@@ -12,10 +12,10 @@
 /**
  * Stable code telling a client why a task request failed; safe to show.
  */
-export type TaskErrorCode = 'invalid_params' | 'missing_model' | 'missing_api_key' | 'missing_base_url' | 'invalid_ai_settings' | 'recording_active' | 'task_not_found' | 'internal';
+export type TaskErrorCode = 'invalid_request' | 'missing_model' | 'missing_api_key' | 'missing_base_url' | 'invalid_ai_settings' | 'recording_active' | 'task_not_found' | 'internal';
 
 export const TaskErrorCode = {
-    InvalidParams: 'invalid_params' as TaskErrorCode,
+    InvalidRequest: 'invalid_request' as TaskErrorCode,
     MissingModel: 'missing_model' as TaskErrorCode,
     MissingApiKey: 'missing_api_key' as TaskErrorCode,
     MissingBaseUrl: 'missing_base_url' as TaskErrorCode,

@@ -9,10 +9,6 @@ docs/AgentApi.md
 docs/AgentDomainAdvertisement.md
 docs/AgentInfo.md
 docs/AgentStatus.md
-docs/AiLogParams.md
-docs/AiLogSubstate.md
-docs/AiLogSubstateOneOf.md
-docs/AiProvider.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
 docs/AppTokenContentType.md
@@ -63,6 +59,9 @@ docs/PreflightOperationKind.md
 docs/PreflightOutput.md
 docs/PreflightOutputKind.md
 docs/PubKeyFormat.md
+docs/RecordingAiAnalysisCredentials.md
+docs/RecordingAiAnalysisSubstate.md
+docs/RecordingAiAnalysisSubstateOneOf.md
 docs/ScanOriginDto.md
 docs/ScanResultSourceDto.md
 docs/SessionInfo.md
@@ -127,10 +126,6 @@ src/Devolutions.Gateway.Client/Model/AddressFamily.cs
 src/Devolutions.Gateway.Client/Model/AgentDomainAdvertisement.cs
 src/Devolutions.Gateway.Client/Model/AgentInfo.cs
 src/Devolutions.Gateway.Client/Model/AgentStatus.cs
-src/Devolutions.Gateway.Client/Model/AiLogParams.cs
-src/Devolutions.Gateway.Client/Model/AiLogSubstate.cs
-src/Devolutions.Gateway.Client/Model/AiLogSubstateOneOf.cs
-src/Devolutions.Gateway.Client/Model/AiProvider.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
@@ -172,6 +167,9 @@ src/Devolutions.Gateway.Client/Model/PreflightOperationKind.cs
 src/Devolutions.Gateway.Client/Model/PreflightOutput.cs
 src/Devolutions.Gateway.Client/Model/PreflightOutputKind.cs
 src/Devolutions.Gateway.Client/Model/PubKeyFormat.cs
+src/Devolutions.Gateway.Client/Model/RecordingAiAnalysisCredentials.cs
+src/Devolutions.Gateway.Client/Model/RecordingAiAnalysisSubstate.cs
+src/Devolutions.Gateway.Client/Model/RecordingAiAnalysisSubstateOneOf.cs
 src/Devolutions.Gateway.Client/Model/ScanOriginDto.cs
 src/Devolutions.Gateway.Client/Model/ScanResultSourceDto.cs
 src/Devolutions.Gateway.Client/Model/SessionInfo.cs

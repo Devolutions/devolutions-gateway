@@ -11,7 +11,7 @@ import { TaskState } from './taskState';
 
 
 /**
- * A background task and its status.  `substate` is set only when `state` is `running`, `result` only when it is `success`, and `error` only when it is `failed`. Both `substate` and `result` are kind-specific: for `ai-log`, `substate` is an `AiLogSubstate`.
+ * A background task and its status.  `substate` is set only when `state` is `running`, `result` only when it is `success`, and `error` only when it is `failed`. Both `substate` and `result` are kind-specific: for `recording.ai-analysis`, `substate` is an `RecordingAiAnalysisSubstate`.
  */
 export interface TaskInfo { 
     /**
@@ -23,7 +23,7 @@ export interface TaskInfo {
      */
     id: string;
     /**
-     * Task kind, as in the `jet_tk` claim of the TASK token.
+     * Task kind, as in `jet_task.kind` in the TASK token.
      */
     kind: string;
     /**

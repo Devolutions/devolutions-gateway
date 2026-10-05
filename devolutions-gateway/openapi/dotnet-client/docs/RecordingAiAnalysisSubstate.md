@@ -1,4 +1,5 @@
-# Devolutions.Gateway.Client.Model.AiLogSubstateOneOf
+# Devolutions.Gateway.Client.Model.RecordingAiAnalysisSubstate
+Progress of a running `recording.ai-analysis` task.
 
 ## Properties
 

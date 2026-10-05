@@ -116,7 +116,7 @@ catch (ApiException e)
 
 Starts a background task.
 
-The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
+The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: `RecordingAiAnalysisCredentials` for `recording.ai-analysis`.  This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
 
 ### Example
 ```csharp
@@ -142,7 +142,7 @@ namespace Example
             HttpClient httpClient = new HttpClient();
             HttpClientHandler httpClientHandler = new HttpClientHandler();
             var apiInstance = new TasksApi(httpClient, config, httpClientHandler);
-            var body = null;  // Object | Kind-specific task parameters, such as `AiLogParams` for `ai-log`
+            var body = null;  // Object | Secrets of the task kind, such as `RecordingAiAnalysisCredentials` for `recording.ai-analysis`
 
             try
             {
@@ -185,7 +185,7 @@ catch (ApiException e)
 
 | Name | Type | Description | Notes |
 |------|------|-------------|-------|
-| **body** | **Object** | Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60; |  |
+| **body** | **Object** | Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60; |  |
 
 ### Return type
 
@@ -205,7 +205,7 @@ catch (ApiException e)
 | Status code | Description | Response headers |
 |-------------|-------------|------------------|
 | **202** | Task was accepted and runs in the background |  -  |
-| **400** | Invalid task parameters |  -  |
+| **400** | Invalid task or request body |  -  |
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **409** | The task target is busy, such as a session that is still recording |  -  |

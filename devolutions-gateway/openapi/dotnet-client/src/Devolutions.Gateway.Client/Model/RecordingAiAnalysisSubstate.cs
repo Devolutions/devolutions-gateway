@@ -29,18 +29,18 @@ using System.Reflection;
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Progress of a running &#x60;ai-log&#x60; task.
+    /// Progress of a running &#x60;recording.ai-analysis&#x60; task.
     /// </summary>
-    [JsonConverter(typeof(AiLogSubstateJsonConverter))]
-    [DataContract(Name = "AiLogSubstate")]
-    public partial class AiLogSubstate : AbstractOpenAPISchema, IValidatableObject
+    [JsonConverter(typeof(RecordingAiAnalysisSubstateJsonConverter))]
+    [DataContract(Name = "RecordingAiAnalysisSubstate")]
+    public partial class RecordingAiAnalysisSubstate : AbstractOpenAPISchema, IValidatableObject
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="AiLogSubstate" /> class
-        /// with the <see cref="AiLogSubstateOneOf" /> class
+        /// Initializes a new instance of the <see cref="RecordingAiAnalysisSubstate" /> class
+        /// with the <see cref="RecordingAiAnalysisSubstateOneOf" /> class
         /// </summary>
-        /// <param name="actualInstance">An instance of AiLogSubstateOneOf.</param>
-        public AiLogSubstate(AiLogSubstateOneOf actualInstance)
+        /// <param name="actualInstance">An instance of RecordingAiAnalysisSubstateOneOf.</param>
+        public RecordingAiAnalysisSubstate(RecordingAiAnalysisSubstateOneOf actualInstance)
         {
             this.IsNullable = false;
             this.SchemaType= "oneOf";
@@ -61,25 +61,25 @@ namespace Devolutions.Gateway.Client.Model
             }
             set
             {
-                if (value.GetType() == typeof(AiLogSubstateOneOf) || value is AiLogSubstateOneOf)
+                if (value.GetType() == typeof(RecordingAiAnalysisSubstateOneOf) || value is RecordingAiAnalysisSubstateOneOf)
                 {
                     this._actualInstance = value;
                 }
                 else
                 {
-                    throw new ArgumentException("Invalid instance found. Must be the following types: AiLogSubstateOneOf");
+                    throw new ArgumentException("Invalid instance found. Must be the following types: RecordingAiAnalysisSubstateOneOf");
                 }
             }
         }
 
         /// <summary>
-        /// Get the actual instance of `AiLogSubstateOneOf`. If the actual instance is not `AiLogSubstateOneOf`,
+        /// Get the actual instance of `RecordingAiAnalysisSubstateOneOf`. If the actual instance is not `RecordingAiAnalysisSubstateOneOf`,
         /// the InvalidClassException will be thrown
         /// </summary>
-        /// <returns>An instance of AiLogSubstateOneOf</returns>
-        public AiLogSubstateOneOf GetAiLogSubstateOneOf()
+        /// <returns>An instance of RecordingAiAnalysisSubstateOneOf</returns>
+        public RecordingAiAnalysisSubstateOneOf GetRecordingAiAnalysisSubstateOneOf()
         {
-            return (AiLogSubstateOneOf)this.ActualInstance;
+            return (RecordingAiAnalysisSubstateOneOf)this.ActualInstance;
         }
 
         /// <summary>
@@ -89,7 +89,7 @@ namespace Devolutions.Gateway.Client.Model
         public override string ToString()
         {
             var sb = new StringBuilder();
-            sb.Append("class AiLogSubstate {\n");
+            sb.Append("class RecordingAiAnalysisSubstate {\n");
             sb.Append("  ActualInstance: ").Append(this.ActualInstance).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
@@ -101,21 +101,21 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>JSON string presentation of the object</returns>
         public override string ToJson()
         {
-            return JsonConvert.SerializeObject(this.ActualInstance, AiLogSubstate.SerializerSettings);
+            return JsonConvert.SerializeObject(this.ActualInstance, RecordingAiAnalysisSubstate.SerializerSettings);
         }
 
         /// <summary>
-        /// Converts the JSON string into an instance of AiLogSubstate
+        /// Converts the JSON string into an instance of RecordingAiAnalysisSubstate
         /// </summary>
         /// <param name="jsonString">JSON string</param>
-        /// <returns>An instance of AiLogSubstate</returns>
-        public static AiLogSubstate FromJson(string jsonString)
+        /// <returns>An instance of RecordingAiAnalysisSubstate</returns>
+        public static RecordingAiAnalysisSubstate FromJson(string jsonString)
         {
-            AiLogSubstate newAiLogSubstate = null;
+            RecordingAiAnalysisSubstate newRecordingAiAnalysisSubstate = null;
 
             if (string.IsNullOrEmpty(jsonString))
             {
-                return newAiLogSubstate;
+                return newRecordingAiAnalysisSubstate;
             }
             int match = 0;
             List<string> matchedTypes = new List<string>();
@@ -123,21 +123,21 @@ namespace Devolutions.Gateway.Client.Model
             try
             {
                 // if it does not contains "AdditionalProperties", use SerializerSettings to deserialize
-                if (typeof(AiLogSubstateOneOf).GetProperty("AdditionalProperties") == null)
+                if (typeof(RecordingAiAnalysisSubstateOneOf).GetProperty("AdditionalProperties") == null)
                 {
-                    newAiLogSubstate = new AiLogSubstate(JsonConvert.DeserializeObject<AiLogSubstateOneOf>(jsonString, AiLogSubstate.SerializerSettings));
+                    newRecordingAiAnalysisSubstate = new RecordingAiAnalysisSubstate(JsonConvert.DeserializeObject<RecordingAiAnalysisSubstateOneOf>(jsonString, RecordingAiAnalysisSubstate.SerializerSettings));
                 }
                 else
                 {
-                    newAiLogSubstate = new AiLogSubstate(JsonConvert.DeserializeObject<AiLogSubstateOneOf>(jsonString, AiLogSubstate.AdditionalPropertiesSerializerSettings));
+                    newRecordingAiAnalysisSubstate = new RecordingAiAnalysisSubstate(JsonConvert.DeserializeObject<RecordingAiAnalysisSubstateOneOf>(jsonString, RecordingAiAnalysisSubstate.AdditionalPropertiesSerializerSettings));
                 }
-                matchedTypes.Add("AiLogSubstateOneOf");
+                matchedTypes.Add("RecordingAiAnalysisSubstateOneOf");
                 match++;
             }
             catch (Exception exception)
             {
                 // deserialization failed, try the next one
-                System.Diagnostics.Debug.WriteLine(string.Format("Failed to deserialize `{0}` into AiLogSubstateOneOf: {1}", jsonString, exception.ToString()));
+                System.Diagnostics.Debug.WriteLine(string.Format("Failed to deserialize `{0}` into RecordingAiAnalysisSubstateOneOf: {1}", jsonString, exception.ToString()));
             }
 
             if (match == 0)
@@ -150,7 +150,7 @@ namespace Devolutions.Gateway.Client.Model
             }
 
             // deserialization is considered successful at this point if no exception has been thrown.
-            return newAiLogSubstate;
+            return newRecordingAiAnalysisSubstate;
         }
 
 
@@ -166,9 +166,9 @@ namespace Devolutions.Gateway.Client.Model
     }
 
     /// <summary>
-    /// Custom JSON converter for AiLogSubstate
+    /// Custom JSON converter for RecordingAiAnalysisSubstate
     /// </summary>
-    public class AiLogSubstateJsonConverter : JsonConverter
+    public class RecordingAiAnalysisSubstateJsonConverter : JsonConverter
     {
         /// <summary>
         /// To write the JSON string
@@ -178,7 +178,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="serializer">JSON Serializer</param>
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
         {
-            writer.WriteRawValue((string)(typeof(AiLogSubstate).GetMethod("ToJson").Invoke(value, null)));
+            writer.WriteRawValue((string)(typeof(RecordingAiAnalysisSubstate).GetMethod("ToJson").Invoke(value, null)));
         }
 
         /// <summary>
@@ -194,9 +194,9 @@ namespace Devolutions.Gateway.Client.Model
             switch(reader.TokenType) 
             {
                 case JsonToken.StartObject:
-                    return AiLogSubstate.FromJson(JObject.Load(reader).ToString(Formatting.None));
+                    return RecordingAiAnalysisSubstate.FromJson(JObject.Load(reader).ToString(Formatting.None));
                 case JsonToken.StartArray:
-                    return AiLogSubstate.FromJson(JArray.Load(reader).ToString(Formatting.None));
+                    return RecordingAiAnalysisSubstate.FromJson(JArray.Load(reader).ToString(Formatting.None));
                 default:
                     return null;
             }

@@ -27,10 +27,6 @@ model/addressFamily.ts
 model/agentDomainAdvertisement.ts
 model/agentInfo.ts
 model/agentStatus.ts
-model/aiLogParams.ts
-model/aiLogSubstate.ts
-model/aiLogSubstateOneOf.ts
-model/aiProvider.ts
 model/appCredential.ts
 model/appCredentialKind.ts
 model/appTokenContentType.ts
@@ -73,6 +69,9 @@ model/preflightOperationKind.ts
 model/preflightOutput.ts
 model/preflightOutputKind.ts
 model/pubKeyFormat.ts
+model/recordingAiAnalysisCredentials.ts
+model/recordingAiAnalysisSubstate.ts
+model/recordingAiAnalysisSubstateOneOf.ts
 model/scanOriginDto.ts
 model/scanResultSourceDto.ts
 model/sessionInfo.ts

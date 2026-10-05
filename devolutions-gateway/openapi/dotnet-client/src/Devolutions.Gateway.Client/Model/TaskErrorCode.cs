@@ -35,10 +35,10 @@ namespace Devolutions.Gateway.Client.Model
     public enum TaskErrorCode
     {
         /// <summary>
-        /// Enum InvalidParams for value: invalid_params
+        /// Enum InvalidRequest for value: invalid_request
         /// </summary>
-        [EnumMember(Value = "invalid_params")]
-        InvalidParams = 1,
+        [EnumMember(Value = "invalid_request")]
+        InvalidRequest = 1,
 
         /// <summary>
         /// Enum MissingModel for value: missing_model
@@ -92,8 +92,8 @@ namespace Devolutions.Gateway.Client.Model
         {
             switch (variant)
             {
-                case TaskErrorCode.InvalidParams:
-                    return "invalid_params";
+                case TaskErrorCode.InvalidRequest:
+                    return "invalid_request";
                 case TaskErrorCode.MissingModel:
                     return "missing_model";
                 case TaskErrorCode.MissingApiKey:

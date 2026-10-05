@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// A background task and its status.  &#x60;substate&#x60; is set only when &#x60;state&#x60; is &#x60;running&#x60;, &#x60;result&#x60; only when it is &#x60;success&#x60;, and &#x60;error&#x60; only when it is &#x60;failed&#x60;. Both &#x60;substate&#x60; and &#x60;result&#x60; are kind-specific: for &#x60;ai-log&#x60;, &#x60;substate&#x60; is an &#x60;AiLogSubstate&#x60;.
+    /// A background task and its status.  &#x60;substate&#x60; is set only when &#x60;state&#x60; is &#x60;running&#x60;, &#x60;result&#x60; only when it is &#x60;success&#x60;, and &#x60;error&#x60; only when it is &#x60;failed&#x60;. Both &#x60;substate&#x60; and &#x60;result&#x60; are kind-specific: for &#x60;recording.ai-analysis&#x60;, &#x60;substate&#x60; is an &#x60;RecordingAiAnalysisSubstate&#x60;.
     /// </summary>
     [DataContract(Name = "TaskInfo")]
     public partial class TaskInfo : IValidatableObject
@@ -49,7 +49,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="error">Why the task failed..</param>
         /// <param name="id">Task ID. (required).</param>
-        /// <param name="kind">Task kind, as in the &#x60;jet_tk&#x60; claim of the TASK token. (required).</param>
+        /// <param name="kind">Task kind, as in &#x60;jet_task.kind&#x60; in the TASK token. (required).</param>
         /// <param name="result">Result of a successful task..</param>
         /// <param name="state">state (required).</param>
         /// <param name="substate">Progress of a running task..</param>
@@ -83,9 +83,9 @@ namespace Devolutions.Gateway.Client.Model
         public Guid Id { get; set; }
 
         /// <summary>
-        /// Task kind, as in the &#x60;jet_tk&#x60; claim of the TASK token.
+        /// Task kind, as in &#x60;jet_task.kind&#x60; in the TASK token.
         /// </summary>
-        /// <value>Task kind, as in the &#x60;jet_tk&#x60; claim of the TASK token.</value>
+        /// <value>Task kind, as in &#x60;jet_task.kind&#x60; in the TASK token.</value>
         [DataMember(Name = "kind", IsRequired = true, EmitDefaultValue = true)]
         public string Kind { get; set; }
 

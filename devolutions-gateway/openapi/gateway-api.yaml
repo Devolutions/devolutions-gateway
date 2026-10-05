@@ -905,13 +905,13 @@ paths:
       - Tasks
       summary: Starts a background task.
       description: |-
-        The task kind and its target come from the TASK token.
-        The request body is a JSON object holding the kind-specific parameters: `AiLogParams` for `ai-log`.
+        The TASK token holds the whole task: its kind, and the payload of that kind.
+        The token is not encrypted, so the request body carries the secrets of the kind: `RecordingAiAnalysisCredentials` for `recording.ai-analysis`.
 
         This endpoint is unstable: it is only available when `__debug__.enable_unstable` is set.
       operationId: StartTask
       requestBody:
-        description: Kind-specific task parameters, such as `AiLogParams` for `ai-log`
+        description: Secrets of the task kind, such as `RecordingAiAnalysisCredentials` for `recording.ai-analysis`
         content:
           application/json:
             schema:
@@ -925,7 +925,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskInfo'
         '400':
-          description: Invalid task parameters
+          description: Invalid task or request body
           content:
             application/json:
               schema:
@@ -1498,52 +1498,6 @@ components:
       - offline
       - online
       - unresponsive
-    AiLogParams:
-      type: object
-      description: 'AI settings used by an `ai-log` task: the body of `POST /jet/tasks` for a TASK token of kind `ai-log`.'
-      required:
-      - provider
-      - model
-      - apiKey
-      properties:
-        apiKey:
-          type: string
-          description: Kept in memory for this task only.
-        baseUrl:
-          type: string
-          description: Overrides the provider default; required for `openai-compatible`.
-          nullable: true
-        maxOutputTokens:
-          type: integer
-          format: int32
-          description: Upper bound of tokens in each AI answer.
-          nullable: true
-          minimum: 0
-        model:
-          type: string
-          description: Model identifier, passed to the provider as is.
-        provider:
-          $ref: '#/components/schemas/AiProvider'
-      additionalProperties: false
-    AiLogSubstate:
-      oneOf:
-      - type: object
-        required:
-        - step
-        properties:
-          step:
-            type: string
-            enum:
-            - preparing
-      description: Progress of a running `ai-log` task.
-    AiProvider:
-      type: string
-      enum:
-      - openai
-      - anthropic
-      - mistral
-      - gemini
-      - openai-compatible
     AppCredential:
       type: object
       required:
@@ -2338,6 +2292,27 @@ components:
       enum:
       - Spki
       - Pkcs1
+    RecordingAiAnalysisCredentials:
+      type: object
+      description: 'Credentials of a `recording.ai-analysis` task: the body of `POST /jet/tasks` for a TASK token of kind `recording.ai-analysis`.'
+      required:
+      - apiKey
+      properties:
+        apiKey:
+          type: string
+          description: API key of the AI provider, kept in memory for this task only.
+      additionalProperties: false
+    RecordingAiAnalysisSubstate:
+      oneOf:
+      - type: object
+        required:
+        - step
+        properties:
+          step:
+            type: string
+            enum:
+            - preparing
+      description: Progress of a running `recording.ai-analysis` task.
     ScanOriginDto:
       type: string
       enum:
@@ -2538,7 +2513,7 @@ components:
       type: string
       description: Stable code telling a client why a task request failed; safe to show.
       enum:
-      - invalid_params
+      - invalid_request
       - missing_model
       - missing_api_key
       - missing_base_url
@@ -2560,7 +2535,7 @@ components:
         A background task and its status.
 
         `substate` is set only when `state` is `running`, `result` only when it is `success`, and `error` only when it is `failed`.
-        Both `substate` and `result` are kind-specific: for `ai-log`, `substate` is an `AiLogSubstate`.
+        Both `substate` and `result` are kind-specific: for `recording.ai-analysis`, `substate` is an `RecordingAiAnalysisSubstate`.
       required:
       - id
       - kind
@@ -2576,7 +2551,7 @@ components:
           description: Task ID.
         kind:
           type: string
-          description: Task kind, as in the `jet_tk` claim of the TASK token.
+          description: Task kind, as in `jet_task.kind` in the TASK token.
         result:
           type: object
           description: Result of a successful task.
@@ -2716,7 +2691,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Token authorizing one kind of background task on a specific target
+      description: 'Token holding one background task: its kind, and the payload of that kind'
     web_app_custom_auth:
       type: http
       scheme: basic

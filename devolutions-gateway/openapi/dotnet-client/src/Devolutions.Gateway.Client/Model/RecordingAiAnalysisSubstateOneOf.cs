@@ -28,10 +28,10 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// AiLogSubstateOneOf
+    /// RecordingAiAnalysisSubstateOneOf
     /// </summary>
-    [DataContract(Name = "AiLogSubstate_oneOf")]
-    public partial class AiLogSubstateOneOf : IValidatableObject
+    [DataContract(Name = "RecordingAiAnalysisSubstate_oneOf")]
+    public partial class RecordingAiAnalysisSubstateOneOf : IValidatableObject
     {
         /// <summary>
         /// Defines Step
@@ -53,15 +53,15 @@ namespace Devolutions.Gateway.Client.Model
         [DataMember(Name = "step", IsRequired = true, EmitDefaultValue = true)]
         public StepEnum Step { get; set; }
         /// <summary>
-        /// Initializes a new instance of the <see cref="AiLogSubstateOneOf" /> class.
+        /// Initializes a new instance of the <see cref="RecordingAiAnalysisSubstateOneOf" /> class.
         /// </summary>
         [JsonConstructorAttribute]
-        protected AiLogSubstateOneOf() { }
+        protected RecordingAiAnalysisSubstateOneOf() { }
         /// <summary>
-        /// Initializes a new instance of the <see cref="AiLogSubstateOneOf" /> class.
+        /// Initializes a new instance of the <see cref="RecordingAiAnalysisSubstateOneOf" /> class.
         /// </summary>
         /// <param name="step">step (required).</param>
-        public AiLogSubstateOneOf(StepEnum step = default(StepEnum))
+        public RecordingAiAnalysisSubstateOneOf(StepEnum step = default(StepEnum))
         {
             this.Step = step;
         }
@@ -73,7 +73,7 @@ namespace Devolutions.Gateway.Client.Model
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append("class AiLogSubstateOneOf {\n");
+            sb.Append("class RecordingAiAnalysisSubstateOneOf {\n");
             sb.Append("  Step: ").Append(Step).Append("\n");
             sb.Append("}\n");
             return sb.ToString();

@@ -9,10 +9,10 @@
  */
 
 
-export interface AiLogSubstateOneOf { 
-    step: AiLogSubstateOneOf.Step;
+export interface RecordingAiAnalysisSubstateOneOf { 
+    step: RecordingAiAnalysisSubstateOneOf.Step;
 }
-export namespace AiLogSubstateOneOf {
+export namespace RecordingAiAnalysisSubstateOneOf {
     export type Step = 'preparing';
     export const Step = {
         Preparing: 'preparing' as Step

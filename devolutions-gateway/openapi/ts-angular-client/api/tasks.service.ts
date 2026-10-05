@@ -166,8 +166,8 @@ export class TasksService {
 
     /**
      * Starts a background task.
-     * The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
-     * @param body Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;
+     * The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+     * @param body Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;
      * @param observe set whether or not to return the data Observable as the body, response or events. defaults to returning the body.
      * @param reportProgress flag to report request and response progress.
      */

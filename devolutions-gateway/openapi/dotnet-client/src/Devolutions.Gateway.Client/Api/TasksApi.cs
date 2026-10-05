@@ -53,10 +53,10 @@ namespace Devolutions.Gateway.Client.Api
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <returns>TaskInfo</returns>
         TaskInfo StartTask(Object body);
 
@@ -64,10 +64,10 @@ namespace Devolutions.Gateway.Client.Api
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <returns>ApiResponse of TaskInfo</returns>
         ApiResponse<TaskInfo> StartTaskWithHttpInfo(Object body);
         #endregion Synchronous Operations
@@ -106,10 +106,10 @@ namespace Devolutions.Gateway.Client.Api
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of TaskInfo</returns>
         System.Threading.Tasks.Task<TaskInfo> StartTaskAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
@@ -118,10 +118,10 @@ namespace Devolutions.Gateway.Client.Api
         /// Starts a background task.
         /// </summary>
         /// <remarks>
-        /// The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </remarks>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (TaskInfo)</returns>
         System.Threading.Tasks.Task<ApiResponse<TaskInfo>> StartTaskWithHttpInfoAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
@@ -458,10 +458,10 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <returns>TaskInfo</returns>
         public TaskInfo StartTask(Object body)
         {
@@ -470,10 +470,10 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <returns>ApiResponse of TaskInfo</returns>
         public Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> StartTaskWithHttpInfo(Object body)
         {
@@ -520,10 +520,10 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of TaskInfo</returns>
         public async System.Threading.Tasks.Task<TaskInfo> StartTaskAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
@@ -533,10 +533,10 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
-        /// Starts a background task. The task kind and its target come from the TASK token. The request body is a JSON object holding the kind-specific parameters: &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
+        /// Starts a background task. The TASK token holds the whole task: its kind, and the payload of that kind. The token is not encrypted, so the request body carries the secrets of the kind: &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;.  This endpoint is unstable: it is only available when &#x60;__debug__.enable_unstable&#x60; is set.
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
-        /// <param name="body">Kind-specific task parameters, such as &#x60;AiLogParams&#x60; for &#x60;ai-log&#x60;</param>
+        /// <param name="body">Secrets of the task kind, such as &#x60;RecordingAiAnalysisCredentials&#x60; for &#x60;recording.ai-analysis&#x60;</param>
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (TaskInfo)</returns>
         public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo>> StartTaskWithHttpInfoAsync(Object body, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
