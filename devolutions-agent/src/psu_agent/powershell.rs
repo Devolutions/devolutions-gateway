@@ -412,7 +412,7 @@ impl PowerShellWorker {
 /// started, such as a secret vault helper, can inherit its stdout and stderr and keep them open after it exits.
 /// Output still being written once it exits is collected for at most [`WORKER_OUTPUT_DRAIN_TIMEOUT`].
 ///
-/// On timeout or failure, the worker process and every process it started are killed.
+/// On timeout or failure, the worker process tree is terminated; see [`ProcessTree`] for descendants it misses.
 async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::Result<Option<Output>> {
     command.kill_on_drop(true);
     ProcessTree::prepare(&mut command);

@@ -62,8 +62,8 @@ impl ProcessTree {
     /// Starts tracking the descendants of a child process spawned from a [`prepared`](Self::prepare) command, then
     /// lets it run.
     ///
-    /// If tracking cannot be set up, only the direct child can be killed, which is logged. If the child process
-    /// cannot be started, it is killed and an error is returned.
+    /// If tracking cannot be set up, only the direct child can be killed, which is logged. If the suspended child
+    /// process cannot be resumed on Windows, it is killed and an error is returned.
     pub(super) async fn attach(child: &mut Child) -> anyhow::Result<Self> {
         let mut tree = Self::try_attach(child).unwrap_or_else(|error| {
             warn!(

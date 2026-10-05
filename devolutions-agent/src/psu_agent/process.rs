@@ -879,7 +879,11 @@ async fn run_process_inner(
             }
             // Only input that the stdin pump is still writing can stall.
             _ = watchdog_interval.tick(), if !stdin_task_completed => {
-                if let Some(stall) = watchdog.check() {
+                // A stop request recorded since the control channel was polled is handled on the next iteration
+                // instead, so that it is not reported as a stall.
+                if let Some(stall) = watchdog.check()
+                    && control_rx.borrow().is_none()
+                {
                     warn!(
                         process_id,
                         correlation_id = %request.correlation_id,
