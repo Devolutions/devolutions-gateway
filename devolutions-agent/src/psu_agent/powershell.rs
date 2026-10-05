@@ -429,7 +429,7 @@ async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::
     let status = {
         // Output is read while waiting, so that the worker never blocks on a full pipe.
         let read_output = async {
-            tokio::join!(
+            tokio::try_join!(
                 read_until_end(&mut stdout_reader, &mut stdout),
                 read_until_end(&mut stderr_reader, &mut stderr),
             )
@@ -440,14 +440,19 @@ async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::
         let wait_for_exit = async {
             loop {
                 tokio::select! {
-                    status = child.wait() => return status,
-                    _ = &mut read_output, if !output_read => output_read = true,
+                    status = child.wait() => return status.context("failed to wait for process"),
+                    result = &mut read_output, if !output_read => {
+                        // A pipe that is no longer read could block the worker, so a read failure ends the request.
+                        result.context("failed to read process output")?;
+                        output_read = true;
+                    }
                 }
             }
         };
 
         let status = match tokio::time::timeout(timeout, wait_for_exit).await {
-            Ok(status) => status.context("failed to wait for process")?,
+            // On failure, the process tree guard is dropped armed and terminates the worker tree.
+            Ok(status) => status?,
             Err(_) => {
                 // Also stops processes started by the worker, such as a secret vault client.
                 process_tree.terminate();
@@ -456,12 +461,15 @@ async fn run_worker_command(mut command: Command, timeout: Duration) -> anyhow::
         };
         process_tree.release();
 
-        if !output_read
-            && tokio::time::timeout(WORKER_OUTPUT_DRAIN_TIMEOUT, &mut read_output)
-                .await
-                .is_err()
-        {
-            debug!("PowerShell worker output was still open after it exited; using the output read so far");
+        if !output_read {
+            match tokio::time::timeout(WORKER_OUTPUT_DRAIN_TIMEOUT, &mut read_output).await {
+                Ok(result) => {
+                    result.context("failed to read process output")?;
+                }
+                Err(_) => {
+                    debug!("PowerShell worker output was still open after it exited; using the output read so far");
+                }
+            }
         }
 
         status

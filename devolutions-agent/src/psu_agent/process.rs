@@ -152,6 +152,8 @@ struct StdinBacklog {
     ///
     /// Zero while the stall watchdog does not supervise the stream.
     stalled_for_ms: AtomicU64,
+    /// Value of `consumed_bytes` when `stalled_for_ms` was measured, so that progress made since then is noticed.
+    stalled_at_consumed_bytes: AtomicU64,
 }
 
 /// Memory charged against the stdin backlog for a queued frame, so that empty frames are bounded too.
@@ -169,6 +171,7 @@ impl StdinBacklog {
             input_state: AtomicU8::new(INPUT_ACCEPTED),
             end_of_stream: AtomicBool::new(false),
             stalled_for_ms: AtomicU64::new(0),
+            stalled_at_consumed_bytes: AtomicU64::new(0),
         }
     }
 
@@ -220,9 +223,11 @@ impl StdinBacklog {
     fn is_evictable(&self, limits: StdinLimits) -> bool {
         let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).unwrap_or(u64::MAX);
 
+        // Acquire pairs with the release store of the watchdog, so the consumed bytes it measured are visible.
         self.input_state.load(Ordering::Acquire) == INPUT_ACCEPTED
             && self.unwritten_bytes.load(Ordering::Relaxed) > 0
-            && self.stalled_for_ms.load(Ordering::Relaxed) >= stall_timeout_ms
+            && self.stalled_for_ms.load(Ordering::Acquire) >= stall_timeout_ms
+            && self.stalled_at_consumed_bytes.load(Ordering::Relaxed) == self.consumed_bytes.load(Ordering::Relaxed)
     }
 
     /// Marks the child process exit as observed, and returns whether input was dropped before.
@@ -351,9 +356,12 @@ impl StallWatchdog {
             }
         }
 
+        self.backlog
+            .stalled_at_consumed_bytes
+            .store(consumed_bytes, Ordering::Relaxed);
         self.backlog.stalled_for_ms.store(
             u64::try_from(self.pending_for.as_millis()).unwrap_or(u64::MAX),
-            Ordering::Relaxed,
+            Ordering::Release,
         );
 
         if self.stalled_for >= self.limits.stall_timeout {
@@ -1988,6 +1996,36 @@ mod tests {
             received += 1;
         }
         assert_eq!(received, 6);
+    }
+
+    #[tokio::test]
+    async fn stalled_stream_that_progressed_since_the_last_check_is_not_stopped() {
+        let limits = StdinLimits {
+            max_total_buffered_bytes: 16 * 1024,
+            ..LIMITS_FOR_TESTS
+        };
+        let registry = ProcessRegistry::new(limits);
+        let stalled = registry.register("stalled", "stalled").await.expect("register");
+        let receiving = registry.register("receiving", "receiving").await.expect("register");
+
+        for sequence in 0..12 {
+            dispatch(&registry, "stalled", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        // The stall watchdog reported a stall, then the child process read some input before the next check.
+        let stall_timeout_ms = u64::try_from(limits.stall_timeout.as_millis()).expect("stall timeout");
+        stalled
+            .backlog
+            .stalled_for_ms
+            .store(stall_timeout_ms, Ordering::Relaxed);
+        stalled.backlog.record_progress(1);
+
+        for sequence in 0..6 {
+            dispatch(&registry, "receiving", sequence, vec![b'x'; 1024], false).await;
+        }
+
+        assert!(stalled.control.borrow().is_none());
+        assert_eq!(*receiving.control.borrow(), Some(StopRequest::StdinOverflow));
     }
 
     #[tokio::test]

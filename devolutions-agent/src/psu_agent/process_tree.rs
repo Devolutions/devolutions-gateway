@@ -95,11 +95,19 @@ impl ProcessTree {
 
         #[cfg(windows)]
         {
+            use std::os::windows::io::BorrowedHandle;
+
             use anyhow::Context as _;
 
-            let process_id = child.id().context("child process already exited")?;
+            let process = child.raw_handle().context("child process already exited")?;
+            // The blocking task keeps running if this task is aborted, so it owns a handle that keeps the process ID
+            // from being reused while it runs.
+            // SAFETY: `process` is a valid handle owned by `child`, which outlives this borrow.
+            let process = unsafe { BorrowedHandle::borrow_raw(process) }
+                .try_clone_to_owned()
+                .context("failed to duplicate child process handle")?;
             // The thread snapshot lists every thread on the system, so it must not block the runtime.
-            tokio::task::spawn_blocking(move || resume_process(process_id))
+            tokio::task::spawn_blocking(move || resume_process(&process))
                 .await
                 .context("child process resume task failed")?
                 .context("failed to resume child process")?;
@@ -207,9 +215,9 @@ impl Drop for ProcessTree {
 
 /// Resumes the initial thread of a child process created with `CREATE_SUSPENDED`.
 ///
-/// The caller must keep a handle to the process open, so that its ID cannot be reused by another process.
+/// The process handle keeps the process ID from being reused while the threads are resumed.
 #[cfg(windows)]
-fn resume_process(process_id: u32) -> anyhow::Result<()> {
+fn resume_process(process: &std::os::windows::io::OwnedHandle) -> anyhow::Result<()> {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
     use anyhow::Context as _;
@@ -217,7 +225,16 @@ fn resume_process(process_id: u32) -> anyhow::Result<()> {
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
     };
-    use windows::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+    use windows::Win32::System::Threading::{
+        GetProcessId, GetProcessIdOfThread, OpenThread, ResumeThread, THREAD_QUERY_LIMITED_INFORMATION,
+        THREAD_SUSPEND_RESUME,
+    };
+
+    // SAFETY: `process` is a valid process handle.
+    let process_id = unsafe { GetProcessId(HANDLE(process.as_raw_handle())) };
+    if process_id == 0 {
+        return Err(std::io::Error::last_os_error()).context("GetProcessId failed");
+    }
 
     // SAFETY: Taking a thread snapshot has no preconditions.
     let snapshot =
@@ -237,16 +254,28 @@ fn resume_process(process_id: u32) -> anyhow::Result<()> {
     while next.is_ok() {
         if entry.th32OwnerProcessID == process_id {
             // SAFETY: Opening a thread by ID has no memory safety preconditions.
-            let thread =
-                unsafe { OpenThread(THREAD_SUSPEND_RESUME, false, entry.th32ThreadID) }.context("OpenThread failed")?;
+            let thread = unsafe {
+                OpenThread(
+                    THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
+                    false,
+                    entry.th32ThreadID,
+                )
+            }
+            .context("OpenThread failed")?;
             // SAFETY: `thread` is a valid handle owned by this function and not closed anywhere else.
             let thread = unsafe { OwnedHandle::from_raw_handle(thread.0) };
 
-            // SAFETY: `thread` is a valid thread handle with THREAD_SUSPEND_RESUME access.
-            if unsafe { ResumeThread(HANDLE(thread.as_raw_handle())) } == u32::MAX {
-                return Err(std::io::Error::last_os_error()).context("ResumeThread failed");
+            // The thread may have exited since the snapshot and its ID been reused by another process.
+            // SAFETY: `thread` is a valid thread handle with THREAD_QUERY_LIMITED_INFORMATION access.
+            let owned_by_process = unsafe { GetProcessIdOfThread(HANDLE(thread.as_raw_handle())) } == process_id;
+
+            if owned_by_process {
+                // SAFETY: `thread` is a valid thread handle with THREAD_SUSPEND_RESUME access.
+                if unsafe { ResumeThread(HANDLE(thread.as_raw_handle())) } == u32::MAX {
+                    return Err(std::io::Error::last_os_error()).context("ResumeThread failed");
+                }
+                resumed_threads += 1;
             }
-            resumed_threads += 1;
         }
 
         // SAFETY: Same as for `Thread32First`.
