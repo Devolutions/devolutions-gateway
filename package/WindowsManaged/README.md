@@ -78,6 +78,16 @@ byte[] pickyBytes = e.Session.GetEmbeddedData("DevolutionsPicky.dll");
 System.IO.File.WriteAllBytes(Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "DevolutionsPicky.dll"),pickyBytes);
 ```
 
+## Localization
+
+Installer strings live in `Resources/Strings_<culture>.json`, with `en-US` as the source of truth.
+The `Strings.g.tt` T4 template generates the `DevolutionsGateway_<culture>.wxl` localization files and `Strings.g.cs` from them.
+Do not edit the generated files by hand.
+After changing a JSON file, run `package\Update-InstallerLocalization.ps1` (it requires Visual Studio) and commit the regenerated files.
+Keys missing from a translation fall back to English.
+
+Each language is built as a separate MSI, turned into a transform, and embedded in the final MSI.
+To add a language, follow the checklist in `.agents/skills/installer-localization/SKILL.md`.
 ## Command line properties
 
 Public properties can be passed to `msiexec` to drive unattended installs and upgrades.

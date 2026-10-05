@@ -34,15 +34,28 @@ function New-AssembledMsi() {
 
     $baseMsi = ".\Release\$prod.msi"  # en-US
 
-    # Build the French MSI.
-    & ".\Release\fr-FR\Build_$prod.cmd"
-    $transform = '.\Release\fr-FR.mst'
-    # Generate a language transform.
-    & 'torch.exe' $baseMsi ".\Release\fr-FR\$prod.msi" '-o' $transform | Out-Host
-    # Embed the transform in the base MSI.
-    & 'cscript.exe' '/nologo' "$repoDir\ci\WiSubStg.vbs" $baseMsi $transform '1036' | Out-Host
+    # The language list must match the one used by `New-GatewayMsi -Generate` or `New-AgentMsi -Generate`.
+    $languages = switch ($Product) {
+        'gateway' { Get-GatewayPackageLanguages }
+        'agent' { Get-PackageLanguages }
+    }
+
+    # The first language is the base MSI; every other language is embedded as a transform.
+    foreach ($language in $languages | Select-Object -Skip 1) {
+        $name = $language.Name
+
+        # Build the localized MSI.
+        & ".\Release\$name\Build_$prod.cmd"
+        $transform = ".\Release\$name.mst"
+        # Generate a language transform.
+        & 'torch.exe' $baseMsi ".\Release\$name\$prod.msi" '-o' $transform | Out-Host
+        # Embed the transform in the base MSI.
+        & 'cscript.exe' '/nologo' "$repoDir\ci\WiSubStg.vbs" $baseMsi $transform $language.LCID | Out-Host
+    }
+
     # Set the complete language list on the base MSI.
-    & 'cscript.exe' '/nologo' "$repoDir\ci\WiLangId.vbs" $baseMsi 'Package' '1033,1036' | Out-Host
+    $lcids = ($languages | ForEach-Object { $_.LCID }) -join ','
+    & 'cscript.exe' '/nologo' "$repoDir\ci\WiLangId.vbs" $baseMsi 'Package' $lcids | Out-Host
 
     Copy-Item -Path $baseMsi -Destination $OutputDir -ErrorAction Stop
     Write-Output "Copied assembled MSI to $(Join-Path $OutputDir "$prod.msi")"
