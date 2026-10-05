@@ -2,40 +2,56 @@
 
 use std::collections::BTreeSet;
 
-use now_policy::{
-    Architecture, Elevation, ManagerName, Operation, PackageIdentifierCondition, PolicyRule, Scope, VersionCondition,
-};
+use now_policy::{Architecture, Decision, Elevation, ManagerName, Operation, PolicyRule, Scope};
 use now_policy_api::PackageRequest;
 
 use super::RequestFlags;
 use super::constraints::constraints_pass;
-use super::wildcard::{literal_case_insensitive_match, wildcard_any};
+use super::custom_options::{custom_options, resolve};
+use super::identifier::package_identifiers_match;
+use super::version::version_condition_matches;
+use super::wildcard::literal_case_insensitive_match;
 
+/// Whether `rule` matches `request`.
+///
+/// `requested_version` is `None` when the version is unknown before execution.
+///
+/// A rule with a version condition never matches an uninstall request, whatever its decision:
+/// removing a package cannot install a version, and the package managers do not pin the version they remove.
 pub(super) fn rule_matches(
     rule: &PolicyRule,
     request: &PackageRequest,
     flags: &RequestFlags,
-    effective_version: &str,
+    requested_version: Option<&str>,
 ) -> bool {
     let m = &rule.match_criteria;
 
     operations_match(request.operation, &m.operations)
         && managers_match(request.manager, &m.managers)
         && source_names_match(request.manager, &request.source.name, &m.source_names)
-        && package_identifiers_match(&request.package.id, &m.package_identifiers)
-        && versions_match(effective_version, &m.version)
-        && scopes_match(request.options.scope, &m.scopes)
-        && architectures_match(request.package.architecture, &m.architectures)
+        && package_identifiers_match(
+            request.manager,
+            &request.package.id.0,
+            m.package_identifiers.as_ref(),
+            rule.decision,
+        )
+        && m.version.as_ref().is_none_or(|condition| {
+            request.operation != now_policy_api::Operation::Uninstall
+                && version_condition_matches(requested_version, condition, rule.decision)
+        })
+        && scopes_match(effective_scope(request), &m.scopes, rule.decision)
+        && architectures_match(effective_architecture(request), &m.architectures, rule.decision)
         && elevation_match(super::effective_execution_elevation(request), &m.execution_elevation)
-        && optional_bool_matches(request.options.interactive, m.interactive)
-        && optional_bool_matches(request.options.skip_hash_check, m.skip_hash_check)
+        && optional_bool_matches(flags.interactive, m.interactive)
+        && optional_bool_matches(flags.skip_hash_check, m.skip_hash_check)
         && optional_bool_matches(request.options.pre_release, m.pre_release)
         && optional_bool_matches(flags.has_custom_parameters, m.has_custom_parameters)
         && optional_bool_matches(flags.has_custom_install_location, m.has_custom_install_location)
         && optional_bool_matches(flags.has_pre_post_commands, m.has_pre_post_commands)
         && optional_bool_matches(flags.has_kill_before_operation, m.has_kill_before_operation)
         && optional_bool_matches(flags.has_uninstall_previous, m.has_uninstall_previous)
-        && constraints_pass(&rule.constraints, request, flags)
+        // Constraints only narrow Allow rules; a Deny rule matches regardless of them.
+        && (rule.decision == Decision::Deny || constraints_pass(&rule.constraints, request, flags))
 }
 
 fn policy_operation(operation: now_policy_api::Operation) -> Operation {
@@ -109,20 +125,103 @@ fn managers_match(manager: now_policy_api::ManagerName, allowed: &BTreeSet<Manag
     allowed.is_empty() || allowed.contains(&policy_manager(manager))
 }
 
-fn scopes_match(scope: Option<now_policy_api::Scope>, allowed: &BTreeSet<Scope>) -> bool {
-    if allowed.is_empty() {
-        return true;
+/// Scope the operation runs in, or `None` when the package manager decides at execution time.
+///
+/// Mirrors the command builders:
+/// - PowerShell and pip uninstall remove the package wherever it is installed, ignoring the requested scope.
+/// - A scope set through custom parameters applies only when the request leaves the scope unset;
+///   otherwise the scope is ambiguous.
+/// - Otherwise, a requested scope is used as is.
+/// - npm, pip, Cargo, Scoop, Bun, vcpkg and `dotnet tool` always run per user.
+/// - PowerShell installs and updates default to `CurrentUser`.
+/// - Chocolatey always runs machine-wide.
+/// - WinGet leaves the scope to the installer.
+fn effective_scope(request: &PackageRequest) -> Option<now_policy_api::Scope> {
+    use now_policy_api::{ManagerName as M, Operation as O, Scope as S};
+
+    if matches!(request.manager, M::PowerShell | M::PowerShell7 | M::Pip) && request.operation == O::Uninstall {
+        return None;
     }
-    scope.map(policy_scope).is_some_and(|scope| allowed.contains(&scope))
+    let custom = custom_options(request.manager, &request.options.custom_parameters);
+    if let Some(scope) = resolve(request.options.scope, &custom.scopes) {
+        return scope;
+    }
+    if let Some(scope) = request.options.scope {
+        return Some(scope);
+    }
+
+    match request.manager {
+        M::Npm | M::Pip | M::Cargo | M::Scoop | M::Bun | M::Vcpkg | M::Dotnet | M::PowerShell | M::PowerShell7 => {
+            Some(S::User)
+        }
+        M::Chocolatey => Some(S::Machine),
+        _ => None,
+    }
 }
 
-fn architectures_match(architecture: Option<now_policy_api::Architecture>, allowed: &BTreeSet<Architecture>) -> bool {
+/// Architecture the operation selects, or `None` when the package manager decides at execution time.
+///
+/// Mirrors the command builders:
+/// - PowerShell packages are architecture-neutral; the builders ignore the requested architecture.
+/// - An architecture set through custom parameters applies only when the request leaves the
+///   architecture unset; otherwise the architecture is ambiguous.
+/// - `dotnet tool` `Neutral` and Chocolatey `X64` add no command-line option, so the manager picks the
+///   architecture from the host and the package.
+/// - Otherwise, a requested architecture is used as is.
+/// - npm, pip, Cargo and Bun packages are architecture-neutral.
+/// - vcpkg encodes the architecture in the triplet source name (`x64-windows`).
+/// - WinGet, Chocolatey, Scoop and `dotnet tool` pick an architecture from the host, the package and user configuration.
+fn effective_architecture(request: &PackageRequest) -> Option<now_policy_api::Architecture> {
+    use now_policy_api::{Architecture as A, ManagerName as M};
+
+    if matches!(request.manager, M::PowerShell | M::PowerShell7) {
+        return Some(A::Neutral);
+    }
+    let custom = custom_options(request.manager, &request.options.custom_parameters);
+    if let Some(architecture) = resolve(request.package.architecture, &custom.architectures) {
+        return architecture;
+    }
+
+    match (request.manager, request.package.architecture) {
+        (M::Dotnet, Some(A::Neutral)) | (M::Chocolatey, Some(A::X64)) => return None,
+        (_, Some(architecture)) => return Some(architecture),
+        (_, None) => {}
+    }
+
+    match request.manager {
+        M::Npm | M::Pip | M::Cargo | M::Bun => Some(A::Neutral),
+        M::Vcpkg => match request.source.name.split('-').next() {
+            Some(prefix) if prefix.eq_ignore_ascii_case("x64") => Some(A::X64),
+            Some(prefix) if prefix.eq_ignore_ascii_case("x86") => Some(A::X86),
+            Some(prefix) if prefix.eq_ignore_ascii_case("arm64") => Some(A::Arm64),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// An unknown scope matches Deny rules only.
+fn scopes_match(scope: Option<now_policy_api::Scope>, allowed: &BTreeSet<Scope>, decision: Decision) -> bool {
     if allowed.is_empty() {
         return true;
     }
-    architecture
-        .map(policy_architecture)
-        .is_some_and(|architecture| allowed.contains(&architecture))
+    scope.map_or(decision == Decision::Deny, |scope| {
+        allowed.contains(&policy_scope(scope))
+    })
+}
+
+/// An unknown architecture matches Deny rules only.
+fn architectures_match(
+    architecture: Option<now_policy_api::Architecture>,
+    allowed: &BTreeSet<Architecture>,
+    decision: Decision,
+) -> bool {
+    if allowed.is_empty() {
+        return true;
+    }
+    architecture.map_or(decision == Decision::Deny, |architecture| {
+        allowed.contains(&policy_architecture(architecture))
+    })
 }
 
 fn elevation_match(elevation: now_policy_api::Elevation, allowed: &BTreeSet<Elevation>) -> bool {
@@ -142,29 +241,6 @@ fn source_names_match(
                 source.as_ref().eq_ignore_ascii_case(value)
             }
         })
-}
-
-fn package_identifiers_match(
-    value: &now_policy_api::PackageIdentifier,
-    condition: &Option<PackageIdentifierCondition>,
-) -> bool {
-    match condition {
-        None => true,
-        Some(PackageIdentifierCondition::Exact(identifiers)) => {
-            identifiers.iter().any(|identifier| identifier.as_ref() == value.0)
-        }
-        Some(PackageIdentifierCondition::Patterns(patterns)) => wildcard_any(&value.0, patterns),
-    }
-}
-
-fn versions_match(value: &str, condition: &Option<VersionCondition>) -> bool {
-    match condition {
-        None => true,
-        Some(VersionCondition::Exact(versions)) => {
-            !value.is_empty() && versions.iter().any(|version| version.0 == value)
-        }
-        Some(VersionCondition::Range(range)) => super::version::version_range_matches(value, range),
-    }
 }
 
 fn optional_bool_matches(value: bool, expected: Option<bool>) -> bool {
@@ -238,7 +314,7 @@ mod tests {
     fn matches(match_criteria: PolicyMatch) -> bool {
         let request = request();
         let flags = RequestFlags::from_request(&request);
-        rule_matches(&rule(match_criteria), &request, &flags, "1.2.3")
+        rule_matches(&rule(match_criteria), &request, &flags, Some("1.2.3"))
     }
 
     #[test]
@@ -284,11 +360,11 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(!rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(!rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
-    fn absent_scope_or_architecture_in_request_fails_when_rule_restricts_them() {
+    fn absent_scope_or_architecture_matches_only_deny_rules_that_restrict_them() {
         let mut request = request();
         request.options.scope = None;
         request.package.architecture = None;
@@ -299,7 +375,11 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(!rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(!rule_matches(&rule, &request, &flags, Some("1.2.3")));
+
+        let mut rule = rule;
+        rule.decision = Decision::Deny;
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
@@ -312,7 +392,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
@@ -326,7 +406,7 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 
     #[test]
@@ -340,6 +420,115 @@ mod tests {
             ..Default::default()
         });
 
-        assert!(rule_matches(&rule, &request, &flags, "1.2.3"));
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
+    }
+
+    #[test]
+    fn absent_scope_and_architecture_use_deterministic_manager_defaults() {
+        use api::{Architecture as A, ManagerName as M, Operation as O, Scope as S};
+
+        let cases = [
+            (M::Npm, O::Install, "npm", Some(S::User), Some(A::Neutral)),
+            (M::Pip, O::Install, "pip", Some(S::User), Some(A::Neutral)),
+            (M::Cargo, O::Install, "crates.io", Some(S::User), Some(A::Neutral)),
+            (M::Bun, O::Install, "npm", Some(S::User), Some(A::Neutral)),
+            (M::Scoop, O::Install, "main", Some(S::User), None),
+            (M::Dotnet, O::Install, "nuget.org", Some(S::User), None),
+            (M::Vcpkg, O::Install, "x64-windows", Some(S::User), Some(A::X64)),
+            (
+                M::Vcpkg,
+                O::Install,
+                "arm64-windows-static",
+                Some(S::User),
+                Some(A::Arm64),
+            ),
+            (M::Vcpkg, O::Install, "custom-triplet", Some(S::User), None),
+            (M::PowerShell, O::Install, "PSGallery", Some(S::User), Some(A::Neutral)),
+            (M::PowerShell7, O::Update, "PSGallery", Some(S::User), Some(A::Neutral)),
+            (M::PowerShell, O::Uninstall, "PSGallery", None, Some(A::Neutral)),
+            (M::Pip, O::Uninstall, "pip", None, Some(A::Neutral)),
+            (M::Chocolatey, O::Install, "chocolatey", Some(S::Machine), None),
+            (M::Winget, O::Install, "winget", None, None),
+        ];
+
+        for (manager, operation, source, scope, architecture) in cases {
+            let mut request = request();
+            request.manager = manager;
+            request.operation = operation;
+            request.source.name = source.to_owned();
+            request.options.scope = None;
+            request.package.architecture = None;
+
+            assert_eq!(effective_scope(&request), scope, "{manager:?} {operation:?}");
+            assert_eq!(effective_architecture(&request), architecture, "{manager:?} {source}");
+        }
+
+        let mut request = request();
+        request.manager = M::Npm;
+        request.options.scope = Some(S::Machine);
+        request.package.architecture = Some(A::X64);
+        assert_eq!(effective_scope(&request), Some(S::Machine));
+        assert_eq!(effective_architecture(&request), Some(A::X64));
+
+        // The PowerShell builders ignore the requested architecture, and the requested scope on uninstall.
+        request.manager = M::PowerShell7;
+        request.operation = O::Uninstall;
+        request.options.scope = Some(S::User);
+        assert_eq!(effective_scope(&request), None);
+        assert_eq!(effective_architecture(&request), Some(A::Neutral));
+
+        // These values add no architecture option, so the manager decides.
+        request.operation = O::Install;
+        for (manager, architecture) in [(M::Dotnet, A::Neutral), (M::Chocolatey, A::X64)] {
+            request.manager = manager;
+            request.package.architecture = Some(architecture);
+            assert_eq!(effective_architecture(&request), None, "{manager:?}");
+        }
+        request.manager = M::Chocolatey;
+        request.package.architecture = Some(A::X86);
+        assert_eq!(effective_architecture(&request), Some(A::X86));
+
+        // WinGet and Scoop options passed through custom parameters.
+        let custom = |values: &[&str]| {
+            values
+                .iter()
+                .map(|value| api::CustomParameterString((*value).to_owned()))
+                .collect::<Vec<_>>()
+        };
+        request.manager = M::Winget;
+        request.options.scope = None;
+        request.package.architecture = None;
+        request.options.custom_parameters = custom(&["--scope", "machine", "-a", "x86"]);
+        assert_eq!(effective_scope(&request), Some(S::Machine));
+        assert_eq!(effective_architecture(&request), Some(A::X86));
+
+        request.options.scope = Some(S::User);
+        request.package.architecture = Some(A::X64);
+        assert_eq!(effective_scope(&request), None);
+        assert_eq!(effective_architecture(&request), None);
+
+        request.manager = M::Scoop;
+        request.options.custom_parameters = custom(&["-a", "32bit"]);
+        assert_eq!(effective_architecture(&request), None);
+    }
+
+    #[test]
+    fn constraints_narrow_allow_rules_but_not_deny_rules() {
+        let mut request = request();
+        request.options.interactive = true;
+        let flags = RequestFlags::from_request(&request);
+        let mut rule = rule(PolicyMatch {
+            managers: BTreeSet::from([ManagerName::Winget]),
+            ..Default::default()
+        });
+        rule.constraints = Some(now_policy::PolicyConstraints {
+            allow_interactive: false,
+            ..Default::default()
+        });
+
+        assert!(!rule_matches(&rule, &request, &flags, Some("1.2.3")));
+
+        rule.decision = Decision::Deny;
+        assert!(rule_matches(&rule, &request, &flags, Some("1.2.3")));
     }
 }
