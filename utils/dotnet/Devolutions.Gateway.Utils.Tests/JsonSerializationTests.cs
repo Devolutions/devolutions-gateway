@@ -209,6 +209,26 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void ScopeClaimsRecordingAnalyze()
+    {
+        const string EXPECTED = """{"scope":"gateway.recording.analyze","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayRecordingAnalyze);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
+    public void ScopeClaimsTasksRead()
+    {
+        const string EXPECTED = """{"scope":"gateway.tasks.read","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayTasksRead);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void EnrollmentClaimsAllFields()
     {
         const string EXPECTED = """{"jet_gw_url":"http://gw.example.com:7777","jet_agent_name":"site-a"}""";
