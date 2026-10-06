@@ -407,8 +407,8 @@ pub(crate) async fn spawn_stream_harness_delayed_start(
             server_ws,
             input,
             shutdown_for_stream,
-            video_streamer::StreamingConfig {
-                encoder_threads: video_streamer::config::CpuCount::new(encoder_threads),
+            video_streamer::SessionConfig {
+                encoder_threads: u32::try_from(encoder_threads).expect("thread count fits in u32"),
                 adaptive_frame_skip: false,
             },
             when_new_chunk_appended,
