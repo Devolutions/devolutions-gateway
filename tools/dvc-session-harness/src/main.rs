@@ -5,17 +5,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(windows)]
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
+#[cfg(windows)]
+use std::{mem::size_of, time::Duration};
 
 use anyhow::{Context, bail};
 #[cfg(windows)]
-use now_proto_pdu::ironrdp_core::encode_vec;
+use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf, encode_vec};
 #[cfg(windows)]
 use now_proto_pdu::{
-    NowChannelCapsetMsg, NowChannelHeartbeatMsg, NowExecCapsetFlags, NowMessage, NowSessionCapsetFlags,
-    NowSystemCapsetFlags,
+    NowChannelCapsetMsg, NowChannelHeartbeatMsg, NowChannelMessage, NowExecCapsetFlags, NowMessage,
+    NowSessionCapsetFlags, NowSystemCapsetFlags,
 };
 #[cfg(windows)]
-use win_api_wrappers::raw::Win32::Storage::FileSystem::WriteFile;
+use win_api_wrappers::raw::Win32::Storage::FileSystem::{ReadFile, WriteFile};
+#[cfg(windows)]
+use win_api_wrappers::raw::Win32::System::RemoteDesktop::CHANNEL_PDU_HEADER;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scenario {
@@ -215,6 +219,54 @@ fn log_event(scenario: Scenario, cycle: Option<u32>, event: &str, detail: impl A
 }
 
 #[cfg(windows)]
+#[derive(Default)]
+struct NowMessageDissector {
+    start_pos: usize,
+    pdu_body_buffer: WriteBuf,
+}
+
+#[cfg(windows)]
+impl NowMessageDissector {
+    fn dissect(&mut self, data_chunk: &[u8]) -> anyhow::Result<Vec<NowMessage<'static>>> {
+        let mut messages = Vec::new();
+
+        self.pdu_body_buffer.write_slice(data_chunk);
+
+        loop {
+            let usable_chunk_size = self
+                .pdu_body_buffer
+                .filled_len()
+                .checked_sub(self.start_pos)
+                .context("failed to get usable chunk size")?;
+
+            let mut cursor = ReadCursor::new(&self.pdu_body_buffer.filled()[self.start_pos..]);
+
+            match NowMessage::decode(&mut cursor) {
+                Ok(message) => {
+                    messages.push(message.into_owned());
+                    let pos = cursor.pos();
+
+                    if pos == usable_chunk_size {
+                        self.pdu_body_buffer.clear();
+                        self.start_pos = 0;
+                        return Ok(messages);
+                    }
+
+                    self.start_pos += pos;
+                }
+                Err(DecodeError {
+                    kind: DecodeErrorKind::NotEnoughBytes { .. },
+                    ..
+                }) => break,
+                Err(error) => return Err(error.into()),
+            }
+        }
+
+        Ok(messages)
+    }
+}
+
+#[cfg(windows)]
 fn open_channel(channel_name: &str) -> anyhow::Result<win_api_wrappers::wts::WtsVirtualChannel> {
     win_api_wrappers::wts::WtsVirtualChannel::open_dvc(channel_name)
 }
@@ -351,6 +403,31 @@ fn send_message(
 }
 
 #[cfg(windows)]
+fn read_now_messages(
+    channel_file: &win_api_wrappers::raw::core::Owned<win_api_wrappers::raw::Win32::Foundation::HANDLE>,
+    dissector: &mut NowMessageDissector,
+    read_buffer: &mut [u8],
+) -> anyhow::Result<Vec<NowMessage<'static>>> {
+    let mut bytes_read = 0_u32;
+
+    // SAFETY: `channel_file` is an owned valid handle and `read_buffer` is valid for writes.
+    unsafe { ReadFile(**channel_file, Some(read_buffer), Some(&mut bytes_read), None)? };
+
+    if bytes_read == 0 {
+        bail!("DVC channel closed by peer");
+    }
+
+    let header_size = size_of::<CHANNEL_PDU_HEADER>();
+    let bytes_read = usize::try_from(bytes_read).context("bytes read does not fit usize")?;
+
+    if bytes_read < header_size {
+        bail!("short DVC read: {} bytes", bytes_read);
+    }
+
+    dissector.dissect(&read_buffer[header_size..bytes_read])
+}
+
+#[cfg(windows)]
 fn run_protocol_shim(
     config: &Config,
     scenario: Scenario,
@@ -372,15 +449,60 @@ fn run_protocol_shim(
     }
 
     let channel_file = channel.query_file_handle().context("query DVC channel file handle")?;
-    let capset = default_server_caps();
-    let capset_msg: NowMessage<'_> = capset.into();
-
-    send_message(&channel_file, &capset_msg).context("send server capset")?;
-    log_event(scenario, Some(cycle), "shim-capset-sent", "sent server capability set");
-
     let start = Instant::now();
-    let heartbeat_interval = std::time::Duration::from_millis(config.heartbeat_ms);
-    let mut next_heartbeat = start + heartbeat_interval;
+    let mut dissector = NowMessageDissector::default();
+    let mut read_buffer = vec![0_u8; 128 * 1024];
+    let handshake_deadline = start + Duration::from_secs(5);
+
+    // Handshake-driven flow: first consume client capset, then answer with server capset.
+    let mut handshake_done = false;
+    while !handshake_done {
+        if stop_requested.load(Ordering::Relaxed) {
+            log_event(
+                scenario,
+                Some(cycle),
+                "interrupted",
+                "stop requested while waiting for client capset",
+            );
+            bail!("interrupted by user");
+        }
+
+        if Instant::now() >= handshake_deadline {
+            bail!("timed out waiting for client capset");
+        }
+
+        let messages = read_now_messages(&channel_file, &mut dissector, &mut read_buffer)
+            .context("read handshake messages from DVC channel")?;
+
+        for message in messages {
+            match message {
+                NowMessage::Channel(NowChannelMessage::Capset(_)) => {
+                    let capset = default_server_caps();
+                    let capset_msg: NowMessage<'_> = capset.into();
+                    send_message(&channel_file, &capset_msg).context("send server capset")?;
+                    log_event(
+                        scenario,
+                        Some(cycle),
+                        "shim-capset-sent",
+                        "received client capset and sent server capset",
+                    );
+                    handshake_done = true;
+                    break;
+                }
+                other => {
+                    log_event(
+                        scenario,
+                        Some(cycle),
+                        "shim-handshake-skip",
+                        format!("ignoring pre-capset message: {other:?}"),
+                    );
+                }
+            }
+        }
+    }
+
+    let heartbeat_interval = Duration::from_millis(config.heartbeat_ms);
+    let mut next_heartbeat = Instant::now() + heartbeat_interval;
 
     while start.elapsed().as_millis() < u128::from(config.open_ms) {
         if stop_requested.load(Ordering::Relaxed) {
@@ -396,7 +518,7 @@ fn run_protocol_shim(
             next_heartbeat = now + heartbeat_interval;
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(100));
     }
 
     Ok(())

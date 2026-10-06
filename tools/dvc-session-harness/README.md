@@ -20,7 +20,7 @@ The harness supports Ctrl+C and exits cleanly.
 ## Protocol shim modes
 
 - `none` (default): open/close behavior only.
-- `minimal`: send a server capset and periodic heartbeats while the channel is open.
+- `minimal`: handshake-driven mode that waits for client capset, replies with server capset, then sends periodic heartbeats while open.
 
 Minimal shim mode is useful when you want RDM to stay attached longer instead of failing immediately with “agent not available”.
 
