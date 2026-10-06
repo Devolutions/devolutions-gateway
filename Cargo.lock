@@ -2662,7 +2662,10 @@ dependencies = [
  "async-trait",
  "camino",
  "libsql",
+ "provisioner-task",
+ "serde_json",
  "tempfile",
+ "time",
  "tokio 1.52.3",
  "tracing",
  "uuid",
@@ -5995,6 +5998,17 @@ name = "protoc-bin-vendored-win32"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "95067976aca6421a523e491fce939a3e65249bac4b977adee0ee9771568e8aa3"
+
+[[package]]
+name = "provisioner-task"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "serde_json",
+ "time",
+ "uuid",
+]
 
 [[package]]
 name = "proxy-generators"

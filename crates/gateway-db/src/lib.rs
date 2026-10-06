@@ -9,6 +9,7 @@
 extern crate tracing;
 
 pub mod agent_tunnel;
+pub mod provisioner_task;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -31,6 +32,7 @@ const PRAGMAS: &str = "
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/01_agent_tunnel.sql"),
     include_str!("../migrations/02_prefix_agent_tunnel_tables.sql"),
+    include_str!("../migrations/03_provisioner_task.sql"),
 ];
 
 /// The open `gateway.db`, ready to hand a connection to each feature that keeps tables in it.
@@ -298,6 +300,7 @@ mod tests {
         assert!(table_exists(&conn, "agent_tunnel_accepted_agents").await);
         assert!(table_exists(&conn, "agent_tunnel_enrollment_attempts").await);
         assert!(table_exists(&conn, "agent_tunnel_deleted_agent_keys").await);
+        assert!(table_exists(&conn, "provisioner_task").await);
         assert!(!table_exists(&conn, "metadata").await);
     }
 
