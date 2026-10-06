@@ -41,6 +41,14 @@
       "ExpectedDecision": "Deny",
       "ExpectedRuleId": "deny.elevated-uninstall-critical-software",
       "Tags": ["baseline", "winget", "default-allow", "uninstall"]
+    },
+    {
+      "Id": "baseline.default-allow.critical-software-replace.deny",
+      "Policy": "deny-risky-options.policy.json",
+      "Request": "requests/winget-endpoint-agent-replace.request.json",
+      "ExpectedDecision": "Deny",
+      "ExpectedRuleId": "deny.elevated-replace-critical-software",
+      "Tags": ["baseline", "winget", "default-allow", "uninstall"]
     }
   ]
 }

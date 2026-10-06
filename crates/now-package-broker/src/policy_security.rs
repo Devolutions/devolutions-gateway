@@ -853,12 +853,12 @@ pub(crate) fn verify_elevated_install_location(
     opener: &dyn PathOpener,
     location: &Path,
 ) -> anyhow::Result<VerifiedInstallLocation> {
-    // Delete sharing lets the installer replace an existing install folder; non-administrators
-    // cannot, since the DACL check below rejects delete rights for them.
+    // Delete sharing is not granted: a renamed verified folder could be replaced by a junction
+    // while the guard is held, so the installer cannot rename or delete it during the operation.
     let mut options = OpenOptions::new();
     options
         .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
-        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0)
+        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
         .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0);
 
     let mut folder = location;

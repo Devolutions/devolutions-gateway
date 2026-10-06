@@ -86,6 +86,25 @@
           ]
         }
       }
+    },
+    {
+      "Id": "deny.elevated-replace-critical-software",
+      "Priority": 60,
+      "Decision": "Deny",
+      "Reason": "Updates that remove the previous version of critical software first cannot run through the broker.",
+      "Match": {
+        "HasUninstallPrevious": true,
+        "ExecutionElevation": [
+          "Elevated"
+        ],
+        "PackageIdentifiers": {
+          "Patterns": [
+            "Contoso.EndpointProtection*",
+            "Contoso.Vpn*",
+            "Contoso.DeviceManagement*"
+          ]
+        }
+      }
     }
   ]
 }
