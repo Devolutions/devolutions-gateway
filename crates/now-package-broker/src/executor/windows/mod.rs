@@ -353,27 +353,10 @@ fn run_plan(
         bail!("elevated Bun package operations are not supported by the broker");
     }
 
-    // SECURITY: The request was evaluated for the elevation `requires_elevation` reports, but the
-    // token actually running the plan is what matters (e.g. a broker launched from an elevated
-    // shell, or a full session token when UAC is disabled), so query the token itself.
-    // Running a standard plan elevated would apply standard-execution policy rules, and skip the
-    // elevated safeguards, while the administrator token runs without a UAC prompt.
     let token_is_elevated = token
         .is_elevated()
         .context("failed to query execution token elevation")?;
-    if token_is_elevated && !requires_elevation {
-        bail!(
-            "the package broker can't run requests for a full administrator token without UAC \
-             (User Account Control is disabled, the account is the built-in Administrator, \
-             or the broker runs elevated outside service mode)"
-        );
-    }
-
-    // SECURITY: Pre/post commands are raw strings whose content is not governed by
-    // the policy, so they must never run elevated.
-    if token_is_elevated && (ctx.pre_command.is_some() || ctx.post_command.is_some()) {
-        bail!("pre/post operation commands are only allowed for non-elevated execution");
-    }
+    check_execution_token_elevation(ctx, token_is_elevated)?;
 
     // Defense in depth: the server rejects these names before policy evaluation.
     if let Some(process_name) = ctx
@@ -447,8 +430,12 @@ fn run_plan(
         }
     }
 
-    // 3. Main package-manager command.
-    let command = prepare_main_command_in(&ctx.command, None, Some(&user_env), requires_elevation)?;
+    // 3. Main package-manager command. The environment is reloaded because the pre-operation
+    //    command may have updated persisted variables such as `PATH`.
+    let main_vars = win_api_wrappers::utils::environment_block(Some(token), false)
+        .context("failed to load user environment block")?;
+    let main_env = UserEnv::for_user(&main_vars, token)?;
+    let command = prepare_main_command_in(&ctx.command, None, Some(&main_env), requires_elevation)?;
     let output = create_process(
         token,
         command.args(),
@@ -489,6 +476,30 @@ fn run_plan(
     }
 
     Ok(output)
+}
+
+/// Verify that the token running the plan has the elevation the request was evaluated for.
+///
+/// The token actually running the plan is what matters (e.g. a broker launched from an elevated
+/// shell, or a full session token when UAC is disabled), so the caller queries the token itself.
+fn check_execution_token_elevation(ctx: &ExecutionContext, token_is_elevated: bool) -> anyhow::Result<()> {
+    // SECURITY: Running a standard plan elevated would apply standard-execution policy rules, and
+    // skip the elevated safeguards, while the administrator token runs without a UAC prompt.
+    if token_is_elevated && !ctx.requires_elevation() {
+        bail!(
+            "the package broker can't run requests for a full administrator token without UAC \
+             (User Account Control is disabled, the account is the built-in Administrator, \
+             or the broker runs elevated outside service mode)"
+        );
+    }
+
+    // SECURITY: Pre/post commands are raw strings whose content is not governed by
+    // the policy, so they must never run elevated.
+    if token_is_elevated && (ctx.pre_command.is_some() || ctx.post_command.is_some()) {
+        bail!("pre/post operation commands are only allowed for non-elevated execution");
+    }
+
+    Ok(())
 }
 
 fn prepare_main_command_in(
@@ -2372,6 +2383,44 @@ mod tests {
             error.to_string().contains("does not match broker process session"),
             "{error:#}"
         );
+    }
+
+    #[test]
+    fn elevated_tokens_are_rejected_for_standard_plans() {
+        let mut ctx = ExecutionContext {
+            kill_processes: vec!["notepad.exe".to_owned()],
+            pre_command: None,
+            command: vec!["winget.exe".to_owned(), "install".to_owned()],
+            post_command: None,
+            effective_user: "DOMAIN\\user".to_owned(),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
+            session_id: 1,
+            elevation: Elevation::Standard,
+            scope: None,
+            custom_install_location: None,
+            capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
+        };
+
+        let error = super::check_execution_token_elevation(&ctx, true).expect_err("standard plan with elevated token");
+        assert!(
+            error.to_string().contains("full administrator token without UAC"),
+            "{error:#}"
+        );
+        super::check_execution_token_elevation(&ctx, false).expect("standard plan with standard token");
+
+        // An elevated user-scope request is a standard plan.
+        ctx.elevation = Elevation::Elevated;
+        ctx.scope = Some(Scope::User);
+        assert!(super::check_execution_token_elevation(&ctx, true).is_err());
+
+        ctx.scope = None;
+        super::check_execution_token_elevation(&ctx, true).expect("elevated plan with elevated token");
+
+        ctx.pre_command = Some("echo before".to_owned());
+        let error = super::check_execution_token_elevation(&ctx, true).expect_err("elevated pre-command");
+        assert!(error.to_string().contains("non-elevated"), "{error:#}");
     }
 
     #[test]
