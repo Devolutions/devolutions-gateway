@@ -1868,6 +1868,7 @@ dependencies = [
  "picky-krb",
  "pin-project-lite 0.2.17",
  "proptest",
+ "provisioner-task",
  "rand 0.10.2",
  "reqwest",
  "rstest",

@@ -337,6 +337,14 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         None
     };
 
+    let provisioner_tasks_conn = gateway_db
+        .connect()
+        .await
+        .context("failed to connect the provisioner tasks to the gateway database")?;
+    let provisioner_tasks = Arc::new(gateway_db::provisioner_task::LibSqlProvisionerTaskStore::new(
+        provisioner_tasks_conn,
+    ));
+
     let state = DgwState {
         conf_handle: conf_handle.clone(),
         token_cache: Arc::clone(&token_cache),
@@ -351,6 +359,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
+        provisioner_tasks,
     };
 
     for listener in &conf.listeners {

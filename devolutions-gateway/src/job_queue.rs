@@ -11,6 +11,9 @@ use job_queue_libsql::libsql;
 use time::OffsetDateTime;
 use tokio::sync::{Notify, mpsc};
 
+/// Runs of a job before the job queue gives up on it.
+pub const MAX_ATTEMPTS: u32 = 5;
+
 pub struct JobQueueCtx {
     notify_runner: Arc<Notify>,
     runner_waker: RunnerWaker,
@@ -59,6 +62,7 @@ impl JobQueueCtx {
         let queue = job_queue_libsql::LibSqlJobQueue::builder()
             .runner_waker(runner_waker.clone())
             .conn(conn)
+            .max_attempts(MAX_ATTEMPTS)
             .build();
 
         let queue = Arc::new(queue);
