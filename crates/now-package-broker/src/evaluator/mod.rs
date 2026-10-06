@@ -45,9 +45,12 @@
 //! can select regardless of the policy:
 //! - An explicit user scope, typed or passed through custom parameters, always runs with the standard
 //!   token (see `effective_execution_elevation`); policy matching and execution use the same elevation.
+//!   The executor refuses to run a standard plan with an elevated token, such as the full token of an
+//!   administrator when UAC is disabled.
 //! - Kill-before-operation entries must be plain `.exe` image names; process names without an
 //!   extension get `.exe` appended.
-//!   `taskkill` only targets the requester's session, and the requester's own processes when elevated.
+//!   `taskkill` only targets the session of the authenticated client, and the requester's own processes
+//!   when elevated.
 //! - An elevated custom install location must be on a local disk, contain no reparse point, and not be
 //!   writable by principals other than SYSTEM, Administrators and TrustedInstaller, including through
 //!   inheritable ACEs.

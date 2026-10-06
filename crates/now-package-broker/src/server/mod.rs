@@ -492,7 +492,9 @@ impl PackageBrokerServer for BrokerConnection {
                 error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
             })?;
 
-        self.state.execute(request, self.client.user_sid()).await
+        self.state
+            .execute(request, self.client.user_sid(), self.client.session_id())
+            .await
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
@@ -612,7 +614,12 @@ impl BrokerState {
         })
     }
 
-    async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
+    async fn execute(
+        &self,
+        request: PackageRequest,
+        user_sid: &Sid,
+        session_id: u32,
+    ) -> Result<ExecutionResponse, ErrorResponse> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
         let operation = if evaluated.would_execute {
@@ -630,6 +637,7 @@ impl BrokerState {
                 post_command: request.options.post_operation_command.clone(),
                 effective_user: request.client.effective_user.clone(),
                 user_sid: user_sid.clone(),
+                session_id,
                 elevation: evaluator::effective_execution_elevation(&request),
                 scope: request.options.scope,
                 custom_install_location: evaluator::custom_install_location(&request).map(PathBuf::from),
@@ -2033,14 +2041,13 @@ mod tests {
     async fn submit_operation(state: &BrokerState, request: &PackageRequest) -> OperationSubmission {
         // Use the real test-process user SID: the per-operation event pipe ACL only
         // admits the requesting client user (plus SYSTEM/Administrators).
-        let user_sid = win_api_wrappers::process::Process::current_process()
+        let token = win_api_wrappers::process::Process::current_process()
             .token(windows::Win32::Security::TOKEN_QUERY)
-            .expect("open current process token")
-            .sid_and_attributes()
-            .expect("query token user SID")
-            .sid;
+            .expect("open current process token");
+        let user_sid = token.sid_and_attributes().expect("query token user SID").sid;
+        let session_id = token.session_id().expect("query token session ID");
         let response = state
-            .execute(request.clone(), &user_sid)
+            .execute(request.clone(), &user_sid, session_id)
             .await
             .expect("execute request accepted");
         response.operation.expect("operation submitted")

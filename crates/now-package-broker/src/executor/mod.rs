@@ -52,6 +52,10 @@ pub struct ExecutionContext {
     /// Session selection uses this SID so distinct accounts sharing the same name
     /// (e.g. `MACHINE\alice` vs `DOMAIN\alice`) cannot be confused with one another.
     pub user_sid: Sid,
+    /// Session of the authenticated pipe client, captured from its token at connect.
+    ///
+    /// The plan runs in this session, and kill-before-operation only targets processes in it.
+    pub session_id: u32,
     /// Execution elevation, as decided by `evaluator::effective_execution_elevation`.
     pub elevation: Elevation,
     /// Installation scope (machine scope requires elevation).
@@ -158,6 +162,7 @@ impl CommandExecutor for DryRunExecutor {
         info!(
             effective_user = %ctx.effective_user,
             user_sid = %ctx.user_sid,
+            session_id = ctx.session_id,
             kill_processes = ?ctx.kill_processes,
             has_pre_command = ctx.pre_command.is_some(),
             command_len = ctx.command.len(),
