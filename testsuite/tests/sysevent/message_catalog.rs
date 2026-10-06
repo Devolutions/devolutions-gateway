@@ -439,6 +439,16 @@ fn agent_events() -> Vec<(u32, Entry)> {
             agent_sysevent_codes::POLICY_EXTERNAL_CHANGE_REJECTED,
             agent_sysevent_codes::policy_external_change_rejected(path, "invalid"),
         ),
+        (
+            agent_sysevent_codes::POLICY_WRITE_DENIED_SUMMARY,
+            agent_sysevent_codes::policy_write_denied_summary(
+                "S-1-5-21-1-2-3-1001",
+                "policy_write",
+                "administrator_required",
+                41,
+                60,
+            ),
+        ),
     ];
 
     events.sort_unstable_by_key(|(code, _)| *code);

@@ -248,3 +248,15 @@ Modification externe de la politique rejetée. Contexte=%1 Chemin=%2 Raison=%3
 Language=German
 Externe Richtlinienänderung abgelehnt. Kontext=%1 Pfad=%2 Grund=%3
 .
+
+MessageId=8090
+SymbolicName=POLICY_WRITE_DENIED_SUMMARY
+Language=English
+Policy management write denials summarized. Context=%1 ActorSid=%2 Intent=%3 Reason=%4 Suppressed=%5 IntervalSec=%6
+.
+Language=French
+Résumé des écritures de politique refusées. Contexte=%1 SidActeur=%2 Intention=%3 Raison=%4 Supprimés=%5 IntervalSec=%6
+.
+Language=German
+Zusammenfassung verweigerter Richtlinien-Schreibvorgänge. Kontext=%1 AkteurSid=%2 Absicht=%3 Grund=%4 Unterdrückt=%5 IntervallSek=%6
+.
