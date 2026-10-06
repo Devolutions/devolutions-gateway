@@ -1,0 +1,16 @@
+[package]
+name = "dvc-session-harness"
+version = "0.0.0"
+edition = "2024"
+publish = false
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+description = "Windows-only harness to replay DVC channel establishment edge cases"
+
+[workspace]
+resolver = "2"
+members = ["."]
+
+[dependencies]
+anyhow = "1"
+win-api-wrappers = { path = "../../crates/win-api-wrappers" }
+
