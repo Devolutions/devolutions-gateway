@@ -151,7 +151,19 @@ namespace Devolutions.Gateway.Client.Model
         /// Enum GatewayRecordingsSearch for value: gateway.recordings.search
         /// </summary>
         [EnumMember(Value = "gateway.recordings.search")]
-        GatewayRecordingsSearch = 20
+        GatewayRecordingsSearch = 20,
+
+        /// <summary>
+        /// Enum GatewayTasksRecordingAiAnalysisStart for value: gateway.tasks.recording-ai-analysis.start
+        /// </summary>
+        [EnumMember(Value = "gateway.tasks.recording-ai-analysis.start")]
+        GatewayTasksRecordingAiAnalysisStart = 21,
+
+        /// <summary>
+        /// Enum GatewayTasksRecordingAiAnalysisRead for value: gateway.tasks.recording-ai-analysis.read
+        /// </summary>
+        [EnumMember(Value = "gateway.tasks.recording-ai-analysis.read")]
+        GatewayTasksRecordingAiAnalysisRead = 22
     }
 
     public static class AccessScopeExtensions
@@ -203,6 +215,10 @@ namespace Devolutions.Gateway.Client.Model
                     return "gateway.agent.read";
                 case AccessScope.GatewayRecordingsSearch:
                     return "gateway.recordings.search";
+                case AccessScope.GatewayTasksRecordingAiAnalysisStart:
+                    return "gateway.tasks.recording-ai-analysis.start";
+                case AccessScope.GatewayTasksRecordingAiAnalysisRead:
+                    return "gateway.tasks.recording-ai-analysis.read";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }
