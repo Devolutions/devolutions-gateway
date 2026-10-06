@@ -511,6 +511,10 @@ pub enum AccessScope {
     AgentDelete,
     #[serde(rename = "gateway.agent.read")]
     AgentRead,
+    #[serde(rename = "gateway.tasks.recording-ai-analysis.start")]
+    RecordingAiAnalysisStart,
+    #[serde(rename = "gateway.tasks.recording-ai-analysis.read")]
+    RecordingAiAnalysisRead,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
