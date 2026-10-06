@@ -71,7 +71,7 @@ impl Drop for HandlesGuard {
 /// Build a Router with a live TrafficAuditManagerTask and real handle,
 /// similar to tests/preflight.rs harness.
 async fn make_router() -> anyhow::Result<(Router, DgwState, HandlesGuard)> {
-    let (mut state, handles) = DgwState::mock(CONFIG)?;
+    let (mut state, handles) = DgwState::mock(CONFIG).await?;
 
     // Start the manager with an in-memory DB.
     let manager = TrafficAuditManagerTask::init(":memory:").await?;
