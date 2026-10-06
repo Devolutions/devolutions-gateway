@@ -26,7 +26,10 @@ const MAX_POLICY_ID_BYTES: usize = 256;
 const DENIAL_SUMMARY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// How often the counted denials whose interval elapsed are summarized.
-const DENIAL_SUMMARY_TICK: std::time::Duration = std::time::Duration::from_secs(15);
+///
+/// A new denial already summarizes the elapsed windows, so this only bounds how late the summary
+/// of a caller that stopped sending requests is logged: at most twice the interval.
+const DENIAL_SUMMARY_TICK: std::time::Duration = DENIAL_SUMMARY_INTERVAL;
 
 /// Caller and reason pairs whose denials are counted separately.
 ///
