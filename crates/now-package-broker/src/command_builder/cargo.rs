@@ -3,10 +3,12 @@
 use anyhow::bail;
 use now_policy_api::{Architecture, Elevation, Operation, PackageRequest, Scope};
 
-use super::set_if_specified;
+use super::{set_if_specified, validate_batch_arguments, validate_package_version};
 
 const CRATES_IO_SOURCE_NAME: &str = "crates.io";
 const CRATES_IO_SOURCE_URL: &str = "https://index.crates.io";
+/// Cargo version requirement operators that are inert in a batch script, such as `=1.2.3` or `~1.2`.
+const CARGO_VERSION_EXTRA_CHARACTERS: &[char] = &['=', '~', '*'];
 
 /// Build the Cargo command line from a validated request.
 ///
@@ -52,6 +54,9 @@ pub fn build_cargo_command(request: &PackageRequest) -> anyhow::Result<Vec<Strin
         }
     }
 
+    // The Windows executor runs Cargo through a generated batch script.
+    validate_batch_arguments("cargo", &command)?;
+
     Ok(command)
 }
 
@@ -83,6 +88,9 @@ fn validate_cargo_request(request: &PackageRequest) -> anyhow::Result<()> {
     }
     if request.operation == Operation::Uninstall && request.package.version.is_some() {
         bail!("cargo uninstall does not support version-pinned removals");
+    }
+    if let Some(version) = request.package.version.as_deref() {
+        validate_package_version("cargo", version, CARGO_VERSION_EXTRA_CHARACTERS)?;
     }
     if request.options.interactive {
         bail!("cargo interactive operations are not supported by the broker");

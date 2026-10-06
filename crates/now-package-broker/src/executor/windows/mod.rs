@@ -22,15 +22,18 @@ use super::{
     BROKER_SUPPORTED_MANAGERS, CommandExecutor, ExecutionContext, ExecutionOutput, OperationCanceled,
     ProcessStartedCallback, is_canceled_error,
 };
+use crate::command_builder::{BATCH_METACHARACTERS, quote_powershell_literal};
 use crate::policy_security;
 
 mod privileges;
 mod process;
 mod token;
+mod user_env;
 
 use privileges::SharedPrivileges;
 use process::{OutputCapture, create_process};
 use token::{detect_running_as_system, find_user_session, get_elevated_token};
+use user_env::UserEnv;
 
 /// Windows command executor using `win-api-wrappers` safe abstractions.
 ///
@@ -104,7 +107,8 @@ impl CommandExecutor for WindowsExecutor {
 
         // All Win32 calls are blocking — run in a blocking thread.
         let probed = tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<ManagerName>> {
-            let user_env = probe_user_environment(is_system, &user_sid)?;
+            let (token, vars) = probe_user_environment(is_system, &user_sid)?;
+            let user_env = UserEnv::for_user(&vars, &token)?;
             Ok(BROKER_SUPPORTED_MANAGERS
                 .into_iter()
                 .filter(|manager| manager_is_available(*manager, &user_env))
@@ -129,11 +133,11 @@ impl CommandExecutor for WindowsExecutor {
     }
 }
 
-/// Load the environment block of the target user identified by `user_sid`.
+/// Load the token and environment block of the target user identified by `user_sid`.
 ///
 /// In SYSTEM (service) mode the token comes from the user's active session, matching the
 /// token later used for execution. In user (development) mode the current process token is used.
-fn probe_user_environment(is_system: bool, user_sid: &Sid) -> anyhow::Result<HashMap<String, String>> {
+fn probe_user_environment(is_system: bool, user_sid: &Sid) -> anyhow::Result<(Token, HashMap<String, String>)> {
     let token = if is_system {
         // WTSQueryUserToken (used by find_user_session) requires the SeTcb privilege.
         let _privileges = SharedPrivileges::acquire(&[privilege::SE_TCB_NAME]).context("failed to enable SeTcb")?;
@@ -147,12 +151,15 @@ fn probe_user_environment(is_system: bool, user_sid: &Sid) -> anyhow::Result<Has
             .context("failed to open current process token")?
     };
 
-    win_api_wrappers::utils::environment_block(Some(&token), false).context("failed to load user environment block")
+    let vars = win_api_wrappers::utils::environment_block(Some(&token), false)
+        .context("failed to load user environment block")?;
+
+    Ok((token, vars))
 }
 
 /// Check whether a package manager is usable for the target user, mirroring the executable
 /// resolution rules the execution path applies for that manager.
-fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>) -> bool {
+fn manager_is_available(manager: ManagerName, user_env: &UserEnv<'_>) -> bool {
     match manager {
         // Probing is not an elevated execution, so no executable ACL verification is needed.
         ManagerName::Winget => resolve_winget_executable(user_env, false).is_ok(),
@@ -162,7 +169,11 @@ fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>
         ManagerName::Bun => resolve_bun_executable("bun", user_env).is_ok(),
         ManagerName::Cargo => resolve_cargo_executable(user_env).is_ok(),
         ManagerName::Dotnet => Path::new(&crate::command_builder::dotnet::trusted_dotnet_executable()).is_file(),
-        ManagerName::Pip => resolve_python_executable("python.exe", user_env).is_ok(),
+        // The Microsoft Store installation shortcut stands in for `python.exe` when Python is not installed.
+        ManagerName::Pip => resolve_python_executable("python.exe", user_env).is_ok_and(|python| {
+            policy_security::app_exec_alias_kind(user_env, &python)
+                != Some(policy_security::AppExecAliasKind::StoreInstallerRedirect)
+        }),
         // npm runs through the user PATH `npm` shim inside the trusted Windows PowerShell wrapper,
         // so both the shim and the host must exist.
         ManagerName::Npm => {
@@ -183,13 +194,9 @@ fn manager_is_available(manager: ManagerName, user_env: &HashMap<String, String>
 }
 
 /// Return true when any of `names` exists as a file in a directory listed in the environment PATH.
-fn path_contains_executable(env: &HashMap<String, String>, names: &[&str]) -> bool {
-    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
-    path_var
-        .split(';')
-        .map(str::trim)
-        .filter(|dir| !dir.is_empty())
-        .any(|dir| names.iter().any(|name| PathBuf::from(dir).join(name).is_file()))
+fn path_contains_executable(env: &UserEnv<'_>, names: &[&str]) -> bool {
+    env.path_dirs()
+        .any(|dir| names.iter().any(|name| env.is_file(&PathBuf::from(dir).join(name))))
 }
 
 /// Execute a command in the context of the target user's session (SYSTEM mode).
@@ -448,15 +455,16 @@ fn prepare_main_command(
     command: &[String],
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
-    let user_env = win_api_wrappers::utils::environment_block(Some(token), false)
+    let vars = win_api_wrappers::utils::environment_block(Some(token), false)
         .context("failed to load user environment block")?;
+    let user_env = UserEnv::for_user(&vars, token)?;
     prepare_main_command_in(command, None, Some(&user_env), requires_elevation)
 }
 
 fn prepare_main_command_in(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     if let Some((script, command_arg_index)) = powershell_inline_script(command) {
@@ -480,11 +488,11 @@ fn prepare_main_command_in(
     }
 
     if is_pip_python_command(command) {
-        return prepare_pip_command(command, temp_dir, user_env);
+        return prepare_pip_command(command, temp_dir, user_env, requires_elevation);
     }
 
     if command_is_bun(command) {
-        return prepare_bun_command(command, temp_dir, user_env);
+        return prepare_bun_command(command, temp_dir, user_env, requires_elevation);
     }
 
     Ok(PreparedCommand::raw(command))
@@ -574,7 +582,7 @@ fn powershell_script_with_utf8_preamble(script: &str) -> String {
 fn prepare_winget_script(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
@@ -589,7 +597,7 @@ fn prepare_winget_script(
             resolve_winget_executable(env, requires_elevation).map(|(path, guard)| (path.display().to_string(), guard))
         },
     )?;
-    append_batch_argument(&mut script, &executable)?;
+    append_batch_executable(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -619,7 +627,7 @@ fn prepare_winget_script(
 fn prepare_chocolatey_script(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     prepare_chocolatey_script_in(command, temp_dir, user_env, requires_elevation)
@@ -628,7 +636,7 @@ fn prepare_chocolatey_script(
 fn prepare_chocolatey_script_in(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let default_install_root = default_chocolatey_install_dir()?;
@@ -644,7 +652,7 @@ fn prepare_chocolatey_script_in(
 fn prepare_chocolatey_script_in_with_default_install_root(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
     default_install_root: &Path,
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
@@ -658,7 +666,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
         resolve_trusted_chocolatey_executable(user_env, default_install_root, requires_elevation)?;
     append_batch_set_value(&mut script, "ChocolateyInstall", &install_root.display().to_string())?;
     script.push_str("\r\n");
-    append_batch_argument(&mut script, &executable.display().to_string())?;
+    append_batch_executable(&mut script, &executable.display().to_string())?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -693,7 +701,7 @@ fn prepare_chocolatey_script_in_with_default_install_root(
 fn prepare_vcpkg_script(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
 ) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
     script.push_str("@echo off\r\n");
@@ -705,7 +713,7 @@ fn prepare_vcpkg_script(
         || Ok(executable.clone()),
         |env| resolve_vcpkg_executable(env).map(|path| path.display().to_string()),
     )?;
-    append_batch_argument(&mut script, &executable)?;
+    append_batch_executable(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -735,7 +743,7 @@ fn prepare_vcpkg_script(
 fn prepare_cargo_script(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
 ) -> anyhow::Result<PreparedCommand> {
     let mut script = String::new();
     script.push_str("@echo off\r\n");
@@ -747,10 +755,10 @@ fn prepare_cargo_script(
         || Ok(executable.clone()),
         |env| resolve_cargo_executable(env).map(|path| path.display().to_string()),
     )?;
-    append_cargo_batch_argument(&mut script, &executable)?;
+    append_batch_executable(&mut script, &executable)?;
     for arg in args {
         script.push(' ');
-        append_cargo_batch_argument(&mut script, arg)?;
+        append_batch_argument(&mut script, arg)?;
     }
     script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
 
@@ -776,18 +784,105 @@ fn prepare_cargo_script(
 
 fn prepare_pip_command(
     command: &[String],
-    _temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    temp_dir: Option<&Path>,
+    user_env: Option<&UserEnv<'_>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let (executable, args) = command.split_first().context("empty pip command")?;
-    let executable = user_env
-        .context("target user environment is required to resolve python.exe")
-        .and_then(|env| resolve_python_executable(executable, env))?;
-    let mut prepared = Vec::with_capacity(command.len());
-    prepared.push(executable.display().to_string());
-    prepared.extend_from_slice(args);
+    let env = user_env.context("target user environment is required to resolve python.exe")?;
+    let executable = resolve_python_executable(executable, env)?;
 
-    Ok(PreparedCommand::raw(&prepared))
+    let alias = policy_security::app_exec_alias_kind(env, &executable);
+    prepare_user_executable("pip", &executable, args, alias, requires_elevation, temp_dir)
+}
+
+/// How a package-manager executable resolved from the target user environment is launched.
+#[derive(Debug, PartialEq, Eq)]
+enum UserExecutableLaunch {
+    /// Pinned by the broker and launched directly.
+    Pinned,
+    /// Launched through a batch script run by the target user, which resolves the executable itself.
+    UserBatch,
+}
+
+/// Choose how to launch a user-resolved executable, given whether it is an app execution alias.
+///
+/// Aliases cannot be opened and pinned, so the target user's own process resolves them.
+/// They are per-user Microsoft Store apps, so they are never launched elevated.
+fn user_executable_launch(
+    manager: &str,
+    executable: &Path,
+    alias: Option<policy_security::AppExecAliasKind>,
+    requires_elevation: bool,
+) -> anyhow::Result<UserExecutableLaunch> {
+    match alias {
+        None => Ok(UserExecutableLaunch::Pinned),
+        Some(_) if requires_elevation => bail!(
+            "Microsoft Store app execution aliases are not supported for elevated {manager} operations: {}",
+            executable.display()
+        ),
+        Some(policy_security::AppExecAliasKind::StoreInstallerRedirect) => bail!(
+            "{manager} executable '{}' is the Microsoft Store installation shortcut; install the package manager first",
+            executable.display()
+        ),
+        Some(policy_security::AppExecAliasKind::App) => Ok(UserExecutableLaunch::UserBatch),
+    }
+}
+
+fn prepare_user_executable(
+    manager: &str,
+    executable: &Path,
+    args: &[String],
+    alias: Option<policy_security::AppExecAliasKind>,
+    requires_elevation: bool,
+    temp_dir: Option<&Path>,
+) -> anyhow::Result<PreparedCommand> {
+    match user_executable_launch(manager, executable, alias, requires_elevation)? {
+        UserExecutableLaunch::Pinned => {
+            let mut prepared = Vec::with_capacity(args.len() + 1);
+            prepared.push(executable.display().to_string());
+            prepared.extend_from_slice(args);
+            Ok(PreparedCommand::raw(&prepared))
+        }
+        UserExecutableLaunch::UserBatch => prepare_user_batch_script(&executable.display().to_string(), args, temp_dir),
+    }
+}
+
+/// Run `executable` with `args` through a generated batch script under the target user's token.
+fn prepare_user_batch_script(
+    executable: &str,
+    args: &[String],
+    temp_dir: Option<&Path>,
+) -> anyhow::Result<PreparedCommand> {
+    let mut script = String::new();
+    script.push_str("@echo off\r\n");
+    script.push_str(BATCH_UTF8_PREAMBLE);
+    script.push_str("\r\nset \"NO_COLOR=1\"\r\n");
+    append_batch_executable(&mut script, executable)?;
+    for arg in args {
+        script.push(' ');
+        append_batch_argument(&mut script, arg)?;
+    }
+    script.push_str("\r\nexit /b %ERRORLEVEL%\r\n");
+
+    let temp_script = broker_temp_script("bat", temp_dir)?;
+    temp_script.write_content(&script).with_context(|| {
+        format!(
+            "failed to write broker temporary script at {}",
+            temp_script.path().display()
+        )
+    })?;
+
+    let prepared = vec![
+        trusted_system32_executable("cmd.exe"),
+        "/D".to_owned(),
+        "/V:OFF".to_owned(),
+        "/Q".to_owned(),
+        "/C".to_owned(),
+        temp_script.path_string(),
+    ];
+
+    Ok(PreparedCommand::with_script(prepared, temp_script))
 }
 
 fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
@@ -806,7 +901,8 @@ fn powershell_inline_script(command: &[String]) -> Option<(&str, usize)> {
 fn prepare_bun_command(
     command: &[String],
     temp_dir: Option<&Path>,
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     let (executable, args) = command.split_first().context("empty Bun command")?;
     let executable = user_env.map_or_else(
@@ -822,11 +918,8 @@ fn prepare_bun_command(
         return prepare_bun_cmd_script(&executable.display().to_string(), args, temp_dir);
     }
 
-    let mut prepared = Vec::with_capacity(command.len());
-    prepared.push(executable.display().to_string());
-    prepared.extend_from_slice(args);
-
-    Ok(PreparedCommand::raw(&prepared))
+    let alias = user_env.and_then(|env| policy_security::app_exec_alias_kind(env, &executable));
+    prepare_user_executable("Bun", &executable, args, alias, requires_elevation, temp_dir)
 }
 
 fn prepare_bun_cmd_script(
@@ -838,7 +931,11 @@ fn prepare_bun_cmd_script(
     script.push_str("@echo off\r\n");
     script.push_str(BATCH_UTF8_PREAMBLE);
     script.push_str("\r\ncall ");
-    append_batch_argument(&mut script, executable)?;
+    // `call` expands the line a second time, so percent signs and carets would not survive literally.
+    if executable.contains(['%', '^']) {
+        bail!("bun.cmd path cannot contain percent signs or carets");
+    }
+    append_batch_executable(&mut script, executable)?;
     for arg in args {
         script.push(' ');
         append_batch_argument(&mut script, arg)?;
@@ -989,10 +1086,6 @@ fn command_is_bun(command: &[String]) -> bool {
     executable_is(command, "bun") || executable_is(command, "bun.exe") || executable_is(command, "bun.cmd")
 }
 
-fn quote_powershell_literal(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "''"))
-}
-
 fn trusted_system32_executable(name: &str) -> String {
     let system_root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_owned());
     PathBuf::from(system_root)
@@ -1045,22 +1138,17 @@ fn default_chocolatey_install_dir() -> anyhow::Result<PathBuf> {
 }
 
 fn resolve_trusted_chocolatey_executable(
-    user_env: Option<&HashMap<String, String>>,
+    user_env: Option<&UserEnv<'_>>,
     default_install_root: &Path,
     requires_elevation: bool,
 ) -> anyhow::Result<(PathBuf, PathBuf, Option<policy_security::VerifiedExecutable>)> {
     let install_root = user_env
-        .and_then(|env| env_value_ignore_case(env, "ChocolateyInstall"))
+        .and_then(|env| env.var("ChocolateyInstall"))
         .filter(|value| !value.trim().is_empty())
         .map_or_else(|| default_install_root.to_owned(), PathBuf::from);
     let executable = install_root.join("bin").join("choco.exe");
-    if !executable.is_file() {
-        bail!(
-            "Chocolatey executable was not found at {}; set ChocolateyInstall to the Chocolatey installation root",
-            executable.display()
-        );
-    }
 
+    // Check the trusted location before touching the environment-derived path.
     if !is_trusted_chocolatey_install_dir(&install_root, default_install_root) {
         bail!(
             "ChocolateyInstall points to {}; only the trusted system Chocolatey folder at {} is supported by the broker",
@@ -1069,7 +1157,22 @@ fn resolve_trusted_chocolatey_executable(
         );
     }
 
-    let guard = policy_security::verify_elevated_executable_security(&executable, requires_elevation)?;
+    let executable_found = match user_env {
+        Some(env) => env.is_file(&executable),
+        None => executable.is_file(),
+    };
+    if !executable_found {
+        bail!(
+            "Chocolatey executable was not found at {}; set ChocolateyInstall to the Chocolatey installation root",
+            executable.display()
+        );
+    }
+
+    let opener: &dyn policy_security::PathOpener = match user_env {
+        Some(env) => env,
+        None => &policy_security::ServiceOpener,
+    };
+    let guard = policy_security::verify_elevated_executable_security(opener, &executable, requires_elevation)?;
     let executable = guard.as_ref().map_or(executable, |g| g.path().to_owned());
 
     Ok((executable, install_root, guard))
@@ -1086,25 +1189,15 @@ fn paths_eq_ignore_ascii_case(lhs: &Path, rhs: &Path) -> bool {
         .eq_ignore_ascii_case(rhs.as_os_str().to_string_lossy().trim_end_matches(['\\', '/']))
 }
 
-fn env_value_ignore_case<'a>(env: &'a HashMap<String, String>, key: &str) -> Option<&'a str> {
-    env.iter()
-        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
-        .map(|(_, value)| value.as_str())
-}
-
 fn resolve_winget_executable(
-    env: &HashMap<String, String>,
+    env: &UserEnv<'_>,
     requires_elevation: bool,
 ) -> anyhow::Result<(PathBuf, Option<policy_security::VerifiedExecutable>)> {
-    let path_var = env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
-        .map(|(_, value)| value.as_str())
-        .unwrap_or_default();
-    for dir in path_var.split(';') {
+    for dir in env.path_dirs() {
         let candidate = PathBuf::from(dir).join("winget.exe");
-        if candidate.exists() && is_trusted_winget_path(&candidate, env) {
-            let guard = policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
+        if is_trusted_winget_path(&candidate, env) && env.exists(&candidate) {
+            // Trust verification of the resolved path runs as the broker service account.
+            let guard = policy_security::verify_elevated_executable_security(env, &candidate, requires_elevation)?;
             let candidate = guard.as_ref().map_or(candidate, |g| g.path().to_owned());
             return Ok((candidate, guard));
         }
@@ -1112,44 +1205,22 @@ fn resolve_winget_executable(
     bail!("trusted winget.exe not found in target user PATH");
 }
 
-fn resolve_vcpkg_executable(env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
-    if let Some(root) = env_value_ignore_case(env, "VCPKG_ROOT")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
+fn resolve_vcpkg_executable(env: &UserEnv<'_>) -> anyhow::Result<PathBuf> {
+    if let Some(root) = env.var("VCPKG_ROOT").map(str::trim).filter(|value| !value.is_empty()) {
         let candidate = PathBuf::from(root).join("vcpkg.exe");
-        if candidate.exists() {
+        if env.exists(&candidate) {
             return Ok(candidate);
         }
     }
 
-    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
-    for dir in path_var.split(';') {
-        let dir = dir.trim();
-        if dir.is_empty() {
-            continue;
-        }
-        let candidate = PathBuf::from(dir).join("vcpkg.exe");
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    bail!("vcpkg.exe not found in target user VCPKG_ROOT or PATH");
+    find_in_path(env, &["vcpkg.exe"]).context("vcpkg.exe not found in target user VCPKG_ROOT or PATH")
 }
 
-fn resolve_cargo_executable(env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
-    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
-    for dir in path_var.split(';') {
-        let candidate = PathBuf::from(dir).join("cargo.exe");
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-    bail!("cargo.exe not found in target user PATH");
+fn resolve_cargo_executable(env: &UserEnv<'_>) -> anyhow::Result<PathBuf> {
+    find_in_path(env, &["cargo.exe"]).context("cargo.exe not found in target user PATH")
 }
 
-fn resolve_python_executable(exe_name: &str, env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
+fn resolve_python_executable(exe_name: &str, env: &UserEnv<'_>) -> anyhow::Result<PathBuf> {
     if !Path::new(exe_name)
         .file_name()
         .and_then(|name| name.to_str())
@@ -1158,25 +1229,13 @@ fn resolve_python_executable(exe_name: &str, env: &HashMap<String, String>) -> a
         bail!("pip command executable must be python.exe");
     }
 
-    let path_var = env_value_ignore_case(env, "PATH").unwrap_or_default();
-    for dir in path_var.split(';') {
-        let dir = dir.trim();
-        if dir.is_empty() {
-            continue;
-        }
-        let candidate = PathBuf::from(dir).join("python.exe");
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    bail!("python.exe not found in target user PATH");
+    find_in_path(env, &["python.exe"]).context("python.exe not found in target user PATH")
 }
 
-fn resolve_bun_executable(executable: &str, env: &HashMap<String, String>) -> anyhow::Result<PathBuf> {
+fn resolve_bun_executable(executable: &str, env: &UserEnv<'_>) -> anyhow::Result<PathBuf> {
     let executable_path = Path::new(executable);
     if executable_path.is_absolute() {
-        if executable_path.exists() {
+        if env.exists(executable_path) {
             return Ok(executable_path.to_owned());
         }
         bail!(
@@ -1196,92 +1255,54 @@ fn resolve_bun_executable(executable: &str, env: &HashMap<String, String>) -> an
         _ => bail!("invalid Bun executable name: {executable}"),
     };
 
-    let path_var = env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("PATH"))
-        .map(|(_, value)| value.as_str())
-        .unwrap_or_default();
-    for dir in path_var.split(';') {
-        let dir = dir.trim();
-        if dir.is_empty() {
-            continue;
-        }
-        for candidate_name in candidate_names {
-            let candidate = PathBuf::from(dir).join(candidate_name);
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-    }
-    bail!("bun executable not found in target user PATH");
+    find_in_path(env, candidate_names).context("bun executable not found in target user PATH")
 }
 
-fn is_trusted_winget_path(candidate: &Path, env: &HashMap<String, String>) -> bool {
+/// Return the first existing `PATH` candidate, trying `names` in order within each directory.
+fn find_in_path(env: &UserEnv<'_>, names: &[&str]) -> Option<PathBuf> {
+    env.path_dirs()
+        .flat_map(|dir| names.iter().map(move |name| PathBuf::from(dir).join(name)))
+        .find(|candidate| env.exists(candidate))
+}
+
+fn is_trusted_winget_path(candidate: &Path, env: &UserEnv<'_>) -> bool {
     let candidate = candidate.as_os_str().to_string_lossy().to_lowercase();
-    let program_files = env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("ProgramFiles"))
-        .map(|(_, value)| value)
-        .map_or(r"C:\Program Files", |value| value)
-        .to_lowercase();
-    let local_app_data = env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("LOCALAPPDATA"))
-        .map(|(_, value)| value.to_lowercase());
+    let program_files = env.var("ProgramFiles").unwrap_or(r"C:\Program Files").to_lowercase();
+    let local_app_data = env.var("LOCALAPPDATA").map(str::to_lowercase);
 
     candidate.starts_with(&format!("{program_files}\\windowsapps\\"))
         || local_app_data.is_some_and(|path| candidate == format!("{path}\\microsoft\\windowsapps\\winget.exe"))
 }
 
-fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
-    if value.contains(['\0', '\r', '\n']) {
-        bail!("package manager command arguments cannot contain control line separators");
+/// Append a broker-resolved executable path as a quoted batch token.
+fn append_batch_executable(script: &mut String, path: &str) -> anyhow::Result<()> {
+    if path.contains(['\0', '\r', '\n', '"']) {
+        bail!("package manager executable path cannot contain control line separators or quotes");
     }
 
     script.push('"');
-
-    let mut backslashes = 0;
-    for c in value.chars() {
-        match c {
-            '\\' => backslashes += 1,
-            '"' => {
-                for _ in 0..=(backslashes * 2) {
-                    script.push('\\');
-                }
-                script.push('"');
-                backslashes = 0;
-            }
-            '%' => {
-                for _ in 0..backslashes {
-                    script.push('\\');
-                }
-                script.push_str("%%");
-                backslashes = 0;
-            }
-            c => {
-                for _ in 0..backslashes {
-                    script.push('\\');
-                }
-                script.push(c);
-                backslashes = 0;
-            }
-        }
-    }
-
-    for _ in 0..(backslashes * 2) {
-        script.push('\\');
-    }
+    script.push_str(&path.replace('%', "%%"));
     script.push('"');
 
     Ok(())
 }
 
-fn append_cargo_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
-    if value.contains('"') {
-        bail!("broker command arguments cannot contain double quotes");
+/// Append a package manager argument as a quoted batch token.
+///
+/// Values containing batch metacharacters are rejected rather than escaped.
+fn append_batch_argument(script: &mut String, value: &str) -> anyhow::Result<()> {
+    if value.contains(BATCH_METACHARACTERS) {
+        bail!("package manager command arguments cannot contain batch metacharacters");
     }
 
-    append_batch_argument(script, value)
+    script.push('"');
+    script.push_str(value);
+    // Double trailing backslashes so the target program does not read them as escaping the closing quote.
+    let trailing_backslashes = value.len() - value.trim_end_matches('\\').len();
+    script.extend(std::iter::repeat_n('\\', trailing_backslashes));
+    script.push('"');
+
+    Ok(())
 }
 
 fn append_batch_set_value(script: &mut String, name: &str, value: &str) -> anyhow::Result<()> {
@@ -1349,9 +1370,10 @@ mod tests {
     use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
 
     use super::{
-        POWERSHELL_UTF8_ENCODING_PREAMBLE, WindowsExecutor, execute_as_current_user,
-        prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
-        reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable, resolve_winget_executable,
+        BATCH_METACHARACTERS, POWERSHELL_UTF8_ENCODING_PREAMBLE, UserEnv, WindowsExecutor, append_batch_executable,
+        execute_as_current_user, prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root,
+        prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
+        resolve_trusted_chocolatey_executable, resolve_winget_executable,
     };
     use crate::executor::{CommandExecutor as _, ExecutionContext};
 
@@ -1470,8 +1492,9 @@ mod tests {
             "winget.exe".to_owned(),
             "install".to_owned(),
             "--id".to_owned(),
-            "Vendor.Package&Name".to_owned(),
-            "100%".to_owned(),
+            "Vendor.Package".to_owned(),
+            "--location".to_owned(),
+            "C:\\Tools\\".to_owned(),
         ];
         let command =
             prepare_main_command_in(&command, Some(temp_dir.path()), None, false).expect("prepare WinGet command");
@@ -1484,8 +1507,66 @@ mod tests {
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
-        assert!(script.contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package&Name\" \"100%%\""));
+        assert!(
+            script.contains("\"winget.exe\" \"install\" \"--id\" \"Vendor.Package\" \"--location\" \"C:\\Tools\\\\\"")
+        );
         assert!(script.contains("exit /b %ERRORLEVEL%"));
+    }
+
+    #[test]
+    fn batch_wrapper_rejects_metacharacters_for_every_batch_manager() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        for executable in ["winget.exe", "cargo.exe", "vcpkg.exe"] {
+            for metacharacter in BATCH_METACHARACTERS {
+                let command = vec![
+                    executable.to_owned(),
+                    "install".to_owned(),
+                    format!("Vendor{metacharacter}Package"),
+                ];
+                let error = match prepare_main_command_in(&command, Some(temp_dir.path()), None, false) {
+                    Ok(_) => panic!("{executable} argument with {metacharacter:?} must be rejected"),
+                    Err(error) => error,
+                };
+                assert!(
+                    error.to_string().contains("batch metacharacters"),
+                    "unexpected error for {executable} with {metacharacter:?}: {error:#}"
+                );
+            }
+        }
+
+        for metacharacter in BATCH_METACHARACTERS {
+            let error = match prepare_bun_cmd_script(
+                r"C:\Tools\bun.cmd",
+                &["add".to_owned(), format!("typescript{metacharacter}")],
+                Some(temp_dir.path()),
+            ) {
+                Ok(_) => panic!("bun.cmd argument with {metacharacter:?} must be rejected"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains("batch metacharacters"));
+        }
+
+        for executable in [
+            r"C:\Users\100%\bun.cmd",
+            r"C:\Users\%USERNAME%\bun.cmd",
+            r"C:\Tools^\bun.cmd",
+        ] {
+            let error = match prepare_bun_cmd_script(executable, &["add".to_owned()], Some(temp_dir.path())) {
+                Ok(_) => panic!("{executable} must be rejected for the call line"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains("percent signs or carets"));
+        }
+    }
+
+    #[test]
+    fn batch_executable_path_escapes_percent_and_rejects_quotes() {
+        let mut script = String::new();
+        append_batch_executable(&mut script, r"C:\Users\100%\bin\tool.exe").expect("append executable");
+        assert_eq!(script, r#""C:\Users\100%%\bin\tool.exe""#);
+
+        append_batch_executable(&mut String::new(), "C:\\Tools\\\"x\".exe")
+            .expect_err("a quoted executable path must be rejected");
     }
 
     #[test]
@@ -1502,7 +1583,7 @@ mod tests {
             ("ProgramFiles".to_owned(), program_files.path().display().to_string()),
         ]);
 
-        let error = resolve_winget_executable(&env, true)
+        let error = resolve_winget_executable(&UserEnv::without_impersonation(&env), true)
             .expect_err("an everyone-writable winget.exe must be rejected for elevated execution");
         assert!(
             error.to_string().contains("elevated package-manager executable"),
@@ -1524,8 +1605,8 @@ mod tests {
             ("ProgramFiles".to_owned(), program_files.path().display().to_string()),
         ]);
 
-        let (resolved, guard) =
-            resolve_winget_executable(&env, false).expect("non-elevated resolution is not subject to the ACL check");
+        let (resolved, guard) = resolve_winget_executable(&UserEnv::without_impersonation(&env), false)
+            .expect("non-elevated resolution is not subject to the ACL check");
         assert_eq!(resolved, winget_path);
         assert!(guard.is_none(), "no guard is produced for non-elevated executions");
     }
@@ -1544,8 +1625,13 @@ mod tests {
             "--global".to_owned(),
         ];
 
-        let command = prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env), false)
-            .expect("prepare Bun command");
+        let command = prepare_main_command_in(
+            &command,
+            Some(temp_dir.path()),
+            Some(&UserEnv::without_impersonation(&user_env)),
+            false,
+        )
+        .expect("prepare Bun command");
 
         assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
@@ -1563,6 +1649,140 @@ mod tests {
     }
 
     #[test]
+    fn user_executable_launch_routes_aliases_through_user_batch_scripts() {
+        use crate::policy_security::AppExecAliasKind;
+
+        let python = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\python.exe");
+        assert_eq!(
+            super::user_executable_launch("pip", python, None, false).expect("plain executable"),
+            super::UserExecutableLaunch::Pinned
+        );
+        assert_eq!(
+            super::user_executable_launch("pip", python, Some(AppExecAliasKind::App), false).expect("app alias"),
+            super::UserExecutableLaunch::UserBatch
+        );
+
+        let error = super::user_executable_launch("pip", python, Some(AppExecAliasKind::App), true)
+            .expect_err("aliases are never launched elevated");
+        assert!(
+            error
+                .to_string()
+                .contains("Microsoft Store app execution aliases are not supported for elevated pip operations"),
+            "{error:#}"
+        );
+
+        let error = super::user_executable_launch("pip", python, Some(AppExecAliasKind::StoreInstallerRedirect), false)
+            .expect_err("the Store installation shortcut is not run");
+        assert!(
+            error.to_string().contains("Microsoft Store installation shortcut"),
+            "{error:#}"
+        );
+    }
+
+    fn pip_command() -> Vec<String> {
+        [
+            "python.exe",
+            "-m",
+            "pip",
+            "--isolated",
+            "install",
+            "requests==2.31.0",
+            "--user",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect()
+    }
+
+    #[test]
+    fn pip_through_an_app_execution_alias_runs_in_a_user_batch_script() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let alias_dir = temp_dir.path().join("100% WindowsApps");
+        std::fs::create_dir(&alias_dir).expect("create alias dir");
+        let python = alias_dir.join("python.exe");
+        crate::policy_security::create_app_exec_alias_for_tests(
+            &python,
+            "PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0",
+            Path::new(
+                r"C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.12_3.12.0.0_x64__qbz5n2kfra8p0\python3.12.exe",
+            ),
+        );
+        let vars = HashMap::from([("PATH".to_owned(), alias_dir.display().to_string())]);
+        let env = UserEnv::without_impersonation(&vars);
+
+        let command = prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), false)
+            .expect("prepare pip command through an alias");
+        assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
+        assert_eq!(&command.args()[1..5], ["/D", "/V:OFF", "/Q", "/C"]);
+        let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
+        let expected_executable = python.display().to_string().replace('%', "%%");
+        assert!(
+            script.contains(&format!(
+                "\"{expected_executable}\" \"-m\" \"pip\" \"--isolated\" \"install\" \"requests==2.31.0\" \"--user\""
+            )),
+            "{script}"
+        );
+
+        let error = match prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), true) {
+            Ok(_) => panic!("an elevated alias must be rejected"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("Microsoft Store app execution aliases are not supported for elevated pip operations"),
+            "{error:#}"
+        );
+
+        let mut metacharacter = pip_command();
+        metacharacter[5] = "requests&x".to_owned();
+        let error = match prepare_main_command_in(&metacharacter, Some(temp_dir.path()), Some(&env), false) {
+            Ok(_) => panic!("batch metacharacters must be rejected"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("batch metacharacters"), "{error:#}");
+    }
+
+    #[test]
+    fn pip_through_the_store_installation_shortcut_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let python = temp_dir.path().join("python.exe");
+        crate::policy_security::create_app_exec_alias_for_tests(
+            &python,
+            "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe",
+            Path::new(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe\AppInstallerPythonRedirector.exe",
+            ),
+        );
+        let vars = HashMap::from([("PATH".to_owned(), temp_dir.path().display().to_string())]);
+        let env = UserEnv::without_impersonation(&vars);
+
+        let error = match prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), false) {
+            Ok(_) => panic!("the Store installation shortcut must not be run"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("Microsoft Store installation shortcut"),
+            "{error:#}"
+        );
+        assert!(!super::manager_is_available(now_policy_api::ManagerName::Pip, &env));
+    }
+
+    #[test]
+    fn pip_with_a_regular_python_executable_is_launched_directly() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let python = temp_dir.path().join("python.exe");
+        std::fs::write(&python, b"").expect("write python placeholder");
+        let vars = HashMap::from([("PATH".to_owned(), temp_dir.path().display().to_string())]);
+        let env = UserEnv::without_impersonation(&vars);
+
+        let command = prepare_main_command_in(&pip_command(), Some(temp_dir.path()), Some(&env), false)
+            .expect("prepare pip command");
+        assert_eq!(command.args()[0], python.display().to_string());
+        assert_eq!(&command.args()[1..], &pip_command()[1..]);
+    }
+
+    #[test]
     fn bun_exe_command_resolves_from_user_path_without_script_wrapper() {
         let temp_dir = tempfile::tempdir().expect("create temp dir");
         let bun_path = temp_dir.path().join("bun.exe");
@@ -1576,7 +1796,8 @@ mod tests {
             "--global".to_owned(),
         ];
 
-        let command = prepare_main_command_in(&command, None, Some(&user_env), false).expect("prepare Bun command");
+        let command = prepare_main_command_in(&command, None, Some(&UserEnv::without_impersonation(&user_env)), false)
+            .expect("prepare Bun command");
 
         assert_eq!(command.args()[0], bun_path.display().to_string());
         assert_eq!(command.args()[1], "add");
@@ -1719,14 +1940,13 @@ mod tests {
         let command = vec![
             "choco.exe".to_owned(),
             "install".to_owned(),
-            "Vendor.Package&Name".to_owned(),
-            "100%".to_owned(),
-            "Quoted\"Value".to_owned(),
+            "Vendor.Package".to_owned(),
+            "--version=1.2.3".to_owned(),
         ];
         let command = prepare_chocolatey_script_in_with_default_install_root(
             &command,
             Some(temp_dir.path()),
-            Some(&env),
+            Some(&UserEnv::without_impersonation(&env)),
             &install_root,
             false,
         )
@@ -1742,7 +1962,7 @@ mod tests {
         assert!(script.starts_with("@echo off\r\n@chcp 65001 > nul\r\nset \"NO_COLOR=1\""));
         assert!(script.contains(&format!("set \"ChocolateyInstall={}\"", install_root.display())));
         assert!(script.contains(&format!(
-            "\"{}\" \"install\" \"Vendor.Package&Name\" \"100%%\" \"Quoted\\\"Value\"",
+            "\"{}\" \"install\" \"Vendor.Package\" \"--version=1.2.3\"",
             choco_bin.join("choco.exe").display()
         )));
         assert!(script.contains("if \"%CHOCO_EXIT_CODE%\"==\"3010\" exit /b 0"));
@@ -1763,7 +1983,7 @@ mod tests {
         let error = match prepare_chocolatey_script_in_with_default_install_root(
             &command,
             Some(temp_dir.path()),
-            Some(&env),
+            Some(&UserEnv::without_impersonation(&env)),
             &install_root,
             false,
         ) {
@@ -1795,7 +2015,7 @@ mod tests {
         let error = match prepare_chocolatey_script_in_with_default_install_root(
             &command,
             Some(temp_dir.path()),
-            Some(&env),
+            Some(&UserEnv::without_impersonation(&env)),
             &trusted_install_root,
             false,
         ) {
@@ -1876,8 +2096,13 @@ mod tests {
         env.insert("PATH".to_owned(), cargo_home.display().to_string());
 
         let command = vec!["cargo.exe".to_owned(), "uninstall".to_owned(), "ripgrep".to_owned()];
-        let command =
-            prepare_main_command_in(&command, Some(temp_dir.path()), Some(&env), false).expect("prepare Cargo command");
+        let command = prepare_main_command_in(
+            &command,
+            Some(temp_dir.path()),
+            Some(&UserEnv::without_impersonation(&env)),
+            false,
+        )
+        .expect("prepare Cargo command");
 
         let script = std::fs::read_to_string(&command.args()[5]).expect("read temp script");
         assert!(script.contains(&format!(
@@ -1902,7 +2127,7 @@ mod tests {
             Err(error) => error,
         };
 
-        assert!(error.to_string().contains("double quotes"));
+        assert!(error.to_string().contains("batch metacharacters"));
     }
 
     #[test]
@@ -1918,8 +2143,13 @@ mod tests {
             "zlib:x64-windows".to_owned(),
         ];
         let user_env = HashMap::from([("VCPKG_ROOT".to_owned(), vcpkg_root.display().to_string())]);
-        let command = prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env), false)
-            .expect("prepare vcpkg command");
+        let command = prepare_main_command_in(
+            &command,
+            Some(temp_dir.path()),
+            Some(&UserEnv::without_impersonation(&user_env)),
+            false,
+        )
+        .expect("prepare vcpkg command");
 
         assert!(command.args()[0].ends_with(r"\System32\cmd.exe"));
         assert_eq!(command.args()[1], "/D");
@@ -2027,8 +2257,13 @@ mod tests {
             "requests==2.31.0".to_owned(),
             "--no-input".to_owned(),
         ];
-        let command = prepare_main_command_in(&command, Some(temp_dir.path()), Some(&user_env), false)
-            .expect("prepare Pip command");
+        let command = prepare_main_command_in(
+            &command,
+            Some(temp_dir.path()),
+            Some(&UserEnv::without_impersonation(&user_env)),
+            false,
+        )
+        .expect("prepare Pip command");
 
         assert_eq!(command.args()[0], python_path.display().to_string());
         assert_eq!(command.args()[1], "-m");

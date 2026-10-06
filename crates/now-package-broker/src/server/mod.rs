@@ -41,6 +41,8 @@ mod execution;
 mod responses;
 
 pub use connection::serve_connection;
+#[cfg(test)]
+pub(crate) use connection::serve_connection_with_header_timeout;
 use responses::{
     api_version, diagnostics, error_response, filter_manager_capabilities, new_operation_id, parse_rule_id,
     policy_info, policy_validity_failure, request_summary, server_context, supported_manager_capabilities,
@@ -306,6 +308,25 @@ async fn authenticate_policy_management(
             | (&Method::POST, "/v1/policy/validate")
             | (&Method::PUT, "/v1/policy")
     );
+    // Capability probing inspects the caller's environment, so it requires an authenticated client.
+    if matches!(
+        (request.method(), request.uri().path()),
+        (&Method::GET | &Method::HEAD, "/v1/capabilities")
+    ) && let Err(error) = client.validate_connection(state.skip_signature_validation)
+    {
+        warn!(
+            error = format!("{error:#}"),
+            "Rejected package broker capabilities request"
+        );
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(error_response(
+                ErrorCode::Unauthorized,
+                "pipe client authentication failed",
+            )),
+        )
+            .into_response();
+    }
     if protected {
         if let Err(error) = client.validate_connection(state.skip_signature_validation) {
             if let Some(audit) = write_audit {
@@ -1522,6 +1543,34 @@ mod tests {
 
     fn test_sid() -> Sid {
         Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).unwrap()
+    }
+
+    #[tokio::test]
+    async fn capabilities_route_rejects_unauthenticated_client_before_probing() {
+        let executor = Arc::new(FakeExecutor {
+            available: vec![ManagerName::Winget],
+            probe_count: AtomicUsize::new(0),
+        });
+        let mut state = state();
+        state.executor = Arc::clone(&executor) as Arc<dyn CommandExecutor>;
+        state.skip_signature_validation = false;
+        let state = Arc::new(state);
+
+        for method in [Method::GET, Method::HEAD] {
+            let response = route_request(Arc::clone(&state), method.clone(), "/v1/capabilities").await;
+            assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{method}");
+        }
+        assert_eq!(executor.probe_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn capabilities_route_serves_authenticated_client() {
+        let (state, executor) = make_state(vec![ManagerName::Winget]);
+
+        let response = route_request(state, Method::GET, "/v1/capabilities").await;
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(executor.probe_count.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

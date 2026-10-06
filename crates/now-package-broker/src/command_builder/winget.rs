@@ -2,12 +2,19 @@
 
 use now_policy_api::{Architecture, Operation, PackageRequest, Scope};
 
-use super::{set_if_specified, set_if_true};
+use super::{set_if_specified, set_if_true, validate_batch_arguments, validate_package_version, validate_source_name};
 
 /// Build the WinGet command line from a validated request.
 ///
 /// Returns the command as a list of arguments (first element is the executable).
-pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
+pub fn build_winget_command(request: &PackageRequest) -> anyhow::Result<Vec<String>> {
+    validate_source_name("WinGet", &request.source.name)?;
+    if !matches!(request.operation, Operation::Uninstall)
+        && let Some(version) = request.package.version.as_deref()
+    {
+        validate_package_version("WinGet", version, &[])?;
+    }
+
     let operation = match request.operation {
         Operation::Install => "install",
         Operation::Update => "upgrade",
@@ -86,7 +93,10 @@ pub fn build_winget_command(request: &PackageRequest) -> Vec<String> {
         command.push("--accept-package-agreements".to_owned());
     }
 
-    command
+    // The Windows executor runs WinGet through a generated batch script.
+    validate_batch_arguments("WinGet", &command)?;
+
+    Ok(command)
 }
 
 #[cfg(test)]
@@ -143,7 +153,7 @@ mod tests {
     #[test]
     fn test_basic_install_command() {
         let request = make_request();
-        let cmd = build_winget_command(&request);
+        let cmd = build_winget_command(&request).expect("build command");
         assert_eq!(cmd[0], "winget.exe");
         assert_eq!(cmd[1], "install");
         assert!(cmd.contains(&"--id".to_owned()));
@@ -158,7 +168,7 @@ mod tests {
         request.operation = Operation::Update;
         request.package.version = Some(VersionString("120.0.0".to_owned()));
 
-        let cmd = build_winget_command(&request);
+        let cmd = build_winget_command(&request).expect("build command");
         assert_eq!(cmd[1], "upgrade");
         assert!(cmd.contains(&"--version".to_owned()));
         assert!(cmd.contains(&"120.0.0".to_owned()));
@@ -170,12 +180,12 @@ mod tests {
         request.options.no_upgrade = true;
 
         // Install: flag is emitted.
-        let cmd = build_winget_command(&request);
+        let cmd = build_winget_command(&request).expect("build command");
         assert!(cmd.contains(&"--no-upgrade".to_owned()));
 
         // Update: `--no-upgrade` is not an upgrade flag, so it must not appear.
         request.operation = Operation::Update;
-        let cmd = build_winget_command(&request);
+        let cmd = build_winget_command(&request).expect("build command");
         assert!(!cmd.contains(&"--no-upgrade".to_owned()));
     }
 
@@ -185,12 +195,12 @@ mod tests {
         request.options.uninstall_previous = true;
 
         // Install: `--uninstall-previous` is an upgrade flag, so it must not appear.
-        let cmd = build_winget_command(&request);
+        let cmd = build_winget_command(&request).expect("build command");
         assert!(!cmd.contains(&"--uninstall-previous".to_owned()));
 
         // Update: flag is emitted.
         request.operation = Operation::Update;
-        let cmd = build_winget_command(&request);
+        let cmd = build_winget_command(&request).expect("build command");
         assert!(cmd.contains(&"--uninstall-previous".to_owned()));
     }
 
@@ -201,9 +211,41 @@ mod tests {
         request.package.version = Some(VersionString("120.0.0".to_owned()));
 
         // Even when the request carries a version, uninstall must not pin it.
-        let cmd = build_winget_command(&request);
+        let cmd = build_winget_command(&request).expect("build command");
         assert_eq!(cmd[1], "uninstall");
         assert!(!cmd.contains(&"--version".to_owned()));
         assert!(!cmd.contains(&"120.0.0".to_owned()));
+    }
+
+    #[test]
+    fn batch_metacharacters_are_rejected() {
+        for metacharacter in crate::command_builder::BATCH_METACHARACTERS {
+            let mut request = make_request();
+            request.package.id = PackageIdentifier::from(format!("Vendor{metacharacter}Package"));
+            build_winget_command(&request).expect_err("package id metacharacter must be rejected");
+
+            let mut request = make_request();
+            request.options.custom_parameters = vec![CustomParameterString(format!("--override=a{metacharacter}b"))];
+            build_winget_command(&request).expect_err("custom parameter metacharacter must be rejected");
+
+            let mut request = make_request();
+            request.options.custom_install_location = Some(format!("C:\\Tools{metacharacter}"));
+            build_winget_command(&request).expect_err("install location metacharacter must be rejected");
+        }
+    }
+
+    #[test]
+    fn version_and_source_reject_unsupported_characters() {
+        for version in ["1.0 beta", "1.0\"", "1.0&x", "-1.0", ""] {
+            let mut request = make_request();
+            request.package.version = Some(VersionString(version.to_owned()));
+            build_winget_command(&request).expect_err("unsupported version must be rejected");
+        }
+
+        for source in ["win\"get", "win&get", "-winget", "", "winget/x"] {
+            let mut request = make_request();
+            request.source.name = source.to_owned();
+            build_winget_command(&request).expect_err("unsupported source must be rejected");
+        }
     }
 }

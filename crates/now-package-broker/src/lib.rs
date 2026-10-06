@@ -18,6 +18,8 @@ pub mod event_channel;
 #[cfg(windows)]
 pub mod executor;
 #[cfg(windows)]
+mod impersonation;
+#[cfg(windows)]
 pub mod operation_tracker;
 #[cfg(windows)]
 pub mod pipe;

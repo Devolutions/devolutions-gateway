@@ -19,6 +19,7 @@ use windows::Win32::System::Threading::{
 };
 use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
+use super::user_env::UserEnv;
 use crate::event_channel::{OperationEventSink, OutputStream};
 use crate::executor::{
     ExecutionOutput, MAX_CAPTURED_OUTPUT_BYTES, OperationCanceled, ProcessStartedCallback, tail_utf8,
@@ -103,12 +104,13 @@ pub(super) fn create_process(
     // executable, not the child's environment block. Since tools like winget.exe live
     // in per-user directories (e.g. %LOCALAPPDATA%\Microsoft\WindowsApps), we must
     // resolve the full path ourselves using the user's environment.
-    let user_env = utils::environment_block(Some(token), false).context("failed to load user environment block")?;
+    let user_vars = utils::environment_block(Some(token), false).context("failed to load user environment block")?;
+    let user_env = UserEnv::for_user(&user_vars, token)?;
 
     let exe_name = command.first().context("empty command")?;
-    // `_exe_guard` (when elevation is required) keeps the verified executable locked
-    // against modification and replacement until this function returns, i.e. after the
-    // spawned process has finished.
+    // `_exe_guard` keeps the executable opened as the target user pinned (and, when
+    // elevation is required, verified) until this function returns, i.e. after the spawned
+    // process has finished. The service account only launches the guard's final local path.
     let (resolved_exe, _exe_guard) = resolve_executable(exe_name, &user_env, requires_elevation)?;
 
     info!(
@@ -171,7 +173,7 @@ pub(super) fn create_process(
         // Inherit handles only when capturing (so the child receives the pipe ends).
         capture,
         creation_flags,
-        Some(&user_env),
+        Some(&user_vars),
         None,
         &mut startup_info,
     ) {
@@ -344,45 +346,34 @@ fn combined_output_tail(stdout_tail: Option<Vec<u8>>, stderr_tail: Option<Vec<u8
 /// Handles both absolute paths and bare names (e.g., `winget.exe`).
 /// Appends `.exe` if no extension is present and the file is not found as-is.
 ///
+/// The executable is opened as the target user and pinned by the returned
+/// [`policy_security::VerifiedExecutable`] guard. The returned path is the guard's final
+/// local path, which the service account can launch without resolving the user-derived
+/// name itself. The guard must be kept alive until the process has been created.
+///
 /// When `requires_elevation` is true (the command will run with an elevated or
 /// machine-scope token), the resolved executable must additionally be writable only by
 /// trusted principals (SYSTEM, built-in Administrators, or TrustedInstaller); otherwise
 /// a standard user could replace the binary (e.g. via a weakly-ACL'd `%ProgramData%`
-/// install root) and have the broker launch it with elevated privileges. In that case
-/// the returned path is the final path pinned by the returned
-/// [`policy_security::VerifiedExecutable`] guard, which must be kept alive until the
-/// process has been spawned so the verified binary cannot be swapped in between. This
-/// check is skipped for non-elevated executions, since per-user tool installs (pip
-/// venvs, `~/.cargo`, etc.) are not admin-owned.
+/// install root) and have the broker launch it with elevated privileges. This check is
+/// skipped for non-elevated executions, since per-user tool installs (pip venvs,
+/// `~/.cargo`, etc.) are not admin-owned.
 fn resolve_executable(
     exe_name: &str,
-    env: &std::collections::HashMap<String, String>,
+    env: &UserEnv<'_>,
     requires_elevation: bool,
-) -> anyhow::Result<(PathBuf, Option<policy_security::VerifiedExecutable>)> {
+) -> anyhow::Result<(PathBuf, policy_security::VerifiedExecutable)> {
     let exe_path = Path::new(exe_name);
 
-    // If already an absolute path, just verify it exists.
     if exe_path.is_absolute() {
-        if exe_path.exists() {
-            let guard = policy_security::verify_elevated_executable_security(exe_path, requires_elevation)?;
-            let resolved = guard
-                .as_ref()
-                .map_or_else(|| exe_path.to_owned(), |g| g.path().to_owned());
-            return Ok((resolved, guard));
-        }
-        bail!("executable not found at absolute path: {}", exe_path.display());
+        let guard = policy_security::pin_launch_executable(env, exe_path, requires_elevation)
+            .with_context(|| format!("executable not usable at absolute path: {}", exe_path.display()))?;
+        return Ok((guard.path().to_owned(), guard));
     }
 
     if !exe_name.eq_ignore_ascii_case("winget.exe") {
         bail!("broker command executable must be an absolute path: {exe_name}");
     }
-
-    // Get PATH from environment (case-insensitive key lookup).
-    let path_var = env
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case("PATH"))
-        .map(|(_, v)| v.as_str())
-        .unwrap_or_default();
 
     let extensions: &[&str] = if exe_path.extension().is_some() {
         &[""]
@@ -390,19 +381,14 @@ fn resolve_executable(
         &["", ".exe", ".cmd", ".bat", ".com"]
     };
 
-    for dir in path_var.split(';') {
-        let dir = dir.trim();
-        if dir.is_empty() {
-            continue;
-        }
+    for dir in env.path_dirs() {
         for ext in extensions {
             let mut candidate = PathBuf::from(dir);
             let file_name = format!("{}{}", exe_name, ext);
             candidate.push(&file_name);
-            if candidate.exists() && is_trusted_winget_path(&candidate, env) {
-                let guard = policy_security::verify_elevated_executable_security(&candidate, requires_elevation)?;
-                let resolved = guard.as_ref().map_or(candidate, |g| g.path().to_owned());
-                return Ok((resolved, guard));
+            if is_trusted_winget_path(&candidate, env) && env.exists(&candidate) {
+                let guard = policy_security::pin_launch_executable(env, &candidate, requires_elevation)?;
+                return Ok((guard.path().to_owned(), guard));
             }
         }
     }
@@ -495,7 +481,7 @@ fn send_ctrl_break(pid: u32) -> anyhow::Result<()> {
     result
 }
 
-fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<String, String>) -> bool {
+fn is_trusted_winget_path(candidate: &Path, env: &UserEnv<'_>) -> bool {
     if !candidate
         .file_name()
         .and_then(|name| name.to_str())
@@ -505,16 +491,8 @@ fn is_trusted_winget_path(candidate: &Path, env: &std::collections::HashMap<Stri
     }
 
     let candidate = candidate.as_os_str().to_string_lossy().to_lowercase();
-    let program_files = env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("ProgramFiles"))
-        .map(|(_, value)| value)
-        .map_or(r"C:\Program Files", |value| value)
-        .to_lowercase();
-    let local_app_data = env
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case("LOCALAPPDATA"))
-        .map(|(_, value)| value.to_lowercase());
+    let program_files = env.var("ProgramFiles").unwrap_or(r"C:\Program Files").to_lowercase();
+    let local_app_data = env.var("LOCALAPPDATA").map(str::to_lowercase);
 
     candidate.starts_with(&format!("{program_files}\\windowsapps\\"))
         || local_app_data.is_some_and(|path| candidate == format!("{path}\\microsoft\\windowsapps\\winget.exe"))
@@ -565,11 +543,11 @@ mod tests {
         make_everyone_writable(&exe);
 
         let env = HashMap::new();
-        let error = resolve_executable(&exe.display().to_string(), &env, true)
+        let error = resolve_executable(&exe.display().to_string(), &UserEnv::without_impersonation(&env), true)
             .expect_err("an everyone-writable executable must be rejected when it will run with an elevated token");
         assert!(
-            error.to_string().contains("elevated package-manager executable"),
-            "unexpected error: {error}"
+            format!("{error:#}").contains("elevated package-manager executable"),
+            "unexpected error: {error:#}"
         );
     }
 
@@ -581,9 +559,41 @@ mod tests {
         make_everyone_writable(&exe);
 
         let env = HashMap::new();
-        let (resolved, guard) = resolve_executable(&exe.display().to_string(), &env, false)
-            .expect("non-elevated executables are not subject to the admin-only-writable check");
-        assert_eq!(resolved, exe);
-        assert!(guard.is_none(), "no guard is produced for non-elevated executions");
+        let (resolved, guard) =
+            resolve_executable(&exe.display().to_string(), &UserEnv::without_impersonation(&env), false)
+                .expect("non-elevated executables are not subject to the admin-only-writable check");
+        let expected = policy_security::final_path_from_handle(&std::fs::File::open(&exe).expect("open exe"))
+            .expect("exe final path");
+        assert!(policy_security::windows_paths_equal(&resolved, &expected));
+        assert_eq!(resolved, guard.path());
+    }
+
+    #[test]
+    fn resolved_executables_are_pinned_against_replacement() {
+        let temp_dir = tempfile::tempdir().expect("create temp dir");
+        let tool_dir = temp_dir.path().join("tools");
+        std::fs::create_dir(&tool_dir).expect("create tool directory");
+        let exe = tool_dir.join("tool.exe");
+        std::fs::write(&exe, b"").expect("write fake executable");
+
+        let env = HashMap::new();
+        let (_resolved, guard) =
+            resolve_executable(&exe.display().to_string(), &UserEnv::without_impersonation(&env), false)
+                .expect("resolve executable");
+
+        std::fs::rename(&tool_dir, temp_dir.path().join("moved"))
+            .expect_err("the pinned executable's directory cannot be renamed");
+        std::fs::remove_file(&exe).expect_err("the pinned executable cannot be deleted");
+        drop(guard);
+        std::fs::remove_file(&exe).expect("the executable can be deleted once released");
+    }
+
+    #[test]
+    fn non_local_executable_paths_are_rejected_before_launch() {
+        let env = HashMap::new();
+        for path in [r"\\server\share\tool.exe", r"\\?\UNC\server\share\tool.exe"] {
+            resolve_executable(path, &UserEnv::without_impersonation(&env), false)
+                .expect_err("non-local executables must be rejected");
+        }
     }
 }
