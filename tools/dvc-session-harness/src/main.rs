@@ -13,8 +13,8 @@ use anyhow::{Context, bail};
 use now_proto_pdu::ironrdp_core::{Decode, DecodeError, DecodeErrorKind, IntoOwned, ReadCursor, WriteBuf, encode_vec};
 #[cfg(windows)]
 use now_proto_pdu::{
-    NowChannelCapsetMsg, NowChannelHeartbeatMsg, NowChannelMessage, NowExecCapsetFlags, NowMessage,
-    NowSessionCapsetFlags, NowSystemCapsetFlags,
+    NowChannelCapsetMsg, NowChannelHeartbeatMsg, NowChannelMessage, NowExecCapsetFlags, NowMessage, NowRdmAppNotifyMsg,
+    NowRdmAppState, NowRdmCapabilitiesMsg, NowRdmMessage, NowRdmReason, NowSessionCapsetFlags, NowSystemCapsetFlags,
 };
 #[cfg(windows)]
 use win_api_wrappers::raw::Win32::Storage::FileSystem::{ReadFile, WriteFile};
@@ -582,6 +582,28 @@ fn run_protocol_shim(
             }
         }
     }
+
+    // Mimic the post-negotiation bootstrap used by Devolutions Session for RDM integration.
+    let server_timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .context("get current timestamp")?
+        .as_secs();
+    let capabilities = NowRdmCapabilitiesMsg::new(server_timestamp, "harness".to_owned())
+        .context("create RDM capabilities message")?
+        .with_app_available();
+    let capabilities_msg: NowMessage<'_> = NowMessage::Rdm(NowRdmMessage::Capabilities(capabilities));
+    send_message(&channel_file, &capabilities_msg).context("send RDM capabilities")?;
+    log_event(
+        scenario,
+        Some(cycle),
+        "shim-rdm-capabilities-sent",
+        "sent RDM capabilities with app_available",
+    );
+
+    let app_notify = NowRdmAppNotifyMsg::new(NowRdmAppState::READY, NowRdmReason::NOT_SPECIFIED);
+    let app_notify_msg: NowMessage<'_> = NowMessage::Rdm(NowRdmMessage::AppNotify(app_notify));
+    send_message(&channel_file, &app_notify_msg).context("send RDM READY notify")?;
+    log_event(scenario, Some(cycle), "shim-rdm-ready-sent", "sent RDM AppNotify READY");
 
     let heartbeat_interval = Duration::from_millis(config.heartbeat_ms);
     let mut next_heartbeat = Instant::now() + heartbeat_interval;
