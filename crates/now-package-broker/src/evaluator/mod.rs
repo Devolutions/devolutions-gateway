@@ -58,9 +58,9 @@
 //!   from being renamed until the operation completes.
 //!   A supplied location is checked even with opaque installer arguments (WinGet `--override` and
 //!   `--custom`), but a location selected only inside those arguments is not.
-//! - The broker never uninstalls the Devolutions Agent, which hosts it.
-//!   WinGet may also select installed programs by their `ARP\...` identifiers, which this protection
-//!   does not cover; add Deny rules for other critical software and for such identifiers.
+//! - The broker never uninstalls the Devolutions Agent, which hosts it, whether it is selected by its
+//!   package identifier or, for WinGet, by the `ARP\...` identifier of its installed MSI product.
+//!   Add Deny rules to protect other critical software, including its `ARP\...` identifiers.
 //! - None of these restrictions depend on the policy, so audit mode cannot override them.
 //!   Audit mode allows every other request, including elevated ones the rules deny, and the policy
 //!   validator warns about this whenever audit mode is enabled.
@@ -160,6 +160,14 @@ impl RequestFlags {
     }
 }
 
+impl RequestFlags {
+    /// Whether the request removes an installed package, directly or as the previous version
+    /// replaced by an install or update.
+    fn removes_package(&self, request: &PackageRequest) -> bool {
+        request.operation == now_policy_api::Operation::Uninstall || self.has_uninstall_previous
+    }
+}
+
 /// Whether the request supplies a custom install location that is not a single plain local drive path.
 ///
 /// The server rejects such requests before policy evaluation so audit mode cannot override the rejection;
@@ -192,10 +200,20 @@ pub(crate) fn has_unacceptable_kill_process_name(request: &PackageRequest) -> bo
 
 /// Whether the request uninstalls a package the broker protects, such as the Devolutions Agent.
 ///
+/// `agent_product_code` is the MSI product code of the installed Agent, when known, so WinGet
+/// requests selecting the Agent by its `ARP\...` identifier are covered too.
 /// The server rejects such requests before policy evaluation so audit mode cannot override the rejection;
-/// [`evaluate`] also denies them for direct callers.
-pub(crate) fn uninstalls_protected_package(request: &PackageRequest) -> bool {
-    builtin_rules::uninstalls_protected_package(request, &RequestFlags::from_request(request))
+/// [`evaluate`] also denies them for direct callers, by package identifier only.
+pub(crate) fn uninstalls_protected_package(request: &PackageRequest, agent_product_code: Option<uuid::Uuid>) -> bool {
+    let flags = RequestFlags::from_request(request);
+    builtin_rules::uninstalls_protected_package(request, &flags)
+        || agent_product_code.is_some_and(|code| builtin_rules::uninstalls_product_code(request, &flags, code))
+}
+
+/// Whether the request removes an installed package, directly or as the previous version replaced
+/// by an install or update.
+pub(crate) fn removes_package(request: &PackageRequest) -> bool {
+    RequestFlags::from_request(request).removes_package(request)
 }
 
 /// Evaluate a parsed request against a parsed policy document.

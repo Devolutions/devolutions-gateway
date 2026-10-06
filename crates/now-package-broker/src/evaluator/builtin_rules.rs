@@ -2,7 +2,8 @@
 
 use std::borrow::Cow;
 
-use now_policy_api::{ManagerName, Operation, PackageRequest};
+use now_policy_api::{ManagerName, PackageRequest};
+use uuid::Uuid;
 
 use super::RequestFlags;
 use super::identifier::selects_identifier;
@@ -25,11 +26,30 @@ const PROTECTED_PACKAGES: &[(ManagerName, &str)] = &[
 /// Whether the request uninstalls a [`PROTECTED_PACKAGES`] entry, directly or as the previous
 /// version replaced by an install or update.
 pub(super) fn uninstalls_protected_package(request: &PackageRequest, flags: &RequestFlags) -> bool {
-    let removes_package = request.operation == Operation::Uninstall || flags.has_uninstall_previous;
-    removes_package
+    flags.removes_package(request)
         && PROTECTED_PACKAGES.iter().any(|(manager, identifier)| {
             *manager == request.manager && selects_identifier(request.manager, &request.package.id.0, identifier)
         })
+}
+
+/// Whether a WinGet request that removes a package references the MSI `product_code`, in its
+/// package identifier or custom parameters.
+///
+/// WinGet selects installed programs by `ARP\<scope>\<architecture>\{ProductCode}` identifiers,
+/// and the product code of an MSI changes with each version, so the caller resolves it from the
+/// installed product.
+pub(super) fn uninstalls_product_code(request: &PackageRequest, flags: &RequestFlags, product_code: Uuid) -> bool {
+    let product_code = product_code.hyphenated().to_string();
+    let references_product_code = |value: &str| value.to_ascii_lowercase().contains(&product_code);
+
+    request.manager == ManagerName::Winget
+        && flags.removes_package(request)
+        && (references_product_code(&request.package.id.0)
+            || request
+                .options
+                .custom_parameters
+                .iter()
+                .any(|parameter| references_product_code(&parameter.0)))
 }
 
 /// Kill-before-operation entry as passed to `taskkill /IM`: `.exe` is appended to a name without

@@ -810,7 +810,7 @@ impl BrokerState {
 
         // SECURITY: The broker never removes the Devolutions Agent, which hosts it. Like the
         // gates below, this is not bypassable by policy rules, `defaultDecision`, or audit mode.
-        if evaluator::uninstalls_protected_package(request) {
+        if evaluator::uninstalls_protected_package(request, installed_agent_product_code(request)?) {
             warn!(
                 request_id = %request.request_id,
                 package_id = %request.package.id,
@@ -965,6 +965,32 @@ impl PackageRequestClientOwner for PackageRequest {
 ///
 /// An empty or whitespace-only custom install location means "not set", so every component
 /// (policy evaluation, the command builders and operation tracking) sees `None`.
+/// MSI product code of the installed Devolutions Agent, for requests that remove a package.
+///
+/// Fails closed: a request that removes a package is rejected when the product code cannot be read.
+#[expect(
+    clippy::result_large_err,
+    reason = "the shared API contract requires ErrorResponse values"
+)]
+fn installed_agent_product_code(request: &PackageRequest) -> Result<Option<uuid::Uuid>, ErrorResponse> {
+    if !evaluator::removes_package(request) {
+        return Ok(None);
+    }
+
+    devolutions_agent_shared::windows::registry::get_product_code(devolutions_agent_shared::windows::AGENT_UPDATE_CODE)
+        .map_err(|error| {
+            warn!(
+                request_id = %request.request_id,
+                error = format!("{error:#}"),
+                "Rejecting request: failed to read the installed Devolutions Agent product code"
+            );
+            error_response(
+                ErrorCode::ValidationFailed,
+                "the package broker cannot verify that the request does not uninstall the Devolutions Agent",
+            )
+        })
+}
+
 fn normalize_request(mut request: PackageRequest) -> PackageRequest {
     if request
         .options
