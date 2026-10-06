@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 use super::AttemptError;
 use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
+use crate::token::AccessScope;
 
 /// A provisioner task: the work Gateway does for one kind of request, such as `recording-ai-analysis`.
 ///
@@ -39,6 +40,12 @@ use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
 pub trait ProvisionerTask: Send + Sync + 'static {
     /// The kind written in the records of this task.
     const KIND: &'static str;
+
+    /// The scope a token needs to start this task, `gateway.tasks.<kind>.start`.
+    const START_SCOPE: AccessScope;
+
+    /// The scope a token needs to read the records of this task, `gateway.tasks.<kind>.read`.
+    const READ_SCOPE: AccessScope;
 
     /// What the record keeps as asked; never secrets, since records are kept and returned to callers.
     type Params: Serialize + DeserializeOwned + Send;

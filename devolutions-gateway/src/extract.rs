@@ -6,6 +6,7 @@ use axum::http::request::Parts;
 
 use crate::DgwState;
 use crate::http::HttpError;
+use crate::provisioner_tasks::runner::ProvisionerTask;
 use crate::token::{
     AccessScope, AccessTokenClaims, AssociationTokenClaims, BridgeTokenClaims, EnrollmentTokenClaims, JmuxTokenClaims,
     JrecTokenClaims, JrlTokenClaims, KdcTokenClaims, ScopeTokenClaims, WebAppTokenClaims,
@@ -321,6 +322,46 @@ where
     }
 }
 
+/// A scope token allowed to read the records of the provisioner task `T`: `*`, or the read scope of `T`.
+pub struct ProvisionerTaskReadScope<T>(core::marker::PhantomData<T>);
+
+impl<S, T> FromRequestParts<S> for ProvisionerTaskReadScope<T>
+where
+    S: Send + Sync,
+    T: ProvisionerTask,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let scope = ScopeToken::from_request_parts(parts, state).await?.0.scope;
+
+        if scope == AccessScope::Wildcard || scope == T::READ_SCOPE {
+            Ok(Self(core::marker::PhantomData))
+        } else {
+            Err(HttpError::forbidden().msg("invalid scope for route"))
+        }
+    }
+}
+/// A scope token allowed to start the provisioner task `T`: `*`, or the start scope of `T`.
+pub struct ProvisionerTaskStartScope<T>(core::marker::PhantomData<T>);
+
+impl<S, T> FromRequestParts<S> for ProvisionerTaskStartScope<T>
+where
+    S: Send + Sync,
+    T: ProvisionerTask,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let scope = ScopeToken::from_request_parts(parts, state).await?.0.scope;
+
+        if scope == AccessScope::Wildcard || scope == T::START_SCOPE {
+            Ok(Self(core::marker::PhantomData))
+        } else {
+            Err(HttpError::forbidden().msg("invalid scope for route"))
+        }
+    }
+}
 #[derive(Clone, Copy)]
 pub struct UpdateScope;
 
