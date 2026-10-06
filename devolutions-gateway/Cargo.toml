@@ -38,6 +38,8 @@ sysevent-codes.path = "../crates/sysevent-codes"
 agent-tunnel = { path = "../crates/agent-tunnel" }
 agent-tunnel-libsql.path = "../crates/agent-tunnel-libsql"
 gateway-db.path = "../crates/gateway-db"
+provisioner-task.path = "../crates/provisioner-task"
+provisioner-task-libsql.path = "../crates/provisioner-task-libsql"
 ironrdp-pdu = { version = "0.9", features = ["std"] }
 ironrdp-core = { version = "0.2", features = ["std"] }
 ironrdp-rdcleanpath = "0.2"
