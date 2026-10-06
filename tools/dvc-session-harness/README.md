@@ -45,9 +45,14 @@ cargo run --release -- timeout-window --cycles 200 --open-ms 5000 --gap-ms 200 -
 
 Use `--wait-for-open-ms` when launch/reconnect timing is unpredictable.
 With this mode, the harness keeps retrying DVC open within each cycle instead of exiting on the first `0x8007001F`.
+Use `--wait-for-next-open` to arm the harness until it observes a disconnect->reconnect transition before starting the scenario.
 
 ```powershell
 cargo run --release -- timeout-window --protocol-shim minimal --cycles 200 --open-ms 5000 --gap-ms 200 --wait-for-open-ms 300000 --retry-interval-ms 250 --heartbeat-ms 3000
+```
+
+```powershell
+cargo run --release -- timeout-window --protocol-shim minimal --cycles 200 --open-ms 5000 --gap-ms 200 --wait-for-open-ms 300000 --retry-interval-ms 250 --heartbeat-ms 3000 --wait-for-next-open
 ```
 
 ## Log format

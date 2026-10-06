@@ -85,6 +85,7 @@ struct Config {
     wait_for_open_ms: u64,
     retry_interval_ms: u64,
     heartbeat_ms: u64,
+    wait_for_next_open: bool,
 }
 
 impl Config {
@@ -114,6 +115,7 @@ impl Config {
         let mut wait_for_open_ms = 0_u64;
         let mut retry_interval_ms = 250_u64;
         let mut heartbeat_ms = 3_000_u64;
+        let mut wait_for_next_open = false;
 
         while let Some(flag) = args.next() {
             match flag.as_str() {
@@ -130,6 +132,7 @@ impl Config {
                 "--wait-for-open-ms" => wait_for_open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--retry-interval-ms" => retry_interval_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--heartbeat-ms" => heartbeat_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
+                "--wait-for-next-open" => wait_for_next_open = true,
                 "--help" | "-h" => {
                     print_usage();
                     std::process::exit(0);
@@ -167,6 +170,7 @@ impl Config {
             wait_for_open_ms,
             retry_interval_ms,
             heartbeat_ms,
+            wait_for_next_open,
         })
     }
 }
@@ -369,6 +373,84 @@ fn open_channel_with_retry(
 }
 
 #[cfg(windows)]
+fn arm_for_next_open(config: &Config, scenario: Scenario, stop_requested: &AtomicBool) -> anyhow::Result<()> {
+    let started_at = Instant::now();
+    let mut saw_disconnected = false;
+    let mut attempt = 1_u32;
+
+    log_event(
+        scenario,
+        None,
+        "arm-start",
+        "arming for next DVC open transition (disconnect -> reconnect)",
+    );
+
+    loop {
+        if stop_requested.load(Ordering::Relaxed) {
+            log_event(scenario, None, "interrupted", "stop requested while arming");
+            bail!("interrupted by user");
+        }
+
+        if config.wait_for_open_ms != 0 && started_at.elapsed().as_millis() as u64 >= config.wait_for_open_ms {
+            bail!("timed out while waiting for next DVC open transition");
+        }
+
+        match open_channel(&config.channel_name) {
+            Ok(channel) => {
+                drop(channel);
+
+                if saw_disconnected {
+                    log_event(
+                        scenario,
+                        None,
+                        "arm-ready",
+                        format!("next DVC open observed at attempt={attempt}"),
+                    );
+                    return Ok(());
+                }
+
+                log_event(
+                    scenario,
+                    None,
+                    "arm-open-present",
+                    format!("channel is currently open at attempt={attempt}; waiting for disconnect"),
+                );
+            }
+            Err(error) => {
+                if !saw_disconnected {
+                    saw_disconnected = true;
+                    log_event(
+                        scenario,
+                        None,
+                        "arm-disconnected",
+                        format!("disconnected state observed at attempt={attempt}: {error:#}"),
+                    );
+                } else {
+                    log_event(
+                        scenario,
+                        None,
+                        "arm-wait",
+                        format!("still waiting for reopen at attempt={attempt}: {error:#}"),
+                    );
+                }
+            }
+        }
+
+        if !sleep_with_stop(stop_requested, config.retry_interval_ms) {
+            log_event(
+                scenario,
+                None,
+                "interrupted",
+                "stop requested during arming retry delay",
+            );
+            bail!("interrupted by user");
+        }
+
+        attempt = attempt.saturating_add(1);
+    }
+}
+
+#[cfg(windows)]
 fn default_server_caps() -> NowChannelCapsetMsg {
     let exec_flags = NowExecCapsetFlags::STYLE_RUN
         | NowExecCapsetFlags::STYLE_PROCESS
@@ -540,6 +622,10 @@ fn run_windows(config: &Config, stop_requested: &AtomicBool) -> anyhow::Result<(
         log_event(config.scenario, None, "pre-delay-end", "pre-delay completed");
     }
 
+    if config.wait_for_next_open {
+        arm_for_next_open(config, config.scenario, stop_requested)?;
+    }
+
     match config.scenario {
         Scenario::NoOpen => {
             log_event(
@@ -658,11 +744,12 @@ fn print_usage() {
            --wait-for-open-ms <ms> Retry open up to this duration per cycle (default: 0)\n\
            --retry-interval-ms <ms> Delay between open retries (default: 250)\n\
            --heartbeat-ms <ms>     Heartbeat interval in minimal shim mode (default: 3000)\n\
+           --wait-for-next-open    Arm until a disconnect->reconnect open transition is observed\n\
          \n\
          Examples:\n\
            dvc-session-harness timeout-window --cycles 6 --open-ms 5000 --gap-ms 200\n\
            dvc-session-harness timeout-window --cycles 200 --wait-for-open-ms 300000 --retry-interval-ms 250\n\
-           dvc-session-harness timeout-window --protocol-shim minimal --wait-for-open-ms 300000\n\
+           dvc-session-harness timeout-window --protocol-shim minimal --wait-for-open-ms 300000 --wait-for-next-open\n\
            dvc-session-harness delayed-open --delay-ms 12000 --open-ms 5000\n\
            dvc-session-harness no-open --open-ms 15000"
     );
@@ -701,8 +788,8 @@ fn main() -> anyhow::Result<()> {
         None,
         "open-policy",
         format!(
-            "wait_for_open_ms={}, retry_interval_ms={}, heartbeat_ms={}",
-            config.wait_for_open_ms, config.retry_interval_ms, config.heartbeat_ms
+            "wait_for_open_ms={}, retry_interval_ms={}, heartbeat_ms={}, wait_for_next_open={}",
+            config.wait_for_open_ms, config.retry_interval_ms, config.heartbeat_ms, config.wait_for_next_open
         ),
     );
 
