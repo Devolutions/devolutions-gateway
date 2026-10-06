@@ -16,7 +16,6 @@ pub(crate) mod channel_writer;
 pub(crate) mod iter;
 pub(crate) mod protocol;
 pub(crate) mod reopenable_file;
-pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
 use tokio::io::AsyncWriteExt;

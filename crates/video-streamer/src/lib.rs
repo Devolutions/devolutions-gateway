@@ -37,8 +37,6 @@ extern crate tracing;
 #[rustfmt::skip]
 pub use streamer::reopenable_file::ReOpenableFile;
 #[rustfmt::skip]
-pub use streamer::signal_writer::SignalWriter;
-#[rustfmt::skip]
 pub use streamer::webm_stream;
 #[rustfmt::skip]
 pub use session::{
