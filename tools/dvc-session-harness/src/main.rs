@@ -225,14 +225,14 @@ fn log_event(scenario: Scenario, cycle: Option<u32>, event: &str, detail: impl A
 #[cfg(windows)]
 fn classify_pipe_disconnect(error: &anyhow::Error) -> Option<&'static str> {
     error.chain().find_map(|source| {
-        source
-            .downcast_ref::<windows::core::Error>()
-            .and_then(|error| match error.code().0 {
+        source.downcast_ref::<win_api_wrappers::Error>().and_then(|error| {
+            match u32::from_ne_bytes(error.code().to_ne_bytes()) {
                 0x8007_006D => Some("broken-pipe"),
                 0x8007_00E8 => Some("no-data"),
                 0x8007_00E9 => Some("pipe-not-connected"),
                 _ => None,
-            })
+            }
+        })
     })
 }
 
@@ -720,7 +720,7 @@ fn run_windows(config: &Config, stop_requested: &AtomicBool) -> anyhow::Result<(
 
                 let channel = match open_channel_with_retry(config.scenario, cycle, config, stop_requested) {
                     Ok(channel) => channel,
-                    Err(error) if stop_requested.load(Ordering::Relaxed) => {
+                    Err(_error) if stop_requested.load(Ordering::Relaxed) => {
                         log_event(
                             config.scenario,
                             Some(cycle),
