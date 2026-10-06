@@ -41,6 +41,14 @@
         {
           "id": "FeaturePsuDescription",
           "text": "Active l'agent distant pour PowerShell Universal."
+        },
+        {
+          "id": "FeaturePackageBrokerName",
+          "text": "Courtier de paquets"
+        },
+        {
+          "id": "FeaturePackageBrokerDescription",
+          "text": "Permet aux utilisateurs standard de demander, au moyen d'UniGetUI et d'autres clients approuvés, l'installation et la mise à jour de paquets autorisées par une politique définie par un administrateur. Les demandes sont refusées tant qu'aucune politique de paquets n'est déployée."
         }
       ],
       "messages": [

@@ -73,6 +73,14 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeaturePsuDescription = "FeaturePsuDescription";		
 		/// <summary>
+		/// Package Broker
+		/// </summary>
+		public const string FeaturePackageBrokerName = "FeaturePackageBrokerName";		
+		/// <summary>
+		/// Lets standard users request package installations and updates that an administrator-defined policy allows, through UniGetUI and other approved clients. Requests are denied until a package policy is deployed.
+		/// </summary>
+		public const string FeaturePackageBrokerDescription = "FeaturePackageBrokerDescription";		
+		/// <summary>
 		/// There is a problem with the entered data. Please correct the issue and try again.
 		/// </summary>
 		public const string ThereIsAProblemWithTheEnteredData = "ThereIsAProblemWithTheEnteredData";		

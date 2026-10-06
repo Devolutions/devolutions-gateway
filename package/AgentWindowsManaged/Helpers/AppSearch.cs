@@ -15,9 +15,17 @@ namespace DevolutionsAgent.Helpers
                 .FirstOrDefault();
 
         internal static IEnumerable<FeatureInstallation> InstalledFeatures =>
+            InstalledProducts.SelectMany(product => product.Features.Where(feature => feature.State == InstallState.Local));
+
+        /// <summary>
+        /// The features each installed related product defines, whatever their state.
+        /// </summary>
+        internal static IEnumerable<IEnumerable<string>> InstalledProductFeatureNames =>
+            InstalledProducts.Select(product => product.Features.Select(feature => feature.FeatureName).ToList());
+
+        private static IEnumerable<ProductInstallation> InstalledProducts =>
             ProductInstallation.GetRelatedProducts("{" + Includes.UPGRADE_CODE + "}")
                 .Where(product => product.ProductName?.Equals(Includes.PRODUCT_NAME) ?? false)
-                .Where(product => product.IsInstalled)
-                .SelectMany(product => product.Features.Where(feature => feature.State == InstallState.Local));
+                .Where(product => product.IsInstalled);
     }
 }

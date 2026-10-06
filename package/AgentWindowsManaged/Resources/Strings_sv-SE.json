@@ -65,6 +65,14 @@
         {
           "id": "FeaturePsuDescription",
           "text": "Aktiverar fjärragenten för PowerShell Universal."
+        },
+        {
+          "id": "FeaturePackageBrokerName",
+          "text": "Paketmäklare"
+        },
+        {
+          "id": "FeaturePackageBrokerDescription",
+          "text": "Låter standardanvändare begära installationer och uppdateringar av paket som en administratörsdefinierad princip tillåter, via UniGetUI och andra godkända klienter. Begäranden nekas tills en paketprincip har distribuerats."
         }
       ],
       "messages": [
