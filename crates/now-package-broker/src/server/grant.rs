@@ -125,6 +125,7 @@ pub(super) async fn execute_grant(
         post_command: None,
         effective_user: request.client.effective_user.clone(),
         user_sid: caller_sid,
+        session_id: client.session_id(),
         elevation: request.client.requested_elevation,
         scope: request.options.scope,
         token_elevation_check: TokenElevationCheck::Exact,

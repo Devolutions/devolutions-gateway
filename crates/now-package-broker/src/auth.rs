@@ -62,6 +62,8 @@ pub(crate) struct PipeClient {
     executable_security: Option<Arc<RetainedExecutableSecurity>>,
     /// Security identifier of the pipe client process token user, captured at connect.
     user_sid: Sid,
+    /// Session of the pipe client process token, captured at connect.
+    session_id: u32,
     /// Actual connected process token elevation, captured at connect.
     is_elevated: bool,
     /// Enabled built-in Administrators membership, captured at connect.
@@ -198,6 +200,9 @@ impl PipeClient {
             .sid_and_attributes()
             .with_context(|| format!("failed to query pipe client process {process_id} token user"))?
             .sid;
+        let session_id = token
+            .session_id()
+            .with_context(|| format!("failed to query pipe client process {process_id} token session"))?;
         let is_elevated = token
             .is_elevated()
             .with_context(|| format!("failed to query pipe client process {process_id} token elevation"))?;
@@ -222,6 +227,7 @@ impl PipeClient {
             executable_file: Some(executable_file),
             executable_security,
             user_sid,
+            session_id,
             is_elevated,
             is_administrator,
             impersonation_token: Some(impersonation_token),
@@ -250,6 +256,11 @@ impl PipeClient {
         self.process_id
     }
 
+    /// Session of the authenticated pipe client, captured at connect.
+    pub(crate) fn session_id(&self) -> u32 {
+        self.session_id
+    }
+
     pub(crate) fn executable_path(&self) -> &Path {
         &self.executable_path
     }
@@ -257,13 +268,6 @@ impl PipeClient {
     /// Creation time of the retained process, which tells a process instance from a recycled process ID.
     pub(crate) fn process_creation_time(&self) -> SystemTime {
         self.process_creation_time
-    }
-
-    pub(crate) fn session_id(&self) -> anyhow::Result<u32> {
-        self.impersonation_token
-            .as_ref()
-            .context("pipe client impersonation token is not retained")?
-            .session_id()
     }
 
     pub(crate) fn display_name(&self) -> anyhow::Result<String> {
@@ -614,6 +618,7 @@ mod tests {
             executable_file: None,
             executable_security: None,
             user_sid: system_sid(),
+            session_id: 1,
             is_elevated: true,
             is_administrator: true,
             impersonation_token: None,
@@ -1314,6 +1319,7 @@ mod tests {
             executable_file: Some(Arc::new(executable_file)),
             executable_security: Some(Arc::new(RetainedExecutableSecurity::unchecked_for_tests())),
             user_sid: client_user_sid(),
+            session_id: 1,
             is_elevated: false,
             is_administrator: false,
             impersonation_token: None,
@@ -1339,6 +1345,7 @@ mod tests {
             executable_file: None,
             executable_security: None,
             user_sid: client_user_sid(),
+            session_id: 1,
             is_elevated: false,
             is_administrator: false,
             impersonation_token: None,

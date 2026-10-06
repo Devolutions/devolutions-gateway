@@ -103,7 +103,7 @@ impl ProcessIdentity {
 
     /// Returns the session ID captured from the process token.
     pub fn session_id(&self) -> anyhow::Result<u32> {
-        self.client.session_id()
+        Ok(self.client.session_id())
     }
 
     /// Checks that the process belongs to the user logged on to its session.
@@ -599,7 +599,7 @@ impl PackageBrokerServer for BrokerConnection {
             })?;
 
         self.state
-            .execute(request, self.client.user_sid())
+            .execute(request, self.client.user_sid(), self.client.session_id())
             .await
             .map_err(|error| *error)
     }
@@ -733,14 +733,16 @@ impl BrokerState {
         })
     }
 
-    /// Evaluates `request` against the policy and, when it allows it, starts the operation for the user `user_sid`.
+    /// Evaluates `request` against the policy and, when it allows it, starts the operation for the user `user_sid`
+    /// in the session `session_id`.
     ///
-    /// The pipe server calls it after authenticating the client; an in-process caller supplies the user itself.
+    /// The pipe server calls it after authenticating the client; an in-process caller supplies the user and session itself.
     /// Follow the operation with `tracker`.
     pub async fn execute(
         &self,
         request: PackageRequest,
         user_sid: &Sid,
+        session_id: u32,
     ) -> Result<ExecutionResponse, Box<ErrorResponse>> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
@@ -759,6 +761,7 @@ impl BrokerState {
                 post_command: request.options.post_operation_command.clone(),
                 effective_user: request.client.effective_user.clone(),
                 user_sid: user_sid.clone(),
+                session_id,
                 elevation: evaluator::effective_execution_elevation(&request),
                 scope: request.options.scope,
                 token_elevation_check: TokenElevationCheck::Unchecked,
@@ -2197,14 +2200,13 @@ mod tests {
     async fn submit_operation(state: &BrokerState, request: &PackageRequest) -> OperationSubmission {
         // Use the real test-process user SID: the per-operation event pipe ACL only
         // admits the requesting client user (plus SYSTEM/Administrators).
-        let user_sid = win_api_wrappers::process::Process::current_process()
+        let token = win_api_wrappers::process::Process::current_process()
             .token(windows::Win32::Security::TOKEN_QUERY)
-            .expect("open current process token")
-            .sid_and_attributes()
-            .expect("query token user SID")
-            .sid;
+            .expect("open current process token");
+        let user_sid = token.sid_and_attributes().expect("query token user SID").sid;
+        let session_id = token.session_id().expect("query token session ID");
         let response = state
-            .execute(request.clone(), &user_sid)
+            .execute(request.clone(), &user_sid, session_id)
             .await
             .expect("execute request accepted");
         response.operation.expect("operation submitted")
