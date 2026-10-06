@@ -109,7 +109,7 @@ where
             }
         };
 
-        let (recording_file, stream_state) = match recordings.connect(session_id, file_type, disconnected_ttl).await {
+        let (recording_file, progress) = match recordings.connect(session_id, file_type, disconnected_ttl).await {
             Ok(connected) => connected,
             Err(e) => {
                 warn!(error = format!("{e:#}"), "Unable to start recording");
@@ -135,7 +135,7 @@ where
 
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
-                stream_state.send_modify(|state| state.lifecycle = StreamLifecycle::Recording);
+                progress.mark_recording();
                 // Wrap WriteProgressWriter inside a BufWriter to reduce the number of flushes.
                 let (file, flush_signal) = WriteProgressWriter::new(file);
                 // larger buffer size to reduce the number of flushes
@@ -143,12 +143,12 @@ where
                 let mut shutdown_signal_clone = shutdown_signal.clone();
                 let copy_fut = io::copy(&mut client_stream, &mut file);
                 let signal_loop = tokio::spawn({
-                    let stream_state = stream_state.clone();
+                    let progress = progress.clone();
                     async move {
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    notify_chunk_appended(&stream_state);
+                                    progress.notify_data();
                                 },
                                 _ = shutdown_signal_clone.wait() => {
                                     break;
@@ -180,7 +180,7 @@ where
 
                 let flush_result = file.flush().await;
                 if flush_result.is_ok() {
-                    notify_chunk_appended(&stream_state);
+                    progress.notify_data();
                 }
 
                 match (res, flush_result) {
@@ -213,10 +213,29 @@ fn is_storage_full(error: &io::Error) -> bool {
     matches!(error.kind(), io::ErrorKind::StorageFull)
 }
 
-/// Wakes the viewers of a clip: new bytes reached its file.
-fn notify_chunk_appended(stream_state: &watch::Sender<RecordingStreamState>) {
-    // Viewers re-read the clip on any change, so an unchanged state still wakes them.
-    stream_state.send_modify(|_| {});
+/// What a producer may change in its recording's stream state.
+///
+/// Every other lifecycle change belongs to the recording manager.
+#[derive(Clone)]
+struct ClipProgress(watch::Sender<RecordingStreamState>);
+
+impl ClipProgress {
+    /// Marks the clip file as open; does nothing unless the clip is still opening.
+    fn mark_recording(&self) {
+        self.0.send_if_modified(|state| {
+            let is_opening = state.lifecycle == StreamLifecycle::Opening;
+            if is_opening {
+                state.lifecycle = StreamLifecycle::Recording;
+            }
+            is_opening
+        });
+    }
+
+    /// Wakes the viewers of the clip: new bytes reached its file.
+    fn notify_data(&self) {
+        // Viewers re-read the clip on any change, so an unchanged state still wakes them.
+        self.0.send_modify(|_| {});
+    }
 }
 
 /// Writes a recording clip and wakes one waiter whenever bytes reach the file.
@@ -331,7 +350,7 @@ enum RecordingManagerMessage {
         id: Uuid,
         file_type: RecordingFileType,
         disconnected_ttl: Duration,
-        channel: oneshot::Sender<(Utf8PathBuf, watch::Sender<RecordingStreamState>)>,
+        channel: oneshot::Sender<(Utf8PathBuf, ClipProgress)>,
     },
     AddArtifact {
         id: Uuid,
@@ -405,13 +424,13 @@ pub struct RecordingMessageSender {
 }
 
 impl RecordingMessageSender {
-    /// Returns the clip file to write, and the stream state its producer updates while writing.
+    /// Returns the clip file to write, and what its producer may update while writing.
     async fn connect(
         &self,
         id: Uuid,
         file_type: RecordingFileType,
         disconnected_ttl: Duration,
-    ) -> anyhow::Result<(Utf8PathBuf, watch::Sender<RecordingStreamState>)> {
+    ) -> anyhow::Result<(Utf8PathBuf, ClipProgress)> {
         let (tx, rx) = oneshot::channel();
         self.channel
             .send(RecordingManagerMessage::Connect {
@@ -580,7 +599,7 @@ impl RecordingManagerTask {
         id: Uuid,
         file_type: RecordingFileType,
         disconnected_ttl: Duration,
-    ) -> anyhow::Result<(Utf8PathBuf, watch::Sender<RecordingStreamState>)> {
+    ) -> anyhow::Result<(Utf8PathBuf, ClipProgress)> {
         const LENGTH_WARNING_THRESHOLD: usize = 1000;
 
         if let Some(ongoing) = self.ongoing_recordings.get(&id)
@@ -706,7 +725,7 @@ impl RecordingManagerTask {
             );
         }
 
-        Ok((recording_file, stream_state))
+        Ok((recording_file, ClipProgress(stream_state)))
     }
 
     async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
@@ -1312,6 +1331,19 @@ mod tests {
         let file_names: Vec<_> = state.clips.iter().filter_map(|path| path.file_name()).collect();
         assert_eq!(file_names, ["recording-0.webm", "recording-1.webm"]);
         assert!(state.is_opening(1));
+    }
+
+    #[test]
+    fn a_producer_only_moves_its_clip_from_opening_to_recording() {
+        let (sender, state) = watch::channel(RecordingStreamState::new(vec!["recording-0.webm".into()]));
+        let progress = ClipProgress(sender.clone());
+
+        progress.mark_recording();
+        assert_eq!(state.borrow().lifecycle, StreamLifecycle::Recording);
+
+        sender.send_modify(RecordingStreamState::mark_ended);
+        progress.mark_recording();
+        assert_eq!(state.borrow().lifecycle, StreamLifecycle::Ended);
     }
 
     #[tokio::test]
