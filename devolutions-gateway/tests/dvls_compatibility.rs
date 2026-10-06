@@ -301,6 +301,10 @@ mod as_of_v2022_3_0_0 {
         JrlRead,
         #[serde(rename = "gateway.config.write")]
         ConfigWrite,
+        #[serde(rename = "gateway.tasks.recording-ai-analysis.start")]
+        RecordingAiAnalysisStart,
+        #[serde(rename = "gateway.tasks.recording-ai-analysis.read")]
+        RecordingAiAnalysisRead,
     }
 
     fn dvls_access_scope() -> impl Strategy<Value = DvlsAccessScope> {
@@ -312,6 +316,8 @@ mod as_of_v2022_3_0_0 {
             Just(DvlsAccessScope::JrlRead),
             Just(DvlsAccessScope::ConfigWrite),
             Just(DvlsAccessScope::ConfigWrite),
+            Just(DvlsAccessScope::RecordingAiAnalysisStart),
+            Just(DvlsAccessScope::RecordingAiAnalysisRead),
         ]
     }
 

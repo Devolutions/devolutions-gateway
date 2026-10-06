@@ -33,6 +33,7 @@ use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
 use crate::provisioning::ProvisioningStore;
 use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender};
+use crate::token::AccessScope;
 
 pub const KIND: &str = "recording-ai-analysis";
 
@@ -250,6 +251,10 @@ impl RecordingAiAnalysis {
 #[async_trait]
 impl ProvisionerTask for RecordingAiAnalysis {
     const KIND: &'static str = KIND;
+
+    const START_SCOPE: AccessScope = AccessScope::RecordingAiAnalysisStart;
+
+    const READ_SCOPE: AccessScope = AccessScope::RecordingAiAnalysisRead;
 
     type Params = Params;
 

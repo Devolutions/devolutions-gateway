@@ -6,6 +6,7 @@ use provisioner_task::ProvisionerTaskState;
 
 use super::*;
 use crate::job_queue::{JobMessage, JobQueueReceiver};
+use crate::token::AccessScope;
 
 const KIND: &str = "test.echo";
 
@@ -24,6 +25,10 @@ struct Echo {
 #[async_trait]
 impl ProvisionerTask for Echo {
     const KIND: &'static str = KIND;
+
+    const START_SCOPE: AccessScope = AccessScope::Wildcard;
+
+    const READ_SCOPE: AccessScope = AccessScope::Wildcard;
 
     type Params = EchoParams;
 
