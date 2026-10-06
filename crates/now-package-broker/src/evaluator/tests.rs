@@ -836,3 +836,37 @@ fn supplied_install_location_is_kept_for_security_checks_when_installer_argument
         Some(r"C:\Tools\App")
     );
 }
+
+#[test]
+fn agent_uninstall_by_installed_product_code_is_detected() {
+    let product_code = uuid::uuid!("{0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D}");
+    let protects = |request: &PackageRequest| super::uninstalls_protected_package(request, Some(product_code));
+
+    let request = make_request(
+        api::Operation::Uninstall,
+        r"ARP\Machine\X64\{0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D}",
+    );
+    assert!(protects(&request));
+    assert!(!super::uninstalls_protected_package(&request, None));
+
+    let mut request = make_request(api::Operation::Uninstall, "Contoso.Tool");
+    request.options.custom_parameters = vec![
+        api::CustomParameterString("--product-code".to_owned()),
+        api::CustomParameterString("{0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d}".to_owned()),
+    ];
+    assert!(protects(&request));
+
+    let mut request = make_request(
+        api::Operation::Update,
+        r"ARP\Machine\X64\{0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D}",
+    );
+    assert!(!protects(&request));
+    request.options.uninstall_previous = true;
+    assert!(protects(&request));
+
+    let request = make_request(
+        api::Operation::Uninstall,
+        r"ARP\Machine\X64\{FFFFFFFF-4E5F-4A6B-8C7D-9E0F1A2B3C4D}",
+    );
+    assert!(!protects(&request));
+}
