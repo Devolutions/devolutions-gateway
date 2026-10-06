@@ -394,8 +394,9 @@ fn run_plan(
     }
     if token_is_elevated && !requires_elevation {
         bail!(
-            "the execution token is elevated but the request was evaluated for standard execution; \
-             standard execution requires a non-elevated user token"
+            "the package broker can't run requests for a full administrator token without UAC \
+             (User Account Control is disabled, the account is the built-in Administrator, \
+             or the broker runs elevated outside service mode)"
         );
     }
 
