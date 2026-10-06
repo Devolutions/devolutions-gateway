@@ -27,11 +27,16 @@ namespace DevolutionsAgent.Resources
             Id = $"{FEATURE_ID_PREFIX}PsuAgent"
         };
 
+        internal static Feature PACKAGE_BROKER_FEATURE = new("!(loc.FeaturePackageBrokerName)", "!(loc.FeaturePackageBrokerDescription)", isEnabled: false, allowChange: true)
+        {
+            Id = $"{FEATURE_ID_PREFIX}PackageBroker"
+        };
+
         internal static Feature AGENT_FEATURE = new("!(loc.FeatureAgentName)", isEnabled: true, allowChange: false)
         {
             Id = $"{FEATURE_ID_PREFIX}Agent",
             Description = "!(loc.FeatureAgentDescription)",
-            Children = [ AGENT_UPDATER_FEATURE, AGENT_TUNNEL_FEATURE, PSU_FEATURE ]
+            Children = [ AGENT_UPDATER_FEATURE, AGENT_TUNNEL_FEATURE, PSU_FEATURE, PACKAGE_BROKER_FEATURE ]
         };
 
         internal static Feature PEDM_FEATURE = new("!(loc.FeaturePedmName)", "!(loc.FeaturePedmDescription)", isEnabled: false)

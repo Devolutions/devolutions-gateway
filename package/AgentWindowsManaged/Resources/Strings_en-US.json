@@ -65,6 +65,14 @@
         {
           "id": "FeaturePsuDescription",
           "text": "Enables the PowerShell Universal remote agent."
+        },
+        {
+          "id": "FeaturePackageBrokerName",
+          "text": "Package Broker"
+        },
+        {
+          "id": "FeaturePackageBrokerDescription",
+          "text": "Lets standard users request package installations and updates that an administrator-defined policy allows, through UniGetUI and other approved clients. Requests are denied until a package policy is deployed."
         }
       ],
       "messages": [

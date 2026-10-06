@@ -8,6 +8,8 @@
                 <String Id="FeatureAgentTunnelName">Agent Tunnel</String>
                 <String Id="FeatureAgentUpdaterDescription">Enables the Devolutions Gateway updater</String>
                 <String Id="FeatureAgentUpdaterName">Devolutions Gateway Updater</String>
+                <String Id="FeaturePackageBrokerDescription">Lets standard users request package installations and updates that an administrator-defined policy allows, through UniGetUI and other approved clients. Requests are denied until a package policy is deployed.</String>
+                <String Id="FeaturePackageBrokerName">Package Broker</String>
                 <String Id="FeaturePedmDescription">Enables PEDM features and installs the shell extension</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
                 <String Id="FeaturePsuDescription">Enables the PowerShell Universal remote agent.</String>
