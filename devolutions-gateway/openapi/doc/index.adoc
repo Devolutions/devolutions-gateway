@@ -1119,6 +1119,118 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.getAiAnalysis]
+==== getAiAnalysis
+
+`GET /jet/jrec/{session_id}/ai-analysis/{task_id}`
+
+Gets an AI analysis of a recorded session
+
+===== Description
+
+Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+
+
+// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/\{task_id\}/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| session_id
+| Recorded session ID 
+| X
+| null
+| 
+
+| task_id
+| Task ID of the AI analysis 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+<<TaskInfo>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The AI analysis Task
+|  <<TaskInfo>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| The session has no AI analysis with this Task ID
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/\{task_id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.listRecordings]
 ==== listRecordings
 
@@ -1421,6 +1533,135 @@ ifdef::internal-generation[]
 ===== Implementation
 
 // markup not found, no include::{specDir}jet/jrec/pull/\{id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.startAiAnalysis]
+==== startAiAnalysis
+
+`POST /jet/jrec/{session_id}/ai-analysis`
+
+Starts an AI analysis of a recorded session
+
+===== Description
+
+Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under `artifacts.ai-analysis` in its manifest. The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`, which the `Location` header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+
+
+// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| session_id
+| Recorded session ID 
+| X
+| null
+| 
+
+|===
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| AiAnalysisRequest
+| AI analysis settings <<AiAnalysisRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<TaskInfo>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The same request came in before; nothing new starts
+|  <<TaskInfo>>
+
+
+| 202
+| The AI analysis Task is created and runs in the background
+|  <<TaskInfo>>
+
+
+| 400
+| Invalid request body or AI settings
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| The session has no recording
+|  <<>>
+
+
+| 409
+| The AI analysis cannot start now
+|  <<AiAnalysisConflict>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/POST/implementation.adoc[opts=optional]
 
 
 endif::internal-generation[]
@@ -3371,6 +3612,8 @@ endif::internal-generation[]
 | gateway.net.monitor.drain
 | gateway.agent.delete
 | gateway.agent.read
+| gateway.tasks.recording-ai-analysis.start
+| gateway.tasks.recording-ai-analysis.read
 
 |===
 
@@ -3540,6 +3783,292 @@ endif::internal-generation[]
 | offline
 | online
 | unresponsive
+
+|===
+
+
+[#AiAnalysisConflict]
+=== _AiAnalysisConflict_ 
+
+Why an AI analysis cannot start now
+
+
+[.fields-AiAnalysisConflict]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| code
+| X
+| 
+|  <<AiAnalysisConflictCode>>  
+| 
+|    task_id_conflict, recording_active, analysis_in_progress,  
+
+| taskId
+| 
+| X
+|   UUID  
+| The AI analysis of this session that is not finished yet; set for `analysis_in_progress`.
+| uuid    
+
+|===
+
+
+
+[#AiAnalysisConflictCode]
+=== _AiAnalysisConflictCode_ 
+
+
+
+
+
+
+[.fields-AiAnalysisConflictCode]
+[cols="1"]
+|===
+| Enum Values
+
+| task_id_conflict
+| recording_active
+| analysis_in_progress
+
+|===
+
+
+[#AiAnalysisFailedPayload]
+=== _AiAnalysisFailedPayload_ 
+
+Payload of a &#x60;failed&#x60; AI analysis Task: why it failed
+
+
+[.fields-AiAnalysisFailedPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| attempts
+| X
+| 
+|   Integer  
+| Number of attempts started.
+| int32    
+
+| details
+| X
+| X
+|   oas_any_type_not_mapped  
+| What went wrong: a text, except for `timed out`, where it is `{ \"lastPayload\": <payload before the timeout> }`.
+|     
+
+| reason
+| X
+| 
+|   String  
+| Kind of failure, such as `permanent error`, `attempts exhausted`, `key lost` or `timed out`.
+|     
+
+|===
+
+
+
+[#AiAnalysisRequest]
+=== _AiAnalysisRequest_ 
+
+Settings of an AI analysis
+
+
+[.fields-AiAnalysisRequest]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| apiKey
+| X
+| 
+|   String  
+| API key of the provider, kept in memory only until the Task ends.
+| password    
+
+| baseUrl
+| 
+| X
+|   String  
+| Endpoint of the provider API, kept in memory only; required for `openai-compatible`.
+|     
+
+| maxOutputTokens
+| 
+| X
+|   Integer  
+| Upper bound of tokens in each AI answer.
+| int32    
+
+| model
+| X
+| 
+|   String  
+| Model identifier, passed to the provider as is.
+|     
+
+| provider
+| X
+| 
+|  <<AiProvider>>  
+| 
+|    openai, anthropic, mistral, gemini, openai-compatible,  
+
+| taskId
+| X
+| 
+|   UUID  
+| Task ID, chosen by the caller so it can send the same request again safely.
+| uuid    
+
+|===
+
+
+
+[#AiAnalysisRunningPayload]
+=== _AiAnalysisRunningPayload_ 
+
+Payload of a &#x60;running&#x60; AI analysis Task: its progress
+
+
+[.fields-AiAnalysisRunningPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| done
+| 
+| X
+|   Long  
+| Work done in the step: bytes read while `reading`, parts described while `describing`.
+| int64    
+
+| message
+| 
+| X
+|   String  
+| Short sentence for people following the analysis, such as `asking the AI: 2 of 5 chunks described`.
+|     
+
+| percent
+| 
+| X
+|   Integer  
+| Part of the step done, from 0 to 100.
+| int32    
+
+| step
+| X
+| 
+|   String  
+| Current step: `preparing` (the attempt starts), `reading` (the recordings are read), `describing` (the AI is asked about the recording, part by part), then `writing` (the log is written).
+|     
+
+| total
+| 
+| X
+|   Long  
+| Work the step has in all, in the same unit as `done`.
+| int64    
+
+|===
+
+
+
+[#AiAnalysisSucceededPayload]
+=== _AiAnalysisSucceededPayload_ 
+
+Payload of a &#x60;succeeded&#x60; AI analysis Task: the log it added to the session
+
+
+[.fields-AiAnalysisSucceededPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| fileName
+| X
+| 
+|   String  
+| Name of the new log in the session manifest, such as `ai-analysis-0.slog`.
+|     
+
+| model
+| X
+| 
+|   String  
+| Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+|     
+
+| promptVersion
+| X
+| 
+|   String  
+| Version of the instructions sent to the AI provider.
+|     
+
+| usage
+| 
+| X
+| <<AiAnalysisUsage>>    
+| 
+|     
+
+|===
+
+
+
+[#AiAnalysisUsage]
+=== _AiAnalysisUsage_ 
+
+Tokens counted by an AI provider
+
+
+[.fields-AiAnalysisUsage]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| inputTokens
+| X
+| 
+|   Long  
+| 
+| int64    
+
+| outputTokens
+| X
+| 
+|   Long  
+| 
+| int64    
+
+|===
+
+
+
+[#AiProvider]
+=== _AiProvider_ 
+
+AI provider to ask; &#x60;openai-compatible&#x60; needs a base URL
+
+
+
+
+[.fields-AiProvider]
+[cols="1"]
+|===
+| Enum Values
+
+| openai
+| anthropic
+| mistral
+| gemini
+| openai-compatible
 
 |===
 
@@ -5562,6 +6091,124 @@ Subscriber configuration
 
 |===
 
+
+
+[#TaskInfo]
+=== _TaskInfo_ 
+
+A Task: the permanent record of one piece of work the provisioner asked Gateway to do
+
+The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes.
+The shape of &#x60;params&#x60; and &#x60;payload&#x60; belongs to the kind.
+For &#x60;recording-ai-analysis&#x60;, &#x60;payload&#x60; is an &#x60;AiAnalysisRunningPayload&#x60; while &#x60;running&#x60;, an
+&#x60;AiAnalysisSucceededPayload&#x60; once &#x60;succeeded&#x60;, and an &#x60;AiAnalysisFailedPayload&#x60; once &#x60;failed&#x60;.
+
+
+[.fields-TaskInfo]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| attempts
+| X
+| 
+|   Integer  
+| Number of attempts started so far.
+| int32    
+
+| createdAt
+| X
+| 
+|   Date  
+| When the Task was created.
+| date-time    
+
+| deadlineAt
+| X
+| 
+|   Date  
+| When an unfinished Task becomes failed, waiting and retries included.
+| date-time    
+
+| finishedAt
+| 
+| X
+|   Date  
+| When it succeeded or failed.
+| date-time    
+
+| id
+| X
+| 
+|   UUID  
+| Task ID, chosen by the provisioner.
+| uuid    
+
+| kind
+| X
+| 
+|   String  
+| Kind of work, such as `recording-ai-analysis`.
+|     
+
+| params
+| X
+| 
+|   Object  
+| What was asked, without secrets.
+|     
+
+| payload
+| 
+| X
+|   Object  
+| Details of the current state; null while `queued`.
+|     
+
+| startedAt
+| 
+| X
+|   Date  
+| When its first attempt started.
+| date-time    
+
+| state
+| X
+| 
+|  <<TaskState>>  
+| 
+|    queued, running, succeeded, failed,  
+
+| target
+| X
+| 
+|   String  
+| What the work is about, such as a session ID.
+|     
+
+|===
+
+
+
+[#TaskState]
+=== _TaskState_ 
+
+
+
+
+
+
+[.fields-TaskState]
+[cols="1"]
+|===
+| Enum Values
+
+| queued
+| running
+| succeeded
+| failed
+
+|===
 
 
 [#TrafficEventResponse]
