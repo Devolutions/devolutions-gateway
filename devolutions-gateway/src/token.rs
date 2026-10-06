@@ -513,6 +513,10 @@ pub enum AccessScope {
     AgentRead,
     #[serde(rename = "gateway.recordings.search")]
     RecordingsSearch,
+    #[serde(rename = "gateway.tasks.recording-ai-analysis.start")]
+    RecordingAiAnalysisStart,
+    #[serde(rename = "gateway.tasks.recording-ai-analysis.read")]
+    RecordingAiAnalysisRead,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
