@@ -7,119 +7,36 @@ use libsql::{Connection, TransactionBehavior, params};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/01_agent_authorization.sql")];
 const CA_SPKI_SHA256_KEY: &str = "ca_spki_sha256";
 
+/// Agent authorization kept in the `agent_tunnel_*` tables of `gateway.db`.
 pub struct LibSqlAgentAuthorizationStore {
     conn: Mutex<Connection>,
 }
 
 impl LibSqlAgentAuthorizationStore {
-    pub async fn open(path: &str, ca_spki_sha256: SpkiSha256) -> anyhow::Result<Self> {
-        let database = libsql::Builder::new_local(path)
-            .build()
-            .await
-            .context("build Agent authorization database")?;
-        let conn = database.connect().context("open Agent authorization database")?;
+    /// Opens the store on a `gateway.db` connection from the `gateway-db` crate.
+    ///
+    /// The stored Agents only make sense with the CA that signed their certificates, so the first open ties the
+    /// store to `ca_spki_sha256`, and later opens refuse any other CA.
+    pub async fn open(conn: Connection, ca_spki_sha256: SpkiSha256) -> anyhow::Result<Self> {
         let store = Self { conn: Mutex::new(conn) };
 
-        store.apply_pragmas().await?;
-        store.migrate_and_bind_ca(ca_spki_sha256).await?;
         store.validate_integrity_and_schema().await?;
+        store.bind_ca(ca_spki_sha256).await?;
 
         Ok(store)
     }
 
-    async fn apply_pragmas(&self) -> anyhow::Result<()> {
-        const PRAGMAS: &str = "
-            PRAGMA journal_mode = WAL;
-            PRAGMA synchronous = FULL;
-            PRAGMA busy_timeout = 15000;
-            PRAGMA foreign_keys = ON;
-            PRAGMA temp_store = MEMORY;
-        ";
-
-        self.conn
-            .lock()
-            .await
-            .execute_batch(PRAGMAS)
-            .await
-            .context("apply Agent authorization database PRAGMAs")?;
-        Ok(())
-    }
-
-    async fn migrate_and_bind_ca(&self, ca_spki_sha256: SpkiSha256) -> anyhow::Result<()> {
-        let conn = self.conn.lock().await;
-        let user_version = Self::schema_version(&conn).await?;
-
-        if MIGRATIONS.len() < user_version {
-            bail!(
-                "Agent authorization schema version {user_version} is newer than supported version {}",
-                MIGRATIONS.len()
-            );
-        }
-
-        if user_version == 0 {
-            let tx = conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .await
-                .context("begin Agent authorization initialization")?;
-            for (migration_id, migration) in MIGRATIONS.iter().enumerate() {
-                tx.execute_batch(migration)
-                    .await
-                    .with_context(|| format!("apply Agent authorization migration {}", migration_id + 1))?;
-                if migration_id == 0 {
-                    tx.execute(
-                        "INSERT INTO metadata (key, value) VALUES (?1, ?2)",
-                        params![CA_SPKI_SHA256_KEY, ca_spki_sha256.to_vec()],
-                    )
-                    .await
-                    .context("bind Agent authorization database to CA")?;
-                }
-                tx.execute_batch(&format!("PRAGMA user_version = {}", migration_id + 1))
-                    .await
-                    .with_context(|| format!("record Agent authorization migration {}", migration_id + 1))?;
-            }
-            tx.commit().await.context("commit Agent authorization initialization")?;
-            return Ok(());
-        }
-
-        Self::validate_ca_binding(&conn, ca_spki_sha256).await?;
-        for (migration_id, migration) in MIGRATIONS.iter().enumerate().skip(user_version) {
-            let tx = conn
-                .transaction_with_behavior(TransactionBehavior::Immediate)
-                .await
-                .with_context(|| format!("begin Agent authorization migration {}", migration_id + 1))?;
-            tx.execute_batch(migration)
-                .await
-                .with_context(|| format!("apply Agent authorization migration {}", migration_id + 1))?;
-            tx.execute_batch(&format!("PRAGMA user_version = {}", migration_id + 1))
-                .await
-                .with_context(|| format!("record Agent authorization migration {}", migration_id + 1))?;
-            tx.commit()
-                .await
-                .with_context(|| format!("commit Agent authorization migration {}", migration_id + 1))?;
-        }
-
-        Ok(())
-    }
-
-    async fn schema_version(conn: &Connection) -> anyhow::Result<usize> {
-        let row = conn
-            .query("PRAGMA user_version", ())
-            .await
-            .context("query Agent authorization schema version")?
-            .next()
-            .await
-            .context("read Agent authorization schema version")?
-            .context("Agent authorization schema version query returned no row")?;
-        let user_version = row.get::<u64>(0).context("decode Agent authorization schema version")?;
-        usize::try_from(user_version).context("Agent authorization schema version is too large")
-    }
-
-    async fn validate_ca_binding(conn: &Connection, ca_spki_sha256: SpkiSha256) -> anyhow::Result<()> {
+    /// Returns the CA the stored Agents belong to, or `None` if the agent tunnel never ran.
+    ///
+    /// Once Agents are tied to a CA, Gateway must load that CA and never generate a new one.
+    pub async fn bound_ca(conn: &Connection) -> anyhow::Result<Option<SpkiSha256>> {
         let stored = conn
-            .query("SELECT value FROM metadata WHERE key = ?1", params![CA_SPKI_SHA256_KEY])
+            .query(
+                "SELECT value FROM agent_tunnel_metadata WHERE key = ?1",
+                params![CA_SPKI_SHA256_KEY],
+            )
             .await
             .context("query Agent authorization CA identity")?
             .next()
@@ -129,12 +46,30 @@ impl LibSqlAgentAuthorizationStore {
             .transpose()
             .context("decode Agent authorization CA identity")?;
 
-        let stored = stored.context("Agent authorization database is missing CA metadata")?;
-        if stored.as_slice() != ca_spki_sha256 {
-            bail!("Agent authorization database belongs to a different CA");
-        }
+        stored
+            .map(|stored| {
+                SpkiSha256::try_from(stored)
+                    .map_err(|_| anyhow::anyhow!("Agent authorization CA identity has an invalid length"))
+            })
+            .transpose()
+    }
 
-        Ok(())
+    async fn bind_ca(&self, ca_spki_sha256: SpkiSha256) -> anyhow::Result<()> {
+        let conn = self.conn.lock().await;
+
+        match Self::bound_ca(&conn).await? {
+            Some(stored) if stored == ca_spki_sha256 => Ok(()),
+            Some(_) => bail!("Agent authorization database belongs to a different CA"),
+            None => {
+                conn.execute(
+                    "INSERT INTO agent_tunnel_metadata (key, value) VALUES (?1, ?2)",
+                    params![CA_SPKI_SHA256_KEY, ca_spki_sha256.to_vec()],
+                )
+                .await
+                .context("bind Agent authorization database to CA")?;
+                Ok(())
+            }
+        }
     }
 
     async fn validate_integrity_and_schema(&self) -> anyhow::Result<()> {
@@ -162,18 +97,21 @@ impl LibSqlAgentAuthorizationStore {
         }
 
         const TABLE_PROBES: &[(&str, &str)] = &[
-            ("metadata", "SELECT key, value FROM metadata LIMIT 0"),
             (
-                "accepted_agents",
-                "SELECT agent_id, name, client_spki_sha256, enrollment_jti FROM accepted_agents LIMIT 0",
+                "agent_tunnel_metadata",
+                "SELECT key, value FROM agent_tunnel_metadata LIMIT 0",
             ),
             (
-                "enrollment_attempts",
-                "SELECT jti, agent_id, request_sha256, expires_at, deleted FROM enrollment_attempts LIMIT 0",
+                "agent_tunnel_accepted_agents",
+                "SELECT agent_id, name, client_spki_sha256, enrollment_jti FROM agent_tunnel_accepted_agents LIMIT 0",
             ),
             (
-                "deleted_agent_keys",
-                "SELECT agent_id, client_spki_sha256 FROM deleted_agent_keys LIMIT 0",
+                "agent_tunnel_enrollment_attempts",
+                "SELECT jti, agent_id, request_sha256, expires_at, deleted FROM agent_tunnel_enrollment_attempts LIMIT 0",
+            ),
+            (
+                "agent_tunnel_deleted_agent_keys",
+                "SELECT agent_id, client_spki_sha256 FROM agent_tunnel_deleted_agent_keys LIMIT 0",
             ),
         ];
         for (table, probe) in TABLE_PROBES {
@@ -182,12 +120,12 @@ impl LibSqlAgentAuthorizationStore {
                 .with_context(|| format!("validate Agent authorization table {table}"))?;
         }
 
-        Self::validate_unique_index(&conn, "metadata", &["key"]).await?;
-        Self::validate_unique_index(&conn, "accepted_agents", &["agent_id"]).await?;
-        Self::validate_unique_index(&conn, "accepted_agents", &["name"]).await?;
-        Self::validate_unique_index(&conn, "accepted_agents", &["enrollment_jti"]).await?;
-        Self::validate_unique_index(&conn, "enrollment_attempts", &["jti"]).await?;
-        Self::validate_unique_index(&conn, "deleted_agent_keys", &["client_spki_sha256"]).await?;
+        Self::validate_unique_index(&conn, "agent_tunnel_metadata", &["key"]).await?;
+        Self::validate_unique_index(&conn, "agent_tunnel_accepted_agents", &["agent_id"]).await?;
+        Self::validate_unique_index(&conn, "agent_tunnel_accepted_agents", &["name"]).await?;
+        Self::validate_unique_index(&conn, "agent_tunnel_accepted_agents", &["enrollment_jti"]).await?;
+        Self::validate_unique_index(&conn, "agent_tunnel_enrollment_attempts", &["jti"]).await?;
+        Self::validate_unique_index(&conn, "agent_tunnel_deleted_agent_keys", &["client_spki_sha256"]).await?;
 
         Ok(())
     }
@@ -278,7 +216,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         };
         let conn = self.conn.lock().await;
         conn.execute(
-            "DELETE FROM enrollment_attempts
+            "DELETE FROM agent_tunnel_enrollment_attempts
              WHERE expires_at < unixepoch() - 86400",
             (),
         )
@@ -288,7 +226,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         let existing_attempt = conn
             .query(
                 "SELECT agent_id, request_sha256, deleted
-                 FROM enrollment_attempts
+                 FROM agent_tunnel_enrollment_attempts
                  WHERE jti = ?1",
                 params![attempt.token_id.to_string()],
             )
@@ -315,7 +253,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
             let existing_agent = conn
                 .query(
                     "SELECT agent_id, name, client_spki_sha256
-                     FROM accepted_agents
+                     FROM agent_tunnel_accepted_agents
                      WHERE enrollment_jti = ?1",
                     params![attempt.token_id.to_string()],
                 )
@@ -336,7 +274,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
 
         let agent_id_exists = conn
             .query(
-                "SELECT 1 FROM accepted_agents WHERE agent_id = ?1",
+                "SELECT 1 FROM agent_tunnel_accepted_agents WHERE agent_id = ?1",
                 params![attempt.agent_id.to_string()],
             )
             .await
@@ -351,7 +289,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
 
         let agent_name_exists = conn
             .query(
-                "SELECT 1 FROM accepted_agents WHERE name = ?1",
+                "SELECT 1 FROM agent_tunnel_accepted_agents WHERE name = ?1",
                 params![attempt.name.clone()],
             )
             .await
@@ -367,7 +305,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         let deleted_key_exists = conn
             .query(
                 "SELECT 1
-                 FROM deleted_agent_keys
+                 FROM agent_tunnel_deleted_agent_keys
                  WHERE client_spki_sha256 = ?1",
                 params![attempt.client_spki_sha256.to_vec()],
             )
@@ -387,7 +325,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
             .context("begin Agent enrollment transaction")?;
 
         tx.execute(
-            "INSERT INTO enrollment_attempts (jti, agent_id, request_sha256, expires_at)
+            "INSERT INTO agent_tunnel_enrollment_attempts (jti, agent_id, request_sha256, expires_at)
              VALUES (?1, ?2, ?3, ?4)",
             params![
                 attempt.token_id.to_string(),
@@ -399,7 +337,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         .await
         .context("persist Agent enrollment attempt")?;
         tx.execute(
-            "INSERT INTO accepted_agents (agent_id, name, client_spki_sha256, enrollment_jti)
+            "INSERT INTO agent_tunnel_accepted_agents (agent_id, name, client_spki_sha256, enrollment_jti)
              VALUES (?1, ?2, ?3, ?4)",
             params![
                 attempt.agent_id.to_string(),
@@ -420,7 +358,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         let row = conn
             .query(
                 "SELECT agent_id, name, client_spki_sha256
-                 FROM accepted_agents
+                 FROM agent_tunnel_accepted_agents
                  WHERE agent_id = ?1 AND client_spki_sha256 = ?2",
                 params![agent_id.to_string(), client_spki_sha256.to_vec()],
             )
@@ -438,7 +376,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         let row = conn
             .query(
                 "SELECT agent_id, name, client_spki_sha256
-                 FROM accepted_agents
+                 FROM agent_tunnel_accepted_agents
                  WHERE agent_id = ?1",
                 params![agent_id.to_string()],
             )
@@ -456,7 +394,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         let mut rows = conn
             .query(
                 "SELECT agent_id, name, client_spki_sha256
-                 FROM accepted_agents
+                 FROM agent_tunnel_accepted_agents
                  ORDER BY name COLLATE NOCASE, agent_id",
                 (),
             )
@@ -480,7 +418,7 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         let row = tx
             .query(
                 "SELECT agent_id, name, client_spki_sha256, enrollment_jti
-                 FROM accepted_agents
+                 FROM agent_tunnel_accepted_agents
                  WHERE agent_id = ?1",
                 params![agent_id.to_string()],
             )
@@ -498,20 +436,20 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
         let enrollment_jti = row.get::<String>(3).context("decode deleted Agent enrollment JTI")?;
 
         tx.execute(
-            "INSERT OR IGNORE INTO deleted_agent_keys (client_spki_sha256, agent_id)
+            "INSERT OR IGNORE INTO agent_tunnel_deleted_agent_keys (client_spki_sha256, agent_id)
              VALUES (?1, ?2)",
             params![accepted.client_spki_sha256.to_vec(), agent_id.to_string()],
         )
         .await
         .context("remember deleted Agent key")?;
         tx.execute(
-            "DELETE FROM accepted_agents WHERE agent_id = ?1",
+            "DELETE FROM agent_tunnel_accepted_agents WHERE agent_id = ?1",
             params![agent_id.to_string()],
         )
         .await
         .context("delete accepted Agent")?;
         tx.execute(
-            "UPDATE enrollment_attempts SET deleted = 1 WHERE jti = ?1",
+            "UPDATE agent_tunnel_enrollment_attempts SET deleted = 1 WHERE jti = ?1",
             params![enrollment_jti],
         )
         .await
@@ -525,6 +463,11 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    async fn open_store(path: &str, ca_spki_sha256: SpkiSha256) -> anyhow::Result<LibSqlAgentAuthorizationStore> {
+        let conn = gateway_db::open_path(path).await?;
+        LibSqlAgentAuthorizationStore::open(conn, ca_spki_sha256).await
+    }
 
     fn enrollment(agent_id: Uuid) -> EnrollmentAttempt {
         EnrollmentAttempt {
@@ -540,19 +483,19 @@ mod tests {
     #[tokio::test]
     async fn accepted_agent_survives_reopen() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let database_path = temp_dir.path().join("agent_tunnel.db");
+        let database_path = temp_dir.path().join("gateway.db");
         let database_path = database_path.to_str().expect("temporary database path is UTF-8");
         let ca_spki_sha256 = [0xCA; 32];
         let agent_id = Uuid::new_v4();
 
-        let store = LibSqlAgentAuthorizationStore::open(database_path, ca_spki_sha256)
+        let store = open_store(database_path, ca_spki_sha256)
             .await
             .expect("open Agent authorization store");
         let outcome = store.enroll(enrollment(agent_id)).await.expect("enroll Agent");
         assert!(matches!(outcome, EnrollmentOutcome::Created(_)));
         drop(store);
 
-        let reopened = LibSqlAgentAuthorizationStore::open(database_path, ca_spki_sha256)
+        let reopened = open_store(database_path, ca_spki_sha256)
             .await
             .expect("reopen Agent authorization store");
         let accepted = reopened
@@ -567,7 +510,7 @@ mod tests {
 
     #[tokio::test]
     async fn identical_enrollment_retry_is_idempotent() {
-        let store = LibSqlAgentAuthorizationStore::open(":memory:", [0xCA; 32])
+        let store = open_store(":memory:", [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let attempt = enrollment(Uuid::new_v4());
@@ -581,7 +524,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_prevents_original_enrollment_retry() {
-        let store = LibSqlAgentAuthorizationStore::open(":memory:", [0xCA; 32])
+        let store = open_store(":memory:", [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let attempt = enrollment(Uuid::new_v4());
@@ -607,7 +550,7 @@ mod tests {
 
     #[tokio::test]
     async fn accepted_agent_id_and_name_are_unique() {
-        let store = LibSqlAgentAuthorizationStore::open(":memory:", [0xCA; 32])
+        let store = open_store(":memory:", [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let first = enrollment(Uuid::new_v4());
@@ -626,7 +569,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_and_get_include_offline_accepted_agents() {
-        let store = LibSqlAgentAuthorizationStore::open(":memory:", [0xCA; 32])
+        let store = open_store(":memory:", [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let first = enrollment(Uuid::new_v4());
@@ -654,7 +597,7 @@ mod tests {
 
     #[tokio::test]
     async fn enrollment_token_rejects_different_material() {
-        let store = LibSqlAgentAuthorizationStore::open(":memory:", [0xCA; 32])
+        let store = open_store(":memory:", [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let first = enrollment(Uuid::new_v4());
@@ -669,7 +612,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_token_and_key_can_reenroll_deleted_agent() {
-        let store = LibSqlAgentAuthorizationStore::open(":memory:", [0xCA; 32])
+        let store = open_store(":memory:", [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let first = enrollment(Uuid::new_v4());
@@ -708,9 +651,9 @@ mod tests {
     #[tokio::test]
     async fn new_token_cannot_reenroll_deleted_agent_key() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let database_path = temp_dir.path().join("agent_tunnel.db");
+        let database_path = temp_dir.path().join("gateway.db");
         let database_path = database_path.to_str().expect("temporary database path is UTF-8");
-        let store = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+        let store = open_store(database_path, [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let first = enrollment(Uuid::new_v4());
@@ -722,7 +665,7 @@ mod tests {
             .expect("Agent was accepted");
         drop(store);
 
-        let reopened = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+        let reopened = open_store(database_path, [0xCA; 32])
             .await
             .expect("reopen Agent authorization store");
         let replay = enrollment(first.agent_id);
@@ -733,7 +676,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_agent_id_cannot_reuse_deleted_agent_key() {
-        let store = LibSqlAgentAuthorizationStore::open(":memory:", [0xCA; 32])
+        let store = open_store(":memory:", [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         let first = enrollment(Uuid::new_v4());
@@ -754,14 +697,14 @@ mod tests {
     #[tokio::test]
     async fn database_rejects_another_ca() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let database_path = temp_dir.path().join("agent_tunnel.db");
+        let database_path = temp_dir.path().join("gateway.db");
         let database_path = database_path.to_str().expect("temporary database path is UTF-8");
-        let store = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+        let store = open_store(database_path, [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         drop(store);
 
-        let error = LibSqlAgentAuthorizationStore::open(database_path, [0xBB; 32])
+        let error = open_store(database_path, [0xBB; 32])
             .await
             .err()
             .expect("database must reject another CA");
@@ -769,67 +712,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn database_rejects_a_newer_schema() {
+    async fn first_open_binds_the_ca() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let database_path = temp_dir.path().join("agent_tunnel.db");
+        let database_path = temp_dir.path().join("gateway.db");
         let database_path = database_path.to_str().expect("temporary database path is UTF-8");
-        let store = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+
+        let conn = gateway_db::open_path(database_path)
+            .await
+            .expect("open gateway database");
+        let bound = LibSqlAgentAuthorizationStore::bound_ca(&conn)
+            .await
+            .expect("read bound CA");
+        assert_eq!(bound, None);
+
+        let store = LibSqlAgentAuthorizationStore::open(conn, [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         drop(store);
 
-        let database = libsql::Builder::new_local(database_path)
-            .build()
+        let conn = gateway_db::open_path(database_path)
             .await
-            .expect("open Agent authorization database");
-        let conn = database.connect().expect("connect to Agent authorization database");
-        conn.execute_batch("PRAGMA user_version = 99")
+            .expect("reopen gateway database");
+        let bound = LibSqlAgentAuthorizationStore::bound_ca(&conn)
             .await
-            .expect("set unsupported schema version");
-        drop(conn);
-        drop(database);
-
-        let error = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
-            .await
-            .err()
-            .expect("database must reject a newer schema");
-        assert!(error.to_string().contains("newer than supported"));
-    }
-
-    #[tokio::test]
-    async fn initialized_database_rejects_missing_ca_metadata() {
-        let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let database_path = temp_dir.path().join("agent_tunnel.db");
-        let database_path = database_path.to_str().expect("temporary database path is UTF-8");
-        let store = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
-            .await
-            .expect("open Agent authorization store");
-        drop(store);
-
-        let database = libsql::Builder::new_local(database_path)
-            .build()
-            .await
-            .expect("open Agent authorization database");
-        let conn = database.connect().expect("connect to Agent authorization database");
-        conn.execute("DELETE FROM metadata WHERE key = ?1", params![CA_SPKI_SHA256_KEY])
-            .await
-            .expect("delete CA metadata");
-        drop(conn);
-        drop(database);
-
-        let error = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
-            .await
-            .err()
-            .expect("initialized database must require CA metadata");
-        assert!(error.to_string().contains("missing CA"));
+            .expect("read bound CA");
+        assert_eq!(bound, Some([0xCA; 32]));
     }
 
     #[tokio::test]
     async fn database_rejects_missing_required_table() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let database_path = temp_dir.path().join("agent_tunnel.db");
+        let database_path = temp_dir.path().join("gateway.db");
         let database_path = database_path.to_str().expect("temporary database path is UTF-8");
-        let store = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+        let store = open_store(database_path, [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         drop(store);
@@ -839,13 +754,13 @@ mod tests {
             .await
             .expect("open Agent authorization database");
         let conn = database.connect().expect("connect to Agent authorization database");
-        conn.execute("DROP TABLE accepted_agents", ())
+        conn.execute("DROP TABLE agent_tunnel_accepted_agents", ())
             .await
             .expect("drop required table");
         drop(conn);
         drop(database);
 
-        let error = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+        let error = open_store(database_path, [0xCA; 32])
             .await
             .err()
             .expect("database must reject missing required table");
@@ -855,9 +770,9 @@ mod tests {
     #[tokio::test]
     async fn database_rejects_missing_required_unique_index() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let database_path = temp_dir.path().join("agent_tunnel.db");
+        let database_path = temp_dir.path().join("gateway.db");
         let database_path = database_path.to_str().expect("temporary database path is UTF-8");
-        let store = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+        let store = open_store(database_path, [0xCA; 32])
             .await
             .expect("open Agent authorization store");
         drop(store);
@@ -869,8 +784,8 @@ mod tests {
         let conn = database.connect().expect("connect to Agent authorization database");
         conn.execute_batch(
             "
-            ALTER TABLE accepted_agents RENAME TO accepted_agents_with_name_index;
-            CREATE TABLE accepted_agents (
+            ALTER TABLE agent_tunnel_accepted_agents RENAME TO agent_tunnel_accepted_agents_with_name_index;
+            CREATE TABLE agent_tunnel_accepted_agents (
                 agent_id TEXT PRIMARY KEY,
                 name TEXT NOT NULL COLLATE NOCASE,
                 client_spki_sha256 BLOB NOT NULL,
@@ -879,7 +794,7 @@ mod tests {
                 CHECK (name = trim(name)),
                 CHECK (length(client_spki_sha256) = 32)
             );
-            DROP TABLE accepted_agents_with_name_index;
+            DROP TABLE agent_tunnel_accepted_agents_with_name_index;
             ",
         )
         .await
@@ -887,7 +802,7 @@ mod tests {
         drop(conn);
         drop(database);
 
-        let error = LibSqlAgentAuthorizationStore::open(database_path, [0xCA; 32])
+        let error = open_store(database_path, [0xCA; 32])
             .await
             .err()
             .expect("database must reject missing Agent name index");
