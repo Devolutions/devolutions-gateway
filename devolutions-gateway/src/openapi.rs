@@ -24,6 +24,8 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::list_recordings,
         crate::api::jrec::pull_recording_session,
         crate::api::jrec::pull_recording_file,
+        crate::api::jrec::start_ai_analysis,
+        crate::api::tasks::get_task,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
         crate::api::update::get_update_products,
@@ -58,6 +60,16 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         ConfigPatch,
         crate::api::jrl::JrlInfo,
         crate::api::jrec::DeleteManyResult,
+        crate::api::jrec::AiAnalysisRequest,
+        crate::api::jrec::AiAnalysisConflict,
+        crate::api::jrec::AiAnalysisConflictCode,
+        crate::provisioner_tasks::ai::AiProvider,
+        crate::api::tasks::TaskInfo,
+        crate::api::tasks::TaskState,
+        AiAnalysisRunningPayload,
+        AiAnalysisSucceededPayload,
+        AiAnalysisUsage,
+        AiAnalysisFailedPayload,
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
@@ -134,6 +146,56 @@ struct SessionInfo {
     connection_mode: ConnectionMode,
     /// Destination Host
     destination_host: Option<String>,
+}
+
+/// Payload of a `running` AI analysis Task: its progress
+#[allow(dead_code)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisRunningPayload {
+    /// Current step, such as `preparing` or `describing`.
+    step: String,
+    /// Number of transcript chunks described so far; set while `describing`.
+    done: Option<u64>,
+    /// Number of transcript chunks to describe; set while `describing`.
+    total: Option<u64>,
+}
+
+/// Payload of a `succeeded` AI analysis Task: the log it added to the session
+#[allow(dead_code)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisSucceededPayload {
+    /// Name of the new log in the session manifest, such as `ai-analysis-0.slog`.
+    file_name: String,
+    /// Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+    model: String,
+    /// Tokens counted by the AI provider; absent when it did not report them for every request.
+    usage: Option<AiAnalysisUsage>,
+    /// Version of the instructions sent to the AI provider.
+    prompt_version: String,
+}
+
+/// Tokens counted by an AI provider
+#[allow(dead_code)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+/// Payload of a `failed` AI analysis Task: why it failed
+#[allow(dead_code)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisFailedPayload {
+    /// Kind of failure, such as `permanent error`, `attempts exhausted`, `key lost` or `timed out`.
+    reason: String,
+    /// What went wrong: a text, except for `timed out`, where it is `{ "lastPayload": <payload before the timeout> }`.
+    details: serde_json::Value,
+    /// Number of attempts started.
+    attempts: u32,
 }
 
 #[allow(unused)]

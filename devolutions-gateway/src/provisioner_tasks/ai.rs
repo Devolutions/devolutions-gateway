@@ -13,6 +13,8 @@ use url::Url;
 use super::AttemptError;
 use crate::config::Conf;
 
+/// AI provider to ask; `openai-compatible` needs a base URL
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AiProvider {
     #[serde(rename = "openai")]

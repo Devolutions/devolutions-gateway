@@ -13,6 +13,7 @@ pub mod preflight;
 pub mod rdp;
 pub mod session;
 pub mod sessions;
+pub mod tasks;
 pub mod traffic;
 pub mod tunnel;
 pub mod update;
@@ -28,6 +29,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .nest("/jet/config", config::make_router(state.clone()))
         .nest("/jet/session", session::make_router(state.clone()))
         .nest("/jet/sessions", sessions::make_router(state.clone()))
+        .nest("/jet/tasks", tasks::make_router(state.clone()))
         .nest("/jet/diagnostics", diagnostics::make_router(state.clone()))
         .route("/jet/jmux", axum::routing::get(jmux::handler))
         .route("/jet/rdp", axum::routing::get(rdp::handler))
