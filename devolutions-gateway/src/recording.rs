@@ -311,7 +311,10 @@ impl ActiveRecordings {
 #[derive(Debug, Clone)]
 pub enum OnGoingRecordingState {
     Connected,
-    LastSeen { timestamp: i64 },
+    /// The producer disconnected; a reconnection before `reconnect_deadline` continues the recording.
+    LastSeen {
+        reconnect_deadline: tokio::time::Instant,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -717,10 +720,9 @@ impl RecordingManagerTask {
 
         let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
-        ongoing.state = OnGoingRecordingState::LastSeen { timestamp: end_time };
-        // Viewers wait for the reconnect window only, not for the extra leeway Gateway keeps the recording.
-        let reconnect_deadline =
-            tokio::time::Instant::now() + ongoing.disconnected_ttl.saturating_sub(DISCONNECTED_TTL_EXTRA_LEEWAY);
+        // Viewers and the recording share this deadline, so a stream never ends while its recording continues.
+        let reconnect_deadline = tokio::time::Instant::now() + ongoing.disconnected_ttl;
+        ongoing.state = OnGoingRecordingState::LastSeen { reconnect_deadline };
 
         // Re-read from disk: an artifact may have been added since this recording connected.
         let mut manifest = JrecManifest::read_from_file(&ongoing.manifest_path)
@@ -800,13 +802,10 @@ impl RecordingManagerTask {
 
     fn handle_remove(&mut self, id: Uuid) {
         if let Some(ongoing) = self.ongoing_recordings.get(&id) {
-            let now = time::OffsetDateTime::now_utc().unix_timestamp();
-            let disconnected_ttl_secs = i64::try_from(ongoing.disconnected_ttl.as_secs()).expect("TTL can’t be so big");
-
             match ongoing.state {
-                // NOTE: Comparing with disconnected_ttl_secs - 1 just in case the sleep returns faster than expected.
-                // (I don’t know if this can actually happen in practice, but it’s better to be safe than sorry.)
-                OnGoingRecordingState::LastSeen { timestamp } if now >= timestamp + disconnected_ttl_secs - 1 => {
+                OnGoingRecordingState::LastSeen { reconnect_deadline }
+                    if reconnect_deadline <= tokio::time::Instant::now() =>
+                {
                     debug!(%id, "Mark recording as terminated");
                     self.rx.active_recordings.remove(id);
                     ongoing.stream_state.send_modify(RecordingStreamState::mark_ended);
@@ -924,9 +923,12 @@ async fn recording_manager_task(
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
-                        if let Some(ongoing) = manager.ongoing_recordings.get(&id) {
-                            let now = tokio::time::Instant::now();
-                            let deadline = now + ongoing.disconnected_ttl;
+                        if let Some(OnGoingRecording {
+                            state: OnGoingRecordingState::LastSeen { reconnect_deadline: deadline },
+                            ..
+                        }) = manager.ongoing_recordings.get(&id)
+                        {
+                            let deadline = *deadline;
 
                             disconnected.push(DisconnectedTtl {
                                 deadline,
@@ -1313,36 +1315,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_reconnection_after_the_window_starts_a_new_stream() {
+    async fn viewers_and_the_recording_share_the_reconnect_deadline() {
         let harness = Harness::start();
         let id = Uuid::new_v4();
-        let window = Duration::from_millis(200);
-        let disconnected_ttl = window + DISCONNECTED_TTL_EXTRA_LEEWAY;
+        let disconnected_ttl = Duration::from_millis(200);
         harness
             .sender
             .connect(id, WEBM, disconnected_ttl)
             .await
             .expect("connect");
-        let ended = harness
+        let mut ended = harness
             .sender
             .subscribe_to_stream(id)
             .await
             .expect("subscribe")
             .expect("ongoing recording");
         harness.disconnect(id).await;
-        assert!(!ended.borrow().has_ended(tokio::time::Instant::now()));
 
-        tokio::time::sleep(window).await;
-        assert!(ended.borrow().has_ended(tokio::time::Instant::now()));
+        let Some(OnGoingRecordingState::LastSeen { reconnect_deadline }) =
+            harness.sender.get_state(id).await.expect("get state")
+        else {
+            panic!("the recording should wait for a reconnection");
+        };
+        assert_eq!(
+            ended.borrow().lifecycle,
+            StreamLifecycle::Disconnected { reconnect_deadline }
+        );
 
-        // Within the cleanup leeway, Gateway still accepts the reconnection.
+        // The stream ends when Gateway forgets the recording, not before.
+        tokio::time::timeout(
+            disconnected_ttl * 10,
+            ended.wait_for(|state| state.lifecycle == StreamLifecycle::Ended),
+        )
+        .await
+        .expect("stream ended in time")
+        .expect("stream state alive");
+        assert!(harness.sender.get_state(id).await.expect("get state").is_none());
+
         harness
             .sender
             .connect(id, WEBM, disconnected_ttl)
             .await
             .expect("reconnect");
 
-        assert_eq!(ended.borrow().lifecycle, StreamLifecycle::Ended);
         let fresh = harness
             .sender
             .subscribe_to_stream(id)
