@@ -10,11 +10,11 @@ publish = false
 devolutions-gateway = { path = "../devolutions-gateway", default-features = false, features = ["fips"] }
 
 [patch.crates-io]
-picky = { git = "https://github.com/Devolutions/picky-rs.git", rev = "4de0135c528b60500d21451111b5f35d72671395", version = "=7.0.0-rc.25" }
-picky-asn1 = { git = "https://github.com/Devolutions/picky-rs.git", rev = "4de0135c528b60500d21451111b5f35d72671395", version = "=0.10.1" }
-picky-asn1-der = { git = "https://github.com/Devolutions/picky-rs.git", rev = "4de0135c528b60500d21451111b5f35d72671395", version = "=0.5.7" }
-picky-asn1-x509 = { git = "https://github.com/Devolutions/picky-rs.git", rev = "4de0135c528b60500d21451111b5f35d72671395", version = "=0.15.5" }
+picky = { git = "https://github.com/Devolutions/picky-rs", branch = "copilot/picky-fips-audit", version = "=7.0.0-rc.25" }
+picky-asn1 = { git = "https://github.com/Devolutions/picky-rs", branch = "copilot/picky-fips-audit", version = "=0.10.1" }
+picky-asn1-der = { git = "https://github.com/Devolutions/picky-rs", branch = "copilot/picky-fips-audit", version = "=0.5.7" }
+picky-asn1-x509 = { git = "https://github.com/Devolutions/picky-rs", branch = "copilot/picky-fips-audit", version = "=0.15.5" }
 rustls = { path = "../vendor/rustls-fips", version = "=0.23.43" }
 rustls-webpki = { path = "../vendor/rustls-webpki-fips", version = "=0.103.13" }
-sspi = { git = "https://github.com/Devolutions/sspi-rs.git", rev = "cc4afe6dc3a7a16453ec8f056aa6c7a961f2edfa", version = "=0.21.3" }
+sspi = { git = "https://github.com/Devolutions/sspi-rs.git", rev = "e3216fcbac5add1d4742a4bfb7866aaa899e4892", version = "=0.23.0" }
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
