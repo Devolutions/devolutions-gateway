@@ -156,6 +156,7 @@ Class | Method | HTTP request | Description
 *JrecApi* | [**ListRecordings**](docs/JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance
 *JrecApi* | [**PullRecordingFile**](docs/JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session
 *JrecApi* | [**PullRecordingSession**](docs/JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive
+*JrecApi* | [**StartAiAnalysis**](docs/JrecApi.md#startaianalysis) | **POST** /jet/jrec/{session_id}/ai-analysis | Starts an AI analysis of a recorded session
 *JrlApi* | [**GetJrlInfo**](docs/JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info
 *JrlApi* | [**UpdateJrl**](docs/JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token
 *NetApi* | [**GetNetConfig**](docs/NetApi.md#getnetconfig) | **GET** /jet/net/config | Lists network interfaces
@@ -166,6 +167,7 @@ Class | Method | HTTP request | Description
 *PreflightApi* | [**PostPreflight**](docs/PreflightApi.md#postpreflight) | **POST** /jet/preflight | Performs a batch of preflight operations
 *SessionsApi* | [**GetSessions**](docs/SessionsApi.md#getsessions) | **GET** /jet/sessions | Lists running sessions
 *SessionsApi* | [**TerminateSession**](docs/SessionsApi.md#terminatesession) | **POST** /jet/session/{id}/terminate | Terminate forcefully a running session
+*TasksApi* | [**GetTask**](docs/TasksApi.md#gettask) | **GET** /jet/tasks/{id} | Gets a Task, the record of one piece of work the provisioner asked Gateway to do
 *TrafficApi* | [**AckTrafficEvents**](docs/TrafficApi.md#acktrafficevents) | **POST** /jet/traffic/ack | Acknowledge traffic audit events and remove them from the queue
 *TrafficApi* | [**ClaimTrafficEvents**](docs/TrafficApi.md#claimtrafficevents) | **POST** /jet/traffic/claim | Claim traffic audit events for processing
 *UpdateApi* | [**GetUpdateProducts**](docs/UpdateApi.md#getupdateproducts) | **GET** /jet/update | Retrieve the currently installed version of each Devolutions product.
@@ -186,6 +188,14 @@ Class | Method | HTTP request | Description
  - [Model.AgentDomainAdvertisement](docs/AgentDomainAdvertisement.md)
  - [Model.AgentInfo](docs/AgentInfo.md)
  - [Model.AgentStatus](docs/AgentStatus.md)
+ - [Model.AiAnalysisConflict](docs/AiAnalysisConflict.md)
+ - [Model.AiAnalysisConflictCode](docs/AiAnalysisConflictCode.md)
+ - [Model.AiAnalysisFailedPayload](docs/AiAnalysisFailedPayload.md)
+ - [Model.AiAnalysisRequest](docs/AiAnalysisRequest.md)
+ - [Model.AiAnalysisRunningPayload](docs/AiAnalysisRunningPayload.md)
+ - [Model.AiAnalysisSucceededPayload](docs/AiAnalysisSucceededPayload.md)
+ - [Model.AiAnalysisUsage](docs/AiAnalysisUsage.md)
+ - [Model.AiProvider](docs/AiProvider.md)
  - [Model.AppCredential](docs/AppCredential.md)
  - [Model.AppCredentialKind](docs/AppCredentialKind.md)
  - [Model.AppTokenContentType](docs/AppTokenContentType.md)
@@ -237,6 +247,8 @@ Class | Method | HTTP request | Description
  - [Model.SubProvisionerKey](docs/SubProvisionerKey.md)
  - [Model.Subscriber](docs/Subscriber.md)
  - [Model.TargetConnectionOptions](docs/TargetConnectionOptions.md)
+ - [Model.TaskInfo](docs/TaskInfo.md)
+ - [Model.TaskState](docs/TaskState.md)
  - [Model.TrafficEventResponse](docs/TrafficEventResponse.md)
  - [Model.TransportProtocolResponse](docs/TransportProtocolResponse.md)
  - [Model.UpdateProductInfo](docs/UpdateProductInfo.md)

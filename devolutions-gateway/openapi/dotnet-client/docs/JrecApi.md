@@ -9,6 +9,7 @@ All URIs are relative to *http://localhost*
 | [**ListRecordings**](JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance |
 | [**PullRecordingFile**](JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session |
 | [**PullRecordingSession**](JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive |
+| [**StartAiAnalysis**](JrecApi.md#startaianalysis) | **POST** /jet/jrec/{session_id}/ai-analysis | Starts an AI analysis of a recorded session |
 
 <a id="deletemanyrecordings"></a>
 # **DeleteManyRecordings**
@@ -510,6 +511,113 @@ catch (ApiException e)
 | **403** | Insufficient permissions |  -  |
 | **404** | Recording not found |  -  |
 | **413** | Recording package exceeds download size or file-count limits |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+<a id="startaianalysis"></a>
+# **StartAiAnalysis**
+> TaskInfo StartAiAnalysis (Guid sessionId, AiAnalysisRequest aiAnalysisRequest)
+
+Starts an AI analysis of a recorded session
+
+Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under `artifacts.ai-analysis` in its manifest. The work runs in the background as a Task; follow it with `GET /jet/tasks/{id}`.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Gateway.Client.Api;
+using Devolutions.Gateway.Client.Client;
+using Devolutions.Gateway.Client.Model;
+
+namespace Example
+{
+    public class StartAiAnalysisExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
+            var sessionId = "sessionId_example";  // Guid | Recorded session ID
+            var aiAnalysisRequest = new AiAnalysisRequest(); // AiAnalysisRequest | AI analysis settings
+
+            try
+            {
+                // Starts an AI analysis of a recorded session
+                TaskInfo result = apiInstance.StartAiAnalysis(sessionId, aiAnalysisRequest);
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling JrecApi.StartAiAnalysis: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the StartAiAnalysisWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    // Starts an AI analysis of a recorded session
+    ApiResponse<TaskInfo> response = apiInstance.StartAiAnalysisWithHttpInfo(sessionId, aiAnalysisRequest);
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling JrecApi.StartAiAnalysisWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **sessionId** | **Guid** | Recorded session ID |  |
+| **aiAnalysisRequest** | [**AiAnalysisRequest**](AiAnalysisRequest.md) | AI analysis settings |  |
+
+### Return type
+
+[**TaskInfo**](TaskInfo.md)
+
+### Authorization
+
+[scope_token](../README.md#scope_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | The same request came in before; nothing new starts |  -  |
+| **202** | The AI analysis Task is created and runs in the background |  -  |
+| **400** | Invalid request body or AI settings |  -  |
+| **401** | Invalid or missing authorization token |  -  |
+| **403** | Insufficient permissions |  -  |
+| **404** | The session has no recording |  -  |
+| **409** | The AI analysis cannot start now |  -  |
+| **500** | Unexpected server error |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 

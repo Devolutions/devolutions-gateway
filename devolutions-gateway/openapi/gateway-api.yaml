@@ -346,6 +346,67 @@ paths:
       security:
       - jrec_token:
         - pull
+  /jet/jrec/{session_id}/ai-analysis:
+    post:
+      tags:
+      - Jrec
+      summary: Starts an AI analysis of a recorded session
+      description: |-
+        Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a
+        new log, listed under `artifacts.ai-analysis` in its manifest.
+        The work runs in the background as a Task; follow it with `GET /jet/tasks/{id}`.
+
+        Sending the same request again returns the same Task and starts nothing new.
+        The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
+        Tasks.
+      operationId: StartAiAnalysis
+      parameters:
+      - name: session_id
+        in: path
+        description: Recorded session ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: AI analysis settings
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiAnalysisRequest'
+        required: true
+      responses:
+        '200':
+          description: The same request came in before; nothing new starts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskInfo'
+        '202':
+          description: The AI analysis Task is created and runs in the background
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskInfo'
+        '400':
+          description: Invalid request body or AI settings
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: The session has no recording
+        '409':
+          description: The AI analysis cannot start now
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAnalysisConflict'
+        '500':
+          description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.recording.analyze
   /jet/jrl:
     post:
       tags:
@@ -899,6 +960,43 @@ paths:
       security:
       - scope_token:
         - gateway.sessions.read
+  /jet/tasks/{id}:
+    get:
+      tags:
+      - Tasks
+      summary: Gets a Task, the record of one piece of work the provisioner asked Gateway to do
+      description: |-
+        Tasks are kept forever, across Gateway restarts.
+        An unfinished Task past its deadline is reported as failed.
+      operationId: GetTask
+      parameters:
+      - name: id
+        in: path
+        description: Task ID
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: The Task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskInfo'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: No Task has this ID
+        '500':
+          description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.tasks.read
   /jet/traffic/ack:
     post:
       tags:
@@ -1326,6 +1424,8 @@ components:
       - gateway.net.monitor.drain
       - gateway.agent.delete
       - gateway.agent.read
+      - gateway.recording.analyze
+      - gateway.tasks.read
     AckRequest:
       type: object
       required:
@@ -1402,6 +1502,142 @@ components:
       - offline
       - online
       - unresponsive
+    AiAnalysisConflict:
+      type: object
+      description: Why an AI analysis cannot start now
+      required:
+      - code
+      properties:
+        code:
+          $ref: '#/components/schemas/AiAnalysisConflictCode'
+        taskId:
+          type: string
+          format: uuid
+          description: The AI analysis of this session that is not finished yet; set for `analysis_in_progress`.
+          nullable: true
+    AiAnalysisConflictCode:
+      type: string
+      enum:
+      - task_id_conflict
+      - recording_active
+      - analysis_in_progress
+    AiAnalysisFailedPayload:
+      type: object
+      description: 'Payload of a `failed` AI analysis Task: why it failed'
+      required:
+      - reason
+      - details
+      - attempts
+      properties:
+        attempts:
+          type: integer
+          format: int32
+          description: Number of attempts started.
+          minimum: 0
+        details:
+          description: 'What went wrong: a text, except for `timed out`, where it is `{ "lastPayload": <payload before the timeout> }`.'
+        reason:
+          type: string
+          description: Kind of failure, such as `permanent error`, `attempts exhausted`, `key lost` or `timed out`.
+    AiAnalysisRequest:
+      type: object
+      description: Settings of an AI analysis
+      required:
+      - taskId
+      - provider
+      - model
+      - apiKey
+      properties:
+        apiKey:
+          type: string
+          format: password
+          description: API key of the provider, kept in memory only until the Task ends.
+        baseUrl:
+          type: string
+          description: Endpoint of the provider API, kept in memory only; required for `openai-compatible`.
+          nullable: true
+        maxOutputTokens:
+          type: integer
+          format: int32
+          description: Upper bound of tokens in each AI answer.
+          nullable: true
+          minimum: 0
+        model:
+          type: string
+          description: Model identifier, passed to the provider as is.
+        provider:
+          $ref: '#/components/schemas/AiProvider'
+        taskId:
+          type: string
+          format: uuid
+          description: Task ID, chosen by the caller so it can send the same request again safely.
+      additionalProperties: false
+    AiAnalysisRunningPayload:
+      type: object
+      description: 'Payload of a `running` AI analysis Task: its progress'
+      required:
+      - step
+      properties:
+        done:
+          type: integer
+          format: int64
+          description: Number of transcript chunks described so far; set while `describing`.
+          nullable: true
+          minimum: 0
+        step:
+          type: string
+          description: Current step, such as `preparing` or `describing`.
+        total:
+          type: integer
+          format: int64
+          description: Number of transcript chunks to describe; set while `describing`.
+          nullable: true
+          minimum: 0
+    AiAnalysisSucceededPayload:
+      type: object
+      description: 'Payload of a `succeeded` AI analysis Task: the log it added to the session'
+      required:
+      - fileName
+      - model
+      - promptVersion
+      properties:
+        fileName:
+          type: string
+          description: Name of the new log in the session manifest, such as `ai-analysis-0.slog`.
+        model:
+          type: string
+          description: Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+        promptVersion:
+          type: string
+          description: Version of the instructions sent to the AI provider.
+        usage:
+          allOf:
+          - $ref: '#/components/schemas/AiAnalysisUsage'
+          nullable: true
+    AiAnalysisUsage:
+      type: object
+      description: Tokens counted by an AI provider
+      required:
+      - inputTokens
+      - outputTokens
+      properties:
+        inputTokens:
+          type: integer
+          format: int64
+          minimum: 0
+        outputTokens:
+          type: integer
+          format: int64
+          minimum: 0
+    AiProvider:
+      type: string
+      description: AI provider to ask; `openai-compatible` needs a base URL
+      enum:
+      - openai
+      - anthropic
+      - mistral
+      - gemini
+      - openai-compatible
     AppCredential:
       type: object
       required:
@@ -2392,6 +2628,74 @@ components:
 
             Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
           nullable: true
+    TaskInfo:
+      type: object
+      description: |-
+        A Task: the permanent record of one piece of work the provisioner asked Gateway to do
+
+        The work runs in the background; `state` and `payload` tell how it goes.
+        The shape of `params` and `payload` belongs to the kind.
+        For `recording.ai-analysis`, `payload` is an `AiAnalysisRunningPayload` while `running`, an
+        `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
+      required:
+      - id
+      - kind
+      - target
+      - params
+      - state
+      - attempts
+      - createdAt
+      - deadlineAt
+      properties:
+        attempts:
+          type: integer
+          format: int32
+          description: Number of attempts started so far.
+          minimum: 0
+        createdAt:
+          type: string
+          format: date-time
+          description: When the Task was created.
+        deadlineAt:
+          type: string
+          format: date-time
+          description: When an unfinished Task becomes failed, waiting and retries included.
+        finishedAt:
+          type: string
+          format: date-time
+          description: When it succeeded or failed.
+          nullable: true
+        id:
+          type: string
+          format: uuid
+          description: Task ID, chosen by the provisioner.
+        kind:
+          type: string
+          description: Kind of work, such as `recording.ai-analysis`.
+        params:
+          type: object
+          description: What was asked, without secrets.
+        payload:
+          type: object
+          description: Details of the current state; null while `queued`.
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+          description: When its first attempt started.
+          nullable: true
+        state:
+          $ref: '#/components/schemas/TaskState'
+        target:
+          type: string
+          description: What the work is about, such as a session ID.
+    TaskState:
+      type: string
+      enum:
+      - queued
+      - running
+      - succeeded
+      - failed
     TrafficEventResponse:
       type: object
       required:

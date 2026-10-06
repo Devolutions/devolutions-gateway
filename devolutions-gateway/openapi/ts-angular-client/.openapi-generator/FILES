@@ -13,6 +13,7 @@ api/net.service.ts
 api/networkMonitoring.service.ts
 api/preflight.service.ts
 api/sessions.service.ts
+api/tasks.service.ts
 api/traffic.service.ts
 api/update.service.ts
 api/webApp.service.ts
@@ -26,6 +27,14 @@ model/addressFamily.ts
 model/agentDomainAdvertisement.ts
 model/agentInfo.ts
 model/agentStatus.ts
+model/aiAnalysisConflict.ts
+model/aiAnalysisConflictCode.ts
+model/aiAnalysisFailedPayload.ts
+model/aiAnalysisRequest.ts
+model/aiAnalysisRunningPayload.ts
+model/aiAnalysisSucceededPayload.ts
+model/aiAnalysisUsage.ts
+model/aiProvider.ts
 model/appCredential.ts
 model/appCredentialKind.ts
 model/appTokenContentType.ts
@@ -78,6 +87,8 @@ model/setUpdateScheduleRequest.ts
 model/subProvisionerKey.ts
 model/subscriber.ts
 model/targetConnectionOptions.ts
+model/taskInfo.ts
+model/taskState.ts
 model/trafficEventResponse.ts
 model/transportProtocolResponse.ts
 model/updateProductInfo.ts
