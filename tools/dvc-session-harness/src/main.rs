@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
@@ -39,6 +41,8 @@ struct Config {
     delay_ms: u64,
     open_ms: u64,
     gap_ms: u64,
+    wait_for_open_ms: u64,
+    retry_interval_ms: u64,
 }
 
 impl Config {
@@ -64,6 +68,8 @@ impl Config {
         let mut delay_ms = 0_u64;
         let mut open_ms = 5_000_u64;
         let mut gap_ms = 500_u64;
+        let mut wait_for_open_ms = 0_u64;
+        let mut retry_interval_ms = 250_u64;
 
         while let Some(flag) = args.next() {
             match flag.as_str() {
@@ -72,6 +78,8 @@ impl Config {
                 "--delay-ms" => delay_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--open-ms" => open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--gap-ms" => gap_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
+                "--wait-for-open-ms" => wait_for_open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
+                "--retry-interval-ms" => retry_interval_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--help" | "-h" => {
                     print_usage();
                     std::process::exit(0);
@@ -82,6 +90,10 @@ impl Config {
 
         if cycles == 0 {
             bail!("--cycles must be at least 1");
+        }
+
+        if retry_interval_ms == 0 {
+            bail!("--retry-interval-ms must be at least 1");
         }
 
         match scenario {
@@ -97,6 +109,8 @@ impl Config {
             delay_ms,
             open_ms,
             gap_ms,
+            wait_for_open_ms,
+            retry_interval_ms,
         })
     }
 }
@@ -154,6 +168,66 @@ fn open_channel(channel_name: &str) -> anyhow::Result<win_api_wrappers::wts::Wts
 }
 
 #[cfg(windows)]
+fn open_channel_with_retry(
+    scenario: Scenario,
+    cycle: u32,
+    config: &Config,
+) -> anyhow::Result<win_api_wrappers::wts::WtsVirtualChannel> {
+    let start = Instant::now();
+    let mut attempt = 1_u32;
+
+    loop {
+        log_event(
+            scenario,
+            Some(cycle),
+            "open-attempt",
+            format!("opening channel `{}` attempt={attempt}", config.channel_name),
+        );
+
+        match open_channel(&config.channel_name) {
+            Ok(channel) => {
+                log_event(
+                    scenario,
+                    Some(cycle),
+                    "open-success",
+                    format!("channel opened on attempt={attempt}"),
+                );
+                return Ok(channel);
+            }
+            Err(error) => {
+                if config.wait_for_open_ms == 0 {
+                    log_event(scenario, Some(cycle), "open-failure", format!("error={error:#}"));
+                    return Err(error).context("failed to open DVC channel");
+                }
+
+                let elapsed_ms = start.elapsed().as_millis() as u64;
+                if elapsed_ms >= config.wait_for_open_ms {
+                    log_event(
+                        scenario,
+                        Some(cycle),
+                        "open-timeout",
+                        format!("waited {} ms for open; last_error={error:#}", config.wait_for_open_ms),
+                    );
+                    return Err(error).context("timed out waiting for DVC open");
+                }
+
+                log_event(
+                    scenario,
+                    Some(cycle),
+                    "open-retry",
+                    format!(
+                        "attempt={attempt} elapsed_ms={elapsed_ms} sleeping {} ms error={error:#}",
+                        config.retry_interval_ms
+                    ),
+                );
+                std::thread::sleep(std::time::Duration::from_millis(config.retry_interval_ms));
+                attempt = attempt.saturating_add(1);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
 fn run_windows(config: &Config) -> anyhow::Result<()> {
     if config.delay_ms > 0 {
         log_event(
@@ -179,23 +253,7 @@ fn run_windows(config: &Config) -> anyhow::Result<()> {
         }
         Scenario::OpenHold | Scenario::TimeoutWindow | Scenario::DelayedOpen => {
             for cycle in 1..=config.cycles {
-                log_event(
-                    config.scenario,
-                    Some(cycle),
-                    "open-attempt",
-                    format!("opening channel `{}`", config.channel_name),
-                );
-
-                let channel = match open_channel(&config.channel_name) {
-                    Ok(channel) => {
-                        log_event(config.scenario, Some(cycle), "open-success", "channel opened");
-                        channel
-                    }
-                    Err(error) => {
-                        log_event(config.scenario, Some(cycle), "open-failure", format!("error={error:#}"));
-                        return Err(error).context("failed to open DVC channel");
-                    }
-                };
+                let channel = open_channel_with_retry(config.scenario, cycle, config)?;
 
                 log_event(
                     config.scenario,
@@ -246,9 +304,12 @@ fn print_usage() {
            --delay-ms <ms>         Delay before first open (default: 0)\n\
            --open-ms <ms>          Duration to hold each open channel (default: 5000)\n\
            --gap-ms <ms>           Delay between cycles (default: 500)\n\
+           --wait-for-open-ms <ms> Retry open up to this duration per cycle (default: 0)\n\
+           --retry-interval-ms <ms> Delay between open retries (default: 250)\n\
          \n\
          Examples:\n\
            dvc-session-harness timeout-window --cycles 6 --open-ms 5000 --gap-ms 200\n\
+           dvc-session-harness timeout-window --cycles 200 --wait-for-open-ms 300000 --retry-interval-ms 250\n\
            dvc-session-harness delayed-open --delay-ms 12000 --open-ms 5000\n\
            dvc-session-harness no-open --open-ms 15000"
     );
@@ -264,6 +325,15 @@ fn main() -> anyhow::Result<()> {
         format!(
             "channel={}, cycles={}, delay_ms={}, open_ms={}, gap_ms={}",
             config.channel_name, config.cycles, config.delay_ms, config.open_ms, config.gap_ms
+        ),
+    );
+    log_event(
+        config.scenario,
+        None,
+        "open-policy",
+        format!(
+            "wait_for_open_ms={}, retry_interval_ms={}",
+            config.wait_for_open_ms, config.retry_interval_ms
         ),
     );
 

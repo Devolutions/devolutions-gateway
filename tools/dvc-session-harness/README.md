@@ -31,6 +31,13 @@ cargo run --release -- delayed-open --delay-ms 12000 --open-ms 5000
 cargo run --release -- no-open --open-ms 15000
 ```
 
+```powershell
+cargo run --release -- timeout-window --cycles 200 --open-ms 5000 --gap-ms 200 --wait-for-open-ms 300000 --retry-interval-ms 250
+```
+
+Use `--wait-for-open-ms` when launch/reconnect timing is unpredictable.
+With this mode, the harness keeps retrying DVC open within each cycle instead of exiting on the first `0x8007001F`.
+
 ## Log format
 
 Events are emitted as plain text key/value lines.
