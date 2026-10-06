@@ -961,10 +961,6 @@ impl PackageRequestClientOwner for PackageRequest {
     }
 }
 
-/// Normalize equivalent request spellings before policy evaluation and command building.
-///
-/// An empty or whitespace-only custom install location means "not set", so every component
-/// (policy evaluation, the command builders and operation tracking) sees `None`.
 /// MSI product code of the installed Devolutions Agent, for requests that remove a package.
 ///
 /// Fails closed: a request that removes a package is rejected when the product code cannot be read.
@@ -991,6 +987,11 @@ fn installed_agent_product_code(request: &PackageRequest) -> Result<Option<uuid:
         })
 }
 
+/// Normalize equivalent request spellings before policy evaluation and command building.
+///
+/// An empty or whitespace-only custom install location means "not set", so every component
+/// (policy evaluation, the command builders and operation tracking) sees `None`.
+/// Kill-before-operation names without an extension get `.exe` appended.
 fn normalize_request(mut request: PackageRequest) -> PackageRequest {
     if request
         .options

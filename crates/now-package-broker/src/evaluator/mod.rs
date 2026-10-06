@@ -45,8 +45,8 @@
 //! can select regardless of the policy:
 //! - An explicit user scope, typed or passed through custom parameters, always runs with the standard
 //!   token (see `effective_execution_elevation`); policy matching and execution use the same elevation.
-//!   The executor refuses to run a standard plan with an elevated token, such as the full token of an
-//!   administrator when UAC is disabled.
+//!   The executor refuses to run a standard plan with an elevated token: a full administrator token
+//!   without UAC (UAC disabled, or the built-in Administrator account) cannot use the broker.
 //! - Kill-before-operation entries must be plain `.exe` image names; process names without an
 //!   extension get `.exe` appended.
 //!   `taskkill` only targets the session of the authenticated client, and the requester's own processes
@@ -54,8 +54,10 @@
 //! - An elevated custom install location must be on a local disk, contain no reparse point, and not be
 //!   writable by principals other than SYSTEM, Administrators and TrustedInstaller, including through
 //!   inheritable ACEs.
-//!   The executor checks the nearest existing folder before running the package manager and keeps it
-//!   from being renamed until the operation completes.
+//!   The executor checks the nearest existing folder before running the package manager and holds it
+//!   open without delete sharing until the operation completes.
+//!   Installers that delete or rename their own existing install root, such as rename-and-swap
+//!   upgrades, fail there; installing into a new folder, for example under Program Files, is not affected.
 //!   A supplied location is checked even with opaque installer arguments (WinGet `--override` and
 //!   `--custom`), but a location selected only inside those arguments is not.
 //! - The broker never uninstalls the Devolutions Agent, which hosts it, whether it is selected by its

@@ -54,9 +54,9 @@ use windows::Win32::Security::{
 };
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_APPEND_DATA, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_DELETE_CHILD,
-    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES, FILE_WRITE_DATA,
-    FILE_WRITE_EA, FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_NAME_NORMALIZED,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, FILE_WRITE_ATTRIBUTES,
+    FILE_WRITE_DATA, FILE_WRITE_EA, FileAttributeTagInfo, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
     GetFinalPathNameByHandleW, READ_CONTROL, VOLUME_NAME_GUID, VOLUME_NAME_NT, WRITE_DAC, WRITE_OWNER,
 };
 use windows::core::PWSTR;
@@ -840,6 +840,19 @@ pub(crate) struct VerifiedInstallLocation {
     _handles: Vec<File>,
 }
 
+/// Options that open an install location folder for verification and pin it without delete sharing.
+///
+/// Share modes only constrain other opens when the handle has data access, so the folder is also
+/// opened for listing.
+fn install_location_pin_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options
+        .access_mode(FILE_LIST_DIRECTORY.0 | FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
+        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
+        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0);
+    options
+}
+
 /// Verify that an elevated operation may install into `location`.
 ///
 /// The nearest existing folder, which is `location` itself when it exists, is opened through
@@ -849,17 +862,16 @@ pub(crate) struct VerifiedInstallLocation {
 /// and TrustedInstaller write it.
 /// Its ancestors must not be reparse points or be renamable by other principals.
 /// The returned guard must be kept alive until the installation completes.
+///
+/// The guard holds the folder without delete sharing: a renamed verified folder could be replaced
+/// by a junction while the guard is held.
+/// Installers can still create, modify and delete entries inside it, but installers that delete or
+/// rename an existing install root (such as rename-and-swap upgrades) fail.
 pub(crate) fn verify_elevated_install_location(
     opener: &dyn PathOpener,
     location: &Path,
 ) -> anyhow::Result<VerifiedInstallLocation> {
-    // Delete sharing is not granted: a renamed verified folder could be replaced by a junction
-    // while the guard is held, so the installer cannot rename or delete it during the operation.
-    let mut options = OpenOptions::new();
-    options
-        .access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0)
-        .share_mode(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0)
-        .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0);
+    let options = install_location_pin_options();
 
     let mut folder = location;
     let handle = loop {
@@ -2014,6 +2026,30 @@ mod tests {
 
         verify_elevated_install_location(&ServiceOpener, &location.join("App"))
             .expect("a new folder under Program Files must be accepted");
+    }
+
+    #[test]
+    fn pinned_install_location_accepts_installer_writes_but_not_root_rename() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("App");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("old.dll"), b"v1").unwrap();
+
+        let pin = install_location_pin_options().open(&root).unwrap();
+
+        std::fs::write(root.join("app.exe"), b"v2").unwrap();
+        std::fs::write(root.join("old.dll"), b"v2").unwrap();
+        std::fs::create_dir(root.join("plugins")).unwrap();
+        std::fs::write(root.join("plugins").join("plugin.dll"), b"v2").unwrap();
+        std::fs::rename(root.join("old.dll"), root.join("old.dll.bak")).unwrap();
+        std::fs::remove_file(root.join("old.dll.bak")).unwrap();
+        assert!(
+            std::fs::rename(&root, temp.path().join("App.old")).is_err(),
+            "the pinned install root must not be renamed"
+        );
+
+        drop(pin);
+        std::fs::rename(&root, temp.path().join("App.old")).expect("rename succeeds once the pin is released");
     }
 
     fn canonical_dir(path: &Path) -> PathBuf {
