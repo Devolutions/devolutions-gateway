@@ -275,16 +275,20 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
-    let gateway_db = gateway_db::open(&config::get_data_dir())
+    let data_dir = config::get_data_dir();
+    let gateway_db = gateway_db::GatewayDb::open(&data_dir)
         .await
         .context("failed to open the gateway database")?;
 
     // Initialize the agent tunnel when enabled.
     let agent_tunnel_handle = if conf.agent_tunnel.enabled {
-        let data_dir = config::get_data_dir();
         let hostname = &conf.hostname;
 
-        let agents_have_ca = agent_tunnel_libsql::LibSqlAgentAuthorizationStore::bound_ca(&gateway_db)
+        let agent_tunnel_conn = gateway_db
+            .connect()
+            .await
+            .context("failed to connect the agent tunnel to the gateway database")?;
+        let agents_have_ca = agent_tunnel_libsql::LibSqlAgentAuthorizationStore::bound_ca(&agent_tunnel_conn)
             .await
             .context("failed to read the agent tunnel CA identity")?
             .is_some();
@@ -298,7 +302,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .ca_spki_sha256()
             .context("failed to identify agent tunnel CA")?;
         let authorization_store =
-            agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(gateway_db.clone(), ca_spki_sha256)
+            agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(agent_tunnel_conn, ca_spki_sha256)
                 .await
                 .context("failed to initialize Agent authorization database")?;
         let authorization_store: agent_tunnel::authorization::DynAgentAuthorizationStore =

@@ -175,9 +175,12 @@ pub(super) async fn bind_test_listener() -> TestListener {
     let data_dir = Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("use utf-8 temporary path");
     let ca_manager = CaManager::load_or_generate(&data_dir).expect("generate test ca");
     let ca_spki_sha256 = ca_manager.ca_spki_sha256().expect("hash test CA public key");
-    let gateway_db = gateway_db::open_path(":memory:")
+    let gateway_db = gateway_db::GatewayDb::open_path(":memory:")
         .await
-        .expect("open test gateway database");
+        .expect("open test gateway database")
+        .connect()
+        .await
+        .expect("connect to test gateway database");
     let authorization_store = agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(gateway_db, ca_spki_sha256)
         .await
         .expect("open test Agent authorization store");

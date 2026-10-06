@@ -9,9 +9,9 @@ extern crate tracing;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
-use libsql::{Connection, TransactionBehavior, params};
+use libsql::{Connection, Database, TransactionBehavior, params};
 
-pub const FILE_NAME: &str = "gateway.db";
+const FILE_NAME: &str = "gateway.db";
 
 /// Gateway 2026.3 kept the agent tunnel tables in a file of their own.
 const LEGACY_AGENT_TUNNEL_FILE_NAME: &str = "agent_tunnel.db";
@@ -30,52 +30,78 @@ const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/02_prefix_agent_tunnel_tables.sql"),
 ];
 
-/// Opens `gateway.db` in `data_dir`, creating it or bringing its tables up to date.
-///
-/// The first time a Gateway that ran 2026.3 starts, its `agent_tunnel.db` becomes `gateway.db`.
-pub async fn open(data_dir: &Utf8Path) -> anyhow::Result<Connection> {
-    let path = data_dir.join(FILE_NAME);
-    adopt_legacy_agent_tunnel_database(&data_dir.join(LEGACY_AGENT_TUNNEL_FILE_NAME), &path).await?;
-    open_path(path.as_str()).await
+/// The open `gateway.db`, ready to hand a connection to each feature that keeps tables in it.
+#[derive(Debug)]
+pub struct GatewayDb {
+    database: Database,
 }
 
-/// Opens the database at `path` (`:memory:` works too), creating it or bringing its tables up to date.
-pub async fn open_path(path: &str) -> anyhow::Result<Connection> {
-    let conn = connect(path).await?;
+impl GatewayDb {
+    /// Opens `gateway.db` in `data_dir`, creating it or bringing its tables up to date.
+    ///
+    /// The first time a Gateway that ran 2026.3 starts, its `agent_tunnel.db` becomes `gateway.db`.
+    pub async fn open(data_dir: &Utf8Path) -> anyhow::Result<Self> {
+        let path = data_dir.join(FILE_NAME);
+        adopt_legacy_agent_tunnel_database(&data_dir.join(LEGACY_AGENT_TUNNEL_FILE_NAME), &path).await?;
+        Self::open_path(path.as_str()).await
+    }
 
-    conn.execute_batch(PRAGMAS)
-        .await
-        .context("apply gateway database PRAGMAs")?;
-    migrate(&conn).await?;
+    /// Opens the database at `path`, creating it or bringing its tables up to date.
+    ///
+    /// With `:memory:`, every connection gets its own empty database with up-to-date tables, which is handy in tests.
+    pub async fn open_path(path: &str) -> anyhow::Result<Self> {
+        let database = libsql::Builder::new_local(path)
+            .build()
+            .await
+            .with_context(|| format!("build database {path}"))?;
+        let db = Self { database };
 
-    Ok(conn)
-}
+        db.connect().await?;
 
-async fn connect(path: &str) -> anyhow::Result<Connection> {
-    libsql::Builder::new_local(path)
-        .build()
-        .await
-        .with_context(|| format!("build database {path}"))?
-        .connect()
-        .with_context(|| format!("connect to database {path}"))
+        Ok(db)
+    }
+
+    /// Gives a feature a connection of its own.
+    ///
+    /// SQLite tracks transactions per connection, so features sharing one connection would end up inside each
+    /// other's transactions. Each feature should call this once and keep its connection.
+    pub async fn connect(&self) -> anyhow::Result<Connection> {
+        let conn = self.database.connect().context("connect to the gateway database")?;
+
+        conn.execute_batch(PRAGMAS)
+            .await
+            .context("apply gateway database PRAGMAs")?;
+        migrate(&conn).await?;
+
+        Ok(conn)
+    }
 }
 
 async fn migrate(conn: &Connection) -> anyhow::Result<()> {
-    let user_version = schema_version(conn).await?;
-
-    if MIGRATIONS.len() < user_version {
-        bail!(
-            "gateway database schema version {user_version} is newer than supported version {}",
-            MIGRATIONS.len()
-        );
+    if schema_version(conn).await? == MIGRATIONS.len() {
+        return Ok(());
     }
 
-    for (index, migration) in MIGRATIONS.iter().enumerate().skip(user_version) {
-        let version = index + 1;
+    loop {
+        // Another connection may migrate at the same time, so the version is read again under the write lock.
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .await
-            .with_context(|| format!("begin gateway database migration {version}"))?;
+            .context("begin gateway database migration")?;
+        let user_version = schema_version(&tx).await?;
+
+        let Some(migration) = MIGRATIONS.get(user_version) else {
+            if MIGRATIONS.len() < user_version {
+                bail!(
+                    "gateway database schema version {user_version} is newer than supported version {}",
+                    MIGRATIONS.len()
+                );
+            }
+
+            return Ok(());
+        };
+
+        let version = user_version + 1;
         tx.execute_batch(migration)
             .await
             .with_context(|| format!("apply gateway database migration {version}"))?;
@@ -86,8 +112,6 @@ async fn migrate(conn: &Connection) -> anyhow::Result<()> {
             .await
             .with_context(|| format!("commit gateway database migration {version}"))?;
     }
-
-    Ok(())
 }
 
 async fn schema_version(conn: &Connection) -> anyhow::Result<usize> {
@@ -108,14 +132,27 @@ async fn schema_version(conn: &Connection) -> anyhow::Result<usize> {
 /// We write a complete copy first and only then rename it into place, so `gateway.db` either doesn't exist yet
 /// or is whole. If Gateway stops halfway, the next start simply does it again.
 async fn adopt_legacy_agent_tunnel_database(legacy: &Utf8Path, path: &Utf8Path) -> anyhow::Result<()> {
-    if path.exists() || !legacy.exists() {
+    if !legacy.exists() {
+        return Ok(());
+    }
+
+    if path.exists() {
+        warn!(
+            %legacy,
+            "Ignoring an old agent tunnel database because gateway.db already exists; its Agents are not imported. Delete the file to silence this warning"
+        );
         return Ok(());
     }
 
     let copy = Utf8PathBuf::from(format!("{path}.tmp"));
     remove_file_if_exists(&copy).with_context(|| format!("remove the incomplete copy {copy}"))?;
 
-    let legacy_conn = connect(legacy.as_str()).await?;
+    let legacy_conn = libsql::Builder::new_local(legacy.as_str())
+        .build()
+        .await
+        .with_context(|| format!("build database {legacy}"))?
+        .connect()
+        .with_context(|| format!("connect to database {legacy}"))?;
     legacy_conn
         .execute("VACUUM INTO ?1", params![copy.as_str()])
         .await
@@ -154,6 +191,10 @@ mod tests {
         (temp_dir, data_dir)
     }
 
+    async fn open_dir(data_dir: &Utf8Path) -> anyhow::Result<Connection> {
+        GatewayDb::open(data_dir).await?.connect().await
+    }
+
     async fn user_version(conn: &Connection) -> usize {
         schema_version(conn).await.expect("read schema version")
     }
@@ -173,7 +214,12 @@ mod tests {
 
     /// Builds the `agent_tunnel.db` that Gateway 2026.3 leaves behind.
     async fn write_legacy_database(path: &Utf8Path) {
-        let conn = connect(path.as_str()).await.expect("open legacy database");
+        let conn = libsql::Builder::new_local(path.as_str())
+            .build()
+            .await
+            .expect("build legacy database")
+            .connect()
+            .expect("open legacy database");
         conn.execute_batch(PRAGMAS).await.expect("apply legacy PRAGMAs");
         conn.execute_batch(MIGRATIONS[0]).await.expect("create legacy tables");
         conn.execute(
@@ -189,7 +235,12 @@ mod tests {
 
     #[tokio::test]
     async fn new_database_has_prefixed_agent_tunnel_tables() {
-        let conn = open_path(":memory:").await.expect("open gateway database");
+        let conn = GatewayDb::open_path(":memory:")
+            .await
+            .expect("open gateway database")
+            .connect()
+            .await
+            .expect("connect to gateway database");
 
         assert_eq!(user_version(&conn).await, MIGRATIONS.len());
         assert!(table_exists(&conn, "agent_tunnel_metadata").await);
@@ -205,7 +256,7 @@ mod tests {
         let legacy = data_dir.join(LEGACY_AGENT_TUNNEL_FILE_NAME);
         write_legacy_database(&legacy).await;
 
-        let conn = open(&data_dir).await.expect("open gateway database");
+        let conn = open_dir(&data_dir).await.expect("open gateway database");
 
         assert!(!legacy.exists());
         assert!(data_dir.join(FILE_NAME).exists());
@@ -233,7 +284,7 @@ mod tests {
         write_legacy_database(&legacy).await;
         std::fs::write(data_dir.join(format!("{FILE_NAME}.tmp")), b"half written").expect("leave an incomplete copy");
 
-        let conn = open(&data_dir).await.expect("open gateway database");
+        let conn = open_dir(&data_dir).await.expect("open gateway database");
 
         assert!(table_exists(&conn, "agent_tunnel_metadata").await);
         assert!(!data_dir.join(format!("{FILE_NAME}.tmp")).exists());
@@ -242,11 +293,11 @@ mod tests {
     #[tokio::test]
     async fn existing_gateway_database_is_kept() {
         let (_temp_dir, data_dir) = temp_data_dir();
-        drop(open(&data_dir).await.expect("create gateway database"));
+        drop(open_dir(&data_dir).await.expect("create gateway database"));
         let legacy = data_dir.join(LEGACY_AGENT_TUNNEL_FILE_NAME);
         write_legacy_database(&legacy).await;
 
-        let conn = open(&data_dir).await.expect("reopen gateway database");
+        let conn = open_dir(&data_dir).await.expect("reopen gateway database");
 
         assert!(legacy.exists());
         let rows = conn
@@ -260,15 +311,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn each_connection_has_its_own_transactions() {
+        let (_temp_dir, data_dir) = temp_data_dir();
+        let db = GatewayDb::open(&data_dir).await.expect("open gateway database");
+        let first = db.connect().await.expect("connect first feature");
+        let second = db.connect().await.expect("connect second feature");
+
+        let tx = first
+            .transaction_with_behavior(TransactionBehavior::Deferred)
+            .await
+            .expect("begin a transaction on the first connection");
+        let second_tx = second
+            .transaction_with_behavior(TransactionBehavior::Deferred)
+            .await
+            .expect("the second connection is not inside the first one's transaction");
+
+        drop(second_tx);
+        drop(tx);
+    }
+
+    #[tokio::test]
     async fn newer_schema_is_rejected() {
         let (_temp_dir, data_dir) = temp_data_dir();
-        let conn = open(&data_dir).await.expect("create gateway database");
+        let conn = open_dir(&data_dir).await.expect("create gateway database");
         conn.execute_batch("PRAGMA user_version = 99")
             .await
             .expect("set unsupported schema version");
         drop(conn);
 
-        let error = open(&data_dir).await.expect_err("newer schema must be rejected");
+        let error = open_dir(&data_dir).await.expect_err("newer schema must be rejected");
 
         assert!(error.to_string().contains("newer than supported"));
     }

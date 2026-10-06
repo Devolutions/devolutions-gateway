@@ -15,10 +15,11 @@ pub struct LibSqlAgentAuthorizationStore {
 }
 
 impl LibSqlAgentAuthorizationStore {
-    /// Opens the store on a `gateway.db` connection from the `gateway-db` crate.
+    /// Opens the store on a `gateway.db` connection of its own, from `GatewayDb::connect` in the `gateway-db` crate.
     ///
-    /// The stored Agents only make sense with the CA that signed their certificates, so the first open ties the
-    /// store to `ca_spki_sha256`, and later opens refuse any other CA.
+    /// The connection must already have up-to-date `agent_tunnel_*` tables; opening checks them and fails if they
+    /// don't match. The stored Agents only make sense with the CA that signed their certificates, so the first open
+    /// ties the store to `ca_spki_sha256`, and later opens refuse any other CA.
     pub async fn open(conn: Connection, ca_spki_sha256: SpkiSha256) -> anyhow::Result<Self> {
         let store = Self { conn: Mutex::new(conn) };
 
@@ -56,20 +57,44 @@ impl LibSqlAgentAuthorizationStore {
 
     async fn bind_ca(&self, ca_spki_sha256: SpkiSha256) -> anyhow::Result<()> {
         let conn = self.conn.lock().await;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await
+            .context("begin Agent authorization CA binding")?;
 
-        match Self::bound_ca(&conn).await? {
-            Some(stored) if stored == ca_spki_sha256 => Ok(()),
+        match Self::bound_ca(&tx).await? {
+            Some(stored) if stored == ca_spki_sha256 => return Ok(()),
             Some(_) => bail!("Agent authorization database belongs to a different CA"),
-            None => {
-                conn.execute(
-                    "INSERT INTO agent_tunnel_metadata (key, value) VALUES (?1, ?2)",
-                    params![CA_SPKI_SHA256_KEY, ca_spki_sha256.to_vec()],
-                )
-                .await
-                .context("bind Agent authorization database to CA")?;
-                Ok(())
-            }
+            None => {}
         }
+
+        let has_agent_data = tx
+            .query(
+                "SELECT 1 FROM agent_tunnel_accepted_agents
+                 UNION ALL SELECT 1 FROM agent_tunnel_deleted_agent_keys
+                 UNION ALL SELECT 1 FROM agent_tunnel_enrollment_attempts
+                 LIMIT 1",
+                (),
+            )
+            .await
+            .context("query Agent data before binding a CA")?
+            .next()
+            .await
+            .context("read Agent data before binding a CA")?
+            .is_some();
+        if has_agent_data {
+            bail!("Agent authorization database has Agent data but is missing CA metadata");
+        }
+
+        tx.execute(
+            "INSERT INTO agent_tunnel_metadata (key, value) VALUES (?1, ?2)",
+            params![CA_SPKI_SHA256_KEY, ca_spki_sha256.to_vec()],
+        )
+        .await
+        .context("bind Agent authorization database to CA")?;
+        tx.commit().await.context("commit Agent authorization CA binding")?;
+
+        Ok(())
     }
 
     async fn validate_integrity_and_schema(&self) -> anyhow::Result<()> {
@@ -464,9 +489,12 @@ impl AgentAuthorizationStore for LibSqlAgentAuthorizationStore {
 mod tests {
     use super::*;
 
+    async fn connect(path: &str) -> anyhow::Result<Connection> {
+        gateway_db::GatewayDb::open_path(path).await?.connect().await
+    }
+
     async fn open_store(path: &str, ca_spki_sha256: SpkiSha256) -> anyhow::Result<LibSqlAgentAuthorizationStore> {
-        let conn = gateway_db::open_path(path).await?;
-        LibSqlAgentAuthorizationStore::open(conn, ca_spki_sha256).await
+        LibSqlAgentAuthorizationStore::open(connect(path).await?, ca_spki_sha256).await
     }
 
     fn enrollment(agent_id: Uuid) -> EnrollmentAttempt {
@@ -717,9 +745,7 @@ mod tests {
         let database_path = temp_dir.path().join("gateway.db");
         let database_path = database_path.to_str().expect("temporary database path is UTF-8");
 
-        let conn = gateway_db::open_path(database_path)
-            .await
-            .expect("open gateway database");
+        let conn = connect(database_path).await.expect("open gateway database");
         let bound = LibSqlAgentAuthorizationStore::bound_ca(&conn)
             .await
             .expect("read bound CA");
@@ -730,13 +756,98 @@ mod tests {
             .expect("open Agent authorization store");
         drop(store);
 
-        let conn = gateway_db::open_path(database_path)
-            .await
-            .expect("reopen gateway database");
+        let conn = connect(database_path).await.expect("reopen gateway database");
         let bound = LibSqlAgentAuthorizationStore::bound_ca(&conn)
             .await
             .expect("read bound CA");
         assert_eq!(bound, Some([0xCA; 32]));
+    }
+
+    #[tokio::test]
+    async fn database_with_agents_but_no_ca_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("create temporary directory");
+        let database_path = temp_dir.path().join("gateway.db");
+        let database_path = database_path.to_str().expect("temporary database path is UTF-8");
+        let store = open_store(database_path, [0xCA; 32])
+            .await
+            .expect("open Agent authorization store");
+        store.enroll(enrollment(Uuid::new_v4())).await.expect("enroll Agent");
+        drop(store);
+
+        let conn = connect(database_path).await.expect("reopen gateway database");
+        conn.execute(
+            "DELETE FROM agent_tunnel_metadata WHERE key = ?1",
+            params![CA_SPKI_SHA256_KEY],
+        )
+        .await
+        .expect("delete CA metadata");
+
+        let error = LibSqlAgentAuthorizationStore::open(conn, [0xBB; 32])
+            .await
+            .err()
+            .expect("Agents without a CA must not be bound to a new CA");
+        assert!(error.to_string().contains("missing CA"));
+    }
+
+    #[tokio::test]
+    async fn agents_enrolled_on_2026_3_still_authorize_after_the_move() {
+        let temp_dir = tempfile::tempdir().expect("create temporary directory");
+        let data_dir =
+            camino::Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("temporary path is UTF-8");
+        let agent_id = Uuid::new_v4();
+
+        let legacy = libsql::Builder::new_local(data_dir.join("agent_tunnel.db").as_str())
+            .build()
+            .await
+            .expect("build 2026.3 database")
+            .connect()
+            .expect("open 2026.3 database");
+        legacy
+            .execute_batch(include_str!("../../gateway-db/migrations/01_agent_tunnel.sql"))
+            .await
+            .expect("create 2026.3 tables");
+        legacy
+            .execute(
+                "INSERT INTO metadata (key, value) VALUES (?1, ?2)",
+                params![CA_SPKI_SHA256_KEY, vec![0xCAu8; 32]],
+            )
+            .await
+            .expect("bind 2026.3 CA");
+        legacy
+            .execute(
+                "INSERT INTO accepted_agents (agent_id, name, client_spki_sha256, enrollment_jti) VALUES (?1, ?2, ?3, ?4)",
+                params![agent_id.to_string(), "montreal-office", vec![0x11u8; 32], Uuid::new_v4().to_string()],
+            )
+            .await
+            .expect("store 2026.3 Agent");
+        legacy
+            .execute_batch("PRAGMA user_version = 1")
+            .await
+            .expect("record 2026.3 schema version");
+        drop(legacy);
+
+        let conn = gateway_db::GatewayDb::open(&data_dir)
+            .await
+            .expect("open gateway database")
+            .connect()
+            .await
+            .expect("connect to gateway database");
+        assert_eq!(
+            LibSqlAgentAuthorizationStore::bound_ca(&conn)
+                .await
+                .expect("read bound CA"),
+            Some([0xCA; 32])
+        );
+        let store = LibSqlAgentAuthorizationStore::open(conn, [0xCA; 32])
+            .await
+            .expect("open Agent authorization store");
+
+        let accepted = store
+            .authorize(agent_id, [0x11; 32])
+            .await
+            .expect("authorize moved Agent")
+            .expect("Agent is still accepted");
+        assert_eq!(accepted.name, "montreal-office");
     }
 
     #[tokio::test]

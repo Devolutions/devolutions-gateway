@@ -140,6 +140,7 @@ dependencies = [
  "agent-tunnel",
  "anyhow",
  "async-trait",
+ "camino",
  "gateway-db",
  "libsql",
  "tempfile",
