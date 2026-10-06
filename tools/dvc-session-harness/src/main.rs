@@ -224,15 +224,23 @@ fn log_event(scenario: Scenario, cycle: Option<u32>, event: &str, detail: impl A
 
 #[cfg(windows)]
 fn classify_pipe_disconnect(error: &anyhow::Error) -> Option<&'static str> {
+    fn kind_from_hresult(code: i32) -> Option<&'static str> {
+        match u32::from_ne_bytes(code.to_ne_bytes()) {
+            0x8007_006D => Some("broken-pipe"),
+            0x8007_00E8 => Some("no-data"),
+            0x8007_00E9 => Some("pipe-not-connected"),
+            _ => None,
+        }
+    }
+
     error.chain().find_map(|source| {
-        source.downcast_ref::<win_api_wrappers::Error>().and_then(|error| {
-            match u32::from_ne_bytes(error.code().to_ne_bytes()) {
-                0x8007_006D => Some("broken-pipe"),
-                0x8007_00E8 => Some("no-data"),
-                0x8007_00E9 => Some("pipe-not-connected"),
-                _ => None,
-            }
-        })
+        if let Some(error) = source.downcast_ref::<win_api_wrappers::Error>() {
+            return kind_from_hresult(error.code());
+        }
+
+        source
+            .downcast_ref::<win_api_wrappers::raw::core::Error>()
+            .and_then(|error| kind_from_hresult(error.code().0))
     })
 }
 
