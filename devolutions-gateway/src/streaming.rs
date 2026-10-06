@@ -97,14 +97,16 @@ pub(crate) enum ShadowCloseCode {
 pub(crate) fn reject_shadow(ws: axum::extract::WebSocketUpgrade, code: ShadowCloseCode) -> Response {
     // Echo an offered shadow protocol so that browsers open the socket and see the close code.
     let (ws, _) = negotiate_shadow_protocol(ws);
-    ws.on_upgrade(move |mut socket| async move {
-        let _ = socket
-            .send(axum::extract::ws::Message::Close(Some(CloseFrame {
-                code: code as u16,
-                reason: Utf8Bytes::from_static(""),
-            })))
-            .await;
-    })
+    ws.on_upgrade(move |mut socket| async move { close_shadow(&mut socket, code).await })
+}
+
+async fn close_shadow(socket: &mut WebSocket, code: ShadowCloseCode) {
+    let _ = socket
+        .send(axum::extract::ws::Message::Close(Some(CloseFrame {
+            code: code as u16,
+            reason: Utf8Bytes::from_static(""),
+        })))
+        .await;
 }
 
 /// Streams the recording that `stream_state` describes, or closes the upgrade with the reason it can’t.
@@ -150,7 +152,18 @@ pub(crate) async fn stream_recording(
                 return reject_shadow(ws, ShadowCloseCode::StreamingEnded);
             }
 
-            ws.on_upgrade(move |socket| async move {
+            ws.on_upgrade(move |mut socket| async move {
+                let mut opening_shutdown = shutdown_signal.clone();
+                tokio::select! {
+                    is_open = wait_until_clip_is_open(stream_state.clone(), index) => {
+                        if !is_open {
+                            close_shadow(&mut socket, ShadowCloseCode::StreamingEnded).await;
+                            return;
+                        }
+                    }
+                    () = opening_shutdown.wait() => return,
+                }
+
                 let shutdown_notify = Arc::new(Notify::new());
                 let notify = Arc::clone(&shutdown_notify);
                 let data_appended = stream_state.clone();
@@ -277,6 +290,14 @@ async fn setup_terminal_streaming(
     .inspect_err(|e| error!(error = format!("{e:#}"), "Streaming file failed"))?;
 
     Ok(())
+}
+
+/// Waits until the producer opened the clip at `index`, so that its file exists, and returns whether it is still active.
+async fn wait_until_clip_is_open(mut stream_state: watch::Receiver<RecordingStreamState>, index: usize) -> bool {
+    stream_state
+        .wait_for(|state| !state.is_opening(index))
+        .await
+        .is_ok_and(|state| state.is_active(index))
 }
 
 /// Returns once the clip at `index` can no longer receive data.
@@ -727,6 +748,28 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(25), wait_for_recording_clip_end(receiver, 0))
             .await
             .expect("clip end should already be visible");
+    }
+
+    #[tokio::test]
+    async fn terminal_viewer_waits_for_the_clip_file_to_open() {
+        let state = RecordingStreamState::for_test(vec!["recording-0.cast".into()], StreamLifecycle::Opening);
+        let (sender, receiver) = watch::channel(state);
+        let opened = tokio::spawn(wait_until_clip_is_open(receiver, 0));
+
+        tokio::time::sleep(Duration::from_millis(25)).await;
+        assert!(!opened.is_finished(), "the viewer should wait while the clip opens");
+
+        sender.send_modify(|state| state.lifecycle = StreamLifecycle::Recording);
+        assert!(opened.await.expect("join"));
+    }
+
+    #[tokio::test]
+    async fn terminal_viewer_stops_when_the_clip_never_opens() {
+        let state = RecordingStreamState::for_test(vec!["recording-0.cast".into()], StreamLifecycle::Opening);
+        let (sender, receiver) = watch::channel(state);
+        disconnect(&sender);
+
+        assert!(!wait_until_clip_is_open(receiver, 0).await);
     }
 
     /// Simulates the recording manager’s reconnection: the clip list grows and the new clip opens.
