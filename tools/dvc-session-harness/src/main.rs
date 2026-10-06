@@ -223,6 +223,20 @@ fn log_event(scenario: Scenario, cycle: Option<u32>, event: &str, detail: impl A
 }
 
 #[cfg(windows)]
+fn classify_pipe_disconnect(error: &anyhow::Error) -> Option<&'static str> {
+    error.chain().find_map(|source| {
+        source
+            .downcast_ref::<windows::core::Error>()
+            .and_then(|error| match error.code().0 {
+                0x8007_006D => Some("broken-pipe"),
+                0x8007_00E8 => Some("no-data"),
+                0x8007_00E9 => Some("pipe-not-connected"),
+                _ => None,
+            })
+    })
+}
+
+#[cfg(windows)]
 #[derive(Default)]
 struct NowMessageDissector {
     start_pos: usize,
@@ -553,8 +567,23 @@ fn run_protocol_shim(
             bail!("timed out waiting for client capset");
         }
 
-        let messages = read_now_messages(&channel_file, &mut dissector, &mut read_buffer)
-            .context("read handshake messages from DVC channel")?;
+        let messages = match read_now_messages(&channel_file, &mut dissector, &mut read_buffer)
+            .context("read handshake messages from DVC channel")
+        {
+            Ok(messages) => messages,
+            Err(error) => {
+                if let Some(kind) = classify_pipe_disconnect(&error) {
+                    log_event(
+                        scenario,
+                        Some(cycle),
+                        "shim-peer-closed",
+                        format!("peer disconnected during handshake ({kind})"),
+                    );
+                    return Ok(());
+                }
+                return Err(error);
+            }
+        };
 
         for message in messages {
             match message {
@@ -617,7 +646,18 @@ fn run_protocol_shim(
         let now = Instant::now();
         if now >= next_heartbeat {
             let heartbeat_msg: NowMessage<'_> = NowChannelHeartbeatMsg::default().into();
-            send_message(&channel_file, &heartbeat_msg).context("send heartbeat")?;
+            if let Err(error) = send_message(&channel_file, &heartbeat_msg).context("send heartbeat") {
+                if let Some(kind) = classify_pipe_disconnect(&error) {
+                    log_event(
+                        scenario,
+                        Some(cycle),
+                        "shim-peer-closed",
+                        format!("peer disconnected during heartbeat ({kind})"),
+                    );
+                    return Ok(());
+                }
+                return Err(error);
+            }
             log_event(scenario, Some(cycle), "shim-heartbeat-sent", "sent heartbeat");
             next_heartbeat = now + heartbeat_interval;
         }
