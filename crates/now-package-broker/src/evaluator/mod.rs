@@ -54,9 +54,10 @@
 //! - An elevated custom install location must be on a local disk, contain no reparse point, and not be
 //!   writable by principals other than SYSTEM, Administrators and TrustedInstaller, including through
 //!   inheritable ACEs.
-//!   The executor checks the nearest existing folder before running the package manager.
-//!   An install location selected by opaque installer arguments (WinGet `--override` and `--custom`) is
-//!   not checked.
+//!   The executor checks the nearest existing folder before running the package manager and keeps it
+//!   from being renamed until the operation completes.
+//!   A supplied location is checked even with opaque installer arguments (WinGet `--override` and
+//!   `--custom`), but a location selected only inside those arguments is not.
 //! - The broker never uninstalls the Devolutions Agent, which hosts it.
 //!   WinGet may also select installed programs by their `ARP\...` identifiers, which this protection
 //!   does not cover; add Deny rules for other critical software and for such identifiers.
@@ -107,6 +108,9 @@ struct RequestFlags {
     no_upgrade: bool,
     /// Normalized custom install location, or `None` when it is absent, unknown or unacceptable.
     custom_install_location: Option<String>,
+    /// Normalized supplied install location, typed or passed through custom parameters, even when
+    /// installer arguments may override it.
+    supplied_install_location: Option<String>,
     custom_parameters: Vec<String>,
 }
 
@@ -128,6 +132,8 @@ impl RequestFlags {
             _ => Some(None),
         };
 
+        let supplied_install_location = supplied_location.clone().flatten();
+
         Self {
             interactive: request.options.interactive || custom.interactive,
             skip_hash_check: request.options.skip_hash_check || custom.skip_hash_check,
@@ -140,7 +146,10 @@ impl RequestFlags {
             has_uninstall_previous: request.options.uninstall_previous || custom.uninstall_previous,
             no_upgrade: request.options.no_upgrade || custom.no_upgrade,
             // Installer arguments may override a supplied location.
-            custom_install_location: supplied_location.flatten().filter(|_| !custom.installer_arguments),
+            custom_install_location: supplied_install_location
+                .clone()
+                .filter(|_| !custom.installer_arguments),
+            supplied_install_location,
             custom_parameters: request
                 .options
                 .custom_parameters
@@ -159,10 +168,13 @@ pub(crate) fn has_unacceptable_install_location(request: &PackageRequest) -> boo
     RequestFlags::from_request(request).has_unacceptable_install_location
 }
 
-/// Normalized custom install location the package manager will use, typed or passed through
-/// custom parameters, or `None` when there is none or it is unknown.
+/// Normalized install location the request supplies, typed or passed through custom parameters,
+/// or `None` when there is none.
+///
+/// Unlike policy matching, this keeps a supplied location even when opaque installer arguments
+/// may override it, because the package manager still receives it.
 pub(crate) fn custom_install_location(request: &PackageRequest) -> Option<String> {
-    RequestFlags::from_request(request).custom_install_location
+    RequestFlags::from_request(request).supplied_install_location
 }
 
 /// Whether a kill-before-operation entry, after [`normalize_kill_process_name`], is not an

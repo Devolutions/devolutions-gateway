@@ -143,6 +143,7 @@ mod tests {
             has_uninstall_previous: false,
             no_upgrade: false,
             custom_install_location: None,
+            supplied_install_location: None,
             custom_parameters: Vec::new(),
         }
     }

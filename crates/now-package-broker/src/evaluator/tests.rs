@@ -813,3 +813,26 @@ fn custom_parameter_user_scope_lowers_execution_elevation() {
     request.options.custom_parameters = custom(&["--scope", "user", "--scope", "machine"]);
     assert_eq!(super::effective_execution_elevation(&request), api::Elevation::Elevated);
 }
+
+#[test]
+fn supplied_install_location_is_kept_for_security_checks_when_installer_arguments_are_present() {
+    let mut request = make_request(api::Operation::Install, "Contoso.Tool");
+    request.options.custom_install_location = Some(r"c:\Users\alice\Downloads\App".to_owned());
+    request.options.custom_parameters = vec![api::CustomParameterString("--custom=/quiet".to_owned())];
+    assert_eq!(
+        super::custom_install_location(&request).as_deref(),
+        Some(r"C:\Users\alice\Downloads\App")
+    );
+
+    request.options.custom_install_location = None;
+    request.options.custom_parameters = vec![
+        api::CustomParameterString("--location".to_owned()),
+        api::CustomParameterString(r"C:\Tools\App".to_owned()),
+        api::CustomParameterString("--override".to_owned()),
+        api::CustomParameterString("/S".to_owned()),
+    ];
+    assert_eq!(
+        super::custom_install_location(&request).as_deref(),
+        Some(r"C:\Tools\App")
+    );
+}
