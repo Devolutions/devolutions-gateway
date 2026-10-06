@@ -24,6 +24,10 @@ interface MockPlaybackClip {
   resolveAppend: () => void;
   resolveFinish: () => void;
   setDuration: (duration: number) => void;
+  setBuffered: (start: number, end: number) => void;
+  userPause: () => void;
+  userResume: () => void;
+  userSeek: (time: number) => void;
   loaded: () => void;
   end: () => void;
 }
@@ -117,6 +121,8 @@ vi.mock('./playbackClip', () => ({
     private finishResolver!: () => void;
     private duration = 0;
     private ended = false;
+    private paused = false;
+    private bufferedRanges: Array<[number, number]> = [];
 
     constructor(readonly metadata: PlaybackClipMetadata) {
       this.openPromise = new Promise((resolve) => {
@@ -137,8 +143,37 @@ vi.mock('./playbackClip', () => ({
         load: { configurable: true, value: vi.fn() },
         duration: { configurable: true, get: () => this.duration },
         ended: { configurable: true, get: () => this.ended },
+        paused: { configurable: true, get: () => this.paused },
+        buffered: {
+          configurable: true,
+          get: () => ({
+            length: this.bufferedRanges.length,
+            start: (index: number) => this.bufferedRanges[index][0],
+            end: (index: number) => this.bufferedRanges[index][1],
+          }),
+        },
       });
       mocks.clips.push(this);
+    }
+
+    setBuffered(start: number, end: number): void {
+      this.bufferedRanges = [[start, end]];
+    }
+
+    userPause(): void {
+      this.paused = true;
+      this.video.dispatchEvent(new Event('pause'));
+    }
+
+    userResume(): void {
+      this.paused = false;
+      this.video.dispatchEvent(new Event('play'));
+    }
+
+    userSeek(time: number): void {
+      this.paused = false;
+      this.video.currentTime = time;
+      this.video.dispatchEvent(new Event('seeked'));
     }
 
     resolveOpen(): void {
@@ -541,5 +576,107 @@ describe('ShadowPlayer', () => {
     expect(player._videoElement).toBe(firstClip.video);
     expect(firstClip.video.currentTime).toBe(0);
     expect(secondClip.video.currentTime).toBe(0);
+  });
+
+  async function startLiveClip(): Promise<{
+    player: ShadowPlayer;
+    socket: MockServerWebSocket;
+    clip: MockPlaybackClip;
+  }> {
+    const { player, socket } = createPlayer();
+    const start = socket.emitMessage(firstMetadata);
+    await flushMicrotasks();
+    const clip = mocks.clips[0];
+    clip.resolveOpen();
+    await start;
+    clip.loaded();
+    clip.resolveAppend();
+    return { player, socket, clip };
+  }
+
+  const chunk: ServerMessage = { type: 'chunk', data: new Uint8Array([1]) };
+
+  it('jumps a live viewer to the live edge once data resumes after an idle screen', async () => {
+    const { socket, clip } = await startLiveClip();
+    clip.video.currentTime = 1.87;
+    clip.setBuffered(0, 10.8);
+
+    await socket.emitMessage(chunk);
+
+    expect(clip.video.currentTime).toBeCloseTo(10.55);
+  });
+
+  it('stops following the live edge while paused or in history, and follows again near the edge', async () => {
+    const { socket, clip } = await startLiveClip();
+    clip.setBuffered(0, 12);
+
+    clip.userPause();
+    clip.video.currentTime = 2;
+    await socket.emitMessage(chunk);
+    expect(clip.video.currentTime).toBe(2);
+
+    clip.userSeek(3);
+    await socket.emitMessage(chunk);
+    expect(clip.video.currentTime).toBe(3);
+
+    clip.userSeek(11.5);
+    clip.setBuffered(0, 20);
+    clip.video.currentTime = 12;
+    await socket.emitMessage(chunk);
+    expect(clip.video.currentTime).toBeCloseTo(19.75);
+  });
+
+  it('follows the live edge again once a resumed viewer is back within the threshold', async () => {
+    const { socket, clip } = await startLiveClip();
+    clip.setBuffered(0, 12);
+    clip.video.currentTime = 9;
+
+    clip.userPause();
+    clip.userResume();
+    await socket.emitMessage(chunk);
+    expect(clip.video.currentTime).toBe(9);
+
+    clip.setBuffered(0, 20);
+    await socket.emitMessage(chunk);
+    expect(clip.video.currentTime).toBeCloseTo(19.75);
+  });
+
+  it('keeps a viewer that resumed far behind the live edge where it is', async () => {
+    const { socket, clip } = await startLiveClip();
+    clip.setBuffered(0, 12);
+    clip.video.currentTime = 2;
+
+    clip.userPause();
+    clip.userResume();
+    await socket.emitMessage(chunk);
+    clip.setBuffered(0, 20);
+    await socket.emitMessage(chunk);
+
+    expect(clip.video.currentTime).toBe(2);
+  });
+
+  it('releases the media of the oldest segments beyond the retained limit', async () => {
+    const { player, socket } = createPlayer();
+    const start = socket.emitMessage(firstMetadata);
+    await flushMicrotasks();
+    mocks.clips[0].resolveOpen();
+    await start;
+    mocks.clips[0].setDuration(4);
+
+    for (let sequence = 1; sequence <= 10; sequence++) {
+      const next = socket.emitMessage(secondMetadata);
+      await flushMicrotasks();
+      mocks.clips[sequence - 1].resolveFinish();
+      await flushMicrotasks();
+      mocks.clips[sequence].resolveOpen();
+      await next;
+    }
+
+    const container = player.shadowRoot?.querySelector('.container');
+    expect(container?.contains(mocks.clips[0].video)).toBe(false);
+    expect(container?.contains(mocks.clips[1].video)).toBe(true);
+    const segments = player.shadowRoot?.querySelectorAll('.timeline-segment') ?? [];
+    expect(segments).toHaveLength(11);
+    expect(segments[0].getAttribute('aria-disabled')).toBe('true');
   });
 });

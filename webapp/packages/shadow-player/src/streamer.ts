@@ -38,6 +38,13 @@ export type ShadowPlayerError =
 type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
 type TerminalOutcome = 'none' | 'end' | 'error' | 'closed';
 
+/** How far a live viewer may fall behind the newest frame before it jumps forward. */
+const LIVE_EDGE_THRESHOLD_SECONDS = 5;
+/** How far behind the newest frame a jump lands, so playback does not immediately wait for data. */
+const LIVE_EDGE_SAFETY_MARGIN_SECONDS = 0.25;
+/** Older segments beyond this count release their media, so long sessions don't keep every segment in memory. */
+const MAX_RETAINED_SEGMENTS = 10;
+
 export class ShadowPlayer extends HTMLElement {
   _videoElement: HTMLVideoElement | null = null;
   _src: string | null = null;
@@ -62,6 +69,9 @@ export class ShadowPlayer extends HTMLElement {
   private controls: PlaybackControls | null = null;
   private controlLabels = defaultPlaybackControlLabels;
   private readonly segmentStartTimes = new Map<PlaybackClip, number>();
+  private readonly releasedDurations = new Map<PlaybackClip, number>();
+  /** Whether playback follows the live edge; pausing or seeking back stops it, and seeking near the edge resumes it. */
+  private followingLive = true;
   private readonly onFullscreenChange = () => this.renderPlayerControls();
 
   static get observedAttributes(): string[] {
@@ -244,14 +254,17 @@ export class ShadowPlayer extends HTMLElement {
 
   private replay(): void {
     this._replayButton?.classList.remove('visible');
-    const firstClip = this.clips[0];
+    const firstClip = this.clips.find((clip) => !this.releasedDurations.has(clip));
     if (!firstClip) {
       return;
     }
     for (const clip of this.clips) {
-      clip.video.currentTime = 0;
+      if (!this.releasedDurations.has(clip)) {
+        clip.video.currentTime = 0;
+      }
     }
     this.shouldPlay = true;
+    this.followingLive = false;
     this.activateClip(firstClip);
     this.renderAllSegments();
     this.renderPlayerControls();
@@ -266,6 +279,7 @@ export class ShadowPlayer extends HTMLElement {
 
     this.terminalOutcome = 'none';
     this.streamEnded = false;
+    this.followingLive = true;
     this._replayButton?.classList.remove('visible');
     this.renderPlayerControls();
     const websocket = new ServerWebSocket(value);
@@ -316,6 +330,7 @@ export class ShadowPlayer extends HTMLElement {
         throw new Error('Received a chunk before a segment started');
       }
       await clip.append(message.data);
+      this.catchUpToLiveEdge();
       this.sendRequest(websocket, 'pull');
       return;
     }
@@ -342,8 +357,59 @@ export class ShadowPlayer extends HTMLElement {
     this.clips.push(clip);
     this.receivingClip = clip;
     this._container?.insertBefore(clip.video, this._replayButton);
+    this.releaseOldSegments();
     this.renderAllSegments();
     await clip.open();
+  }
+
+  /**
+   * Releases the media of the oldest segments behind the active one, keeping their place on the timeline.
+   *
+   * Segments from the active one onward stay, because playback continues through them.
+   */
+  private releaseOldSegments(): void {
+    const retained = this.clips.filter((clip) => !this.releasedDurations.has(clip));
+    let excess = retained.length - MAX_RETAINED_SEGMENTS;
+    for (const clip of retained) {
+      if (excess <= 0 || clip === this.activeClip || clip === this.receivingClip) {
+        break;
+      }
+      this.releasedDurations.set(clip, this.clipDuration(clip));
+      this.playableClips.delete(clip);
+      clip.dispose();
+      excess--;
+    }
+  }
+
+  /** Jumps forward when a live viewer falls behind, for example after the recorded screen sat idle. */
+  private catchUpToLiveEdge(): void {
+    const clip = this.activeClip;
+    if (!clip || clip !== this.receivingClip || clip.video.paused) {
+      return;
+    }
+    if (!this.followingLive) {
+      // Playing within the threshold again, for example after a short pause, follows the live edge again.
+      this.followingLive = this.isNearLiveEdge(clip);
+      return;
+    }
+    const buffered = clip.video.buffered;
+    if (buffered.length === 0) {
+      return;
+    }
+    const latestStart = buffered.start(buffered.length - 1);
+    const latestEnd = buffered.end(buffered.length - 1);
+    const currentTime = clip.video.currentTime;
+    if (currentTime < latestStart || latestEnd - currentTime > LIVE_EDGE_THRESHOLD_SECONDS) {
+      clip.video.currentTime = Math.max(latestStart, latestEnd - LIVE_EDGE_SAFETY_MARGIN_SECONDS);
+    }
+  }
+
+  private isNearLiveEdge(clip: PlaybackClip): boolean {
+    const buffered = clip.video.buffered;
+    if (clip !== this.receivingClip || buffered.length === 0) {
+      return false;
+    }
+    return buffered.end(buffered.length - 1) - clip.video.currentTime <= LIVE_EDGE_THRESHOLD_SECONDS;
   }
 
   private async finishReceivingClip(): Promise<void> {
@@ -390,7 +456,13 @@ export class ShadowPlayer extends HTMLElement {
     video.addEventListener('pause', () => {
       if (this.activeClip === clip && !video.ended) {
         this.shouldPlay = false;
+        this.followingLive = false;
         this.renderPlayerControls();
+      }
+    });
+    video.addEventListener('seeked', () => {
+      if (this.activeClip === clip) {
+        this.followingLive = this.isNearLiveEdge(clip);
       }
     });
     video.addEventListener('ended', () => {
@@ -470,6 +542,10 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   private clipDuration(clip: PlaybackClip): number {
+    const released = this.releasedDurations.get(clip);
+    if (released !== undefined) {
+      return released;
+    }
     if (Number.isFinite(clip.video.duration) && clip.video.duration > 0) {
       return clip.video.duration;
     }
@@ -674,11 +750,15 @@ export class ShadowPlayer extends HTMLElement {
     websocket?.close(1000, 'Component cleanup');
     delete this.dataset.shadowProtocol;
     for (const clip of this.clips) {
-      clip.dispose();
+      if (!this.releasedDurations.has(clip)) {
+        clip.dispose();
+      }
     }
     this.clips.length = 0;
     this.playableClips.clear();
     this.segmentStartTimes.clear();
+    this.releasedDurations.clear();
+    this.followingLive = true;
     this.receivingClip = null;
     this.activeClip = null;
     this._videoElement = null;
