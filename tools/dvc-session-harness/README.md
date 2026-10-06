@@ -8,6 +8,7 @@ It intentionally does not reuse Devolutions Session runtime logic so production 
 It opens and closes the `Devolutions::Now::Agent` dynamic virtual channel with controlled timing.
 This allows repeatable recreation of timeout windows and rapid channel churn without NetIQ.
 Each action is logged with a millisecond Unix timestamp to align with RDM, agent, and session logs.
+The harness supports Ctrl+C and exits cleanly.
 
 ## Scenarios
 
@@ -15,6 +16,13 @@ Each action is logged with a millisecond Unix timestamp to align with RDM, agent
 - `timeout-window`: repeat open/hold/close cycles to emulate server-side negotiation windows.
 - `delayed-open`: wait `--delay-ms` before starting `timeout-window` behavior.
 - `no-open`: do not open DVC at all and only sleep for `--open-ms`.
+
+## Protocol shim modes
+
+- `none` (default): open/close behavior only.
+- `minimal`: send a server capset and periodic heartbeats while the channel is open.
+
+Minimal shim mode is useful when you want RDM to stay attached longer instead of failing immediately with “agent not available”.
 
 ## Usage
 
@@ -37,6 +45,10 @@ cargo run --release -- timeout-window --cycles 200 --open-ms 5000 --gap-ms 200 -
 
 Use `--wait-for-open-ms` when launch/reconnect timing is unpredictable.
 With this mode, the harness keeps retrying DVC open within each cycle instead of exiting on the first `0x8007001F`.
+
+```powershell
+cargo run --release -- timeout-window --protocol-shim minimal --cycles 200 --open-ms 5000 --gap-ms 200 --wait-for-open-ms 300000 --retry-interval-ms 250 --heartbeat-ms 3000
+```
 
 ## Log format
 

@@ -12,5 +12,6 @@ members = ["."]
 
 [dependencies]
 anyhow = "1"
+ctrlc = "3.5"
+now-proto-pdu = { version = "0.4.4", features = ["std"] }
 win-api-wrappers = { path = "../../crates/win-api-wrappers" }
-

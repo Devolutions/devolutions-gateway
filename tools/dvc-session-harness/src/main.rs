@@ -1,8 +1,21 @@
 #[cfg(windows)]
+use std::sync::Arc;
+#[cfg(windows)]
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
 use std::time::Instant;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, bail};
+#[cfg(windows)]
+use now_proto_pdu::ironrdp_core::encode_vec;
+#[cfg(windows)]
+use now_proto_pdu::{
+    NowChannelCapsetMsg, NowChannelHeartbeatMsg, NowExecCapsetFlags, NowMessage, NowSessionCapsetFlags,
+    NowSystemCapsetFlags,
+};
+#[cfg(windows)]
+use win_api_wrappers::raw::Win32::Storage::FileSystem::WriteFile;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Scenario {
@@ -33,9 +46,33 @@ impl Scenario {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProtocolShim {
+    None,
+    Minimal,
+}
+
+impl ProtocolShim {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "none" => Some(Self::None),
+            "minimal" => Some(Self::Minimal),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Minimal => "minimal",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 struct Config {
     scenario: Scenario,
+    protocol_shim: ProtocolShim,
     channel_name: String,
     cycles: u32,
     delay_ms: u64,
@@ -43,6 +80,7 @@ struct Config {
     gap_ms: u64,
     wait_for_open_ms: u64,
     retry_interval_ms: u64,
+    heartbeat_ms: u64,
 }
 
 impl Config {
@@ -64,22 +102,30 @@ impl Config {
         })?;
 
         let mut channel_name = "Devolutions::Now::Agent".to_owned();
+        let mut protocol_shim = ProtocolShim::None;
         let mut cycles = 1_u32;
         let mut delay_ms = 0_u64;
         let mut open_ms = 5_000_u64;
         let mut gap_ms = 500_u64;
         let mut wait_for_open_ms = 0_u64;
         let mut retry_interval_ms = 250_u64;
+        let mut heartbeat_ms = 3_000_u64;
 
         while let Some(flag) = args.next() {
             match flag.as_str() {
                 "--channel-name" => channel_name = next_value(&mut args, &flag)?,
+                "--protocol-shim" => {
+                    let value = next_value(&mut args, &flag)?;
+                    protocol_shim = ProtocolShim::from_str(&value)
+                        .with_context(|| format!("invalid value for {flag}: `{value}` (expected none or minimal)"))?;
+                }
                 "--cycles" => cycles = parse_u32(&next_value(&mut args, &flag)?, &flag)?,
                 "--delay-ms" => delay_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--open-ms" => open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--gap-ms" => gap_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--wait-for-open-ms" => wait_for_open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--retry-interval-ms" => retry_interval_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
+                "--heartbeat-ms" => heartbeat_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--help" | "-h" => {
                     print_usage();
                     std::process::exit(0);
@@ -96,6 +142,10 @@ impl Config {
             bail!("--retry-interval-ms must be at least 1");
         }
 
+        if heartbeat_ms == 0 {
+            bail!("--heartbeat-ms must be at least 1");
+        }
+
         match scenario {
             Scenario::OpenHold if cycles != 1 => bail!("open-hold supports exactly one cycle"),
             Scenario::NoOpen if cycles != 1 => bail!("no-open supports exactly one cycle"),
@@ -104,6 +154,7 @@ impl Config {
 
         Ok(Self {
             scenario,
+            protocol_shim,
             channel_name,
             cycles,
             delay_ms,
@@ -111,6 +162,7 @@ impl Config {
             gap_ms,
             wait_for_open_ms,
             retry_interval_ms,
+            heartbeat_ms,
         })
     }
 }
@@ -168,15 +220,44 @@ fn open_channel(channel_name: &str) -> anyhow::Result<win_api_wrappers::wts::Wts
 }
 
 #[cfg(windows)]
+fn sleep_with_stop(stop_requested: &AtomicBool, duration_ms: u64) -> bool {
+    let deadline = Instant::now() + std::time::Duration::from_millis(duration_ms);
+    let sleep_slice = std::time::Duration::from_millis(100);
+
+    while Instant::now() < deadline {
+        if stop_requested.load(Ordering::Relaxed) {
+            return false;
+        }
+
+        let now = Instant::now();
+        let remaining = deadline.saturating_duration_since(now);
+        std::thread::sleep(std::cmp::min(remaining, sleep_slice));
+    }
+
+    true
+}
+
+#[cfg(windows)]
 fn open_channel_with_retry(
     scenario: Scenario,
     cycle: u32,
     config: &Config,
+    stop_requested: &AtomicBool,
 ) -> anyhow::Result<win_api_wrappers::wts::WtsVirtualChannel> {
     let start = Instant::now();
     let mut attempt = 1_u32;
 
     loop {
+        if stop_requested.load(Ordering::Relaxed) {
+            log_event(
+                scenario,
+                Some(cycle),
+                "interrupted",
+                "stop requested before channel open",
+            );
+            bail!("interrupted by user");
+        }
+
         log_event(
             scenario,
             Some(cycle),
@@ -220,7 +301,15 @@ fn open_channel_with_retry(
                         config.retry_interval_ms
                     ),
                 );
-                std::thread::sleep(std::time::Duration::from_millis(config.retry_interval_ms));
+                if !sleep_with_stop(stop_requested, config.retry_interval_ms) {
+                    log_event(
+                        scenario,
+                        Some(cycle),
+                        "interrupted",
+                        "stop requested during open retry delay",
+                    );
+                    bail!("interrupted by user");
+                }
                 attempt = attempt.saturating_add(1);
             }
         }
@@ -228,7 +317,93 @@ fn open_channel_with_retry(
 }
 
 #[cfg(windows)]
-fn run_windows(config: &Config) -> anyhow::Result<()> {
+fn default_server_caps() -> NowChannelCapsetMsg {
+    let exec_flags = NowExecCapsetFlags::STYLE_RUN
+        | NowExecCapsetFlags::STYLE_PROCESS
+        | NowExecCapsetFlags::STYLE_BATCH
+        | NowExecCapsetFlags::STYLE_WINPS
+        | NowExecCapsetFlags::IO_REDIRECTION
+        | NowExecCapsetFlags::UNICODE_CONSOLE;
+
+    NowChannelCapsetMsg::default()
+        .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
+        .with_session_capset(
+            NowSessionCapsetFlags::LOCK
+                | NowSessionCapsetFlags::LOGOFF
+                | NowSessionCapsetFlags::MSGBOX
+                | NowSessionCapsetFlags::SET_KBD_LAYOUT
+                | NowSessionCapsetFlags::WINDOW_RECORDING,
+        )
+        .with_exec_capset(exec_flags)
+}
+
+#[cfg(windows)]
+fn send_message(
+    channel_file: &win_api_wrappers::raw::core::Owned<win_api_wrappers::raw::Win32::Foundation::HANDLE>,
+    message: &NowMessage<'_>,
+) -> anyhow::Result<()> {
+    let payload = encode_vec(message).context("encode NOW message")?;
+    let mut written = 0_u32;
+
+    // SAFETY: `channel_file` is an owned valid handle returned by WTSVirtualChannelQuery.
+    unsafe { WriteFile(**channel_file, Some(payload.as_slice()), Some(&mut written), None)? };
+    Ok(())
+}
+
+#[cfg(windows)]
+fn run_protocol_shim(
+    config: &Config,
+    scenario: Scenario,
+    cycle: u32,
+    channel: &win_api_wrappers::wts::WtsVirtualChannel,
+    stop_requested: &AtomicBool,
+) -> anyhow::Result<()> {
+    if config.protocol_shim == ProtocolShim::None {
+        if !sleep_with_stop(stop_requested, config.open_ms) {
+            log_event(
+                scenario,
+                Some(cycle),
+                "interrupted",
+                "stop requested during open window",
+            );
+            bail!("interrupted by user");
+        }
+        return Ok(());
+    }
+
+    let channel_file = channel.query_file_handle().context("query DVC channel file handle")?;
+    let capset = default_server_caps();
+    let capset_msg: NowMessage<'_> = capset.into();
+
+    send_message(&channel_file, &capset_msg).context("send server capset")?;
+    log_event(scenario, Some(cycle), "shim-capset-sent", "sent server capability set");
+
+    let start = Instant::now();
+    let heartbeat_interval = std::time::Duration::from_millis(config.heartbeat_ms);
+    let mut next_heartbeat = start + heartbeat_interval;
+
+    while start.elapsed().as_millis() < u128::from(config.open_ms) {
+        if stop_requested.load(Ordering::Relaxed) {
+            log_event(scenario, Some(cycle), "interrupted", "stop requested during shim loop");
+            bail!("interrupted by user");
+        }
+
+        let now = Instant::now();
+        if now >= next_heartbeat {
+            let heartbeat_msg: NowMessage<'_> = NowChannelHeartbeatMsg::default().into();
+            send_message(&channel_file, &heartbeat_msg).context("send heartbeat")?;
+            log_event(scenario, Some(cycle), "shim-heartbeat-sent", "sent heartbeat");
+            next_heartbeat = now + heartbeat_interval;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn run_windows(config: &Config, stop_requested: &AtomicBool) -> anyhow::Result<()> {
     if config.delay_ms > 0 {
         log_event(
             config.scenario,
@@ -236,7 +411,10 @@ fn run_windows(config: &Config) -> anyhow::Result<()> {
             "pre-delay-start",
             format!("sleeping {} ms before first open", config.delay_ms),
         );
-        std::thread::sleep(std::time::Duration::from_millis(config.delay_ms));
+        if !sleep_with_stop(stop_requested, config.delay_ms) {
+            log_event(config.scenario, None, "interrupted", "stop requested during pre-delay");
+            return Ok(());
+        }
         log_event(config.scenario, None, "pre-delay-end", "pre-delay completed");
     }
 
@@ -248,12 +426,41 @@ fn run_windows(config: &Config) -> anyhow::Result<()> {
                 "no-open",
                 format!("holding without DVC open for {} ms", config.open_ms),
             );
-            std::thread::sleep(std::time::Duration::from_millis(config.open_ms));
+            if !sleep_with_stop(stop_requested, config.open_ms) {
+                log_event(
+                    config.scenario,
+                    None,
+                    "interrupted",
+                    "stop requested during no-open hold",
+                );
+            }
             Ok(())
         }
         Scenario::OpenHold | Scenario::TimeoutWindow | Scenario::DelayedOpen => {
             for cycle in 1..=config.cycles {
-                let channel = open_channel_with_retry(config.scenario, cycle, config)?;
+                if stop_requested.load(Ordering::Relaxed) {
+                    log_event(
+                        config.scenario,
+                        Some(cycle),
+                        "interrupted",
+                        "stop requested before cycle",
+                    );
+                    return Ok(());
+                }
+
+                let channel = match open_channel_with_retry(config.scenario, cycle, config, stop_requested) {
+                    Ok(channel) => channel,
+                    Err(error) if stop_requested.load(Ordering::Relaxed) => {
+                        log_event(
+                            config.scenario,
+                            Some(cycle),
+                            "interrupted",
+                            "stop requested while opening channel",
+                        );
+                        return Ok(());
+                    }
+                    Err(error) => return Err(error),
+                };
 
                 log_event(
                     config.scenario,
@@ -261,7 +468,20 @@ fn run_windows(config: &Config) -> anyhow::Result<()> {
                     "open-window-start",
                     format!("holding channel for {} ms", config.open_ms),
                 );
-                std::thread::sleep(std::time::Duration::from_millis(config.open_ms));
+                if let Err(error) = run_protocol_shim(config, config.scenario, cycle, &channel, stop_requested) {
+                    drop(channel);
+                    if stop_requested.load(Ordering::Relaxed) {
+                        log_event(
+                            config.scenario,
+                            Some(cycle),
+                            "interrupted",
+                            "stop requested in protocol shim",
+                        );
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
+
                 log_event(config.scenario, Some(cycle), "open-window-end", "closing channel");
                 drop(channel);
                 log_event(config.scenario, Some(cycle), "closed", "channel handle released");
@@ -273,7 +493,15 @@ fn run_windows(config: &Config) -> anyhow::Result<()> {
                         "gap-start",
                         format!("sleeping {} ms before next cycle", config.gap_ms),
                     );
-                    std::thread::sleep(std::time::Duration::from_millis(config.gap_ms));
+                    if !sleep_with_stop(stop_requested, config.gap_ms) {
+                        log_event(
+                            config.scenario,
+                            Some(cycle),
+                            "interrupted",
+                            "stop requested during inter-cycle gap",
+                        );
+                        return Ok(());
+                    }
                     log_event(config.scenario, Some(cycle), "gap-end", "starting next cycle");
                 }
             }
@@ -284,7 +512,7 @@ fn run_windows(config: &Config) -> anyhow::Result<()> {
 }
 
 #[cfg(not(windows))]
-fn run_windows(_config: &Config) -> anyhow::Result<()> {
+fn run_windows(_config: &Config, _stop_requested: &()) -> anyhow::Result<()> {
     bail!("this harness is windows-only")
 }
 
@@ -300,16 +528,19 @@ fn print_usage() {
          \n\
          Options:\n\
            --channel-name <name>   DVC channel name (default: Devolutions::Now::Agent)\n\
+           --protocol-shim <mode>  Protocol behavior: none|minimal (default: none)\n\
            --cycles <n>            Number of open/close cycles (default: 1)\n\
            --delay-ms <ms>         Delay before first open (default: 0)\n\
            --open-ms <ms>          Duration to hold each open channel (default: 5000)\n\
            --gap-ms <ms>           Delay between cycles (default: 500)\n\
            --wait-for-open-ms <ms> Retry open up to this duration per cycle (default: 0)\n\
            --retry-interval-ms <ms> Delay between open retries (default: 250)\n\
+           --heartbeat-ms <ms>     Heartbeat interval in minimal shim mode (default: 3000)\n\
          \n\
          Examples:\n\
            dvc-session-harness timeout-window --cycles 6 --open-ms 5000 --gap-ms 200\n\
            dvc-session-harness timeout-window --cycles 200 --wait-for-open-ms 300000 --retry-interval-ms 250\n\
+           dvc-session-harness timeout-window --protocol-shim minimal --wait-for-open-ms 300000\n\
            dvc-session-harness delayed-open --delay-ms 12000 --open-ms 5000\n\
            dvc-session-harness no-open --open-ms 15000"
     );
@@ -318,13 +549,29 @@ fn print_usage() {
 fn main() -> anyhow::Result<()> {
     let config = Config::parse()?;
 
+    #[cfg(windows)]
+    let stop_requested = {
+        let flag = Arc::new(AtomicBool::new(false));
+        let cloned = Arc::clone(&flag);
+        ctrlc::set_handler(move || {
+            cloned.store(true, Ordering::Relaxed);
+        })
+        .context("failed to set Ctrl+C handler")?;
+        flag
+    };
+
     log_event(
         config.scenario,
         None,
         "start",
         format!(
-            "channel={}, cycles={}, delay_ms={}, open_ms={}, gap_ms={}",
-            config.channel_name, config.cycles, config.delay_ms, config.open_ms, config.gap_ms
+            "channel={}, protocol_shim={}, cycles={}, delay_ms={}, open_ms={}, gap_ms={}",
+            config.channel_name,
+            config.protocol_shim.as_str(),
+            config.cycles,
+            config.delay_ms,
+            config.open_ms,
+            config.gap_ms
         ),
     );
     log_event(
@@ -332,12 +579,15 @@ fn main() -> anyhow::Result<()> {
         None,
         "open-policy",
         format!(
-            "wait_for_open_ms={}, retry_interval_ms={}",
-            config.wait_for_open_ms, config.retry_interval_ms
+            "wait_for_open_ms={}, retry_interval_ms={}, heartbeat_ms={}",
+            config.wait_for_open_ms, config.retry_interval_ms, config.heartbeat_ms
         ),
     );
 
-    let result = run_windows(&config);
+    #[cfg(windows)]
+    let result = run_windows(&config, &stop_requested);
+    #[cfg(not(windows))]
+    let result = run_windows(&config, &());
 
     match &result {
         Ok(()) => log_event(config.scenario, None, "done", "scenario completed"),
