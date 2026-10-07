@@ -191,10 +191,10 @@ fn rename_durably(from: &Utf8Path, to: &Utf8Path) -> std::io::Result<()> {
     std::fs::rename(from, to)?;
 
     // On Unix, the new name is only durable once its directory is flushed.
-    let dir = to
-        .parent()
-        .filter(|dir| !dir.as_str().is_empty())
-        .unwrap_or(Utf8Path::new("."));
+    let dir = match to.parent() {
+        Some(dir) if !dir.as_str().is_empty() => dir,
+        _ => Utf8Path::new("."),
+    };
     std::fs::File::open(dir)?.sync_all()
 }
 
