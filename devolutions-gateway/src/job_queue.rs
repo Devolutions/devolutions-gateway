@@ -6,10 +6,12 @@ use std::time::Duration;
 use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
-use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
+use job_queue::{DynJob, DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
 use job_queue_libsql::libsql;
 use time::OffsetDateTime;
 use tokio::sync::{Notify, mpsc};
+
+use crate::provisioner_tasks::runner::{ProvisionerTaskJob, ProvisionerTaskRunner};
 
 /// Runs of a job before the job queue gives up on it.
 pub const MAX_ATTEMPTS: u32 = 5;
@@ -41,6 +43,7 @@ pub struct JobRunnerTask {
     notify_runner: Arc<Notify>,
     runner_waker: RunnerWaker,
     queue: DynJobQueue,
+    tasks: ProvisionerTaskRunner,
 }
 
 impl JobQueueCtx {
@@ -85,6 +88,14 @@ impl JobQueueCtx {
             job_queue_rx: rx,
             job_queue_handle: handle,
         })
+    }
+
+    /// Writes a job to the queue right away, without going through [`JobQueueHandle`].
+    ///
+    /// For startup, before the job runner claims anything.
+    pub async fn push<T: Job + 'static>(&self, job: T) -> anyhow::Result<()> {
+        let job: DynJob = Box::new(job);
+        self.queue.push_job(&job, None).await
     }
 }
 
@@ -201,11 +212,12 @@ async fn job_queue_task(ctx: JobQueueTask, mut shutdown_signal: ShutdownSignal) 
 }
 
 impl JobRunnerTask {
-    pub fn new(ctx: &JobQueueCtx) -> Self {
+    pub fn new(ctx: &JobQueueCtx, tasks: ProvisionerTaskRunner) -> Self {
         Self {
             notify_runner: Arc::clone(&ctx.notify_runner),
             runner_waker: RunnerWaker::clone(&ctx.runner_waker),
             queue: Arc::clone(&ctx.queue),
+            tasks,
         }
     }
 }
@@ -229,9 +241,10 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
         notify_runner,
         runner_waker,
         queue,
+        tasks,
     } = ctx;
 
-    let reader = DgwJobReader;
+    let reader = DgwJobReader { tasks };
 
     let spawn = |mut ctx: JobCtx, callback: job_queue::SpawnCallback| {
         tokio::spawn(async move {
@@ -283,10 +296,12 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
     Ok(())
 }
 
-struct DgwJobReader;
+struct DgwJobReader {
+    tasks: ProvisionerTaskRunner,
+}
 
 impl JobReader for DgwJobReader {
-    fn read_json(&self, name: &str, json: &str) -> anyhow::Result<job_queue::DynJob> {
+    fn read_json(&self, name: &str, json: &str) -> anyhow::Result<DynJob> {
         use crate::api::jrec::DeleteRecordingsJob;
         use crate::recording::RemuxJob;
 
@@ -298,6 +313,10 @@ impl JobReader for DgwJobReader {
             DeleteRecordingsJob::NAME => {
                 let job: DeleteRecordingsJob =
                     serde_json::from_str(json).context("failed to deserialize DeleteRecordingsJob")?;
+                Ok(Box::new(job))
+            }
+            ProvisionerTaskJob::NAME => {
+                let job = ProvisionerTaskJob::read_json(json, self.tasks.clone())?;
                 Ok(Box::new(job))
             }
             _ => anyhow::bail!("unknown job name: {name}"),
