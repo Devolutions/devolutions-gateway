@@ -7,6 +7,7 @@ use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use devolutions_gateway_ai::screen_actions::Screenshot;
 use devolutions_gateway_ai::session_actions::Action;
 use devolutions_gateway_ai::{AiClient, Error, Provider, Usage};
 use reqwest::StatusCode;
@@ -21,7 +22,9 @@ const USAGE: Usage = Usage {
     input_tokens: 10,
     output_tokens: 20,
 };
-const ANSWER: &str = "{\"offsetSeconds\":1.5,\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}\nnot an action\n{\"offsetSeconds\":4,\"description\":\"Opened a shell\"}";
+const ANSWER: &str = "{\"line\":\"L1\",\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}\nnot an action\n{\"line\":\"L2\",\"description\":\"Opened a shell\"}";
+/// Transcript the requests send; its lines are at 1.5 s and 4 s.
+const TRANSCRIPT: &str = "[1.5] ls\n[4] bash\n";
 const NO_ACTIONS: &str = "{\"noActions\":true}";
 /// Largest answer body the client reads, the same as in the crate.
 const MAX_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
@@ -207,7 +210,7 @@ async fn openai_chat_request_and_response() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
 
     let response = client(Provider::OpenAi, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .max_output_tokens(1234)
         .send()
         .await
@@ -225,7 +228,10 @@ async fn openai_chat_request_and_response() {
     );
     assert_eq!(header(&request.headers, "x-api-key"), None);
     assert_eq!(request.body["model"], MODEL);
-    assert!(request.body.to_string().contains("[1.5] ls"));
+    assert!(
+        request.body.to_string().contains("L1 [1.5] ls"),
+        "the transcript lines are labeled"
+    );
     assert_eq!(request.body["max_completion_tokens"], 1234);
     assert_eq!(request.body["store"], false);
 }
@@ -235,7 +241,7 @@ async fn anthropic_messages_request_and_response() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, anthropic_response(ANSWER)).await;
 
     let response = client(Provider::Anthropic, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .max_output_tokens(1234)
         .send()
         .await
@@ -252,7 +258,10 @@ async fn anthropic_messages_request_and_response() {
     assert_eq!(header(&request.headers, "authorization"), None);
     assert_eq!(request.body["model"], MODEL);
     assert_eq!(request.body["max_tokens"], 1234);
-    assert!(request.body.to_string().contains("[1.5] ls"));
+    assert!(
+        request.body.to_string().contains("L1 [1.5] ls"),
+        "the transcript lines are labeled"
+    );
 }
 
 #[tokio::test]
@@ -260,7 +269,7 @@ async fn openai_compatible_uses_the_given_base_url_and_max_tokens() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
 
     let response = client(Provider::OpenAiCompatible, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .send()
         .await
         .unwrap();
@@ -283,7 +292,7 @@ async fn gemini_speaks_openai_chat_with_max_tokens() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
 
     let response = client(Provider::Gemini, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .max_output_tokens(1234)
         .send()
         .await
@@ -318,7 +327,7 @@ async fn mistral_chunked_content_is_read_as_text() {
     let (base_url, captured) = spawn_provider(StatusCode::OK, answer).await;
 
     let response = client(Provider::Mistral, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .max_output_tokens(1234)
         .send()
         .await
@@ -346,7 +355,7 @@ async fn answer_without_model_or_usage_is_accepted() {
     let (base_url, _captured) = spawn_provider(StatusCode::OK, answer).await;
 
     let response = client(Provider::OpenAiCompatible, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .send()
         .await
         .unwrap();
@@ -362,7 +371,7 @@ async fn think_blocks_are_not_read_as_actions() {
     let (base_url, _captured) = spawn_provider(StatusCode::OK, openai_response(&answer)).await;
 
     let response = client(Provider::OpenAiCompatible, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .send()
         .await
         .unwrap();
@@ -375,7 +384,7 @@ async fn think_tags_inside_an_action_are_kept() {
     const COMMAND: &str = "grep '<think>x</think>' notes.txt";
 
     let action = serde_json::json!({
-        "offsetSeconds": 2,
+        "line": "L1",
         "description": "Searched notes",
         "parameters": { "Command": COMMAND }
     });
@@ -417,7 +426,7 @@ async fn answers_cut_at_the_token_limit_are_truncated() {
         let (base_url, _captured) = spawn_provider(StatusCode::OK, response).await;
 
         let error = client(provider, base_url)
-            .describe_session_actions("[1.5] ls")
+            .describe_session_actions(TRANSCRIPT)
             .send()
             .await
             .unwrap_err();
@@ -450,7 +459,7 @@ async fn refusals_are_permanent_errors() {
         let (base_url, _captured) = spawn_provider(StatusCode::OK, response).await;
 
         let error = client(provider, base_url)
-            .describe_session_actions("[1.5] ls")
+            .describe_session_actions(TRANSCRIPT)
             .send()
             .await
             .unwrap_err();
@@ -468,7 +477,7 @@ async fn provider_failure_while_answering_is_invalid_response() {
     let (base_url, _captured) = spawn_provider(StatusCode::OK, answer).await;
 
     let error = client(Provider::Mistral, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .send()
         .await
         .unwrap_err();
@@ -506,7 +515,7 @@ async fn unexpected_answers_are_invalid_responses() {
         let (base_url, _captured) = spawn_provider(StatusCode::OK, response).await;
 
         let error = client(provider, base_url)
-            .describe_session_actions("[1.5] ls")
+            .describe_session_actions(TRANSCRIPT)
             .send()
             .await
             .unwrap_err();
@@ -565,7 +574,7 @@ async fn answer_without_any_action_line_is_invalid_output() {
     let (base_url, _captured) = spawn_provider(StatusCode::OK, openai_response("Sorry, I cannot help.")).await;
 
     let error = client(Provider::OpenAi, base_url)
-        .describe_session_actions("[1.5] ls")
+        .describe_session_actions(TRANSCRIPT)
         .send()
         .await
         .unwrap_err();
@@ -726,7 +735,7 @@ async fn instructions_are_a_system_message() {
         let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(ANSWER)).await;
 
         client(provider, base_url)
-            .describe_session_actions("[1.5] ls")
+            .describe_session_actions(TRANSCRIPT)
             .send()
             .await
             .unwrap();
@@ -742,7 +751,7 @@ async fn instructions_are_a_system_message() {
             "{provider:?}"
         );
         assert_eq!(messages[1]["role"], "user", "{provider:?}");
-        assert_eq!(messages[1]["content"], "[1.5] ls", "{provider:?}");
+        assert_eq!(messages[1]["content"], "L1 [1.5] ls\nL2 [4] bash\n", "{provider:?}");
     }
 }
 
@@ -778,7 +787,7 @@ async fn answer_up_to_the_size_limit_is_read() {
         let (base_url, _captured) = spawn_mock(answer).await;
 
         let response = client(Provider::OpenAi, base_url)
-            .describe_session_actions("[1.5] ls")
+            .describe_session_actions(TRANSCRIPT)
             .send()
             .await
             .unwrap();
@@ -800,7 +809,7 @@ async fn answer_over_the_size_limit_is_invalid_response() {
         let (base_url, _captured) = spawn_mock(answer).await;
 
         let error = client(Provider::OpenAi, base_url)
-            .describe_session_actions("[1.5] ls")
+            .describe_session_actions(TRANSCRIPT)
             .send()
             .await
             .unwrap_err();
@@ -919,4 +928,75 @@ async fn silent_provider_times_out_as_transient() {
     assert!(matches!(error, Error::Transport { .. }), "{error:?}");
     assert!(error.is_transient());
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
+}
+
+#[tokio::test]
+async fn screenshots_are_sent_as_images_and_actions_take_their_time() {
+    const PNG: &[u8] = b"\x89PNG not really";
+
+    let screenshots = [
+        Screenshot {
+            id: "F00001",
+            offset: Duration::from_secs(10),
+            png: PNG,
+            context: true,
+        },
+        Screenshot {
+            id: "F00002",
+            offset: Duration::from_millis(12_500),
+            png: PNG,
+            context: false,
+        },
+    ];
+    let answer = "{\"frame\":\"F00002\",\"description\":\"Opened a dialog\"}\n{\"frame\":\"F00001\",\"description\":\"Only in context\"}";
+
+    for (provider, response) in [
+        (Provider::OpenAi, openai_response(answer)),
+        (Provider::Anthropic, anthropic_response(answer)),
+    ] {
+        let (base_url, captured) = spawn_provider(StatusCode::OK, response).await;
+
+        let response = client(provider, base_url)
+            .describe_screen_actions(&screenshots)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            response.output.len(),
+            1,
+            "a context screenshot is never cited: {provider:?}"
+        );
+        assert_eq!(response.output[0].description, "Opened a dialog");
+        assert_eq!(response.output[0].offset, Duration::from_millis(12_500));
+
+        let request = take(&captured);
+        let content = match provider {
+            Provider::Anthropic => &request.body["messages"][0]["content"],
+            _ => &request.body["messages"][1]["content"],
+        };
+        let blocks = content.as_array().unwrap();
+        assert_eq!(blocks.len(), 4, "{provider:?}");
+        assert_eq!(blocks[0]["text"], "[F00001 t=10.0s context]");
+        assert_eq!(blocks[2]["text"], "[F00002 t=12.5s]");
+
+        match provider {
+            Provider::Anthropic => {
+                assert_eq!(blocks[1]["type"], "image");
+                assert_eq!(blocks[1]["source"]["media_type"], "image/png");
+                assert!(blocks[1]["source"]["data"].as_str().unwrap().starts_with("iVBOR"));
+            }
+            _ => {
+                assert_eq!(blocks[1]["type"], "image_url");
+                assert!(
+                    blocks[1]["image_url"]["url"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("data:image/png;base64,iVBOR"),
+                    "{}",
+                    blocks[1]
+                );
+            }
+        }
+    }
 }

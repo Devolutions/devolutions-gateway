@@ -1937,6 +1937,7 @@ dependencies = [
 name = "devolutions-gateway-ai"
 version = "0.0.0"
 dependencies = [
+ "base64 0.23.1",
  "reqwest",
  "secrecy",
  "serde",

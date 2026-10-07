@@ -1,7 +1,7 @@
 //! High-level AI for Devolutions Gateway: one method per purpose, never a raw request to a model.
 //!
 //! A purpose is one AI job Gateway needs done, such as listing what a user did in a session transcript with
-//! [`AiClient::describe_session_actions`].
+//! [`AiClient::describe_session_actions`], or in screenshots of a session with [`AiClient::describe_screen_actions`].
 //! The crate does not expose low-level AI requests: there is no chat, no completion call, and no way to pass a prompt.
 //! A consumer states what it needs and gets a typed result; it is not expected to know, or care, how the result is
 //! obtained.
@@ -31,6 +31,7 @@
 mod client;
 mod error;
 mod response;
+pub mod screen_actions;
 pub mod session_actions;
 mod wire;
 
