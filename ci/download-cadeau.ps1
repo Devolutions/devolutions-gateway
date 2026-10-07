@@ -9,7 +9,7 @@ param(
 	[ValidateSet('x64', 'arm64')]
 	[string] $Architecture,
 
-	[string] $VersionTag = "v2026.8.21.0"
+	[string] $VersionTag = "v2026.9.25.0"
 )
 
 $ErrorActionPreference = "Stop"
