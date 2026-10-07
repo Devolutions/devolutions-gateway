@@ -8,6 +8,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use url::Url;
 
+use crate::client::Input;
 use crate::{Error, Usage};
 
 /// HTTP API spoken by a provider.
@@ -43,7 +44,31 @@ pub(crate) enum Stop {
 #[derive(Serialize)]
 struct Message<'a> {
     role: &'static str,
-    content: &'a str,
+    content: Content<'a>,
+}
+
+/// Content of a message: plain text, or blocks in the format of the API when the input has images.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Content<'a> {
+    Text(&'a str),
+    Blocks(Vec<Value>),
+}
+
+impl<'a> Content<'a> {
+    /// Builds the content of input, writing each part with lock.
+    fn of(input: &[Input<'a>], block: impl Fn(&Input<'a>) -> Value) -> Self {
+        match input {
+            [Input::Text(text)] => Self::Text(text),
+            input => Self::Blocks(input.iter().map(block).collect()),
+        }
+    }
+}
+
+fn base64(data: &[u8]) -> String {
+    use base64::Engine as _;
+
+    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 /// Message and code of an error answer, when its body has them.

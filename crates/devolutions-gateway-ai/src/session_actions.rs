@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use tracing::warn;
 
-use crate::client::{AiClient, Prompt};
+use crate::client::{AiClient, Input, Prompt};
 use crate::{Error, Response};
 
 /// Version of the prompt of this purpose.
@@ -15,21 +15,21 @@ use crate::{Error, Response};
 /// Results do not carry it: a caller that stores results should store it with them, so readers know which prompt
 /// produced them.
 /// Bump it whenever the prompt changes.
-pub const PROMPT_VERSION: &str = "session-actions-2";
+pub const PROMPT_VERSION: &str = "session-actions-3";
 
 const PROMPT: &str = r#"You read the transcript of a remote session and list what the user did.
 
-Input: each transcript line starts with the elapsed time since the session started, in seconds, between square brackets. Example: `[12.5] ls -la`.
+Input: each transcript line starts with its id, then the elapsed time since the session started, in seconds, between square brackets. Example: `L12 [34.5] ls -la`.
 
 Output: JSON Lines only. Write one JSON object per line and nothing else: no prose, no Markdown, no code fences.
 Each object has these fields:
-- "offsetSeconds": number. Elapsed seconds when the action started, taken from the transcript.
+- "line": string. The id of the transcript line where the action starts, like "L12".
 - "description": string. A short past-tense sentence naming the action, like "Listed directory contents".
 - "object": string, optional. The main thing acted on, like a file path, host, service, or account.
 - "parameters": object, optional. Every value is a string. Important details, like the exact command.
 
 Example output line:
-{"offsetSeconds":12.5,"description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"}}
+{"line":"L12","description":"Listed directory contents","object":"/var/log","parameters":{"Command":"ls -la /var/log"}}
 
 Rules:
 - Write one line per meaningful user action, in time order. Merge the keystrokes of one command into one action.
@@ -38,12 +38,12 @@ Rules:
 - If the user did nothing, write only this line: {"noActions":true}"#;
 
 /// The same limit DVLS and RDM use for Claude. Reasoning models count their reasoning in it, so it cannot be small.
-const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
+pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
 
-/// One user action found in a session transcript.
+/// One user action found in a session.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Action {
-    /// Elapsed time since the start of the session, as reported by the model.
+    /// Elapsed time since the start of the session, taken from the input the model cited, never written by the model.
     pub offset: Duration,
     /// Short past-tense sentence naming the action, never empty.
     pub description: String,
@@ -58,6 +58,7 @@ impl AiClient {
     ///
     /// Each line of `transcript` must start with the elapsed time in seconds between square brackets, such as
     /// `[12.5] ls`.
+    /// The model cites the line where each action starts, and the action gets the time of that line.
     pub fn describe_session_actions<'a>(&'a self, transcript: &'a str) -> DescribeSessionActions<'a> {
         DescribeSessionActions {
             client: self,
@@ -99,30 +100,53 @@ impl DescribeSessionActions<'_> {
     /// Returns the actions in the order of the answer; the list is empty only when the model answered that the user did
     /// nothing.
     ///
-    /// Invalid lines in the answer are skipped with a warning.
+    /// Invalid lines in the answer are skipped with a warning, and so are actions citing a line that is not in the
+    /// transcript or has no time.
     /// The answer is [`Error::InvalidOutput`] when it has no valid action and does not say that the user did nothing,
     /// such as an empty answer.
     /// An answer cut short by the output token limit or the context window is [`Error::Truncated`]: send a shorter
     /// transcript instead.
     /// A refusal of the provider is [`Error::Refused`], never an empty list.
     pub async fn send(self) -> Result<Response<Vec<Action>>, Error> {
+        let (labeled, times) = label_lines(self.transcript);
+
         let prompt = Prompt {
             system: PROMPT,
-            input: self.transcript,
+            input: &[Input::Text(&labeled)],
             max_output_tokens: self.max_output_tokens,
         };
 
-        self.client
-            .complete(&prompt)
-            .await?
-            .try_map(|answer| parse_actions(&answer))
+        self.client.complete(&prompt).await?.try_map(|answer| {
+            parse_actions(&answer, "line", |line| {
+                let index = line.strip_prefix('L')?.parse::<usize>().ok()?;
+                times.get(index.checked_sub(1)?).copied().flatten()
+            })
+        })
     }
+}
+
+/// Prefixes every transcript line with its id, `L1` for the first, and returns the times of the lines.
+fn label_lines(transcript: &str) -> (String, Vec<Option<Duration>>) {
+    let mut labeled = String::with_capacity(transcript.len() + transcript.len() / 8);
+    let mut times = Vec::new();
+
+    for line in transcript.lines() {
+        times.push(line_time(line));
+        labeled.push_str(&format!("L{} {line}\n", times.len()));
+    }
+
+    (labeled, times)
+}
+
+/// Reads the elapsed time at the start of a transcript line, such as `[12.5] ls`.
+fn line_time(line: &str) -> Option<Duration> {
+    let (time, _) = line.strip_prefix('[')?.split_once(']')?;
+    Duration::try_from_secs_f64(time.trim().parse().ok()?).ok()
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ActionLine {
-    offset_seconds: f64,
     description: String,
     #[serde(default)]
     object: Option<String>,
@@ -130,7 +154,13 @@ struct ActionLine {
     parameters: BTreeMap<String, String>,
 }
 
-fn parse_actions(answer: &str) -> Result<Vec<Action>, Error> {
+/// Reads JSON Lines actions that each cite a part of the input in `citation`, such as a transcript line; `time` gives
+/// the time of a cited part, or `None` when the input has no such part.
+pub(crate) fn parse_actions(
+    answer: &str,
+    citation: &str,
+    time: impl Fn(&str) -> Option<Duration>,
+) -> Result<Vec<Action>, Error> {
     let mut actions = Vec::new();
     let mut invalid_lines = 0usize;
     let mut no_actions = false;
@@ -147,7 +177,7 @@ fn parse_actions(answer: &str) -> Result<Vec<Action>, Error> {
             continue;
         }
 
-        match parse_action_line(line) {
+        match parse_action_line(line, citation, &time) {
             Ok(action) => actions.push(action),
             Err(reason) => {
                 invalid_lines += 1;
@@ -193,11 +223,17 @@ fn is_no_actions_line(line: &str) -> bool {
 }
 
 // The reason never quotes the line, because the line may contain session data.
-fn parse_action_line(line: &str) -> Result<Action, String> {
-    let parsed: ActionLine = serde_json::from_str(line)
+fn parse_action_line(line: &str, citation: &str, time: &impl Fn(&str) -> Option<Duration>) -> Result<Action, String> {
+    let value: serde_json::Value = serde_json::from_str(line)
         .map_err(|error| format!("{:?} error at column {}", error.classify(), error.column()))?;
 
-    let offset = Duration::try_from_secs_f64(parsed.offset_seconds).map_err(|_| "invalid offsetSeconds".to_owned())?;
+    let cited = value
+        .get(citation)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| format!("missing {citation}"))?;
+    let offset = time(cited.trim()).ok_or_else(|| format!("{citation} is not in the input"))?;
+
+    let parsed: ActionLine = serde_json::from_value(value).map_err(|_| "invalid action fields".to_owned())?;
 
     let description = parsed.description.trim();
     if description.is_empty() {
@@ -214,26 +250,33 @@ fn parse_action_line(line: &str) -> Result<Action, String> {
         parameters: parsed.parameters,
     })
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// Parses an answer about a transcript whose line `Ln` is at `n` seconds, for lines 1 to 9.
+    fn parse(answer: &str) -> Result<Vec<Action>, Error> {
+        parse_actions(answer, "line", |line| {
+            let index = line.strip_prefix('L')?.parse::<u64>().ok()?;
+            (1..10).contains(&index).then(|| Duration::from_secs(index))
+        })
+    }
+
     #[test]
-    fn parses_valid_lines() {
+    fn parses_valid_lines_with_the_time_of_the_cited_line() {
         let answer = concat!(
-            "{\"offsetSeconds\":1.5,\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}\n",
+            "{\"line\":\"L1\",\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}\n",
             "\n",
-            "{\"offsetSeconds\":3,\"description\":\"Opened a shell\"}\n",
+            "{\"line\":\"L3\",\"description\":\"Opened a shell\"}\n",
         );
 
-        let actions = parse_actions(answer).expect("valid answer");
+        let actions = parse(answer).expect("valid answer");
 
         assert_eq!(
             actions,
             vec![
                 Action {
-                    offset: Duration::from_millis(1500),
+                    offset: Duration::from_secs(1),
                     description: "Listed files".to_owned(),
                     object: Some("/var/log".to_owned()),
                     parameters: BTreeMap::from([("Command".to_owned(), "ls".to_owned())]),
@@ -249,21 +292,33 @@ mod tests {
     }
 
     #[test]
-    fn skips_code_fences_and_invalid_lines() {
+    fn skips_code_fences_invalid_lines_and_unknown_citations() {
         let answer = concat!(
             "```jsonl\n",
-            "{\"offsetSeconds\":1,\"description\":\"Listed files\"}\n",
+            "{\"line\":\"L1\",\"description\":\"Listed files\"}\n",
             "Here are the actions:\n",
-            "{\"offsetSeconds\":-1,\"description\":\"Negative offset\"}\n",
-            "{\"offsetSeconds\":2,\"description\":\"  \"}\n",
-            "{\"offsetSeconds\":2,\"description\":\"Numeric parameter\",\"parameters\":{\"Count\":5}}\n",
+            "{\"line\":\"L42\",\"description\":\"Line not in the transcript\"}\n",
+            "{\"offsetSeconds\":2,\"description\":\"No citation\"}\n",
+            "{\"line\":\"L2\",\"description\":\"  \"}\n",
+            "{\"line\":\"L2\",\"description\":\"Numeric parameter\",\"parameters\":{\"Count\":5}}\n",
             "```\n",
         );
 
-        let actions = parse_actions(answer).expect("one valid line");
+        let actions = parse(answer).expect("one valid line");
 
         assert_eq!(actions.len(), 1);
         assert_eq!(actions[0].description, "Listed files");
+    }
+
+    #[test]
+    fn lines_are_labeled_with_their_time() {
+        let (labeled, times) = label_lines("[1.5] ls\n[2] cd /tmp\nno time\n");
+
+        assert_eq!(labeled, "L1 [1.5] ls\nL2 [2] cd /tmp\nL3 no time\n");
+        assert_eq!(
+            times,
+            [Some(Duration::from_millis(1500)), Some(Duration::from_secs(2)), None]
+        );
     }
 
     #[test]
@@ -273,14 +328,14 @@ mod tests {
             "\n```jsonl\n{\"noActions\":true}\n```\n",
             " { \"noActions\" : true } ",
         ] {
-            assert_eq!(parse_actions(answer).expect("no actions"), Vec::new(), "{answer:?}");
+            assert_eq!(parse(answer).expect("no actions"), Vec::new(), "{answer:?}");
         }
     }
 
     #[test]
     fn empty_answer_is_invalid_output() {
         for answer in ["", "\n```\n```\n"] {
-            let error = parse_actions(answer).expect_err("empty answer");
+            let error = parse(answer).expect_err("empty answer");
 
             assert!(matches!(error, Error::InvalidOutput { .. }), "{answer:?}: {error:?}");
         }
@@ -293,7 +348,7 @@ mod tests {
             "{\"noActions\":true,\"extra\":1}",
             "{\"noActions\":\"yes\"}",
         ] {
-            let error = parse_actions(line).expect_err("not the no-actions line");
+            let error = parse(line).expect_err("not the no-actions line");
 
             assert!(error.to_string().contains("1 invalid lines"), "{line}: {error}");
         }
@@ -301,9 +356,9 @@ mod tests {
 
     #[test]
     fn actions_win_over_the_no_actions_line() {
-        let answer = "{\"noActions\":true}\n{\"offsetSeconds\":1,\"description\":\"Listed files\"}\n";
+        let answer = "{\"noActions\":true}\n{\"line\":\"L1\",\"description\":\"Listed files\"}\n";
 
-        let actions = parse_actions(answer).expect("one action");
+        let actions = parse(answer).expect("one action");
 
         assert_eq!(actions.len(), 1);
     }
@@ -322,7 +377,7 @@ mod tests {
 
     #[test]
     fn answer_without_valid_line_is_invalid_output() {
-        let error = parse_actions("not json\n{\"description\":\"no offset\"}\n").expect_err("no valid line");
+        let error = parse("not json\n{\"description\":\"no line\"}\n").expect_err("no valid line");
 
         assert!(matches!(error, Error::InvalidOutput { .. }), "{error:?}");
         assert!(error.to_string().contains("2 invalid lines"), "{error}");
@@ -330,9 +385,12 @@ mod tests {
 
     #[test]
     fn invalid_line_reason_does_not_quote_the_line() {
-        let reason =
-            parse_action_line("{\"offsetSeconds\":1,\"description\":\"secret-value\",\"parameters\":{\"a\":1}}")
-                .expect_err("numeric parameter");
+        let reason = parse_action_line(
+            "{\"line\":\"L1\",\"description\":\"secret-value\",\"parameters\":{\"a\":1}}",
+            "line",
+            &|_: &str| Some(Duration::ZERO),
+        )
+        .expect_err("numeric parameter");
 
         assert!(!reason.contains("secret-value"));
     }
@@ -340,7 +398,7 @@ mod tests {
     #[test]
     fn prompt_asks_for_the_parsed_fields() {
         for field in [
-            "offsetSeconds",
+            "\"line\"",
             "description",
             "object",
             "parameters",
