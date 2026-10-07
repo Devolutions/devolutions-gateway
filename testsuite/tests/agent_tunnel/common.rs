@@ -181,7 +181,7 @@ pub(super) async fn bind_test_listener() -> TestListener {
         .connect()
         .await
         .expect("connect to test gateway database");
-    let authorization_store = agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(gateway_db, ca_spki_sha256)
+    let authorization_store = gateway_db::agent_tunnel::LibSqlAgentAuthorizationStore::open(gateway_db, ca_spki_sha256)
         .await
         .expect("open test Agent authorization store");
     let listen_addr: SocketAddr = "127.0.0.1:0".parse().expect("parse listener address");

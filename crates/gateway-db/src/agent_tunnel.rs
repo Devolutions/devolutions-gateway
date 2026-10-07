@@ -1,3 +1,5 @@
+//! The agent tunnel's tables: accepted Agents, enrollment attempts and the CA they belong to.
+
 use agent_tunnel::authorization::{
     AcceptedAgent, AgentAuthorizationStore, EnrollmentAttempt, EnrollmentConflict, EnrollmentOutcome, SpkiSha256,
 };
@@ -15,7 +17,7 @@ pub struct LibSqlAgentAuthorizationStore {
 }
 
 impl LibSqlAgentAuthorizationStore {
-    /// Opens the store on a `gateway.db` connection of its own, from `GatewayDb::connect` in the `gateway-db` crate.
+    /// Opens the store on a `gateway.db` connection of its own, from [`GatewayDb::connect`](crate::GatewayDb::connect).
     ///
     /// The connection must already have up-to-date `agent_tunnel_*` tables; opening checks them and fails if they
     /// don't match. The stored Agents only make sense with the CA that signed their certificates, so the first open
@@ -490,7 +492,7 @@ mod tests {
     use super::*;
 
     async fn connect(path: &str) -> anyhow::Result<Connection> {
-        gateway_db::GatewayDb::open_path(path).await?.connect().await
+        crate::GatewayDb::open_path(path).await?.connect().await
     }
 
     async fn open_store(path: &str, ca_spki_sha256: SpkiSha256) -> anyhow::Result<LibSqlAgentAuthorizationStore> {
@@ -826,7 +828,7 @@ mod tests {
             .expect("record 2026.3 schema version");
         drop(legacy);
 
-        let conn = gateway_db::GatewayDb::open(&data_dir)
+        let conn = crate::GatewayDb::open(&data_dir)
             .await
             .expect("open gateway database")
             .connect()

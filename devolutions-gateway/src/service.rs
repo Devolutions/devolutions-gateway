@@ -288,7 +288,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .connect()
             .await
             .context("failed to connect the agent tunnel to the gateway database")?;
-        let agents_have_ca = agent_tunnel_libsql::LibSqlAgentAuthorizationStore::bound_ca(&agent_tunnel_conn)
+        let agents_have_ca = gateway_db::agent_tunnel::LibSqlAgentAuthorizationStore::bound_ca(&agent_tunnel_conn)
             .await
             .context("failed to read the agent tunnel CA identity")?
             .is_some();
@@ -302,7 +302,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .ca_spki_sha256()
             .context("failed to identify agent tunnel CA")?;
         let authorization_store =
-            agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(agent_tunnel_conn, ca_spki_sha256)
+            gateway_db::agent_tunnel::LibSqlAgentAuthorizationStore::open(agent_tunnel_conn, ca_spki_sha256)
                 .await
                 .context("failed to initialize Agent authorization database")?;
         let authorization_store: agent_tunnel::authorization::DynAgentAuthorizationStore =

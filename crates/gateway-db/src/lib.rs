@@ -1,11 +1,14 @@
 //! Gateway's own database, `gateway.db`.
 //!
 //! When a feature needs to remember a little data, it keeps it here in tables named after the feature
-//! (`agent_tunnel_*`, ...), so we don't end up with one database file per feature. The job queue is the
-//! exception: it tunes its database for queue work, so it keeps its own file.
+//! (`agent_tunnel_*`, ...), with the code reading them in a module of the same name, so we don't end up with one
+//! database file per feature. Queues are the exception: the job queue and the traffic audit tune their databases
+//! for queue work, so they keep their own files.
 
 #[macro_use]
 extern crate tracing;
+
+pub mod agent_tunnel;
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
