@@ -235,7 +235,6 @@ impl AiClient {
         debug!(
             provider = ?self.provider,
             model = %self.model,
-            base_url = %self.base_url,
             input_len = prompt.input.len(),
             max_output_tokens = prompt.max_output_tokens,
             "Send AI completion request"
@@ -257,13 +256,13 @@ impl AiClient {
             .timeout(self.request_timeout)
             .send()
             .await
-            .map_err(|error| error::transport(&error, api_key))?;
+            .map_err(|error| error::transport(error, api_key))?;
 
         let status = response.status();
         let retry_after = error::retry_after(response.headers());
         let body = read_body(response)
             .await
-            .map_err(|error| error::transport(&error, api_key))?;
+            .map_err(|error| error::transport(error, api_key))?;
 
         if !status.is_success() {
             // An error body over the limit is not parsed, so the error holds the reason phrase of the status.

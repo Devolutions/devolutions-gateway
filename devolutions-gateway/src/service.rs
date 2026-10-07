@@ -341,9 +341,11 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         .connect()
         .await
         .context("failed to connect the provisioner tasks to the gateway database")?;
-    let provisioner_tasks = Arc::new(gateway_db::provisioner_task::LibSqlProvisionerTaskStore::new(
-        provisioner_tasks_conn,
-    ));
+    let provisioner_tasks: provisioner_task::DynProvisionerTaskStore = Arc::new(
+        gateway_db::provisioner_task::LibSqlProvisionerTaskStore::new(provisioner_tasks_conn),
+    );
+
+    let ai_keys = devolutions_gateway::provisioner_tasks::ai_key_store::AiKeyStore::new();
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -360,6 +362,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
         provisioner_tasks,
+        ai_keys: ai_keys.clone(),
     };
 
     for listener in &conf.listeners {
@@ -393,6 +396,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::provisioning::CleanupTask { handle: provisioning });
 
+    tasks.register(devolutions_gateway::provisioner_tasks::ai_key_store::CleanupTask { handle: ai_keys });
+
     tasks.register(devolutions_gateway::credential_injection::CleanupTask {
         handle: synthetic_kdc_registry,
     });
@@ -424,7 +429,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         job_queue_ctx.job_queue_handle.clone(),
     ));
 
-    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(&job_queue_ctx));
+    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(
+        &job_queue_ctx,
+        state.clone(),
+    ));
     tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
 
     tasks.register(traffic_audit_task);

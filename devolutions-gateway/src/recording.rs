@@ -30,15 +30,26 @@ const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JrecFile {
+pub(crate) struct JrecFile {
     file_name: String,
     start_time: i64,
     duration: i64,
 }
 
+impl JrecFile {
+    pub(crate) fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
+    /// Unix seconds.
+    pub(crate) fn start_time(&self) -> i64 {
+        self.start_time
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JrecManifest {
+pub(crate) struct JrecManifest {
     session_id: Uuid,
     start_time: i64,
     duration: i64,
@@ -48,6 +59,20 @@ struct JrecManifest {
 }
 
 impl JrecManifest {
+    /// Unix seconds.
+    pub(crate) fn start_time(&self) -> i64 {
+        self.start_time
+    }
+
+    /// Seconds.
+    pub(crate) fn duration(&self) -> i64 {
+        self.duration
+    }
+
+    pub(crate) fn files(&self) -> &[JrecFile] {
+        &self.files
+    }
+
     fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let json = std::fs::read(path)?;
         let manifest = serde_json::from_slice(&json)?;
@@ -220,7 +245,7 @@ impl ActiveRecordings {
         self.0.lock().clone()
     }
 
-    fn insert(&self, id: Uuid) -> usize {
+    pub(crate) fn insert(&self, id: Uuid) -> usize {
         let mut guard = self.0.lock();
         guard.insert(id);
         guard.len()
@@ -257,6 +282,10 @@ enum RecordingManagerMessage {
         kind: ArtifactKind,
         channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
     },
+    GetFinished {
+        id: Uuid,
+        channel: oneshot::Sender<Result<Utf8PathBuf, FinishedRecordingError>>,
+    },
     Disconnect {
         id: Uuid,
     },
@@ -281,6 +310,29 @@ enum RecordingManagerMessage {
     },
 }
 
+/// A session that is not recording anymore and has at least one Recording.
+#[derive(Debug)]
+pub(crate) struct FinishedRecording {
+    pub(crate) dir: Utf8PathBuf,
+    pub(crate) manifest: JrecManifest,
+}
+
+impl FinishedRecording {
+    pub(crate) fn manifest_path(&self) -> Utf8PathBuf {
+        self.dir.join("recording.json")
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FinishedRecordingError {
+    #[error("session has no recording")]
+    NotFound,
+    #[error("session is still recording")]
+    Recording,
+    #[error(transparent)]
+    Other(anyhow::Error),
+}
+
 impl fmt::Debug for RecordingManagerMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -300,6 +352,9 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("kind", kind)
                 .finish_non_exhaustive(),
+            RecordingManagerMessage::GetFinished { id, channel: _ } => {
+                f.debug_struct("GetFinished").field("id", id).finish_non_exhaustive()
+            }
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
@@ -363,6 +418,36 @@ impl RecordingMessageSender {
             .ok()
             .context("couldn't send AddArtifact message")?;
         rx.await.context("couldn't receive AddArtifact result")?
+    }
+
+    pub(crate) async fn get_finished(&self, id: Uuid) -> Result<FinishedRecording, FinishedRecordingError> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::GetFinished { id, channel: tx })
+            .await
+            .ok()
+            .context("couldn't send GetFinished message")
+            .map_err(FinishedRecordingError::Other)?;
+        let dir = rx
+            .await
+            .context("couldn't receive GetFinished result")
+            .map_err(FinishedRecordingError::Other)??;
+
+        // The manifest is read here, so the recording manager task never waits on the disk for it.
+        let manifest = match fs::read(dir.join("recording.json")).await {
+            Ok(manifest) => manifest,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(FinishedRecordingError::NotFound),
+            Err(error) => {
+                return Err(FinishedRecordingError::Other(
+                    anyhow::Error::new(error).context("read manifest from disk"),
+                ));
+            }
+        };
+        let manifest = serde_json::from_slice(&manifest)
+            .context("parse manifest")
+            .map_err(FinishedRecordingError::Other)?;
+
+        Ok(FinishedRecording { dir, manifest })
     }
 
     async fn disconnect(&self, id: Uuid) -> anyhow::Result<()> {
@@ -727,6 +812,15 @@ impl RecordingManagerTask {
         Ok(artifact_path)
     }
 
+    fn handle_get_finished(&self, id: Uuid) -> Result<Utf8PathBuf, FinishedRecordingError> {
+        // The transcript is built from the whole recording, so one still being pushed is not ready.
+        if self.ongoing_recordings.contains_key(&id) {
+            return Err(FinishedRecordingError::Recording);
+        }
+
+        Ok(self.recordings_path.join(id.to_string()))
+    }
+
     fn handle_remove(&mut self, id: Uuid) {
         if let Some(ongoing) = self.ongoing_recordings.get(&id) {
             let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -857,6 +951,9 @@ async fn recording_manager_task(
                     RecordingManagerMessage::AddArtifact { id, kind, channel } => {
                         let _ = channel.send(manager.handle_add_artifact(id, kind).await);
                     },
+                    RecordingManagerMessage::GetFinished { id, channel } => {
+                        let _ = channel.send(manager.handle_get_finished(id));
+                    }
                     RecordingManagerMessage::Disconnect { id } => {
                         if let Err(e) = manager.handle_disconnect(id).await {
                             error!(error = format!("{e:#}"), "handle_disconnect");
@@ -1251,6 +1348,25 @@ mod tests {
         ));
         assert!(harness.sender.active_recordings.contains(recorded));
         assert_eq!(harness.sender.get_count().await.expect("count"), 1);
+    }
+
+    #[tokio::test]
+    async fn finished_recordings_are_read_through_the_manager() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        harness.write_manifest(id, MASTER_MANIFEST);
+
+        let finished = harness.sender.get_finished(id).await.expect("finished");
+        assert_eq!(finished.dir, harness.recordings_path.join(id.to_string()));
+        assert_eq!(finished.manifest.files()[0].file_name(), "recording-0.webm");
+
+        let ongoing = Uuid::new_v4();
+        harness.connect(ongoing, WEBM).await;
+        let result = harness.sender.get_finished(ongoing).await;
+        assert!(matches!(result, Err(FinishedRecordingError::Recording)), "{result:?}");
+
+        let missing = harness.sender.get_finished(Uuid::new_v4()).await;
+        assert!(matches!(missing, Err(FinishedRecordingError::NotFound)), "{missing:?}");
     }
 
     #[test]

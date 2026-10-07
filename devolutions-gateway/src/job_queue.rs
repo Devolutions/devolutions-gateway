@@ -11,6 +11,8 @@ use job_queue_libsql::libsql;
 use time::OffsetDateTime;
 use tokio::sync::{Notify, mpsc};
 
+use crate::DgwState;
+
 /// Runs of a job before the job queue gives up on it.
 pub const MAX_ATTEMPTS: u32 = 5;
 
@@ -41,6 +43,7 @@ pub struct JobRunnerTask {
     notify_runner: Arc<Notify>,
     runner_waker: RunnerWaker,
     queue: DynJobQueue,
+    state: DgwState,
 }
 
 impl JobQueueCtx {
@@ -201,11 +204,12 @@ async fn job_queue_task(ctx: JobQueueTask, mut shutdown_signal: ShutdownSignal) 
 }
 
 impl JobRunnerTask {
-    pub fn new(ctx: &JobQueueCtx) -> Self {
+    pub fn new(ctx: &JobQueueCtx, state: DgwState) -> Self {
         Self {
             notify_runner: Arc::clone(&ctx.notify_runner),
             runner_waker: RunnerWaker::clone(&ctx.runner_waker),
             queue: Arc::clone(&ctx.queue),
+            state,
         }
     }
 }
@@ -229,9 +233,10 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
         notify_runner,
         runner_waker,
         queue,
+        state,
     } = ctx;
 
-    let reader = DgwJobReader;
+    let reader = DgwJobReader { state };
 
     let spawn = |mut ctx: JobCtx, callback: job_queue::SpawnCallback| {
         tokio::spawn(async move {
@@ -283,11 +288,14 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
     Ok(())
 }
 
-struct DgwJobReader;
+struct DgwJobReader {
+    state: DgwState,
+}
 
 impl JobReader for DgwJobReader {
     fn read_json(&self, name: &str, json: &str) -> anyhow::Result<job_queue::DynJob> {
         use crate::api::jrec::DeleteRecordingsJob;
+        use crate::provisioner_tasks::recording_ai_analysis::RecordingAiAnalysisJob;
         use crate::recording::RemuxJob;
 
         match name {
@@ -298,6 +306,10 @@ impl JobReader for DgwJobReader {
             DeleteRecordingsJob::NAME => {
                 let job: DeleteRecordingsJob =
                     serde_json::from_str(json).context("failed to deserialize DeleteRecordingsJob")?;
+                Ok(Box::new(job))
+            }
+            RecordingAiAnalysisJob::NAME => {
+                let job = RecordingAiAnalysisJob::read_json(json, self.state.clone())?;
                 Ok(Box::new(job))
             }
             _ => anyhow::bail!("unknown job name: {name}"),

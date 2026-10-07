@@ -30,6 +30,7 @@ pub mod log;
 pub mod middleware;
 pub mod ngrok;
 pub mod plugin_manager;
+pub mod provisioner_tasks;
 pub mod provisioning;
 pub mod proxy;
 pub mod rd_clean_path;
@@ -69,6 +70,7 @@ pub struct DgwState {
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
     pub provisioner_tasks: provisioner_task::DynProvisionerTaskStore,
+    pub ai_keys: provisioner_tasks::ai_key_store::AiKeyStore,
 }
 
 #[doc(hidden)]
@@ -116,6 +118,7 @@ impl DgwState {
             monitoring_state,
             agent_tunnel_handle: None,
             provisioner_tasks,
+            ai_keys: provisioner_tasks::ai_key_store::AiKeyStore::new(),
         };
 
         let handles = MockHandles {
