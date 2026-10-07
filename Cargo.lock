@@ -1920,12 +1920,17 @@ dependencies = [
 name = "devolutions-gateway-ai"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "camino",
  "reqwest",
  "secrecy",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
+ "time",
  "tokio 1.52.3",
+ "tokio-util",
  "tracing",
  "url",
 ]
