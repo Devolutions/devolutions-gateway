@@ -132,8 +132,9 @@ async fn schema_version(conn: &Connection) -> anyhow::Result<usize> {
 
 /// Turns a 2026.3 `agent_tunnel.db` into `gateway.db`.
 ///
-/// We write a complete copy first and only then rename it into place, so `gateway.db` either doesn't exist yet
-/// or is whole. If Gateway stops halfway, the next start simply does it again.
+/// We write a complete copy, flush it to disk, and only then rename it into place, so `gateway.db` either doesn't
+/// exist yet or is whole. The rename reaches the disk before the old files are removed, so a power loss never leaves
+/// only a partial copy behind. If Gateway stops halfway, the next start simply does it again.
 async fn adopt_legacy_agent_tunnel_database(legacy: &Utf8Path, path: &Utf8Path) -> anyhow::Result<()> {
     if !legacy.exists() {
         return Ok(());
@@ -162,7 +163,14 @@ async fn adopt_legacy_agent_tunnel_database(legacy: &Utf8Path, path: &Utf8Path) 
         .with_context(|| format!("copy {legacy} to {copy}"))?;
     drop(legacy_conn);
 
-    std::fs::rename(&copy, path).with_context(|| format!("rename {copy} to {path}"))?;
+    // VACUUM INTO does not flush the file it writes.
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&copy)
+        .and_then(|file| file.sync_all())
+        .with_context(|| format!("flush {copy} to disk"))?;
+
+    rename_durably(&copy, path).with_context(|| format!("rename {copy} to {path}"))?;
 
     for suffix in ["", "-wal", "-shm"] {
         let legacy_file = Utf8PathBuf::from(format!("{legacy}{suffix}"));
@@ -173,6 +181,46 @@ async fn adopt_legacy_agent_tunnel_database(legacy: &Utf8Path, path: &Utf8Path) 
     }
 
     info!(from = %legacy, to = %path, "Moved the agent tunnel database into the gateway database");
+
+    Ok(())
+}
+
+/// Renames `from` to `to` and waits until the rename is on disk.
+#[cfg(unix)]
+fn rename_durably(from: &Utf8Path, to: &Utf8Path) -> std::io::Result<()> {
+    std::fs::rename(from, to)?;
+
+    // On Unix, the new name is only durable once its directory is flushed.
+    let dir = to
+        .parent()
+        .filter(|dir| !dir.as_str().is_empty())
+        .unwrap_or(Utf8Path::new("."));
+    std::fs::File::open(dir)?.sync_all()
+}
+
+/// Renames `from` to `to` and waits until the rename is on disk.
+#[cfg(windows)]
+fn rename_durably(from: &Utf8Path, to: &Utf8Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt as _;
+
+    use windows_sys::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
+
+    let wide = |path: &Utf8Path| -> Vec<u16> {
+        path.as_std_path()
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
+    };
+    let from = wide(from);
+    let to = wide(to);
+
+    // SAFETY: Both paths are null-terminated UTF-16 strings that outlive the call.
+    let succeeded = unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH) };
+
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
 
     Ok(())
 }
