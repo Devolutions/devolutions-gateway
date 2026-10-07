@@ -92,10 +92,7 @@ pub(super) fn write_chunks(
 
         match RecordingKind::of(&file.file_name) {
             RecordingKind::Asciicast => transcript.add_cast(open()?, offset).map_err(to_transcript_error)?,
-            RecordingKind::Trp => {
-                unsupported.get_or_insert("trp");
-                continue;
-            }
+            RecordingKind::Trp => transcript.add_trp(open()?, offset).map_err(to_transcript_error)?,
             RecordingKind::Video => {
                 unsupported.get_or_insert("webm");
                 continue;
@@ -200,6 +197,16 @@ impl<'a> Transcript<'a> {
             Ok(true) => Some(Ok(core::mem::take(&mut line))),
             Ok(false) => None,
             Err(error) => Some(Err(CastError::Read(error.to_string()))),
+        });
+
+        self.add_cast_events(events, offset)
+    }
+
+    /// Adds the terminal output of a TRP recording that started `offset` seconds into the session.
+    fn add_trp(&mut self, trp: impl io::Read, offset: f64) -> Result<(), CastError> {
+        let events = terminal_streamer::trp_decoder::AsciicastLines::new(trp).map(|line| {
+            line.map(String::into_bytes)
+                .map_err(|error| CastError::Read(format!("{error:#}")))
         });
 
         self.add_cast_events(events, offset)
@@ -556,7 +563,24 @@ mod tests {
         }
     }
 
-    fn assert_streamed_into_bounded_chunk_files(event: fn(usize) -> Vec<u8>) {
+    fn trp_packet(time_delta: u32, event_type: u16, payload: &[u8]) -> Vec<u8> {
+        let mut packet = Vec::new();
+        packet.extend_from_slice(&time_delta.to_le_bytes());
+        packet.extend_from_slice(&event_type.to_le_bytes());
+        packet.extend_from_slice(&u16::try_from(payload.len()).expect("small").to_le_bytes());
+        packet.extend_from_slice(payload);
+        packet
+    }
+
+    fn trp_event(event: usize) -> Vec<u8> {
+        if event == 0 {
+            trp_packet(0, 4, b"")
+        } else {
+            trp_packet(1000, 0, format!("line {event} of a long session\r\n").as_bytes())
+        }
+    }
+
+    fn assert_streamed_into_bounded_chunk_files(event: fn(usize) -> Vec<u8>, trp: bool) {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
         let events = 20_000;
@@ -565,7 +589,12 @@ mod tests {
         let cancel = CancellationToken::new();
         let mut transcript = Transcript::new(ChunkWriter::new(dir, 4096), &cancel);
         let recording = BufReader::with_capacity(64, recording);
-        assert!(transcript.add_cast(recording, 0.0).is_ok());
+        let added = if trp {
+            transcript.add_trp(recording, 0.0)
+        } else {
+            transcript.add_cast(recording, 0.0)
+        };
+        assert!(added.is_ok());
         let count = transcript.chunks.finish().expect("written");
 
         assert!(count > 100, "{count}");
@@ -583,7 +612,12 @@ mod tests {
 
     #[test]
     fn large_casts_are_streamed_into_bounded_chunk_files() {
-        assert_streamed_into_bounded_chunk_files(cast_event);
+        assert_streamed_into_bounded_chunk_files(cast_event, false);
+    }
+
+    #[test]
+    fn large_trp_recordings_are_streamed_into_bounded_chunk_files() {
+        assert_streamed_into_bounded_chunk_files(trp_event, true);
     }
 
     #[test]
@@ -663,14 +697,14 @@ mod tests {
     }
 
     #[test]
-    fn trp_only_sessions_are_unsupported() {
-        let dir = session_dir(&[]);
+    fn trp_recordings_are_decoded() {
+        let mut trp = trp_packet(0, 4, b"");
+        trp.extend(trp_packet(2500, 0, b"uptime\r\n"));
+        let dir = session_dir(&[("recording-0.trp", &trp)]);
 
         assert_eq!(
-            read(&manifest(1, &[("recording-0.trp", 1)]), &dir)
-                .expect_err("trp only")
-                .to_string(),
-            "unsupported recording type: trp"
+            read(&manifest(100, &[("recording-0.trp", 100)]), &dir).expect("transcript"),
+            "[2.5] uptime\n"
         );
     }
 

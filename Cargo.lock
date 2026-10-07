@@ -1930,6 +1930,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "terminal-streamer",
  "thiserror 2.0.20",
  "time",
  "tokio 1.52.3",
