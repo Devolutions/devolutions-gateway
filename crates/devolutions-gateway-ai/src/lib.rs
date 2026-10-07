@@ -27,9 +27,14 @@
 //!
 //! A new purpose is a module like [`session_actions`]: its prompt and `PROMPT_VERSION`, a request builder returned by
 //! a new [`AiClient`] method, and the parser of the answer.
+//!
+//! A purpose may also build on others and on files: [`recording_analysis`] reads the recordings of a session, terminal
+//! or video, describes them chunk by chunk with [`session_actions`] and [`screen_actions`], and writes the result as a
+//! session log, keeping its working files next to the recordings.
 
 mod client;
 mod error;
+pub mod recording_analysis;
 mod response;
 pub mod screen_actions;
 pub mod session_actions;

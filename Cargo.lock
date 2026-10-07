@@ -1937,15 +1937,24 @@ dependencies = [
 name = "devolutions-gateway-ai"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "base64 0.23.1",
+ "cadeau",
+ "camino",
+ "png",
  "reqwest",
  "secrecy",
  "serde",
  "serde_json",
+ "tempfile",
+ "terminal-streamer",
  "thiserror 2.0.20",
+ "time",
  "tokio 1.52.3",
+ "tokio-util",
  "tracing",
  "url",
+ "webm-iterable",
 ]
 
 [[package]]
@@ -2453,6 +2462,15 @@ name = "fastrand"
 version = "2.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
+
+[[package]]
+name = "fdeflate"
+version = "0.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e6853b52649d4ac5c0bd02320cddc5ba956bdb407c4b75a2c6b75bf51500f8c"
+dependencies = [
+ "simd-adler32",
+]
 
 [[package]]
 name = "ff"
@@ -5615,6 +5633,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51bae2ac328883f7acdfea3d66a7c35751187f870bc81f94563733a154d7a670"
 dependencies = [
  "plotters-backend",
+]
+
+[[package]]
+name = "png"
+version = "0.17.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
+dependencies = [
+ "bitflags 1.3.2",
+ "crc32fast",
+ "fdeflate",
+ "flate2",
+ "miniz_oxide",
 ]
 
 [[package]]
