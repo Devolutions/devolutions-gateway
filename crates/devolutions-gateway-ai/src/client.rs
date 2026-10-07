@@ -226,6 +226,11 @@ impl AiClient {
         AiClientBuilder::default()
     }
 
+    /// Model requested from the provider.
+    pub(crate) fn model(&self) -> &str {
+        &self.model
+    }
+
     /// Sends one completion request and returns the text of the answer.
     ///
     /// An answer cut short by the output token limit or the context window is [`Error::Truncated`], because no purpose

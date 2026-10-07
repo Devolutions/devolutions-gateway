@@ -10,14 +10,26 @@ publish = false
 workspace = true
 
 [dependencies]
+anyhow = "1"
 base64 = "0.23"
+cadeau = { version = "0.5.3", features = ["dlopen"] }
+camino = "1.1"
+png = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+terminal-streamer.path = "../terminal-streamer"
 thiserror = "2"
+time = "0.3"
+tokio = { version = "1.52", features = ["fs", "macros", "rt", "time"] }
+tokio-util = "0.7"
 tracing = "0.1"
 url = "2.5"
+webm-iterable = "0.7"
 
 [dev-dependencies]
+# The example builds its own HTTP client, so it needs TLS; Gateway passes one with its own TLS settings.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+tempfile = "3.24"
 tokio = { version = "1.52", features = ["io-util", "macros", "net", "rt-multi-thread"] }
