@@ -49,8 +49,9 @@ impl std::str::FromStr for ProvisionerTaskState {
     }
 }
 
+/// What is kept of a Task: what was asked, how it goes and how it ended.
 #[derive(Debug, Clone, PartialEq)]
-pub struct ProvisionerTask {
+pub struct ProvisionerTaskRecord {
     /// Chosen by the provisioner, so it can ask again without knowing whether the first request went through.
     pub id: Uuid,
     /// What kind of work this is, e.g. `recording.ai-analysis`.
@@ -71,8 +72,9 @@ pub struct ProvisionerTask {
     pub job_token: Option<Uuid>,
 }
 
+/// The record of a Task about to be created.
 #[derive(Debug, Clone, PartialEq)]
-pub struct NewProvisionerTask {
+pub struct NewProvisionerTaskRecord {
     pub id: Uuid,
     pub kind: String,
     pub target: String,
@@ -84,22 +86,22 @@ pub struct NewProvisionerTask {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateOutcome {
-    Created(ProvisionerTask),
+    Created(ProvisionerTaskRecord),
     /// The same request came in again; nothing new was created.
-    Existing(ProvisionerTask),
+    Existing(ProvisionerTaskRecord),
     /// The ID is already used by a Task with another kind, target or parameters.
-    IdConflict(ProvisionerTask),
+    IdConflict(ProvisionerTaskRecord),
     /// Another unfinished Task of the same kind already works on this target.
-    TargetBusy(ProvisionerTask),
+    TargetBusy(ProvisionerTaskRecord),
 }
 
 /// What a job finds when it comes to run an attempt of its Task.
 #[derive(Debug, Clone, PartialEq)]
 pub enum AttemptStart {
     /// The attempt is recorded: the Task is `running` with one more attempt counted.
-    Started(ProvisionerTask),
+    Started(ProvisionerTaskRecord),
     /// The Task is finished, possibly just now because it is past its deadline.
-    Finished(ProvisionerTask),
+    Finished(ProvisionerTaskRecord),
     /// Another job now runs the Task, so this one is stale or a duplicate.
     Superseded,
     /// No Task has this ID.
@@ -111,9 +113,9 @@ pub trait ProvisionerTaskStore: Send + Sync {
     /// Records a new `queued` Task, unless the ID is known or its target is busy.
     ///
     /// Like every method that takes `now`, it first fails the Tasks it looks at that are past their deadline.
-    async fn create(&self, task: NewProvisionerTask, now: OffsetDateTime) -> anyhow::Result<CreateOutcome>;
+    async fn create(&self, task: NewProvisionerTaskRecord, now: OffsetDateTime) -> anyhow::Result<CreateOutcome>;
 
-    async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTask>>;
+    async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTaskRecord>>;
 
     /// Marks the start of one more attempt by the job holding `job_token`: `running`, with one more attempt counted.
     ///
@@ -132,7 +134,7 @@ pub trait ProvisionerTaskStore: Send + Sync {
     async fn replace_job_token(&self, id: Uuid, job_token: Uuid, now: OffsetDateTime) -> anyhow::Result<bool>;
 
     /// Every unfinished Task, after failing those past their deadline.
-    async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTask>>;
+    async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;
 
     /// Replaces the payload of a `running` Task, e.g. to report progress. Returns `false` if it is not running.
     async fn update_running(&self, id: Uuid, payload: serde_json::Value) -> anyhow::Result<bool>;
