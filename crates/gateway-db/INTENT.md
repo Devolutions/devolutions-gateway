@@ -15,7 +15,7 @@ For each domain table, the table should have its prefix in table's name, for exa
 All persistent state except the job queue and traffic audit should be stored in this database.
 
 
-# Upgrade from 2026.3
+# Upgrade from 2026.3.0
 If for 2026.3.0, user turned on the feature of agent-tunnel, then the database will be migrated from `agent_tunnel.db` to `gateway.db`. The migration will be done automatically on Gateway start up. This is one-off, atomic operation.
 
 # Future

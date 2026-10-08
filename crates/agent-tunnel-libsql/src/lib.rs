@@ -18,7 +18,7 @@ use libsql::{Connection, TransactionBehavior, params};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-pub use self::upgrade::import_2026_3_database;
+pub use self::upgrade::import_2026_3_0_database;
 
 /// Every schema change ever made to the `agent_tunnel_*` tables, oldest first. Only ever append to it.
 const MIGRATIONS: &[&str] = &[include_str!("../migrations/01_agent_tunnel.sql")];

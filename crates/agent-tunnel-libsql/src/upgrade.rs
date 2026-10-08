@@ -1,4 +1,4 @@
-//! The upgrade from Gateway 2026.3, which kept the agent tunnel tables in an `agent_tunnel.db` of their own.
+//! The upgrade from Gateway 2026.3.0, which kept the agent tunnel tables in an `agent_tunnel.db` of their own.
 
 use anyhow::{Context as _, bail};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -6,16 +6,16 @@ use libsql::{Connection, params};
 
 use crate::record_schema_version;
 
-/// Only Gateway 2026.3 wrote this file.
+/// Only Gateway 2026.3.0 wrote this file.
 pub(crate) const LEGACY_FILE_NAME: &str = "agent_tunnel.db";
 
-/// The only schema 2026.3 ever had, as its `PRAGMA user_version`.
+/// The only schema 2026.3.0 ever had, as its `PRAGMA user_version`.
 const LEGACY_SCHEMA_VERSION: i64 = 1;
 
 /// The conversion yields the tables of the first migration.
 const CONVERTED_SCHEMA_VERSION: i64 = 1;
 
-/// Turns the 2026.3 tables into the first version of the `agent_tunnel_*` tables.
+/// Turns the 2026.3.0 tables into the first version of the `agent_tunnel_*` tables.
 const CONVERSION: &str = "
     ALTER TABLE metadata RENAME TO agent_tunnel_metadata;
     ALTER TABLE accepted_agents RENAME TO agent_tunnel_accepted_agents;
@@ -23,7 +23,7 @@ const CONVERSION: &str = "
     ALTER TABLE deleted_agent_keys RENAME TO agent_tunnel_deleted_agent_keys;
 ";
 
-/// Turns the `agent_tunnel.db` left by Gateway 2026.3 in `data_dir` into `gateway.db`.
+/// Turns the `agent_tunnel.db` left by Gateway 2026.3.0 in `data_dir` into `gateway.db`.
 ///
 /// Call it before opening `gateway.db`: once `gateway.db` exists, the old file is ignored. It does nothing when there
 /// is no old file.
@@ -31,7 +31,7 @@ const CONVERSION: &str = "
 /// We convert a copy, flush it to disk, and only then rename it into place, so `gateway.db` either doesn't exist yet
 /// or is whole and in the new layout. The rename reaches the disk before the old files are removed, so a power loss
 /// never leaves only a partial copy behind. If Gateway stops halfway, the next start simply does it again.
-pub async fn import_2026_3_database(data_dir: &Utf8Path) -> anyhow::Result<()> {
+pub async fn import_2026_3_0_database(data_dir: &Utf8Path) -> anyhow::Result<()> {
     let legacy = data_dir.join(LEGACY_FILE_NAME);
     let path = data_dir.join(gateway_db::FILE_NAME);
 
@@ -117,7 +117,7 @@ async fn convert(copy: &Utf8Path) -> anyhow::Result<()> {
     record_schema_version(&tx, CONVERTED_SCHEMA_VERSION).await?;
     tx.execute_batch("PRAGMA user_version = 0")
         .await
-        .context("clear the 2026.3 schema version")?;
+        .context("clear the 2026.3.0 schema version")?;
     tx.commit().await.context("commit agent tunnel conversion")?;
 
     Ok(())
@@ -140,10 +140,10 @@ async fn has_tables(conn: &Connection) -> anyhow::Result<bool> {
     let row = conn
         .query("SELECT 1 FROM sqlite_master LIMIT 1", ())
         .await
-        .context("query the 2026.3 agent tunnel tables")?
+        .context("query the 2026.3.0 agent tunnel tables")?
         .next()
         .await
-        .context("read the 2026.3 agent tunnel tables")?;
+        .context("read the 2026.3.0 agent tunnel tables")?;
 
     Ok(row.is_some())
 }
@@ -151,13 +151,13 @@ async fn has_tables(conn: &Connection) -> anyhow::Result<bool> {
 async fn legacy_schema_version(conn: &Connection) -> anyhow::Result<i64> {
     conn.query("PRAGMA user_version", ())
         .await
-        .context("query the 2026.3 agent tunnel schema version")?
+        .context("query the 2026.3.0 agent tunnel schema version")?
         .next()
         .await
-        .context("read the 2026.3 agent tunnel schema version")?
+        .context("read the 2026.3.0 agent tunnel schema version")?
         .context("schema version query returned no row")?
         .get::<i64>(0)
-        .context("decode the 2026.3 agent tunnel schema version")
+        .context("decode the 2026.3.0 agent tunnel schema version")
 }
 
 fn with_sidecars(path: &Utf8Path) -> [Utf8PathBuf; 4] {
@@ -187,7 +187,7 @@ mod tests {
     use super::*;
     use crate::LibSqlAgentAuthorizationStore;
 
-    /// The tables Gateway 2026.3 created in `agent_tunnel.db`.
+    /// The tables Gateway 2026.3.0 created in `agent_tunnel.db`.
     const LEGACY_SCHEMA: &str = "
         CREATE TABLE metadata (key TEXT PRIMARY KEY, value BLOB NOT NULL);
         CREATE TABLE accepted_agents (
@@ -221,27 +221,27 @@ mod tests {
         (temp_dir, data_dir)
     }
 
-    /// Writes the `agent_tunnel.db` that Gateway 2026.3 leaves behind, with one Agent, and returns its ID.
+    /// Writes the `agent_tunnel.db` that Gateway 2026.3.0 leaves behind, with one Agent, and returns its ID.
     async fn write_legacy_database(data_dir: &Utf8Path) -> Uuid {
         let conn = connect(&data_dir.join(LEGACY_FILE_NAME))
             .await
-            .expect("open 2026.3 database");
+            .expect("open 2026.3.0 database");
         conn.execute_batch("PRAGMA journal_mode = WAL")
             .await
-            .expect("use WAL like 2026.3");
+            .expect("use WAL like 2026.3.0");
         fill_legacy_database(&conn).await
     }
 
-    /// Creates the 2026.3 tables with one Agent, and returns its ID.
+    /// Creates the 2026.3.0 tables with one Agent, and returns its ID.
     async fn fill_legacy_database(conn: &Connection) -> Uuid {
         let agent_id = Uuid::new_v4();
-        conn.execute_batch(LEGACY_SCHEMA).await.expect("create 2026.3 tables");
+        conn.execute_batch(LEGACY_SCHEMA).await.expect("create 2026.3.0 tables");
         conn.execute(
             "INSERT INTO metadata (key, value) VALUES ('ca_spki_sha256', ?1)",
             params![vec![0xCAu8; 32]],
         )
         .await
-        .expect("bind 2026.3 CA");
+        .expect("bind 2026.3.0 CA");
         conn.execute(
             "INSERT INTO accepted_agents (agent_id, name, client_spki_sha256, enrollment_jti) VALUES (?1, ?2, ?3, ?4)",
             params![
@@ -252,10 +252,10 @@ mod tests {
             ],
         )
         .await
-        .expect("store 2026.3 Agent");
+        .expect("store 2026.3.0 Agent");
         conn.execute_batch("PRAGMA user_version = 1")
             .await
-            .expect("record 2026.3 schema version");
+            .expect("record 2026.3.0 schema version");
         agent_id
     }
 
@@ -281,11 +281,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agents_enrolled_on_2026_3_still_authorize_after_the_move() {
+    async fn agents_enrolled_on_2026_3_0_still_authorize_after_the_move() {
         let (_temp_dir, data_dir) = temp_data_dir();
         let agent_id = write_legacy_database(&data_dir).await;
 
-        import_2026_3_database(&data_dir).await.expect("import 2026.3 database");
+        import_2026_3_0_database(&data_dir)
+            .await
+            .expect("import 2026.3.0 database");
 
         for file in with_sidecars(&data_dir.join(LEGACY_FILE_NAME)) {
             assert!(!file.exists(), "{file} is removed");
@@ -331,23 +333,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agents_still_in_the_2026_3_wal_are_imported() {
+    async fn agents_still_in_the_2026_3_0_wal_are_imported() {
         let (_source_dir, source) = temp_data_dir();
         let (_temp_dir, data_dir) = temp_data_dir();
         let legacy = source.join(LEGACY_FILE_NAME);
-        let conn = connect(&legacy).await.expect("open 2026.3 database");
+        let conn = connect(&legacy).await.expect("open 2026.3.0 database");
         conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0")
             .await
             .expect("keep changes in the WAL");
         let agent_id = fill_legacy_database(&conn).await;
 
-        // Copied while open, as if 2026.3 had crashed before writing its WAL into the database.
+        // Copied while open, as if 2026.3.0 had crashed before writing its WAL into the database.
         for suffix in ["", "-wal"] {
             std::fs::copy(
                 format!("{legacy}{suffix}"),
                 format!("{}{suffix}", data_dir.join(LEGACY_FILE_NAME)),
             )
-            .expect("copy the 2026.3 files");
+            .expect("copy the 2026.3.0 files");
         }
         drop(conn);
         assert!(
@@ -357,7 +359,9 @@ mod tests {
                 > 0
         );
 
-        import_2026_3_database(&data_dir).await.expect("import 2026.3 database");
+        import_2026_3_0_database(&data_dir)
+            .await
+            .expect("import 2026.3.0 database");
 
         let store = LibSqlAgentAuthorizationStore::open(open_gateway_db(&data_dir).await, [0xCA; 32])
             .await
@@ -379,7 +383,9 @@ mod tests {
         std::fs::write(&copy, b"half written").expect("leave an incomplete copy");
         std::fs::write(format!("{copy}-journal"), b"stale journal").expect("leave its journal");
 
-        import_2026_3_database(&data_dir).await.expect("import 2026.3 database");
+        import_2026_3_0_database(&data_dir)
+            .await
+            .expect("import 2026.3.0 database");
 
         for file in with_sidecars(&copy) {
             assert!(!file.exists(), "{file} is removed");
@@ -396,7 +402,9 @@ mod tests {
         drop(open_gateway_db(&data_dir).await);
         write_legacy_database(&data_dir).await;
 
-        import_2026_3_database(&data_dir).await.expect("ignore 2026.3 database");
+        import_2026_3_0_database(&data_dir)
+            .await
+            .expect("ignore 2026.3.0 database");
 
         assert!(data_dir.join(LEGACY_FILE_NAME).exists());
         let conn = open_gateway_db(&data_dir).await;
@@ -409,20 +417,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_2026_3_database_is_removed() {
+    async fn empty_2026_3_0_database_is_removed() {
         let (_temp_dir, data_dir) = temp_data_dir();
         let conn = connect(&data_dir.join(LEGACY_FILE_NAME))
             .await
-            .expect("create empty 2026.3 database");
+            .expect("create empty 2026.3.0 database");
         conn.execute_batch("PRAGMA journal_mode = WAL")
             .await
             .expect("write the database header");
         drop(conn);
         assert!(data_dir.join(LEGACY_FILE_NAME).exists());
 
-        import_2026_3_database(&data_dir)
+        import_2026_3_0_database(&data_dir)
             .await
-            .expect("import empty 2026.3 database");
+            .expect("import empty 2026.3.0 database");
 
         assert!(!data_dir.join(LEGACY_FILE_NAME).exists());
         assert!(!data_dir.join(gateway_db::FILE_NAME).exists());
@@ -433,11 +441,11 @@ mod tests {
         let (_temp_dir, data_dir) = temp_data_dir();
         let conn = connect(&data_dir.join(LEGACY_FILE_NAME))
             .await
-            .expect("create 2026.3 database");
-        conn.execute_batch(LEGACY_SCHEMA).await.expect("create 2026.3 tables");
+            .expect("create 2026.3.0 database");
+        conn.execute_batch(LEGACY_SCHEMA).await.expect("create 2026.3.0 tables");
         drop(conn);
 
-        let error = import_2026_3_database(&data_dir)
+        let error = import_2026_3_0_database(&data_dir)
             .await
             .expect_err("tables without a schema version must be refused");
 
@@ -446,17 +454,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unknown_2026_3_schema_is_refused() {
+    async fn unknown_2026_3_0_schema_is_refused() {
         let (_temp_dir, data_dir) = temp_data_dir();
         let conn = connect(&data_dir.join(LEGACY_FILE_NAME))
             .await
-            .expect("create 2026.3 database");
+            .expect("create 2026.3.0 database");
         conn.execute_batch("PRAGMA user_version = 7")
             .await
             .expect("set unknown schema version");
         drop(conn);
 
-        let error = import_2026_3_database(&data_dir)
+        let error = import_2026_3_0_database(&data_dir)
             .await
             .expect_err("unknown schema must be refused");
 
