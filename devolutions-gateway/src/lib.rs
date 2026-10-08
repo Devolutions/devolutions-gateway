@@ -101,7 +101,7 @@ impl DgwState {
         let task_store = Arc::new(provisioner_task_libsql::LibSqlProvisionerTaskStore::open(task_store).await?);
         let provisioner_tasks = provisioner_tasks::task_runner(
             task_store,
-            job_queue_handle.clone(),
+            Arc::new(job_queue_handle.clone()),
             conf_handle.clone(),
             recording_manager_handle.clone(),
             provisioning.clone(),
