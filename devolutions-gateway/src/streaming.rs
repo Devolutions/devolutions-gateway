@@ -330,7 +330,7 @@ async fn setup_webm_streaming(
     );
     let start_source = move || async move { Ok(recording_event_stream(stream_state)) };
     let streaming_result = tokio::select! {
-        result = stream_session(start_source, websocket_stream, SessionConfig::default(), version) => result,
+        result = stream_session(start_source, websocket_stream, session_config(), version) => result,
         () = session_shutdown.wait() => return Ok(()),
     };
 
@@ -483,6 +483,18 @@ fn recording_event_stream(
     })
 }
 
+/// Experiment: `DGATEWAY_SHADOW_FILL_MS` sets the refill interval for quiet live clips.
+fn session_config() -> SessionConfig {
+    let fill_interval = std::env::var("DGATEWAY_SHADOW_FILL_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|&value| value > 0)
+        .map(Duration::from_millis);
+    SessionConfig {
+        fill_interval,
+        ..SessionConfig::default()
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::fs;

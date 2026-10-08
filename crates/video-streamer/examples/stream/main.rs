@@ -72,6 +72,7 @@ async fn main() -> anyhow::Result<()> {
             SessionConfig {
                 encoder_threads: SessionConfig::default().encoder_threads,
                 adaptive_frame_skip: true,
+                fill_interval: None,
             },
             || {
                 let (tx, rx) = tokio::sync::oneshot::channel();

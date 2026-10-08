@@ -2,6 +2,7 @@ use std::error::Error;
 use std::fmt;
 use std::future::Future;
 use std::io::{self, Read, Seek, SeekFrom};
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::{Sink, Stream};
@@ -89,6 +90,9 @@ pub struct SessionConfig {
     pub encoder_threads: u32,
     /// When `true`, the encoder skips frames while it falls behind real time, lowering the output frame rate.
     pub adaptive_frame_skip: bool,
+    /// When set, a live clip whose source stays quiet repeats its last picture at this interval, so players keep
+    /// receiving frames.
+    pub fill_interval: Option<Duration>,
 }
 
 impl Default for SessionConfig {
@@ -96,6 +100,7 @@ impl Default for SessionConfig {
         Self {
             encoder_threads: u32::try_from(num_cpus::get()).unwrap_or(1).max(1),
             adaptive_frame_skip: true,
+            fill_interval: None,
         }
     }
 }
