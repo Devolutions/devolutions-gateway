@@ -8,16 +8,15 @@ pub mod runner;
 use provisioner_task::DynProvisionerTaskStore;
 
 use self::recording_ai_analysis::RecordingAiAnalysis;
-use self::runner::ProvisionerTaskRunner;
+use self::runner::{DynProvisionerTaskJobQueue, ProvisionerTaskRunner};
 use crate::config::ConfHandle;
-use crate::job_queue::JobQueueHandle;
 use crate::provisioning::ProvisioningStore;
 use crate::recording::RecordingMessageSender;
 
 /// The provisioner task runner, with every provisioner task Gateway knows.
 pub fn task_runner(
     store: DynProvisionerTaskStore,
-    job_queue: JobQueueHandle,
+    job_queue: DynProvisionerTaskJobQueue,
     conf_handle: ConfHandle,
     recordings: RecordingMessageSender,
     provisioning: ProvisioningStore,
