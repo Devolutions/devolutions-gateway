@@ -1143,8 +1143,7 @@ dependencies = [
 [[package]]
 name = "cadeau"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d436ed569e312af22175720428864c72c0cb1a64c8713da6b560777b94ac88ea"
+source = "git+https://github.com/Devolutions/cadeau.git?rev=e56c47c748531b6c5925bec4f3b4405a7ccbfec1#e56c47c748531b6c5925bec4f3b4405a7ccbfec1"
 dependencies = [
  "xmf-sys",
 ]
@@ -10248,8 +10247,7 @@ dependencies = [
 [[package]]
 name = "xmf-sys"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "11fdca6c3a45724e73f61e2d2fb435df3de4bcbec0ae294b272dcdfbbc6ac115"
+source = "git+https://github.com/Devolutions/cadeau.git?rev=e56c47c748531b6c5925bec4f3b4405a7ccbfec1#e56c47c748531b6c5925bec4f3b4405a7ccbfec1"
 dependencies = [
  "dlib",
 ]
