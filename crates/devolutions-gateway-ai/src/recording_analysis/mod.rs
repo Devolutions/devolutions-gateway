@@ -412,7 +412,15 @@ impl Run {
             let read_bytes = Arc::clone(&read_bytes);
             move || prepare(&manifest, &dir, &workspace, &settings, &read_bytes, &cancel)
         });
-        let mut ticks = tokio::time::interval(PREPARING_PROGRESS_INTERVAL);
+        // The first event of an analysis is always the start of the reading, however quickly the files are read.
+        self.report(Progress::Reading {
+            read_bytes: 0,
+            total_bytes,
+        });
+        let mut ticks = tokio::time::interval_at(
+            tokio::time::Instant::now() + PREPARING_PROGRESS_INTERVAL,
+            PREPARING_PROGRESS_INTERVAL,
+        );
 
         // Decoding a long video takes a while, so the bytes read so far are reported until it is done.
         let plan = loop {
