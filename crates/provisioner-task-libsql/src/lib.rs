@@ -99,6 +99,8 @@ impl LibSqlProvisionerTaskStore {
     }
 
     /// Ends the Task as `state` if it is currently in one of `from`, given as an SQL list such as `'running'`.
+    ///
+    /// A Task past its deadline is failed as timed out first, and then not ended again.
     async fn finish(
         &self,
         id: Uuid,
@@ -108,7 +110,17 @@ impl LibSqlProvisionerTaskStore {
         now: OffsetDateTime,
     ) -> anyhow::Result<bool> {
         let conn = self.conn.lock().await;
-        let changed = conn
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await
+            .context("begin task finish")?;
+
+        let Some(task) = Self::find(&tx, id).await? else {
+            return Ok(false);
+        };
+        Self::expire(&tx, task, now).await?;
+
+        let changed = tx
             .execute(
                 &format!(
                     "UPDATE provisioner_task_records SET state = ?2, payload = ?3, finished_at = ?4
@@ -123,6 +135,7 @@ impl LibSqlProvisionerTaskStore {
             )
             .await
             .context("finish task")?;
+        tx.commit().await.context("commit task finish")?;
 
         Ok(changed == 1)
     }
@@ -578,6 +591,64 @@ mod tests {
         assert_eq!(finished.state, ProvisionerTaskState::Failed);
         assert_eq!(finished.payload["reason"], "boom");
         assert_eq!(finished.finished_at, Some(now()));
+    }
+
+    #[tokio::test]
+    async fn running_task_succeeds_with_its_result() {
+        let store = store().await;
+        let task = new_task("session-1");
+        create(&store, task.clone()).await;
+        store
+            .start_attempt(task.id, serde_json::json!({ "done": 0 }), now())
+            .await
+            .expect("start");
+
+        assert!(
+            store
+                .succeed(task.id, serde_json::json!({ "log": "ai-analysis-0.slog" }), now())
+                .await
+                .expect("succeed")
+        );
+
+        let succeeded = store.get(task.id, now()).await.expect("get task").expect("task exists");
+        assert_eq!(succeeded.state, ProvisionerTaskState::Succeeded);
+        assert_eq!(succeeded.payload["log"], "ai-analysis-0.slog");
+        assert_eq!(succeeded.finished_at, Some(now()));
+    }
+
+    #[tokio::test]
+    async fn overdue_task_cannot_succeed_or_fail_with_another_reason() {
+        let store = store().await;
+        let mut overdue = new_task("session-1");
+        overdue.deadline_at = now() + Duration::minutes(1);
+        create(&store, overdue.clone()).await;
+        store
+            .start_attempt(overdue.id, serde_json::json!({ "done": 3 }), now())
+            .await
+            .expect("start");
+        let late = now() + Duration::minutes(2);
+
+        assert!(
+            !store
+                .succeed(overdue.id, serde_json::json!({ "log": "late" }), late)
+                .await
+                .expect("succeed late")
+        );
+        assert!(
+            !store
+                .fail(overdue.id, serde_json::json!({ "reason": "boom" }), late)
+                .await
+                .expect("fail late")
+        );
+
+        let failed = store
+            .get(overdue.id, late)
+            .await
+            .expect("get task")
+            .expect("task exists");
+        assert_eq!(failed.state, ProvisionerTaskState::Failed);
+        assert_eq!(failed.payload["reason"], "timed out");
+        assert_eq!(failed.payload["details"]["lastPayload"]["done"], 3);
     }
 
     #[tokio::test]
