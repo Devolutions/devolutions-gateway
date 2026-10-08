@@ -402,6 +402,27 @@ impl JobQueue for LibSqlJobQueue {
 
         Ok(Some(scheduled_for))
     }
+
+    async fn job_definitions(&self, name: &str) -> anyhow::Result<Vec<String>> {
+        let sql_query = "SELECT json(def) FROM job_queue WHERE name = :name AND failed_attempts < :max_attempts";
+
+        let params = ((":name", name), (":max_attempts", self.max_attempts));
+
+        trace!(%sql_query, ?params, "Listing job definitions");
+
+        let mut rows = self
+            .conn
+            .query(sql_query, params)
+            .await
+            .context("failed to execute SQL query")?;
+
+        let mut definitions = Vec::new();
+        while let Some(row) = rows.next().await.context("failed to read the row")? {
+            definitions.push(row.get::<String>(0).context("failed to read the job definition")?);
+        }
+
+        Ok(definitions)
+    }
 }
 
 // Typically, migrations should not be modified once released, and we should only be appending to this list.
@@ -425,3 +446,55 @@ const MIGRATIONS: &[&str] = &[
 
     CREATE INDEX idx_scheduled_for ON job_queue(scheduled_for);",
 ];
+
+#[cfg(test)]
+mod tests {
+    use job_queue::{DynJob, Job, JobQueue as _, RunnerWaker};
+
+    use super::*;
+
+    struct Named {
+        name: &'static str,
+        def: &'static str,
+    }
+
+    #[async_trait]
+    impl Job for Named {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn write_json(&self) -> anyhow::Result<String> {
+            Ok(self.def.to_owned())
+        }
+
+        async fn run(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn job_definitions_lists_the_stored_jobs_of_one_name() {
+        let conn = libsql::Builder::new_local(":memory:")
+            .build()
+            .await
+            .expect("build database")
+            .connect()
+            .expect("connect");
+        let queue = LibSqlJobQueue::builder()
+            .runner_waker(RunnerWaker::new(|| {}))
+            .conn(conn)
+            .build();
+        queue.setup().await.expect("setup");
+
+        for (name, def) in [("a", r#"{"n":1}"#), ("b", r#"{"n":2}"#), ("a", r#"{"n":3}"#)] {
+            let job: DynJob = Box::new(Named { name, def });
+            queue.push_job(&job, None).await.expect("push");
+        }
+
+        let mut definitions = queue.job_definitions("a").await.expect("list");
+        definitions.sort();
+
+        assert_eq!(definitions, [r#"{"n":1}"#, r#"{"n":3}"#]);
+    }
+}

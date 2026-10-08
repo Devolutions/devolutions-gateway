@@ -106,6 +106,10 @@ impl ProvisionerTaskJobQueue for DurableJobQueue {
         let job: DynJob = Box::new(job);
         self.0.push_job(&job, None).await
     }
+
+    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>> {
+        self.0.job_definitions(ProvisionerTaskJob::NAME).await
+    }
 }
 
 impl JobQueueHandle {

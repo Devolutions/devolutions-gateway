@@ -35,6 +35,9 @@ use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
 pub trait ProvisionerTaskJobQueue: Send + Sync {
     /// Queues `job`, and returns once it is stored, so a record never waits for a job that was lost.
     async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()>;
+
+    /// Lists the JSON definitions of the provisioner task jobs already stored that may still run.
+    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>>;
 }
 
 pub type DynProvisionerTaskJobQueue = Arc<dyn ProvisionerTaskJobQueue>;
@@ -44,6 +47,11 @@ pub type DynProvisionerTaskJobQueue = Arc<dyn ProvisionerTaskJobQueue>;
 impl ProvisionerTaskJobQueue for JobQueueHandle {
     async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
         self.enqueue(job).await
+    }
+
+    /// The channel cannot tell what is stored: every unfinished record looks like it has no job.
+    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>> {
+        Ok(Vec::new())
     }
 }
 use crate::token::AccessScope;
@@ -256,15 +264,34 @@ impl ProvisionerTaskRunner {
         Ok(outcome)
     }
 
-    /// Hands every unfinished record to a new job: the jobs queued before stop at their next attempt.
+    /// Hands every unfinished record that has no job left to a new job, such as a record created just before a crash.
     ///
-    /// Call it at startup, before the job runner claims any job, so no earlier job is running an attempt meanwhile. A
-    /// record whose new job cannot be queued is failed, since no job is left to run it.
+    /// A record whose job is still stored keeps it. Call it at startup, before the job runner claims any job, so no job
+    /// runs an attempt meanwhile. A record whose new job cannot be queued is failed, since no job is left to run it.
     pub async fn resume(&self) -> anyhow::Result<()> {
         let now = OffsetDateTime::now_utc();
         let records = self.inner.store.list_unfinished(now).await?;
 
+        let stored = self
+            .inner
+            .job_queue
+            .stored_jobs()
+            .await
+            .context("list the stored provisioner task jobs")?
+            .iter()
+            .filter_map(|json| serde_json::from_str::<JobDef>(json).ok())
+            .map(|def| (def.task_id, def.job_token))
+            .collect::<std::collections::HashSet<_>>();
+
         for record in records {
+            if record
+                .job_token
+                .is_some_and(|job_token| stored.contains(&(record.id, job_token)))
+            {
+                debug!(task.id = %record.id, task.kind = %record.kind, "Task still has its job");
+                continue;
+            }
+
             let job_token = Uuid::new_v4();
 
             if !self.inner.store.replace_job_token(record.id, job_token, now).await? {
