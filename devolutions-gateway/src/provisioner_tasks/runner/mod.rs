@@ -13,7 +13,6 @@
 mod tests;
 
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::Context as _;
@@ -30,6 +29,23 @@ use uuid::Uuid;
 
 use super::AttemptError;
 use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
+
+/// Where the runner queues the jobs of its records.
+#[async_trait]
+pub trait ProvisionerTaskJobQueue: Send + Sync {
+    /// Queues `job`, and returns once it is stored, so a record never waits for a job that was lost.
+    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()>;
+}
+
+pub type DynProvisionerTaskJobQueue = Arc<dyn ProvisionerTaskJobQueue>;
+
+/// Hands the job to the job queue task, which stores it later: for tests, which take the jobs from its channel.
+#[async_trait]
+impl ProvisionerTaskJobQueue for JobQueueHandle {
+    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
+        self.enqueue(job).await
+    }
+}
 use crate::token::AccessScope;
 
 /// A provisioner task: the work Gateway does for one kind of request, such as `recording-ai-analysis`.
@@ -135,14 +151,14 @@ pub struct ProvisionerTaskRunner {
 
 struct Inner {
     store: DynProvisionerTaskStore,
-    job_queue: JobQueueHandle,
+    job_queue: DynProvisionerTaskJobQueue,
     /// Kind → the task that runs records of this kind.
     tasks: HashMap<&'static str, Arc<dyn AnyProvisionerTask>>,
 }
 
 pub struct ProvisionerTaskRunnerBuilder {
     store: DynProvisionerTaskStore,
-    job_queue: JobQueueHandle,
+    job_queue: DynProvisionerTaskJobQueue,
     tasks: HashMap<&'static str, Arc<dyn AnyProvisionerTask>>,
 }
 
@@ -171,7 +187,10 @@ fn starting_payload() -> serde_json::Value {
 }
 
 impl ProvisionerTaskRunner {
-    pub fn builder(store: DynProvisionerTaskStore, job_queue: JobQueueHandle) -> ProvisionerTaskRunnerBuilder {
+    pub fn builder(
+        store: DynProvisionerTaskStore,
+        job_queue: DynProvisionerTaskJobQueue,
+    ) -> ProvisionerTaskRunnerBuilder {
         ProvisionerTaskRunnerBuilder {
             store,
             job_queue,
@@ -221,17 +240,14 @@ impl ProvisionerTaskRunner {
             return Ok(outcome);
         };
 
-        if let Err(error) = on_created(record) {
-            error!(task.id = %id, task.kind = T::KIND, error = format!("{error:#}"), "Failed to prepare the Task");
-            self.fail(task.as_ref(), id, failure("not queued", &format!("{error:#}"), 0))
-                .await;
-            return Err(error);
-        }
+        let queued = match on_created(record) {
+            Ok(()) => self.enqueue(id, job_token).await,
+            Err(error) => Err(error.context("prepare the Task")),
+        };
 
-        if let Err(error) = self.enqueue(id, job_token).await {
+        if let Err(error) = queued {
             error!(task.id = %id, task.kind = T::KIND, error = format!("{error:#}"), "Failed to queue the Task");
-            self.fail(task.as_ref(), id, failure("not queued", &format!("{error:#}"), 0))
-                .await;
+            self.fail_not_queued(task.as_ref(), id, &error, 0).await;
             return Err(error);
         }
 
@@ -240,14 +256,11 @@ impl ProvisionerTaskRunner {
         Ok(outcome)
     }
 
-    /// Hands every unfinished record to a new job queued with `push`: the jobs queued before stop at their next attempt.
+    /// Hands every unfinished record to a new job: the jobs queued before stop at their next attempt.
     ///
-    /// Call it at startup, before the job runner claims any job, so no earlier job is running an attempt meanwhile.
-    pub async fn resume<F, Fut>(&self, push: F) -> anyhow::Result<()>
-    where
-        F: Fn(ProvisionerTaskJob) -> Fut,
-        Fut: Future<Output = anyhow::Result<()>>,
-    {
+    /// Call it at startup, before the job runner claims any job, so no earlier job is running an attempt meanwhile. A
+    /// record whose new job cannot be queued is failed, since no job is left to run it.
+    pub async fn resume(&self) -> anyhow::Result<()> {
         let now = OffsetDateTime::now_utc();
         let records = self.inner.store.list_unfinished(now).await?;
 
@@ -258,20 +271,20 @@ impl ProvisionerTaskRunner {
                 continue;
             }
 
-            let job = ProvisionerTaskJob {
-                task_id: record.id,
-                job_token,
-                runner: self.clone(),
-            };
-
-            match push(job).await {
+            match self.enqueue(record.id, job_token).await {
                 Ok(()) => info!(task.id = %record.id, task.kind = %record.kind, "Task queued again"),
-                Err(error) => error!(
-                    task.id = %record.id,
-                    task.kind = %record.kind,
-                    error = format!("{error:#}"),
-                    "Failed to queue the Task again; it fails at its deadline"
-                ),
+                Err(error) => {
+                    error!(
+                        task.id = %record.id,
+                        task.kind = %record.kind,
+                        error = format!("{error:#}"),
+                        "Failed to queue the Task again"
+                    );
+                    if let Some(task) = self.task(&record.kind) {
+                        self.fail_not_queued(task.as_ref(), record.id, &error, record.attempts)
+                            .await;
+                    }
+                }
             }
         }
 
@@ -291,7 +304,7 @@ impl ProvisionerTaskRunner {
     async fn enqueue(&self, task_id: Uuid, job_token: Uuid) -> anyhow::Result<()> {
         self.inner
             .job_queue
-            .enqueue(ProvisionerTaskJob {
+            .push(ProvisionerTaskJob {
                 task_id,
                 job_token,
                 runner: self.clone(),
@@ -374,24 +387,28 @@ impl ProvisionerTaskRunner {
         };
 
         match outcome {
-            Ok(output) => {
-                // An error here must not ask for a retry: the work is done.
-                match store.succeed(task_id, output, OffsetDateTime::now_utc()).await {
-                    Ok(true) => info!(task.id = %task_id, task.kind = %record.kind, attempts, "Task succeeded"),
-                    Ok(false) => warn!(
-                        task.id = %task_id,
-                        task.kind = %record.kind,
-                        "Task attempt succeeded after the Task had ended, such as past its deadline; the Task keeps its earlier end"
-                    ),
-                    Err(error) => error!(
-                        task.id = %task_id,
-                        error = format!("{error:#}"),
-                        "Failed to record the Task result"
-                    ),
-                }
+            Ok(output) => match store.succeed(task_id, output, OffsetDateTime::now_utc()).await {
+                Ok(ended) => {
+                    if ended {
+                        info!(task.id = %task_id, task.kind = %record.kind, attempts, "Task succeeded");
+                    } else {
+                        warn!(
+                            task.id = %task_id,
+                            task.kind = %record.kind,
+                            "Task attempt succeeded after the Task had ended, such as past its deadline; the Task keeps its earlier end"
+                        );
+                    }
 
-                self.end(task.as_ref(), task_id).await;
-            }
+                    self.end(task.as_ref(), task_id).await;
+                }
+                // No retry: the work is done, and doing it again would repeat it, such as adding a second log. Nothing is
+                // dropped either, since the record still runs; it fails at its deadline.
+                Err(error) => error!(
+                    task.id = %task_id,
+                    error = format!("{error:#}"),
+                    "Failed to record the Task result; the Task fails at its deadline"
+                ),
+            },
             Err(AttemptError::Transient(details)) if attempts < MAX_ATTEMPTS => {
                 warn!(task.id = %task_id, task.kind = %record.kind, attempts, %details, "Task attempt failed; it will be retried");
                 anyhow::bail!("Task attempt failed: {details}");
@@ -403,17 +420,17 @@ impl ProvisionerTaskRunner {
                     task_id,
                     failure("attempts exhausted", &details, attempts),
                 )
-                .await;
+                .await?;
             }
             Err(AttemptError::Permanent(details)) => {
                 warn!(task.id = %task_id, task.kind = %record.kind, attempts, %details, "Task failed");
                 self.fail(task.as_ref(), task_id, failure("permanent error", &details, attempts))
-                    .await;
+                    .await?;
             }
             Err(AttemptError::Failed { reason, details }) => {
                 warn!(task.id = %task_id, task.kind = %record.kind, attempts, reason, %details, "Task failed");
                 self.fail(task.as_ref(), task_id, failure(reason, &details, attempts))
-                    .await;
+                    .await?;
             }
             Err(AttemptError::Cancelled) => unreachable!("a cancelled attempt is reported as a timeout above"),
         }
@@ -421,12 +438,40 @@ impl ProvisionerTaskRunner {
         Ok(())
     }
 
-    async fn fail(&self, task: &dyn AnyProvisionerTask, task_id: Uuid, payload: serde_json::Value) {
-        if let Err(error) = self.inner.store.fail(task_id, payload, OffsetDateTime::now_utc()).await {
-            error!(task.id = %task_id, error = format!("{error:#}"), "Failed to record the Task failure");
-        }
+    /// Records the failure, then drops what the record kept while running.
+    ///
+    /// If the failure cannot be recorded, nothing is dropped, since the record may still run, and the error is returned so
+    /// the job queue tries again.
+    async fn fail(
+        &self,
+        task: &dyn AnyProvisionerTask,
+        task_id: Uuid,
+        payload: serde_json::Value,
+    ) -> anyhow::Result<()> {
+        self.inner
+            .store
+            .fail(task_id, payload, OffsetDateTime::now_utc())
+            .await
+            .context("record the Task failure")?;
 
         self.end(task, task_id).await;
+
+        Ok(())
+    }
+
+    /// Fails a record no job will run.
+    async fn fail_not_queued(
+        &self,
+        task: &dyn AnyProvisionerTask,
+        task_id: Uuid,
+        error: &anyhow::Error,
+        attempts: u32,
+    ) {
+        let payload = failure("not queued", &format!("{error:#}"), attempts);
+
+        if let Err(error) = self.fail(task, task_id, payload).await {
+            error!(task.id = %task_id, error = format!("{error:#}"), "Failed to record the Task failure; it fails at its deadline");
+        }
     }
 
     async fn end(&self, task: &dyn AnyProvisionerTask, task_id: Uuid) {

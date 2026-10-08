@@ -107,7 +107,7 @@ impl Harness {
         );
         state.provisioner_tasks = devolutions_gateway::provisioner_tasks::task_runner(
             Arc::clone(&task_store),
-            state.job_queue_handle.clone(),
+            Arc::new(state.job_queue_handle.clone()),
             state.conf_handle.clone(),
             state.recordings.clone(),
             state.provisioning.clone(),
