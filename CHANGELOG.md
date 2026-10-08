@@ -2,6 +2,127 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.3.1 (2026-10-09)
+
+### Security
+
+- _agent_: use TLS for PowerShell Universal gRPC over HTTPS ([#2017](https://github.com/Devolutions/devolutions-gateway/issues/2017)) ([d0f13ef9ff](https://github.com/Devolutions/devolutions-gateway/commit/d0f13ef9ff967d3cd8bfdb5ddee56d25eb783e5f)) ([PSU-1420](https://devolutions.atlassian.net/browse/PSU-1420))
+
+  Previously, a PowerShell Universal Agent configured with an `https://` `ServerUrl` connected without TLS, so its AppToken could have been sent unencrypted.
+  The connection now uses TLS with the system's trusted root certificates, and plain `http://` URLs keep working.
+  If you configured an HTTPS `ServerUrl` on 2026.3.0 or earlier, rotate the AppToken.
+
+### Features
+
+- _agent,agent-installer_: make the package broker available ([#1975](https://github.com/Devolutions/devolutions-gateway/issues/1975)) ([504e9908ba](https://github.com/Devolutions/devolutions-gateway/commit/504e9908baab79b3d9616861b806257baaf916af)) ([#1977](https://github.com/Devolutions/devolutions-gateway/issues/1977)) ([a9e1555a66](https://github.com/Devolutions/devolutions-gateway/commit/a9e1555a66c1da9a7edfaac356a9032fd426fc79)) ([#1978](https://github.com/Devolutions/devolutions-gateway/issues/1978)) ([16658918bb](https://github.com/Devolutions/devolutions-gateway/commit/16658918bba6dbbd24018755f5e8fed539433aab)) ([#1980](https://github.com/Devolutions/devolutions-gateway/issues/1980)) ([e9934c2aee](https://github.com/Devolutions/devolutions-gateway/commit/e9934c2aee42cddaeb96c8a85aee9f2190e76719)) ([#2020](https://github.com/Devolutions/devolutions-gateway/issues/2020)) ([f52641f2e3](https://github.com/Devolutions/devolutions-gateway/commit/f52641f2e3885344592948ef67ae729de5371564)) ([#2023](https://github.com/Devolutions/devolutions-gateway/issues/2023)) ([b0b5d86b7c](https://github.com/Devolutions/devolutions-gateway/commit/b0b5d86b7c39fb60dd5ac084b4c42ee30e57f93b)) ([#2024](https://github.com/Devolutions/devolutions-gateway/issues/2024)) ([45a51c2137](https://github.com/Devolutions/devolutions-gateway/commit/45a51c21372decc07e86effe3b6f04609f30ee70)) ([#2025](https://github.com/Devolutions/devolutions-gateway/issues/2025)) ([5fcfa7fc64](https://github.com/Devolutions/devolutions-gateway/commit/5fcfa7fc6444a39e49aabcd3d77d1a2b9e9a836b)) ([#2037](https://github.com/Devolutions/devolutions-gateway/issues/2037)) ([446842aabc](https://github.com/Devolutions/devolutions-gateway/commit/446842aabc0f2f82b5de24dd892c0bb5d40e08a1))
+
+  The package broker runs package manager operations requested by Windows users, as allowed by an administrator-managed JSON package policy.
+  Enable it with the Package Broker feature of the Agent installer, which is off by default; for unattended installs, add `F.PackageBroker` to `ADDLOCAL`.
+  The installer doesn't deploy a policy: the broker rejects package requests until one is deployed, by default in `%ProgramData%\Devolutions\PackageBroker\`.
+  Administrators can validate and manage the policy through the broker API, and policy changes and rejected change attempts are logged to the Windows Event Log.
+  Deny rules match whenever a request might fall within them, while Allow rules require a definite match.
+  The broker verifies the calling process and its signature, resolves package manager executables as the requesting user, and validates package ids, versions, source names and install locations before running a package manager.
+
+- _agent_: clarify RDP Extension description ([#1998](https://github.com/Devolutions/devolutions-gateway/issues/1998)) ([722227d326](https://github.com/Devolutions/devolutions-gateway/commit/722227d326a2ff7b98df692e082d7cde3af3f32d))
+
+  The Agent installer describes the RDP Extension as enabling RDP session features such as remote execution, jump sessions and remote logoff.
+
+- _agent_: remove experimental label from PowerShell Universal Agent ([#2016](https://github.com/Devolutions/devolutions-gateway/issues/2016)) ([3a3714e0a4](https://github.com/Devolutions/devolutions-gateway/commit/3a3714e0a486730c5cf020f523c393a50a8ec325))
+
+  The Agent installer no longer marks the PowerShell Universal Agent feature as experimental.
+
+- _installer_: support custom service accounts ([2f382935c2](https://github.com/Devolutions/devolutions-gateway/commit/2f382935c28632ca64e64cfbd5f528af34b0ec0d))
+
+  Choose a custom service account when installing Devolutions Gateway, and keep the existing identity during upgrades.
+  Regular users, managed service accounts and the Gateway virtual account are supported.
+  Regular user accounts require their password again on each major upgrade.
+
+- _agent_: support custom Gateway service accounts ([c5dd1e9e57](https://github.com/Devolutions/devolutions-gateway/commit/c5dd1e9e57250e197fbe0ff8bd8bac2c09a05e60))
+
+  Gateway updates follow the selected Gateway service account.
+  Unattended updates are limited to passwordless accounts, and the Agent reports when an update requires credentials supplied manually.
+
+- _dgw,installer_: configure service accounts from PowerShell ([1d09b259b3](https://github.com/Devolutions/devolutions-gateway/commit/1d09b259b3a3506f96b646d54e29e19e80487c3e))
+
+  Install or upgrade Gateway on Windows under a chosen service account from PowerShell.
+  Failed installations now report the MSI error and keep diagnostic logs.
+  Password-based accounts require credentials again for major upgrades, and the password is visible to privileged users who can inspect process command lines.
+
+- _agent,agent-installer_: refresh Agent branding ([#2018](https://github.com/Devolutions/devolutions-gateway/issues/2018)) ([86df61e965](https://github.com/Devolutions/devolutions-gateway/commit/86df61e96524917ff64bfc925ac4098c0b6f6327))
+
+  The service, shell extension, Desktop Agent tray and installer use the new Agent icon and images.
+
+- _dgw_: list Gateway-generated artifacts in the recording manifest ([#2003](https://github.com/Devolutions/devolutions-gateway/issues/2003)) ([4e18d9c1a7](https://github.com/Devolutions/devolutions-gateway/commit/4e18d9c1a77eb9acac41699d8345d754229819ee))
+
+  The recording manifest format supports an `artifacts` object next to `files` for Gateway-generated, non-playable files such as a future AI analysis.
+  Gateway doesn't generate any artifacts yet; `artifacts` is omitted when empty, so manifests are unchanged.
+
+- _dgw_: honor an explicit agent on JMUX tokens ([#2021](https://github.com/Devolutions/devolutions-gateway/issues/2021)) ([20e5861680](https://github.com/Devolutions/devolutions-gateway/commit/20e58616801672546fea6786256dc351e4a88312)) ([DGW-451](https://devolutions.atlassian.net/browse/DGW-451))
+
+  JMUX tokens can name an explicit agent with `jet_agent_id`, as association tokens already do.
+  Every JMUX channel of the session then goes through that agent or fails with `OPEN_FAILURE`, without falling back to a direct connection or route matching.
+  If Agent Tunnel is disabled, the session is rejected up front; tokens without the claim keep working as before.
+  The .NET `JmuxClaims` and tokengen support the optional claim.
+
+- _agent,agent-installer_: add Swedish localization ([#2031](https://github.com/Devolutions/devolutions-gateway/issues/2031)) ([f13a9a1615](https://github.com/Devolutions/devolutions-gateway/commit/f13a9a161541f2b4249766dac588dc51b2727233))
+
+  Devolutions Agent now installs in Swedish on systems using a Swedish UI language, and the Desktop Agent tray menu and messages are translated.
+  Swedish was contributed by Daniel Nylander.
+
+- _dgw_: stream reconnecting WebM sessions ([#1942](https://github.com/Devolutions/devolutions-gateway/issues/1942)) ([81a3141c5e](https://github.com/Devolutions/devolutions-gateway/commit/81a3141c5ecf296100cb9f4e47c10706bf9b116a)) ([RDMW-24281](https://devolutions.atlassian.net/browse/RDMW-24281))
+
+  Live shadowing of a WebM recording keeps playing when the recorded session reconnects or changes size: Gateway re-encodes the clips into fixed-size segments and streams them over one WebSocket.
+  Players opt in with the `jrec-shadow.v2` WebSocket subprotocol and get a `SegmentStarted` message before each new segment; other players' streams end cleanly at the first reconnect or resize instead of freezing.
+  Viewers get `StreamEnded` when the recorded session disconnects and can't reconnect, and requests that can't be streamed are closed with 4001, 4002 or 4003 instead of failing the upgrade.
+
+- _webapp_: play session-protocol WebM streams ([#1943](https://github.com/Devolutions/devolutions-gateway/issues/1943)) ([62de985e3e](https://github.com/Devolutions/devolutions-gateway/commit/62de985e3ef9dfc7077ea738ec693503d80388e1)) ([RDMW-24281](https://devolutions.atlassian.net/browse/RDMW-24281))
+
+  The shadow player keeps playing live recordings that reconnect or change size, with its own controls and one timeline across segments.
+  Against an older Gateway, it reconnects without `jrec-shadow.v2` and plays the single segment that Gateway sends.
+
+### Bug Fixes
+
+- _agent_: start the session process only for remote sessions ([#1995](https://github.com/Devolutions/devolutions-gateway/issues/1995)) ([13919492a0](https://github.com/Devolutions/devolutions-gateway/commit/13919492a0c66b4282823b2ad4a9e7e9f2f43247))
+
+  The Devolutions Session process is no longer started in console sessions, where it can't serve the RDP dynamic virtual channel and exited with an error.
+
+- _dgw_: identify subscriber requests ([#1996](https://github.com/Devolutions/devolutions-gateway/issues/1996)) ([ad4d129051](https://github.com/Devolutions/devolutions-gateway/commit/ad4d129051984a9870f1dadb2f382164b713d35d))
+
+  Every subscriber notification carries a versioned Devolutions Gateway `User-Agent` header so endpoints can identify the caller.
+
+- _installer_: respect certificate store context ([912fd9a889](https://github.com/Devolutions/devolutions-gateway/commit/912fd9a889208435b67a7bf5abcdcd5da3cdafb6))
+
+  Certificate warnings are resolved against the existing or selected service account.
+  Manually managed user or service certificate stores are kept only when the service account is unchanged, and named machine stores are supported.
+
+- _agent_: report product update failures alongside an Agent self-update ([28da053f73](https://github.com/Devolutions/devolutions-gateway/commit/28da053f730321537c05d47ec033fb5265acba88))
+
+  Product update failures are now published even when an Agent self-update in the same run succeeds.
+
+- _agent_: improve PowerShell Universal Agent connection resilience ([#2022](https://github.com/Devolutions/devolutions-gateway/issues/2022)) ([7b512121bc](https://github.com/Devolutions/devolutions-gateway/commit/7b512121bc6c4d093a77ee13ee520bc13532a05c))
+
+  The PowerShell Universal Agent now recovers on its own from conditions that previously required a service restart.
+  A `$secret:` AppToken is resolved on every connection attempt with a 30-second limit, silently dropped connections are detected with TCP and HTTP/2 keepalives, and connection attempts are bounded by timeouts.
+  A job that stops reading its input no longer stalls other jobs, stop requests or service shutdown; memory is bounded to 64 MiB per job and 256 MiB for all jobs.
+  `ServerUrl` must now use the `http` or `https` scheme: other schemes such as `grpcs` previously connected in plaintext and are now rejected at startup.
+  The AppToken, and any credentials or query parameters in `ServerUrl`, are no longer written to logs.
+
+- _agent_: harden PowerShell Universal Agent job supervision ([#2030](https://github.com/Devolutions/devolutions-gateway/issues/2030)) ([abe40edfc1](https://github.com/Devolutions/devolutions-gateway/commit/abe40edfc118964a7d31ed40e73b26433cee87c4))
+
+  A job whose stdin input makes no progress for 5 minutes is now stopped, reported as "no stdin consumed for 300s while input was unread", even when its backlog is below the 16 MiB stall threshold.
+  A `$secret:` AppToken lookup completes when the PowerShell worker exits, even if a vault helper keeps its output open.
+  Stop requests apply while the process start notification is held back, failed resumes are reported as start failures, and gracefully stopped jobs are reported as canceled.
+
+- _agent_: make PowerShell Universal Agent stdin limits and job start more reliable ([#2032](https://github.com/Devolutions/devolutions-gateway/issues/2032)) ([b4ad554637](https://github.com/Devolutions/devolutions-gateway/commit/b4ad5546377ecaa1fb3d0cd3b2c0bc40bdb3eb88))
+
+  Jobs stopped for exceeding a stdin limit can no longer make the Agent buffer more than 64 MiB beyond the per-connection stdin budget.
+  Stalled jobs are stopped only when that frees enough budget for the incoming input; otherwise, only the job receiving it fails.
+  On Windows, a job no longer fails to start when a thread injected into its process, for example by security software, exits before the Agent resumes the process.
+
+- _webapp_: honor the RDP port in the host field ([#2038](https://github.com/Devolutions/devolutions-gateway/issues/2038)) ([92b746928e](https://github.com/Devolutions/devolutions-gateway/commit/92b746928e6e354b7cc9b3f25fca9a33ba5dcb35))
+
+  RDP sessions started from the standalone web client now use a non-default port entered as `host:port`, as the SSH, VNC and ARD clients already did, instead of always connecting to 3389.
+
 ## 2026.3.0 (2026-09-15)
 
 ### Security
