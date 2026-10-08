@@ -56,7 +56,7 @@ enum Content<'a> {
 }
 
 impl<'a> Content<'a> {
-    /// Builds the content of input, writing each part with lock.
+    /// Builds the content of input, writing each part with `block`.
     fn of(input: &[Input<'a>], block: impl Fn(&Input<'a>) -> Value) -> Self {
         match input {
             [Input::Text(text)] => Self::Text(text),
