@@ -11,7 +11,8 @@ use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use libsql::{Connection, Row, TransactionBehavior, params};
 use provisioner_task::{
-    AttemptStart, CreateOutcome, NewProvisionerTask, ProvisionerTask, ProvisionerTaskState, ProvisionerTaskStore,
+    AttemptStart, CreateOutcome, NewProvisionerTaskRecord, ProvisionerTaskRecord, ProvisionerTaskState,
+    ProvisionerTaskStore,
 };
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -40,7 +41,7 @@ impl LibSqlProvisionerTaskStore {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
-    async fn find(conn: &Connection, id: Uuid) -> anyhow::Result<Option<ProvisionerTask>> {
+    async fn find(conn: &Connection, id: Uuid) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
         conn.query(
             &format!("SELECT {COLUMNS} FROM provisioner_task_records WHERE id = ?1"),
             params![id.to_string()],
@@ -55,7 +56,11 @@ impl LibSqlProvisionerTaskStore {
         .transpose()
     }
 
-    async fn find_unfinished(conn: &Connection, kind: &str, target: &str) -> anyhow::Result<Option<ProvisionerTask>> {
+    async fn find_unfinished(
+        conn: &Connection,
+        kind: &str,
+        target: &str,
+    ) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
         conn.query(
             &format!(
                 "SELECT {COLUMNS} FROM provisioner_task_records
@@ -74,7 +79,11 @@ impl LibSqlProvisionerTaskStore {
     }
 
     /// Fails `task` if it is unfinished and past its deadline, then returns it as stored.
-    async fn expire(conn: &Connection, task: ProvisionerTask, now: OffsetDateTime) -> anyhow::Result<ProvisionerTask> {
+    async fn expire(
+        conn: &Connection,
+        task: ProvisionerTaskRecord,
+        now: OffsetDateTime,
+    ) -> anyhow::Result<ProvisionerTaskRecord> {
         if task.state.is_finished() || now < task.deadline_at {
             return Ok(task);
         }
@@ -143,7 +152,7 @@ impl LibSqlProvisionerTaskStore {
 
 #[async_trait]
 impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
-    async fn create(&self, task: NewProvisionerTask, now: OffsetDateTime) -> anyhow::Result<CreateOutcome> {
+    async fn create(&self, task: NewProvisionerTaskRecord, now: OffsetDateTime) -> anyhow::Result<CreateOutcome> {
         let conn = self.conn.lock().await;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -194,7 +203,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         Ok(CreateOutcome::Created(created))
     }
 
-    async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTask>> {
+    async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
         let conn = self.conn.lock().await;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -281,7 +290,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         Ok(replaced)
     }
 
-    async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTask>> {
+    async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>> {
         let conn = self.conn.lock().await;
         let tx = conn
             .transaction_with_behavior(TransactionBehavior::Immediate)
@@ -341,7 +350,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
     }
 }
 
-fn task_from_row(row: &Row) -> anyhow::Result<ProvisionerTask> {
+fn task_from_row(row: &Row) -> anyhow::Result<ProvisionerTaskRecord> {
     let timestamp = |index: i32, name: &str| -> anyhow::Result<OffsetDateTime> {
         let seconds = row.get::<i64>(index).with_context(|| format!("decode task {name}"))?;
         OffsetDateTime::from_unix_timestamp(seconds).with_context(|| format!("invalid task {name}"))
@@ -359,7 +368,7 @@ fn task_from_row(row: &Row) -> anyhow::Result<ProvisionerTask> {
         serde_json::from_str(&text).with_context(|| format!("parse task {name}"))
     };
 
-    Ok(ProvisionerTask {
+    Ok(ProvisionerTaskRecord {
         id: row
             .get::<String>(0)
             .context("decode task id")?
@@ -482,8 +491,8 @@ mod tests {
         OffsetDateTime::from_unix_timestamp(1_800_000_000).expect("valid timestamp")
     }
 
-    fn new_task(target: &str) -> NewProvisionerTask {
-        NewProvisionerTask {
+    fn new_task(target: &str) -> NewProvisionerTaskRecord {
+        NewProvisionerTaskRecord {
             id: Uuid::new_v4(),
             kind: String::from("recording.ai-analysis"),
             target: String::from(target),
@@ -493,7 +502,7 @@ mod tests {
         }
     }
 
-    async fn create(store: &LibSqlProvisionerTaskStore, task: NewProvisionerTask) -> CreateOutcome {
+    async fn create(store: &LibSqlProvisionerTaskStore, task: NewProvisionerTaskRecord) -> CreateOutcome {
         store.create(task, now()).await.expect("create task")
     }
 
