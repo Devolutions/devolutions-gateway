@@ -1,4 +1,13 @@
-//! The agent tunnel's tables: accepted Agents, enrollment attempts and the CA they belong to.
+//! The agent tunnel's tables in `gateway.db`: accepted Agents, enrollment attempts and the CA they belong to.
+//!
+//! The tables are named `agent_tunnel_*`, and this crate alone creates and migrates them. Their schema version is the
+//! `schema_version` row of `agent_tunnel_metadata`, not the file's `PRAGMA user_version`, because other features keep
+//! their own tables in the same file.
+
+#[macro_use]
+extern crate tracing;
+
+mod upgrade;
 
 use agent_tunnel::authorization::{
     AcceptedAgent, AgentAuthorizationStore, EnrollmentAttempt, EnrollmentConflict, EnrollmentOutcome, SpkiSha256,
@@ -9,7 +18,13 @@ use libsql::{Connection, TransactionBehavior, params};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+pub use self::upgrade::import_2026_3_database;
+
+/// Every schema change ever made to the `agent_tunnel_*` tables, oldest first. Only ever append to it.
+const MIGRATIONS: &[&str] = &[include_str!("../migrations/01_agent_tunnel.sql")];
+
 const CA_SPKI_SHA256_KEY: &str = "ca_spki_sha256";
+const SCHEMA_VERSION_KEY: &str = "schema_version";
 
 /// Agent authorization kept in the `agent_tunnel_*` tables of `gateway.db`.
 pub struct LibSqlAgentAuthorizationStore {
@@ -17,12 +32,14 @@ pub struct LibSqlAgentAuthorizationStore {
 }
 
 impl LibSqlAgentAuthorizationStore {
-    /// Opens the store on a `gateway.db` connection of its own, from [`GatewayDb::connect`](crate::GatewayDb::connect).
+    /// Opens the store on a `gateway.db` connection of its own, from `GatewayDb::connect`.
     ///
-    /// The connection must already have up-to-date `agent_tunnel_*` tables; opening checks them and fails if they
+    /// Opening creates the `agent_tunnel_*` tables or brings them up to date, then checks them and fails if they
     /// don't match. The stored Agents only make sense with the CA that signed their certificates, so the first open
     /// ties the store to `ca_spki_sha256`, and later opens refuse any other CA.
     pub async fn open(conn: Connection, ca_spki_sha256: SpkiSha256) -> anyhow::Result<Self> {
+        migrate(&conn).await?;
+
         let store = Self { conn: Mutex::new(conn) };
 
         store.validate_integrity_and_schema().await?;
@@ -35,6 +52,10 @@ impl LibSqlAgentAuthorizationStore {
     ///
     /// Once Agents are tied to a CA, Gateway must load that CA and never generate a new one.
     pub async fn bound_ca(conn: &Connection) -> anyhow::Result<Option<SpkiSha256>> {
+        if !metadata_table_exists(conn).await? {
+            return Ok(None);
+        }
+
         let stored = conn
             .query(
                 "SELECT value FROM agent_tunnel_metadata WHERE key = ?1",
@@ -231,6 +252,81 @@ impl LibSqlAgentAuthorizationStore {
             client_spki_sha256,
         })
     }
+}
+
+/// Creates the `agent_tunnel_*` tables or brings them up to date.
+async fn migrate(conn: &Connection) -> anyhow::Result<()> {
+    loop {
+        // Another connection may migrate at the same time, so the version is read under the write lock.
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await
+            .context("begin agent tunnel migration")?;
+        let version = schema_version(&tx).await?;
+
+        let Some(migration) = MIGRATIONS.get(version) else {
+            if MIGRATIONS.len() < version {
+                bail!(
+                    "agent tunnel schema version {version} is newer than supported version {}",
+                    MIGRATIONS.len()
+                );
+            }
+
+            return Ok(());
+        };
+
+        let version = version + 1;
+        tx.execute_batch(migration)
+            .await
+            .with_context(|| format!("apply agent tunnel migration {version}"))?;
+        tx.execute(
+            "INSERT OR REPLACE INTO agent_tunnel_metadata (key, value) VALUES (?1, ?2)",
+            params![SCHEMA_VERSION_KEY, i64::try_from(version)?],
+        )
+        .await
+        .with_context(|| format!("record agent tunnel migration {version}"))?;
+        tx.commit()
+            .await
+            .with_context(|| format!("commit agent tunnel migration {version}"))?;
+    }
+}
+
+/// Reads the version of the `agent_tunnel_*` tables; 0 when there are none yet.
+async fn schema_version(conn: &Connection) -> anyhow::Result<usize> {
+    if !metadata_table_exists(conn).await? {
+        return Ok(0);
+    }
+
+    let version = conn
+        .query(
+            "SELECT value FROM agent_tunnel_metadata WHERE key = ?1",
+            params![SCHEMA_VERSION_KEY],
+        )
+        .await
+        .context("query agent tunnel schema version")?
+        .next()
+        .await
+        .context("read agent tunnel schema version")?
+        .context("agent tunnel tables have no schema version")?
+        .get::<i64>(0)
+        .context("decode agent tunnel schema version")?;
+
+    usize::try_from(version).context("agent tunnel schema version is out of range")
+}
+
+async fn metadata_table_exists(conn: &Connection) -> anyhow::Result<bool> {
+    let row = conn
+        .query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agent_tunnel_metadata'",
+            (),
+        )
+        .await
+        .context("look for the agent tunnel tables")?
+        .next()
+        .await
+        .context("read the agent tunnel tables")?;
+
+    Ok(row.is_some())
 }
 
 #[async_trait]
@@ -492,7 +588,7 @@ mod tests {
     use super::*;
 
     async fn connect(path: &str) -> anyhow::Result<Connection> {
-        crate::GatewayDb::open_path(path).await?.connect().await
+        gateway_db::GatewayDb::open_path(path).await?.connect().await
     }
 
     async fn open_store(path: &str, ca_spki_sha256: SpkiSha256) -> anyhow::Result<LibSqlAgentAuthorizationStore> {
@@ -792,66 +888,56 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agents_enrolled_on_2026_3_still_authorize_after_the_move() {
-        let temp_dir = tempfile::tempdir().expect("create temporary directory");
-        let data_dir =
-            camino::Utf8PathBuf::from_path_buf(temp_dir.path().to_path_buf()).expect("temporary path is UTF-8");
-        let agent_id = Uuid::new_v4();
+    async fn new_tables_record_their_schema_version_in_metadata() {
+        let conn = connect(":memory:").await.expect("open gateway database");
 
-        let legacy = libsql::Builder::new_local(data_dir.join("agent_tunnel.db").as_str())
-            .build()
-            .await
-            .expect("build 2026.3 database")
-            .connect()
-            .expect("open 2026.3 database");
-        legacy
-            .execute_batch(include_str!("../../gateway-db/migrations/01_agent_tunnel.sql"))
-            .await
-            .expect("create 2026.3 tables");
-        legacy
-            .execute(
-                "INSERT INTO metadata (key, value) VALUES (?1, ?2)",
-                params![CA_SPKI_SHA256_KEY, vec![0xCAu8; 32]],
-            )
-            .await
-            .expect("bind 2026.3 CA");
-        legacy
-            .execute(
-                "INSERT INTO accepted_agents (agent_id, name, client_spki_sha256, enrollment_jti) VALUES (?1, ?2, ?3, ?4)",
-                params![agent_id.to_string(), "montreal-office", vec![0x11u8; 32], Uuid::new_v4().to_string()],
-            )
-            .await
-            .expect("store 2026.3 Agent");
-        legacy
-            .execute_batch("PRAGMA user_version = 1")
-            .await
-            .expect("record 2026.3 schema version");
-        drop(legacy);
-
-        let conn = crate::GatewayDb::open(&data_dir)
-            .await
-            .expect("open gateway database")
-            .connect()
-            .await
-            .expect("connect to gateway database");
-        assert_eq!(
-            LibSqlAgentAuthorizationStore::bound_ca(&conn)
-                .await
-                .expect("read bound CA"),
-            Some([0xCA; 32])
-        );
         let store = LibSqlAgentAuthorizationStore::open(conn, [0xCA; 32])
             .await
             .expect("open Agent authorization store");
+        let conn = store.conn.lock().await;
 
-        let accepted = store
-            .authorize(agent_id, [0x11; 32])
+        assert_eq!(
+            schema_version(&conn).await.expect("read schema version"),
+            MIGRATIONS.len()
+        );
+        let user_version = conn
+            .query("PRAGMA user_version", ())
             .await
-            .expect("authorize moved Agent")
-            .expect("Agent is still accepted");
-        assert_eq!(accepted.name, "montreal-office");
+            .expect("query user_version")
+            .next()
+            .await
+            .expect("read user_version")
+            .expect("user_version row")
+            .get::<i64>(0)
+            .expect("decode user_version");
+        assert_eq!(user_version, 0, "the file's user_version belongs to no feature");
     }
 
+    #[tokio::test]
+    async fn newer_schema_is_rejected() {
+        let temp_dir = tempfile::tempdir().expect("create temporary directory");
+        let database_path = temp_dir.path().join("gateway.db");
+        let database_path = database_path.to_str().expect("temporary database path is UTF-8");
+        drop(
+            open_store(database_path, [0xCA; 32])
+                .await
+                .expect("open Agent authorization store"),
+        );
+
+        let conn = connect(database_path).await.expect("reopen gateway database");
+        conn.execute(
+            "UPDATE agent_tunnel_metadata SET value = 99 WHERE key = ?1",
+            params![SCHEMA_VERSION_KEY],
+        )
+        .await
+        .expect("set unsupported schema version");
+
+        let error = LibSqlAgentAuthorizationStore::open(conn, [0xCA; 32])
+            .await
+            .err()
+            .expect("newer schema must be rejected");
+        assert!(error.to_string().contains("newer than supported"));
+    }
     #[tokio::test]
     async fn database_rejects_missing_required_table() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");

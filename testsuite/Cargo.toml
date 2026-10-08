@@ -39,6 +39,7 @@ camino = "1"
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-gateway = { path = "../devolutions-gateway" }
 futures-util = "0.3"
+agent-tunnel-libsql.path = "../crates/agent-tunnel-libsql"
 gateway-db.path = "../crates/gateway-db"
 ipnetwork = "0.20"
 jmux-proto = { path = "../crates/jmux-proto" }
