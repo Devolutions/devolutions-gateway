@@ -93,6 +93,8 @@ pub struct SessionConfig {
     /// When set, a live clip whose source stays quiet repeats its last picture at this interval, so players keep
     /// receiving frames.
     pub fill_interval: Option<Duration>,
+    /// How far refills trail the source clock. A source frame that arrives up to this late is never overtaken.
+    pub fill_delay: Duration,
 }
 
 impl Default for SessionConfig {
@@ -101,6 +103,7 @@ impl Default for SessionConfig {
             encoder_threads: u32::try_from(num_cpus::get()).unwrap_or(1).max(1),
             adaptive_frame_skip: true,
             fill_interval: None,
+            fill_delay: Duration::ZERO,
         }
     }
 }
@@ -138,4 +141,10 @@ where
     E: Error + Send + Sync + 'static,
 {
     crate::protocol::stream_segments(transport, start_source, config, version).await
+}
+
+/// Experiment: source frames moved after an earlier output frame since the process started.
+#[doc(hidden)]
+pub fn late_frames_moved() -> u64 {
+    crate::normalizer::LATE_FRAMES_MOVED.load(core::sync::atomic::Ordering::Relaxed)
 }

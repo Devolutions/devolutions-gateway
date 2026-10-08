@@ -196,6 +196,7 @@ fn closed_output_stops_scan_at_a_frame_checkpoint() {
             encoder_threads: 1,
             adaptive_frame_skip: false,
             fill_interval: None,
+            fill_delay: Duration::ZERO,
         },
         0,
     )

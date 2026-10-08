@@ -29,6 +29,9 @@ const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
 const MAX_WEBM_BLOCK_TIMESTAMP: u64 = 32_767;
 const MAX_CONSECUTIVE_FRAME_SKIPS: u32 = 1;
 
+/// Experiment counter: frames whose timestamp was moved forward because an earlier output frame already covered it.
+pub(crate) static LATE_FRAMES_MOVED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SegmentInfo {
     pub sequence: u64,
@@ -668,6 +671,8 @@ impl ClipNormalizer {
         if !matches!(self.phase, ClipPhase::Live) || self.sender.is_closed() {
             return Ok(());
         }
+        // A source frame already written but not scanned yet must not be overtaken by a refill.
+        self.scan_available()?;
         let Some((source_timestamp, processed_at)) = self.last_source_frame else {
             return Ok(());
         };
@@ -678,7 +683,8 @@ impl ClipNormalizer {
             return Ok(());
         };
 
-        let elapsed = processed_at.elapsed();
+        // Refills trail the source by `fill_delay`, so a source frame up to that late still lands before them.
+        let elapsed = processed_at.elapsed().saturating_sub(self.config.fill_delay);
         if elapsed < interval {
             return Ok(());
         }
@@ -952,9 +958,18 @@ impl OutputSegment {
 
     fn encode(&mut self, image: &VpxImage<'_>, timestamp: u64) -> anyhow::Result<()> {
         // A refill frame may already cover a source timestamp that arrives late.
-        let timestamp = self
-            .previous_timestamp
-            .map_or(timestamp, |previous| timestamp.max(previous.saturating_add(1)));
+        let timestamp = match self.previous_timestamp {
+            Some(previous) if timestamp <= previous => {
+                LATE_FRAMES_MOVED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                perf_debug!(
+                    timestamp,
+                    previous,
+                    "Moved a late source frame after the previous output frame"
+                );
+                previous.saturating_add(1)
+            }
+            _ => timestamp,
+        };
         let origin = *self.origin_timestamp.get_or_insert(timestamp);
         let relative_timestamp = timestamp.saturating_sub(origin);
         let duration = self

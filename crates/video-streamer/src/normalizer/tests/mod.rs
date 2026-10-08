@@ -199,6 +199,7 @@ where
             encoder_threads: 1,
             adaptive_frame_skip: false,
             fill_interval: None,
+            fill_delay: Duration::ZERO,
         },
         0,
     )
@@ -510,6 +511,7 @@ fn truncated_clip_tail_does_not_abort_the_following_clip() {
             encoder_threads: 1,
             adaptive_frame_skip: false,
             fill_interval: None,
+            fill_delay: Duration::ZERO,
         },
     )
     .expect("normalize reconnecting clips");
@@ -547,6 +549,7 @@ fn corruption_before_an_incomplete_tail_still_fails() {
             encoder_threads: 1,
             adaptive_frame_skip: false,
             fill_interval: None,
+            fill_delay: Duration::ZERO,
         },
     )
     .expect_err("corruption before the incomplete tail must fail");

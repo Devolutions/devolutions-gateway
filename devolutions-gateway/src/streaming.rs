@@ -483,15 +483,21 @@ fn recording_event_stream(
     })
 }
 
-/// Experiment: `DGATEWAY_SHADOW_FILL_MS` sets the refill interval for quiet live clips.
+/// Experiment: `DGATEWAY_SHADOW_FILL_MS` sets the refill interval for quiet live clips, and
+/// `DGATEWAY_SHADOW_FILL_DELAY_MS` how far refills trail the source.
 fn session_config() -> SessionConfig {
     let fill_interval = std::env::var("DGATEWAY_SHADOW_FILL_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|&value| value > 0)
         .map(Duration::from_millis);
+    let fill_delay = std::env::var("DGATEWAY_SHADOW_FILL_DELAY_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .map_or(Duration::ZERO, Duration::from_millis);
     SessionConfig {
         fill_interval,
+        fill_delay,
         ..SessionConfig::default()
     }
 }

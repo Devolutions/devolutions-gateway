@@ -1,7 +1,9 @@
 //! Experiment: replays a WebM recording into `stream_session` at its real cadence, as a live clip, and reports when
 //! output frames reach a client that pulls continuously.
 //!
-//! Usage: sparse_fill <xmf-lib> <input.webm> <seconds> <fill-ms (0 = off)> <report.json>
+//! Usage: sparse_fill <xmf-lib> <input.webm> <seconds> <fill-ms (0 = off)> <report.json> [fill-delay-ms] [jitter-ms]
+//!
+//! `jitter-ms` delays each source frame by a pseudo-random 0..jitter-ms (order kept), like a congested push link.
 
 #![allow(
     clippy::cast_possible_truncation,
@@ -310,8 +312,8 @@ fn percentile(values: &mut [f64], p: f64) -> f64 {
 async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     anyhow::ensure!(
-        args.len() == 6,
-        "usage: sparse_fill <xmf-lib> <input.webm> <seconds> <fill-ms> <report.json>"
+        (6..=8).contains(&args.len()),
+        "usage: sparse_fill <xmf-lib> <input.webm> <seconds> <fill-ms> <report.json> [fill-delay-ms] [jitter-ms]"
     );
     // SAFETY: XMF has no initialization precondition beyond a valid library path.
     unsafe { cadeau::xmf::init(&args[1]) }.context("load XMF")?;
@@ -319,6 +321,8 @@ async fn main() -> anyhow::Result<()> {
     let limit_ms = args[3].parse::<u64>()? * 1000;
     let fill_ms = args[4].parse::<u64>()?;
     let report = PathBuf::from(&args[5]);
+    let fill_delay_ms = args.get(6).map_or(Ok(0), |value| value.parse::<u64>())?;
+    let jitter_ms = args.get(7).map_or(Ok(0), |value| value.parse::<u64>())?;
 
     let (codec, width, height, frames) = read_input(&input, limit_ms)?;
     anyhow::ensure!(!frames.is_empty(), "no frames");
@@ -337,8 +341,16 @@ async fn main() -> anyhow::Result<()> {
         let file = file.clone();
         let source_ms = source_ms.clone();
         tokio::spawn(async move {
+            let mut state = 0x2545_f491_4f6c_dd1du64;
+            let mut not_before = 0;
             for (offset, cluster) in source_ms.iter().zip(&clusters).skip(1) {
-                tokio::time::sleep_until((start + Duration::from_millis(*offset)).into()).await;
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let jitter = if jitter_ms == 0 { 0 } else { state % (jitter_ms + 1) };
+                let due = (offset + jitter).max(not_before);
+                not_before = due;
+                tokio::time::sleep_until((start + Duration::from_millis(due)).into()).await;
                 file.0.lock().expect("poisoned").extend_from_slice(cluster);
                 let _ = event_sender.send(Ok(RecordingEvent::DataAvailable));
             }
@@ -383,6 +395,7 @@ async fn main() -> anyhow::Result<()> {
         encoder_threads: 1,
         adaptive_frame_skip: false,
         fill_interval: (fill_ms > 0).then(|| Duration::from_millis(fill_ms)),
+        fill_delay: Duration::from_millis(fill_delay_ms),
     };
     let server = tokio::spawn(stream_session(
         move || async move { start_source().await },
@@ -436,8 +449,9 @@ async fn main() -> anyhow::Result<()> {
     let frame_bytes: usize = output.iter().map(|frame| frame.bytes).sum();
     let span_s = last_ms as f64 / 1000.0 + 10.0;
     let json = format!(
-        "{{\"input\":\"{}\",\"fill_ms\":{fill_ms},\"span_s\":{span_s:.1},\"source_frames\":{source_frames},\"output_frames\":{output_frames},\"output_bytes\":{total_bytes},\"frame_bytes\":{frame_bytes},\"kbps\":{:.2},\"wall_gap_p95_ms\":{wall_gap_p95:.0},\"wall_gap_max_ms\":{wall_gap_max:.0},\"media_gap_max_ms\":{media_gap_max:.0},\"delay_p50_ms\":{delay_p50:.0},\"delay_max_ms\":{delay_max:.0},\"source_ms\":{source_ms:?},\"frames\":[{}]}}",
+        "{{\"input\":\"{}\",\"fill_ms\":{fill_ms},\"fill_delay_ms\":{fill_delay_ms},\"jitter_ms\":{jitter_ms},\"late_frames_moved\":{},\"span_s\":{span_s:.1},\"source_frames\":{source_frames},\"output_frames\":{output_frames},\"output_bytes\":{total_bytes},\"frame_bytes\":{frame_bytes},\"kbps\":{:.2},\"wall_gap_p95_ms\":{wall_gap_p95:.0},\"wall_gap_max_ms\":{wall_gap_max:.0},\"media_gap_max_ms\":{media_gap_max:.0},\"delay_p50_ms\":{delay_p50:.0},\"delay_max_ms\":{delay_max:.0},\"source_ms\":{source_ms:?},\"frames\":[{}]}}",
         input.display().to_string().replace('\\', "/"),
+        video_streamer::late_frames_moved(),
         total_bytes as f64 * 8.0 / span_s / 1000.0,
         output
             .iter()
