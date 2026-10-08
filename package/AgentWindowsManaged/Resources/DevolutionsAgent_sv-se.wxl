@@ -9,7 +9,7 @@
                 <String Id="FeatureAgentUpdaterDescription">Aktiverar uppdateraren för Devolutions Gateway</String>
                 <String Id="FeatureAgentUpdaterName">Devolutions Gateway-uppdaterare</String>
                 <String Id="FeaturePackageBrokerDescription">Låter standardanvändare begära installationer och uppdateringar av paket som en administratörsdefinierad princip tillåter, via UniGetUI och andra godkända klienter. Begäranden nekas tills en paketprincip har distribuerats.</String>
-                <String Id="FeaturePackageBrokerName">Paketmäklare</String>
+                <String Id="FeaturePackageBrokerName">UniGetUI-paketmäklare</String>
                 <String Id="FeaturePedmDescription">Aktiverar PEDM-funktioner och installerar skalutökningen</String>
                 <String Id="FeaturePedmName">Devolutions PEDM</String>
                 <String Id="FeaturePsuDescription">Aktiverar fjärragenten för PowerShell Universal.</String>

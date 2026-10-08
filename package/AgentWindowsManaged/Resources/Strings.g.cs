@@ -73,7 +73,7 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string FeaturePsuDescription = "FeaturePsuDescription";		
 		/// <summary>
-		/// Package Broker
+		/// UniGetUI Package Broker
 		/// </summary>
 		public const string FeaturePackageBrokerName = "FeaturePackageBrokerName";		
 		/// <summary>
