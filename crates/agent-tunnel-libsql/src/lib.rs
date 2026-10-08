@@ -265,6 +265,8 @@ async fn migrate(conn: &Connection) -> anyhow::Result<()> {
         let version = schema_version(&tx).await?;
 
         let Some(migration) = MIGRATIONS.get(version) else {
+            tx.rollback().await.context("end agent tunnel migration")?;
+
             if MIGRATIONS.len() < version {
                 bail!(
                     "agent tunnel schema version {version} is newer than supported version {}",
@@ -279,16 +281,23 @@ async fn migrate(conn: &Connection) -> anyhow::Result<()> {
         tx.execute_batch(migration)
             .await
             .with_context(|| format!("apply agent tunnel migration {version}"))?;
-        tx.execute(
-            "INSERT OR REPLACE INTO agent_tunnel_metadata (key, value) VALUES (?1, ?2)",
-            params![SCHEMA_VERSION_KEY, i64::try_from(version)?],
-        )
-        .await
-        .with_context(|| format!("record agent tunnel migration {version}"))?;
+        record_schema_version(&tx, i64::try_from(version)?).await?;
         tx.commit()
             .await
             .with_context(|| format!("commit agent tunnel migration {version}"))?;
     }
+}
+
+/// Records the version of the `agent_tunnel_*` tables, inside the transaction that changes them.
+async fn record_schema_version(tx: &Connection, version: i64) -> anyhow::Result<()> {
+    tx.execute(
+        "INSERT OR REPLACE INTO agent_tunnel_metadata (key, value) VALUES (?1, ?2)",
+        params![SCHEMA_VERSION_KEY, version],
+    )
+    .await
+    .with_context(|| format!("record agent tunnel schema version {version}"))?;
+
+    Ok(())
 }
 
 /// Reads the version of the `agent_tunnel_*` tables; 0 when there are none yet.
@@ -938,6 +947,7 @@ mod tests {
             .expect("newer schema must be rejected");
         assert!(error.to_string().contains("newer than supported"));
     }
+
     #[tokio::test]
     async fn database_rejects_missing_required_table() {
         let temp_dir = tempfile::tempdir().expect("create temporary directory");
