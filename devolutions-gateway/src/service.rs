@@ -352,7 +352,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     let provisioner_tasks = devolutions_gateway::provisioner_tasks::task_runner(
         task_store,
-        job_queue_ctx.job_queue_handle.clone(),
+        Arc::new(job_queue_ctx.durable()),
         conf_handle.clone(),
         recording_manager_handle.clone(),
         provisioning.clone(),
@@ -360,7 +360,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     // Before the job runner starts, so no job queued earlier runs an attempt meanwhile.
     provisioner_tasks
-        .resume(|job| job_queue_ctx.push(job))
+        .resume()
         .await
         .context("failed to queue the unfinished provisioner tasks again")?;
 
