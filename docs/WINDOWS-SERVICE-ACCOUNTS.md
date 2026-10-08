@@ -6,14 +6,15 @@ Changing the Windows service account changes the process's access to files and n
 
 This guide covers two deployment models:
 
-| Version | How to configure the account | Maintenance implications |
+| Gateway version | How to configure the account | Maintenance implications |
 | --- | --- | --- |
-| **Current release: 2026.3.0** | Configure the Windows service and permissions manually after installation. | Assume customization must be reapplied after every Gateway update, reinstall, or repair. Agent updates/restarts can also reset update-channel permissions. |
-| **Forthcoming custom-account feature** | Select the account through MSI properties or the updated PowerShell module. | Same-account upgrades preserve the identity; password accounts require credentials again. Failed upgrades and account changes have the limitations described below. |
+| **2026.3.1 and later** | Select the account through MSI properties or `Install-DGatewayPackage`. | Same-account upgrades preserve the identity; password accounts require credentials again. Failed upgrades and account changes have the limitations described below. |
+| **2026.3.0 and earlier (legacy)** | Configure the Windows service and permissions manually after installation. | Assume customization must be reapplied after every Gateway update, reinstall, or repair. Agent updates/restarts can also reset update-channel permissions. |
 
-**The forthcoming interface is not available in 2026.3.0.**
-Do not pass `P.SERVICEACCOUNT` to an older MSI and assume it took effect.
-Use the manual procedure until the release notes explicitly announce support, and verify both Gateway and Agent versions when transitioning.
+Gateway 2026.3.1 is the first release that supports custom service accounts.
+On 2026.3.1 and later, [select the account through the installer][select-account] instead of using the [legacy manual procedure][legacy].
+Older MSIs ignore `P.SERVICEACCOUNT`; do not pass it to them and assume it took effect.
+Automatic Gateway updates under a custom account also require Devolutions Agent 2026.3.1 or later.
 
 ## Choose an identity
 
@@ -26,7 +27,7 @@ Use the manual procedure until the release notes explicitly announce support, an
 | Dedicated local/domain user | Integrations that cannot use managed accounts. | Supply and rotate the password yourself, update the SCM credentials, and plan manual recovery after failed upgrades. |
 
 Do not use a personal account, Domain Admin, or another privileged administrator account.
-`LocalSystem`, `LocalService`, groups, computer accounts, and another service's virtual account are not supported selections in the forthcoming installer.
+`LocalSystem`, `LocalService`, groups, computer accounts, and another service's virtual account are not supported selections in the installer.
 A name ending in `$` is not proof that an account is an MSA.
 
 ## Before changing a working installation
@@ -94,7 +95,7 @@ An AD administrator can authorize the computer directly where policy permits; do
 ### Prepare service-logon rights
 
 The selected custom account needs **Log on as a service** (`SeServiceLogonRight`).
-Configure this through the applicable local or domain security policy.
+The installer grants it on 2026.3.1 and later; for the legacy procedure, configure it through the applicable local or domain security policy.
 For local policy, use `secpol.msc` → **Local Policies** → **User Rights Assignment**.
 The Services console may grant this right when applying logon credentials, but verify the effective policy.
 
@@ -102,9 +103,89 @@ The Services console may grant this right when applying logon credentials, but v
 Domain policy can replace local assignments.
 Do not grant interactive/RDP logon, administrative membership, or broad file access merely to make the service start.
 
-## Customize the current release
+## Select the account (2026.3.1 and later)
 
-This is an administrator-managed workaround for 2026.3.0, not a persistent MSI configuration setting.
+Select the account through MSI properties or the DevolutionsGateway PowerShell module; there is no account-selection dialog.
+On a fresh install, the default remains NETWORK SERVICE.
+Omitting `P.SERVICEACCOUNT` on an upgrade preserves the existing service's account.
+
+For a passwordless account, an explicit selection is:
+
+```powershell
+msiexec /i DevolutionsGateway.msi /qn /norestart REBOOT=ReallySuppress `
+    P.SERVICEACCOUNT="CONTOSO\svc-gateway$" /l*v C:\Gateway-maintenance\gateway-install.log
+```
+
+With the PowerShell module:
+
+```powershell
+Install-DGatewayPackage -ServiceAccount 'CONTOSO\svc-gateway$' -Quiet
+
+$Credential = Get-Credential -UserName 'CONTOSO\svc-gateway' -Message 'Gateway service account'
+Install-DGatewayPackage -ServiceCredential $Credential -Quiet
+```
+
+For regular users, `P.SERVICEPASSWORD` supplies the MSI password.
+`Install-DGatewayPackage` handles MSI quoting and surfaces failures, but it still passes the password to `msiexec`.
+The password is hidden from ordinary MSI logs, **not** from process command lines or Windows Installer's `Debug=7` logging policy.
+Keep diagnostics appropriately protected.
+
+The installer grants the selected identity access to the standard data directory and default user database.
+It adjusts system-certificate key permissions only when `TlsCertificateStoreLocation` is explicitly `LocalMachine`.
+An omitted or `null` location means `CurrentUser` at runtime, not `LocalMachine` or the installer's SYSTEM profile.
+When the existing service and selected account resolve to the same SID and no reconfiguration is requested, setup leaves retained `CurrentUser` or `CurrentService` configuration and private-key ACLs unchanged and unmanaged.
+It logs that it skips certificate discovery, permission grants, and runtime access verification; this does not establish certificate or runtime availability.
+If the identity changes, the service is missing, or reconfiguration is requested, setup rejects retained non-machine-store configuration before modifying the installation.
+Setup also aborts if configuration approved for retention changes or is removed after validation.
+Migrate to explicit `LocalMachine` or external certificate/key files first.
+New wizard selections of `CurrentUser` are rejected because the interactive administrator's profile is not the service's profile.
+External/custom resources still need your permissions.
+Review old manual grants deliberately; the installer does not remove every earlier account grant or service-logon right.
+Do not remove permissions still required by another service or deployment.
+
+Agent 2026.3.1 and later supports automatic Gateway updates only under NETWORK SERVICE, the Gateway virtual account, or verified managed accounts.
+Password-based accounts remain a manual-upgrade path.
+After an external identity change, Agent file-permission refresh normally occurs on its five-minute status interval; check the files or use a planned Agent restart if immediate refresh is required.
+
+### Migrate from a manual setup
+
+To move a deployment customized with the [legacy procedure][legacy] to the supported method:
+
+1. Inventory the manually configured account, SID, paths, certificate, startup mode, and custom grants.
+2. Update the Agent to 2026.3.1 or later before relying on its automatic updater.
+   Recheck the old Gateway's channel access during this transition.
+3. Keep the existing Gateway identity for the first 2026.3.1 or later upgrade where possible.
+   Avoid combining a version upgrade, account migration, certificate replacement, and path migration in one operation.
+4. Upgrade Gateway with `P.SERVICEACCOUNT` or `Install-DGatewayPackage`, supplying the password again if the existing account requires one.
+5. Verify the resulting identity, permissions, TLS, state, and update integration before removing your old reapplication procedure.
+
+### Accepted limitations and failed-upgrade recovery
+
+Successful same-account installs/upgrades were validated for the default and custom-account paths.
+The following are failure-recovery limitations, not claims that normal upgrades fail:
+
+| Situation | What to expect and plan for |
+| --- | --- |
+| Unchanged NETWORK SERVICE or gMSA | Tested rollback restored a working service. A late failure could retain the installer's tightened `users.txt` ACL rather than its prior inherited ACL. |
+| Unchanged password account | Even with valid credentials supplied to the upgrade, rollback can restore the old files/account name without usable service logon credentials. Reapply the known password through SCM, then validate. |
+| Changing identities during an upgrade | Failed rollback can leave DACLs for the new SID on the restored old installation. Restore the original identity and recorded permissions; a password account may need its password reapplied too. |
+| Repair | The installer preserves an existing account/password but rejects account/password changes during repair. Missing-service repair requires an explicit account and credentials when applicable. |
+| Downgrade | Direct MSI downgrades remain blocked. The Agent retains its existing uninstall/reinstall path for passwordless accounts; older target MSIs can discard custom-account settings. |
+
+The SID-change permission risk is not specific to password accounts; it also matters when planning a migration to a managed account.
+Do not treat a failed MSI transaction as proof that the service is operational.
+Preserve logs and inspect the installed version, service identity, startup state, and ACLs before retrying.
+
+When recovering, reapply credentials only to the intended service, restore data/key permissions from the maintenance record, and verify real operation.
+Do not work around failures by switching to LocalSystem, granting broad administrator rights, disabling TLS validation, or weakening the Agent's configuration permissions.
+If service repair is necessary, use the installed ProductCode and an available matching source package with explicit reboot suppression.
+Agent-installed packages may have a UUID source name; a differently named MSI can produce a source/secure-repair error.
+If the required source or recovery state is uncertain, stop and escalate with the evidence below rather than repeatedly installing over it.
+
+## Devolutions Gateway 2026.3.0 and earlier
+
+These legacy instructions are an administrator-managed workaround for Gateway 2026.3.0 and earlier, whose MSI cannot persist a custom account.
+On 2026.3.1 and later, [select the account through the installer][select-account] instead.
 Complete the ordinary Gateway configuration first, then perform the steps below.
 
 ### 1. Stop Gateway and prevent an automatic start during maintenance
@@ -229,10 +310,10 @@ A successful change does not prove the service can log on or access its resource
 To return to NETWORK SERVICE, select that identity in the Services console and clear the password.
 If using CIM for that change, supply `StartName = 'NT AUTHORITY\NetworkService'` and `StartPassword = ''` rather than `$null`.
 
-### 5. Handle the current Agent's update-channel permissions
+### 5. Handle the Agent's update-channel permissions
 
 Skip this step if the deployment does not use Devolutions Agent's update integration.
-The 2026.3.0 Agent grants update-file access to NETWORK SERVICE, not an arbitrary Gateway account.
+Agent 2026.3.0 and earlier grants update-file access to NETWORK SERVICE, not an arbitrary Gateway account.
 If the custom Gateway needs this integration, grant access to the two existing files:
 
 ```powershell
@@ -252,8 +333,8 @@ Adjust the location if the Agent uses `DAGENT_CONFIG_PATH`.
 **Do not grant Gateway write access to `agent.json`, `update_status.json`, or the whole Agent directory.**
 The Agent is privileged; writable configuration there would cross the intended trust boundary.
 
-These file grants can be reset when the current Agent restarts or is updated.
-They do not make the current Gateway MSI preserve a custom account.
+These file grants can be reset when the Agent restarts or is updated.
+They do not make an older Gateway MSI preserve a custom account.
 Keep Gateway updates under your maintenance procedure rather than treating these ACL changes as support for unattended customized upgrades.
 
 ### 6. Validate, then restore the intended startup mode
@@ -285,10 +366,10 @@ Once validation succeeds, restore the recorded startup mode; for an originally a
 Set-Service -Name $ServiceName -StartupType Automatic
 ```
 
-## Maintain a customized 2026.3.0 deployment
+### Maintain a customized deployment
 
 Treat every Gateway update, reinstall, and repair as a maintenance event that may invalidate the account or its permissions.
-The current MSI recreates the service during a major upgrade with NETWORK SERVICE.
+Older MSIs recreate the service during a major upgrade with NETWORK SERVICE.
 Some settings may survive a repair while ACLs are reset; do not depend on partial preservation.
 In the validated 2026.3.0 repair cases, virtual-account, local-user, and gMSA customizations all reverted to NETWORK SERVICE and the data-directory ACL changed.
 
@@ -309,107 +390,27 @@ if ($Process.ExitCode -ne 0) {
 }
 ```
 
-Reapply the desired account, service-logon right, data/key permissions, and current-Agent channel grants before returning the service to operation.
+Reapply the desired account, service-logon right, data/key permissions, and Agent channel grants before returning the service to operation.
 Revalidate functionality and restore startup mode.
 Do not assume that running an older `Install-DGatewayPackage` wrapper retained the log or surfaced the MSI result; direct `msiexec` is preferable for this maintenance procedure.
 
-If this repeated work is unacceptable, keep NETWORK SERVICE until the supported feature ships.
-
-## Transition to the forthcoming feature
-
-Use release notes to identify the first supported Gateway installer, PowerShell module, and Agent builds.
-The test MSI version numbers used during development are not release identifiers.
-
-1. Inventory the manually configured account, SID, paths, certificate, startup mode, and custom grants.
-2. Update the Agent to a version that understands custom Gateway accounts before relying on its automatic updater.
-   Recheck the old Gateway's channel access during this transition.
-3. Keep the existing Gateway identity for the first feature-aware upgrade where possible.
-   Avoid combining a version upgrade, account migration, certificate replacement, and path migration in one operation.
-4. Upgrade Gateway using the supported interface, supplying the password again if the existing account requires one.
-5. Verify the resulting identity, permissions, TLS, state, and update integration before removing your old reapplication procedure.
-
-For a passwordless account, an explicit selection with the forthcoming MSI is:
-
-```powershell
-# Forthcoming feature only; not supported by the 2026.3.0 MSI.
-msiexec /i DevolutionsGateway.msi /qn /norestart REBOOT=ReallySuppress `
-    P.SERVICEACCOUNT="CONTOSO\svc-gateway$" /l*v C:\Gateway-maintenance\gateway-install.log
-```
-
-Omitting `P.SERVICEACCOUNT` on an upgrade preserves the existing service's account in the forthcoming installer.
-On a fresh install, the default remains NETWORK SERVICE.
-There is no account-selection wizard.
-
-The updated PowerShell module adds:
-
-```powershell
-# Forthcoming module only.
-Install-DGatewayPackage -RequiredVersion '<supported-version>' -ServiceAccount 'CONTOSO\svc-gateway$' -Quiet
-
-$Credential = Get-Credential -UserName 'CONTOSO\svc-gateway' -Message 'Gateway service account'
-Install-DGatewayPackage -RequiredVersion '<supported-version>' -ServiceCredential $Credential -Quiet
-```
-
-For regular users, `P.SERVICEPASSWORD` supplies the MSI password.
-The forthcoming wrapper handles MSI quoting and surfaces failures, but it still passes the password to `msiexec`.
-The password is hidden from ordinary MSI logs, **not** from process command lines or Windows Installer's `Debug=7` logging policy.
-Keep diagnostics appropriately protected.
-
-The forthcoming installer grants the selected identity access to the standard data directory and default user database.
-It adjusts system-certificate key permissions only when `TlsCertificateStoreLocation` is explicitly `LocalMachine`.
-An omitted or `null` location means `CurrentUser` at runtime, not `LocalMachine` or the installer's SYSTEM profile.
-When the existing service and selected account resolve to the same SID and no reconfiguration is requested, setup leaves retained `CurrentUser` or `CurrentService` configuration and private-key ACLs unchanged and unmanaged.
-It logs that it skips certificate discovery, permission grants, and runtime access verification; this does not establish certificate or runtime availability.
-If the identity changes, the service is missing, or reconfiguration is requested, setup rejects retained non-machine-store configuration before modifying the installation.
-Setup also aborts if configuration approved for retention changes or is removed after validation.
-Migrate to explicit `LocalMachine` or external certificate/key files first.
-New wizard selections of `CurrentUser` are rejected because the interactive administrator's profile is not the service's profile.
-External/custom resources still need your permissions.
-Review old manual grants deliberately; the installer does not remove every earlier account grant or service-logon right.
-Do not remove permissions still required by another service or deployment.
-
-The updated Agent supports automatic Gateway updates only under NETWORK SERVICE, the Gateway virtual account, or verified managed accounts.
-Password-based accounts remain a manual-upgrade path.
-After an external identity change, Agent file-permission refresh normally occurs on its five-minute status interval; check the files or use a planned Agent restart if immediate refresh is required.
-
-### Accepted limitations and failed-upgrade recovery
-
-Successful same-account installs/upgrades were validated for the default and custom-account paths.
-The following are failure-recovery limitations, not claims that normal upgrades fail:
-
-| Situation | What to expect and plan for |
-| --- | --- |
-| Unchanged NETWORK SERVICE or gMSA | Tested rollback restored a working service. A late failure could retain the installer's tightened `users.txt` ACL rather than its prior inherited ACL. |
-| Unchanged password account | Even with valid credentials supplied to the upgrade, rollback can restore the old files/account name without usable service logon credentials. Reapply the known password through SCM, then validate. |
-| Changing identities during an upgrade | Failed rollback can leave DACLs for the new SID on the restored old installation. Restore the original identity and recorded permissions; a password account may need its password reapplied too. |
-| Repair | The forthcoming installer preserves an existing account/password but rejects account/password changes during repair. Missing-service repair requires an explicit account and credentials when applicable. |
-| Downgrade | Direct MSI downgrades remain blocked. The Agent retains its existing uninstall/reinstall path for passwordless accounts; older target MSIs can discard custom-account settings. |
-
-The SID-change permission risk is not specific to password accounts; it also matters when planning a migration to a managed account.
-Do not treat a failed MSI transaction as proof that the service is operational.
-Preserve logs and inspect the installed version, service identity, startup state, and ACLs before retrying.
-
-When recovering, reapply credentials only to the intended service, restore data/key permissions from the maintenance record, and verify real operation.
-Do not work around failures by switching to LocalSystem, granting broad administrator rights, disabling TLS validation, or weakening the Agent's configuration permissions.
-If service repair is necessary, use the installed ProductCode and an available matching source package with explicit reboot suppression.
-Agent-installed packages may have a UUID source name; a differently named MSI can produce a source/secure-repair error.
-If the required source or recovery state is uncertain, stop and escalate with the evidence below rather than repeatedly installing over it.
+To stop repeating this work, upgrade to 2026.3.1 or later and [migrate to the supported method][migrate].
 
 ## Diagnose problems and collect support evidence
 
 Collect evidence **before** restarting the Agent or rebooting.
-The forthcoming `Products.Gateway.LastUpdateError` status field is reset when the Agent restarts.
+The `Products.Gateway.LastUpdateError` status field of Agent 2026.3.1 and later is reset when the Agent restarts.
 Agent-generated MSI logs are scheduled for deletion at reboot.
 Application logs also rotate, so preserve the relevant files promptly.
 
 | Source | What it tells you |
 | --- | --- |
-| Explicit MSI `/l*v` log | Account discovery, selected name/SID/type in the new installer, validation failures, custom-action results, permission operations, and rollback. A generic 1603 alone is not the root cause. |
+| Explicit MSI `/l*v` log | Account discovery, selected name/SID/type in 2026.3.1 and later, validation failures, custom-action results, permission operations, and rollback. A generic 1603 alone is not the root cause. |
 | Windows **System** log, **Service Control Manager** | Logon/start failures even when Gateway cannot create a log; examples include 1069/logon failure and events 7000/7038. |
 | Windows **Application** log, **Devolutions Gateway** | Configuration, TLS, startup, and state/database errors. If the rendered message is unavailable, inspect the event's Details/XML data. |
 | Gateway `gateway*.log` | Runtime failures and affected paths, normally under `%ProgramData%\Devolutions\Gateway`; `LogFile` can override the location/prefix. |
 | Agent `agent*.log` | Update attempts, account/ACL decisions, package validation, MSI log locations, exit outcomes, and errors; normally under `%ProgramData%\Devolutions\Agent`. |
-| Agent `update_status.json` | The forthcoming per-product `LastUpdateError`, when present. It is not exposed by the current Gateway update HTTP response and is not durable history. |
+| Agent `update_status.json` | The per-product `LastUpdateError` of Agent 2026.3.1 and later, when present. It is not exposed by the current Gateway update HTTP response and is not durable history. |
 
 A configured account name in SCM is not sufficient evidence of actual runtime access.
 Correlate it with the running process and the failing operation.
@@ -455,6 +456,9 @@ Do not enable the Agent's unsafe URL, hash, or signature bypass settings to diag
 
 [gateway-readme]: ../README.md#configuration
 [installer]: ../package/WindowsManaged/README.md
+[select-account]: #select-the-account-202631-and-later
+[migrate]: #migrate-from-a-manual-setup
+[legacy]: #devolutions-gateway-202630-and-earlier
 [msa-overview]: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/group-managed-service-accounts/group-managed-service-accounts/group-managed-service-accounts-overview
 [kds]: https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/group-managed-service-accounts/group-managed-service-accounts/create-the-key-distribution-services-kds-root-key
 [service-change]: https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/change-method-in-class-win32-service
