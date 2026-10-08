@@ -222,6 +222,75 @@ async fn a_task_that_cannot_be_queued_again_fails() {
     assert_eq!(*harness.ended.lock(), [id]);
 }
 
+/// A job queue that remembers the jobs it stores, as the job queue database does.
+#[derive(Default)]
+struct StoredJobs(Mutex<Vec<String>>);
+
+#[async_trait]
+impl ProvisionerTaskJobQueue for StoredJobs {
+    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
+        self.0.lock().push(job_queue::Job::write_json(&job)?);
+        Ok(())
+    }
+
+    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>> {
+        Ok(self.0.lock().clone())
+    }
+}
+
+#[tokio::test]
+async fn resume_queues_only_the_tasks_left_without_a_job() {
+    let conn = gateway_db::GatewayDb::open_path(":memory:")
+        .await
+        .expect("open gateway database")
+        .connect()
+        .await
+        .expect("connect");
+    let store = Arc::new(
+        provisioner_task_libsql::LibSqlProvisionerTaskStore::open(conn)
+            .await
+            .expect("open task store"),
+    );
+    let queue = Arc::new(StoredJobs::default());
+    let runner = ProvisionerTaskRunner::builder(store, Arc::clone(&queue) as DynProvisionerTaskJobQueue)
+        .register(Echo {
+            outcome: |value| Ok(json!(value)),
+            runs: Arc::default(),
+            ended: Arc::default(),
+        })
+        .build();
+    let create = |id: Uuid| runner.create::<Echo>(id, format!("target-{id}"), &EchoParams { value: 1 }, |_| Ok(()));
+    let with_job = Uuid::new_v4();
+    let without_job = Uuid::new_v4();
+    create(with_job).await.expect("create");
+    create(without_job).await.expect("create");
+    let token_with_job = runner
+        .get(with_job, OffsetDateTime::now_utc())
+        .await
+        .expect("read")
+        .expect("record")
+        .job_token;
+
+    // The job of the second record is lost, as when Gateway stops right after creating the record.
+    queue.0.lock().retain(|json| json.contains(&with_job.to_string()));
+
+    runner.resume().await.expect("resume");
+
+    let stored = queue.0.lock().clone();
+    assert_eq!(stored.len(), 2, "one new job, for the record without one: {stored:?}");
+    assert!(stored[1].contains(&without_job.to_string()));
+    assert_eq!(
+        runner
+            .get(with_job, OffsetDateTime::now_utc())
+            .await
+            .expect("read")
+            .expect("record")
+            .job_token,
+        token_with_job,
+        "a record with its job keeps it"
+    );
+}
+
 #[tokio::test]
 async fn a_panicking_attempt_fails_the_task() {
     let mut harness = Harness::new(|_| panic!("the attempt panics")).await;
