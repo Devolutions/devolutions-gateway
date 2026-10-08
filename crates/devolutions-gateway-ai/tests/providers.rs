@@ -855,6 +855,19 @@ async fn error_answer_over_the_size_limit_keeps_the_status() {
     }
 }
 
+/// A base URL whose host, port and path a transport error must not repeat.
+fn private_url(addr: std::net::SocketAddr) -> Url {
+    Url::parse(&format!("http://{addr}/private-endpoint/v1/")).unwrap()
+}
+
+// Errors end up in logs and in stored Task results, where the endpoint of the provider must not appear.
+fn assert_url_hidden(error: &Error, addr: std::net::SocketAddr) {
+    for shown in [error.to_string(), format!("{error:?}")] {
+        assert!(!shown.contains("private-endpoint"), "{shown}");
+        assert!(!shown.contains(&addr.to_string()), "{shown}");
+    }
+}
+
 #[tokio::test]
 async fn answer_cut_by_a_closed_connection_is_transient() {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -869,7 +882,7 @@ async fn answer_cut_by_a_closed_connection_is_transient() {
             .unwrap();
     });
 
-    let error = client(Provider::OpenAi, Url::parse(&format!("http://{addr}/v1/")).unwrap())
+    let error = client(Provider::OpenAi, private_url(addr))
         .describe_session_actions("[0] whoami")
         .send()
         .await
@@ -877,6 +890,7 @@ async fn answer_cut_by_a_closed_connection_is_transient() {
 
     assert!(matches!(error, Error::Transport { .. }), "{error:?}");
     assert!(error.is_transient());
+    assert_url_hidden(&error, addr);
 }
 
 #[tokio::test]
@@ -885,7 +899,7 @@ async fn unreachable_provider_is_transient() {
     let addr = listener.local_addr().unwrap();
     drop(listener);
 
-    let error = client(Provider::OpenAi, Url::parse(&format!("http://{addr}/v1/")).unwrap())
+    let error = client(Provider::OpenAi, private_url(addr))
         .describe_session_actions("[0] whoami")
         .send()
         .await
@@ -893,6 +907,7 @@ async fn unreachable_provider_is_transient() {
 
     assert!(matches!(error, Error::Transport { .. }), "{error:?}");
     assert!(error.is_transient());
+    assert_url_hidden(&error, addr);
 }
 
 #[tokio::test]
@@ -915,7 +930,7 @@ async fn silent_provider_times_out_as_transient() {
         .provider(Provider::OpenAiCompatible)
         .model(MODEL)
         .api_key(API_KEY)
-        .base_url(Url::parse(&format!("http://{addr}/v1/")).unwrap())
+        .base_url(private_url(addr))
         .http_client(reqwest::Client::builder().no_proxy().build().unwrap())
         .request_timeout(Duration::from_millis(200))
         .build()
@@ -927,6 +942,7 @@ async fn silent_provider_times_out_as_transient() {
 
     assert!(matches!(error, Error::Transport { .. }), "{error:?}");
     assert!(error.is_transient());
+    assert_url_hidden(&error, addr);
     assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
 }
 
