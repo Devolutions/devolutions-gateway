@@ -27,6 +27,8 @@ enum Scenario {
     TimeoutWindow,
     DelayedOpen,
     NoOpen,
+    LoginChurn,
+    TimingReplay,
 }
 
 impl Scenario {
@@ -36,6 +38,8 @@ impl Scenario {
             "timeout-window" => Some(Self::TimeoutWindow),
             "delayed-open" => Some(Self::DelayedOpen),
             "no-open" => Some(Self::NoOpen),
+            "login-churn" => Some(Self::LoginChurn),
+            "timing-replay" => Some(Self::TimingReplay),
             _ => None,
         }
     }
@@ -46,8 +50,17 @@ impl Scenario {
             Self::TimeoutWindow => "timeout-window",
             Self::DelayedOpen => "delayed-open",
             Self::NoOpen => "no-open",
+            Self::LoginChurn => "login-churn",
+            Self::TimingReplay => "timing-replay",
         }
     }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct ReplayCycle {
+    open_ms: u64,
+    gap_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +99,12 @@ struct Config {
     retry_interval_ms: u64,
     heartbeat_ms: u64,
     wait_for_next_open: bool,
+    login_churn_cycles: u32,
+    login_churn_open_ms: u64,
+    login_churn_gap_ms: u64,
+    login_settle_open_ms: u64,
+    replay_cycles: Vec<ReplayCycle>,
+    replay_settle_open_ms: u64,
 }
 
 impl Config {
@@ -103,7 +122,9 @@ impl Config {
         }
 
         let scenario = Scenario::from_str(&scenario_str).with_context(|| {
-            format!("unknown scenario `{scenario_str}` (expected open-hold, timeout-window, delayed-open, no-open)")
+            format!(
+                "unknown scenario `{scenario_str}` (expected open-hold, timeout-window, delayed-open, no-open, login-churn, timing-replay)"
+            )
         })?;
 
         let mut channel_name = "Devolutions::Now::Agent".to_owned();
@@ -116,6 +137,12 @@ impl Config {
         let mut retry_interval_ms = 250_u64;
         let mut heartbeat_ms = 3_000_u64;
         let mut wait_for_next_open = false;
+        let mut login_churn_cycles = 10_u32;
+        let mut login_churn_open_ms = 1_200_u64;
+        let mut login_churn_gap_ms = 120_u64;
+        let mut login_settle_open_ms = 900_000_u64;
+        let mut replay_cycles = Vec::<ReplayCycle>::new();
+        let mut replay_settle_open_ms = 900_000_u64;
 
         while let Some(flag) = args.next() {
             match flag.as_str() {
@@ -133,6 +160,12 @@ impl Config {
                 "--retry-interval-ms" => retry_interval_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--heartbeat-ms" => heartbeat_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--wait-for-next-open" => wait_for_next_open = true,
+                "--login-churn-cycles" => login_churn_cycles = parse_u32(&next_value(&mut args, &flag)?, &flag)?,
+                "--login-churn-open-ms" => login_churn_open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
+                "--login-churn-gap-ms" => login_churn_gap_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
+                "--login-settle-open-ms" => login_settle_open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
+                "--replay-cycles" => replay_cycles = parse_replay_cycles(&next_value(&mut args, &flag)?, &flag)?,
+                "--replay-settle-open-ms" => replay_settle_open_ms = parse_u64(&next_value(&mut args, &flag)?, &flag)?,
                 "--help" | "-h" => {
                     print_usage();
                     std::process::exit(0);
@@ -153,10 +186,28 @@ impl Config {
             bail!("--heartbeat-ms must be at least 1");
         }
 
+        if login_churn_cycles == 0 {
+            bail!("--login-churn-cycles must be at least 1");
+        }
+
+        if login_churn_open_ms == 0 {
+            bail!("--login-churn-open-ms must be at least 1");
+        }
+
+        if login_settle_open_ms == 0 {
+            bail!("--login-settle-open-ms must be at least 1");
+        }
+
         match scenario {
             Scenario::OpenHold if cycles != 1 => bail!("open-hold supports exactly one cycle"),
             Scenario::NoOpen if cycles != 1 => bail!("no-open supports exactly one cycle"),
+            Scenario::LoginChurn if cycles != 1 => bail!("login-churn manages its own phases; keep --cycles at 1"),
+            Scenario::TimingReplay if cycles != 1 => bail!("timing-replay manages its own phases; keep --cycles at 1"),
             _ => {}
+        }
+
+        if scenario == Scenario::TimingReplay && replay_cycles.is_empty() {
+            bail!("timing-replay requires --replay-cycles");
         }
 
         Ok(Self {
@@ -171,6 +222,12 @@ impl Config {
             retry_interval_ms,
             heartbeat_ms,
             wait_for_next_open,
+            login_churn_cycles,
+            login_churn_open_ms,
+            login_churn_gap_ms,
+            login_settle_open_ms,
+            replay_cycles,
+            replay_settle_open_ms,
         })
     }
 }
@@ -185,6 +242,42 @@ fn parse_u64(value: &str, flag: &str) -> anyhow::Result<u64> {
     value
         .parse::<u64>()
         .with_context(|| format!("invalid value for {flag}: `{value}`"))
+}
+
+fn parse_replay_cycles(value: &str, flag: &str) -> anyhow::Result<Vec<ReplayCycle>> {
+    let mut cycles = Vec::new();
+
+    for (index, token) in value.split(',').enumerate() {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+
+        let mut parts = token.split(':');
+        let open_ms = parts
+            .next()
+            .with_context(|| format!("invalid value for {flag}: `{token}`"))?
+            .parse::<u64>()
+            .with_context(|| format!("invalid open_ms in {flag} entry `{token}`"))?;
+        let gap_ms = parts
+            .next()
+            .unwrap_or("0")
+            .parse::<u64>()
+            .with_context(|| format!("invalid gap_ms in {flag} entry `{token}`"))?;
+        if parts.next().is_some() {
+            bail!("invalid value for {flag}: `{token}` (expected open_ms:gap_ms)");
+        }
+        if open_ms == 0 {
+            bail!("invalid value for {flag}: entry #{} open_ms must be at least 1", index + 1);
+        }
+        cycles.push(ReplayCycle { open_ms, gap_ms });
+    }
+
+    if cycles.is_empty() {
+        bail!("invalid value for {flag}: expected at least one entry");
+    }
+
+    Ok(cycles)
 }
 
 fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> anyhow::Result<String> {
@@ -715,78 +808,165 @@ fn run_windows(config: &Config, stop_requested: &AtomicBool) -> anyhow::Result<(
             Ok(())
         }
         Scenario::OpenHold | Scenario::TimeoutWindow | Scenario::DelayedOpen => {
-            for cycle in 1..=config.cycles {
-                if stop_requested.load(Ordering::Relaxed) {
-                    log_event(
-                        config.scenario,
-                        Some(cycle),
-                        "interrupted",
-                        "stop requested before cycle",
-                    );
-                    return Ok(());
-                }
+            run_cycles(config, config.scenario, config.cycles, config.open_ms, config.gap_ms, stop_requested)
+        }
+        Scenario::LoginChurn => {
+            log_event(
+                config.scenario,
+                None,
+                "phase-start",
+                format!(
+                    "login churn burst: cycles={} open_ms={} gap_ms={}",
+                    config.login_churn_cycles, config.login_churn_open_ms, config.login_churn_gap_ms
+                ),
+            );
+            run_cycles(
+                config,
+                config.scenario,
+                config.login_churn_cycles,
+                config.login_churn_open_ms,
+                config.login_churn_gap_ms,
+                stop_requested,
+            )?;
 
-                let channel = match open_channel_with_retry(config.scenario, cycle, config, stop_requested) {
-                    Ok(channel) => channel,
-                    Err(_error) if stop_requested.load(Ordering::Relaxed) => {
-                        log_event(
-                            config.scenario,
-                            Some(cycle),
-                            "interrupted",
-                            "stop requested while opening channel",
-                        );
-                        return Ok(());
-                    }
-                    Err(error) => return Err(error),
-                };
+            if stop_requested.load(Ordering::Relaxed) {
+                log_event(config.scenario, None, "interrupted", "stop requested before settle phase");
+                return Ok(());
+            }
 
+            log_event(
+                config.scenario,
+                None,
+                "phase-start",
+                format!("settle hold: open_ms={}", config.login_settle_open_ms),
+            );
+            run_cycles(config, config.scenario, 1, config.login_settle_open_ms, 0, stop_requested)
+        }
+        Scenario::TimingReplay => {
+            log_event(
+                config.scenario,
+                None,
+                "phase-start",
+                format!("timing replay: cycles={}", config.replay_cycles.len()),
+            );
+
+            for (index, replay_cycle) in config.replay_cycles.iter().enumerate() {
+                let replay_num = index + 1;
                 log_event(
                     config.scenario,
-                    Some(cycle),
-                    "open-window-start",
-                    format!("holding channel for {} ms", config.open_ms),
+                    None,
+                    "replay-cycle-start",
+                    format!(
+                        "replay={} open_ms={} gap_ms={}",
+                        replay_num, replay_cycle.open_ms, replay_cycle.gap_ms
+                    ),
                 );
-                if let Err(error) = run_protocol_shim(config, config.scenario, cycle, &channel, stop_requested) {
-                    drop(channel);
-                    if stop_requested.load(Ordering::Relaxed) {
-                        log_event(
-                            config.scenario,
-                            Some(cycle),
-                            "interrupted",
-                            "stop requested in protocol shim",
-                        );
-                        return Ok(());
-                    }
-                    return Err(error);
-                }
 
-                log_event(config.scenario, Some(cycle), "open-window-end", "closing channel");
-                drop(channel);
-                log_event(config.scenario, Some(cycle), "closed", "channel handle released");
+                run_cycles(config, config.scenario, 1, replay_cycle.open_ms, 0, stop_requested)?;
 
-                if cycle != config.cycles {
+                if replay_cycle.gap_ms > 0 {
                     log_event(
                         config.scenario,
-                        Some(cycle),
-                        "gap-start",
-                        format!("sleeping {} ms before next cycle", config.gap_ms),
+                        None,
+                        "replay-gap-start",
+                        format!("replay={} sleeping {} ms", replay_num, replay_cycle.gap_ms),
                     );
-                    if !sleep_with_stop(stop_requested, config.gap_ms) {
-                        log_event(
-                            config.scenario,
-                            Some(cycle),
-                            "interrupted",
-                            "stop requested during inter-cycle gap",
-                        );
+                    if !sleep_with_stop(stop_requested, replay_cycle.gap_ms) {
+                        log_event(config.scenario, None, "interrupted", "stop requested during replay gap");
                         return Ok(());
                     }
-                    log_event(config.scenario, Some(cycle), "gap-end", "starting next cycle");
+                    log_event(config.scenario, None, "replay-gap-end", format!("replay={} done", replay_num));
                 }
+            }
+
+            if config.replay_settle_open_ms > 0 {
+                log_event(
+                    config.scenario,
+                    None,
+                    "phase-start",
+                    format!("settle hold: open_ms={}", config.replay_settle_open_ms),
+                );
+                run_cycles(config, config.scenario, 1, config.replay_settle_open_ms, 0, stop_requested)?;
             }
 
             Ok(())
         }
     }
+}
+
+#[cfg(windows)]
+fn run_cycles(
+    config: &Config,
+    scenario: Scenario,
+    cycles: u32,
+    open_ms: u64,
+    gap_ms: u64,
+    stop_requested: &AtomicBool,
+) -> anyhow::Result<()> {
+    for cycle in 1..=cycles {
+        if stop_requested.load(Ordering::Relaxed) {
+            log_event(scenario, Some(cycle), "interrupted", "stop requested before cycle");
+            return Ok(());
+        }
+
+        let channel = match open_channel_with_retry(scenario, cycle, config, stop_requested) {
+            Ok(channel) => channel,
+            Err(_error) if stop_requested.load(Ordering::Relaxed) => {
+                log_event(
+                    scenario,
+                    Some(cycle),
+                    "interrupted",
+                    "stop requested while opening channel",
+                );
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
+
+        log_event(
+            scenario,
+            Some(cycle),
+            "open-window-start",
+            format!("holding channel for {} ms", open_ms),
+        );
+
+        let mut phase_config = config.clone();
+        phase_config.open_ms = open_ms;
+
+        if let Err(error) = run_protocol_shim(&phase_config, scenario, cycle, &channel, stop_requested) {
+            drop(channel);
+            if stop_requested.load(Ordering::Relaxed) {
+                log_event(scenario, Some(cycle), "interrupted", "stop requested in protocol shim");
+                return Ok(());
+            }
+            return Err(error);
+        }
+
+        log_event(scenario, Some(cycle), "open-window-end", "closing channel");
+        drop(channel);
+        log_event(scenario, Some(cycle), "closed", "channel handle released");
+
+        if cycle != cycles {
+            log_event(
+                scenario,
+                Some(cycle),
+                "gap-start",
+                format!("sleeping {} ms before next cycle", gap_ms),
+            );
+            if !sleep_with_stop(stop_requested, gap_ms) {
+                log_event(
+                    scenario,
+                    Some(cycle),
+                    "interrupted",
+                    "stop requested during inter-cycle gap",
+                );
+                return Ok(());
+            }
+            log_event(scenario, Some(cycle), "gap-end", "starting next cycle");
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(not(windows))]
@@ -803,6 +983,8 @@ fn print_usage() {
            timeout-window  Open/hold/close cycles to emulate the server handshake window.\n\
            delayed-open    Sleep first, then behave like timeout-window.\n\
            no-open         Never open DVC (sleep only).\n\
+           login-churn     Run a login-like churn burst followed by a settle hold.\n\
+          timing-replay   Replay exact open/gap timing cycles from customer logs.\n\
          \n\
          Options:\n\
            --channel-name <name>   DVC channel name (default: Devolutions::Now::Agent)\n\
@@ -815,11 +997,19 @@ fn print_usage() {
            --retry-interval-ms <ms> Delay between open retries (default: 250)\n\
            --heartbeat-ms <ms>     Heartbeat interval in minimal shim mode (default: 3000)\n\
            --wait-for-next-open    Arm until a disconnect->reconnect open transition is observed\n\
+           --login-churn-cycles <n> Churn phase cycles for login-churn (default: 10)\n\
+           --login-churn-open-ms <ms> Open duration per churn cycle (default: 1200)\n\
+           --login-churn-gap-ms <ms> Gap duration per churn cycle (default: 120)\n\
+           --login-settle-open-ms <ms> Final settle hold duration (default: 900000)\n\
+          --replay-cycles <spec>   Comma-separated open_ms:gap_ms (e.g. 5032:73210,7867:13328,7831:0)\n\
+          --replay-settle-open-ms <ms> Final settle hold after replay (default: 900000, 0 disables)\n\
          \n\
          Examples:\n\
            dvc-session-harness timeout-window --cycles 6 --open-ms 5000 --gap-ms 200\n\
            dvc-session-harness timeout-window --cycles 200 --wait-for-open-ms 300000 --retry-interval-ms 250\n\
            dvc-session-harness timeout-window --protocol-shim minimal --wait-for-open-ms 300000 --wait-for-next-open\n\
+           dvc-session-harness login-churn --protocol-shim minimal --wait-for-open-ms 300000\n\
+           dvc-session-harness timing-replay --protocol-shim minimal --wait-for-open-ms 300000 --replay-cycles 5032:73210,7867:13328,7831:0 --replay-settle-open-ms 900000\n\
            dvc-session-harness delayed-open --delay-ms 12000 --open-ms 5000\n\
            dvc-session-harness no-open --open-ms 15000"
     );
@@ -844,13 +1034,19 @@ fn main() -> anyhow::Result<()> {
         None,
         "start",
         format!(
-            "channel={}, protocol_shim={}, cycles={}, delay_ms={}, open_ms={}, gap_ms={}",
+            "channel={}, protocol_shim={}, cycles={}, delay_ms={}, open_ms={}, gap_ms={}, login_churn_cycles={}, login_churn_open_ms={}, login_churn_gap_ms={}, login_settle_open_ms={}, replay_cycles={}, replay_settle_open_ms={}",
             config.channel_name,
             config.protocol_shim.as_str(),
             config.cycles,
             config.delay_ms,
             config.open_ms,
-            config.gap_ms
+            config.gap_ms,
+            config.login_churn_cycles,
+            config.login_churn_open_ms,
+            config.login_churn_gap_ms,
+            config.login_settle_open_ms,
+            config.replay_cycles.len(),
+            config.replay_settle_open_ms
         ),
     );
     log_event(
