@@ -336,7 +336,11 @@ impl ProvisioningStore {
     /// Returns the decrypted secret of `task_id`, or `None` once it is removed or expired.
     ///
     /// The returned value zeroizes on drop; keep it only as long as it is needed.
-    pub fn task_secret(&self, task_id: Uuid, now: time::OffsetDateTime) -> anyhow::Result<Option<SecretString>> {
+    pub fn task_secret(&self, task_id: Uuid) -> anyhow::Result<Option<SecretString>> {
+        self.task_secret_at(task_id, time::OffsetDateTime::now_utc())
+    }
+
+    fn task_secret_at(&self, task_id: Uuid, now: time::OffsetDateTime) -> anyhow::Result<Option<SecretString>> {
         let encrypted = {
             let mut task_secrets = self.task_secrets.lock();
 
@@ -494,7 +498,7 @@ mod tests {
             !format!("{store:?}").contains("sk-task-secret"),
             "only the encrypted secret is held"
         );
-        let secret = store.task_secret(task_id, now).expect("decrypt").expect("present");
+        let secret = store.task_secret_at(task_id, now).expect("decrypt").expect("present");
         assert_eq!(secret.expose_secret(), "sk-task-secret");
 
         store
@@ -504,7 +508,7 @@ mod tests {
                 now + time::Duration::hours(1),
             )
             .expect("replace");
-        let secret = store.task_secret(task_id, now).expect("decrypt").expect("present");
+        let secret = store.task_secret_at(task_id, now).expect("decrypt").expect("present");
         assert_eq!(secret.expose_secret(), "sk-replaced");
     }
 
@@ -527,9 +531,9 @@ mod tests {
             .expect("insert");
 
         store.remove_task_secret(removed);
-        assert!(store.task_secret(removed, now).expect("read").is_none());
+        assert!(store.task_secret_at(removed, now).expect("read").is_none());
         assert!(
-            store.task_secret(expired, now).expect("read").is_none(),
+            store.task_secret_at(expired, now).expect("read").is_none(),
             "due at its expiry"
         );
 
