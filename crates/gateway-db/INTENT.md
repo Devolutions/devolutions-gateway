@@ -16,7 +16,7 @@ All persistent state except the job queue and traffic audit should be stored in 
 
 
 # Upgrade from 2026.3
-If for 2026.3, user turned on the feature of agent-tunnel, then the database will be migrated from `agent_tunnel.db` to `gateway.db`. The migration will be done automatically on Gateway start up. This is one-off, atomic operation.
+If for 2026.3.0, user turned on the feature of agent-tunnel, then the database will be migrated from `agent_tunnel.db` to `gateway.db`. The migration will be done automatically on Gateway start up. This is one-off, atomic operation.
 
 # Future
 Later, `gateway-db` could take migrations from each adapter.
