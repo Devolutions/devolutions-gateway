@@ -13,7 +13,7 @@ It returns a stream of events that contains the progress of the analysis, and fi
 
 The final result is a series of JSON objects with timestamps and a natural language description of the events that happened during the recording.
 
-Analyze recording is trivial for terminal recordings. We just send the recording files to the AI service and get the results back.
+Analyze recording is trivial for terminal recordings. We pre-process the .trp file to .cast, and strip out some noises, then send as text to the AI services.
 
 Analyze video recordings breaks down the video into frames, and we apply motion detection altorithms to filter out idle or close enough frames. Then we send the the frames in chronological order to the AI services in batches.
 
