@@ -494,7 +494,7 @@ mod tests {
     fn new_task(target: &str) -> NewProvisionerTaskRecord {
         NewProvisionerTaskRecord {
             id: Uuid::new_v4(),
-            kind: String::from("recording.ai-analysis"),
+            kind: String::from("recording-ai-analysis"),
             target: String::from(target),
             params: serde_json::json!({ "provider": "openai", "model": "gpt-6-luna" }),
             deadline_at: now() + Duration::hours(2),
