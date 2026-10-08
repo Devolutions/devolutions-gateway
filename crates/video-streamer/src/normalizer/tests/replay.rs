@@ -23,17 +23,24 @@ fn replay_uses_latest_gop_and_restores_the_same_reader() {
     normalizer.scan_available().expect("scan available history");
     let original_head = normalizer.reader_head;
     let replay_point = normalizer.replay_point.expect("latest replay point");
+    let mut decoded = Vec::new();
     let mut frames = Vec::new();
+    let mut decode_frame = |_: &mut ClipNormalizer, frame: PendingFrame| {
+        decoded.push((frame.timestamp, frame.key_frame));
+        Ok(())
+    };
     let mut process_frame = |_: &mut ClipNormalizer, frame: PendingFrame| {
         frames.push((frame.timestamp, frame.key_frame));
         Ok(())
     };
 
     normalizer
-        .caught_up_with(&mut process_frame)
+        .caught_up_with(&mut decode_frame, &mut process_frame)
         .expect("replay latest GOP");
 
-    assert_eq!(frames, vec![(90, true), (120, false)]);
+    // The viewer starts at the live picture: earlier frames of the group are decoded only.
+    assert_eq!(decoded, vec![(90, true)]);
+    assert_eq!(frames, vec![(120, false)]);
     assert_eq!(normalizer.reader_head, original_head);
 
     let stats = stats.lock().expect("reader stats lock");
@@ -44,7 +51,7 @@ fn replay_uses_latest_gop_and_restores_the_same_reader() {
 
 #[test]
 fn replay_error_restores_the_original_parser_and_reader_state() {
-    let data = video_clip_bytes(&[true, false, true], false);
+    let data = video_clip_bytes(&[true, false, true, false], false);
     let visible = Arc::new(AtomicUsize::new(data.len()));
     let stats = Arc::new(Mutex::new(ReaderStats::default()));
     let reader = GrowingReader {
@@ -59,10 +66,11 @@ fn replay_error_restores_the_original_parser_and_reader_state() {
     let original_head = normalizer.reader_head;
     let original_decoder_position = normalizer.decoder.position();
     let original_input = normalizer.input.clone();
-    let mut process_frame = |_: &mut ClipNormalizer, _: PendingFrame| Err(anyhow::anyhow!("replay callback failed"));
+    let mut decode_frame = |_: &mut ClipNormalizer, _: PendingFrame| Err(anyhow::anyhow!("replay callback failed"));
+    let mut process_frame = |_: &mut ClipNormalizer, _: PendingFrame| Ok(());
 
     let error = normalizer
-        .caught_up_with(&mut process_frame)
+        .caught_up_with(&mut decode_frame, &mut process_frame)
         .expect_err("replay callback failure");
 
     assert!(format!("{error:#}").contains("replay callback failed"));
@@ -91,12 +99,15 @@ fn known_size_group_replay_excludes_a_partial_next_group_until_growth() {
     normalizer.scan_available().expect("scan partial group");
     assert!(normalizer.pending_block_group.is_some());
     {
+        let mut decode_frame = |_: &mut ClipNormalizer, _: PendingFrame| -> anyhow::Result<()> {
+            panic!("a single-frame group has nothing to decode only")
+        };
         let mut process_frame = |_: &mut ClipNormalizer, frame: PendingFrame| {
             frames.push((frame.timestamp, frame.key_frame));
             Ok(())
         };
         normalizer
-            .caught_up_with(&mut process_frame)
+            .caught_up_with(&mut decode_frame, &mut process_frame)
             .expect("replay complete group");
     }
     assert_eq!(frames, vec![(0, true)]);
@@ -129,12 +140,15 @@ fn unknown_size_group_replay_uses_the_following_sibling_as_its_boundary() {
     normalizer.scan_available().expect("scan unknown-sized group");
     assert!(normalizer.pending_block_group.is_some());
     {
+        let mut decode_frame = |_: &mut ClipNormalizer, _: PendingFrame| -> anyhow::Result<()> {
+            panic!("a single-frame group has nothing to decode only")
+        };
         let mut process_frame = |_: &mut ClipNormalizer, frame: PendingFrame| {
             frames.push((frame.timestamp, frame.key_frame));
             Ok(())
         };
         normalizer
-            .caught_up_with(&mut process_frame)
+            .caught_up_with(&mut decode_frame, &mut process_frame)
             .expect("replay through the complete boundary");
     }
     assert_eq!(frames, vec![(0, true)]);
@@ -161,7 +175,12 @@ fn replay_stops_at_a_completed_frame_inside_a_known_cluster() {
         stats: Arc::new(Mutex::new(ReaderStats::default())),
     };
     let (mut normalizer, _receiver) = live_edge_normalizer(reader);
+    let mut decoded = Vec::new();
     let mut frames = Vec::new();
+    let mut decode_frame = |_: &mut ClipNormalizer, frame: PendingFrame| {
+        decoded.push((frame.timestamp, frame.key_frame));
+        Ok(())
+    };
     let mut process_frame = |_: &mut ClipNormalizer, frame: PendingFrame| {
         frames.push((frame.timestamp, frame.key_frame));
         Ok(())
@@ -169,10 +188,11 @@ fn replay_stops_at_a_completed_frame_inside_a_known_cluster() {
 
     normalizer.scan_available().expect("scan cross-cluster history");
     normalizer
-        .caught_up_with(&mut process_frame)
+        .caught_up_with(&mut decode_frame, &mut process_frame)
         .expect("replay completed frames without finalizing the document");
 
-    assert_eq!(frames, vec![(0, true), (30, false)]);
+    assert_eq!(decoded, vec![(0, true)]);
+    assert_eq!(frames, vec![(30, false)]);
 }
 
 #[test]
