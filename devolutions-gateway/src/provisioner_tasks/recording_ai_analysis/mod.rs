@@ -329,7 +329,11 @@ impl RecordingAiAnalysis {
             .client(&conf, &api_key)
             .map_err(|error| AttemptError::Permanent(error.to_string()))?;
 
-        let _session = lock_session(session_id).await;
+        // Waiting for an earlier analysis of the session counts in the attempt time, so a timeout cancels it too.
+        let _session = tokio::select! {
+            session = lock_session(session_id) => session,
+            () = attempt.cancel.cancelled() => return Err(AttemptError::Cancelled),
+        };
 
         let recording = self
             .recordings

@@ -681,7 +681,7 @@ async fn slow_attempt_is_retried() {
     task.attempt_timeout = Duration::from_millis(500);
     harness.state.provisioner_tasks = ProvisionerTaskRunner::builder(
         Arc::clone(harness.state.provisioner_tasks.store()),
-        harness.state.job_queue_handle.clone(),
+        Arc::new(harness.state.job_queue_handle.clone()),
     )
     .register(task)
     .build();

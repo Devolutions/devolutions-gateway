@@ -11,7 +11,7 @@ use job_queue_libsql::libsql;
 use time::OffsetDateTime;
 use tokio::sync::{Notify, mpsc};
 
-use crate::provisioner_tasks::runner::{ProvisionerTaskJob, ProvisionerTaskRunner};
+use crate::provisioner_tasks::runner::{ProvisionerTaskJob, ProvisionerTaskJobQueue, ProvisionerTaskRunner};
 
 /// Runs of a job before the job queue gives up on it.
 pub const MAX_ATTEMPTS: u32 = 5;
@@ -90,12 +90,21 @@ impl JobQueueCtx {
         })
     }
 
-    /// Writes a job to the queue right away, without going through [`JobQueueHandle`].
-    ///
-    /// For startup, before the job runner claims anything.
-    pub async fn push<T: Job + 'static>(&self, job: T) -> anyhow::Result<()> {
+    /// The queue itself, for jobs whose callers must know they are stored.
+    pub fn durable(&self) -> DurableJobQueue {
+        DurableJobQueue(Arc::clone(&self.queue))
+    }
+}
+
+/// The job queue database: a job pushed here is stored before `push` returns, unlike with [`JobQueueHandle`].
+#[derive(Clone)]
+pub struct DurableJobQueue(DynJobQueue);
+
+#[async_trait]
+impl ProvisionerTaskJobQueue for DurableJobQueue {
+    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
         let job: DynJob = Box::new(job);
-        self.queue.push_job(&job, None).await
+        self.0.push_job(&job, None).await
     }
 }
 

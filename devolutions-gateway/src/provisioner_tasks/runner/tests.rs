@@ -1,6 +1,5 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use job_queue::Job as _;
 use parking_lot::Mutex;
 use provisioner_task::ProvisionerTaskState;
 
@@ -76,7 +75,7 @@ impl Harness {
         let runs = Arc::new(AtomicUsize::new(0));
         let ended = Arc::new(Mutex::new(Vec::new()));
 
-        let runner = ProvisionerTaskRunner::builder(store, job_queue)
+        let runner = ProvisionerTaskRunner::builder(store, Arc::new(job_queue))
             .register(Echo {
                 outcome,
                 runs: Arc::clone(&runs),
@@ -183,43 +182,44 @@ async fn a_superseded_job_runs_nothing_once_the_task_is_resumed() {
     let id = harness.create(7).await;
     let mut stale = harness.queued_job();
 
-    let resumed = Mutex::new(Vec::new());
-    harness
-        .runner
-        .resume(|job| {
-            resumed.lock().push(job);
-            async { Ok(()) }
-        })
-        .await
-        .expect("resume");
-    let mut resumed = resumed.into_inner();
-    assert_eq!(resumed.len(), 1, "the unfinished Task gets a new job");
+    harness.runner.resume().await.expect("resume");
+    let mut resumed = harness.queued_job();
+    assert!(
+        harness.job_queue_rx.try_recv().is_err(),
+        "the unfinished Task gets one new job"
+    );
 
     stale.run().await.expect("the stale job stops");
     assert_eq!(harness.runs.load(Ordering::SeqCst), 0);
     assert_eq!(harness.task(id).await.attempts, 0, "a stale job counts no attempt");
     assert!(harness.ended.lock().is_empty(), "a stale job ends nothing");
 
-    resumed[0].run().await.expect("the new job runs");
+    resumed.run().await.expect("the new job runs");
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Succeeded);
     assert_eq!(task.payload, json!({ "echo": 7 }));
     assert_eq!(*harness.ended.lock(), [id]);
 
-    let queued_again = AtomicUsize::new(0);
-    harness
-        .runner
-        .resume(|_| {
-            queued_again.fetch_add(1, Ordering::SeqCst);
-            async { Ok(()) }
-        })
-        .await
-        .expect("resume again");
-    assert_eq!(
-        queued_again.load(Ordering::SeqCst),
-        0,
+    harness.runner.resume().await.expect("resume again");
+    assert!(
+        harness.job_queue_rx.try_recv().is_err(),
         "a finished Task gets no new job"
     );
+}
+
+#[tokio::test]
+async fn a_task_that_cannot_be_queued_again_fails() {
+    let mut harness = Harness::new(|value| Ok(json!(value))).await;
+    let id = harness.create(1).await;
+    harness.queued_job();
+    harness.job_queue_rx.close();
+
+    harness.runner.resume().await.expect("resume");
+
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed, "no job is left to run it");
+    assert_eq!(task.payload["reason"], "not queued");
+    assert_eq!(*harness.ended.lock(), [id]);
 }
 
 #[tokio::test]
