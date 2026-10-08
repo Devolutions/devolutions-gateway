@@ -102,7 +102,8 @@ pub(super) fn keep_changed_frames(
         kept: Vec::new(),
         current: None,
     };
-    let mut track = TrackInfo::default();
+    let mut entry: Option<TrackEntry> = None;
+    let mut video: Option<VideoTrack> = None;
     let mut decoder: Option<VpxDecoder> = None;
     let mut cluster_time = None;
     let mut timestamp_scale_ns = 1_000_000u64;
@@ -126,20 +127,48 @@ pub(super) fn keep_changed_frames(
                 timestamp_scale_ns = scale.max(1);
                 continue;
             }
+            MatroskaSpec::TrackEntry(Master::Start) => {
+                entry = Some(TrackEntry::default());
+                continue;
+            }
+            MatroskaSpec::TrackNumber(number) => {
+                if let Some(entry) = &mut entry {
+                    entry.number = Some(number);
+                }
+                continue;
+            }
+            MatroskaSpec::TrackType(kind) => {
+                if let Some(entry) = &mut entry {
+                    entry.kind = Some(kind);
+                }
+                continue;
+            }
             MatroskaSpec::CodecID(id) => {
-                track.codec = Some(match id.as_str() {
-                    "V_VP8" => VpxCodec::VP8,
-                    "V_VP9" => VpxCodec::VP9,
-                    other => return Err(VideoError::Invalid(format!("unsupported video codec {other}"))),
-                });
+                if let Some(entry) = &mut entry {
+                    entry.codec_id = Some(id);
+                }
                 continue;
             }
             MatroskaSpec::PixelWidth(width) => {
-                track.width = u32::try_from(width).ok();
+                if let Some(entry) = &mut entry {
+                    entry.width = u32::try_from(width).ok();
+                }
                 continue;
             }
             MatroskaSpec::PixelHeight(height) => {
-                track.height = u32::try_from(height).ok();
+                if let Some(entry) = &mut entry {
+                    entry.height = u32::try_from(height).ok();
+                }
+                continue;
+            }
+            MatroskaSpec::TrackEntry(Master::End) => {
+                // Only the first video track is read; audio, subtitles and any other video track are skipped.
+                if let Some(entry) = entry.take()
+                    && video.is_none()
+                    && entry.is_video()
+                {
+                    video = Some(VideoTrack::try_from(entry)?);
+                }
                 continue;
             }
             MatroskaSpec::Timestamp(time) => {
@@ -148,7 +177,7 @@ pub(super) fn keep_changed_frames(
             }
             MatroskaSpec::SimpleBlock(data) => SimpleBlock::try_from(&data)
                 .map_err(|error| VideoError::Invalid(format!("invalid block: {error}")))
-                .and_then(|block| frame_of(block.timestamp, block.read_frame_data()))?,
+                .and_then(|block| frame_of(block.track, block.timestamp, block.read_frame_data()))?,
             MatroskaSpec::BlockGroup(Master::Full(children)) => {
                 let Some(raw) = children.iter().find_map(|child| match child {
                     MatroskaSpec::Block(raw) => Some(raw),
@@ -158,10 +187,18 @@ pub(super) fn keep_changed_frames(
                 };
                 Block::try_from(raw)
                     .map_err(|error| VideoError::Invalid(format!("invalid block: {error}")))
-                    .and_then(|block| frame_of(block.timestamp, block.read_frame_data()))?
+                    .and_then(|block| frame_of(block.track, block.timestamp, block.read_frame_data()))?
             }
             _ => continue,
         };
+
+        let Some(video) = &video else {
+            return Err(VideoError::Invalid("block before any video track".to_owned()));
+        };
+
+        if block.track != video.number {
+            continue;
+        }
 
         let Some(cluster_time) = cluster_time else {
             return Err(VideoError::Invalid("block before its cluster time".to_owned()));
@@ -169,16 +206,16 @@ pub(super) fn keep_changed_frames(
 
         let ticks = i64::try_from(cluster_time)
             .unwrap_or(i64::MAX)
-            .saturating_add(i64::from(block.0));
+            .saturating_add(i64::from(block.timestamp));
         let pts_ms = u64::try_from(ticks).unwrap_or(0).saturating_mul(timestamp_scale_ns) / 1_000_000;
 
         let decoder = match &mut decoder {
             Some(decoder) => decoder,
-            None => decoder.insert(track.decoder()?),
+            None => decoder.insert(video.decoder()?),
         };
 
         decoder
-            .decode(&block.1)
+            .decode(&block.data)
             .map_err(|error| VideoError::Invalid(format!("failed to decode a frame: {error:?}")))?;
 
         // Exactly one call per decoded frame: XMF would hand back the same image again.
@@ -216,37 +253,94 @@ pub(super) fn keep_changed_frames(
     Ok(keeper.kept)
 }
 
-/// The time of a block relative to its cluster, and its frame.
+/// A frame of a block, with the track it belongs to and its time relative to its cluster.
+struct BlockFrame {
+    track: u64,
+    timestamp: i16,
+    data: Vec<u8>,
+}
+
 fn frame_of(
+    track: u64,
     timestamp: i16,
     frames: Result<Vec<webm_iterable::matroska_spec::Frame<'_>>, webm_iterable::errors::WebmCoercionError>,
-) -> Result<(i16, Vec<u8>), VideoError> {
+) -> Result<BlockFrame, VideoError> {
     let frames = frames.map_err(|error| VideoError::Invalid(format!("invalid block: {error}")))?;
 
     match frames.as_slice() {
-        [frame] => Ok((timestamp, frame.data.to_vec())),
+        [frame] => Ok(BlockFrame {
+            track,
+            timestamp,
+            data: frame.data.to_vec(),
+        }),
         _ => Err(VideoError::Invalid("laced blocks are not supported".to_owned())),
     }
 }
 
+/// Matroska `TrackType` of a video track.
+const VIDEO_TRACK_TYPE: u64 = 1;
+
+/// What a `TrackEntry` says about its track, of any kind.
 #[derive(Default)]
-struct TrackInfo {
-    codec: Option<VpxCodec>,
+struct TrackEntry {
+    number: Option<u64>,
+    kind: Option<u64>,
+    codec_id: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
 }
 
-impl TrackInfo {
-    fn decoder(&self) -> Result<VpxDecoder, VideoError> {
-        let (Some(codec), Some(width), Some(height)) = (self.codec, self.width, self.height) else {
-            return Err(VideoError::Invalid("video track without codec or size".to_owned()));
+impl TrackEntry {
+    fn is_video(&self) -> bool {
+        match self.kind {
+            Some(kind) => kind == VIDEO_TRACK_TYPE,
+            None => self.codec_id.as_deref().is_some_and(|id| id.starts_with("V_")),
+        }
+    }
+}
+
+/// The video track the screenshots are taken from.
+struct VideoTrack {
+    number: u64,
+    codec: VpxCodec,
+    width: u32,
+    height: u32,
+}
+
+impl TryFrom<TrackEntry> for VideoTrack {
+    type Error = VideoError;
+
+    fn try_from(entry: TrackEntry) -> Result<Self, Self::Error> {
+        let (Some(number), Some(codec_id), Some(width), Some(height)) =
+            (entry.number, entry.codec_id, entry.width, entry.height)
+        else {
+            return Err(VideoError::Invalid(
+                "video track without number, codec or size".to_owned(),
+            ));
         };
 
+        let codec = match codec_id.as_str() {
+            "V_VP8" => VpxCodec::VP8,
+            "V_VP9" => VpxCodec::VP9,
+            other => return Err(VideoError::Invalid(format!("unsupported video codec {other}"))),
+        };
+
+        Ok(Self {
+            number,
+            codec,
+            width,
+            height,
+        })
+    }
+}
+
+impl VideoTrack {
+    fn decoder(&self) -> Result<VpxDecoder, VideoError> {
         VpxDecoder::builder()
             .threads(2)
-            .width(width)
-            .height(height)
-            .codec(codec)
+            .width(self.width)
+            .height(self.height)
+            .codec(self.codec)
             .build()
             .map_err(|error| VideoError::Invalid(format!("failed to start the video decoder: {error:?}")))
     }
