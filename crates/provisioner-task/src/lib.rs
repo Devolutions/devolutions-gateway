@@ -54,7 +54,7 @@ impl std::str::FromStr for ProvisionerTaskState {
 pub struct ProvisionerTaskRecord {
     /// Chosen by the provisioner, so it can ask again without knowing whether the first request went through.
     pub id: Uuid,
-    /// What kind of work this is, e.g. `recording.ai-analysis`.
+    /// What kind of work this is, e.g. `recording-ai-analysis`.
     pub kind: String,
     /// What the work is about, e.g. a session ID. At most one unfinished Task per kind and target.
     pub target: String,
