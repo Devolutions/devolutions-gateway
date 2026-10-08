@@ -10,6 +10,7 @@ CREATE TABLE provisioner_task_records (
     started_at INTEGER,
     finished_at INTEGER,
     deadline_at INTEGER NOT NULL,
+    job_token TEXT,
     CHECK (state IN ('queued', 'running', 'succeeded', 'failed')),
     CHECK ((state IN ('succeeded', 'failed')) = (finished_at IS NOT NULL)),
     CHECK (json_valid(params) AND json_valid(payload)),
