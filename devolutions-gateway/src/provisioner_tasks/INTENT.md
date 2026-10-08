@@ -1,5 +1,5 @@
 # Background
-Provisioner tasks are tasks issued for Gateway to execute. Tasks's state are pesisted in `gateway.db`, see more at `../crates/provisioner-task-libsql/README.md`. 
+Provisioner tasks are tasks issued for Gateway to execute. Tasks's state are pesisted in `gateway.db`, see more at `../../../crates/provisioner-task-libsql/`. 
 
 
 # Invariants
