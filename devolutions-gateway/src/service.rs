@@ -275,13 +275,27 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
+    let data_dir = config::get_data_dir();
+    agent_tunnel_libsql::import_2026_3_0_database(&data_dir)
+        .await
+        .context("failed to import the 2026.3.0 agent tunnel database")?;
+    let gateway_db = gateway_db::GatewayDb::open(&data_dir)
+        .await
+        .context("failed to open the gateway database")?;
+
     // Initialize the agent tunnel when enabled.
     let agent_tunnel_handle = if conf.agent_tunnel.enabled {
-        let data_dir = config::get_data_dir();
         let hostname = &conf.hostname;
 
-        let authorization_database = data_dir.join("agent_tunnel.db");
-        let ca_manager = if authorization_database.exists() {
+        let agent_tunnel_conn = gateway_db
+            .connect()
+            .await
+            .context("failed to connect the agent tunnel to the gateway database")?;
+        let agents_have_ca = agent_tunnel_libsql::LibSqlAgentAuthorizationStore::bound_ca(&agent_tunnel_conn)
+            .await
+            .context("failed to read the agent tunnel CA identity")?
+            .is_some();
+        let ca_manager = if agents_have_ca {
             agent_tunnel::cert::CaManager::load(&data_dir)
         } else {
             agent_tunnel::cert::CaManager::load_or_generate(&data_dir)
@@ -291,7 +305,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .ca_spki_sha256()
             .context("failed to identify agent tunnel CA")?;
         let authorization_store =
-            agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(authorization_database.as_str(), ca_spki_sha256)
+            agent_tunnel_libsql::LibSqlAgentAuthorizationStore::open(agent_tunnel_conn, ca_spki_sha256)
                 .await
                 .context("failed to initialize Agent authorization database")?;
         let authorization_store: agent_tunnel::authorization::DynAgentAuthorizationStore =
