@@ -204,6 +204,9 @@ fi
 # The gateway requires a provisioner public key to start.
 # Generate a key pair and place the public key where gateway.json points.
 
+info "Checking service did not start automatically…"
+check_service_not_auto_started
+
 info "Generating provisioner key…"
 check_provisioner_key
 
