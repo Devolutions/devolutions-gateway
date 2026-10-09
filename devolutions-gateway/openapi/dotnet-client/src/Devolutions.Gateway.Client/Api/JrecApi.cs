@@ -68,6 +68,29 @@ namespace Devolutions.Gateway.Client.Api
         /// <returns>ApiResponse of Object(void)</returns>
         ApiResponse<Object> DeleteRecordingWithHttpInfo(Guid id);
         /// <summary>
+        /// Gets an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <returns>TaskInfo</returns>
+        TaskInfo GetAiAnalysis(Guid sessionId, Guid taskId);
+
+        /// <summary>
+        /// Gets an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <returns>ApiResponse of TaskInfo</returns>
+        ApiResponse<TaskInfo> GetAiAnalysisWithHttpInfo(Guid sessionId, Guid taskId);
+        /// <summary>
         /// Lists all recordings stored on this instance
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
@@ -126,6 +149,29 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="id">Recorded session ID</param>
         /// <returns>ApiResponse of FileParameter</returns>
         ApiResponse<FileParameter> PullRecordingSessionWithHttpInfo(Guid id);
+        /// <summary>
+        /// Starts an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <returns>TaskInfo</returns>
+        TaskInfo StartAiAnalysis(Guid sessionId, AiAnalysisRequest aiAnalysisRequest);
+
+        /// <summary>
+        /// Starts an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <returns>ApiResponse of TaskInfo</returns>
+        ApiResponse<TaskInfo> StartAiAnalysisWithHttpInfo(Guid sessionId, AiAnalysisRequest aiAnalysisRequest);
         #endregion Synchronous Operations
     }
 
@@ -181,6 +227,31 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse</returns>
         System.Threading.Tasks.Task<ApiResponse<Object>> DeleteRecordingWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        /// <summary>
+        /// Gets an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of TaskInfo</returns>
+        System.Threading.Tasks.Task<TaskInfo> GetAiAnalysisAsync(Guid sessionId, Guid taskId, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+
+        /// <summary>
+        /// Gets an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (TaskInfo)</returns>
+        System.Threading.Tasks.Task<ApiResponse<TaskInfo>> GetAiAnalysisWithHttpInfoAsync(Guid sessionId, Guid taskId, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         /// <summary>
         /// Lists all recordings stored on this instance
         /// </summary>
@@ -252,6 +323,31 @@ namespace Devolutions.Gateway.Client.Api
         /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
         /// <returns>Task of ApiResponse (FileParameter)</returns>
         System.Threading.Tasks.Task<ApiResponse<FileParameter>> PullRecordingSessionWithHttpInfoAsync(Guid id, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+        /// <summary>
+        /// Starts an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of TaskInfo</returns>
+        System.Threading.Tasks.Task<TaskInfo> StartAiAnalysisAsync(Guid sessionId, AiAnalysisRequest aiAnalysisRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
+
+        /// <summary>
+        /// Starts an AI analysis of a recorded session
+        /// </summary>
+        /// <remarks>
+        /// Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </remarks>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (TaskInfo)</returns>
+        System.Threading.Tasks.Task<ApiResponse<TaskInfo>> StartAiAnalysisWithHttpInfoAsync(Guid sessionId, AiAnalysisRequest aiAnalysisRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken));
         #endregion Asynchronous Operations
     }
 
@@ -710,6 +806,131 @@ namespace Devolutions.Gateway.Client.Api
         }
 
         /// <summary>
+        /// Gets an AI analysis of a recorded session Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <returns>TaskInfo</returns>
+        public TaskInfo GetAiAnalysis(Guid sessionId, Guid taskId)
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = GetAiAnalysisWithHttpInfo(sessionId, taskId);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Gets an AI analysis of a recorded session Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <returns>ApiResponse of TaskInfo</returns>
+        public Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> GetAiAnalysisWithHttpInfo(Guid sessionId, Guid taskId)
+        {
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.PathParameters.Add("session_id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(sessionId)); // path parameter
+            localVarRequestOptions.PathParameters.Add("task_id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(taskId)); // path parameter
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+            var localVarResponse = this.Client.Get<TaskInfo>("/jet/jrec/{session_id}/ai-analysis/{task_id}", localVarRequestOptions, this.Configuration);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("GetAiAnalysis", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Gets an AI analysis of a recorded session Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of TaskInfo</returns>
+        public async System.Threading.Tasks.Task<TaskInfo> GetAiAnalysisAsync(Guid sessionId, Guid taskId, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = await GetAiAnalysisWithHttpInfoAsync(sessionId, taskId, cancellationToken).ConfigureAwait(false);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Gets an AI analysis of a recorded session Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="taskId">Task ID of the AI analysis</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (TaskInfo)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo>> GetAiAnalysisWithHttpInfoAsync(Guid sessionId, Guid taskId, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.PathParameters.Add("session_id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(sessionId)); // path parameter
+            localVarRequestOptions.PathParameters.Add("task_id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(taskId)); // path parameter
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+
+            var localVarResponse = await this.AsynchronousClient.GetAsync<TaskInfo>("/jet/jrec/{session_id}/ai-analysis/{task_id}", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("GetAiAnalysis", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
         /// Lists all recordings stored on this instance 
         /// </summary>
         /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
@@ -1074,6 +1295,141 @@ namespace Devolutions.Gateway.Client.Api
             if (this.ExceptionFactory != null)
             {
                 Exception _exception = this.ExceptionFactory("PullRecordingSession", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Starts an AI analysis of a recorded session Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <returns>TaskInfo</returns>
+        public TaskInfo StartAiAnalysis(Guid sessionId, AiAnalysisRequest aiAnalysisRequest)
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = StartAiAnalysisWithHttpInfo(sessionId, aiAnalysisRequest);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Starts an AI analysis of a recorded session Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <returns>ApiResponse of TaskInfo</returns>
+        public Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> StartAiAnalysisWithHttpInfo(Guid sessionId, AiAnalysisRequest aiAnalysisRequest)
+        {
+            // verify the required parameter 'aiAnalysisRequest' is set
+            if (aiAnalysisRequest == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'aiAnalysisRequest' when calling JrecApi->StartAiAnalysis");
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+                "application/json"
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.PathParameters.Add("session_id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(sessionId)); // path parameter
+            localVarRequestOptions.Data = aiAnalysisRequest;
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+            var localVarResponse = this.Client.Post<TaskInfo>("/jet/jrec/{session_id}/ai-analysis", localVarRequestOptions, this.Configuration);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("StartAiAnalysis", localVarResponse);
+                if (_exception != null) throw _exception;
+            }
+
+            return localVarResponse;
+        }
+
+        /// <summary>
+        /// Starts an AI analysis of a recorded session Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of TaskInfo</returns>
+        public async System.Threading.Tasks.Task<TaskInfo> StartAiAnalysisAsync(Guid sessionId, AiAnalysisRequest aiAnalysisRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo> localVarResponse = await StartAiAnalysisWithHttpInfoAsync(sessionId, aiAnalysisRequest, cancellationToken).ConfigureAwait(false);
+            return localVarResponse.Data;
+        }
+
+        /// <summary>
+        /// Starts an AI analysis of a recorded session Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under &#x60;artifacts.ai-analysis&#x60; in its manifest. The work runs in the background as a Task; follow it with &#x60;GET /jet/jrec/{session_id}/ai-analysis/{task_id}&#x60;, which the &#x60;Location&#x60; header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+        /// </summary>
+        /// <exception cref="Devolutions.Gateway.Client.Client.ApiException">Thrown when fails to make API call</exception>
+        /// <param name="sessionId">Recorded session ID</param>
+        /// <param name="aiAnalysisRequest">AI analysis settings</param>
+        /// <param name="cancellationToken">Cancellation Token to cancel the request.</param>
+        /// <returns>Task of ApiResponse (TaskInfo)</returns>
+        public async System.Threading.Tasks.Task<Devolutions.Gateway.Client.Client.ApiResponse<TaskInfo>> StartAiAnalysisWithHttpInfoAsync(Guid sessionId, AiAnalysisRequest aiAnalysisRequest, System.Threading.CancellationToken cancellationToken = default(global::System.Threading.CancellationToken))
+        {
+            // verify the required parameter 'aiAnalysisRequest' is set
+            if (aiAnalysisRequest == null)
+                throw new Devolutions.Gateway.Client.Client.ApiException(400, "Missing required parameter 'aiAnalysisRequest' when calling JrecApi->StartAiAnalysis");
+
+
+            Devolutions.Gateway.Client.Client.RequestOptions localVarRequestOptions = new Devolutions.Gateway.Client.Client.RequestOptions();
+
+            string[] _contentTypes = new string[] {
+                "application/json"
+            };
+
+            // to determine the Accept header
+            string[] _accepts = new string[] {
+                "application/json"
+            };
+
+
+            var localVarContentType = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderContentType(_contentTypes);
+            if (localVarContentType != null) localVarRequestOptions.HeaderParameters.Add("Content-Type", localVarContentType);
+
+            var localVarAccept = Devolutions.Gateway.Client.Client.ClientUtils.SelectHeaderAccept(_accepts);
+            if (localVarAccept != null) localVarRequestOptions.HeaderParameters.Add("Accept", localVarAccept);
+
+            localVarRequestOptions.PathParameters.Add("session_id", Devolutions.Gateway.Client.Client.ClientUtils.ParameterToString(sessionId)); // path parameter
+            localVarRequestOptions.Data = aiAnalysisRequest;
+
+            // authentication (scope_token) required
+            // bearer authentication required
+            if (!string.IsNullOrEmpty(this.Configuration.AccessToken) && !localVarRequestOptions.HeaderParameters.ContainsKey("Authorization"))
+            {
+                localVarRequestOptions.HeaderParameters.Add("Authorization", "Bearer " + this.Configuration.AccessToken);
+            }
+
+            // make the HTTP request
+
+            var localVarResponse = await this.AsynchronousClient.PostAsync<TaskInfo>("/jet/jrec/{session_id}/ai-analysis", localVarRequestOptions, this.Configuration, cancellationToken).ConfigureAwait(false);
+
+            if (this.ExceptionFactory != null)
+            {
+                Exception _exception = this.ExceptionFactory("StartAiAnalysis", localVarResponse);
                 if (_exception != null) throw _exception;
             }
 
