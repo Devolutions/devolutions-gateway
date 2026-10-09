@@ -248,6 +248,31 @@ fn main() {
                     eprintln!("[ERROR] Agent configuration failed: {e}");
                 }
             }
+            "psu-device" => {
+                let result = (|| -> Result<()> {
+                    let handle = ConfHandle::init()?;
+                    let conf = handle.get_conf();
+                    let psu = conf.psu_agent.as_ref().context("PSU agent is disabled")?;
+                    match env::args().nth(2).as_deref() {
+                        Some("enroll") => tokio::runtime::Runtime::new()
+                            .context("create enrollment runtime")?
+                            .block_on(devolutions_agent::psu_agent::device::enroll(psu)),
+                        Some("renew") => tokio::runtime::Runtime::new()
+                            .context("create renewal runtime")?
+                            .block_on(devolutions_agent::psu_agent::device::renew(psu)),
+                        Some("status") => {
+                            let identity = devolutions_agent::psu_agent::device::DeviceIdentity::open(psu)?;
+                            println!("{}", identity.status());
+                            Ok(())
+                        }
+                        _ => bail!("usage: devolutions-agent psu-device <enroll|renew|status>"),
+                    }
+                })();
+                if let Err(error) = result {
+                    eprintln!("[ERROR] PSU device operation failed: {error:#}");
+                    std::process::exit(1);
+                }
+            }
             "enroll" => {
                 let gateway_url = env::args()
                     .nth(2)

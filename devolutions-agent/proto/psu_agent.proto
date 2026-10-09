@@ -10,6 +10,51 @@ service AgentControl {
   rpc Connect(stream AgentMessage) returns (stream ServerMessage);
 }
 
+service AgentEnrollment {
+  rpc GetTrustAnchor(TrustAnchorRequest) returns (TrustAnchorResponse);
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+  rpc Renew(RenewRequest) returns (EnrollResponse);
+}
+
+message TrustAnchorRequest {
+  string nonce = 1;
+}
+
+message TrustAnchorResponse {
+  bytes root_certificate = 1;
+  string root_thumbprint = 2;
+  string server_assertion = 3;
+}
+
+message EnrollRequest {
+  bytes csr = 1;
+  string machine_name = 2;
+  string os = 3;
+  string architecture = 4;
+  string agent_version = 5;
+  string requested_display_name = 6;
+  string hardware_id = 7;
+}
+
+enum EnrollmentStatus {
+  ENROLLMENT_STATUS_UNSPECIFIED = 0;
+  ENROLLMENT_STATUS_APPROVED = 1;
+  ENROLLMENT_STATUS_PENDING_APPROVAL = 2;
+}
+
+message EnrollResponse {
+  string device_id = 1;
+  bytes certificate = 2;
+  repeated bytes chain = 3;
+  EnrollmentStatus status = 4;
+  string certificate_thumbprint = 5;
+  google.protobuf.Timestamp not_after = 6;
+}
+
+message RenewRequest {
+  bytes csr = 1;
+}
+
 message AgentMessage {
   string request_id = 1;
   string agent_id = 2;

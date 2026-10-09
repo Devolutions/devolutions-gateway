@@ -1356,12 +1356,13 @@ namespace DevolutionsAgent.Actions
         }
 
         /// <summary>
-        /// Whether agent.json already holds a complete <c>PsuAgent</c> section (both a non-empty
-        /// <c>ServerUrl</c> and <c>AppToken</c>). Used to preserve an existing configuration on a
+        /// Whether agent.json already holds a complete <c>PsuAgent</c> section (a non-empty
+        /// <c>ServerUrl</c> and either a non-empty <c>AppToken</c> or a non-empty
+        /// <c>DeviceEnrollment.RootThumbprint</c>). Used to preserve an existing configuration on a
         /// silent upgrade that re-runs <see cref="ConfigurePsuAgent"/> without passing PSU
         /// properties. Best-effort: any read/parse failure is treated as "not complete".
         /// </summary>
-        private static bool PsuConfigIsComplete(string configPath)
+        internal static bool PsuConfigIsComplete(string configPath)
         {
             try
             {
@@ -1375,8 +1376,12 @@ namespace DevolutionsAgent.Actions
                     return false;
                 }
 
-                return !string.IsNullOrWhiteSpace((string)psu["ServerUrl"])
-                    && !string.IsNullOrWhiteSpace((string)psu["AppToken"]);
+                bool hasServerUrl = !string.IsNullOrWhiteSpace((string)psu["ServerUrl"]);
+                bool hasAppToken = !string.IsNullOrWhiteSpace((string)psu["AppToken"]);
+                bool hasDeviceEnrollment = psu["DeviceEnrollment"] is JObject deviceEnrollment
+                    && !string.IsNullOrWhiteSpace((string)deviceEnrollment["RootThumbprint"]);
+
+                return hasServerUrl && (hasAppToken || hasDeviceEnrollment);
             }
             catch (Exception)
             {
