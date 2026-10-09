@@ -38,6 +38,7 @@ agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde
 base64 = "0.23"
 camino = "1"
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
+devolutions-agent = { path = "../devolutions-agent" }
 devolutions-gateway = { path = "../devolutions-gateway" }
 futures-util = "0.3"
 ipnetwork = "0.20"
@@ -56,12 +57,18 @@ rstest = "0.25"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2"
 rustls-pki-types = "1"
+ring = "0.17"
+prost-types = "0.13"
 serde_json = "1"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
 tempfile = "3"
 test-utils.path = "../crates/test-utils"
 tokio-rustls = { version = "0.26", features = ["ring"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+tonic = { version = "0.12", features = ["transport"] }
+time = "0.3"
+x509-parser = "0.16"
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dev-dependencies]

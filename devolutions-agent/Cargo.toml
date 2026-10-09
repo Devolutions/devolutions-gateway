@@ -35,10 +35,12 @@ prost-types = "0.13"
 quinn = "0.11"
 rand = "0.8" # FIXME(@CBenoit): maybe we don't need this crate
 rcgen = { version = "0.13", features = ["pem"] }
+ring = "0.17"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks", "json"] }
 rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
 rustls-pemfile = "2.2"
 rustls-pki-types = "1"
+rustls-webpki = { version = "0.103", default-features = false, features = ["std", "ring"] }
 sha2 = "0.10"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
