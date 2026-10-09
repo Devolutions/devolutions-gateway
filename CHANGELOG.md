@@ -11,6 +11,10 @@ This document provides a list of notable changes introduced in Devolutions Gatew
   A viewer joining a live recording got every frame since the source's last key frame and started playing from there, so it began behind the live edge, by the whole session when the source sends only one key frame.
   Gateway now only decodes those frames and sends the current picture as the first key frame, like before the session streaming rework.
 
+- _agent-installer_: label the package broker as UniGetUI Package Broker ([#2057](https://github.com/Devolutions/devolutions-gateway/issues/2057)) ([72233dfd03](https://github.com/Devolutions/devolutions-gateway/commit/72233dfd03a4223f207c52edc187bf1f5561fe38)) ([#2064](https://github.com/Devolutions/devolutions-gateway/issues/2064)) ([e1dca6a6e9](https://github.com/Devolutions/devolutions-gateway/commit/e1dca6a6e9b406cc4f604310a9944c4c696fec23))
+
+  The Agent installer now names the Package Broker feature after the client it serves: "UniGetUI Package Broker" in English, "Service d'installation de paquets UniGetUI" in French and "UniGetUI-paketmäklare" in Swedish.
+
 ## 2026.3.1 (2026-10-09)
 
 ### Security
