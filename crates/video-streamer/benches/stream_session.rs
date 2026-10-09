@@ -74,6 +74,8 @@ async fn stream_recording(recording: &'static [u8]) -> u64 {
     let config = SessionConfig {
         encoder_threads: 1,
         adaptive_frame_skip: false,
+        fill_interval: None,
+        fill_delay: Duration::ZERO,
     };
     let server = tokio::spawn(stream_session(
         start_source,

@@ -29,6 +29,9 @@ const WEBM_TIMESTAMP_SCALE_NS: u64 = 1_000_000;
 const MAX_WEBM_BLOCK_TIMESTAMP: u64 = 32_767;
 const MAX_CONSECUTIVE_FRAME_SKIPS: u32 = 1;
 
+/// Experiment counter: frames whose timestamp was moved forward because an earlier output frame already covered it.
+pub(crate) static LATE_FRAMES_MOVED: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SegmentInfo {
     pub sequence: u64,
@@ -110,9 +113,26 @@ where
         let mut worker = tokio::task::spawn_blocking(move || normalize_events(input_receiver, worker_sender, config));
         let mut forward = Box::pin(async move {
             tokio::pin!(source);
-            while let Some(event) = source.next().await {
-                if input_sender.send(event).await.is_err() {
-                    break;
+            // Ticks drive the refill of quiet live clips; with no fill interval, the tick never fires.
+            let tick_period = config
+                .fill_interval
+                .map_or(Duration::from_secs(3600), |interval| interval / 4);
+            let mut ticks = tokio::time::interval(tick_period.max(Duration::from_millis(10)));
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    event = source.next() => {
+                        let Some(event) = event else { break };
+                        if input_sender.send(event.map(InputEvent::Recording)).await.is_err() {
+                            break;
+                        }
+                    }
+                    _ = ticks.tick(), if config.fill_interval.is_some() => {
+                        // A busy worker misses the tick, which is fine: it is producing frames.
+                        if let Err(mpsc::error::TrySendError::Closed(_)) = input_sender.try_send(Ok(InputEvent::Tick)) {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -148,8 +168,13 @@ async fn publish_worker_result(
     let _ = sender.send(Err(error)).await;
 }
 
+enum InputEvent {
+    Recording(RecordingEvent),
+    Tick,
+}
+
 fn normalize_events(
-    mut receiver: mpsc::Receiver<anyhow::Result<RecordingEvent>>,
+    mut receiver: mpsc::Receiver<anyhow::Result<InputEvent>>,
     sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
     config: SessionConfig,
 ) -> anyhow::Result<()> {
@@ -157,7 +182,16 @@ fn normalize_events(
     let mut next_segment_sequence = 0;
 
     while let Some(event) = receiver.blocking_recv() {
-        match event.context("recording source failed")? {
+        let event = match event.context("recording source failed")? {
+            InputEvent::Recording(event) => event,
+            InputEvent::Tick => {
+                if let SessionPhase::InClip(clip) = &mut phase {
+                    clip.fill_if_quiet()?;
+                }
+                continue;
+            }
+        };
+        match event {
             RecordingEvent::ClipStarted {
                 sequence,
                 start_at,
@@ -275,6 +309,8 @@ struct ClipNormalizer {
     processing_time: Duration,
     first_frame_timestamp: Option<u64>,
     frames_since_last_encode: u32,
+    /// Media timestamp of the last source frame and when it was processed, to place refill frames.
+    last_source_frame: Option<(u64, Instant)>,
     sender: mpsc::Sender<anyhow::Result<SegmentEvent>>,
     config: SessionConfig,
 }
@@ -314,6 +350,7 @@ impl ClipNormalizer {
             processing_time: Duration::ZERO,
             first_frame_timestamp: None,
             frames_since_last_encode: 0,
+            last_source_frame: None,
             sender,
             config,
         })
@@ -607,8 +644,8 @@ impl ClipNormalizer {
         let input_decoder = self
             .input_decoder
             .get_or_insert_with(|| InputDecoder::new(frame.codec, self.config.encoder_threads));
-        let decoded = input_decoder.decode(&frame.data)?;
-        let dimensions = decoded.dimensions;
+        let dimensions = input_decoder.decode(&frame.data)?;
+        self.last_source_frame = Some((frame.timestamp, Instant::now()));
         let new_segment = next_segment_info(
             self.output_segment.as_ref().map(|segment| segment.dimensions),
             dimensions,
@@ -635,11 +672,57 @@ impl ClipNormalizer {
                 .checked_add(1)
                 .context("segment sequence overflow")?;
         }
+        let picture = self
+            .input_decoder
+            .as_ref()
+            .and_then(InputDecoder::picture)
+            .context("decoded picture is missing")?;
         self.output_segment
             .as_mut()
             .context("output segment is missing")?
-            .encode(&decoded.image, frame.timestamp)?;
+            .encode(picture, frame.timestamp)?;
         Ok(())
+    }
+
+    /// Repeats the last picture when the live source has been quiet for at least the fill interval.
+    ///
+    /// The refill timestamp follows the source clock: the last source timestamp plus the time elapsed since that
+    /// frame. A source frame that arrives later with a smaller timestamp is moved after the refill.
+    fn fill_if_quiet(&mut self) -> anyhow::Result<()> {
+        let Some(interval) = self.config.fill_interval else {
+            return Ok(());
+        };
+        if !matches!(self.phase, ClipPhase::Live) || self.sender.is_closed() {
+            return Ok(());
+        }
+        // A source frame already written but not scanned yet must not be overtaken by a refill.
+        self.scan_available()?;
+        let Some((source_timestamp, processed_at)) = self.last_source_frame else {
+            return Ok(());
+        };
+        let (Some(segment), Some(picture)) = (
+            self.output_segment.as_mut(),
+            self.input_decoder.as_ref().and_then(InputDecoder::picture),
+        ) else {
+            return Ok(());
+        };
+
+        // Refills trail the source by `fill_delay`, so a source frame up to that late still lands before them.
+        let elapsed = processed_at.elapsed().saturating_sub(self.config.fill_delay);
+        if elapsed < interval {
+            return Ok(());
+        }
+        let interval_ms = u64::try_from(interval.as_millis()).unwrap_or(u64::MAX);
+        let timestamp = source_timestamp.saturating_add(u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX));
+        if segment
+            .previous_timestamp
+            .is_some_and(|previous| timestamp < previous.saturating_add(interval_ms))
+        {
+            return Ok(());
+        }
+
+        perf_trace!(timestamp, "Refill quiet live clip");
+        segment.encode(picture, timestamp)
     }
 
     fn should_skip_encode(&mut self, timestamp: u64) -> bool {
@@ -898,6 +981,19 @@ impl OutputSegment {
     }
 
     fn encode(&mut self, image: &VpxImage<'_>, timestamp: u64) -> anyhow::Result<()> {
+        // A refill frame may already cover a source timestamp that arrives late.
+        let timestamp = match self.previous_timestamp {
+            Some(previous) if timestamp <= previous => {
+                LATE_FRAMES_MOVED.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+                perf_debug!(
+                    timestamp,
+                    previous,
+                    "Moved a late source frame after the previous output frame"
+                );
+                previous.saturating_add(1)
+            }
+            _ => timestamp,
+        };
         let origin = *self.origin_timestamp.get_or_insert(timestamp);
         let relative_timestamp = timestamp.saturating_sub(origin);
         let duration = self
