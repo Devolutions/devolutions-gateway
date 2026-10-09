@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use tracing::warn;
 use url::Url;
 
-use super::{Completion, Message, Stop, endpoint, parse_body, usage};
+use super::{Completion, Content, Message, Stop, base64, endpoint, parse_body, usage};
 use crate::Error;
-use crate::client::Prompt;
+use crate::client::{Input, Prompt};
 
 const VERSION: &str = "2023-06-01";
 
@@ -26,7 +26,13 @@ pub(crate) fn request(
             system: prompt.system,
             messages: [Message {
                 role: "user",
-                content: prompt.input,
+                content: Content::of(prompt.input, |input| match input {
+                    Input::Text(text) => serde_json::json!({ "type": "text", "text": text }),
+                    Input::Png(png) => serde_json::json!({
+                        "type": "image",
+                        "source": { "type": "base64", "media_type": "image/png", "data": base64(png) },
+                    }),
+                }),
             }],
             max_tokens: prompt.max_output_tokens,
         })
