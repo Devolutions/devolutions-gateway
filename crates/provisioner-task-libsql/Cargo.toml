@@ -1,0 +1,26 @@
+[package]
+name = "provisioner-task-libsql"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+libsql = { version = "0.9", default-features = false, features = ["core"] }
+provisioner-task.path = "../provisioner-task"
+serde_json = "1"
+time = { version = "0.3", default-features = false }
+tokio = { version = "1.52", features = ["sync"] }
+tracing = "0.1"
+uuid = "1.23"
+
+[dev-dependencies]
+gateway-db.path = "../gateway-db"
+tempfile = "3.24"
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1.23", features = ["v4"] }
