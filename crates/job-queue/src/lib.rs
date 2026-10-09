@@ -62,6 +62,9 @@ pub trait JobQueue: Send + Sync {
 
     /// Retrieves the closest future scheduled date
     async fn next_scheduled_date(&self) -> anyhow::Result<Option<OffsetDateTime>>;
+
+    /// Lists the definitions of the stored jobs named `name` that may still run, in no particular order.
+    async fn job_definitions(&self, name: &str) -> anyhow::Result<Vec<String>>;
 }
 
 pub struct JobCtx {

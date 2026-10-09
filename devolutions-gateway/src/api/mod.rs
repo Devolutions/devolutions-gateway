@@ -13,6 +13,7 @@ pub mod preflight;
 pub mod rdp;
 pub mod session;
 pub mod sessions;
+pub mod tasks;
 pub mod traffic;
 pub mod tunnel;
 pub mod update;
