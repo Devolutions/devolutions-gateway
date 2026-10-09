@@ -363,12 +363,19 @@ impl ClipNormalizer {
     }
 
     fn caught_up(&mut self) -> anyhow::Result<()> {
+        let mut decode_frame = Self::decode_frame;
         let mut process_frame = Self::process_frame;
-        self.caught_up_with(&mut process_frame)
+        self.caught_up_with(&mut decode_frame, &mut process_frame)
     }
 
-    fn caught_up_with<F>(&mut self, process_frame: &mut F) -> anyhow::Result<()>
+    /// Ends the history phase.
+    ///
+    /// For a live-edge viewer, the frames of the latest group of pictures are only decoded, to rebuild the current
+    /// picture, and only the last one is processed. Its picture becomes the first output key frame, so the viewer
+    /// starts at the live picture instead of replaying the group.
+    fn caught_up_with<D, F>(&mut self, decode_frame: &mut D, process_frame: &mut F) -> anyhow::Result<()>
     where
+        D: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
         F: FnMut(&mut Self, PendingFrame) -> anyhow::Result<()>,
     {
         let history = match std::mem::replace(&mut self.phase, ClipPhase::Live) {
@@ -378,7 +385,15 @@ impl ClipNormalizer {
         if matches!(history, HistoryPolicy::KeepLatestGop)
             && let Some(replay_point) = self.replay_point
         {
-            self.replay_latest_gop_with(replay_point, process_frame)?;
+            let mut latest = None;
+            let mut keep_latest = |this: &mut Self, frame: PendingFrame| match latest.replace(frame) {
+                Some(previous) => decode_frame(this, previous),
+                None => Ok(()),
+            };
+            self.replay_latest_gop_with(replay_point, &mut keep_latest)?;
+            if let Some(latest) = latest {
+                process_frame(self, latest)?;
+            }
         }
         Ok(())
     }
@@ -569,6 +584,15 @@ impl ClipNormalizer {
             codec: video.codec,
             key_frame,
         }))
+    }
+
+    /// Decodes a frame without showing it, to advance the decoder to a later picture.
+    fn decode_frame(&mut self, frame: PendingFrame) -> anyhow::Result<()> {
+        let input_decoder = self
+            .input_decoder
+            .get_or_insert_with(|| InputDecoder::new(frame.codec, self.config.encoder_threads));
+        input_decoder.decode(&frame.data)?;
+        Ok(())
     }
 
     fn process_frame(&mut self, frame: PendingFrame) -> anyhow::Result<()> {
