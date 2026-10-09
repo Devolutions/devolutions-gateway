@@ -23,6 +23,7 @@ macro_rules! perf_debug {
     ($($tt:tt)*) => {};
 }
 
+mod compact;
 pub mod debug;
 mod decoder;
 mod normalizer;
@@ -34,6 +35,8 @@ pub(crate) mod streamer;
 #[macro_use]
 extern crate tracing;
 
+#[rustfmt::skip]
+pub use compact::{CompactOutcome, CompactStats, SkipReason, compact_webm};
 #[rustfmt::skip]
 pub use streamer::reopenable_file::ReOpenableFile;
 #[rustfmt::skip]
