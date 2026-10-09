@@ -6,11 +6,12 @@ use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use parking_lot::Mutex;
+use secrecy::SecretString;
 use tokio::sync::Notify;
 use tracing::{debug, instrument, warn};
 use uuid::Uuid;
 
-use crate::credential::{AppCredentialMapping, CleartextAppCredentialMapping};
+use crate::credential::{AppCredentialMapping, CleartextAppCredentialMapping, EncryptedPassword};
 use crate::target_connection_options::TargetConnectionOptions;
 
 /// Error returned when inserting into the credentials half of the provisioning store.
@@ -68,19 +69,29 @@ struct ConnectionOptionsEntry {
     expires_at: time::OffsetDateTime,
 }
 
-/// Two independent token-keyed stores that together provision a session.
+#[derive(Debug, Clone)]
+struct TaskSecretEntry {
+    secret: EncryptedPassword,
+    expires_at: time::OffsetDateTime,
+}
+
+/// What the provisioner hands Gateway to use later, kept in memory only, each kind with its own policy.
 ///
-/// The credentials store is the encryption boundary: cleartext mappings are encrypted on the way
-/// in, so entries only ever hold encrypted material. Token-only rows (`mapping = None`) match the
-/// existing `provision-token` behavior on master. The connection-options store holds plaintext
-/// routing metadata only and has no crypto dependency.
+/// Two token-keyed stores together provision a session. The credentials store is the encryption
+/// boundary: cleartext mappings are encrypted on the way in, so entries only ever hold encrypted
+/// material. Token-only rows (`mapping = None`) match the existing `provision-token` behavior on
+/// master. The connection-options store holds plaintext routing metadata only and has no crypto
+/// dependency. Both are keyed by the association-token JTI. The halves are provisioned by separate
+/// preflight operations and may arrive, expire, or be replaced independently.
 ///
-/// Both are keyed by the association-token JTI. The halves are provisioned by separate preflight
-/// operations and may arrive, expire, or be replaced independently.
+/// The task-secrets store holds what a provisioner task needs but must never write to disk, such as
+/// the API key of an AI analysis. It is keyed by Task ID, encrypted like the credentials, and its
+/// entries go away when their Task ends or at their expiry.
 #[derive(Debug, Clone)]
 pub struct ProvisioningStore {
     credentials: Arc<Mutex<HashMap<Uuid, CredentialsEntry>>>,
     connection_options: Arc<Mutex<HashMap<Uuid, ConnectionOptionsEntry>>>,
+    task_secrets: Arc<Mutex<HashMap<Uuid, TaskSecretEntry>>>,
     cleanup_notify: Arc<Notify>,
 }
 
@@ -95,6 +106,7 @@ impl ProvisioningStore {
         Self {
             credentials: Arc::new(Mutex::new(HashMap::new())),
             connection_options: Arc::new(Mutex::new(HashMap::new())),
+            task_secrets: Arc::new(Mutex::new(HashMap::new())),
             cleanup_notify: Arc::new(Notify::new()),
         }
     }
@@ -302,9 +314,61 @@ impl ProvisioningStore {
         self.connection_options.lock().get(&jti).map(|entry| entry.expires_at)
     }
 
+    /// Stores the secret of a provisioner task, encrypted, until `expires_at`; it replaces any earlier secret of the Task.
+    ///
+    /// The store does not look inside: the task decides what the secret holds, such as a serialized API key and URL.
+    pub fn insert_task_secret(
+        &self,
+        task_id: Uuid,
+        secret: &SecretString,
+        expires_at: time::OffsetDateTime,
+    ) -> anyhow::Result<()> {
+        let secret = crate::credential::encrypt_secret(secret).context("encrypt the task secret")?;
+
+        self.task_secrets
+            .lock()
+            .insert(task_id, TaskSecretEntry { secret, expires_at });
+        self.cleanup_notify.notify_one();
+
+        Ok(())
+    }
+
+    /// Returns the decrypted secret of `task_id`, or `None` once it is removed or expired.
+    ///
+    /// The returned value zeroizes on drop; keep it only as long as it is needed.
+    pub fn task_secret(&self, task_id: Uuid) -> anyhow::Result<Option<SecretString>> {
+        self.task_secret_at(task_id, time::OffsetDateTime::now_utc())
+    }
+
+    fn task_secret_at(&self, task_id: Uuid, now: time::OffsetDateTime) -> anyhow::Result<Option<SecretString>> {
+        let encrypted = {
+            let mut task_secrets = self.task_secrets.lock();
+
+            let Some(entry) = task_secrets.get(&task_id) else {
+                return Ok(None);
+            };
+            if now >= entry.expires_at {
+                task_secrets.remove(&task_id);
+                return Ok(None);
+            }
+
+            entry.secret.clone()
+        };
+
+        crate::credential::decrypt_secret(&encrypted)
+            .context("decrypt the task secret")
+            .map(Some)
+    }
+
+    /// Removes the secret of `task_id`, as when its Task ends.
+    pub fn remove_task_secret(&self, task_id: Uuid) {
+        self.task_secrets.lock().remove(&task_id);
+    }
+
     fn remove_expired(&self, now: time::OffsetDateTime) {
         self.credentials.lock().retain(|_, entry| now < entry.expires_at);
         self.connection_options.lock().retain(|_, entry| now < entry.expires_at);
+        self.task_secrets.lock().retain(|_, entry| now < entry.expires_at);
     }
 
     fn next_expiry(&self) -> Option<time::OffsetDateTime> {
@@ -315,7 +379,12 @@ impl ProvisioningStore {
             .values()
             .map(|entry| entry.expires_at)
             .min();
-        credentials_expiry.into_iter().chain(options_expiry).min()
+        let task_secrets_expiry = self.task_secrets.lock().values().map(|entry| entry.expires_at).min();
+        credentials_expiry
+            .into_iter()
+            .chain(options_expiry)
+            .chain(task_secrets_expiry)
+            .min()
     }
 }
 
@@ -407,6 +476,89 @@ mod tests {
 
     fn options() -> TargetConnectionOptions {
         serde_json::from_value(serde_json::json!({ "krb_kdc": "tcp://dc.example:88" })).expect("options")
+    }
+
+    #[test]
+    fn task_secret_is_kept_encrypted_and_read_back() {
+        use secrecy::ExposeSecret as _;
+
+        let store = ProvisioningStore::new();
+        let task_id = Uuid::new_v4();
+        let now = time::OffsetDateTime::now_utc();
+
+        store
+            .insert_task_secret(
+                task_id,
+                &SecretString::from("sk-task-secret"),
+                now + time::Duration::hours(1),
+            )
+            .expect("insert");
+
+        assert!(
+            !format!("{store:?}").contains("sk-task-secret"),
+            "only the encrypted secret is held"
+        );
+        let secret = store.task_secret_at(task_id, now).expect("decrypt").expect("present");
+        assert_eq!(secret.expose_secret(), "sk-task-secret");
+
+        store
+            .insert_task_secret(
+                task_id,
+                &SecretString::from("sk-replaced"),
+                now + time::Duration::hours(1),
+            )
+            .expect("replace");
+        let secret = store.task_secret_at(task_id, now).expect("decrypt").expect("present");
+        assert_eq!(secret.expose_secret(), "sk-replaced");
+    }
+
+    #[test]
+    fn task_secret_goes_away_when_removed_or_expired() {
+        let store = ProvisioningStore::new();
+        let now = time::OffsetDateTime::now_utc();
+        let removed = Uuid::new_v4();
+        let expired = Uuid::new_v4();
+        let expiring = Uuid::new_v4();
+
+        store
+            .insert_task_secret(removed, &SecretString::from("a"), now + time::Duration::hours(1))
+            .expect("insert");
+        store
+            .insert_task_secret(expired, &SecretString::from("b"), now)
+            .expect("insert");
+        store
+            .insert_task_secret(expiring, &SecretString::from("c"), now + time::Duration::minutes(1))
+            .expect("insert");
+
+        store.remove_task_secret(removed);
+        assert!(store.task_secret_at(removed, now).expect("read").is_none());
+        assert!(
+            store.task_secret_at(expired, now).expect("read").is_none(),
+            "due at its expiry"
+        );
+
+        assert_eq!(store.next_expiry(), Some(now + time::Duration::minutes(1)));
+        store.remove_expired(now + time::Duration::minutes(1));
+        assert!(store.task_secrets.lock().is_empty(), "the cleanup task removes it");
+    }
+
+    #[test]
+    fn task_secrets_are_independent_from_session_provisioning() {
+        let store = ProvisioningStore::new();
+        let id = Uuid::new_v4();
+        let token = association_token(id);
+        let now = time::OffsetDateTime::now_utc();
+        store
+            .insert_credentials(token.clone(), Some(mapping()), time::Duration::minutes(5))
+            .expect("insert credentials");
+        store
+            .insert_task_secret(id, &SecretString::from("sk"), now + time::Duration::hours(1))
+            .expect("insert secret");
+
+        store.remove_task_secret(id);
+
+        assert_eq!(store.mapping_status(id), MappingStatus::Available);
+        store.get_mapping(id, &token).expect("credentials stay");
     }
 
     #[test]
