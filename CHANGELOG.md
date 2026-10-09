@@ -2,6 +2,15 @@
 
 This document provides a list of notable changes introduced in Devolutions Gateway service, installer and Jetsocat.
 
+## 2026.3.2 (2026-10-09)
+
+### Bug Fixes
+
+- _dgw_: start shadow viewers at the live picture ([#2061](https://github.com/Devolutions/devolutions-gateway/issues/2061)) ([3f41378f0b](https://github.com/Devolutions/devolutions-gateway/commit/3f41378f0bcc015d8f099b0cb60f624a8e94ba80)) ([DGW-457](https://devolutions.atlassian.net/browse/DGW-457))
+
+  A viewer joining a live recording got every frame since the source's last key frame and started playing from there, so it began behind the live edge, by the whole session when the source sends only one key frame.
+  Gateway now only decodes those frames and sends the current picture as the first key frame, like before the session streaming rework.
+
 ## 2026.3.1 (2026-10-09)
 
 ### Security
