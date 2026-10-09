@@ -5,7 +5,7 @@
                 <String Id="FeatureAgentTunnelDescription">Connecte l'agent à une passerelle Devolutions. Nécessite une chaîne d'enrôlement fournie par l'opérateur de votre passerelle.</String>
                 <String Id="FeatureAgentTunnelName">Tunnel d'agent</String>
                 <String Id="FeaturePackageBrokerDescription">Permet aux utilisateurs standard de demander, au moyen d'UniGetUI et d'autres clients approuvés, l'installation et la mise à jour de paquets autorisées par une politique définie par un administrateur. Les demandes sont refusées tant qu'aucune politique de paquets n'est déployée.</String>
-                <String Id="FeaturePackageBrokerName">Courtier de paquets UniGetUI</String>
+                <String Id="FeaturePackageBrokerName">Service d'installation de paquets UniGetUI</String>
                 <String Id="FeaturePsuDescription">Active l'agent distant pour PowerShell Universal.</String>
                 <String Id="FeaturePsuName">Agent PowerShell Universal</String>
                 <String Id="FeatureSessionDescription">Active les fonctionnalités de session RDP telles que l'exécution à distance, les sessions Jump et la déconnexion à distance.</String>
