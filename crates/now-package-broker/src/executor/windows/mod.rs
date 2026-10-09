@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context as _, bail};
 use async_trait::async_trait;
 use devolutions_agent_shared::temp_file::{BATCH_UTF8_PREAMBLE, POWERSHELL_UTF8_ENCODING_PREAMBLE, TmpFileGuard};
-use now_policy_api::{Elevation, ManagerName, Scope};
+use now_policy_api::ManagerName;
 use tracing::{debug, info, warn};
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
@@ -32,7 +32,7 @@ mod user_env;
 
 use privileges::SharedPrivileges;
 use process::{OutputCapture, create_process};
-use token::{detect_running_as_system, find_user_session, get_elevated_token};
+use token::{detect_running_as_system, find_user_session, get_elevated_token, user_session_token};
 use user_env::UserEnv;
 
 /// Windows command executor using `win-api-wrappers` safe abstractions.
@@ -68,7 +68,7 @@ impl CommandExecutor for WindowsExecutor {
         ctx: &ExecutionContext,
         process_started: Option<ProcessStartedCallback>,
     ) -> anyhow::Result<ExecutionOutput> {
-        let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+        let requires_elevation = ctx.requires_elevation();
         reject_unsupported_vcpkg_elevation(ctx)?;
 
         // SECURITY: Defense in depth — the broker server already rejects such
@@ -202,7 +202,7 @@ fn path_contains_executable(env: &UserEnv<'_>, names: &[&str]) -> bool {
 /// Execute a command in the context of the target user's session (SYSTEM mode).
 ///
 /// Steps:
-/// 1. Find the user's active session (and its token) by matching the session token SID.
+/// 1. Query the user token of the pipe client's session, which must belong to the client user.
 /// 2. If elevated execution is requested, obtain the linked elevated token.
 /// 3. Set the token session ID and create the process.
 /// 4. Wait for the process to exit and return the exit code.
@@ -210,7 +210,7 @@ fn execute_as_system(
     ctx: &ExecutionContext,
     process_started: Option<ProcessStartedCallback>,
 ) -> anyhow::Result<ExecutionOutput> {
-    let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+    let requires_elevation = ctx.requires_elevation();
 
     info!(
         effective_user = %ctx.effective_user,
@@ -230,10 +230,11 @@ fn execute_as_system(
     ])
     .context("failed to enable privileges required for SYSTEM-mode execution")?;
 
-    debug!("All privileges enabled, finding user session");
+    debug!("All privileges enabled, querying the pipe client session");
 
-    let (session_id, user_token) = find_user_session(&ctx.user_sid).context(
-        "failed to find an active logon session for the target user; \
+    let session_id = ctx.session_id;
+    let user_token = user_session_token(session_id, &ctx.user_sid).context(
+        "failed to use the pipe client session; \
          user-scope and interactive operations require the user to be logged on",
     )?;
 
@@ -317,6 +318,13 @@ fn execute_as_current_user(
     }
 
     let session_id = token.session_id().context("failed to query token session ID")?;
+    if session_id != ctx.session_id {
+        bail!(
+            "pipe client session {} does not match broker process session {session_id}; \
+             execution is only supported in the broker session when the broker is not running as SYSTEM",
+            ctx.session_id,
+        );
+    }
 
     let output = run_plan(&token, ctx, session_id, process_started)?;
 
@@ -340,34 +348,50 @@ fn run_plan(
         return Err(anyhow::Error::new(OperationCanceled));
     }
 
-    let requires_elevation = ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine);
+    let requires_elevation = ctx.requires_elevation();
     if requires_elevation && command_is_bun(&ctx.command) {
         bail!("elevated Bun package operations are not supported by the broker");
     }
 
-    // SECURITY: Pre/post commands are raw strings whose content is not governed by
-    // the policy, so they must never run elevated. The request flags are already
-    // checked upstream, but the token actually running the plan is what matters
-    // (e.g. a broker launched from an elevated shell, or a full session token when
-    // UAC is disabled), so query the token itself right before running.
-    if ctx.pre_command.is_some() || ctx.post_command.is_some() {
-        let is_elevated = token
-            .is_elevated()
-            .context("failed to query execution token elevation")?;
-        if is_elevated {
-            bail!("pre/post operation commands are only allowed for non-elevated execution");
-        }
+    let token_is_elevated = token
+        .is_elevated()
+        .context("failed to query execution token elevation")?;
+    check_execution_token_elevation(ctx, token_is_elevated)?;
+
+    // Defense in depth: the server rejects these names before policy evaluation.
+    if let Some(process_name) = ctx
+        .kill_processes
+        .iter()
+        .find(|name| !crate::evaluator::is_acceptable_kill_process_name(name))
+    {
+        bail!("unacceptable kill-before-operation process name '{process_name}'");
     }
+
+    let vars = win_api_wrappers::utils::environment_block(Some(token), false)
+        .context("failed to load user environment block")?;
+    let user_env = UserEnv::for_user(&vars, token)?;
+
+    // SECURITY: An elevated install into a folder that non-administrators can write lets them
+    // replace what the administrator token installed. The guard keeps the ancestors of the
+    // verified folder from being renamed until the plan completes.
+    let _install_location_guard = match &ctx.custom_install_location {
+        Some(location) if requires_elevation => {
+            Some(policy_security::verify_elevated_install_location(&user_env, location)?)
+        }
+        _ => None,
+    };
+
+    // Elevated kills are limited to the requester's processes in the requester's session.
+    let kill_user = if requires_elevation && !ctx.kill_processes.is_empty() {
+        Some(account_display_name(&ctx.user_sid)?)
+    } else {
+        None
+    };
 
     // 1. Kill requested processes (best-effort; a missing process is not an error,
     //    but a cancellation request must still be honored).
     for process_name in &ctx.kill_processes {
-        let kill_cmd = vec![
-            trusted_system32_executable("taskkill.exe"),
-            "/F".to_owned(),
-            "/IM".to_owned(),
-            process_name.clone(),
-        ];
+        let kill_cmd = kill_command(process_name, session_id, kill_user.as_deref());
         match create_process(
             token,
             &kill_cmd,
@@ -406,8 +430,12 @@ fn run_plan(
         }
     }
 
-    // 3. Main package-manager command.
-    let command = prepare_main_command(token, &ctx.command, requires_elevation)?;
+    // 3. Main package-manager command. The environment is reloaded because the pre-operation
+    //    command may have updated persisted variables such as `PATH`.
+    let main_vars = win_api_wrappers::utils::environment_block(Some(token), false)
+        .context("failed to load user environment block")?;
+    let main_env = UserEnv::for_user(&main_vars, token)?;
+    let command = prepare_main_command_in(&ctx.command, None, Some(&main_env), requires_elevation)?;
     let output = create_process(
         token,
         command.args(),
@@ -450,15 +478,28 @@ fn run_plan(
     Ok(output)
 }
 
-fn prepare_main_command(
-    token: &Token,
-    command: &[String],
-    requires_elevation: bool,
-) -> anyhow::Result<PreparedCommand> {
-    let vars = win_api_wrappers::utils::environment_block(Some(token), false)
-        .context("failed to load user environment block")?;
-    let user_env = UserEnv::for_user(&vars, token)?;
-    prepare_main_command_in(command, None, Some(&user_env), requires_elevation)
+/// Verify that the token running the plan has the elevation the request was evaluated for.
+///
+/// The token actually running the plan is what matters (e.g. a broker launched from an elevated
+/// shell, or a full session token when UAC is disabled), so the caller queries the token itself.
+fn check_execution_token_elevation(ctx: &ExecutionContext, token_is_elevated: bool) -> anyhow::Result<()> {
+    // SECURITY: Running a standard plan elevated would apply standard-execution policy rules, and
+    // skip the elevated safeguards, while the administrator token runs without a UAC prompt.
+    if token_is_elevated && !ctx.requires_elevation() {
+        bail!(
+            "the package broker can't run requests for a full administrator token without UAC \
+             (User Account Control is disabled, the account is the built-in Administrator, \
+             or the broker runs elevated outside service mode)"
+        );
+    }
+
+    // SECURITY: Pre/post commands are raw strings whose content is not governed by
+    // the policy, so they must never run elevated.
+    if token_is_elevated && (ctx.pre_command.is_some() || ctx.post_command.is_some()) {
+        bail!("pre/post operation commands are only allowed for non-elevated execution");
+    }
+
+    Ok(())
 }
 
 fn prepare_main_command_in(
@@ -498,10 +539,37 @@ fn prepare_main_command_in(
     Ok(PreparedCommand::raw(command))
 }
 
+/// `taskkill` command line terminating `process_name` in `session_id`, owned by `user` when given.
+///
+/// `/IM` alone matches processes of every session and user the execution token can reach.
+fn kill_command(process_name: &str, session_id: u32, user: Option<&str>) -> Vec<String> {
+    let mut command = vec![
+        trusted_system32_executable("taskkill.exe"),
+        "/F".to_owned(),
+        "/FI".to_owned(),
+        format!("SESSION eq {session_id}"),
+    ];
+    if let Some(user) = user {
+        command.extend(["/FI".to_owned(), format!("USERNAME eq {user}")]);
+    }
+    command.extend(["/IM".to_owned(), process_name.to_owned()]);
+    command
+}
+
+/// `DOMAIN\name` of the account identified by `sid`, as `taskkill` reports process owners.
+fn account_display_name(sid: &Sid) -> anyhow::Result<String> {
+    let account = sid
+        .lookup_account(None)
+        .with_context(|| format!("failed to look up the account name of '{sid}'"))?;
+    Ok(format!(
+        "{}\\{}",
+        account.domain_name.to_string_lossy(),
+        account.name.to_string_lossy()
+    ))
+}
+
 fn reject_unsupported_vcpkg_elevation(ctx: &ExecutionContext) -> anyhow::Result<()> {
-    if executable_is(&ctx.command, "vcpkg.exe")
-        && (ctx.elevation == Elevation::Elevated || ctx.scope == Some(Scope::Machine))
-    {
+    if executable_is(&ctx.command, "vcpkg.exe") && ctx.requires_elevation() {
         bail!("vcpkg elevated or machine-scope operations are not supported by the broker");
     }
 
@@ -1370,10 +1438,11 @@ mod tests {
     use windows::Win32::Security::{NO_INHERITANCE, WinWorldSid};
 
     use super::{
-        BATCH_METACHARACTERS, POWERSHELL_UTF8_ENCODING_PREAMBLE, UserEnv, WindowsExecutor, append_batch_executable,
-        execute_as_current_user, prepare_bun_cmd_script, prepare_chocolatey_script_in_with_default_install_root,
-        prepare_main_command_in, prepare_shell_command_in, reject_unsupported_vcpkg_elevation,
-        resolve_trusted_chocolatey_executable, resolve_winget_executable,
+        BATCH_METACHARACTERS, POWERSHELL_UTF8_ENCODING_PREAMBLE, UserEnv, WindowsExecutor, account_display_name,
+        append_batch_executable, execute_as_current_user, kill_command, prepare_bun_cmd_script,
+        prepare_chocolatey_script_in_with_default_install_root, prepare_main_command_in, prepare_shell_command_in,
+        reject_unsupported_vcpkg_elevation, resolve_trusted_chocolatey_executable, resolve_winget_executable,
+        trusted_system32_executable,
     };
     use crate::executor::{CommandExecutor as _, ExecutionContext};
 
@@ -2177,8 +2246,10 @@ mod tests {
             post_command: None,
             effective_user: "DOMAIN\\user".to_owned(),
             user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
+            session_id: 1,
             elevation: Elevation::Elevated,
-            scope: Some(Scope::User),
+            scope: None,
+            custom_install_location: None,
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             event_sink: None,
@@ -2191,6 +2262,42 @@ mod tests {
         ctx.scope = Some(Scope::Machine);
         let error = reject_unsupported_vcpkg_elevation(&ctx).expect_err("machine-scope vcpkg should fail");
         assert!(error.to_string().contains("machine-scope"));
+
+        // Elevated user-scope requests run with the standard token.
+        ctx.elevation = Elevation::Elevated;
+        ctx.scope = Some(Scope::User);
+        assert!(!ctx.requires_elevation());
+        reject_unsupported_vcpkg_elevation(&ctx).expect("elevated user-scope vcpkg runs with the standard token");
+    }
+
+    #[test]
+    fn kill_command_is_scoped_to_the_requester_session() {
+        let taskkill = trusted_system32_executable("taskkill.exe");
+
+        assert_eq!(
+            kill_command("Code.exe", 3, None),
+            [taskkill.as_str(), "/F", "/FI", "SESSION eq 3", "/IM", "Code.exe"]
+        );
+        assert_eq!(
+            kill_command("Code.exe", 3, Some(r"CONTOSO\alice")),
+            [
+                taskkill.as_str(),
+                "/F",
+                "/FI",
+                "SESSION eq 3",
+                "/FI",
+                r"USERNAME eq CONTOSO\alice",
+                "/IM",
+                "Code.exe"
+            ]
+        );
+    }
+
+    #[test]
+    fn account_display_name_uses_domain_and_name() {
+        let system = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
+        let name = account_display_name(&system).expect("look up SYSTEM");
+        assert!(name.ends_with(r"\SYSTEM"), "{name}");
     }
 
     #[tokio::test]
@@ -2202,8 +2309,10 @@ mod tests {
             post_command: None,
             effective_user: "DOMAIN\\user".to_owned(),
             user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
+            session_id: 1,
             elevation: Elevation::Elevated,
-            scope: Some(Scope::User),
+            scope: None,
+            custom_install_location: None,
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             event_sink: None,
@@ -2231,8 +2340,10 @@ mod tests {
             effective_user: "DOMAIN\\other".to_owned(),
             // The Everyone (World) SID never matches the test process user SID.
             user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
+            session_id: 1,
             elevation: Elevation::Standard,
             scope: Some(Scope::User),
+            custom_install_location: None,
             capture_output: false,
             cancel_token: tokio_util::sync::CancellationToken::new(),
             event_sink: None,
@@ -2240,6 +2351,83 @@ mod tests {
 
         let error = execute_as_current_user(&ctx, None).expect_err("mismatched client SID should fail");
         assert!(error.to_string().contains("does not match broker process user SID"));
+    }
+
+    #[test]
+    fn non_system_mode_rejects_client_session_different_from_broker_session() {
+        let token = win_api_wrappers::process::Process::current_process()
+            .token(windows::Win32::Security::TOKEN_QUERY)
+            .expect("open current process token");
+        let ctx = ExecutionContext {
+            kill_processes: vec!["notepad.exe".to_owned()],
+            pre_command: None,
+            command: vec![
+                r"C:\Windows\System32\cmd.exe".to_owned(),
+                "/C".to_owned(),
+                "exit".to_owned(),
+            ],
+            post_command: None,
+            effective_user: "DOMAIN\\user".to_owned(),
+            user_sid: token.sid_and_attributes().expect("query token user SID").sid,
+            session_id: token.session_id().expect("query token session ID") + 1,
+            elevation: Elevation::Standard,
+            scope: Some(Scope::User),
+            custom_install_location: None,
+            capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
+        };
+
+        let error = execute_as_current_user(&ctx, None).expect_err("mismatched client session should fail");
+        assert!(
+            error.to_string().contains("does not match broker process session"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn elevated_tokens_are_rejected_for_standard_plans() {
+        let mut ctx = ExecutionContext {
+            kill_processes: vec!["notepad.exe".to_owned()],
+            pre_command: None,
+            command: vec!["winget.exe".to_owned(), "install".to_owned()],
+            post_command: None,
+            effective_user: "DOMAIN\\user".to_owned(),
+            user_sid: Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID"),
+            session_id: 1,
+            elevation: Elevation::Standard,
+            scope: None,
+            custom_install_location: None,
+            capture_output: false,
+            cancel_token: tokio_util::sync::CancellationToken::new(),
+            event_sink: None,
+        };
+
+        let error = super::check_execution_token_elevation(&ctx, true).expect_err("standard plan with elevated token");
+        assert!(
+            error.to_string().contains("full administrator token without UAC"),
+            "{error:#}"
+        );
+        super::check_execution_token_elevation(&ctx, false).expect("standard plan with standard token");
+
+        // An elevated user-scope request is a standard plan.
+        ctx.elevation = Elevation::Elevated;
+        ctx.scope = Some(Scope::User);
+        assert!(super::check_execution_token_elevation(&ctx, true).is_err());
+
+        ctx.scope = None;
+        super::check_execution_token_elevation(&ctx, true).expect("elevated plan with elevated token");
+
+        ctx.pre_command = Some("echo before".to_owned());
+        let error = super::check_execution_token_elevation(&ctx, true).expect_err("elevated pre-command");
+        assert!(error.to_string().contains("non-elevated"), "{error:#}");
+    }
+
+    #[test]
+    fn session_zero_is_never_used_for_execution() {
+        let sid = Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID");
+        let error = super::user_session_token(0, &sid).expect_err("session 0 must be rejected");
+        assert!(error.to_string().contains("session 0"), "{error:#}");
     }
 
     #[test]

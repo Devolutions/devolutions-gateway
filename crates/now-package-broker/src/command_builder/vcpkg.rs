@@ -34,11 +34,11 @@ pub fn build_vcpkg_command(request: &PackageRequest) -> anyhow::Result<Vec<Strin
 }
 
 fn validate_vcpkg_request(request: &PackageRequest) -> anyhow::Result<()> {
-    if request.client.requested_elevation == Elevation::Elevated {
-        bail!("vcpkg elevated operations are not supported by the broker");
-    }
     if request.options.scope == Some(Scope::Machine) {
         bail!("vcpkg machine-scope operations are not supported by the broker");
+    }
+    if crate::evaluator::effective_execution_elevation(request) == Elevation::Elevated {
+        bail!("vcpkg elevated operations are not supported by the broker");
     }
     if request.source.url.is_some() {
         bail!("vcpkg package sources with URLs are not supported by the broker");
@@ -269,6 +269,7 @@ mod tests {
     fn elevated_requests_are_rejected() {
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = None;
 
         let error = build_vcpkg_command(&request).expect_err("elevated request should fail");
 

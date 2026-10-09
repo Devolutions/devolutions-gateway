@@ -1,7 +1,8 @@
 //! Policy evaluation engine.
 //!
 //! Implements the broker flow described in the package broker policies spec:
-//! 1. Deny requests whose custom install location is not a plain local drive path
+//! 1. Deny requests whose custom install location is not a plain local drive path, whose
+//!    kill-before-operation entries are not plain `.exe` image names, or that uninstall a protected package
 //! 2. Match enabled rules against request
 //! 3. Sort by priority (lowest wins), deny wins on tie
 //! 4. Fall back to `enforcement.defaultDecision`
@@ -30,10 +31,46 @@
 //! the caller pass arbitrary arguments to an installer running with administrator privileges.
 //! For elevated WinGet rules, set `AllowCustomParameters` to `false`, or list `--override*` and
 //! `--custom*` in `DeniedCustomParameters` (WinGet has no short forms for these options).
+//!
+//! # Security model
+//!
+//! Standard operations run with the user's own filtered token, so the user could run the same
+//! package manager command directly.
+//! For them, the policy is governance, not a security boundary, unless App Control or AppLocker
+//! also blocks running the package manager directly.
+//!
+//! Elevated operations run with the user's linked administrator token.
+//! Each Elevated Allow rule removes the UAC prompt for the operations it matches, for any code
+//! running in that administrator's session, so the broker restricts what an elevated operation
+//! can select regardless of the policy:
+//! - An explicit user scope, typed or passed through custom parameters, always runs with the standard
+//!   token (see `effective_execution_elevation`); policy matching and execution use the same elevation.
+//!   The executor refuses to run a standard plan with an elevated token: a full administrator token
+//!   without UAC (UAC disabled, or the built-in Administrator account) cannot use the broker.
+//! - Kill-before-operation entries must be plain `.exe` image names; process names without an
+//!   extension get `.exe` appended.
+//!   `taskkill` only targets the session of the authenticated client, and the requester's own processes
+//!   when elevated.
+//! - An elevated custom install location must be on a local disk, contain no reparse point, and not be
+//!   writable by principals other than SYSTEM, Administrators and TrustedInstaller, including through
+//!   inheritable ACEs.
+//!   The executor checks the nearest existing folder before running the package manager and holds it
+//!   open without delete sharing until the operation completes.
+//!   Installers that delete or rename their own existing install root, such as rename-and-swap
+//!   upgrades, fail there; installing into a new folder, for example under Program Files, is not affected.
+//!   A supplied location is checked even with opaque installer arguments (WinGet `--override` and
+//!   `--custom`), but a location selected only inside those arguments is not.
+//! - The broker never uninstalls the Devolutions Agent, which hosts it, whether it is selected by its
+//!   package identifier or, for WinGet, by the `ARP\...` identifier of its installed MSI product.
+//!   Add Deny rules to protect other critical software, including its `ARP\...` identifiers.
+//! - None of these restrictions depend on the policy, so audit mode cannot override them.
+//!   Audit mode allows every other request, including elevated ones the rules deny, and the policy
+//!   validator warns about this whenever audit mode is enabled.
 
 use now_policy::{Decision, PolicyDocument};
 use now_policy_api::{Elevation, PackageRequest, Scope};
 
+mod builtin_rules;
 mod constraints;
 mod custom_options;
 mod identifier;
@@ -42,6 +79,7 @@ mod matching;
 mod version;
 mod wildcard;
 
+pub(crate) use builtin_rules::{is_acceptable_kill_process_name, normalize_kill_process_name};
 pub(crate) use wildcard::has_powershell_wildcard_syntax;
 
 #[cfg(test)]
@@ -72,6 +110,9 @@ struct RequestFlags {
     no_upgrade: bool,
     /// Normalized custom install location, or `None` when it is absent, unknown or unacceptable.
     custom_install_location: Option<String>,
+    /// Normalized supplied install location, typed or passed through custom parameters, even when
+    /// installer arguments may override it.
+    supplied_install_location: Option<String>,
     custom_parameters: Vec<String>,
 }
 
@@ -93,6 +134,8 @@ impl RequestFlags {
             _ => Some(None),
         };
 
+        let supplied_install_location = supplied_location.clone().flatten();
+
         Self {
             interactive: request.options.interactive || custom.interactive,
             skip_hash_check: request.options.skip_hash_check || custom.skip_hash_check,
@@ -105,7 +148,10 @@ impl RequestFlags {
             has_uninstall_previous: request.options.uninstall_previous || custom.uninstall_previous,
             no_upgrade: request.options.no_upgrade || custom.no_upgrade,
             // Installer arguments may override a supplied location.
-            custom_install_location: supplied_location.flatten().filter(|_| !custom.installer_arguments),
+            custom_install_location: supplied_install_location
+                .clone()
+                .filter(|_| !custom.installer_arguments),
+            supplied_install_location,
             custom_parameters: request
                 .options
                 .custom_parameters
@@ -116,12 +162,60 @@ impl RequestFlags {
     }
 }
 
+impl RequestFlags {
+    /// Whether the request removes an installed package, directly or as the previous version
+    /// replaced by an install or update.
+    fn removes_package(&self, request: &PackageRequest) -> bool {
+        request.operation == now_policy_api::Operation::Uninstall || self.has_uninstall_previous
+    }
+}
+
 /// Whether the request supplies a custom install location that is not a single plain local drive path.
 ///
 /// The server rejects such requests before policy evaluation so audit mode cannot override the rejection;
 /// [`evaluate`] also denies them for direct callers.
 pub(crate) fn has_unacceptable_install_location(request: &PackageRequest) -> bool {
     RequestFlags::from_request(request).has_unacceptable_install_location
+}
+
+/// Normalized install location the request supplies, typed or passed through custom parameters,
+/// or `None` when there is none.
+///
+/// Unlike policy matching, this keeps a supplied location even when opaque installer arguments
+/// may override it, because the package manager still receives it.
+pub(crate) fn custom_install_location(request: &PackageRequest) -> Option<String> {
+    RequestFlags::from_request(request).supplied_install_location
+}
+
+/// Whether a kill-before-operation entry, after [`normalize_kill_process_name`], is not an
+/// [`is_acceptable_kill_process_name`].
+///
+/// The server rejects such requests before policy evaluation so audit mode cannot override the rejection;
+/// [`evaluate`] also denies them for direct callers.
+pub(crate) fn has_unacceptable_kill_process_name(request: &PackageRequest) -> bool {
+    request
+        .options
+        .kill_before_operation
+        .iter()
+        .any(|process| !is_acceptable_kill_process_name(&normalize_kill_process_name(&process.0)))
+}
+
+/// Whether the request uninstalls a package the broker protects, such as the Devolutions Agent.
+///
+/// `agent_product_code` is the MSI product code of the installed Agent, when known, so WinGet
+/// requests selecting the Agent by its `ARP\...` identifier are covered too.
+/// The server rejects such requests before policy evaluation so audit mode cannot override the rejection;
+/// [`evaluate`] also denies them for direct callers, by package identifier only.
+pub(crate) fn uninstalls_protected_package(request: &PackageRequest, agent_product_code: Option<uuid::Uuid>) -> bool {
+    let flags = RequestFlags::from_request(request);
+    builtin_rules::uninstalls_protected_package(request, &flags)
+        || agent_product_code.is_some_and(|code| builtin_rules::uninstalls_product_code(request, &flags, code))
+}
+
+/// Whether the request removes an installed package, directly or as the previous version replaced
+/// by an install or update.
+pub(crate) fn removes_package(request: &PackageRequest) -> bool {
+    RequestFlags::from_request(request).removes_package(request)
 }
 
 /// Evaluate a parsed request against a parsed policy document.
@@ -137,6 +231,23 @@ pub fn evaluate(policy: &PolicyDocument, request: &PackageRequest) -> PolicyDeci
             rule_id: "<validation-failure>".to_owned(),
             reason: "Custom install location must be a single absolute local drive path without relative segments."
                 .to_owned(),
+        };
+    }
+
+    if has_unacceptable_kill_process_name(request) {
+        return PolicyDecision {
+            decision: Decision::Deny,
+            rule_id: "<validation-failure>".to_owned(),
+            reason: "Kill-before-operation entries must be process names without an extension or ending in .exe, without wildcards, path separators, quotes, or control characters."
+                .to_owned(),
+        };
+    }
+
+    if builtin_rules::uninstalls_protected_package(request, &flags) {
+        return PolicyDecision {
+            decision: Decision::Deny,
+            rule_id: "<validation-failure>".to_owned(),
+            reason: "The package broker does not uninstall the Devolutions Agent.".to_owned(),
         };
     }
 
@@ -210,10 +321,33 @@ pub(crate) fn is_powershell_manager(manager: now_policy_api::ManagerName) -> boo
     )
 }
 
+/// Elevation of the token that executes `request`.
+///
+/// Policy matching, request validation, command building and the executor all use this value,
+/// so a request is always evaluated with the elevation it runs with.
 pub(crate) fn effective_execution_elevation(request: &PackageRequest) -> Elevation {
-    if request.options.scope == Some(Scope::Machine) || request.client.requested_elevation == Elevation::Elevated {
-        Elevation::Elevated
-    } else {
-        Elevation::Standard
+    let custom_scope = || {
+        let custom = custom_options::custom_options(request.manager, &request.options.custom_parameters);
+        custom_options::resolve(None, &custom.scopes).flatten()
+    };
+    // A user scope passed only through custom parameters lowers the elevation like a typed one;
+    // a machine scope there does not raise it.
+    let scope = request
+        .options
+        .scope
+        .or_else(|| custom_scope().filter(|scope| *scope == Scope::User));
+    effective_elevation(request.client.requested_elevation, scope)
+}
+
+/// Elevation of the execution token for a requested elevation and an explicitly requested scope.
+///
+/// Machine scope requires the elevated token.
+/// User scope runs with the standard token even when elevation is requested, so the
+/// administrator token never writes into the user profile.
+pub(crate) fn effective_elevation(requested: Elevation, scope: Option<Scope>) -> Elevation {
+    match scope {
+        Some(Scope::Machine) => Elevation::Elevated,
+        Some(Scope::User) => Elevation::Standard,
+        None => requested,
     }
 }

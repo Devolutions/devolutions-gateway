@@ -76,13 +76,13 @@ pub fn build_scoop_command(request: &PackageRequest) -> anyhow::Result<Vec<Strin
 }
 
 fn validate_scoop_request(request: &PackageRequest) -> anyhow::Result<()> {
-    if request.client.requested_elevation == Elevation::Elevated {
+    if request.options.scope == Some(Scope::Machine) {
+        bail!("Scoop machine/global scope is not supported by the broker");
+    }
+    if crate::evaluator::effective_execution_elevation(request) == Elevation::Elevated {
         bail!(
             "Scoop elevated execution is not supported by the broker because scoop.ps1 is resolved from the target user profile"
         );
-    }
-    if request.options.scope == Some(Scope::Machine) {
-        bail!("Scoop machine/global scope is not supported by the broker");
     }
     if request.source.name.trim().is_empty() {
         bail!("Scoop package source name is required");
@@ -352,6 +352,7 @@ mod tests {
     fn elevated_execution_is_rejected() {
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = None;
 
         let error = build_scoop_command(&request).expect_err("elevated Scoop should fail");
 

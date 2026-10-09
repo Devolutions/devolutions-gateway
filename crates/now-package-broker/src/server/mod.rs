@@ -1,5 +1,6 @@
 //! Runtime implementation of the shared NOW package broker server facade.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
@@ -21,7 +22,7 @@ use now_policy_api::{
     ExecutionResponseKind, HealthResponse, HealthResponseKind, HealthStatus, ManagerCapability, ManagerName,
     OperationStatus, OperationSubmission, PackageRequest, PolicyManagementResponse, PolicyReplacementRequest,
     PolicyReplacementResponse, PolicyResponse, PolicyResponseKind, PolicyValidationRequest, PolicyValidationResponse,
-    Scope, StatusRequest, StatusResponse, StatusResponseKind, Transport,
+    StatusRequest, StatusResponse, StatusResponseKind, Transport,
 };
 use now_policy_server_template::{
     MAX_POLICY_MANAGEMENT_BODY_BYTES, MAX_REQUEST_BODY_BYTES, PackageBrokerServer, SharedPackageBrokerServer,
@@ -491,7 +492,9 @@ impl PackageBrokerServer for BrokerConnection {
                 error_response(ErrorCode::Unauthorized, "pipe client authentication failed")
             })?;
 
-        self.state.execute(request, self.client.user_sid()).await
+        self.state
+            .execute(request, self.client.user_sid(), self.client.session_id())
+            .await
     }
 
     async fn status(&self, request: StatusRequest) -> Result<StatusResponse, ErrorResponse> {
@@ -611,7 +614,12 @@ impl BrokerState {
         })
     }
 
-    async fn execute(&self, request: PackageRequest, user_sid: &Sid) -> Result<ExecutionResponse, ErrorResponse> {
+    async fn execute(
+        &self,
+        request: PackageRequest,
+        user_sid: &Sid,
+        session_id: u32,
+    ) -> Result<ExecutionResponse, ErrorResponse> {
         let request = normalize_request(request);
         let evaluated = self.evaluate_request(&request)?;
         let operation = if evaluated.would_execute {
@@ -629,8 +637,10 @@ impl BrokerState {
                 post_command: request.options.post_operation_command.clone(),
                 effective_user: request.client.effective_user.clone(),
                 user_sid: user_sid.clone(),
+                session_id,
                 elevation: evaluator::effective_execution_elevation(&request),
                 scope: request.options.scope,
+                custom_install_location: evaluator::custom_install_location(&request).map(PathBuf::from),
                 capture_output: request.capture_output,
                 cancel_token: tokio_util::sync::CancellationToken::new(),
                 event_sink: None,
@@ -790,19 +800,39 @@ impl BrokerState {
             ));
         }
 
+        let execution_elevation = evaluator::effective_execution_elevation(request);
+        if request.client.requested_elevation == Elevation::Elevated && execution_elevation == Elevation::Standard {
+            info!(
+                request_id = %request.request_id,
+                "Running elevated request with the standard token because it targets the user scope"
+            );
+        }
+
+        // SECURITY: The broker never removes the Devolutions Agent, which hosts it. Like the
+        // gates below, this is not bypassable by policy rules, `defaultDecision`, or audit mode.
+        if evaluator::uninstalls_protected_package(request, installed_agent_product_code(request)?) {
+            warn!(
+                request_id = %request.request_id,
+                package_id = %request.package.id,
+                "Rejecting request: the package is protected from uninstallation"
+            );
+            return Err(error_response(
+                ErrorCode::ValidationFailed,
+                "the package broker does not uninstall the Devolutions Agent",
+            ));
+        }
+
         // SECURITY: Pre/post operation commands are raw command strings executed via
         // cmd.exe with the execution token, and the policy schema cannot restrict
         // their content yet. Running them elevated would grant arbitrary elevated
         // code execution and make the package allowlist moot, so they are only
-        // accepted for non-elevated execution (standard elevation and non-machine
-        // scope; machine scope also elevates the execution token).
+        // accepted when the execution token is standard (see
+        // `evaluator::effective_execution_elevation`; machine scope elevates it).
         // This gate is intentionally not bypassable by policy rules, `defaultDecision`,
         // or audit mode; revisit once the policy schema supports a content allowlist.
         let has_pre_post_commands =
             request.options.pre_operation_command.is_some() || request.options.post_operation_command.is_some();
-        let requires_elevation =
-            request.client.requested_elevation == Elevation::Elevated || request.options.scope == Some(Scope::Machine);
-        if has_pre_post_commands && requires_elevation {
+        if has_pre_post_commands && execution_elevation == Elevation::Elevated {
             warn!(
                 request_id = %request.request_id,
                 "Rejecting request: pre/post operation commands are not allowed for elevated execution"
@@ -810,6 +840,20 @@ impl BrokerState {
             return Err(error_response(
                 ErrorCode::ValidationFailed,
                 "pre/post operation commands are only allowed for non-elevated execution",
+            ));
+        }
+
+        // Kill-before-operation entries are passed to `taskkill /IM`, which accepts wildcards.
+        // Like the gates above, this is not bypassable by audit mode.
+        if evaluator::has_unacceptable_kill_process_name(request) {
+            warn!(
+                request_id = %request.request_id,
+                "Rejecting request: unacceptable kill-before-operation process name"
+            );
+            return Err(error_response(
+                ErrorCode::ValidationFailed,
+                "kill-before-operation entries must be process names without an extension or ending in .exe, \
+                 without wildcards, path separators, quotes, or control characters",
             ));
         }
 
@@ -917,10 +961,37 @@ impl PackageRequestClientOwner for PackageRequest {
     }
 }
 
+/// MSI product code of the installed Devolutions Agent, for requests that remove a package.
+///
+/// Fails closed: a request that removes a package is rejected when the product code cannot be read.
+#[expect(
+    clippy::result_large_err,
+    reason = "the shared API contract requires ErrorResponse values"
+)]
+fn installed_agent_product_code(request: &PackageRequest) -> Result<Option<uuid::Uuid>, ErrorResponse> {
+    if !evaluator::removes_package(request) {
+        return Ok(None);
+    }
+
+    devolutions_agent_shared::windows::registry::get_product_code(devolutions_agent_shared::windows::AGENT_UPDATE_CODE)
+        .map_err(|error| {
+            warn!(
+                request_id = %request.request_id,
+                error = format!("{error:#}"),
+                "Rejecting request: failed to read the installed Devolutions Agent product code"
+            );
+            error_response(
+                ErrorCode::ValidationFailed,
+                "the package broker cannot verify that the request does not uninstall the Devolutions Agent",
+            )
+        })
+}
+
 /// Normalize equivalent request spellings before policy evaluation and command building.
 ///
 /// An empty or whitespace-only custom install location means "not set", so every component
 /// (policy evaluation, the command builders and operation tracking) sees `None`.
+/// Kill-before-operation names without an extension get `.exe` appended.
 fn normalize_request(mut request: PackageRequest) -> PackageRequest {
     if request
         .options
@@ -929,6 +1000,11 @@ fn normalize_request(mut request: PackageRequest) -> PackageRequest {
         .is_some_and(|location| location.trim().is_empty())
     {
         request.options.custom_install_location = None;
+    }
+    for process in &mut request.options.kill_before_operation {
+        if let Cow::Owned(name) = evaluator::normalize_kill_process_name(&process.0) {
+            process.0 = name;
+        }
     }
     request
 }
@@ -945,6 +1021,7 @@ mod tests {
     use chrono::Utc;
     use now_policy::{PolicyEnforcement, PolicyFormatVersion, PolicyMetadata, ResourceId};
     use now_policy_api as api;
+    use now_policy_api::Scope;
     use tower_service::Service as _;
 
     use super::*;
@@ -1605,6 +1682,90 @@ mod tests {
     }
 
     #[test]
+    fn elevated_user_scope_pre_post_commands_are_accepted() {
+        // Explicit user scope runs with the standard token even when elevation is requested.
+        let mut request = request();
+        request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = Some(Scope::User);
+        request.options.pre_operation_command = Some("echo before".to_owned());
+        request.options.post_operation_command = Some("echo after".to_owned());
+
+        let Ok(evaluated) = state().evaluate_request(&request) else {
+            panic!("expected elevated user-scope pre/post commands to be accepted");
+        };
+        assert!(evaluated.would_execute);
+    }
+
+    #[test]
+    fn unacceptable_kill_process_names_are_rejected_even_under_permissive_policy() {
+        for name in [
+            "*",
+            "Code*.exe",
+            "C?de.exe",
+            r"C:\Tools\Code.exe",
+            "dir/Code.exe",
+            "\"Code.exe\"",
+            "chrome.bat",
+            "*",
+        ] {
+            let mut request = request();
+            request.options.kill_before_operation = vec![api::ProcessName(name.to_owned())];
+
+            let Err(error) = state().evaluate_request(&normalize_request(request)) else {
+                panic!("expected kill-before-operation entry {name:?} to be rejected");
+            };
+            assert_eq!(error.code, ErrorCode::ValidationFailed, "{name:?}");
+        }
+
+        for name in ["Code.exe", "Chrome.EXE"] {
+            let mut request = request();
+            request.options.kill_before_operation = vec![api::ProcessName(name.to_owned())];
+            assert!(
+                state().evaluate_request(&normalize_request(request)).is_ok(),
+                "{name:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn kill_process_names_without_an_extension_execute_with_exe_appended() {
+        let executor = Arc::new(CapturingExecutor::default());
+        let state = state_with_executor(Arc::clone(&executor) as Arc<dyn CommandExecutor>);
+        let mut request = request();
+        request.options.kill_before_operation = vec![
+            api::ProcessName("chrome".to_owned()),
+            api::ProcessName("Code.EXE".to_owned()),
+        ];
+        assert_eq!(
+            normalize_request(request.clone())
+                .options
+                .kill_before_operation
+                .iter()
+                .map(|process| process.0.as_str())
+                .collect::<Vec<_>>(),
+            ["chrome.exe", "Code.EXE"]
+        );
+
+        let operation = submit_operation(&state, &request).await;
+        wait_for_status(&state, &request, &operation.operation_id).await;
+
+        let contexts = executor.contexts.lock().expect("contexts lock");
+        assert_eq!(contexts[0].kill_processes, ["chrome.exe", "Code.EXE"]);
+    }
+
+    #[test]
+    fn agent_uninstall_is_rejected_even_under_permissive_policy() {
+        let mut request = request();
+        request.operation = api::Operation::Uninstall;
+        request.package.id = api::PackageIdentifier("Devolutions.Agent".to_owned());
+
+        let Err(error) = state().evaluate_request(&request) else {
+            panic!("expected the Agent uninstall to be rejected");
+        };
+        assert_eq!(error.code, ErrorCode::ValidationFailed);
+    }
+
+    #[test]
     fn non_elevated_pre_post_commands_are_accepted() {
         let mut request = request();
         request.client.requested_elevation = Elevation::Standard;
@@ -1829,6 +1990,52 @@ mod tests {
         }
     }
 
+    /// Executor that records the execution context and completes instantly.
+    #[derive(Default)]
+    struct CapturingExecutor {
+        contexts: std::sync::Mutex<Vec<ExecutionContext>>,
+    }
+
+    #[async_trait]
+    impl CommandExecutor for CapturingExecutor {
+        async fn execute(
+            &self,
+            ctx: &ExecutionContext,
+            _process_started: Option<ProcessStartedCallback>,
+        ) -> anyhow::Result<ExecutionOutput> {
+            self.contexts.lock().expect("contexts lock").push(ctx.clone());
+            Ok(ExecutionOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                started_at: Some(Utc::now()),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn elevated_user_scope_request_executes_with_the_standard_token() {
+        let executor = Arc::new(CapturingExecutor::default());
+        let state = state_with_executor(Arc::clone(&executor) as Arc<dyn CommandExecutor>);
+        let mut request = request();
+        request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = Some(Scope::User);
+        request.options.custom_install_location = Some(r"c:\Tools\Contoso".to_owned());
+
+        let operation = submit_operation(&state, &request).await;
+        wait_for_status(&state, &request, &operation.operation_id).await;
+
+        let contexts = executor.contexts.lock().expect("contexts lock");
+        let [context] = contexts.as_slice() else {
+            panic!("expected one execution, got {}", contexts.len());
+        };
+        assert_eq!(context.elevation, Elevation::Standard);
+        assert!(!context.requires_elevation());
+        assert_eq!(
+            context.custom_install_location.as_deref(),
+            Some(std::path::Path::new(r"C:\Tools\Contoso"))
+        );
+    }
+
     fn state_with_executor(executor: Arc<dyn CommandExecutor>) -> BrokerState {
         BrokerState {
             policy_store: PolicyStore::for_tests(Some(permissive_policy())),
@@ -1861,14 +2068,13 @@ mod tests {
     async fn submit_operation(state: &BrokerState, request: &PackageRequest) -> OperationSubmission {
         // Use the real test-process user SID: the per-operation event pipe ACL only
         // admits the requesting client user (plus SYSTEM/Administrators).
-        let user_sid = win_api_wrappers::process::Process::current_process()
+        let token = win_api_wrappers::process::Process::current_process()
             .token(windows::Win32::Security::TOKEN_QUERY)
-            .expect("open current process token")
-            .sid_and_attributes()
-            .expect("query token user SID")
-            .sid;
+            .expect("open current process token");
+        let user_sid = token.sid_and_attributes().expect("query token user SID").sid;
+        let session_id = token.session_id().expect("query token session ID");
         let response = state
-            .execute(request.clone(), &user_sid)
+            .execute(request.clone(), &user_sid, session_id)
             .await
             .expect("execute request accepted");
         response.operation.expect("operation submitted")
