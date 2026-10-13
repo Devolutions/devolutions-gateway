@@ -35,6 +35,7 @@ agent-sysevent-codes.path = "../crates/agent-sysevent-codes"
 agent-tunnel = { path = "../crates/agent-tunnel", features = ["test-utils"] }
 agent-tunnel-libsql = { path = "../crates/agent-tunnel-libsql" }
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 base64 = "0.23"
 camino = "1"
 devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }

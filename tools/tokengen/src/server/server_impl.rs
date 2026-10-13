@@ -233,6 +233,7 @@ pub(crate) async fn kdc_handler(
             krb_realm: request.krb_realm,
             krb_kdc: request.krb_kdc,
             jet_cred_id: request.jet_cred_id,
+            jet_agent_id: request.jet_agent_id,
         },
     )
     .await
@@ -375,6 +376,8 @@ pub(crate) struct KdcRequest {
     krb_kdc: Option<String>,
     #[serde(default)]
     jet_cred_id: Option<Uuid>,
+    #[serde(default)]
+    jet_agent_id: Option<Uuid>,
 }
 
 #[derive(Deserialize)]

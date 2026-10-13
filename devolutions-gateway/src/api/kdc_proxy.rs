@@ -27,6 +27,7 @@ async fn kdc_proxy(
     KdcToken(KdcTokenClaims {
         destination,
         jti: token_jti,
+        jet_agent_id,
     }): KdcToken,
     body: axum::body::Bytes,
 ) -> Result<Vec<u8>, HttpError> {
@@ -73,8 +74,9 @@ async fn kdc_proxy(
             // session_id: the HTTP /jet/KdcProxy endpoint has no parent association token, so we
             // use the KDC token's own `jti` for log correlation (the RDP CredSSP/NLA caller
             // passes `claims.jet_aid` so KDC sub-traffic correlates with its parent RDP session).
-            // explicit_agent_id: HTTP has no parent association, hence no `jet_agent_id` pin.
-            let kdc_connector = KdcConnector::new(token_jti, None, agent_tunnel_handle);
+            // explicit_agent_id: the KDC token's own `jet_agent_id`, so a session pinned to an
+            // agent keeps its client-side Kerberos on that agent too.
+            let kdc_connector = KdcConnector::new(token_jti, jet_agent_id, agent_tunnel_handle);
 
             forward_to_real_kdc(
                 kdc_proxy_message,

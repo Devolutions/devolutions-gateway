@@ -135,10 +135,12 @@ fn sign(
             krb_realm,
             krb_kdc,
             jet_cred_id,
+            jet_agent_id,
         } => SubCommandArgs::Kdc {
             krb_realm,
             krb_kdc,
             jet_cred_id,
+            jet_agent_id,
         },
         SignSubCommand::Jrl { jti } => SubCommandArgs::Jrl { revoked_jti_list: jti },
         SignSubCommand::NetScan {} => SubCommandArgs::NetScan {},
@@ -285,6 +287,8 @@ enum SignSubCommand {
         krb_kdc: Option<String>,
         #[clap(long)]
         jet_cred_id: Option<Uuid>,
+        #[clap(long)]
+        jet_agent_id: Option<Uuid>,
     },
     Jrl {
         #[clap(long)]

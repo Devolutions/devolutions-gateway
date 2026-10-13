@@ -39,7 +39,8 @@ const KDC_MAX_RETRIES: usize = 3;
 ///   pass `claims.jet_aid` so KDC sub-traffic correlates with its parent RDP session;
 ///   the HTTP `/jet/KdcProxy` endpoint passes the KDC token's own `jti` (no parent).
 ///
-/// - `explicit_agent_id` — the parent association token's `jet_agent_id`, if any. When
+/// - `explicit_agent_id` — the token's `jet_agent_id`, if any: the parent association token
+///   for RDP CredSSP/NLA, the KDC token for `/jet/KdcProxy`. When
 ///   set, traffic must route via that specific agent (or fail). The routing pipeline
 ///   enforces this even when `agent_tunnel_handle` is `None`.
 ///
