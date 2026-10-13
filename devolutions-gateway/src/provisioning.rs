@@ -77,12 +77,15 @@ struct TaskSecretEntry {
 
 /// What the provisioner hands Gateway to use later, kept in memory only, each kind with its own policy.
 ///
-/// Two token-keyed stores together provision a session. The credentials store is the encryption
-/// boundary: cleartext mappings are encrypted on the way in, so entries only ever hold encrypted
-/// material. Token-only rows (`mapping = None`) match the existing `provision-token` behavior on
-/// master. The connection-options store holds plaintext routing metadata only and has no crypto
-/// dependency. Both are keyed by the association-token JTI. The halves are provisioned by separate
-/// preflight operations and may arrive, expire, or be replaced independently.
+/// Two independent token-keyed stores together provision a session.
+///
+/// The credentials store is the encryption boundary: cleartext mappings are encrypted on the way
+/// in, so entries only ever hold encrypted material. Token-only rows (`mapping = None`) match the
+/// existing `provision-token` behavior on master. The connection-options store holds plaintext
+/// routing metadata only and has no crypto dependency.
+///
+/// Both are keyed by the association-token JTI. The halves are provisioned by separate preflight
+/// operations and may arrive, expire, or be replaced independently.
 ///
 /// The task-secrets store holds what a provisioner task needs but must never write to disk, such as
 /// the API key of an AI analysis. It is keyed by Task ID, encrypted like the credentials, and its
@@ -314,9 +317,9 @@ impl ProvisioningStore {
         self.connection_options.lock().get(&jti).map(|entry| entry.expires_at)
     }
 
-    /// Stores the secret of a provisioner task, encrypted, until `expires_at`; it replaces any earlier secret of the Task.
+    /// Stores the encrypted secret of a provisioner task until `expires_at`, replacing any earlier secret of the Task.
     ///
-    /// The store does not look inside: the task decides what the secret holds, such as a serialized API key and URL.
+    /// The secret is opaque to the store.
     pub fn insert_task_secret(
         &self,
         task_id: Uuid,
@@ -360,7 +363,7 @@ impl ProvisioningStore {
             .map(Some)
     }
 
-    /// Removes the secret of `task_id`, as when its Task ends.
+    /// Removes the secret of `task_id`.
     pub fn remove_task_secret(&self, task_id: Uuid) {
         self.task_secrets.lock().remove(&task_id);
     }
