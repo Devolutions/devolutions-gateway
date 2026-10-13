@@ -441,7 +441,7 @@ async fn delete_recording(recording_path: &Utf8Path) -> anyhow::Result<()> {
 /// Settings of an AI analysis
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct AiAnalysisRequest {
     /// Task ID, chosen by the caller so it can send the same request again safely.
     task_id: Uuid,
