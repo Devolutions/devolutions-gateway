@@ -276,9 +276,18 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(filesystem_monitor_config_cache))?);
 
     let data_dir = config::get_data_dir();
-    agent_tunnel_libsql::import_2026_3_0_database(&data_dir)
+    let import_result = agent_tunnel_libsql::import_2026_3_0_database(&data_dir)
         .await
-        .context("failed to import the 2026.3.0 agent tunnel database")?;
+        .context("failed to import the 2026.3.0 agent tunnel database");
+    match import_result {
+        Ok(()) => {}
+        Err(error) if conf.agent_tunnel.enabled => return Err(error),
+        // The agent tunnel is off, so a bad old file must not stop the Gateway.
+        Err(error) => warn!(
+            error = format!("{error:#}"),
+            "Failed to import the 2026.3.0 agent tunnel database, continuing because the agent tunnel is disabled"
+        ),
+    }
     let gateway_db = gateway_db::GatewayDb::open(&data_dir)
         .await
         .context("failed to open the gateway database")?;
