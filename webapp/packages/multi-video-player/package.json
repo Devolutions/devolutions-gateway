@@ -17,6 +17,7 @@
     "build": "tsc && vite build",
     "build:test": "tsc && vite build --mode test",
     "preview": "vite preview",
+    "test": "tsc -p tsconfig.test.json && jest",
     "check:write": "biome check --write ./src"
   },
   "dependencies": {
@@ -39,6 +40,16 @@
   },
   "jest": {
     "preset": "ts-jest",
-    "testEnvironment": "jsdom"
+    "testEnvironment": "jsdom",
+    "roots": ["<rootDir>/tests"],
+    "transform": {
+      "^.+\\.tsx?$": ["ts-jest", {
+        "tsconfig": {
+          "module": "CommonJS",
+          "moduleResolution": "node",
+          "esModuleInterop": true
+        }
+      }]
+    }
   }
 }

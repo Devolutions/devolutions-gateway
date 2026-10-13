@@ -18,6 +18,10 @@ export class MultiVideoProgressControl extends Component {
   }
 
   public setProgressManager(progressManager: ProgressManager) {
+    for (const child of [...this.children()]) {
+      this.removeChild(child);
+      child.dispose();
+    }
     progressManager.forEachHandle((handle) => {
       this.addChild('SingleVideoSeekBar', {
         progressHandle: handle,

@@ -87,8 +87,29 @@ The custom element supports the following attributes:
 #### JavaScript API
 
 ```typescript
-// Play a list of videos
-player.play(playList: SourceMetadata[]);
+// Initialize a playlist; the autoplay attribute controls automatic playback.
+await player.play(playList);
+
+// Read recording-relative seconds and the zero-based active clip.
+player.currentTime;
+player.duration;
+player.currentClipIndex;
+
+// Seek without changing the paused/playing state.
+await player.seek(45);
+
+// Start playback at that position without replacing the playlist.
+await player.resume();
+
+player.addEventListener('timeupdate', (event) => {
+  console.log(event.detail.currentTime, event.detail.clipIndex);
+});
+player.addEventListener('clipchange', (event) => {
+  console.log(event.detail.clipIndex);
+});
+
+player.pause();
+await player.dispose();
 
 // SourceMetadata interface
 interface SourceMetadata {
@@ -97,6 +118,33 @@ interface SourceMetadata {
   type: string;     // MIME type of the video (e.g., 'video/mp4')
 }
 ```
+
+Times use each clip's `SourceMetadata.duration`, not its reported media duration, and clips form a back-to-back timeline.
+Durations must be finite and nonnegative.
+Source URLs must be nonempty strings, not whitespace.
+Before a playlist is initialized, `currentTime` and `duration` are `0`, `currentClipIndex` is `-1`, and `seek()` and `resume()` resolve without loading a source.
+After disposal, the getters return those same empty values and `seek()` and `resume()` reject with `InvalidStateError`.
+
+`seek(seconds): Promise<void>` clamps finite times to `[0, duration]` and rejects non-finite input with `RangeError`.
+An exact clip boundary selects the next nonempty clip; the playlist endpoint selects the end of the last clip.
+The promise resolves after the offset is applied and playback matches the latest Play/Pause command.
+The clock reports the requested target during loading; await the promise before treating the seek as complete.
+Calling `pause()` or using the built-in Play/Pause controls during loading updates the pending playback state.
+Loading or playback errors reject the promise, including seeking within a clip that has already failed to load.
+An unsupported initial source rejects `play()`; seeking to an unsupported clip rejects `seek()` without replacing the current source.
+A newer seek, a replacement playlist, or disposal rejects an unfinished seek with `AbortError`.
+
+`resume(): Promise<void>` starts the current playlist at its current position without reinitializing it.
+For **Play from event**, await `seek(eventPosition)` and then await `resume()`.
+Calling `resume()` during a seek updates its pending playback intent.
+The promise resolves when the playback request succeeds; it does not wait for a pending seek's offset to be applied.
+A later Pause command, playlist replacement, or disposal rejects an unfinished resume with `AbortError`.
+Media loading and autoplay errors reject the promise.
+
+`timeupdate` is a `CustomEvent<{ currentTime: number; clipIndex: number }>` dispatched when the clock updates, including initialization and seeking.
+`clipchange` is a `CustomEvent<{ clipIndex: number }>` dispatched when a playlist is initialized or the active clip changes.
+Both events are dispatched on the custom element and do not bubble.
+Use non-capturing listeners to receive typed custom events; capturing `timeupdate` listeners can also receive native video events without `detail`.
 
 ## Project Structure
 
