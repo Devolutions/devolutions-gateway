@@ -319,7 +319,7 @@ impl ProvisionerTask for RecordingAiAnalysis {
         let manifest_path = self.manifest_path(session_id);
         let _session = lock_session(session_id).await;
 
-        if let Err(error) = recording_analysis::discard(&manifest_path).await {
+        if let Err(error) = recording_analysis::discard(&manifest_path, Some(&record.id.to_string())).await {
             warn!(task.id = %record.id, session.id = %session_id, %error, "Failed to remove the AI analysis working files");
         }
     }
@@ -359,6 +359,7 @@ impl RecordingAiAnalysis {
 
         let mut request = client
             .analyze_recording(&manifest, &manifest_path)
+            .owner(attempt.task_id.to_string())
             .cancellation(attempt.cancel.clone());
 
         if let Some(max_output_tokens) = settings.max_output_tokens {
@@ -366,13 +367,17 @@ impl RecordingAiAnalysis {
         }
 
         let mut events = request.start();
-        let mut recorded: Option<(&'static str, u8)> = None;
+        let mut recorded: Option<(&'static str, u64)> = None;
 
         let analysis = loop {
             match events.recv().await {
                 Some(RecordingAnalysisEvent::Progress(progress)) => {
-                    // Reading sends an event every half second, so the Task is updated only when the stage's percent changes.
-                    let shown = (progress.stage(), progress.percent());
+                    // Reading sends an event every half second, so while reading the Task is updated only when the percent
+                    // changes.
+                    let shown = match progress {
+                        Progress::Reading { .. } => (progress.stage(), u64::from(progress.percent())),
+                        _ => (progress.stage(), progress.done_and_total().map_or(0, |(done, _)| done)),
+                    };
                     if recorded != Some(shown) {
                         recorded = Some(shown);
                         attempt.report_progress(progress_payload(&progress)).await;
