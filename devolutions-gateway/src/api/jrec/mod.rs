@@ -639,6 +639,7 @@ pub(crate) async fn get_ai_analysis(
 
     Ok(Json(TaskInfo::from(task)))
 }
+
 /// Lists all recordings stored on this instance
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
