@@ -893,6 +893,59 @@ async fn working_files_left_by_an_earlier_task_go_with_the_task_that_ends() {
     assert!(!log.exists());
 }
 #[tokio::test]
+async fn a_new_task_replaces_the_result_of_the_earlier_one() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
+    let first = harness.start_created(session_id, settings.clone()).await;
+    harness.run(first).await.expect("first analysis");
+
+    let second = harness.start_created(session_id, settings).await;
+    harness.run(second).await.expect("second analysis");
+
+    let task = harness.task(second).await;
+    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
+    assert_eq!(task.payload["fileName"], "ai-analysis-0.slog");
+    let dir = harness.recording_path.join(session_id.to_string());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("recording.json")).expect("manifest")).expect("manifest JSON");
+    assert_eq!(
+        manifest["artifacts"]["ai-analysis"],
+        json!([{ "fileName": "ai-analysis-0.slog" }]),
+        "one analysis per recording"
+    );
+    assert!(!dir.join("ai-analysis-1.slog").exists());
+}
+
+#[tokio::test]
+async fn a_new_task_never_resumes_from_an_earlier_task() {
+    let harness = Harness::new().await;
+    // About 1 MB of transcript: three chunks.
+    let session_id = harness.write_long_session(10_000);
+    let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
+    let first = harness.start_created(session_id, settings.clone()).await;
+    assert!(harness.run(first).await.is_err(), "the outage is retried");
+    assert!(harness.workspace(session_id).join("chunk-0000.json").exists());
+    harness
+        .state
+        .provisioner_tasks
+        .store()
+        .fail(first, json!({}), OffsetDateTime::now_utc())
+        .await
+        .expect("end the first Task");
+
+    let second = harness.start_created(session_id, settings).await;
+    harness.run(second).await.expect("second analysis");
+
+    assert_eq!(harness.task(second).await.state, ProvisionerTaskState::Succeeded);
+    assert_eq!(
+        requests.lock().len(),
+        2 + 3,
+        "the new Task asks about every chunk again"
+    );
+}
+
+#[tokio::test]
 async fn an_ended_task_leaves_the_working_files_of_another_task() {
     let harness = Harness::new().await;
     let session_id = harness.write_session();
