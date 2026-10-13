@@ -9,6 +9,7 @@
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter, Read};
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -233,8 +234,14 @@ pub(super) fn keep_changed_frames(
 
         // Every sample time before this frame shows the previous one.
         if let Some((_, shown)) = &previous {
+            let mut gray = None;
             while next_sample_ms < pts_ms {
-                keeper.sample(next_sample_ms, shown)?;
+                if cancel.is_cancelled() {
+                    return Err(VideoError::Cancelled);
+                }
+
+                let gray = gray.get_or_insert_with(|| Rc::new(shown.half_gray()));
+                keeper.sample(next_sample_ms, shown, gray)?;
                 next_sample_ms += SAMPLE_INTERVAL_MS;
             }
         } else {
@@ -245,9 +252,11 @@ pub(super) fn keep_changed_frames(
     }
 
     if let Some((pts_ms, shown)) = &previous {
+        let gray = Rc::new(shown.half_gray());
+
         // The last frame stays on screen until the end: it gets at least one sample.
         loop {
-            keeper.sample(next_sample_ms, shown)?;
+            keeper.sample(next_sample_ms, shown, &gray)?;
             if *pts_ms < next_sample_ms + SAMPLE_INTERVAL_MS {
                 break;
             }
@@ -495,11 +504,11 @@ struct Keeper<'a> {
 }
 
 impl Keeper<'_> {
-    fn sample(&mut self, time_ms: u64, picture: &Picture) -> Result<(), VideoError> {
+    fn sample(&mut self, time_ms: u64, picture: &Picture, gray: &Rc<Gray>) -> Result<(), VideoError> {
         let id = format!("F{:05}", *self.next_id);
         *self.next_id += 1;
 
-        if self.selector.sample(picture.half_gray()) {
+        if self.selector.sample(Rc::clone(gray)) {
             self.keep(time_ms, &id, picture)?;
         }
 
@@ -541,7 +550,7 @@ struct Gray {
 /// Decides which samples of a video to keep, from their gray images, in order.
 #[derive(Default)]
 struct FrameSelector {
-    previous: Option<Gray>,
+    previous: Option<Rc<Gray>>,
     /// Changed tiles of the last samples, to find animated ones.
     history: VecDeque<Vec<bool>>,
     in_change: bool,
@@ -551,7 +560,7 @@ struct FrameSelector {
 
 impl FrameSelector {
     /// Returns `true` when the sample is worth keeping.
-    fn sample(&mut self, gray: Gray) -> bool {
+    fn sample(&mut self, gray: Rc<Gray>) -> bool {
         let Some(previous) = self.previous.replace(gray) else {
             // The first sample shows where the video starts.
             return true;
@@ -696,7 +705,7 @@ mod tests {
         samples
             .into_iter()
             .enumerate()
-            .filter_map(|(index, sample)| selector.sample(sample).then_some(index))
+            .filter_map(|(index, sample)| selector.sample(Rc::new(sample)).then_some(index))
             .collect()
     }
 
