@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
@@ -1125,6 +1125,14 @@ pub struct RemuxJob {
 
 impl RemuxJob {
     pub const NAME: &'static str = "remux";
+}
+
+/// Whether one of the remux job `definitions` is for a recording file in `dir`.
+pub(crate) fn remux_pending(definitions: &[String], dir: &Utf8Path) -> bool {
+    definitions
+        .iter()
+        .filter_map(|json| serde_json::from_str::<RemuxJob>(json).ok())
+        .any(|job| job.input_path.parent() == Some(dir))
 }
 
 #[async_trait]
