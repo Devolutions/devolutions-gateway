@@ -140,9 +140,12 @@ dependencies = [
  "agent-tunnel",
  "anyhow",
  "async-trait",
+ "camino",
+ "gateway-db",
  "libsql",
  "tempfile",
  "tokio 1.52.3",
+ "tracing",
  "uuid",
 ]
 
@@ -1853,6 +1856,7 @@ dependencies = [
  "etherparse",
  "expect-test",
  "futures",
+ "gateway-db",
  "hex",
  "hostname 0.4.2",
  "http-body-util",
@@ -2664,6 +2668,18 @@ dependencies = [
  "memchr",
  "pin-project-lite 0.2.17",
  "slab",
+]
+
+[[package]]
+name = "gateway-db"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "camino",
+ "libsql",
+ "tempfile",
+ "tokio 1.52.3",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7656,6 +7672,7 @@ dependencies = [
  "expect-test",
  "fastrand",
  "futures-util",
+ "gateway-db",
  "ipnetwork",
  "jmux-proto",
  "libsql",

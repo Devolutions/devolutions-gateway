@@ -1,0 +1,21 @@
+[package]
+name = "gateway-db"
+version = "0.0.0"
+edition = "2024"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = "1"
+camino = "1.1"
+libsql = { version = "0.9", default-features = false, features = ["core"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = "3.24"
+tokio = { version = "1.52", features = ["macros", "rt-multi-thread"] }
