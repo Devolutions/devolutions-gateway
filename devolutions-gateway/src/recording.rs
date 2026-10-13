@@ -382,6 +382,11 @@ enum RecordingManagerMessage {
         kind: ArtifactKind,
         channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
     },
+    ClearArtifacts {
+        id: Uuid,
+        kind: ArtifactKind,
+        channel: oneshot::Sender<anyhow::Result<()>>,
+    },
     GetFinished {
         id: Uuid,
         channel: oneshot::Sender<Result<Utf8PathBuf, FinishedRecordingError>>,
@@ -445,6 +450,11 @@ impl fmt::Debug for RecordingManagerMessage {
                 .finish_non_exhaustive(),
             RecordingManagerMessage::AddArtifact { id, kind, channel: _ } => f
                 .debug_struct("AddArtifact")
+                .field("id", id)
+                .field("kind", kind)
+                .finish_non_exhaustive(),
+            RecordingManagerMessage::ClearArtifacts { id, kind, channel: _ } => f
+                .debug_struct("ClearArtifacts")
                 .field("id", id)
                 .field("kind", kind)
                 .finish_non_exhaustive(),
@@ -512,6 +522,19 @@ impl RecordingMessageSender {
             .ok()
             .context("couldn't send AddArtifact message")?;
         rx.await.context("couldn't receive AddArtifact result")?
+    }
+
+    /// Removes every artifact of `kind` from the session, both its file and its manifest entry.
+    ///
+    /// Fails when the session has no recording.
+    pub(crate) async fn clear_artifacts(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::ClearArtifacts { id, kind, channel: tx })
+            .await
+            .ok()
+            .context("couldn't send ClearArtifacts message")?;
+        rx.await.context("couldn't receive ClearArtifacts result")?
     }
 
     pub(crate) async fn get_finished(&self, id: Uuid) -> Result<FinishedRecording, FinishedRecordingError> {
@@ -904,6 +927,39 @@ impl RecordingManagerTask {
         Ok(artifact_path)
     }
 
+    async fn handle_clear_artifacts(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<()> {
+        let recording_path = self.recordings_path.join(id.to_string());
+        let manifest_path = recording_path.join("recording.json");
+
+        if !manifest_path.exists() {
+            anyhow::bail!("session {id} has no recording");
+        }
+
+        let mut manifest = JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
+        let artifacts = core::mem::take(manifest.artifacts.of_kind_mut(kind));
+
+        if artifacts.is_empty() {
+            return Ok(());
+        }
+
+        // The manifest goes first, so it never lists a file that is gone.
+        manifest
+            .save_to_file(&manifest_path)
+            .context("write manifest to disk")?;
+
+        for artifact in artifacts {
+            let artifact_path = recording_path.join(&artifact.file_name);
+            match fs::remove_file(&artifact_path).await {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                    return Err(anyhow::Error::new(error).context(format!("remove {artifact_path}")));
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
     fn handle_get_finished(&self, id: Uuid) -> Result<Utf8PathBuf, FinishedRecordingError> {
         // The transcript is built from the whole recording, so one still being pushed is not ready.
         if self.ongoing_recordings.contains_key(&id) {
@@ -1030,6 +1086,9 @@ async fn recording_manager_task(
                     },
                     RecordingManagerMessage::AddArtifact { id, kind, channel } => {
                         let _ = channel.send(manager.handle_add_artifact(id, kind).await);
+                    },
+                    RecordingManagerMessage::ClearArtifacts { id, kind, channel } => {
+                        let _ = channel.send(manager.handle_clear_artifacts(id, kind).await);
                     },
                     RecordingManagerMessage::GetFinished { id, channel } => {
                         let _ = channel.send(manager.handle_get_finished(id));
