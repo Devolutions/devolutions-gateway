@@ -43,7 +43,7 @@ impl From<AiProvider> for Provider {
 }
 
 /// How to reach an AI provider, except the API key.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct AiSettings {
     pub provider: AiProvider,
     pub model: String,
@@ -51,6 +51,17 @@ pub struct AiSettings {
     pub base_url: Option<Url>,
     /// Upper bound of tokens in each AI answer.
     pub max_output_tokens: Option<u32>,
+}
+
+impl fmt::Debug for AiSettings {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AiSettings")
+            .field("provider", &self.provider)
+            .field("model", &self.model)
+            .field("base_url", &self.base_url.as_ref().map(|_| "<redacted>"))
+            .field("max_output_tokens", &self.max_output_tokens)
+            .finish()
+    }
 }
 
 /// Why AI settings were refused before a Task was recorded.
@@ -92,10 +103,19 @@ impl fmt::Display for ClientError {
 }
 
 /// What a Task needs to reach its AI provider and must never write to disk.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct AiAccess {
     pub(crate) api_key: SecretString,
     pub(crate) base_url: Option<Url>,
+}
+
+impl fmt::Debug for AiAccess {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AiAccess")
+            .field("api_key", &self.api_key)
+            .field("base_url", &self.base_url.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 /// [`AiAccess`] as written into its task secret.
