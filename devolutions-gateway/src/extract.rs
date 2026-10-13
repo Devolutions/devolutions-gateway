@@ -342,6 +342,7 @@ where
         }
     }
 }
+
 /// A scope token allowed to start the provisioner task `T`: `*`, or the start scope of `T`.
 pub struct ProvisionerTaskStartScope<T>(core::marker::PhantomData<T>);
 
@@ -362,6 +363,7 @@ where
         }
     }
 }
+
 #[derive(Clone, Copy)]
 pub struct RecordingsSearchScope;
 
