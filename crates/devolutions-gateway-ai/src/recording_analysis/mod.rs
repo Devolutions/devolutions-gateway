@@ -39,7 +39,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use self::checkpoint::DescribedChunk;
 pub use self::recordings::{
@@ -438,7 +438,7 @@ impl Run {
             }
         };
         let total = plan.len();
-        info!(chunks = total, "Describe the session actions");
+        debug!(chunks = total, "Describe the session actions");
 
         for (index, chunk) in plan.iter().enumerate() {
             if cancel.is_cancelled() {
@@ -801,7 +801,7 @@ fn prepare(
             return Ok(plan);
         }
     } else if workspace.exists() {
-        info!(path = %workspace, "Discard the working files of another AI analysis");
+        debug!(path = %workspace, "Discard the working files of another AI analysis");
         std::fs::remove_dir_all(workspace).map_err(|error| files_error(&error))?;
     }
 
@@ -894,7 +894,7 @@ fn plan_screenshots(
             VideoError::Cancelled => RecordingAnalysisError::Cancelled,
         })?;
 
-        info!(file = %recording.file_name(), screenshots = kept.len(), "Screenshots kept from a video");
+        debug!(file = %recording.file_name(), screenshots = kept.len(), "Screenshots kept from a video");
 
         frames.extend(kept.into_iter().map(|frame| PlannedFrame {
             id: frame.id,
