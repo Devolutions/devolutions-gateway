@@ -1,6 +1,7 @@
 mod benign_disconnect;
 mod cli_args;
 mod heartbeat;
+mod kdc_proxy;
 mod preflight;
 mod subscriber;
 mod tls_anchoring;

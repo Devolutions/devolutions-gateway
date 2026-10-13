@@ -19,6 +19,10 @@ public class KdcClaims : IGatewayClaims
     [JsonPropertyName("jet_gw_id")]
     public Guid ScopeGatewayId { get; set; }
 
+    [JsonPropertyName("jet_agent_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? AgentId { get; set; }
+
     public KdcClaims(Guid scopeGatewayId, TargetAddr krbKdc, string krbRealm)
     {
         this.KrbKdc = krbKdc;

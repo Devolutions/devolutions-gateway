@@ -124,6 +124,8 @@ pub struct KdcClaims<'a> {
     pub exp: i64,
     pub nbf: i64,
     pub jti: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_agent_id: Option<Uuid>,
 }
 
 #[derive(Clone, Serialize)]
@@ -283,6 +285,7 @@ pub enum SubCommandArgs {
         krb_realm: Option<String>,
         krb_kdc: Option<String>,
         jet_cred_id: Option<Uuid>,
+        jet_agent_id: Option<Uuid>,
     },
     Jrl {
         revoked_jti_list: Vec<Uuid>,
@@ -496,6 +499,7 @@ pub fn generate_token(
             krb_realm,
             krb_kdc,
             jet_cred_id,
+            jet_agent_id,
         } => {
             let claims = match (krb_realm.as_deref(), krb_kdc.as_deref(), jet_cred_id) {
                 (Some(krb_realm), Some(krb_kdc), None) => KdcClaims {
@@ -506,6 +510,7 @@ pub fn generate_token(
                     jet_cred_id: None,
                     jet_gw_id,
                     jti,
+                    jet_agent_id,
                 },
                 (None, None, Some(jet_cred_id)) => KdcClaims {
                     exp,
@@ -515,6 +520,7 @@ pub fn generate_token(
                     jet_cred_id: Some(jet_cred_id),
                     jet_gw_id,
                     jti,
+                    jet_agent_id,
                 },
                 _ => {
                     return Err(
