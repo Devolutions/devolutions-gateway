@@ -27,12 +27,12 @@ use uuid::Uuid;
 
 use super::AttemptError;
 use super::ai::{AiAccess, AiProvider, AiSettings, AiSettingsError, ClientError};
-use super::runner::{Attempt, ProvisionerTask};
+use super::runner::{Attempt, DynProvisionerTaskJobQueue, ProvisionerTask};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
 use crate::provisioning::ProvisioningStore;
-use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender};
+use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender, RemuxJob, remux_pending};
 use crate::token::AccessScope;
 
 pub const KIND: &str = "recording-ai-analysis";
@@ -42,6 +42,9 @@ pub const ATTEMPT_START_WINDOW: time::Duration = time::Duration::hours(2);
 
 /// Time one attempt of an AI analysis gets.
 pub const ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+
+/// Time between two checks for a remux of the session.
+const REMUX_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 const KEY_LOST: &str = "the API key is no longer available, such as after a Gateway restart";
 
@@ -226,15 +229,22 @@ pub struct RecordingAiAnalysis {
     conf_handle: ConfHandle,
     recordings: RecordingMessageSender,
     provisioning: ProvisioningStore,
+    job_queue: DynProvisionerTaskJobQueue,
     attempt_timeout: std::time::Duration,
 }
 
 impl RecordingAiAnalysis {
-    pub fn new(conf_handle: ConfHandle, recordings: RecordingMessageSender, provisioning: ProvisioningStore) -> Self {
+    pub fn new(
+        conf_handle: ConfHandle,
+        recordings: RecordingMessageSender,
+        provisioning: ProvisioningStore,
+        job_queue: DynProvisionerTaskJobQueue,
+    ) -> Self {
         Self {
             conf_handle,
             recordings,
             provisioning,
+            job_queue,
             attempt_timeout: ATTEMPT_TIMEOUT,
         }
     }
@@ -345,6 +355,8 @@ impl RecordingAiAnalysis {
             analysis_manifest(&recording.manifest).map_err(|error| AttemptError::Permanent(error.to_string()))?;
         let manifest_path = recording.manifest_path();
 
+        self.wait_for_remux(attempt, &recording.dir).await?;
+
         let mut request = client
             .analyze_recording(&manifest, &manifest_path)
             .cancellation(attempt.cancel.clone());
@@ -389,6 +401,30 @@ impl RecordingAiAnalysis {
             usage: analysis.usage.map(TokenUsage::from),
             prompt_version: analysis.prompt_version,
         })
+    }
+}
+
+impl RecordingAiAnalysis {
+    /// Waits until no remux job of the session is stored, since a remux replaces a video that would be read.
+    async fn wait_for_remux(&self, attempt: &Attempt, dir: &Utf8Path) -> Result<(), AttemptError> {
+        loop {
+            let jobs = self
+                .job_queue
+                .stored_jobs(RemuxJob::NAME)
+                .await
+                .map_err(|error| AttemptError::Transient(format!("failed to list the remux jobs: {error:#}")))?;
+
+            if !remux_pending(&jobs, dir) {
+                return Ok(());
+            }
+
+            debug!(task.id = %attempt.task_id, %dir, "Waiting for the remux of the session");
+
+            tokio::select! {
+                () = tokio::time::sleep(REMUX_POLL_INTERVAL) => {}
+                () = attempt.cancel.cancelled() => return Err(AttemptError::Cancelled),
+            }
+        }
     }
 }
 

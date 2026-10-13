@@ -233,7 +233,8 @@ impl ProvisionerTaskJobQueue for StoredJobs {
         Ok(())
     }
 
-    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>> {
+    async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>> {
+        assert_eq!(name, ProvisionerTaskJob::NAME);
         Ok(self.0.lock().clone())
     }
 }

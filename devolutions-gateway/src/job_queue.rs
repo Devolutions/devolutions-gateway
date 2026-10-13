@@ -107,8 +107,8 @@ impl ProvisionerTaskJobQueue for DurableJobQueue {
         self.0.push_job(&job, None).await
     }
 
-    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>> {
-        self.0.job_definitions(ProvisionerTaskJob::NAME).await
+    async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>> {
+        self.0.job_definitions(name).await
     }
 }
 
