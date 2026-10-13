@@ -37,8 +37,8 @@ use crate::token::AccessScope;
 
 pub const KIND: &str = "recording-ai-analysis";
 
-/// Time an AI analysis gets from its creation to its end, waiting and retries included.
-pub const TASK_DEADLINE: time::Duration = time::Duration::hours(2);
+/// Time from the creation of an AI analysis during which its attempts may start, waiting and retries included.
+pub const ATTEMPT_START_WINDOW: time::Duration = time::Duration::hours(2);
 
 /// Time one attempt of an AI analysis gets.
 pub const ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
@@ -260,8 +260,8 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
     type Output = Analysis;
 
-    fn deadline(&self) -> time::Duration {
-        TASK_DEADLINE
+    fn attempt_start_window(&self) -> time::Duration {
+        ATTEMPT_START_WINDOW
     }
 
     fn attempt_timeout(&self) -> std::time::Duration {
