@@ -27,6 +27,9 @@ use crate::upstream::route_target_from_target_addr;
 /// so `KDC_MAX_RETRIES + 1` attempts in total.
 const KDC_MAX_RETRIES: usize = 3;
 
+const UDP_THROUGH_AGENT_UNSUPPORTED: &str =
+    "agent tunnel does not yet support UDP; udp:// KDC requests cannot be routed through an agent";
+
 /// Sends Kerberos messages to a KDC, consulting the agent-tunnel routing pipeline.
 ///
 /// All three fields are always passed to [`agent_tunnel::routing::try_route`]; the
@@ -40,9 +43,9 @@ const KDC_MAX_RETRIES: usize = 3;
 ///   the HTTP `/jet/KdcProxy` endpoint passes the KDC token's own `jti` (no parent).
 ///
 /// - `explicit_agent_id` — the token's `jet_agent_id`, if any: the parent association token
-///   for RDP CredSSP/NLA, the KDC token for `/jet/KdcProxy`. When
-///   set, traffic must route via that specific agent (or fail). The routing pipeline
-///   enforces this even when `agent_tunnel_handle` is `None`.
+///   for RDP CredSSP/NLA, the KDC token for `/jet/KdcProxy`. When set, traffic must route via
+///   that specific agent (or fail). The routing pipeline enforces this even when
+///   `agent_tunnel_handle` is `None`.
 ///
 /// - `agent_tunnel_handle` — `Some` whenever the Gateway is running an agent tunnel
 ///   listener. Whether *this* particular request goes through it still depends on the
@@ -71,6 +74,13 @@ impl KdcConnector {
     pub async fn send(&self, kdc_addr: &TargetAddr, message: &[u8]) -> Result<Vec<u8>, HttpError> {
         let kdc_target = kdc_addr.as_addr();
         let route_target = route_target_from_target_addr(kdc_addr);
+        let is_udp = kdc_addr.scheme().eq_ignore_ascii_case("udp");
+
+        // An explicit agent always routes through the tunnel, which carries only TCP. Reject
+        // before routing so the agent is not asked to dial the KDC for nothing.
+        if is_udp && self.explicit_agent_id.is_some() {
+            return Err(HttpError::bad_gateway().msg(UDP_THROUGH_AGENT_UNSUPPORTED));
+        }
 
         let route_result = agent_tunnel::routing::try_route(
             self.agent_tunnel_handle.as_deref(),
@@ -88,10 +98,8 @@ impl KdcConnector {
             // match or by explicit pin — we must reject explicitly. Silently falling
             // through to direct UDP here would bypass an explicit `jet_agent_id` pin and
             // bypass the routing decision in general.
-            if kdc_addr.scheme().eq_ignore_ascii_case("udp") {
-                return Err(HttpError::bad_gateway().build(
-                    "agent tunnel does not yet support UDP; udp:// KDC requests cannot be routed through an agent",
-                ));
+            if is_udp {
+                return Err(HttpError::bad_gateway().msg(UDP_THROUGH_AGENT_UNSUPPORTED));
             }
 
             info!(%kdc_addr, "Forwarding message to KDC server through agent tunnel");

@@ -7665,6 +7665,8 @@ dependencies = [
  "network-scanner-proto",
  "nonempty",
  "picky",
+ "picky-asn1",
+ "picky-krb",
  "proxy-socks",
  "quinn",
  "rcgen",

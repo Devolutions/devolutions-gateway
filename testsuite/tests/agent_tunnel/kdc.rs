@@ -7,6 +7,10 @@ use base64::Engine as _;
 use devolutions_gateway::kdc_connector::KdcConnector;
 use devolutions_gateway::target_addr::TargetAddr;
 use devolutions_gateway::{DgwState, MockHandles};
+use picky_asn1::restricted_string::Ia5String;
+use picky_asn1::wrapper::{ExplicitContextTag1, GeneralStringAsn1, Optional};
+use picky_krb::messages::KdcProxyMessage;
+use testsuite::dgw_config::DgwConfig;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -16,21 +20,6 @@ use super::common::{accept_session_request, advertise_routes, bind_test_listener
 const KDC_REQUEST: &[u8] = b"\0\0\0\x04test";
 const KDC_REPLY: &[u8] = b"\0\0\0\x04data";
 const KDC_REALM: &str = "example.com";
-
-const GATEWAY_CONFIG: &str = r#"{
-    "ProvisionerPublicKeyData": {
-        "Value": "mMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA4vuqLOkl1pWobt6su1XO9VskgCAwevEGs6kkNjJQBwkGnPKYLmNF1E/af1yCocfVn/OnPf9e4x+lXVyZ6LMDJxFxu+axdgOq3Ld392J1iAEbfvwlyRFnEXFOJNyylqg3bY6LvnWHL/XZczVdMD9xYfq2sO9bg3xjRW4s7r9EEYOFjqVT3VFznH9iWJVtcSEKukmS/3uKoO6lGhacvu0HhjXXdgq0R8zvR4XRJ9Fcnf0f9Ypoc+i6L80NVjrRCeVOH+Ld/2fA9bocpfLarcVqG3RjS+qgOtpyCc0jWVFF4zaGQ7LUDFkEIYILkICeMMn2ll29hmZNzsJzZJ9s6NocgQIDAQAB"
-    },
-    "Listeners": [
-        {
-            "InternalUrl": "http://*:7171",
-            "ExternalUrl": "https://*:7171"
-        }
-    ],
-    "__debug__": {
-        "disable_token_validation": true
-    }
-}"#;
 
 fn target(scheme: &str, port: u16) -> TargetAddr {
     TargetAddr::from_components(scheme, "127.0.0.1", port).expect("build kdc target")
@@ -158,7 +147,7 @@ async fn kdc_connector_rejects_an_explicit_missing_agent() {
     listener.shutdown().await;
 }
 
-/// A Gateway HTTP service, backed by the given Agent Tunnel listener, served on a loopback port.
+/// A Gateway HTTP service served on a loopback port, with or without an Agent Tunnel.
 struct GatewayHttp {
     base_url: String,
     _handles: MockHandles,
@@ -166,9 +155,16 @@ struct GatewayHttp {
 }
 
 impl GatewayHttp {
-    async fn start(agent_tunnel: &super::common::TestListener) -> Self {
-        let (mut state, handles) = DgwState::mock(GATEWAY_CONFIG).expect("mock gateway state");
-        state.agent_tunnel_handle = Some(Arc::new(agent_tunnel.handle.clone()));
+    async fn start(agent_tunnel: Option<&super::common::TestListener>) -> Self {
+        let config_handle = DgwConfig::builder()
+            .disable_token_validation(true)
+            .build()
+            .init()
+            .expect("write gateway config");
+        let config =
+            std::fs::read_to_string(config_handle.config_dir().join("gateway.json")).expect("read gateway config");
+        let (mut state, handles) = DgwState::mock(&config).expect("mock gateway state");
+        state.agent_tunnel_handle = agent_tunnel.map(|listener| Arc::new(listener.handle.clone()));
 
         let app = devolutions_gateway::make_http_service(state);
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -188,10 +184,10 @@ impl GatewayHttp {
         }
     }
 
-    async fn post_kdc_proxy(&self, token: &str) -> reqwest::Response {
+    async fn post_kdc_proxy(&self, token: &str, body: Vec<u8>) -> reqwest::Response {
         reqwest::Client::new()
             .post(format!("{}/jet/KdcProxy/{token}", self.base_url))
-            .body(kdc_proxy_request(KDC_REQUEST, KDC_REALM))
+            .body(body)
             .send()
             .await
             .expect("send KDC proxy request")
@@ -230,22 +226,12 @@ fn kdc_token(jti: Uuid, krb_kdc: &str, jet_agent_id: Option<Uuid>) -> String {
     format!("{header}.{payload}.{signature}")
 }
 
-/// DER-encoded `KDC-PROXY-MESSAGE` (MS-KKDCP) carrying `kerb_message` for `realm`.
-fn kdc_proxy_request(kerb_message: &[u8], realm: &str) -> Vec<u8> {
-    fn tlv(tag: u8, value: &[u8]) -> Vec<u8> {
-        let len = u8::try_from(value.len())
-            .ok()
-            .filter(|len| *len < 0x80)
-            .expect("short-form DER length");
-        let mut encoded = vec![tag, len];
-        encoded.extend_from_slice(value);
-        encoded
-    }
-
-    // [0] kerb-message OCTET STRING, [1] target-domain KerberosString (GeneralString).
-    let kerb_message = tlv(0xA0, &tlv(0x04, kerb_message));
-    let target_domain = tlv(0xA1, &tlv(0x1B, realm.as_bytes()));
-    tlv(0x30, &[kerb_message, target_domain].concat())
+/// A DER-encoded `KDC-PROXY-MESSAGE` (MS-KKDCP) carrying [`KDC_REQUEST`] for [`KDC_REALM`].
+fn kdc_proxy_request() -> Vec<u8> {
+    let realm: Ia5String = KDC_REALM.parse().expect("realm is IA5");
+    let mut message = KdcProxyMessage::from_raw_kerb_message(KDC_REQUEST).expect("build KDC proxy message");
+    message.target_domain = Optional::from(Some(ExplicitContextTag1::from(GeneralStringAsn1::from(realm))));
+    message.to_vec().expect("encode KDC proxy message")
 }
 
 #[tokio::test]
@@ -264,7 +250,7 @@ async fn kdc_proxy_routes_through_the_explicit_agent_of_the_token() {
     // A second agent advertises the KDC address, so route matching alone would pick it.
     let (matching_agent_id, matching_connection) = listener.connect_agent("route-matching-kdc-agent").await;
     let _matching_ctrl = advertise_loopback(&matching_connection, &listener, matching_agent_id).await;
-    let gateway = GatewayHttp::start(&listener).await;
+    let gateway = GatewayHttp::start(Some(&listener)).await;
 
     let token_jti = Uuid::new_v4();
     let token = kdc_token(token_jti, "tcp://127.0.0.1:88", Some(pinned_agent_id));
@@ -284,7 +270,7 @@ async fn kdc_proxy_routes_through_the_explicit_agent_of_the_token() {
         (send, recv)
     };
     let (response, _pinned_stream) = tokio::time::timeout(Duration::from_secs(10), async {
-        tokio::join!(gateway.post_kdc_proxy(&token), pinned_agent)
+        tokio::join!(gateway.post_kdc_proxy(&token, kdc_proxy_request()), pinned_agent)
     })
     .await
     .expect("KDC traffic should reach the explicit agent");
@@ -295,10 +281,8 @@ async fn kdc_proxy_routes_through_the_explicit_agent_of_the_token() {
         response.status()
     );
     let body = response.bytes().await.expect("read KDC proxy reply");
-    assert!(
-        body.windows(KDC_REPLY.len()).any(|window| window == KDC_REPLY),
-        "KDC proxy reply should carry the agent's KDC reply"
-    );
+    let reply = KdcProxyMessage::from_raw(&body).expect("decode KDC proxy reply");
+    assert_eq!(reply.kerb_message.0.0, KDC_REPLY);
     assert!(
         tokio::time::timeout(Duration::from_millis(100), matching_connection.accept_bi())
             .await
@@ -315,12 +299,12 @@ async fn kdc_proxy_routes_through_the_explicit_agent_of_the_token() {
 #[tokio::test]
 async fn kdc_proxy_rejects_a_missing_explicit_agent_without_direct_fallback() {
     let listener = bind_test_listener().await;
-    let gateway = GatewayHttp::start(&listener).await;
+    let gateway = GatewayHttp::start(Some(&listener)).await;
     let kdc = TcpListener::bind("127.0.0.1:0").await.expect("bind fake kdc");
     let kdc_addr = kdc.local_addr().expect("read fake kdc address");
 
     let token = kdc_token(Uuid::new_v4(), &format!("tcp://{kdc_addr}"), Some(Uuid::new_v4()));
-    let response = gateway.post_kdc_proxy(&token).await;
+    let response = gateway.post_kdc_proxy(&token, kdc_proxy_request()).await;
 
     assert_eq!(response.status(), reqwest::StatusCode::BAD_GATEWAY);
     assert!(
@@ -331,5 +315,48 @@ async fn kdc_proxy_rejects_a_missing_explicit_agent_without_direct_fallback() {
     );
 
     gateway.stop();
+    listener.shutdown().await;
+}
+
+#[tokio::test]
+async fn kdc_proxy_rejects_an_explicit_agent_when_agent_tunnel_is_disabled() {
+    let gateway = GatewayHttp::start(None).await;
+    let kdc = TcpListener::bind("127.0.0.1:0").await.expect("bind fake kdc");
+    let kdc_addr = kdc.local_addr().expect("read fake kdc address");
+
+    let token = kdc_token(Uuid::new_v4(), &format!("tcp://{kdc_addr}"), Some(Uuid::new_v4()));
+    let response = gateway.post_kdc_proxy(&token, kdc_proxy_request()).await;
+
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_GATEWAY);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), kdc.accept())
+            .await
+            .is_err(),
+        "a token with an explicit agent must never reach the KDC directly"
+    );
+
+    gateway.stop();
+}
+
+#[tokio::test]
+async fn kdc_connector_rejects_udp_for_an_explicit_agent_before_dialing() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("udp-pinned-kdc-agent").await;
+    let _ctrl = advertise_loopback(&connection, &listener, agent_id).await;
+    let connector = KdcConnector::new(Uuid::new_v4(), Some(agent_id), Some(Arc::new(listener.handle.clone())));
+
+    let error = connector
+        .send(&target("udp", 88), KDC_REQUEST)
+        .await
+        .expect_err("udp with an explicit agent should be rejected");
+    assert!(format!("{error}").contains("does not yet support UDP"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), connection.accept_bi())
+            .await
+            .is_err(),
+        "the explicit agent must not be asked to dial the KDC for a udp:// target"
+    );
+
+    connection.close(0u32.into(), b"test done");
     listener.shutdown().await;
 }
