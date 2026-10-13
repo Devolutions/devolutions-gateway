@@ -107,13 +107,13 @@ impl LibSqlProvisionerTaskStore {
         Self::find(conn, task.id).await?.context("overdue task is missing")
     }
 
-    /// Ends the Task as `state` if it is currently in one of `from`, given as an SQL list such as `'running'`.
+    /// Ends the Task as `state` if it is currently in one of `from`.
     ///
     /// A Task past its deadline is failed as timed out first, and then not ended again.
     async fn finish(
         &self,
         id: Uuid,
-        from: &'static str,
+        from: &[ProvisionerTaskState],
         state: ProvisionerTaskState,
         payload: serde_json::Value,
         now: OffsetDateTime,
@@ -125,28 +125,30 @@ impl LibSqlProvisionerTaskStore {
             .context("begin task finish")?;
 
         let Some(task) = Self::find(&tx, id).await? else {
+            tx.rollback().await.context("end task finish")?;
             return Ok(false);
         };
-        Self::expire(&tx, task, now).await?;
+        let task = Self::expire(&tx, task, now).await?;
 
-        let changed = tx
-            .execute(
-                &format!(
-                    "UPDATE provisioner_task_records SET state = ?2, payload = ?3, finished_at = ?4
-                     WHERE id = ?1 AND state IN ({from})"
-                ),
-                params![
-                    id.to_string(),
-                    state.as_str(),
-                    payload.to_string(),
-                    now.unix_timestamp()
-                ],
-            )
-            .await
-            .context("finish task")?;
+        if !from.contains(&task.state) {
+            tx.commit().await.context("commit task finish")?;
+            return Ok(false);
+        }
+
+        tx.execute(
+            "UPDATE provisioner_task_records SET state = ?2, payload = ?3, finished_at = ?4 WHERE id = ?1",
+            params![
+                id.to_string(),
+                state_to_sql(state),
+                payload.to_string(),
+                now.unix_timestamp()
+            ],
+        )
+        .await
+        .context("finish task")?;
         tx.commit().await.context("commit task finish")?;
 
-        Ok(changed == 1)
+        Ok(true)
     }
 }
 
@@ -176,6 +178,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             let unfinished = Self::expire(&tx, unfinished, now).await?;
 
             if !unfinished.state.is_finished() {
+                tx.rollback().await.context("end task creation")?;
                 return Ok(CreateOutcome::TargetBusy(unfinished));
             }
         }
@@ -211,6 +214,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .context("begin task lookup")?;
 
         let Some(task) = Self::find(&tx, id).await? else {
+            tx.rollback().await.context("end task lookup")?;
             return Ok(None);
         };
         let task = Self::expire(&tx, task, now).await?;
@@ -233,10 +237,12 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .context("begin task attempt")?;
 
         let Some(task) = Self::find(&tx, id).await? else {
+            tx.rollback().await.context("end task attempt")?;
             return Ok(AttemptStart::Unknown);
         };
 
-        if task.job_token != Some(job_token) {
+        if task.job_token != job_token {
+            tx.rollback().await.context("end task attempt")?;
             return Ok(AttemptStart::Superseded);
         }
 
@@ -270,6 +276,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .context("begin job token replacement")?;
 
         let Some(task) = Self::find(&tx, id).await? else {
+            tx.rollback().await.context("end job token replacement")?;
             return Ok(false);
         };
         let task = Self::expire(&tx, task, now).await?;
@@ -326,27 +333,74 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         Ok(unfinished)
     }
 
-    async fn update_running(&self, id: Uuid, payload: serde_json::Value) -> anyhow::Result<bool> {
+    async fn update_running(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool> {
         let conn = self.conn.lock().await;
-        let changed = conn
-            .execute(
-                "UPDATE provisioner_task_records SET payload = ?2 WHERE id = ?1 AND state = 'running'",
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .await
+            .context("begin running task update")?;
+
+        let Some(task) = Self::find(&tx, id).await? else {
+            tx.rollback().await.context("end running task update")?;
+            return Ok(false);
+        };
+        let task = Self::expire(&tx, task, now).await?;
+
+        let running = task.state == ProvisionerTaskState::Running;
+
+        if running {
+            tx.execute(
+                "UPDATE provisioner_task_records SET payload = ?2 WHERE id = ?1",
                 params![id.to_string(), payload.to_string()],
             )
             .await
             .context("update running task")?;
+        }
 
-        Ok(changed == 1)
+        tx.commit().await.context("commit running task update")?;
+
+        Ok(running)
     }
 
     async fn succeed(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool> {
-        self.finish(id, "'running'", ProvisionerTaskState::Succeeded, payload, now)
-            .await
+        self.finish(
+            id,
+            &[ProvisionerTaskState::Running],
+            ProvisionerTaskState::Succeeded,
+            payload,
+            now,
+        )
+        .await
     }
 
     async fn fail(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool> {
-        self.finish(id, "'queued', 'running'", ProvisionerTaskState::Failed, payload, now)
-            .await
+        self.finish(
+            id,
+            &[ProvisionerTaskState::Queued, ProvisionerTaskState::Running],
+            ProvisionerTaskState::Failed,
+            payload,
+            now,
+        )
+        .await
+    }
+}
+
+fn state_to_sql(state: ProvisionerTaskState) -> &'static str {
+    match state {
+        ProvisionerTaskState::Queued => "queued",
+        ProvisionerTaskState::Running => "running",
+        ProvisionerTaskState::Succeeded => "succeeded",
+        ProvisionerTaskState::Failed => "failed",
+    }
+}
+
+fn state_from_sql(state: &str) -> anyhow::Result<ProvisionerTaskState> {
+    match state {
+        "queued" => Ok(ProvisionerTaskState::Queued),
+        "running" => Ok(ProvisionerTaskState::Running),
+        "succeeded" => Ok(ProvisionerTaskState::Succeeded),
+        "failed" => Ok(ProvisionerTaskState::Failed),
+        _ => bail!("unknown task state {state:?}"),
     }
 }
 
@@ -377,11 +431,7 @@ fn task_from_row(row: &Row) -> anyhow::Result<ProvisionerTaskRecord> {
         kind: row.get::<String>(1).context("decode task kind")?,
         target: row.get::<String>(2).context("decode task target")?,
         params: json(3, "params")?,
-        state: row
-            .get::<String>(4)
-            .context("decode task state")?
-            .parse()
-            .context("parse task state")?,
+        state: state_from_sql(&row.get::<String>(4).context("decode task state")?)?,
         payload: json(5, "payload")?,
         attempts: u32::try_from(row.get::<i64>(6).context("decode task attempts")?).context("invalid task attempts")?,
         created_at: timestamp(7, "creation time")?,
@@ -389,10 +439,10 @@ fn task_from_row(row: &Row) -> anyhow::Result<ProvisionerTaskRecord> {
         finished_at: optional_timestamp(9, "finish time")?,
         deadline_at: timestamp(10, "deadline")?,
         job_token: row
-            .get::<Option<String>>(11)
+            .get::<String>(11)
             .context("decode task job token")?
-            .map(|token| token.parse().context("parse task job token"))
-            .transpose()?,
+            .parse()
+            .context("parse task job token")?,
     })
 }
 
@@ -643,7 +693,7 @@ mod tests {
         ));
         assert!(
             store
-                .update_running(task.id, serde_json::json!({ "done": 1 }))
+                .update_running(task.id, serde_json::json!({ "done": 1 }), now())
                 .await
                 .expect("update")
         );
@@ -681,7 +731,7 @@ mod tests {
         ));
         assert!(
             !store
-                .update_running(task.id, serde_json::json!({}))
+                .update_running(task.id, serde_json::json!({}), now())
                 .await
                 .expect("update after finish")
         );
@@ -727,6 +777,12 @@ mod tests {
             .expect("start");
         let late = now() + Duration::minutes(2);
 
+        assert!(
+            !store
+                .update_running(overdue.id, serde_json::json!({ "done": 4 }), late)
+                .await
+                .expect("update late")
+        );
         assert!(
             !store
                 .succeed(overdue.id, serde_json::json!({ "log": "late" }), late)
@@ -821,7 +877,7 @@ mod tests {
                 .start_attempt(task.id, new_token, serde_json::json!({}), now())
                 .await
                 .expect("start with the new token"),
-            AttemptStart::Started(started) if started.job_token == Some(new_token) && started.attempts == 1
+            AttemptStart::Started(started) if started.job_token == new_token && started.attempts == 1
         ));
 
         store

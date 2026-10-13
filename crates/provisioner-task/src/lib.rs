@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 pub type DynProvisionerTaskStore = Arc<dyn ProvisionerTaskStore>;
 
-/// Where a Task is in its life. Every state carries a payload whose shape belongs to the Task kind.
+/// Where a Task is in its life.
+///
+/// Running, succeeded and failed Tasks carry a payload whose shape belongs to the Task kind; a queued Task has none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvisionerTaskState {
     Queued,
@@ -21,31 +23,8 @@ pub enum ProvisionerTaskState {
 }
 
 impl ProvisionerTaskState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Queued => "queued",
-            Self::Running => "running",
-            Self::Succeeded => "succeeded",
-            Self::Failed => "failed",
-        }
-    }
-
     pub fn is_finished(self) -> bool {
         matches!(self, Self::Succeeded | Self::Failed)
-    }
-}
-
-impl std::str::FromStr for ProvisionerTaskState {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> anyhow::Result<Self> {
-        match value {
-            "queued" => Ok(Self::Queued),
-            "running" => Ok(Self::Running),
-            "succeeded" => Ok(Self::Succeeded),
-            "failed" => Ok(Self::Failed),
-            _ => anyhow::bail!("unknown task state {value:?}"),
-        }
     }
 }
 
@@ -69,7 +48,7 @@ pub struct ProvisionerTaskRecord {
     /// After this, an unfinished Task is failed, so a lost job can't block its target forever.
     pub deadline_at: OffsetDateTime,
     /// The job that may run this Task: a job with another token is stale or a duplicate, and must not run it.
-    pub job_token: Option<Uuid>,
+    pub job_token: Uuid,
 }
 
 /// The record of a Task about to be created.
@@ -115,11 +94,13 @@ pub trait ProvisionerTaskStore: Send + Sync {
     /// Like every method that takes `now`, it first fails the Tasks it looks at that are past their deadline.
     async fn create(&self, task: NewProvisionerTaskRecord, now: OffsetDateTime) -> anyhow::Result<CreateOutcome>;
 
+    /// Reads a Task, after failing it if it is past its deadline.
     async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTaskRecord>>;
 
     /// Marks the start of one more attempt by the job holding `job_token`: `running`, with one more attempt counted.
     ///
-    /// Only [`AttemptStart::Started`] lets the attempt run.
+    /// Only [`AttemptStart::Started`] lets the attempt run. A job that no longer holds the token gets
+    /// [`AttemptStart::Superseded`], and nothing changes.
     async fn start_attempt(
         &self,
         id: Uuid,
@@ -137,7 +118,7 @@ pub trait ProvisionerTaskStore: Send + Sync {
     async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;
 
     /// Replaces the payload of a `running` Task, e.g. to report progress. Returns `false` if it is not running.
-    async fn update_running(&self, id: Uuid, payload: serde_json::Value) -> anyhow::Result<bool>;
+    async fn update_running(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
 
     /// Ends a `running` Task as `succeeded`. Returns `false` if it is not running, and changes nothing.
     async fn succeed(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
