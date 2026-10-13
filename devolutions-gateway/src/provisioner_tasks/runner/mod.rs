@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use super::AttemptError;
 use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
+use crate::token::AccessScope;
 
 /// Where the runner queues the jobs of its records.
 #[async_trait]
@@ -54,7 +55,6 @@ impl ProvisionerTaskJobQueue for JobQueueHandle {
         Ok(Vec::new())
     }
 }
-use crate::token::AccessScope;
 
 /// A provisioner task: the work Gateway does for one kind of request, such as `recording-ai-analysis`.
 ///
@@ -107,7 +107,11 @@ pub struct Attempt {
 impl Attempt {
     /// Replaces the payload of the running record, so whoever asks about it sees how the attempt goes.
     pub async fn report_progress(&self, payload: serde_json::Value) {
-        if let Err(error) = self.store.update_running(self.task_id, payload).await {
+        if let Err(error) = self
+            .store
+            .update_running(self.task_id, payload, OffsetDateTime::now_utc())
+            .await
+        {
             warn!(task.id = %self.task_id, error = format!("{error:#}"), "Failed to record the Task progress");
         }
     }
@@ -284,18 +288,25 @@ impl ProvisionerTaskRunner {
             .collect::<std::collections::HashSet<_>>();
 
         for record in records {
-            if record
-                .job_token
-                .is_some_and(|job_token| stored.contains(&(record.id, job_token)))
-            {
+            if stored.contains(&(record.id, record.job_token)) {
                 debug!(task.id = %record.id, task.kind = %record.kind, "Task still has its job");
                 continue;
             }
 
             let job_token = Uuid::new_v4();
 
-            if !self.inner.store.replace_job_token(record.id, job_token, now).await? {
-                continue;
+            match self.inner.store.replace_job_token(record.id, job_token, now).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(error) => {
+                    error!(
+                        task.id = %record.id,
+                        task.kind = %record.kind,
+                        error = format!("{error:#}"),
+                        "Failed to hand the Task to a new job"
+                    );
+                    continue;
+                }
             }
 
             match self.enqueue(record.id, job_token).await {
