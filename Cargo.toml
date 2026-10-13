@@ -33,6 +33,8 @@ lto = true
 
 [patch.crates-io]
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
+# libsql 0.9.30 closes a local connection twice when it's dropped; go back to crates.io once a release has tursodatabase/libsql#2261.
+libsql = { git = "https://github.com/Devolutions/libsql", tag = "0.9.30-devo.1" }
 
 [workspace.lints.rust]
 # Declare the custom cfgs.
