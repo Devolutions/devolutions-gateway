@@ -327,13 +327,22 @@ async fn start_without_recording_returns_404() {
 }
 
 #[tokio::test]
+async fn start_ignores_unknown_fields() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let mut body = request(Uuid::new_v4(), "gpt-test");
+    body["temperature"] = json!(0.5);
+
+    let (status, created) = harness.post(session_id, &body).await;
+
+    assert_eq!(status, StatusCode::ACCEPTED, "{created}");
+}
+
+#[tokio::test]
 async fn invalid_bodies_and_settings_return_400() {
     let harness = Harness::new().await;
     let session_id = harness.write_session();
     let task_id = Uuid::new_v4();
-
-    let mut unknown_field = request(task_id, "gpt-test");
-    unknown_field["temperature"] = json!(0.5);
 
     let mut no_key = request(task_id, "gpt-test");
     no_key.as_object_mut().unwrap().remove("apiKey");
@@ -351,7 +360,6 @@ async fn invalid_bodies_and_settings_return_400() {
     unknown_provider["provider"] = json!("skynet");
 
     for (case, body) in [
-        ("unknown field", unknown_field.to_string()),
         ("missing API key", no_key.to_string()),
         ("empty API key", empty_key.to_string()),
         ("empty model", request(task_id, " ").to_string()),
