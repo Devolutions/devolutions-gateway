@@ -22,17 +22,17 @@ use webm_iterable::errors::TagIteratorError;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
 /// Decoded samples per second of video.
-const SAMPLES_PER_SECOND: u32 = 2;
+const SAMPLES_PER_SECOND: u64 = 2;
 
-const SAMPLE_INTERVAL_MS: u64 = 1000 / SAMPLES_PER_SECOND as u64;
+const SAMPLE_INTERVAL_MS: u64 = 1000 / SAMPLES_PER_SECOND;
 
 /// Side of a tile, in pixels of the half-resolution gray image.
 const TILE: usize = 16;
 
 /// Mean absolute gray difference over which a tile counts as changed.
-const TILE_DIFF: u32 = 3;
+const TILE_DIFF: usize = 3;
 
-const TILE_PIXELS: u32 = 16 * 16;
+const TILE_PIXELS: usize = TILE * TILE;
 
 /// Samples of history used to find animated tiles (10 s).
 const ANIMATION_WINDOW: usize = 20;
@@ -656,11 +656,11 @@ fn changed_tiles(before: &Gray, after: &Gray) -> Vec<bool> {
 
     for row in 0..rows {
         for column in 0..columns {
-            let mut sum = 0u32;
+            let mut sum = 0usize;
             for y in row * TILE..(row + 1) * TILE {
                 let start = y * after.width + column * TILE;
                 for x in start..start + TILE {
-                    sum += u32::from(before.pixels[x].abs_diff(after.pixels[x]));
+                    sum += usize::from(before.pixels[x].abs_diff(after.pixels[x]));
                 }
             }
             changed.push(sum > TILE_DIFF * TILE_PIXELS);
