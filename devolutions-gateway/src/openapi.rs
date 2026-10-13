@@ -166,11 +166,6 @@ struct AiAnalysisRunningPayload {
     done: Option<u64>,
     /// Work the step has in all, in the same unit as `done`.
     total: Option<u64>,
-    /// Part of the step done, from 0 to 100.
-    #[schema(maximum = 100)]
-    percent: Option<u8>,
-    /// Short sentence for people following the analysis, such as `asking the AI: 2 of 5 chunks described`.
-    message: Option<String>,
 }
 
 /// Payload of a `succeeded` AI analysis Task: the log it added to the session
