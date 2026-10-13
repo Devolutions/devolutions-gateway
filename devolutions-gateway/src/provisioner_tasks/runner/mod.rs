@@ -37,8 +37,8 @@ pub trait ProvisionerTaskJobQueue: Send + Sync {
     /// Queues `job`, and returns once it is stored, so a record never waits for a job that was lost.
     async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()>;
 
-    /// Lists the JSON definitions of the provisioner task jobs already stored that may still run.
-    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>>;
+    /// Lists the JSON definitions of the stored jobs named `name` that may still run.
+    async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>>;
 }
 
 pub type DynProvisionerTaskJobQueue = Arc<dyn ProvisionerTaskJobQueue>;
@@ -51,7 +51,7 @@ impl ProvisionerTaskJobQueue for JobQueueHandle {
     }
 
     /// The channel cannot tell what is stored: every unfinished record looks like it has no job.
-    async fn stored_jobs(&self) -> anyhow::Result<Vec<String>> {
+    async fn stored_jobs(&self, _name: &str) -> anyhow::Result<Vec<String>> {
         Ok(Vec::new())
     }
 }
@@ -281,7 +281,7 @@ impl ProvisionerTaskRunner {
         let stored = self
             .inner
             .job_queue
-            .stored_jobs()
+            .stored_jobs(ProvisionerTaskJob::NAME)
             .await
             .context("list the stored provisioner task jobs")?
             .iter()

@@ -5,6 +5,8 @@ pub mod ai;
 pub mod recording_ai_analysis;
 pub mod runner;
 
+use std::sync::Arc;
+
 use provisioner_task::DynProvisionerTaskStore;
 
 use self::recording_ai_analysis::RecordingAiAnalysis;
@@ -21,8 +23,13 @@ pub fn task_runner(
     recordings: RecordingMessageSender,
     provisioning: ProvisioningStore,
 ) -> ProvisionerTaskRunner {
-    ProvisionerTaskRunner::builder(store, job_queue)
-        .register(RecordingAiAnalysis::new(conf_handle, recordings, provisioning))
+    ProvisionerTaskRunner::builder(store, Arc::clone(&job_queue))
+        .register(RecordingAiAnalysis::new(
+            conf_handle,
+            recordings,
+            provisioning,
+            job_queue,
+        ))
         .build()
 }
 
