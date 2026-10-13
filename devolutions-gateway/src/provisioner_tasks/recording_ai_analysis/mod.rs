@@ -355,6 +355,21 @@ impl RecordingAiAnalysis {
             analysis_manifest(&recording.manifest).map_err(|error| AttemptError::Permanent(error.to_string()))?;
         let manifest_path = recording.manifest_path();
 
+        // A new Task is a hard restart: nothing an earlier analysis of the session left stays, not even its result.
+        // Its later attempts are job retries, which resume from the working files.
+        if attempt.attempts == 1 {
+            let cleared = async {
+                self.recordings
+                    .clear_artifacts(session_id, ArtifactKind::AiAnalysis)
+                    .await?;
+                recording_analysis::discard(&manifest_path, None).await?;
+                anyhow::Ok(())
+            };
+            cleared.await.map_err(|error| {
+                AttemptError::Permanent(format!("failed to remove the earlier AI analysis: {error:#}"))
+            })?;
+        }
+
         self.wait_for_remux(attempt, &recording.dir).await?;
 
         let mut request = client
