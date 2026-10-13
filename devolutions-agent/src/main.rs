@@ -318,7 +318,15 @@ fn main() {
             }
         }
     } else {
-        let _result = controller.register(service_main_wrapper);
+        // Propagate the service exit code so that service managers (e.g.: systemd) see failures.
+        match controller.register(service_main_wrapper) {
+            Ok(0) => {}
+            Ok(exit_code) => std::process::exit(i32::from(exit_code)),
+            Err(error) => {
+                eprintln!("[ERROR] Failed to register service: {error}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 

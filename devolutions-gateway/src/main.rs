@@ -63,6 +63,7 @@ extern crate tracing;
 
 mod service;
 
+use std::process::ExitCode;
 use std::sync::mpsc;
 
 use anyhow::Context;
@@ -76,8 +77,8 @@ use tap::prelude::*;
 
 use crate::service::{DESCRIPTION, DISPLAY_NAME, GatewayService, SERVICE_NAME};
 
-fn main() -> anyhow::Result<()> {
-    run().inspect_err(write_boot_stacktrace)
+fn main() -> anyhow::Result<ExitCode> {
+    run().map(ExitCode::from).inspect_err(write_boot_stacktrace)
 }
 
 fn write_boot_stacktrace(error: &anyhow::Error) {
@@ -94,7 +95,8 @@ fn write_boot_stacktrace(error: &anyhow::Error) {
     }
 }
 
-fn run() -> anyhow::Result<()> {
+/// Returns the process exit code.
+fn run() -> anyhow::Result<u8> {
     let (executable, cli_args) = parse_args_from_env()?;
 
     // Set the DGATEWAY_CONFIG_PATH if --config-path was provided.
@@ -139,9 +141,12 @@ fn run() -> anyhow::Result<()> {
             devolutions_gateway::tls::install_default_crypto_provider();
 
             if service_mode {
-                service_controller()
+                // Propagate the service exit code so that service managers (e.g.: systemd) see failures.
+                let exit_code = service_controller()
                     .register(service_main_wrapper)
                     .context("failed to register service")?;
+
+                return Ok(exit_code);
             } else {
                 let conf_handle = ConfHandle::init().context("unable to initialize configuration")?;
                 let mut service = GatewayService::load(conf_handle).context("service loading failed")?;
@@ -162,7 +167,7 @@ fn run() -> anyhow::Result<()> {
         }
     }
 
-    Ok(())
+    Ok(0)
 }
 
 fn service_controller() -> Controller {
