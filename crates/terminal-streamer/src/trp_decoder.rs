@@ -175,7 +175,7 @@ impl PacketHeader {
     }
 }
 
-/// Most payload bytes held while waiting for the terminal setup; past it, the header is sent with the size known so far.
+/// Most packet bytes held while waiting for the terminal setup; past it, the header is sent with the size known so far.
 const MAX_BEFORE_SETUP_LEN: usize = 1024 * 1024;
 
 /// Turns TRP packets into asciicast lines, holding the events that come before the terminal setup.
@@ -216,7 +216,7 @@ impl TrpDecoder {
                 match self.before_setup_cache {
                     Some(ref mut cache) => {
                         cache.push(event);
-                        self.before_setup_len += packet_len;
+                        self.before_setup_len += PACKET_HEADER_SIZE + packet_len;
 
                         // A recording that never sends its terminal setup must not be held whole in memory.
                         if self.before_setup_len > MAX_BEFORE_SETUP_LEN {
@@ -416,23 +416,25 @@ mod tests {
 
     #[test]
     fn events_waiting_for_the_terminal_setup_are_bounded() {
-        let payload = vec![b'x'; 60_000];
-        let packets = MAX_BEFORE_SETUP_LEN / payload.len() + 1;
-        let mut trp = Vec::new();
-        for _ in 0..packets {
-            trp.extend(packet(0, 0, &payload));
+        // Empty packets cost their header, or a flood of them would be held whole.
+        for payload in [vec![b'x'; 60_000], Vec::new()] {
+            let packets = MAX_BEFORE_SETUP_LEN / (PACKET_HEADER_SIZE + payload.len()) + 1;
+            let mut trp = Vec::new();
+            for _ in 0..packets {
+                trp.extend(packet(0, 0, &payload));
+            }
+
+            // The setup never comes: the rest of the recording fails to read.
+            let lines = AsciicastLines::new(Read::chain(trp.as_slice(), FailingReader)).collect::<Vec<_>>();
+
+            assert_eq!(lines.len(), 1 + packets + 1, "header, every event, then the read error");
+            assert_eq!(
+                lines[0].as_ref().expect("valid header"),
+                "{\"version\": 2, \"width\": 80, \"height\": 24}"
+            );
+            assert!(lines[1..=packets].iter().all(Result::is_ok));
+            assert!(lines[packets + 1].is_err());
         }
-
-        // The setup never comes: the rest of the recording fails to read.
-        let lines = AsciicastLines::new(Read::chain(trp.as_slice(), FailingReader)).collect::<Vec<_>>();
-
-        assert_eq!(lines.len(), 1 + packets + 1, "header, every event, then the read error");
-        assert_eq!(
-            lines[0].as_ref().expect("valid header"),
-            "{\"version\": 2, \"width\": 80, \"height\": 24}"
-        );
-        assert!(lines[1..=packets].iter().all(Result::is_ok));
-        assert!(lines[packets + 1].is_err());
     }
 
     #[test]
