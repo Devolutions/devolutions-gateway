@@ -501,8 +501,6 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
             "step": "describing",
             "done": 1,
             "total": 3,
-            "percent": 33,
-            "message": "asking the AI: 1 of 3 chunks described",
         })
     );
     assert!(harness.has_key(task_id), "the key is kept for the retry");
