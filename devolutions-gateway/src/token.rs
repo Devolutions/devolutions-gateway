@@ -653,9 +653,8 @@ pub struct KdcTokenClaims {
 
     /// Optional explicit agent for the KDC traffic of a real destination.
     ///
-    /// When set, every KDC message is forwarded through the specified agent, and the request fails
-    /// instead of connecting directly or falling back to route matching. A credential-injection
-    /// destination is served inside the Gateway, so the claim has no effect there.
+    /// When set, every KDC message is forwarded through the specified agent, and the request fails instead of connecting directly or falling back to route matching.
+    /// A credential-injection destination is served inside the Gateway, so the claim has no effect there.
     pub jet_agent_id: Option<Uuid>,
 }
 
@@ -1936,39 +1935,24 @@ mod tests {
         assert!(matches!(claims.destination, KdcDestination::Inject { .. }));
     }
 
-    #[test]
-    fn kdc_claims_without_agent_id_keep_route_matching() {
-        let claims: KdcTokenClaims = serde_json::from_value(serde_json::json!({
+    #[rstest::rstest]
+    #[case::absent(None)]
+    #[case::explicit(Some(Uuid::new_v4()))]
+    fn kdc_claims_round_trip_agent_id(#[case] agent_id: Option<Uuid>) {
+        let mut token = serde_json::json!({
             "krb_realm": "example.com",
             "krb_kdc": "tcp://dc.example.com:88",
             "jti": Uuid::new_v4(),
-        }))
-        .expect("KDC token without jet_agent_id should still deserialize");
+        });
+        if let Some(agent_id) = agent_id {
+            token["jet_agent_id"] = serde_json::json!(agent_id);
+        }
 
-        assert_eq!(claims.jet_agent_id, None);
-
-        let serialized = serde_json::to_value(&claims).expect("KDC claims serialize");
-        assert!(serialized.get("jet_agent_id").is_none());
-    }
-
-    #[test]
-    fn kdc_claims_keep_explicit_agent_id() {
-        let agent_id = "4f6c4e0a-2b8e-4d49-9a51-2a8b0d9c7e11";
-        let claims: KdcTokenClaims = serde_json::from_value(serde_json::json!({
-            "krb_realm": "example.com",
-            "krb_kdc": "tcp://dc.example.com:88",
-            "jti": Uuid::new_v4(),
-            "jet_agent_id": agent_id,
-        }))
-        .expect("KDC token with jet_agent_id should deserialize");
-
-        assert_eq!(
-            claims.jet_agent_id,
-            Some(Uuid::parse_str(agent_id).expect("valid UUID"))
-        );
+        let claims: KdcTokenClaims = serde_json::from_value(token.clone()).expect("KDC claims deserialize");
+        assert_eq!(claims.jet_agent_id, agent_id);
 
         let serialized = serde_json::to_value(&claims).expect("KDC claims serialize");
-        assert_eq!(serialized["jet_agent_id"], agent_id);
+        assert_eq!(serialized.get("jet_agent_id"), token.get("jet_agent_id"));
     }
 
     #[test]

@@ -27,9 +27,6 @@ use crate::upstream::route_target_from_target_addr;
 /// so `KDC_MAX_RETRIES + 1` attempts in total.
 const KDC_MAX_RETRIES: usize = 3;
 
-const UDP_THROUGH_AGENT_UNSUPPORTED: &str =
-    "agent tunnel does not yet support UDP; udp:// KDC requests cannot be routed through an agent";
-
 /// Sends Kerberos messages to a KDC, consulting the agent-tunnel routing pipeline.
 ///
 /// All three fields are always passed to [`agent_tunnel::routing::try_route`]; the
@@ -75,6 +72,9 @@ impl KdcConnector {
         let kdc_target = kdc_addr.as_addr();
         let route_target = route_target_from_target_addr(kdc_addr);
         let is_udp = kdc_addr.scheme().eq_ignore_ascii_case("udp");
+
+        const UDP_THROUGH_AGENT_UNSUPPORTED: &str =
+            "agent tunnel does not yet support UDP; udp:// KDC requests cannot be routed through an agent";
 
         // An explicit agent always routes through the tunnel, which carries only TCP. Reject
         // before routing so the agent is not asked to dial the KDC for nothing.
