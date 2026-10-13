@@ -359,10 +359,13 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
 
     // Before the job runner starts, so no job queued earlier runs an attempt meanwhile.
-    provisioner_tasks
-        .resume()
-        .await
-        .context("failed to queue the unfinished provisioner tasks again")?;
+    // Unfinished Tasks still fail at their deadline, so this must not keep the other features from starting.
+    if let Err(error) = provisioner_tasks.resume().await {
+        error!(
+            error = format!("{error:#}"),
+            "Failed to queue the unfinished provisioner tasks again"
+        );
+    }
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
