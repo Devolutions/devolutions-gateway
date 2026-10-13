@@ -10,8 +10,9 @@ use parking_lot::Mutex;
 use provisioner_task::{NewProvisionerTaskRecord, ProvisionerTaskState};
 
 use super::*;
+use crate::job_queue::JobQueueHandle;
 use crate::job_queue::{JobMessage, JobQueueReceiver, MAX_ATTEMPTS};
-use crate::provisioner_tasks::runner::{ProvisionerTaskJob, ProvisionerTaskRunner};
+use crate::provisioner_tasks::runner::{ProvisionerTaskJob, ProvisionerTaskJobQueue, ProvisionerTaskRunner};
 use crate::recording::RecordingManagerTask;
 use crate::{DgwState, MockHandles};
 
@@ -674,6 +675,7 @@ async fn slow_attempt_is_retried() {
         harness.state.conf_handle.clone(),
         harness.state.recordings.clone(),
         harness.state.provisioning.clone(),
+        Arc::new(harness.state.job_queue_handle.clone()),
     );
     task.attempt_timeout = Duration::from_millis(500);
     harness.state.provisioner_tasks = ProvisionerTaskRunner::builder(
@@ -787,6 +789,69 @@ async fn finished_task_does_not_run_again() {
         !harness.workspace(session_id).exists(),
         "a job that finds its Task finished deletes the workspace"
     );
+}
+
+/// The job queue channel, plus remux jobs stored as the job queue database would list them.
+struct WithRemuxJobs {
+    queue: JobQueueHandle,
+    remux_jobs: Arc<Mutex<Vec<String>>>,
+}
+
+#[async_trait]
+impl ProvisionerTaskJobQueue for WithRemuxJobs {
+    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
+        self.queue.push(job).await
+    }
+
+    async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>> {
+        Ok(if name == RemuxJob::NAME {
+            self.remux_jobs.lock().clone()
+        } else {
+            Vec::new()
+        })
+    }
+}
+
+#[tokio::test]
+async fn analysis_waits_for_the_remux_of_the_session() {
+    let mut harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, requests) = spawn_ai_provider(|_| 0).await;
+    let task_id = harness.start_created(session_id, settings).await;
+
+    let dir = harness.recording_path.join(session_id.to_string());
+    let other_dir = harness.recording_path.join(Uuid::new_v4().to_string());
+    let remux_jobs = Arc::new(Mutex::new(vec![
+        json!({ "input_path": dir.join("recording-1.webm") }).to_string(),
+        json!({ "input_path": other_dir.join("recording-0.webm") }).to_string(),
+    ]));
+    let queue: DynProvisionerTaskJobQueue = Arc::new(WithRemuxJobs {
+        queue: harness.state.job_queue_handle.clone(),
+        remux_jobs: Arc::clone(&remux_jobs),
+    });
+    harness.state.provisioner_tasks =
+        ProvisionerTaskRunner::builder(Arc::clone(harness.state.provisioner_tasks.store()), Arc::clone(&queue))
+            .register(RecordingAiAnalysis::new(
+                harness.state.conf_handle.clone(),
+                harness.state.recordings.clone(),
+                harness.state.provisioning.clone(),
+                queue,
+            ))
+            .build();
+
+    let mut job = harness.job(task_id).await;
+    let job = tokio::spawn(async move { job.run().await });
+
+    tokio::time::sleep(REMUX_POLL_INTERVAL * 2).await;
+    assert!(!job.is_finished(), "the analysis waits");
+    assert!(requests.lock().is_empty(), "the AI is not asked yet");
+
+    remux_jobs.lock().remove(0);
+    job.await.expect("job task").expect("no retry");
+
+    let task = harness.task(task_id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
+    assert!(!requests.lock().is_empty());
 }
 
 #[tokio::test]
