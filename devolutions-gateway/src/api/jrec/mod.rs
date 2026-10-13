@@ -510,7 +510,8 @@ fn ai_analysis_conflict(code: AiAnalysisConflictCode, task_id: Option<Uuid>) -> 
 /// The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
 /// which the `Location` header of a 202 answer names.
 ///
-/// Sending the same request again returns the same Task and starts nothing new.
+/// Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from
+/// scratch: it removes the earlier AI analysis of the session, even a succeeded one, so a session holds at most one.
 /// The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
 /// Tasks.
 #[cfg_attr(feature = "openapi", utoipa::path(
