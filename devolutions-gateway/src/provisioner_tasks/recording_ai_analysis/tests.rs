@@ -321,7 +321,10 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
         json!({ "provider": "openai", "model": "gpt-test", "maxOutputTokens": null }),
         "neither the key nor the base URL is recorded"
     );
-    assert_eq!(task.deadline_at - task.created_at, TASK_DEADLINE);
+    assert_eq!(
+        task.deadline_at - task.created_at,
+        ATTEMPT_START_WINDOW + ATTEMPT_TIMEOUT
+    );
 
     let access = harness.access(task_id).expect("key is kept");
     assert_eq!(access.base_url.expect("base URL").as_str(), "https://ai.example/v1/");
@@ -694,10 +697,10 @@ async fn slow_attempt_is_retried() {
 }
 
 #[tokio::test]
-async fn log_added_after_the_deadline_leaves_the_task_failed() {
+async fn task_without_time_for_an_attempt_fails_without_calling_the_ai() {
     let harness = Harness::new().await;
     let session_id = harness.write_session();
-    let (settings, _requests) = spawn_ai_provider_after(Duration::from_secs(4), |_| 0).await;
+    let (settings, requests) = spawn_ai_provider(|_| 0).await;
     let task_id = Uuid::new_v4();
     let now = OffsetDateTime::now_utc();
     harness
@@ -706,32 +709,18 @@ async fn log_added_after_the_deadline_leaves_the_task_failed() {
             session_id,
             "openai-compatible",
             now,
-            now + time::Duration::seconds(2),
+            now + ATTEMPT_TIMEOUT - time::Duration::minutes(1),
         )
         .await;
     harness.insert_key(task_id, settings.base_url, now + time::Duration::hours(1));
 
-    let mut job = harness.job(task_id).await;
-    let job = tokio::spawn(async move { job.run().await });
-
-    // Reading the Task past its deadline, as a status request does, ends it while the AI is still answering.
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    assert_eq!(harness.task(task_id).await.state, ProvisionerTaskState::Failed);
-
-    job.await.expect("job task").expect("no retry");
+    harness.job(task_id).await.run().await.expect("no retry");
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
     assert_eq!(task.payload["reason"], "timed out");
-    assert!(
-        harness
-            .recording_path
-            .join(session_id.to_string())
-            .join("ai-analysis-0.slog")
-            .exists(),
-        "the log stays in the session"
-    );
-    assert!(!harness.workspace(session_id).exists());
+    assert_eq!(task.attempts, 0);
+    assert!(requests.lock().is_empty());
     assert!(!harness.has_key(task_id));
 }
 

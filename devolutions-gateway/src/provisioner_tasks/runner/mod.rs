@@ -77,8 +77,10 @@ pub trait ProvisionerTask: Send + Sync + 'static {
     /// The payload of a `succeeded` record.
     type Output: Serialize + Send;
 
-    /// Time from the creation of a record to its end, waiting and retries included.
-    fn deadline(&self) -> time::Duration;
+    /// Time from the creation of a record during which its attempts may start, the first one and retries alike.
+    ///
+    /// The record's deadline comes one [`Self::attempt_timeout`] later, so an attempt started in time can finish.
+    fn attempt_start_window(&self) -> time::Duration;
 
     /// Time one attempt gets before it is cancelled and retried.
     fn attempt_timeout(&self) -> std::time::Duration;
@@ -120,7 +122,7 @@ impl Attempt {
 /// [`ProvisionerTask`] with its types erased, so the runner can hold every task together.
 #[async_trait]
 trait AnyProvisionerTask: Send + Sync {
-    fn deadline(&self) -> time::Duration;
+    fn attempt_start_window(&self) -> time::Duration;
 
     fn attempt_timeout(&self) -> std::time::Duration;
 
@@ -131,8 +133,8 @@ trait AnyProvisionerTask: Send + Sync {
 
 #[async_trait]
 impl<T: ProvisionerTask> AnyProvisionerTask for T {
-    fn deadline(&self) -> time::Duration {
-        ProvisionerTask::deadline(self)
+    fn attempt_start_window(&self) -> time::Duration {
+        ProvisionerTask::attempt_start_window(self)
     }
 
     fn attempt_timeout(&self) -> std::time::Duration {
@@ -241,7 +243,7 @@ impl ProvisionerTaskRunner {
                     kind: T::KIND.to_owned(),
                     target,
                     params,
-                    deadline_at: now + task.deadline(),
+                    deadline_at: now + task.attempt_start_window() + task.attempt_timeout(),
                     job_token,
                 },
                 now,
@@ -354,6 +356,22 @@ impl ProvisionerTaskRunner {
     async fn run_attempt(&self, task_id: Uuid, job_token: Uuid) -> anyhow::Result<()> {
         let store = &self.inner.store;
         let now = OffsetDateTime::now_utc();
+
+        // An attempt that cannot finish before the deadline would do work the record never keeps, such as paid AI calls.
+        if let Some(record) = store.get(task_id, now).await?
+            && record.job_token == job_token
+            && !record.state.is_finished()
+            && let Some(task) = self.task(&record.kind)
+            && now + task.attempt_timeout() > record.deadline_at
+        {
+            warn!(task.id = %task_id, task.kind = %record.kind, attempts = record.attempts, "Task timed out before its next attempt");
+            let payload = json!({
+                "reason": "timed out",
+                "details": { "lastPayload": record.payload },
+                "attempts": record.attempts,
+            });
+            return self.fail(task.as_ref(), task_id, payload).await;
+        }
 
         let record = match store.start_attempt(task_id, job_token, starting_payload(), now).await? {
             AttemptStart::Started(record) => record,
