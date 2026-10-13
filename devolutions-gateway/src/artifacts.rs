@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::token::RecordingFileType;
 
-/// Non-recording artifacts, one list per [`ArtifactKind`]. Each list is append-only, like `files`: names
-/// are derived from positions.
+/// Non-recording artifacts, one list per [`ArtifactKind`]. Each list only grows, like `files`, until it is cleared
+/// as a whole: names are derived from positions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct JrecArtifacts {
