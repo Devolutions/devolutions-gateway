@@ -8,7 +8,7 @@
 
 use std::collections::VecDeque;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter};
+use std::io::{self, BufReader, BufWriter, Read};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
@@ -48,6 +48,9 @@ const KEEP_DURING_CHANGE: usize = 6;
 /// Largest screenshot sent to the AI.
 const MAX_WIDTH: usize = 1280;
 const MAX_HEIGHT: usize = 720;
+
+/// Largest side of a decoded frame, in pixels; it bounds the memory a frame takes.
+const MAX_FRAME_SIDE: usize = 8192;
 
 #[derive(Debug, thiserror::Error)]
 pub(super) enum VideoError {
@@ -91,8 +94,12 @@ pub(super) fn keep_changed_frames(
 
     let file = super::open_counted(path, read_bytes)
         .map_err(|error| VideoError::Invalid(format!("failed to open the video: {error}")))?;
-    let mut tags = WebmIterator::new(BufReader::new(file), &[MatroskaSpec::BlockGroup(Master::Start)]);
-    tags.emit_master_end_when_eof(false);
+    let len = file
+        .inner
+        .metadata()
+        .map_err(|error| VideoError::Invalid(format!("failed to open the video: {error}")))?
+        .len();
+    let mut tags = webm_tags(BufReader::new(file), len);
 
     let mut keeper = Keeper {
         selector: FrameSelector::default(),
@@ -253,6 +260,17 @@ pub(super) fn keep_changed_frames(
     Ok(keeper.kept)
 }
 
+/// Reads the WebM elements of `source`, a file of `len` bytes.
+///
+/// Every element starts with the size it claims, and the parser sets that much memory aside before reading it. A broken
+/// or hostile file could claim gigabytes, so any element bigger than the whole file is refused up front.
+fn webm_tags<R: Read>(source: R, len: u64) -> WebmIterator<R> {
+    let mut tags = WebmIterator::new(source, &[MatroskaSpec::BlockGroup(Master::Start)]);
+    tags.emit_master_end_when_eof(false);
+    tags.set_max_allowable_tag_size(Some(usize::try_from(len).unwrap_or(usize::MAX)));
+    tags
+}
+
 /// A frame of a block, with the track it belongs to and its time relative to its cluster.
 struct BlockFrame {
     track: u64,
@@ -361,6 +379,13 @@ impl Picture {
             .i420_planes()
             .ok_or_else(|| VideoError::Invalid("decoded frame is not 8-bit I420".to_owned()))?;
 
+        let (width, height) = (planes.y.width(), planes.y.height());
+        if width > MAX_FRAME_SIDE || height > MAX_FRAME_SIDE {
+            return Err(VideoError::Invalid(format!(
+                "decoded frame of {width}x{height} is larger than {MAX_FRAME_SIDE}x{MAX_FRAME_SIDE}"
+            )));
+        }
+
         let copy = |plane: cadeau::xmf::vpx::VpxPlane<'_>| {
             let mut out = Vec::with_capacity(plane.width() * plane.height());
             for row in plane.rows() {
@@ -370,8 +395,8 @@ impl Picture {
         };
 
         Ok(Self {
-            width: planes.y.width(),
-            height: planes.y.height(),
+            width,
+            height,
             y: copy(planes.y),
             u: copy(planes.u),
             v: copy(planes.v),
@@ -787,5 +812,25 @@ mod tests {
 
         assert_eq!((gray.width, gray.height), (2, 1));
         assert_eq!(gray.pixels, [10, 30]);
+    }
+
+    #[test]
+    fn an_element_larger_than_its_file_is_refused() {
+        let webm = [
+            // Cluster of unknown size.
+            &[0x1F, 0x43, 0xB6, 0x75, 0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF][..],
+            // SimpleBlock claiming 1 MiB.
+            &[0xA3, 0x10, 0x10, 0x00, 0x00],
+            &[0x81, 0x00, 0x00, 0x80],
+        ]
+        .concat();
+        let mut tags = webm_tags(webm.as_slice(), u64::try_from(webm.len()).expect("small"));
+
+        assert!(matches!(tags.next(), Some(Ok(MatroskaSpec::Cluster(Master::Start)))));
+        let next = tags.next();
+        assert!(
+            matches!(next, Some(Err(TagIteratorError::CorruptedFileData(_)))),
+            "{next:?}"
+        );
     }
 }
