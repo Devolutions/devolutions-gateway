@@ -328,11 +328,13 @@ impl AnalyzeRecording<'_> {
     pub fn start(self) -> mpsc::Receiver<RecordingAnalysisEvent> {
         let (events, receiver) = mpsc::channel(EVENT_BUFFER);
         let finished = CancellationToken::new();
+        // A child, so a receiver that goes away never cancels a token the caller shares with other work.
+        let cancel = self.cancel.child_token();
 
         // A receiver that went away means nobody waits for the result anymore.
         tokio::spawn({
             let events = events.clone();
-            let cancel = self.cancel.clone();
+            let cancel = cancel.clone();
             let finished = finished.clone();
             async move {
                 tokio::select! {
@@ -347,16 +349,17 @@ impl AnalyzeRecording<'_> {
             manifest: self.manifest.clone(),
             manifest_path: self.manifest_path.to_owned(),
             max_output_tokens: self.max_output_tokens,
-            cancel: self.cancel,
+            cancel,
             events,
         };
 
         tokio::spawn(async move {
+            // Also stops the watcher when the analysis panics, so the channel closes instead of staying open forever.
+            let _finished = finished.drop_guard();
             let last = match run.run().await {
                 Ok(analysis) => RecordingAnalysisEvent::Complete(analysis),
                 Err(error) => RecordingAnalysisEvent::Failure(error),
             };
-            finished.cancel();
             let _ = run.events.send(last).await;
         });
 

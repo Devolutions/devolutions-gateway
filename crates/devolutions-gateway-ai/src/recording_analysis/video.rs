@@ -235,14 +235,25 @@ pub(super) fn keep_changed_frames(
         // Every sample time before this frame shows the previous one.
         if let Some((_, shown)) = &previous {
             let mut gray = None;
+            let mut repeats = 0;
             while next_sample_ms < pts_ms {
                 if cancel.is_cancelled() {
                     return Err(VideoError::Cancelled);
                 }
 
+                // Past this many samples of one picture the selector no longer changes, so a long pause, or a
+                // corrupt time far ahead, costs no more work.
+                if repeats > ANIMATION_WINDOW {
+                    let skipped = (pts_ms - next_sample_ms).div_ceil(SAMPLE_INTERVAL_MS);
+                    next_sample_ms += skipped * SAMPLE_INTERVAL_MS;
+                    keeper.skip(skipped, next_sample_ms - SAMPLE_INTERVAL_MS);
+                    break;
+                }
+
                 let gray = gray.get_or_insert_with(|| Rc::new(shown.half_gray()));
                 keeper.sample(next_sample_ms, shown, gray)?;
                 next_sample_ms += SAMPLE_INTERVAL_MS;
+                repeats += 1;
             }
         } else {
             next_sample_ms = pts_ms;
@@ -483,7 +494,10 @@ impl Picture {
         encoder.set_compression(png::Compression::Fast);
         encoder
             .write_header()
-            .and_then(|mut writer| writer.write_image_data(&rgb))
+            .and_then(|mut writer| {
+                writer.write_image_data(&rgb)?;
+                writer.finish()
+            })
             .map_err(io::Error::other)
     }
 }
@@ -519,6 +533,13 @@ impl Keeper<'_> {
 
         self.current = Some((time_ms, id));
         Ok(())
+    }
+
+    /// Counts `samples` that would change nothing, the last one at `last_ms`, as if each was taken.
+    fn skip(&mut self, samples: u64, last_ms: u64) {
+        let samples = usize::try_from(samples).unwrap_or(usize::MAX);
+        *self.next_id = self.next_id.saturating_add(samples);
+        self.current = Some((last_ms, format!("F{:05}", *self.next_id - 1)));
     }
 
     fn keep(&mut self, time_ms: u64, id: &str, picture: &Picture) -> Result<(), VideoError> {
@@ -751,6 +772,39 @@ mod tests {
 
         assert!(kept.len() <= 3, "{kept:?}");
         assert_eq!(kept[0], 0);
+    }
+
+    #[test]
+    fn one_picture_sampled_past_the_animation_window_changes_nothing_more() {
+        let mut selector = FrameSelector::default();
+        for index in 0..4 {
+            selector.sample(Rc::new(screen(&[index, 8])));
+        }
+
+        // What the sampling loop skips over: one picture, sampled again and again.
+        let still = Rc::new(screen(&[30]));
+        for _ in 0..=ANIMATION_WINDOW {
+            selector.sample(Rc::clone(&still));
+        }
+        let state = (
+            selector.history.clone(),
+            selector.in_change,
+            selector.change_samples,
+            selector.quiet_samples,
+        );
+
+        for _ in 0..3 {
+            assert!(!selector.sample(Rc::clone(&still)));
+            assert_eq!(
+                (
+                    selector.history.clone(),
+                    selector.in_change,
+                    selector.change_samples,
+                    selector.quiet_samples
+                ),
+                state
+            );
+        }
     }
 
     #[test]
