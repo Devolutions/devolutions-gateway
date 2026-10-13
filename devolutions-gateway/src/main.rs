@@ -171,15 +171,15 @@ fn service_controller() -> Controller {
 
 enum GatewayServiceEvent {}
 
-const BAD_CONFIG_ERR_CODE: u32 = 1;
-const START_FAILED_ERR_CODE: u32 = 2;
+const BAD_CONFIG_ERR_CODE: u8 = 1;
+const START_FAILED_ERR_CODE: u8 = 2;
 
 fn gateway_service_main(
     rx: mpsc::Receiver<ServiceEvent<GatewayServiceEvent>>,
     _tx: mpsc::Sender<ServiceEvent<GatewayServiceEvent>>,
     _args: Vec<String>,
     _standalone_mode: bool,
-) -> u32 {
+) -> u8 {
     let conf_handle = match ConfHandle::init() {
         Ok(conf_handle) => conf_handle,
         Err(error) => {
