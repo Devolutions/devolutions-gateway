@@ -59,7 +59,7 @@ pub struct NewProvisionerTaskRecord {
     pub target: String,
     pub params: serde_json::Value,
     pub deadline_at: OffsetDateTime,
-    /// Token of the job queued for the new Task.
+    /// Token of the job that will run the new Task.
     pub job_token: Uuid,
 }
 
@@ -111,18 +111,22 @@ pub trait ProvisionerTaskStore: Send + Sync {
 
     /// Hands an unfinished Task to a new job, so the job that had it stops at its next attempt.
     ///
-    /// Returns `false` if the Task is unknown or finished, and changes nothing.
+    /// Only the start of an attempt checks the token, so call it only while the old job runs no attempt, such as at
+    /// startup before any job runs. Returns `false` if the Task is unknown or finished.
     async fn replace_job_token(&self, id: Uuid, job_token: Uuid, now: OffsetDateTime) -> anyhow::Result<bool>;
 
     /// Every unfinished Task, after failing those past their deadline.
     async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;
 
-    /// Replaces the payload of a `running` Task, e.g. to report progress. Returns `false` if it is not running.
+    /// Replaces the payload of a `running` Task, e.g. to report progress. Returns `false` if it is not running, such
+    /// as when it was just failed for being past its deadline.
     async fn update_running(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
 
-    /// Ends a `running` Task as `succeeded`. Returns `false` if it is not running, and changes nothing.
+    /// Ends a `running` Task as `succeeded`. Returns `false` if it is not running, such as when it was just failed for
+    /// being past its deadline.
     async fn succeed(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
 
-    /// Ends a `queued` or `running` Task as `failed`. Returns `false` if it was already finished, and changes nothing.
+    /// Ends a `queued` or `running` Task as `failed`. Returns `false` if it was already finished, such as when it was
+    /// just failed for being past its deadline.
     async fn fail(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
 }

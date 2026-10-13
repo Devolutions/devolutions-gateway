@@ -79,7 +79,7 @@ impl LibSqlProvisionerTaskStore {
     }
 
     /// Fails `task` if it is unfinished and past its deadline, then returns it as stored.
-    async fn expire(
+    async fn fail_if_overdue(
         conn: &Connection,
         task: ProvisionerTaskRecord,
         now: OffsetDateTime,
@@ -128,7 +128,7 @@ impl LibSqlProvisionerTaskStore {
             tx.rollback().await.context("end task finish")?;
             return Ok(false);
         };
-        let task = Self::expire(&tx, task, now).await?;
+        let task = Self::fail_if_overdue(&tx, task, now).await?;
 
         if !from.contains(&task.state) {
             tx.commit().await.context("commit task finish")?;
@@ -162,7 +162,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .context("begin task creation")?;
 
         if let Some(existing) = Self::find(&tx, task.id).await? {
-            let existing = Self::expire(&tx, existing, now).await?;
+            let existing = Self::fail_if_overdue(&tx, existing, now).await?;
             let same_request =
                 existing.kind == task.kind && existing.target == task.target && existing.params == task.params;
             tx.commit().await.context("commit task lookup")?;
@@ -175,7 +175,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         }
 
         if let Some(unfinished) = Self::find_unfinished(&tx, &task.kind, &task.target).await? {
-            let unfinished = Self::expire(&tx, unfinished, now).await?;
+            let unfinished = Self::fail_if_overdue(&tx, unfinished, now).await?;
 
             if !unfinished.state.is_finished() {
                 tx.rollback().await.context("end task creation")?;
@@ -217,7 +217,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             tx.rollback().await.context("end task lookup")?;
             return Ok(None);
         };
-        let task = Self::expire(&tx, task, now).await?;
+        let task = Self::fail_if_overdue(&tx, task, now).await?;
         tx.commit().await.context("commit task lookup")?;
 
         Ok(Some(task))
@@ -246,7 +246,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             return Ok(AttemptStart::Superseded);
         }
 
-        let task = Self::expire(&tx, task, now).await?;
+        let task = Self::fail_if_overdue(&tx, task, now).await?;
 
         if task.state.is_finished() {
             tx.commit().await.context("commit task attempt")?;
@@ -279,7 +279,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             tx.rollback().await.context("end job token replacement")?;
             return Ok(false);
         };
-        let task = Self::expire(&tx, task, now).await?;
+        let task = Self::fail_if_overdue(&tx, task, now).await?;
 
         let replaced = !task.state.is_finished();
 
@@ -322,7 +322,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
 
         let mut unfinished = Vec::with_capacity(tasks.len());
         for task in tasks {
-            let task = Self::expire(&tx, task, now).await?;
+            let task = Self::fail_if_overdue(&tx, task, now).await?;
             if !task.state.is_finished() {
                 unfinished.push(task);
             }
@@ -344,7 +344,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             tx.rollback().await.context("end running task update")?;
             return Ok(false);
         };
-        let task = Self::expire(&tx, task, now).await?;
+        let task = Self::fail_if_overdue(&tx, task, now).await?;
 
         let running = task.state == ProvisionerTaskState::Running;
 
@@ -577,7 +577,15 @@ mod tests {
         let task = new_task("session-1");
         create(&store, task.clone()).await;
 
-        assert!(matches!(create(&store, task).await, CreateOutcome::Existing(_)));
+        let mut again = task.clone();
+        again.job_token = Uuid::new_v4();
+        let CreateOutcome::Existing(existing) = create(&store, again).await else {
+            panic!("the same request must return the existing task");
+        };
+        assert_eq!(
+            existing.job_token, task.job_token,
+            "the job of the first request keeps the task"
+        );
     }
 
     #[tokio::test]
@@ -586,10 +594,16 @@ mod tests {
         let task = new_task("session-1");
         create(&store, task.clone()).await;
 
-        let mut other = task;
-        other.params = serde_json::json!({ "provider": "anthropic" });
+        let mut other_params = task.clone();
+        other_params.params = serde_json::json!({ "provider": "anthropic" });
+        let mut other_kind = task.clone();
+        other_kind.kind = String::from("other-kind");
+        let mut other_target = task;
+        other_target.target = String::from("session-2");
 
-        assert!(matches!(create(&store, other).await, CreateOutcome::IdConflict(_)));
+        for other in [other_params, other_kind, other_target] {
+            assert!(matches!(create(&store, other).await, CreateOutcome::IdConflict(_)));
+        }
     }
 
     #[tokio::test]
@@ -606,6 +620,9 @@ mod tests {
             create(&store, new_task("session-2")).await,
             CreateOutcome::Created(_)
         ));
+        let mut other_kind = new_task("session-1");
+        other_kind.kind = String::from("other-kind");
+        assert!(matches!(create(&store, other_kind).await, CreateOutcome::Created(_)));
 
         store
             .fail(first.id, serde_json::json!({}), now())
@@ -944,6 +961,19 @@ mod tests {
                 .expect("start attempt"),
             AttemptStart::Unknown
         );
+        assert!(
+            !store
+                .replace_job_token(Uuid::new_v4(), Uuid::new_v4(), now())
+                .await
+                .expect("replace job token")
+        );
+        for finished in [
+            store.update_running(Uuid::new_v4(), serde_json::json!({}), now()).await,
+            store.succeed(Uuid::new_v4(), serde_json::json!({}), now()).await,
+            store.fail(Uuid::new_v4(), serde_json::json!({}), now()).await,
+        ] {
+            assert!(!finished.expect("update unknown task"));
+        }
     }
 
     #[tokio::test]
