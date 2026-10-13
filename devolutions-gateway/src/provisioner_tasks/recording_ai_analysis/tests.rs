@@ -892,6 +892,33 @@ async fn working_files_left_by_an_earlier_task_go_with_the_task_that_ends() {
     assert!(!harness.workspace(session_id).exists());
     assert!(!log.exists());
 }
+#[tokio::test]
+async fn an_ended_task_leaves_the_working_files_of_another_task() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
+    let task_id = harness.start_created(session_id, settings).await;
+    let workspace = harness.workspace(session_id);
+    std::fs::create_dir_all(&workspace).expect("working files of a newer Task");
+    std::fs::write(
+        workspace.join("analysis.json"),
+        json!({ "owner": Uuid::new_v4().to_string(), "promptVersion": "p", "model": "m", "chunkLen": 1 }).to_string(),
+    )
+    .expect("settings of a newer Task");
+    let record = harness.task(task_id).await;
+    let task = RecordingAiAnalysis::new(
+        harness.state.conf_handle.clone(),
+        harness.state.recordings.clone(),
+        harness.state.provisioning.clone(),
+        Arc::new(harness.state.job_queue_handle.clone()),
+    );
+
+    task.on_end(&record).await;
+
+    assert!(workspace.exists(), "the newer Task still resumes from them");
+    assert!(!harness.has_key(task_id));
+}
+
 #[test]
 fn unknown_usage_is_left_out_of_the_result() {
     let analysis = Analysis {
