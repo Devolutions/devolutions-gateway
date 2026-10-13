@@ -401,7 +401,12 @@ impl Run {
             chunk_len: MAX_CHUNK_LEN,
         };
 
-        let total_bytes = self.manifest.recordings.total_bytes(&dir);
+        let total_bytes = blocking({
+            let recordings = self.manifest.recordings.clone();
+            let dir = dir.clone();
+            move || Ok(recordings.total_bytes(&dir))
+        })
+        .await?;
         let read_bytes = Arc::new(AtomicU64::new(0));
 
         let mut preparing = tokio::task::spawn_blocking({
@@ -447,7 +452,7 @@ impl Run {
 
             let checkpoint = checkpoint::path(&workspace, index);
 
-            if checkpoint.exists() {
+            if tokio::fs::try_exists(&checkpoint).await.unwrap_or(false) {
                 debug!(index, "Chunk already described");
                 continue;
             }
