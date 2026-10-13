@@ -239,16 +239,26 @@ impl RecordingAnalysisError {
     }
 }
 
-/// Removes what [`AiClient::analyze_recording`] left next to `manifest_path`: its working files and a log nobody moved.
+/// Removes what [`AiClient::analyze_recording`] left next to `manifest_path`: the working files of `owner`, or of
+/// nobody known, and a log nobody moved. With no `owner`, the working files go whoever made them.
 ///
-/// Call it once the analysis of the recording is over for good; a successful analysis already removed its working
-/// files.
-pub async fn discard(manifest_path: &Utf8Path) -> io::Result<()> {
+/// Call it once the analysis of the recording is over for good, or before a new analysis that must start from scratch;
+/// a successful analysis already removed its working files. Working files of another owner stay, since that analysis
+/// may still resume from them.
+pub async fn discard(manifest_path: &Utf8Path, owner: Option<&str>) -> io::Result<()> {
     let dir = recording_dir(manifest_path);
+    let workspace = dir.join(WORKSPACE_DIR);
 
-    match tokio::fs::remove_dir_all(dir.join(WORKSPACE_DIR)).await {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
-        _ => {}
+    let saved = tokio::fs::read(workspace.join(SETTINGS_FILE))
+        .await
+        .ok()
+        .and_then(|saved| serde_json::from_slice::<WorkspaceSettings>(&saved).ok());
+
+    if owner.is_none() || saved.is_none_or(|saved| saved.owner.as_deref() == owner) {
+        match tokio::fs::remove_dir_all(&workspace).await {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
     }
 
     match tokio::fs::remove_file(dir.join(LOG_FILE)).await {
@@ -275,6 +285,7 @@ impl AiClient {
             client: self,
             manifest,
             manifest_path,
+            owner: None,
             max_output_tokens: None,
             cancel: CancellationToken::new(),
         }
@@ -287,6 +298,7 @@ pub struct AnalyzeRecording<'a> {
     client: &'a AiClient,
     manifest: &'a RecordingManifest,
     manifest_path: &'a Utf8Path,
+    owner: Option<String>,
     max_output_tokens: Option<u32>,
     cancel: CancellationToken,
 }
@@ -296,12 +308,20 @@ impl fmt::Debug for AnalyzeRecording<'_> {
         f.debug_struct("AnalyzeRecording")
             .field("client", self.client)
             .field("manifest_path", &self.manifest_path)
+            .field("owner", &self.owner)
             .field("max_output_tokens", &self.max_output_tokens)
             .finish_non_exhaustive()
     }
 }
 
 impl AnalyzeRecording<'_> {
+    /// Who the working files belong to, such as a Task ID: only an analysis of the same owner resumes from them, and
+    /// another owner starts fresh.
+    pub fn owner(mut self, owner: impl Into<String>) -> Self {
+        self.owner = Some(owner.into());
+        self
+    }
+
     /// Upper bound of tokens in each AI answer, see
     /// [`DescribeSessionActions::max_output_tokens`](crate::session_actions::DescribeSessionActions::max_output_tokens).
     pub fn max_output_tokens(mut self, max_output_tokens: u32) -> Self {
@@ -348,6 +368,7 @@ impl AnalyzeRecording<'_> {
             client: self.client.clone(),
             manifest: self.manifest.clone(),
             manifest_path: self.manifest_path.to_owned(),
+            owner: self.owner,
             max_output_tokens: self.max_output_tokens,
             cancel,
             events,
@@ -387,6 +408,7 @@ struct Run {
     client: AiClient,
     manifest: RecordingManifest,
     manifest_path: Utf8PathBuf,
+    owner: Option<String>,
     max_output_tokens: Option<u32>,
     cancel: CancellationToken,
     events: mpsc::Sender<RecordingAnalysisEvent>,
@@ -399,6 +421,7 @@ impl Run {
         let cancel = self.cancel.clone();
 
         let settings = WorkspaceSettings {
+            owner: self.owner.clone(),
             prompt_version: self.manifest.recordings.prompt_version().to_owned(),
             model: self.client.model().to_owned(),
             chunk_len: MAX_CHUNK_LEN,
@@ -733,10 +756,11 @@ fn split_by_size(frames: &[LoadedScreenshot]) -> Vec<Range<usize>> {
     parts
 }
 
-/// What the working files were made with; files made with other settings are never reused.
+/// Whose the working files are and what they were made with; files of another owner or settings are never reused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct WorkspaceSettings {
+    owner: Option<String>,
     prompt_version: String,
     model: String,
     chunk_len: usize,

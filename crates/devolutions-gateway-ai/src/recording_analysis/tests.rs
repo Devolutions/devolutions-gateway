@@ -335,12 +335,45 @@ async fn discard_removes_the_working_files_and_the_log() {
     let log = recording_dir(&session.manifest_path).join(LOG_FILE);
     std::fs::write(&log, "left behind").unwrap();
 
-    discard(&session.manifest_path).await.unwrap();
+    discard(&session.manifest_path, None).await.unwrap();
 
     assert!(!session.workspace().exists());
     assert!(!log.exists());
     assert!(recording_dir(&session.manifest_path).join("recording-0.cast").exists());
-    discard(&session.manifest_path).await.unwrap();
+    discard(&session.manifest_path, None).await.unwrap();
+}
+
+#[tokio::test]
+async fn working_files_belong_to_their_owner() {
+    // About 1 MB of transcript: three chunks.
+    let session = Session::new(10_000);
+    let (client, requests) = spawn_provider(|index| if index == 1 { 503 } else { 0 }).await;
+    let analyze = |owner: &'static str| {
+        finish(
+            client
+                .analyze_recording(&session.manifest, &session.manifest_path)
+                .owner(owner)
+                .start(),
+        )
+    };
+
+    analyze("task-a").await.1.unwrap_err();
+    assert!(session.workspace().join("chunk-0000.json").exists());
+
+    discard(&session.manifest_path, Some("task-b")).await.unwrap();
+    assert!(session.workspace().exists(), "another owner's cleanup leaves the files");
+    discard(&session.manifest_path, None).await.unwrap();
+    assert!(
+        !session.workspace().exists(),
+        "a cleanup for nobody in particular removes them"
+    );
+
+    analyze("task-b").await.1.unwrap();
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        5,
+        "another owner asks about every chunk again"
+    );
 }
 
 #[tokio::test]
@@ -448,6 +481,7 @@ fn recordings_listed_out_of_order_are_read_in_time_order() {
     };
     let workspace = path.join(WORKSPACE_DIR);
     let settings = WorkspaceSettings {
+        owner: None,
         prompt_version: "test".to_owned(),
         model: MODEL.to_owned(),
         chunk_len: MAX_CHUNK_LEN,
