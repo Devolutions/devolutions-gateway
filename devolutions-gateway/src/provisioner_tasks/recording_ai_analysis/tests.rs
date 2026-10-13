@@ -120,8 +120,7 @@ impl Harness {
             .await
             .expect("read task")
             .expect("task exists")
-            .job_token
-            .expect("job token");
+            .job_token;
         let json = json!({ "taskId": task_id, "jobToken": job_token }).to_string();
 
         ProvisionerTaskJob::read_json(&json, self.state.provisioner_tasks.clone()).expect("valid job")
@@ -331,10 +330,7 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
     assert_eq!(job.name(), ProvisionerTaskJob::NAME);
     assert_eq!(
         job.write_json().expect("job JSON"),
-        format!(
-            r#"{{"taskId":"{task_id}","jobToken":"{}"}}"#,
-            task.job_token.expect("job token")
-        )
+        format!(r#"{{"taskId":"{task_id}","jobToken":"{}"}}"#, task.job_token)
     );
     assert!(schedule_for.is_none());
 }

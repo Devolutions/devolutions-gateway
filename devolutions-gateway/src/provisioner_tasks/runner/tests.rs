@@ -370,6 +370,6 @@ async fn the_job_is_read_back_from_its_json() {
     let read = ProvisionerTaskJob::read_json(&json, harness.runner.clone()).expect("valid job");
 
     assert_eq!(read.task_id, id);
-    assert_eq!(Some(read.job_token), harness.task(id).await.job_token);
+    assert_eq!(read.job_token, harness.task(id).await.job_token);
     assert_eq!(job.name(), ProvisionerTaskJob::NAME);
 }
