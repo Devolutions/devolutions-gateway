@@ -31,6 +31,10 @@ use super::AttemptError;
 use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
 use crate::token::AccessScope;
 
+/// Time an attempt may need past its timeout: it ends a little later while it stops, and a stored deadline loses its
+/// fraction of a second.
+pub(crate) const ATTEMPT_END_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
+
 /// Where the runner queues the jobs of its records.
 #[async_trait]
 pub trait ProvisionerTaskJobQueue: Send + Sync {
@@ -362,7 +366,7 @@ impl ProvisionerTaskRunner {
             && record.job_token == job_token
             && !record.state.is_finished()
             && let Some(task) = self.task(&record.kind)
-            && now + task.attempt_timeout() > record.deadline_at
+            && now + task.attempt_timeout() + ATTEMPT_END_GRACE > record.deadline_at
         {
             warn!(task.id = %task_id, task.kind = %record.kind, attempts = record.attempts, "Task timed out before its next attempt");
             let payload = json!({
