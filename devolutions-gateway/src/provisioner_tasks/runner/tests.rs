@@ -367,8 +367,12 @@ async fn an_attempt_starts_only_if_it_can_finish_before_the_deadline() {
     let store = harness.runner.store();
     let now = OffsetDateTime::now_utc();
 
-    // The echo attempt timeout is 5 seconds.
-    for (left, state) in [(6, ProvisionerTaskState::Succeeded), (4, ProvisionerTaskState::Failed)] {
+    // The echo attempt timeout is 5 seconds; 2 more or 2 less keep the test clear of whole-second rounding.
+    let needed = time::Duration::seconds(5) + time::Duration::try_from(ATTEMPT_END_GRACE).expect("grace");
+    for (left, state) in [
+        (needed + time::Duration::seconds(2), ProvisionerTaskState::Succeeded),
+        (needed - time::Duration::seconds(2), ProvisionerTaskState::Failed),
+    ] {
         let id = Uuid::new_v4();
         let job_token = Uuid::new_v4();
         store
@@ -378,7 +382,7 @@ async fn an_attempt_starts_only_if_it_can_finish_before_the_deadline() {
                     kind: KIND.to_owned(),
                     target: id.to_string(),
                     params: json!({ "value": 1 }),
-                    deadline_at: now + time::Duration::seconds(left),
+                    deadline_at: now + left,
                     job_token,
                 },
                 now,

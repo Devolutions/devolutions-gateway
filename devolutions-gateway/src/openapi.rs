@@ -197,7 +197,7 @@ struct AiAnalysisUsage {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AiAnalysisFailedPayload {
-    /// Kind of failure, such as `permanent error`, `attempts exhausted`, `key lost` or `timed out`.
+    /// Kind of failure: `permanent error`, `attempts exhausted`, `key lost`, `timed out`, `invalid task` or `not queued`.
     reason: String,
     /// What went wrong: a text, except for `timed out`, where it is `{ "lastPayload": <payload before the timeout> }`.
     details: serde_json::Value,

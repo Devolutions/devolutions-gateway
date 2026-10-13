@@ -38,7 +38,8 @@ pub(crate) struct TaskInfo {
     /// When it succeeded or failed.
     #[serde(with = "time::serde::rfc3339::option")]
     finished_at: Option<OffsetDateTime>,
-    /// When an unfinished Task becomes failed, waiting and retries included.
+    /// Latest time an unfinished Task becomes failed, waiting and retries included; it fails as `timed out` earlier
+    /// once too little time is left for another attempt.
     #[serde(with = "time::serde::rfc3339")]
     deadline_at: OffsetDateTime,
 }
