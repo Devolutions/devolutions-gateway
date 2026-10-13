@@ -359,7 +359,7 @@ impl RecordingAiAnalysis {
         let analysis = loop {
             match events.recv().await {
                 Some(RecordingAnalysisEvent::Progress(progress)) => {
-                    // Reading sends an event every half second: the Task is only updated when the numbers it shows change.
+                    // Reading sends an event every half second, so the Task is updated only when the stage's percent changes.
                     let shown = (progress.stage(), progress.percent());
                     if recorded != Some(shown) {
                         recorded = Some(shown);
@@ -400,8 +400,6 @@ fn progress_payload(progress: &Progress) -> serde_json::Value {
         "step": progress.stage(),
         "done": done,
         "total": total,
-        "percent": progress.percent(),
-        "message": progress.to_string(),
     })
 }
 
