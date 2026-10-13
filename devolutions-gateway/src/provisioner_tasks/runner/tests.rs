@@ -33,7 +33,7 @@ impl ProvisionerTask for Echo {
 
     type Output = serde_json::Value;
 
-    fn deadline(&self) -> time::Duration {
+    fn attempt_start_window(&self) -> time::Duration {
         time::Duration::hours(1)
     }
 
@@ -358,6 +358,45 @@ async fn invalid_parameters_and_unknown_kinds_fail_the_task() {
     }
 
     assert_eq!(harness.runs.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn an_attempt_starts_only_if_it_can_finish_before_the_deadline() {
+    let harness = Harness::new(|value| Ok(json!(value))).await;
+    let store = harness.runner.store();
+    let now = OffsetDateTime::now_utc();
+
+    // The echo attempt timeout is 5 seconds.
+    for (left, state) in [(6, ProvisionerTaskState::Succeeded), (4, ProvisionerTaskState::Failed)] {
+        let id = Uuid::new_v4();
+        let job_token = Uuid::new_v4();
+        store
+            .create(
+                NewProvisionerTaskRecord {
+                    id,
+                    kind: KIND.to_owned(),
+                    target: id.to_string(),
+                    params: json!({ "value": 1 }),
+                    deadline_at: now + time::Duration::seconds(left),
+                    job_token,
+                },
+                now,
+            )
+            .await
+            .expect("create");
+
+        harness.runner.run_attempt(id, job_token).await.expect("no retry");
+
+        let task = harness.task(id).await;
+        assert_eq!(task.state, state, "{left} seconds left");
+        if state == ProvisionerTaskState::Failed {
+            assert_eq!(task.payload["reason"], "timed out");
+            assert_eq!(task.attempts, 0);
+            assert!(harness.ended.lock().contains(&id));
+        }
+    }
+
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
