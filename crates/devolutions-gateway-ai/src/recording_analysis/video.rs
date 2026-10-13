@@ -222,9 +222,9 @@ pub(super) fn keep_changed_frames(
             None => decoder.insert(video.decoder()?),
         };
 
-        decoder
-            .decode(&block.data)
-            .map_err(|error| VideoError::Invalid(format!("failed to decode a frame: {error:?}")))?;
+        decoder.decode(&block.data).map_err(|error| {
+            VideoError::Invalid(format!("failed to decode a frame: {:#}", anyhow::Error::new(error)))
+        })?;
 
         // Exactly one call per decoded frame: XMF would hand back the same image again.
         let Ok(image) = decoder.next_frame() else {
@@ -369,7 +369,12 @@ impl VideoTrack {
             .height(self.height)
             .codec(self.codec)
             .build()
-            .map_err(|error| VideoError::Invalid(format!("failed to start the video decoder: {error:?}")))
+            .map_err(|error| {
+                VideoError::Invalid(format!(
+                    "failed to start the video decoder: {:#}",
+                    anyhow::Error::new(error)
+                ))
+            })
     }
 }
 
