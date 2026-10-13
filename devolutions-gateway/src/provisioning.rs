@@ -88,8 +88,8 @@ struct TaskSecretEntry {
 /// operations and may arrive, expire, or be replaced independently.
 ///
 /// The task-secrets store holds what a provisioner task needs but must never write to disk, such as
-/// the API key of an AI analysis. It is keyed by Task ID, encrypted like the credentials, and its
-/// entries go away when their Task ends or at their expiry.
+/// the API key of an AI analysis. It is keyed by Task ID, encrypted like the credentials, and an
+/// entry stays until it is removed or reaches its expiry.
 #[derive(Debug, Clone)]
 pub struct ProvisioningStore {
     credentials: Arc<Mutex<HashMap<Uuid, CredentialsEntry>>>,
@@ -317,7 +317,7 @@ impl ProvisioningStore {
         self.connection_options.lock().get(&jti).map(|entry| entry.expires_at)
     }
 
-    /// Stores the encrypted secret of a provisioner task until `expires_at`, replacing any earlier secret of the Task.
+    /// Encrypts and stores the secret of a provisioner task until `expires_at`, replacing any earlier secret of the Task.
     ///
     /// The secret is opaque to the store.
     pub fn insert_task_secret(
@@ -482,7 +482,7 @@ mod tests {
     }
 
     #[test]
-    fn task_secret_is_kept_encrypted_and_read_back() {
+    fn task_secret_is_read_back_and_replaced() {
         use secrecy::ExposeSecret as _;
 
         let store = ProvisioningStore::new();
@@ -499,7 +499,7 @@ mod tests {
 
         assert!(
             !format!("{store:?}").contains("sk-task-secret"),
-            "only the encrypted secret is held"
+            "the store's Debug output never shows the secret"
         );
         let secret = store.task_secret_at(task_id, now).expect("decrypt").expect("present");
         assert_eq!(secret.expose_secret(), "sk-task-secret");
@@ -542,7 +542,7 @@ mod tests {
 
         assert_eq!(store.next_expiry(), Some(now + time::Duration::minutes(1)));
         store.remove_expired(now + time::Duration::minutes(1));
-        assert!(store.task_secrets.lock().is_empty(), "the cleanup task removes it");
+        assert!(store.task_secrets.lock().is_empty(), "the cleanup pass removes it");
     }
 
     #[test]
