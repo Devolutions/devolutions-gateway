@@ -10,8 +10,7 @@ use parking_lot::Mutex;
 use provisioner_task::{NewProvisionerTaskRecord, ProvisionerTaskState};
 
 use super::*;
-use crate::job_queue::JobQueueHandle;
-use crate::job_queue::{JobMessage, JobQueueReceiver, MAX_ATTEMPTS};
+use crate::job_queue::{JobMessage, JobQueueHandle, JobQueueReceiver, MAX_ATTEMPTS};
 use crate::provisioner_tasks::runner::{ProvisionerTaskJob, ProvisionerTaskJobQueue, ProvisionerTaskRunner};
 use crate::recording::RecordingManagerTask;
 use crate::{DgwState, MockHandles};
