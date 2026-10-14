@@ -532,6 +532,10 @@ jobs:
         run: pnpm --filter @devolutions/session-recording-log test
         working-directory: webapp
 
+      - name: Run multi-video-player tests
+        run: pnpm --filter @devolutions/multi-video-player test --runInBand
+        working-directory: webapp
+
       - name: Upload gateway-ui artifact
         uses: actions/upload-artifact@v7
         with:
