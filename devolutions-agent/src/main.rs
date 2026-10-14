@@ -53,8 +53,8 @@ use devolutions_agent::enrollment::parse_enrollment_jwt;
 
 use self::service::{AgentService, DESCRIPTION, DISPLAY_NAME, SERVICE_NAME};
 
-const BAD_CONFIG_ERR_CODE: u32 = 1;
-const START_FAILED_ERR_CODE: u32 = 2;
+const BAD_CONFIG_ERR_CODE: u8 = 1;
+const START_FAILED_ERR_CODE: u8 = 2;
 
 #[derive(Debug, PartialEq, Eq)]
 struct UpCommand {
@@ -69,7 +69,7 @@ fn agent_service_main(
     _tx: mpsc::Sender<AgentServiceEvent>,
     _args: Vec<String>,
     _standalone_mode: bool,
-) -> u32 {
+) -> u8 {
     let Ok(conf_handle) = ConfHandle::init() else {
         // At this point, the logger is not yet initialized.
         return BAD_CONFIG_ERR_CODE;
@@ -318,7 +318,15 @@ fn main() {
             }
         }
     } else {
-        let _result = controller.register(service_main_wrapper);
+        // Propagate the service exit code so that service managers (e.g.: systemd) see failures.
+        match controller.register(service_main_wrapper) {
+            Ok(0) => {}
+            Ok(exit_code) => std::process::exit(i32::from(exit_code)),
+            Err(error) => {
+                eprintln!("[ERROR] Failed to register service: {error}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 

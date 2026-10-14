@@ -44,7 +44,7 @@ ironrdp-rdcleanpath = "0.2"
 ironrdp-tokio = "0.10"
 ironrdp-connector = "0.10"
 ironrdp-acceptor = "0.10"
-ceviche = "0.7"
+ceviche = "0.8"
 picky-krb = "0.12"
 kdc = "0.1"
 
