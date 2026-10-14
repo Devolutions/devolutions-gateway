@@ -1597,7 +1597,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccc2776f0c61eca1ca32528f85548abd1a4be8fb53d1b21c013e4f18da1e7090"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.118",
 ]
 
 [[package]]
@@ -2384,7 +2384,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3228,12 +3228,12 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite 0.2.17",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration",
  "tokio 1.52.3",
  "tower-service",
  "tracing",
- "windows-registry 0.5.3",
+ "windows-registry 0.6.1",
 ]
 
 [[package]]
@@ -3767,7 +3767,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4158,8 +4158,9 @@ dependencies = [
 
 [[package]]
 name = "libsql"
-version = "0.9.30"
-source = "git+https://github.com/Devolutions/libsql?tag=0.9.30-devo.1#182bcfed212f4b034173669777a9bee4dbd943fb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6bca1704194048f0f0bbc8a8e05ba85c0c67628b03bd59346dd2fdd946a1588"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -4196,8 +4197,9 @@ dependencies = [
 
 [[package]]
 name = "libsql-ffi"
-version = "0.9.30"
-source = "git+https://github.com/Devolutions/libsql?tag=0.9.30-devo.1#182bcfed212f4b034173669777a9bee4dbd943fb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f232292810b6298d17466b59bf8077d075fb016d89c281ca9dc968ea4a3b9d03"
 dependencies = [
  "bindgen",
  "cc",
@@ -4207,8 +4209,9 @@ dependencies = [
 
 [[package]]
 name = "libsql-hrana"
-version = "0.9.30"
-source = "git+https://github.com/Devolutions/libsql?tag=0.9.30-devo.1#182bcfed212f4b034173669777a9bee4dbd943fb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ceb7fa4a6b75b9eeffe2a375bde04ee8f48910d135a83ffd4191ddfd346c25c"
 dependencies = [
  "base64 0.21.7",
  "bytes 1.12.1",
@@ -4218,8 +4221,9 @@ dependencies = [
 
 [[package]]
 name = "libsql-rusqlite"
-version = "0.9.30"
-source = "git+https://github.com/Devolutions/libsql?tag=0.9.30-devo.1#182bcfed212f4b034173669777a9bee4dbd943fb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "699682e3695674ab37edc251b31e6fb4b5b81fb8ebabe3efc8cf2d24bb0347f5"
 dependencies = [
  "bitflags 2.13.1",
  "fallible-iterator 0.2.0",
@@ -4232,7 +4236,8 @@ dependencies = [
 [[package]]
 name = "libsql-sqlite3-parser"
 version = "0.13.0"
-source = "git+https://github.com/Devolutions/libsql?tag=0.9.30-devo.1#182bcfed212f4b034173669777a9bee4dbd943fb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15a90128c708356af8f7d767c9ac2946692c9112b4f74f07b99a01a60680e413"
 dependencies = [
  "bitflags 2.13.1",
  "cc",
@@ -4248,8 +4253,9 @@ dependencies = [
 
 [[package]]
 name = "libsql-sys"
-version = "0.9.30"
-source = "git+https://github.com/Devolutions/libsql?tag=0.9.30-devo.1#182bcfed212f4b034173669777a9bee4dbd943fb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf4a7f2d76f49442c273a892a574a272b8b35f4bf0b1b25a475f2cc95885fe0f"
 dependencies = [
  "bytes 1.12.1",
  "libsql-ffi",
@@ -4261,8 +4267,9 @@ dependencies = [
 
 [[package]]
 name = "libsql_replication"
-version = "0.9.30"
-source = "git+https://github.com/Devolutions/libsql?tag=0.9.30-devo.1#182bcfed212f4b034173669777a9bee4dbd943fb"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2c8989755a2e5bec262ef4a7cfbf4765ae07b965cc39341168327d33c88f473"
 dependencies = [
  "aes 0.8.4",
  "async-stream",
@@ -4950,7 +4957,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6097,7 +6104,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.3",
  "rustls 0.23.43",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "thiserror 2.0.20",
  "tokio 1.52.3",
  "tracing",
@@ -6137,9 +6144,9 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6656,7 +6663,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6756,7 +6763,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7311,7 +7318,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -7615,7 +7622,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -9085,7 +9092,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

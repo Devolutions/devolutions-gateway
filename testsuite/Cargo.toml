@@ -43,7 +43,7 @@ agent-tunnel-libsql.path = "../crates/agent-tunnel-libsql"
 gateway-db.path = "../crates/gateway-db"
 ipnetwork = "0.20"
 jmux-proto = { path = "../crates/jmux-proto" }
-libsql = { version = "0.9", default-features = false, features = ["core"] }
+libsql = { version = "0.10", default-features = false, features = ["core"] }
 mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
