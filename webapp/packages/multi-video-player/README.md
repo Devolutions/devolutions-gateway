@@ -15,11 +15,11 @@ A custom web component video player built on top of video.js that specializes in
 
 ### Including the Web Component
 
-Simply include the JavaScript and CSS files in your HTML document:
+In a project using a bundler such as Vite, install the package and import the component and its stylesheet:
 
-```html
-<link rel="stylesheet" href="./dist/multi-video-player.css" />
-<script src="./dist/multi-video-player.js" type="module"></script>
+```javascript
+import '@devolutions/multi-video-player';
+import '@devolutions/multi-video-player/index.css';
 ```
 
 Then use the custom element in your HTML:
@@ -30,7 +30,7 @@ Then use the custom element in your HTML:
 
 ### Basic Implementation
 
-Complete example of using the web component:
+For example, use this `index.html` in a Vite project with the package installed:
 
 ```html
 <!DOCTYPE html>
@@ -39,14 +39,13 @@ Complete example of using the web component:
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multi Video Player Example</title>
-    <link rel="stylesheet" href="./dist/multi-video-player.css" />
   </head>
   <body>
     <multi-video-player width="800" height="700" muted controls></multi-video-player>
     
-    <script src="./dist/multi-video-player.js" type="module"></script>
     <script type="module">
-      import { MultiVideoPlayer } from './dist/multi-video-player.js';
+      import '@devolutions/multi-video-player';
+      import '@devolutions/multi-video-player/index.css';
       
       // Define your playlist
       const playList = [
@@ -120,6 +119,7 @@ interface SourceMetadata {
 ```
 
 Times use each clip's `SourceMetadata.duration`, not its reported media duration, and clips form a back-to-back timeline.
+Playlist metadata is fixed for each `play()` initialization; call `play()` again to apply changes.
 Durations must be finite and nonnegative.
 Source URLs must be nonempty strings, not whitespace.
 Before a playlist is initialized, `currentTime` and `duration` are `0`, `currentClipIndex` is `-1`, and `seek()` and `resume()` resolve without loading a source.

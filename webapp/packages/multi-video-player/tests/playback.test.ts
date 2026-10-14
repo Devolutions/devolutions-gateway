@@ -274,6 +274,90 @@ describe('recording playback API', () => {
     expect(element.currentClipIndex).toBe(0);
   });
 
+  it('keeps metadata stable until the playlist is initialized again', async () => {
+    const sources = playlist.slice(0, 2).map((source) => ({ ...source }));
+    await start(sources);
+    sources[0].duration = 100;
+    sources[1].duration = 40;
+    sources[1].src = 'updated.webm';
+
+    const originalSeek = element.seek(15.5);
+    fixture.emit('loadedmetadata');
+    await originalSeek;
+    expect(element.duration).toBe(30.5);
+    expect(element.currentTime).toBe(15.5);
+    expect(element.currentClipIndex).toBe(1);
+    expect(fixture.state.time).toBe(5);
+    expect(fixture.player.src).toHaveBeenLastCalledWith(expect.objectContaining({ src: playlist[1].src }));
+
+    await element.play(sources);
+    fixture.emit('loadedmetadata');
+    const updatedSeek = element.seek(105);
+    fixture.emit('loadedmetadata');
+    await updatedSeek;
+    expect(element.duration).toBe(140);
+    expect(element.currentTime).toBe(105);
+    expect(element.currentClipIndex).toBe(1);
+    expect(fixture.state.time).toBe(5);
+    expect(fixture.player.src).toHaveBeenLastCalledWith(expect.objectContaining({ src: 'updated.webm' }));
+  });
+
+  it('snapshots metadata provided through prototype getters', async () => {
+    const source = new (class {
+      get src() {
+        return 'getters.webm';
+      }
+      get type() {
+        return 'video/webm';
+      }
+      get duration() {
+        return 10.5;
+      }
+    })();
+    await start([source]);
+    await element.seek(4.5);
+    expect(element.duration).toBe(10.5);
+    expect(element.currentTime).toBe(4.5);
+    expect(fixture.player.src).toHaveBeenLastCalledWith(
+      expect.objectContaining({ src: 'getters.webm', type: 'video/webm' }),
+    );
+  });
+
+  it('uses linear seek work and constant-time clock reads for long playlists', async () => {
+    const clipCount = 1000;
+    const manager = await start(
+      Array.from({ length: clipCount }, (_, index) => ({
+        src: `clip-${index}.webm`,
+        type: 'video/webm',
+        duration: 1,
+      })),
+    );
+    let handleReads = 0;
+    manager.handles = new Proxy(manager.handles, {
+      get(target, property, receiver) {
+        if (typeof property === 'string' && /^\d+$/.test(property)) {
+          handleReads++;
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+
+    const seeking = element.seek(clipCount - 0.5);
+    fixture.emit('loadedmetadata');
+    await seeking;
+    expect(element.currentClipIndex).toBe(clipCount - 1);
+    expect(element.currentTime).toBe(clipCount - 0.5);
+    expect(handleReads).toBeLessThan(10 * clipCount);
+
+    handleReads = 0;
+    for (let update = 0; update < 5; update++) {
+      fixture.emit('timeupdate');
+      expect(element.currentTime).toBe(clipCount - 0.5);
+      expect(element.duration).toBe(clipCount);
+    }
+    expect(handleReads).toBeLessThan(50);
+  });
+
   it.each([
     [0, 0, 0],
     [10.5, 1, 0],

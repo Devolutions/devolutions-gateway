@@ -17,7 +17,7 @@ export function playableSource(player: Player, metadata: SourceMetadata) {
 
 export class ProgressManager {
   handles: ProgressManagerHandle[] = [];
-  playList: SourceMetadata[] = [];
+  readonly duration: number;
   player: Player;
   private currentIndex = -1;
   private sourceInstalled = false;
@@ -40,11 +40,14 @@ export class ProgressManager {
     private readonly onTimeUpdate?: () => void,
     private readonly onClipChange?: () => void,
   ) {
-    this.playList = playList;
     this.player = player;
+    let duration = 0;
     this.handles = playList.map((source, index) => {
-      return new ProgressManagerHandle(this, source, index);
+      const handle = new ProgressManagerHandle(this, source, index, duration);
+      duration += handle.souce.duration;
+      return handle;
     });
+    this.duration = duration;
     this.player.on(['play', 'durationchange', 'timeupdate'], this.updateCurrentHandle);
     this.player.on('loadedmetadata', this.handleLoadedMetadata);
     this.player.on('sourceset', this.handleSourceSet);
@@ -62,10 +65,6 @@ export class ProgressManager {
       },
     });
     this.player.on('ended', this.handleEnded);
-  }
-
-  get duration() {
-    return this.playList.reduce((total, source) => total + source.duration, 0);
   }
 
   get currentTime() {
@@ -339,15 +338,20 @@ export class ProgressManager {
 }
 
 export class ProgressManagerHandle {
-  souce: SourceMetadata;
+  readonly souce: Readonly<SourceMetadata>;
   index: number;
   manager: ProgressManager;
   component: SingleVideoSeekBar | undefined;
   private _status: Status = { status: 'NotStarted' };
   private statusUpdateCallback: ((status: Status) => void) | undefined;
 
-  constructor(manager: ProgressManager, souce: SourceMetadata, index: number) {
-    this.souce = souce;
+  constructor(
+    manager: ProgressManager,
+    souce: SourceMetadata,
+    index: number,
+    readonly startTime: number,
+  ) {
+    this.souce = { src: souce.src, type: souce.type, duration: souce.duration };
     this.index = index;
     this.manager = manager;
   }
@@ -376,16 +380,6 @@ export class ProgressManagerHandle {
 
   userSeek(percentage: Percentage) {
     return this.manager.userSeek(this, percentage);
-  }
-
-  get startTime() {
-    let timeAccumulatedBefore = 0;
-    this.manager.forEachHandle((handle) => {
-      if (handle.index < this.index) {
-        timeAccumulatedBefore += handle.souce.duration;
-      }
-    });
-    return timeAccumulatedBefore;
   }
 
   percentageToTime(percentage: Percentage) {
