@@ -193,6 +193,7 @@ pwsh <skill-dir>/scripts/invoke-jira.ps1 -PlanFile jira-plan.json
 ```
 
 The script handles everything mechanical: creating each ticket, linking cross-project tickets, walking the DGW workflow to Done (`Backlog → To Do → Development → Reviewing → Done`), and deleting `jira-plan.json` when done.
+If a ticket is created but can't be moved to Done, the script warns with the transitions Jira offers and keeps going; report it so the user can move the ticket manually.
 
 The result JSON is written to stdout:
 

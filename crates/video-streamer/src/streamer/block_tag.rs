@@ -12,6 +12,7 @@ pub(crate) enum BlockTag {
 
 #[derive(Clone)]
 pub(crate) struct VideoBlock {
+    pub(crate) track: u64,
     pub(crate) cluster_timestamp: Option<u64>,
     pub(crate) timestamp: i16,
     pub(crate) is_key_frame: bool,
@@ -22,6 +23,7 @@ impl fmt::Debug for VideoBlock {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("VideoBlock")
             .field("cluster_timestamp", &self.cluster_timestamp)
+            .field("track", &self.track)
             .field("timestamp", &self.timestamp)
             .field("is_key_frame", &self.is_key_frame)
             .field(
@@ -58,6 +60,7 @@ impl VideoBlock {
                     .any(|frame| is_vpx_key_frame(frame.data, codec));
 
                 Self {
+                    track: block.track,
                     cluster_timestamp,
                     block_tag: BlockTag::BlockGroup(children),
                     timestamp,
@@ -67,6 +70,7 @@ impl VideoBlock {
             MatroskaSpec::SimpleBlock(data) => {
                 let simple_block = SimpleBlock::try_from(&data)?;
                 Self {
+                    track: simple_block.track,
                     cluster_timestamp,
                     timestamp: simple_block.timestamp,
                     is_key_frame: simple_block.keyframe,
@@ -80,14 +84,15 @@ impl VideoBlock {
     }
 
     pub(crate) fn absolute_timestamp(&self) -> anyhow::Result<u64> {
-        let timestamp = u64::try_from(self.timestamp)?;
-        Ok(self
+        let cluster_timestamp = self
             .cluster_timestamp
-            .with_context(|| format!("Cluster timestamp not found for timestamp: {}", self.timestamp))?
-            + timestamp)
+            .with_context(|| format!("Cluster timestamp not found for timestamp: {}", self.timestamp))?;
+        let timestamp = i64::try_from(cluster_timestamp)?
+            .checked_add(i64::from(self.timestamp))
+            .context("block timestamp overflow")?;
+        u64::try_from(timestamp).context("negative absolute block timestamp")
     }
 
-    // We only handle non-lacing frames for now
     pub(crate) fn get_frame(&self) -> anyhow::Result<Vec<u8>> {
         let mut frames: Vec<_> = match &self.block_tag {
             BlockTag::SimpleBlock(data) => {
@@ -120,8 +125,8 @@ impl VideoBlock {
             }
         };
 
-        assert!(frames.len() == 1);
-        Ok(frames.pop().expect("frame length was asserted"))
+        anyhow::ensure!(frames.len() == 1, "laced video blocks are not supported");
+        frames.pop().context("video block contains no frame")
     }
 }
 
@@ -222,6 +227,20 @@ mod tests {
         assert_eq!(
             video_block.get_frame().expect("frame should be available"),
             expected_frame
+        );
+    }
+
+    #[test]
+    fn get_frame_rejects_laced_blocks() {
+        let tag = MatroskaSpec::SimpleBlock(vec![0x81, 0x00, 0x01, 0x84, 0x01, 0x00, 0x00]);
+        let video_block = VideoBlock::new(tag, None, VpxCodec::VP8).expect("laced block should parse");
+
+        assert_eq!(
+            video_block
+                .get_frame()
+                .expect_err("laced block should be rejected")
+                .to_string(),
+            "laced video blocks are not supported"
         );
     }
 

@@ -18,6 +18,17 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void KdcClaimsWithExplicitAgent()
+    {
+        const string EXPECTED = """{"krb_kdc":"tcp://hello.world:88","krb_realm":"my.realm.com","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815","jet_agent_id":"4f6c4e0a-2b8e-4d49-9a51-2a8b0d9c7e11"}""";
+
+        var claims = new KdcClaims(gatewayId, "tcp://hello.world:88", "MY.REALM.COM");
+        claims.AgentId = Guid.Parse("4f6c4e0a-2b8e-4d49-9a51-2a8b0d9c7e11");
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void KdcClaimsForCredentialInjection()
     {
         const string EXPECTED = """{"jet_cred_id":"2dd6fb87-5340-4a85-9e96-d383ebef8a41","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";

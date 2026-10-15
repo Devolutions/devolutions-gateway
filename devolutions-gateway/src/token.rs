@@ -650,6 +650,12 @@ pub struct KdcTokenClaims {
     /// through an agent — it has no parent association token to inherit `jet_aid` from, so the
     /// KDC token's own `jti` provides a persistent log-correlation identifier instead.
     pub jti: Uuid,
+
+    /// Optional explicit agent for the KDC traffic of a real destination.
+    ///
+    /// When set, every KDC message is forwarded through the specified agent, and the request fails instead of connecting directly or falling back to route matching.
+    /// A credential-injection destination is served inside the Gateway, so the claim has no effect there.
+    pub jet_agent_id: Option<Uuid>,
 }
 
 /// Destination for a KDC session token.
@@ -1550,6 +1556,8 @@ mod serde_impl {
         jet_cred_id: Option<Uuid>,
         #[serde(default = "legacy_kdc_token_jti")]
         jti: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        jet_agent_id: Option<Uuid>,
     }
 
     fn legacy_kdc_token_jti() -> Uuid {
@@ -1808,12 +1816,14 @@ mod serde_impl {
                     krb_kdc: Some(SmolStr::new(krb_kdc.as_str())),
                     jet_cred_id: None,
                     jti: self.jti,
+                    jet_agent_id: self.jet_agent_id,
                 },
                 KdcDestination::Inject { jti } => KdcClaimsHelper {
                     krb_realm: None,
                     krb_kdc: None,
                     jet_cred_id: Some(*jti),
                     jti: self.jti,
+                    jet_agent_id: self.jet_agent_id,
                 },
             };
 
@@ -1868,6 +1878,7 @@ mod serde_impl {
             Ok(Self {
                 destination,
                 jti: claims.jti,
+                jet_agent_id: claims.jet_agent_id,
             })
         }
     }
@@ -1922,6 +1933,26 @@ mod tests {
 
         assert_ne!(claims.jti, Uuid::nil());
         assert!(matches!(claims.destination, KdcDestination::Inject { .. }));
+    }
+
+    #[rstest::rstest]
+    #[case::absent(None)]
+    #[case::explicit(Some(Uuid::new_v4()))]
+    fn kdc_claims_round_trip_agent_id(#[case] agent_id: Option<Uuid>) {
+        let mut token = serde_json::json!({
+            "krb_realm": "example.com",
+            "krb_kdc": "tcp://dc.example.com:88",
+            "jti": Uuid::new_v4(),
+        });
+        if let Some(agent_id) = agent_id {
+            token["jet_agent_id"] = serde_json::json!(agent_id);
+        }
+
+        let claims: KdcTokenClaims = serde_json::from_value(token.clone()).expect("KDC claims deserialize");
+        assert_eq!(claims.jet_agent_id, agent_id);
+
+        let serialized = serde_json::to_value(&claims).expect("KDC claims serialize");
+        assert_eq!(serialized.get("jet_agent_id"), token.get("jet_agent_id"));
     }
 
     #[test]

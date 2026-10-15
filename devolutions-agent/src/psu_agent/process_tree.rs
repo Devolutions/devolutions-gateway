@@ -220,6 +220,24 @@ impl Drop for ProcessTree {
 /// The process handle keeps the process ID from being reused while the threads are resumed.
 #[cfg(windows)]
 fn resume_process(process: &std::os::windows::io::OwnedHandle) -> anyhow::Result<()> {
+    use std::os::windows::io::AsRawHandle as _;
+
+    use anyhow::Context as _;
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::System::Threading::GetProcessId;
+
+    // SAFETY: `process` is a valid process handle.
+    let process_id = unsafe { GetProcessId(HANDLE(process.as_raw_handle())) };
+    if process_id == 0 {
+        return Err(std::io::Error::last_os_error()).context("GetProcessId failed");
+    }
+
+    resume_threads(process_id, process_thread_ids(process_id)?, open_thread)
+}
+
+/// Lists the threads of a process from a snapshot of every thread on the system.
+#[cfg(windows)]
+fn process_thread_ids(process_id: u32) -> anyhow::Result<Vec<u32>> {
     use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
     use anyhow::Context as _;
@@ -227,16 +245,6 @@ fn resume_process(process: &std::os::windows::io::OwnedHandle) -> anyhow::Result
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, TH32CS_SNAPTHREAD, THREADENTRY32, Thread32First, Thread32Next,
     };
-    use windows::Win32::System::Threading::{
-        GetProcessId, GetProcessIdOfThread, OpenThread, ResumeThread, THREAD_QUERY_LIMITED_INFORMATION,
-        THREAD_SUSPEND_RESUME,
-    };
-
-    // SAFETY: `process` is a valid process handle.
-    let process_id = unsafe { GetProcessId(HANDLE(process.as_raw_handle())) };
-    if process_id == 0 {
-        return Err(std::io::Error::last_os_error()).context("GetProcessId failed");
-    }
 
     // SAFETY: Taking a thread snapshot has no preconditions.
     let snapshot =
@@ -249,42 +257,105 @@ fn resume_process(process: &std::os::windows::io::OwnedHandle) -> anyhow::Result
         dwSize: u32::try_from(size_of::<THREADENTRY32>()).expect("THREADENTRY32 size fits in u32"),
         ..THREADENTRY32::default()
     };
-    let mut resumed_threads = 0;
+    let mut thread_ids = Vec::new();
 
     // SAFETY: `snapshot` is valid, and `entry` is a properly sized and writable THREADENTRY32.
     let mut next = unsafe { Thread32First(snapshot, &mut entry) };
     while next.is_ok() {
         if entry.th32OwnerProcessID == process_id {
-            // SAFETY: Opening a thread by ID has no memory safety preconditions.
-            let thread = unsafe {
-                OpenThread(
-                    THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
-                    false,
-                    entry.th32ThreadID,
-                )
-            }
-            .context("OpenThread failed")?;
-            // SAFETY: `thread` is a valid handle owned by this function and not closed anywhere else.
-            let thread = unsafe { OwnedHandle::from_raw_handle(thread.0) };
-
-            // The thread may have exited since the snapshot and its ID been reused by another process.
-            // SAFETY: `thread` is a valid thread handle with THREAD_QUERY_LIMITED_INFORMATION access.
-            let owned_by_process = unsafe { GetProcessIdOfThread(HANDLE(thread.as_raw_handle())) } == process_id;
-
-            if owned_by_process {
-                // SAFETY: `thread` is a valid thread handle with THREAD_SUSPEND_RESUME access.
-                if unsafe { ResumeThread(HANDLE(thread.as_raw_handle())) } == u32::MAX {
-                    return Err(std::io::Error::last_os_error()).context("ResumeThread failed");
-                }
-                resumed_threads += 1;
-            }
+            thread_ids.push(entry.th32ThreadID);
         }
 
         // SAFETY: Same as for `Thread32First`.
         next = unsafe { Thread32Next(snapshot, &mut entry) };
     }
 
-    anyhow::ensure!(resumed_threads > 0, "no thread found for process {process_id}");
+    Ok(thread_ids)
+}
+
+#[cfg(windows)]
+fn open_thread(thread_id: u32) -> windows::core::Result<std::os::windows::io::OwnedHandle> {
+    use std::os::windows::io::{FromRawHandle as _, OwnedHandle};
+
+    use windows::Win32::System::Threading::{OpenThread, THREAD_QUERY_LIMITED_INFORMATION, THREAD_SUSPEND_RESUME};
+
+    // SAFETY: Opening a thread by ID has no memory safety preconditions.
+    let thread = unsafe {
+        OpenThread(
+            THREAD_SUSPEND_RESUME | THREAD_QUERY_LIMITED_INFORMATION,
+            false,
+            thread_id,
+        )
+    }?;
+
+    // SAFETY: `thread` is a valid handle owned by this function and not closed anywhere else.
+    Ok(unsafe { OwnedHandle::from_raw_handle(thread.0) })
+}
+
+/// Resumes the listed threads of a process, and fails unless at least one of them was suspended.
+///
+/// Threads that exited since they were listed are skipped. Other processes, such as security software, can inject
+/// short-lived threads into a new process.
+#[cfg(windows)]
+fn resume_threads(
+    process_id: u32,
+    thread_ids: impl IntoIterator<Item = u32>,
+    open_thread: impl Fn(u32) -> windows::core::Result<std::os::windows::io::OwnedHandle>,
+) -> anyhow::Result<()> {
+    use std::os::windows::io::AsRawHandle as _;
+
+    use anyhow::Context as _;
+    use windows::Win32::Foundation::{ERROR_INVALID_PARAMETER, HANDLE, STILL_ACTIVE};
+    use windows::Win32::System::Threading::{GetExitCodeThread, GetProcessIdOfThread, ResumeThread};
+
+    let mut resumed_threads = 0;
+
+    for thread_id in thread_ids {
+        let thread = match open_thread(thread_id) {
+            Ok(thread) => thread,
+            // The thread ID no longer exists, so the thread exited since it was listed.
+            Err(error) if error.code() == ERROR_INVALID_PARAMETER.to_hresult() => {
+                debug!(process_id, thread_id, %error, "Skipped PSU child process thread that already exited");
+                continue;
+            }
+            Err(error) => return Err(error).context("OpenThread failed"),
+        };
+        let handle = HANDLE(thread.as_raw_handle());
+
+        // The thread may have exited since it was listed and its ID been reused by another process.
+        // SAFETY: `handle` is a valid thread handle with THREAD_QUERY_LIMITED_INFORMATION access.
+        if unsafe { GetProcessIdOfThread(handle) } != process_id {
+            continue;
+        }
+
+        // SAFETY: `handle` is a valid thread handle with THREAD_SUSPEND_RESUME access.
+        let previous_suspend_count = unsafe { ResumeThread(handle) };
+        if previous_suspend_count == u32::MAX {
+            let error = std::io::Error::last_os_error();
+
+            let mut exit_code = 0;
+            // SAFETY: `handle` is a valid thread handle with THREAD_QUERY_LIMITED_INFORMATION access, and
+            // `exit_code` is writable.
+            let exited = unsafe { GetExitCodeThread(handle, &mut exit_code) }.is_ok()
+                && exit_code != STILL_ACTIVE.0.cast_unsigned();
+            if exited {
+                debug!(process_id, thread_id, %error, "Skipped PSU child process thread that already exited");
+                continue;
+            }
+
+            return Err(error).context("ResumeThread failed");
+        }
+
+        // A thread that was not suspended, such as an injected one, does not show that the initial thread runs.
+        if previous_suspend_count > 0 {
+            resumed_threads += 1;
+        }
+    }
+
+    anyhow::ensure!(
+        resumed_threads > 0,
+        "no suspended thread resumed for process {process_id}"
+    );
 
     Ok(())
 }
@@ -299,5 +370,77 @@ pub(super) mod tests {
         ///
         /// Tokio tests use a current-thread runtime, so tasks spawned by a test run on its thread.
         pub(in crate::psu_agent) static FAIL_NEXT_START: Cell<bool> = const { Cell::new(false) };
+    }
+
+    #[cfg(windows)]
+    mod resume {
+        use std::os::windows::process::CommandExt as _;
+        use std::process::{Child, Command, Stdio};
+
+        use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_INVALID_PARAMETER};
+        use windows::Win32::System::Threading::CREATE_SUSPENDED;
+
+        use super::super::{open_thread, process_thread_ids, resume_threads};
+
+        /// Thread ID of a thread that exited after it was listed, which can no longer be opened.
+        const EXITED_THREAD_ID: u32 = u32::MAX;
+
+        fn spawn_suspended() -> Child {
+            Command::new("cmd.exe")
+                .args(["/c", "exit 7"])
+                .creation_flags(CREATE_SUSPENDED.0)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .expect("spawn suspended child process")
+        }
+
+        fn open_unless_exited(thread_id: u32) -> windows::core::Result<std::os::windows::io::OwnedHandle> {
+            if thread_id == EXITED_THREAD_ID {
+                Err(ERROR_INVALID_PARAMETER.to_hresult().into())
+            } else {
+                open_thread(thread_id)
+            }
+        }
+
+        #[test]
+        fn thread_that_exited_before_it_was_opened_is_skipped() {
+            let mut child = spawn_suspended();
+            let mut thread_ids = process_thread_ids(child.id()).expect("list child process threads");
+            assert!(!thread_ids.is_empty());
+            thread_ids.insert(0, EXITED_THREAD_ID);
+
+            let result = resume_threads(child.id(), thread_ids, open_unless_exited);
+            if result.is_err() {
+                let _ = child.kill();
+            }
+            result.expect("resume child process");
+
+            assert_eq!(child.wait().expect("wait for child process").code(), Some(7));
+        }
+
+        #[test]
+        fn start_fails_when_no_thread_is_resumed() {
+            let mut child = spawn_suspended();
+
+            let result = resume_threads(child.id(), [EXITED_THREAD_ID], open_unless_exited);
+            child.kill().expect("kill suspended child process");
+            let _ = child.wait();
+
+            result.expect_err("no thread of the child process was resumed");
+        }
+
+        #[test]
+        fn thread_that_cannot_be_opened_for_another_reason_fails_the_start() {
+            let mut child = spawn_suspended();
+            let thread_ids = process_thread_ids(child.id()).expect("list child process threads");
+
+            let result = resume_threads(child.id(), thread_ids, |_| Err(ERROR_ACCESS_DENIED.to_hresult().into()));
+            child.kill().expect("kill suspended child process");
+            let _ = child.wait();
+
+            result.expect_err("the initial thread of the child process could not be opened");
+        }
     }
 }

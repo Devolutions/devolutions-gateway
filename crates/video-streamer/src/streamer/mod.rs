@@ -16,12 +16,11 @@ pub(crate) mod channel_writer;
 pub(crate) mod iter;
 pub(crate) mod protocol;
 pub(crate) mod reopenable_file;
-pub(crate) mod signal_writer;
 pub(crate) mod tag_writers;
 
 use tokio::io::AsyncWriteExt;
 
-use crate::StreamingConfig;
+use crate::SessionConfig;
 use crate::reopenable::Reopenable;
 
 #[instrument(skip_all)]
@@ -29,7 +28,7 @@ pub fn webm_stream(
     output_stream: impl tokio::io::AsyncWrite + tokio::io::AsyncRead + Unpin + Send + 'static, // A websocket usually
     input_stream: impl std::io::Read + Reopenable,                                             // A file usually
     shutdown_signal: Arc<Notify>,
-    config: StreamingConfig,
+    config: SessionConfig,
     when_new_chunk_appended: impl Fn() -> tokio::sync::oneshot::Receiver<()>,
 ) -> anyhow::Result<()> {
     let mut webm_itr = WebmPositionedIterator::new(input_stream, cadeau::xmf::vpx::VpxCodec::VP8);

@@ -8,7 +8,7 @@ use webm_iterable::{WebmWriter, WriteOptions};
 
 use super::block_tag::VideoBlock;
 use super::channel_writer::ChannelWriterError;
-use crate::StreamingConfig;
+use crate::SessionConfig;
 use crate::debug::mastroka_spec_name;
 
 const VPX_EFLAG_FORCE_KF: u32 = 0x00000001;
@@ -721,10 +721,10 @@ pub(crate) struct EncodeWriterConfig {
 
 pub(crate) type Headers<'a> = &'a [MatroskaSpec];
 
-impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
+impl TryFrom<(Headers<'_>, &SessionConfig)> for EncodeWriterConfig {
     type Error = anyhow::Error;
 
-    fn try_from(value: (Headers<'_>, &StreamingConfig)) -> Result<Self, Self::Error> {
+    fn try_from(value: (Headers<'_>, &SessionConfig)) -> Result<Self, Self::Error> {
         let (value, config) = value;
         let mut width = None;
         let mut height = None;
@@ -732,7 +732,7 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
 
         perf_trace!(
             headers_count = value.len(),
-            encoder_threads = config.encoder_threads.value,
+            encoder_threads = config.encoder_threads,
             "EncodeWriterConfig::try_from - parsing headers"
         );
 
@@ -774,11 +774,7 @@ impl TryFrom<(Headers<'_>, &StreamingConfig)> for EncodeWriterConfig {
             "Header parsing complete - creating config"
         );
 
-        let threads = config
-            .encoder_threads
-            .value
-            .try_into()
-            .context("invalid thread count")?;
+        let threads = config.encoder_threads;
 
         let final_width = width.map(u32::try_from).context("no width specified in headers")??;
         let final_height = height.map(u32::try_from).context("no height specified in headers")??;

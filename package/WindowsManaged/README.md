@@ -88,11 +88,10 @@ Keys missing from a translation fall back to English.
 
 Each language is built as a separate MSI, turned into a transform, and embedded in the final MSI.
 To add a language, follow the checklist in `.agents/skills/installer-localization/SKILL.md`.
+
 ## Command line properties
 
 Public properties can be passed to `msiexec` to drive unattended installs and upgrades.
-**The service-account example and properties below are forthcoming and are not available in Gateway 2026.3.0.**
-For that release, use the [manual service-account procedure][service-account-guide].
 
 ```powershell
 msiexec /i DevolutionsGateway.msi /qn REBOOT=ReallySuppress P.SERVICEACCOUNT="CONTOSO\gateway$"
@@ -100,7 +99,9 @@ msiexec /i DevolutionsGateway.msi /qn REBOOT=ReallySuppress P.SERVICEACCOUNT="CO
 
 ### Service account
 
-For the current-release manual procedure, maintenance limitations, diagnostics, and migration to this interface, see the [Windows service-account guide][service-account-guide].
+Gateway 2026.3.1 is the first release that supports the service-account properties below.
+Older MSIs ignore them; for 2026.3.0 and earlier, use the legacy manual procedure in the [Windows service-account guide][service-account-guide].
+The guide also covers account preparation, migration from a manual setup, failed-upgrade recovery, and diagnostics.
 
 By default the service runs as `NT AUTHORITY\NetworkService`.
 Use these properties or `Install-DGatewayPackage -ServiceAccount` to select another account; there is no account-selection dialog.
@@ -146,7 +147,7 @@ If the service is missing, provide the account explicitly and its password when 
 
 Devolutions Agent updates Gateway only under NETWORK SERVICE, the Gateway virtual account, or a verified managed service account.
 Password-based accounts require manual upgrades.
-Use an Agent version that supports custom Gateway accounts; older Agents grant update-channel write access only to NETWORK SERVICE.
+Use Agent 2026.3.1 or later; older Agents grant update-channel write access only to NETWORK SERVICE.
 After an external account change, the Agent refreshes those permissions on its periodic status check, normally every five minutes.
 The existing Agent downgrade mechanism remains an uninstall followed by installation; direct MSI downgrades remain blocked.
 Older target installers may not recognize custom-account properties.

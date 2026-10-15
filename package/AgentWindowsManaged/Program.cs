@@ -352,6 +352,13 @@ internal class Program
                 RegistryKeyAction = RegistryKeyAction.create,
                 Feature = Features.PSU_FEATURE,
             },
+            new (RegistryHive.LocalMachine, $"SOFTWARE\\{Includes.VENDOR_NAME}\\{Includes.SHORT_NAME}", "PackageBrokerEnabled", "1")
+            {
+                AttributesDefinition = "Type=string",
+                Win64 = project.Platform == Platform.x64,
+                RegistryKeyAction = RegistryKeyAction.create,
+                Feature = Features.PACKAGE_BROKER_FEATURE,
+            },
             CreateEventLogSourceRegistryValue(project.Platform == Platform.x64),
         };
 
@@ -529,6 +536,10 @@ internal class Program
         {
             features.Add(Features.AGENT_UPDATER_FEATURE.Id);
             features.Add(Features.SESSION_FEATURE.Id);
+        }
+        else if (Helpers.PackageBrokerUpgrade.ShouldSelect(Helpers.AppSearch.InstalledProductFeatureNames, Helpers.PackageBrokerUpgrade.TryReadAgentConfig()))
+        {
+            features.Add(Features.PACKAGE_BROKER_FEATURE.Id);
         }
 
         e.Session["ADDLOCAL"] = features.ToString();

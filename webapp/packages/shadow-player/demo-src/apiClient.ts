@@ -1,6 +1,6 @@
 // Base URL of the API
-const TOKEN_SERVER_BASE_URL = 'http://localhost:8080';
-const GATEWAY_BASE_URL = 'http://localhost:7171';
+const TOKEN_SERVER_BASE_URL = import.meta.env.VITE_TOKEN_SERVER_BASE_URL ?? 'http://localhost:8080';
+const GATEWAY_BASE_URL = import.meta.env.VITE_GATEWAY_BASE_URL ?? 'http://localhost:7171';
 
 // Common request fields
 interface CommonRequest {

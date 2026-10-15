@@ -1,9 +1,9 @@
-CREATE TABLE metadata (
+CREATE TABLE agent_tunnel_metadata (
     key TEXT PRIMARY KEY,
     value BLOB NOT NULL
 );
 
-CREATE TABLE accepted_agents (
+CREATE TABLE agent_tunnel_accepted_agents (
     agent_id TEXT PRIMARY KEY,
     name TEXT NOT NULL COLLATE NOCASE UNIQUE,
     client_spki_sha256 BLOB NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE accepted_agents (
     CHECK (length(client_spki_sha256) = 32)
 );
 
-CREATE TABLE enrollment_attempts (
+CREATE TABLE agent_tunnel_enrollment_attempts (
     jti TEXT PRIMARY KEY,
     agent_id TEXT NOT NULL,
     request_sha256 BLOB NOT NULL,
@@ -23,7 +23,7 @@ CREATE TABLE enrollment_attempts (
     CHECK (deleted IN (0, 1))
 );
 
-CREATE TABLE deleted_agent_keys (
+CREATE TABLE agent_tunnel_deleted_agent_keys (
     client_spki_sha256 BLOB PRIMARY KEY,
     agent_id TEXT NOT NULL,
     CHECK (length(client_spki_sha256) = 32)

@@ -138,3 +138,26 @@ async fn kdc_connector_rejects_an_explicit_missing_agent() {
 
     listener.shutdown().await;
 }
+
+#[tokio::test]
+async fn kdc_connector_rejects_udp_for_an_explicit_agent_before_dialing() {
+    let listener = bind_test_listener().await;
+    let (agent_id, connection) = listener.connect_agent("udp-pinned-kdc-agent").await;
+    let _ctrl = advertise_loopback(&connection, &listener, agent_id).await;
+    let connector = KdcConnector::new(Uuid::new_v4(), Some(agent_id), Some(Arc::new(listener.handle.clone())));
+
+    let error = connector
+        .send(&target("udp", 88), KDC_REQUEST)
+        .await
+        .expect_err("udp with an explicit agent should be rejected");
+    assert!(format!("{error}").contains("does not yet support UDP"));
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), connection.accept_bi())
+            .await
+            .is_err(),
+        "the explicit agent must not be asked to dial the KDC for a udp:// target"
+    );
+
+    connection.close(0u32.into(), b"test done");
+    listener.shutdown().await;
+}

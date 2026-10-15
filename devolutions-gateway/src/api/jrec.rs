@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use axum::body::Body;
-use axum::extract::ws::{CloseFrame, WebSocket};
+use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderValue};
 use axum::response::Response;
@@ -955,70 +955,38 @@ where
     crate::http::serve_dir(request, path, player_root, player_index).await
 }
 
-// Code from 4000 to 4999 are reserved for private custom use
-// https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code
-enum StreamerCloseCode {
-    StreamingEnded = 4001,
-    InternalError = 4002,
-    Forbidden = 4003,
-}
-
-impl From<StreamerCloseCode> for CloseFrame {
-    fn from(code: StreamerCloseCode) -> Self {
-        CloseFrame {
-            code: code as u16 as extract::ws::CloseCode,
-            reason: extract::ws::Utf8Bytes::from_static(""),
-        }
-    }
-}
-
 async fn shadow_recording(
-    State(DgwState { recordings, .. }): State<DgwState>,
+    State(DgwState {
+        recordings,
+        shutdown_signal,
+        ..
+    }): State<DgwState>,
     extract::Path(id): extract::Path<Uuid>,
     JrecToken(claims): JrecToken,
     ws: WebSocketUpgrade,
-) -> Result<Response, HttpError> {
+) -> Response {
+    use crate::streaming::{ShadowCloseCode, reject_shadow};
+
     if id != claims.jet_aid {
-        return close_with_error(ws, StreamerCloseCode::Forbidden);
+        return reject_shadow(ws, ShadowCloseCode::Forbidden);
     }
 
-    if !recordings.active_recordings.contains(id) {
-        return close_with_error(ws, StreamerCloseCode::StreamingEnded);
-    }
-
-    let Ok(Some(crate::recording::OnGoingRecordingState::Connected)) = recordings.get_state(id).await else {
-        return close_with_error(ws, StreamerCloseCode::StreamingEnded);
+    // One subscription answers both whether the recording runs and what it contains, so the two can’t disagree.
+    let stream_state = match recordings.subscribe_to_stream(id).await {
+        Ok(Some(stream_state)) => stream_state,
+        Ok(None) => return reject_shadow(ws, ShadowCloseCode::StreamingEnded),
+        Err(error) => {
+            warn!(%id, error = format!("{error:#}"), "Shadow recording rejected: recording manager unavailable");
+            return reject_shadow(ws, ShadowCloseCode::InternalError);
+        }
     };
 
     if !xmf::is_init() {
         warn!(%id, "Shadow recording rejected: XMF native library is not loaded");
-        return close_with_error(ws, StreamerCloseCode::InternalError);
+        return reject_shadow(ws, ShadowCloseCode::InternalError);
     }
 
-    let Ok(notify) = recordings.subscribe_to_recording_finish(id).await else {
-        warn!(%id, "Shadow recording rejected: failed to subscribe to recording finish");
-        return close_with_error(ws, StreamerCloseCode::InternalError);
-    };
-
-    let Ok(recording_files) = recordings.list_files(id).await else {
-        warn!(%id, "Shadow recording rejected: failed to list recording files");
-        return close_with_error(ws, StreamerCloseCode::InternalError);
-    };
-
-    let Some(recording_path) = recording_files.last() else {
-        warn!(%id, "Shadow recording rejected: no recording files found");
-        return close_with_error(ws, StreamerCloseCode::InternalError);
-    };
-
-    return crate::streaming::stream_file(recording_path, ws, notify, recordings, id)
-        .await
-        .map_err(|_| HttpError::internal().msg("failed to stream file"));
-
-    fn close_with_error(ws: WebSocketUpgrade, code: StreamerCloseCode) -> Result<Response, HttpError> {
-        Ok(ws.on_upgrade(move |mut ws| async move {
-            let _ = ws.send(extract::ws::Message::Close(Some(code.into()))).await;
-        }))
-    }
+    crate::streaming::stream_recording(ws, shutdown_signal, stream_state, id).await
 }
 
 #[cfg(test)]

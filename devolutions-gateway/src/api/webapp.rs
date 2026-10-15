@@ -391,6 +391,7 @@ pub(crate) async fn sign_session_token(
                     krb_kdc: krb_kdc.clone(),
                 },
                 jti,
+                jet_agent_id: None,
             }
             .pipe(serde_json::to_value)
             .map(|mut claims| {

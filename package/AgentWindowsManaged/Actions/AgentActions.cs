@@ -260,6 +260,26 @@ internal static class AgentActions
     };
 
     /// <summary>
+    /// Carry a hand-configured Package Broker over to <c>F.PackageBroker</c> on upgrade.
+    /// </summary>
+    /// <remarks>
+    /// Runs after <c>MigrateFeatureStates</c> and before <c>InstallValidate</c>, the window in which feature
+    /// states can still change. It only handles upgrades that make no explicit feature selection: the
+    /// interactive UI sets <c>ADDLOCAL</c> itself and applies the same rule in <c>Project_UIInitialized</c>,
+    /// and an explicit <c>ADDLOCAL</c>/<c>REMOVE</c> on the command line is honored as given.
+    /// </remarks>
+    private static readonly ManagedAction selectPackageBrokerOnUpgrade = new(
+        new Id($"CA.{nameof(selectPackageBrokerOnUpgrade)}"),
+        CustomActions.SelectPackageBrokerOnUpgrade,
+        Return.ignore,
+        When.After, Step.MigrateFeatureStates,
+        new Condition("WIX_UPGRADE_DETECTED AND NOT Preselected AND NOT ADDLOCAL AND NOT REMOVE"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+    };
+
+    /// <summary>
     /// Read the requested feature states into a session property for use by the deferred <see cref="configureFeatures"/> action.
     /// </summary>
     /// <remarks>
@@ -488,6 +508,7 @@ internal static class AgentActions
         checkNetFxInstalledVersion,
         getInstallDirFromRegistry,
         setArpInstallLocation,
+        selectPackageBrokerOnUpgrade,
         setFeaturesToConfigure,
         configureFeatures,
         enrollAgentTunnel,

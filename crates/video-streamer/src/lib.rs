@@ -23,22 +23,26 @@ macro_rules! perf_debug {
     ($($tt:tt)*) => {};
 }
 
-pub mod config;
 pub mod debug;
+mod decoder;
+mod normalizer;
+mod protocol;
 pub mod reopenable;
+mod session;
 pub(crate) mod streamer;
 
 #[macro_use]
 extern crate tracing;
 
 #[rustfmt::skip]
-pub use config::StreamingConfig;
-#[rustfmt::skip]
 pub use streamer::reopenable_file::ReOpenableFile;
 #[rustfmt::skip]
-pub use streamer::signal_writer::SignalWriter;
-#[rustfmt::skip]
 pub use streamer::webm_stream;
+#[rustfmt::skip]
+pub use session::{
+    RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt,
+    stream_session,
+};
 
 #[cfg(feature = "bench")]
 pub mod bench_support;

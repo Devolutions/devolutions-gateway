@@ -309,6 +309,8 @@ pub struct KdcClaims {
     pub nbf: i64,
     pub exp: i64,
     pub jti: Uuid,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub jet_agent_id: Option<Uuid>,
 }
 
 pub fn any_kdc_claims(now: i64, validity_duration: i64) -> impl Strategy<Value = KdcClaims> {
@@ -316,13 +318,15 @@ pub fn any_kdc_claims(now: i64, validity_duration: i64) -> impl Strategy<Value =
         "[a-z0-9_-]{5,25}",
         "(tcp|udp)://[a-z]{1,10}\\.[a-z]{1,5}(:[0-9]{3,4})?",
         uuid_typed(),
+        option::of(uuid_typed()),
     )
-        .prop_map(move |(krb_realm, krb_kdc, jti)| KdcClaims {
+        .prop_map(move |(krb_realm, krb_kdc, jti, jet_agent_id)| KdcClaims {
             krb_realm,
             krb_kdc,
             jti,
             nbf: now,
             exp: now + validity_duration,
+            jet_agent_id,
         })
 }
 

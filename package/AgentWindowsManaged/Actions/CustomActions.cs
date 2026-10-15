@@ -318,6 +318,39 @@ namespace DevolutionsAgent.Actions
             }
         }
 
+        /// <summary>
+        /// Select <c>F.PackageBroker</c> on a non-interactive upgrade from a release that predates the
+        /// feature when agent.json already enables the broker. See <see cref="PackageBrokerUpgrade"/>.
+        /// </summary>
+        /// <remarks>
+        /// Best effort: any failure is logged and leaves the feature state untouched.
+        /// </remarks>
+        [CustomAction]
+        public static ActionResult SelectPackageBrokerOnUpgrade(Session session)
+        {
+            try
+            {
+                List<List<string>> previousProductFeatures = session["WIX_UPGRADE_DETECTED"]
+                    .Split([';'], StringSplitOptions.RemoveEmptyEntries)
+                    .Select(productCode => new ProductInstallation(productCode).Features.Select(feature => feature.FeatureName).ToList())
+                    .ToList();
+
+                if (!PackageBrokerUpgrade.ShouldSelect(previousProductFeatures, PackageBrokerUpgrade.TryReadAgentConfig()))
+                {
+                    return ActionResult.Success;
+                }
+
+                session.Features[Features.PACKAGE_BROKER_FEATURE.Id].RequestState = InstallState.Local;
+                session.Log($"selected {Features.PACKAGE_BROKER_FEATURE.Id} because agent.json enables the package broker");
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to carry over the package broker state: {e}");
+            }
+
+            return ActionResult.Success;
+        }
+
         [CustomAction]
         public static ActionResult SetFeaturesToConfigure(Session session)
         {
@@ -329,6 +362,7 @@ namespace DevolutionsAgent.Actions
                 (Features.SESSION_FEATURE.Id, Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.AGENT_UPDATER_FEATURE.Id, Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.PSU_FEATURE.Id, Features.PSU_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
+                (Features.PACKAGE_BROKER_FEATURE.Id, Features.PACKAGE_BROKER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
                 (Features.PEDM_FEATURE.Id, Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length)),
             ];
 
@@ -899,6 +933,7 @@ namespace DevolutionsAgent.Actions
                 Features.SESSION_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.AGENT_UPDATER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.PSU_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
+                Features.PACKAGE_BROKER_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
                 Features.PEDM_FEATURE.Id.Substring(Features.FEATURE_ID_PREFIX.Length),
             ];
 

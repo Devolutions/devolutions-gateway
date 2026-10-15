@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::Context as _;
 use webm_iterable::matroska_spec::{Block, Master, MatroskaSpec, SimpleBlock};
 
-use crate::StreamingConfig;
+use crate::SessionConfig;
 use crate::reopenable::Reopenable;
 use crate::streamer::iter::WebmPositionedIterator;
 use crate::streamer::tag_writers::{EncodeWriterConfig, HeaderWriter, WriterResult};
@@ -46,7 +46,7 @@ impl Write for CountingWriter {
 /// - Requires XMF to be initialized by the caller (e.g. `cadeau::xmf::init(...)`).
 pub fn reencode_first_tags<R>(
     input_stream: R,
-    config: StreamingConfig,
+    config: SessionConfig,
     max_tags: u64,
 ) -> anyhow::Result<ReencodeBenchStats>
 where
@@ -60,7 +60,7 @@ where
 /// This is intended for "sane timeout" local diagnosis: it prevents benches from running forever on slow machines.
 pub fn reencode_first_tags_until_deadline<R>(
     input_stream: R,
-    config: StreamingConfig,
+    config: SessionConfig,
     max_tags: u64,
     max_wall: Option<Duration>,
 ) -> anyhow::Result<ReencodeBenchStats>
@@ -180,7 +180,7 @@ where
 /// - This is a convenience wrapper for Criterion benches.
 pub fn reencode_first_tags_from_path(
     input_path: &Path,
-    config: StreamingConfig,
+    config: SessionConfig,
     max_tags: u64,
 ) -> anyhow::Result<ReencodeBenchStats> {
     let file = crate::streamer::reopenable_file::ReOpenableFile::open(input_path)
@@ -190,7 +190,7 @@ pub fn reencode_first_tags_from_path(
 
 pub fn reencode_first_tags_from_path_until_deadline(
     input_path: &Path,
-    config: StreamingConfig,
+    config: SessionConfig,
     max_tags: u64,
     max_wall: Duration,
 ) -> anyhow::Result<ReencodeBenchStats> {

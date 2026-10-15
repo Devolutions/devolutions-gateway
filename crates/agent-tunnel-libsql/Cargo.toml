@@ -12,8 +12,11 @@ workspace = true
 agent-tunnel.path = "../agent-tunnel"
 anyhow = "1"
 async-trait = "0.1"
-libsql = { version = "0.9", default-features = false, features = ["core", "serde"] }
+camino = "1.1"
+gateway-db.path = "../gateway-db"
+libsql = { version = "0.10", default-features = false, features = ["core", "serde"] }
 tokio = { version = "1.52", features = ["sync"] }
+tracing = "0.1"
 uuid = "1.23"
 
 [dev-dependencies]

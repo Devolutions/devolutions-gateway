@@ -40,7 +40,7 @@ uuid = "1"
 dunce = "1.0"
 tower = "0.5"
 futures-util = "0.3"
-libsql = { version = "0.9", optional = true, default-features = false, features = [ "core", "sync"] }
+libsql = { version = "0.10", optional = true, default-features = false, features = [ "core", "sync"] }
 tokio-postgres = { version = "0.7", optional = true, features = ["with-chrono-0_4"] }
 bb8 = { version = "0.9", optional = true }
 bb8-postgres = { version = "0.9", optional = true }

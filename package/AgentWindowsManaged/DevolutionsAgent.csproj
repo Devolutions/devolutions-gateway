@@ -28,6 +28,9 @@
     <EmbeddedResource Include="Resources\AgentDialogSide.png" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="DevolutionsAgent.Installer.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="System.IO.Compression" Version="4.3.0" />
     <PackageReference Include="System.ValueTuple" Version="4.6.1" />

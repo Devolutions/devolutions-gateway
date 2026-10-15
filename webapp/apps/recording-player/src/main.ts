@@ -1,10 +1,11 @@
+import { SHADOW_PROTOCOL_V2 } from '@devolutions/shadow-player';
 import { GatewayAccessApi } from './gateway';
 import { showNotification } from './notification.ts';
 import { getPlayer } from './players/index.js';
 import { cleanUpStreamers, getShadowPlayer } from './streamers/index.js';
 import './ws-proxy.ts';
 import { setupI18n, t } from './i18n';
-import { OnBeforeClose as BeforeWebsocketClose } from './ws-proxy.ts';
+import { OnBeforeClose as BeforeWebsocketClose, type CloseContext } from './ws-proxy.ts';
 
 async function main() {
   const { sessionId, token, gatewayAccessUrl, isActive, language } = getSessionDetails();
@@ -29,7 +30,7 @@ async function playSessionShadowing(gatewayAccessApi) {
   try {
     const recordingInfo = await gatewayAccessApi.fetchRecordingInfo();
     const fileType = getFileType(recordingInfo);
-    BeforeWebsocketClose((closeEvent) => beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi));
+    BeforeWebsocketClose((closeEvent, context) => beforeWebsocketCloseHandler(closeEvent, context, gatewayAccessApi));
 
     getShadowPlayer(fileType).play(gatewayAccessApi);
   } catch (error) {
@@ -63,7 +64,13 @@ function getFileType(recordingInfo) {
   return recordingInfo.files[0].fileName.split('.')[1];
 }
 
-function beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi) {
+function beforeWebsocketCloseHandler(closeEvent: CloseEvent, context: CloseContext, gatewayAccessApi): CloseEvent {
+  // Hide the close event from other listeners, particularly asciinema-player, while keeping its reason.
+  // For more details, see the asciinema-player WebSocket driver's socket close handler.
+  // https://github.com/asciinema/asciinema-player/blob/c09e1d2625450a32e9e76063cdc315fd54ecdd9d/src/driver/websocket.js#L219
+  const handled = () =>
+    new CloseEvent('close', { code: 1000, reason: closeEvent.reason, wasClean: closeEvent.wasClean });
+
   if (closeEvent.code >= 4000) {
     if (closeEvent.code === StreamerWebsocketCloseCode.StreamingEnded) {
       cleanUpStreamers();
@@ -79,21 +86,17 @@ function beforeWebsocketCloseHandler(closeEvent, gatewayAccessApi) {
       showNotification(t('notifications.unauthorized'), 'error');
     }
 
-    // This prevents extra handling by other listeners, particularly for asciinema-player in this scenario.
-    // For more details, see the asciinema-player WebSocket driver's socket close handler.
-    // https://github.com/asciinema/asciinema-player/blob/c09e1d2625450a32e9e76063cdc315fd54ecdd9d/src/driver/websocket.js#L219
-    return {
-      ...closeEvent,
-      code: 1000,
-    };
+    return handled();
+  }
+
+  // The shadow player retries without the v2 subprotocol when that handshake fails, so it is not an error yet.
+  if (!context.opened && context.protocols.includes(SHADOW_PROTOCOL_V2)) {
+    return closeEvent;
   }
 
   if (closeEvent.code !== 1000 && closeEvent.code !== 1005) {
     showNotification(t('notifications.unknownError'), 'error');
-    return {
-      ...closeEvent,
-      code: 1000,
-    };
+    return handled();
   }
 
   return closeEvent;

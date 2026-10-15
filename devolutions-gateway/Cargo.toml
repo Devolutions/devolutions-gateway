@@ -36,14 +36,15 @@ network-monitor.path = "../crates/network-monitor"
 sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
 agent-tunnel = { path = "../crates/agent-tunnel" }
-agent-tunnel-libsql = { path = "../crates/agent-tunnel-libsql" }
+agent-tunnel-libsql.path = "../crates/agent-tunnel-libsql"
+gateway-db.path = "../crates/gateway-db"
 ironrdp-pdu = { version = "0.9", features = ["std"] }
 ironrdp-core = { version = "0.2", features = ["std"] }
 ironrdp-rdcleanpath = "0.2"
 ironrdp-tokio = "0.10"
 ironrdp-connector = "0.10"
 ironrdp-acceptor = "0.10"
-ceviche = "0.7"
+ceviche = "0.8"
 picky-krb = "0.12"
 kdc = "0.1"
 

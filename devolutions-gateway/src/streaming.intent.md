@@ -47,3 +47,69 @@ JREC artifact handling, storage, download content types, and consumer-side rende
 
 
 > **Boundary:** Session Recording Log artifacts are supported elsewhere in Gateway through the JREC recording flow. Their rejection by `/shadow` applies only to the WebSocket streaming path covered by this document.
+
+
+## Multi-clip, size variant streaming
+
+We support streamings of multi-clip, size-variant source.
+See how we do multi-clip recordings in `devolutions-gateway/src/recording.rs`. We support streaming as well for the same source.
+
+### The source
+We have two streaming sources that we currently support:
+1. RDM, which whenver size of a remote connecti session changes, it creates a new clip with consistent size in the header. 
+2. Chrome/Other browsers, chrome behaves differently, see `webapp/packages/web-recorder`, we use the media recorder API to record the session, the size changing behavior is not documented, but in experiencemnt and in practice, it will sliently change the size of the frame, the webm standard did not advise against this behavior, more lilely, it is undifined, and the client may or may not support it.
+
+### The normalizer
+
+Given the constrains above, we would like to unifiy the source and provide a single shape that the client can consume easily.
+We use the following model:
+
+```text
+Legend:
+-----  size A
+=====  size B
+^^^^^  size C
+|      input clip boundary
++      client joins
+[ ]    normalized output segment
+
+Time ------------------------------------------------------------------>
+
+RDM source: each size change creates a new input clip
+
+Input:    ----------------------|======================|^^^^^^^^^^^^^^^^
+          <------ clip 1 ------> <------ clip 2 ------> <--- clip 3 --->
+
+Client 1:          +[-----------][======================][^^^^^^^^^^^^^^^^]
+                   starts near
+                   end of clip 1
+
+Client 2:                              +[==============][^^^^^^^^^^^^^^^^]
+                                       starts partway
+                                       through clip 2
+
+
+Browser source: sizes change inside one input clip
+
+Input:    -----------------------=======================^^^^^^^^^^^^^^^^^
+          <------------------- one input clip -------------------------->
+
+Client 1:          +[------------][======================][^^^^^^^^^^^^^^^^]
+                   starts near
+                   end of size A
+
+Client 2:                              +[===============][^^^^^^^^^^^^^^^^]
+                                       starts partway
+                                       through size B
+
+
+Normalized client output:
+
+- Each client begins at its own live edge.
+- Each `[segment]` contains one fixed frame size.
+- RDM input clip boundaries and browser frame-size changes produce the same
+  normalized output shape.
+- Every client has an independent output sequence beginning at zero.
+```
+
+We use Websocket subprotocols to implement backward compatibility, for the first version, which had no subprotocol, it will be treated as the first version of the streaming protocol. That is, no segment support. For the second version, we will introduce a new subprotocol `jrec-shadow.v2`, which fully takes advantage of the multi-clip protorol introduced above.

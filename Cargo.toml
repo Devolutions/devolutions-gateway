@@ -19,7 +19,7 @@ default-members = [
 ]
 
 [workspace.package]
-version = "2026.3.0"
+version = "2026.3.3"
 
 [profile.profiling]
 inherits = "release"

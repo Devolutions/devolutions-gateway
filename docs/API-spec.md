@@ -258,6 +258,8 @@ KDC tokens are long-lived (big interval between `exp` and `nbf` claims).
  "krb_kdc": string (TargetAddr),
  // Optional, but it is recommended to always scope to a specific Gateway ID
  "jet_gw_id": string (UUID),
+ // Optional, explicit agent: KDC messages are routed through this Agent Tunnel agent or fail (`krb_kdc` must use `tcp`)
+ "jet_agent_id": string (UUID),
  "iat": integer (i64),
  "nbf": integer (i64),
  "exp": integer (i64),

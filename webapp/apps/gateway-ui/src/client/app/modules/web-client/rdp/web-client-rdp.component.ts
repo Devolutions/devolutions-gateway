@@ -7,9 +7,9 @@ import { ScreenSize } from '@shared/enums/screen-size.enum';
 import { IronRDPConnectionParameters } from '@shared/interfaces/connection-params.interfaces';
 import { RdpFormDataInput } from '@shared/interfaces/forms.interfaces';
 import { DesktopSize } from '@shared/models/desktop-size';
-import { ExtractedUsernameDomain } from '@shared/services/utils/string.service';
+import { ExtractedHostnamePort, ExtractedUsernameDomain } from '@shared/services/utils/string.service';
 import { UtilsService } from '@shared/services/utils.service';
-import { WebClientService } from '@shared/services/web-client.service';
+import { DefaultRDPPort, WebClientService } from '@shared/services/web-client.service';
 import { WebSessionService } from '@shared/services/web-session.service';
 import { MessageService } from 'primeng/api';
 import { debounceTime, EMPTY, from, noop, Observable, of, Subscription, throwError } from 'rxjs';
@@ -163,6 +163,7 @@ export class WebClientRdpComponent
   private fetchParameters(formData: RdpFormDataInput): Observable<IronRDPConnectionParameters> {
     const { hostname, password, enableDisplayControl, preConnectionBlob, kdcUrl } = formData;
 
+    const extractedHostData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultRDPPort);
     const extractedData: ExtractedUsernameDomain = this.utils.string.extractDomain(this.formData.username);
     const gatewayAddress = this.getGatewayWebSocketUrl(JET_RDP_URL);
     this.sessionInfoUsername = extractedData.username;
@@ -175,7 +176,8 @@ export class WebClientRdpComponent
     const connectionParameters: IronRDPConnectionParameters = {
       username: extractedData.username,
       password,
-      host: hostname,
+      host: extractedHostData.hostname,
+      port: extractedHostData.port,
       domain: extractedData.domain,
       gatewayAddress: gatewayAddress,
       screenSize: desktopScreenSize,
