@@ -20,7 +20,7 @@ Run the scoped tests once by hand instead and keep the log, then skip the baseli
 Arguments after `--` go to `cargo test`, and a second `--` reaches the test binary: `-- --no-fail-fast --test integration_tests -- <module>::` runs only that module's tests of the `testsuite` binary.
 Confirm the clean scoped run executes tests before trusting any result; a filter that matches nothing passes silently and yields an empty kill matrix.
 `--no-fail-fast` keeps one failing test binary from hiding the results of the others.
-Pass `--features <f>` for feature-gated code; without it that code gets no mutants and nothing warns.
+Pass `--features <f>` for feature-gated code; discovery ignores `cfg` conditions, so mutants behind a disabled feature are still generated, compile away, and appear missed rather than absent, and a survivor there is a scoping error, not a coverage gap.
 Pass `--output <scratch-dir>` so `mutants.out` stays out of the checkout.
 
 The default mode copies the tree and cold-builds the workspace; `--in-place` reuses the warm `target/` and is much cheaper.
