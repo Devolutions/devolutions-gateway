@@ -19,4 +19,4 @@ Integration tests are centralized in the `testsuite` crate; see `testsuite/AGENT
 ## Git
 
 Branch names carry the ticket: `DGW-338` or `DGW-338-short-description` for Jira, `fix/123-description` for GitHub issues.
-Reference the ticket in the commit footer as `Issue: DGW-123` or `Issue: #456`.
+Reference the Jira ticket in a commit footer as `Issue: DGW-123`; the `commit-footer` skill covers footers.
