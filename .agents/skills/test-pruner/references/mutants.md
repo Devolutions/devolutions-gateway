@@ -7,6 +7,8 @@ These notes target cargo-mutants 27.1.
 ## Run
 
 Scope with `--file '<package-dir>/src/<module>/**'` for a crate or module, `--re '<fn>|<fn>'` for a pull request's changed functions, or `--in-diff <diff>` for its whole diff; build time dominates, so scope first.
+A test-only diff yields no mutants under `--in-diff`, so scope with `--re` to the production functions the changed tests call, including unchanged ones.
+Make no deletion decision on an empty or near-empty viable sample; with nothing to catch, every test has zero unique kills and the invariant passes trivially.
 Package directories differ: `devolutions-gateway/src` sits at the repository root, while most libraries live under `crates/`.
 
 ```sh
