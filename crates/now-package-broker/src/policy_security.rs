@@ -861,12 +861,16 @@ fn install_location_pin_options() -> OpenOptions {
 /// DACL, including inheritable ACEs, must not let principals other than SYSTEM, Administrators
 /// and TrustedInstaller write it.
 /// Its ancestors must not be reparse points or be renamable by other principals.
-/// The returned guard must be kept alive until the installation completes.
+/// When `location` already exists, its parent must also not let other principals create entries:
+/// an elevated installer may rename or delete its install root, and an untrusted principal could
+/// then put a junction in its place.
+/// This keeps the location safe without relying on the returned guard, which a canceled or timed-out
+/// operation can release while installer processes it started are still running.
 ///
-/// The guard holds the folder without delete sharing: a renamed verified folder could be replaced
-/// by a junction while the guard is held.
-/// Installers can still create, modify and delete entries inside it, but installers that delete or
-/// rename an existing install root (such as rename-and-swap upgrades) fail.
+/// The returned guard must be kept alive until the installation completes.
+/// It holds the folder without delete sharing, so installers can still create, modify and delete
+/// entries inside it, but installers that delete or rename an existing install root (such as
+/// rename-and-swap upgrades) fail.
 pub(crate) fn verify_elevated_install_location(
     opener: &dyn PathOpener,
     location: &Path,
@@ -874,10 +878,12 @@ pub(crate) fn verify_elevated_install_location(
     let options = install_location_pin_options();
 
     let mut folder = location;
+    let mut location_exists = true;
     let handle = loop {
         match opener.open(&options, folder) {
             Ok(handle) => break handle,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                location_exists = false;
                 folder = folder.parent().with_context(|| {
                     format!(
                         "custom install location '{}' is not on an existing drive",
@@ -923,13 +929,27 @@ pub(crate) fn verify_elevated_install_location(
         )
     })?;
 
-    let mut handles =
-        retain_ancestor_directories(folder.parent(), DIRECTORY_TAMPER_MASK, &subject).with_context(|| {
+    // A folder created by the installer below the verified folder is protected by the verified
+    // folder's own DACL, so only an existing install root needs a parent without create rights.
+    let parent_mask = if location_exists {
+        PARENT_DIRECTORY_TAMPER_MASK
+    } else {
+        DIRECTORY_TAMPER_MASK
+    };
+    let mut handles = retain_ancestor_directories(folder.parent(), parent_mask, &subject).with_context(|| {
+        if location_exists {
+            format!(
+                "custom install location '{}' is in a folder where non-administrators can create or rename \
+                 entries; choose a location under Program Files or a folder restricted to administrators",
+                location.display()
+            )
+        } else {
             format!(
                 "custom install location '{}' is in a folder that non-administrators can redirect",
                 location.display()
             )
-        })?;
+        }
+    })?;
     handles.push(handle);
 
     Ok(VerifiedInstallLocation { _handles: handles })
@@ -2050,6 +2070,46 @@ mod tests {
 
         drop(pin);
         std::fs::rename(&root, temp.path().join("App.old")).expect("rename succeeds once the pin is released");
+    }
+
+    #[test]
+    fn existing_install_root_requires_a_parent_without_untrusted_create_rights() {
+        let temp = tempfile::tempdir().unwrap();
+        let parent = canonical_dir(temp.path()).join("Parent");
+        let root = parent.join("App");
+        std::fs::create_dir_all(&root).unwrap();
+
+        let admins = Sid::from_well_known(WinBuiltinAdministratorsSid, None).unwrap();
+        let system = Sid::from_well_known(WinLocalSystemSid, None).unwrap();
+        let users = Sid::from_well_known(windows::Win32::Security::WinBuiltinUsersSid, None).unwrap();
+        let admin_only = [grant(GENERIC_ALL.0, system), grant(GENERIC_ALL.0, admins.clone())];
+
+        // Setting the owner to Administrators requires an elevated token; skip otherwise.
+        // The DACL rules themselves are covered by the SDDL-based tests above.
+        if set_security(&root, Some(&admins), &admin_only).is_err() {
+            return;
+        }
+        // Users may create subfolders in the parent, as on a drive root.
+        let mut parent_entries = admin_only.to_vec();
+        parent_entries.push(grant(FILE_APPEND_DATA.0 | FILE_TRAVERSE.0, users));
+        set_security(&parent, Some(&admins), &parent_entries).unwrap();
+
+        // An existing install root could be renamed by the installer and replaced through the parent.
+        let error = verify_elevated_install_location(&ServiceOpener, &root).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("non-administrators can create or rename entries"),
+            "unexpected error: {error:#}"
+        );
+
+        // A new folder below the verified root does not depend on the parent's create rights, so the
+        // parent passes; the user-writable temporary directory above it is rejected instead.
+        let error = verify_elevated_install_location(&ServiceOpener, &root.join("New")).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("can redirect"), "unexpected error: {message}");
+        assert!(
+            !message.contains(&format!("'{}'", parent.display())),
+            "unexpected error: {message}"
+        );
     }
 
     fn canonical_dir(path: &Path) -> PathBuf {

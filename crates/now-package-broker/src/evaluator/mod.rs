@@ -58,6 +58,8 @@
 //!   open without delete sharing until the operation completes.
 //!   Installers that delete or rename their own existing install root, such as rename-and-swap
 //!   upgrades, fail there; installing into a new folder, for example under Program Files, is not affected.
+//!   An existing install root must also be in a folder where non-administrators cannot create entries,
+//!   so it stays protected if a canceled operation leaves installer processes running.
 //!   A supplied location is checked even with opaque installer arguments (WinGet `--override` and
 //!   `--custom`), but a location selected only inside those arguments is not.
 //! - The broker never uninstalls the Devolutions Agent, which hosts it, whether it is selected by its
