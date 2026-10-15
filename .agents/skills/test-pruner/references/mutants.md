@@ -56,11 +56,12 @@ For assertion-level evidence, read the `panicked at <file>:<line>` location of e
 ## Rerun
 
 Rerun with the same scope and flags after each change.
+Run the scoped tests on the clean tree first; with `--baseline skip`, a suite broken by a test edit marks every mutant caught.
 Any mutant that moved from caught to missed without an approved deletion explaining it means revert.
 
 ## Domain mutants
 
-Write each as a small patch; apply, run the scoped tests, revert; caught means any test failed.
+Write each as a small patch; apply it, run the scoped tests, revert it with `git apply -R`; caught means any test failed.
 Patches are pull request evidence, not repository files.
 
 Codec catalog:

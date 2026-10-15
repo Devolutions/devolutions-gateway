@@ -9,7 +9,7 @@ A test whose expected value came from the code under test detects change, not bu
 For each test, ask whether the expected value can be justified without running the code.
 
 Independent sources: a spec example, an external capture, a hand-derived value, an input the test chose itself and asserts was honored, a real property such as round-trip or `encode` writing exactly `size()` bytes, or a reference model.
-Self-derived sources: a snapshot of current output, a value computed through the code or a shared helper, a production constant or message copied into the test, a mock that returns what is then asserted, `is_ok()` or `!is_empty()` alone, or a restatement of what a derive or the type system guarantees.
+Self-derived sources: a snapshot of current output, a value computed through the code or a shared helper, a production constant or message copied into the test, a mock that returns what is then asserted, `is_ok()` or `!is_empty()` on an input that no requirement says must succeed, or a restatement of what a derive or the type system guarantees.
 
 Verify instead of guessing.
 Check comments and `git log -p` for the origin, then check the value against the governing spec section: decode a byte vector field by field and show the breakdown, or cite the specification section that defines the behavior.
