@@ -12,7 +12,7 @@ Independent sources: a spec example, an external capture, a hand-derived value, 
 Self-derived sources: a snapshot of current output, a value computed through the code or a shared helper, a production constant or message copied into the test, a mock that returns what is then asserted, `is_ok()` or `!is_empty()` alone, or a restatement of what a derive or the type system guarantees.
 
 Verify instead of guessing.
-Check comments and `git log -p` for the origin, then check the value against the governing spec section: decode a byte vector field by field and show the breakdown, or cite the section that defines the protocol behavior, such as RFC 6455 §5.5.1.
+Check comments and `git log -p` for the origin, then check the value against the governing spec section: decode a byte vector field by field and show the breakdown, or cite the specification section that defines the behavior.
 A value pasted from the code's output is independent once it checks out against the spec, and a spec vector nobody re-read is not; verification is the property, origin is only a hint.
 
 Classify each test as independent, self-derived, or unknown, with evidence.

@@ -29,7 +29,7 @@ Challenge a test of unknown oracle.
 Deletion is a set decision, not a per-test verdict.
 Two tests that both catch mutant M each have zero unique kills, and deleting both loses M.
 Choose the deletion set so the caught mutants afterward equal the caught mutants before.
-The same rule applies to assertions: one that never fails across its test's kills is a deletion candidate.
+The same rule applies to assertions: a self-derived one that never fails across its test's kills is a deletion candidate.
 
 Never propose deleting a regression test tied to an issue or fuzz crash, a test of untrusted-input parsing or bounds checks, or a doctest; strengthen or merge those only.
 Treat a suite that deliberately uses snapshots as a change detector: dedupe it, do not delete it.
@@ -40,7 +40,7 @@ Report flaky tests separately; deleting one hides a bug.
 Give a fresh-context agent the test, the code under test, and the mutants the rest of the suite already catches, and ask for one mutant that this test catches and the others miss, as a patch only.
 Apply and run the patch yourself; arguments do not count.
 Add any mutant it finds to the domain catalog regardless of the verdict.
-If it finds none, send the case to a human with what is asserted, the oracle finding, its kills, and the failed challenge: the test's author, or the pull request author or a human reviewer when an agent wrote the test.
+If it finds none, send the case to a human with what is asserted, the oracle finding, its kills, and the failed challenge: the test's author, or the file's CODEOWNERS when an agent wrote the test.
 An agent confirming its own test is worthless.
 
 ## Consolidate
