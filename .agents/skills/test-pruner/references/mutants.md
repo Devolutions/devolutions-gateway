@@ -12,14 +12,14 @@ Make no deletion decision on an empty or near-empty viable sample; with nothing 
 Package directories differ: `devolutions-gateway/src` sits at the repository root, while most libraries live under `crates/`.
 
 ```sh
-cargo mutants --file '<path>' --test-package <test-package> --in-place --baseline skip --timeout <s> --build-timeout <s> -- --no-fail-fast <cargo-test-args>
+cargo mutants --file '<path>' --test-package <test-package> --in-place --baseline skip --timeout <s> --build-timeout <s> -- <cargo-test-args>
 ```
 
 The baseline phase ignores `--test-package` and tests the mutated package, so it fails when the tests live in `testsuite`.
 Run the scoped tests once by hand instead and keep the log, then skip the baseline and set both timeouts to a few times the measured test run and incremental build.
-Arguments after `--` go to `cargo test`, and a second `--` reaches the test binary: `-- --no-fail-fast --test integration_tests -- <module>::` runs only that module's tests of the `testsuite` binary.
+Arguments after `--` go to `cargo test`, and a second `--` reaches the test binary: `-- --test integration_tests -- <module>::` runs only that module's tests of the `testsuite` binary.
 Confirm the clean scoped run executes tests before trusting any result; a filter that matches nothing passes silently and yields an empty kill matrix.
-`--no-fail-fast` keeps one failing test binary from hiding the results of the others.
+Scope every run to one test binary with `--test <name>` or `--lib`; the kill matrix keys tests by harness name, which can repeat across binaries.
 Pass `--features <f>` for feature-gated code; discovery ignores `cfg` conditions, so mutants behind a disabled feature are still generated, compile away, and appear missed rather than absent, and a survivor there is a scoping error, not a coverage gap.
 Pass `--output <scratch-dir>` so `mutants.out` stays out of the checkout.
 
