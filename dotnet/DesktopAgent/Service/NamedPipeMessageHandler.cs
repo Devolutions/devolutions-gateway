@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Net.Http;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -13,9 +15,18 @@ namespace Devolutions.Agent.Desktop.Service
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            using NamedPipeClientStream pipeClient = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            // Request only the access the service grants to clients; ReadPermissions is needed by VerifyServer.
+            // The service impersonates the client to act on its behalf.
+            using NamedPipeClientStream pipeClient = new NamedPipeClientStream(
+                ".",
+                pipeName,
+                PipeAccessRights.ReadData | PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes | PipeAccessRights.ReadPermissions,
+                PipeOptions.Asynchronous,
+                TokenImpersonationLevel.Impersonation,
+                HandleInheritability.None);
             Task connectTask = pipeClient.ConnectAsync(cancellationToken);
             connectTask.GetAwaiter().GetResult();
+            VerifyServer(pipeClient);
 
             string requestMessage = SerializeRequest(request);
             byte[] requestBytes = Encoding.UTF8.GetBytes(requestMessage);
@@ -28,6 +39,20 @@ namespace Devolutions.Agent.Desktop.Service
             string responseMessage = Encoding.UTF8.GetString(memoryStream.ToArray());
 
             return DeserializeResponse(responseMessage);
+        }
+
+        /// <summary>
+        /// Ensures the pipe server is the PEDM service: the pipe must be owned by SYSTEM or Administrators, which a standard user cannot assign.
+        /// </summary>
+        private static void VerifyServer(NamedPipeClientStream pipe)
+        {
+            SecurityIdentifier owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+
+            if (owner is null
+                || !(owner.IsWellKnown(WellKnownSidType.LocalSystemSid) || owner.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)))
+            {
+                throw new UnauthorizedAccessException("The PEDM pipe server is not trusted because the pipe is not owned by SYSTEM or Administrators.");
+            }
         }
 
         private HttpResponseMessage DeserializeResponse(string responseMessage)
