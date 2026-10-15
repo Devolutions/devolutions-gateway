@@ -59,6 +59,9 @@ impl fmt::Display for ProxyMode {
 
 #[derive(TypedBuilder)]
 pub struct DgwConfig {
+    /// Gateway ID, matched against the `jet_gw_id` token claim.
+    #[builder(default, setter(into))]
+    id: Option<uuid::Uuid>,
     #[builder(default, setter(into))]
     hostname: Option<String>,
     #[builder(default = "127.0.0.1".to_owned(), setter(into))]
@@ -125,6 +128,7 @@ pub struct DgwConfigHandle {
 impl DgwConfigHandle {
     pub fn init(config: DgwConfig) -> anyhow::Result<Self> {
         let DgwConfig {
+            id,
             hostname,
             listener_host,
             provisioner_public_key_data,
@@ -194,6 +198,15 @@ impl DgwConfigHandle {
             })
             .unwrap_or_default();
 
+        let id_json = id
+            .map(|id| {
+                format!(
+                    r#"    "Id": "{id}",
+"#
+                )
+            })
+            .unwrap_or_default();
+
         let hostname_json = hostname
             .map(|hostname| {
                 format!(
@@ -208,7 +221,7 @@ impl DgwConfigHandle {
 
         let config = format!(
             r#"{{
-{hostname_json}    "ProvisionerPublicKeyData": {{
+{id_json}{hostname_json}    "ProvisionerPublicKeyData": {{
         "Value": "{provisioner_public_key_data}"
     }},
     "Listeners": [

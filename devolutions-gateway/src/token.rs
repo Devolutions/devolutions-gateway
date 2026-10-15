@@ -16,6 +16,7 @@ use smol_str::SmolStr;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::error_code::ErrorCode;
 use crate::recording::ActiveRecordings;
 use crate::session::DisconnectedInfo;
 use crate::target_addr::TargetAddr;
@@ -891,6 +892,47 @@ pub enum TokenError {
     SubkeySignedAndTooLongLifetime,
     #[error("lifetime defined by `nbf` and `exp` claims is too long")]
     TooLongLifetime,
+}
+
+impl TokenError {
+    /// Returns the machine-readable code reported to the client.
+    ///
+    /// The signature is verified before any claim is checked.
+    /// Errors raised before the signature check map to `malformed_token`, `bad_signature` or `unknown_subkey`,
+    /// so a caller without a token signed by a trusted key learns nothing about the claims.
+    pub fn code(&self) -> ErrorCode {
+        use picky::jose::jwt::JwtError;
+
+        match self {
+            // Raised before the signature is verified.
+            Self::MissingDelegationKey | Self::Jwe { .. } | Self::JwePayload { .. } | Self::Jws { .. } => {
+                ErrorCode::MalformedToken
+            }
+            Self::SignatureVerification { .. } => ErrorCode::BadSignature,
+            Self::UnknownSubkey { .. } => ErrorCode::UnknownSubkey,
+
+            // Raised after the signature is verified.
+            Self::Jwt { source } => match source {
+                JwtError::Expired { .. } => ErrorCode::Expired,
+                JwtError::NotYetValid { .. } => ErrorCode::NotYetValid,
+                JwtError::Json { .. }
+                | JwtError::InvalidRegisteredClaimType { .. }
+                | JwtError::RequiredClaimMissing { .. } => ErrorCode::MalformedToken,
+                _ => ErrorCode::InvalidToken,
+            },
+            Self::BadContentType { .. } | Self::MalformedClaim { .. } | Self::InvalidClaimScheme { .. } => {
+                ErrorCode::MalformedToken
+            }
+            Self::GatewayIdScopeMismatch => ErrorCode::GatewayIdMismatch,
+            Self::Revoked => ErrorCode::Revoked,
+            Self::UnexpectedReplay { .. } => ErrorCode::UnexpectedReplay,
+            Self::ContentTypeNotAllowedForSubkey { .. }
+            | Self::PlaintextSecrets
+            | Self::OldJrl
+            | Self::SubkeySignedAndTooLongLifetime
+            | Self::TooLongLifetime => ErrorCode::InvalidToken,
+        }
+    }
 }
 
 #[derive(typed_builder::TypedBuilder)]
