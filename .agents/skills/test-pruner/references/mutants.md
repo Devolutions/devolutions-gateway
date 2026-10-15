@@ -29,14 +29,21 @@ Do not use `--iterate`; it skips mutants caught in previous runs, the opposite o
 ## Kill matrix
 
 Each log holds the test harness output for its mutant, with one `ok` or `FAILED` line per test.
-A test caught a mutant when its line reads `FAILED`, so parse the logs instead of rerunning tests:
+A test caught a mutant when its line reads `FAILED`, so parse the logs instead of rerunning tests.
+Key the matrix on `outcomes.json`, which maps each mutant name to its log; log file names do not distinguish mutants at the same position.
+A mutant caught by timeout has no per-test result, so rerun its tests one at a time.
+Run from the directory that contains `mutants.out`:
 
 ```powershell
-Get-ChildItem mutants.out/log/*.log | ForEach-Object {
-    $mutant = $_.BaseName
-    Select-String -Path $_.FullName -Pattern '^test (\S+) \.\.\. FAILED$' |
-        ForEach-Object { "$mutant`t$($_.Matches[0].Groups[1].Value)" }
-}
+(Get-Content -Raw mutants.out/outcomes.json | ConvertFrom-Json).outcomes |
+    Where-Object { $_.scenario.Mutant -and $_.summary -in 'CaughtMutant', 'Timeout' } |
+    ForEach-Object {
+        $mutant = $_.scenario.Mutant.name
+        $failed = Select-String -Path "mutants.out/$($_.log_path)" -Pattern '^test (\S+) \.\.\. FAILED$' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value }
+        if (-not $failed) { "$mutant`t<$($_.summary): no per-test result, rerun tests individually>" }
+        $failed | ForEach-Object { "$mutant`t$_" }
+    }
 ```
 
 A unique kill is a mutant caught by exactly one test in scope.
