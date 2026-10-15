@@ -1,6 +1,7 @@
 //! PEDM named pipe server instances.
 
 use std::convert::Infallible;
+use std::os::windows::io::AsRawHandle as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,10 +9,12 @@ use anyhow::Context as _;
 use devolutions_pedm_shared::pipe::CLIENT_ACCESS;
 use futures_util::StreamExt as _;
 use futures_util::stream::FuturesUnordered;
+use parking_lot::Mutex;
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tracing::{error, info, warn};
+use win_api_wrappers::handle::Handle;
 use win_api_wrappers::identity::sid::Sid;
-use win_api_wrappers::raw::Win32::Foundation::GENERIC_ALL;
+use win_api_wrappers::raw::Win32::Foundation::{GENERIC_ALL, HANDLE};
 use win_api_wrappers::raw::Win32::Security::Authorization::SET_ACCESS;
 use win_api_wrappers::raw::Win32::Security::{ACE_FLAGS, WinBuiltinUsersSid, WinLocalSystemSid};
 use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
@@ -93,9 +96,49 @@ fn security_attributes(service_sid: Sid, client_sid: Sid) -> anyhow::Result<Secu
     })
 }
 
-/// Marks a pipe instance of this server as open until dropped.
+/// Keeps a pipe instance of this server open until dropped, through a duplicate of its handle.
+///
+/// The pipe name exists as long as one of these is alive, so instances created meanwhile join this server's pipe.
 pub(super) struct OpenInstance {
-    _count: Arc<()>,
+    handle: Option<Handle>,
+    open_instances: Arc<Mutex<usize>>,
+}
+
+impl OpenInstance {
+    /// Create the next instance of `pipe_name`, claiming the name if this server has no open instance.
+    fn create(
+        pipe_name: &str,
+        open_instances: &Arc<Mutex<usize>>,
+        create_instance: &(dyn Fn(&str, bool) -> anyhow::Result<NamedPipeServer> + Sync),
+    ) -> (bool, anyhow::Result<(NamedPipeServer, Self)>) {
+        // Hold the lock across creation, so the last open instance cannot close in between.
+        let mut count = open_instances.lock();
+        let first_instance = *count == 0;
+
+        let result = create_instance(pipe_name, first_instance).and_then(|server| {
+            let handle = Handle::new_borrowed(HANDLE(server.as_raw_handle().cast()))?
+                .try_clone()
+                .context("failed to duplicate the pipe instance handle")?;
+            *count += 1;
+            Ok((
+                server,
+                Self {
+                    handle: Some(handle),
+                    open_instances: Arc::clone(open_instances),
+                },
+            ))
+        });
+
+        (first_instance, result)
+    }
+}
+
+impl Drop for OpenInstance {
+    fn drop(&mut self) {
+        let mut count = self.open_instances.lock();
+        drop(self.handle.take());
+        *count -= 1;
+    }
 }
 
 /// Accept clients on `pipe_name` forever, handing each one to `dispatch`.
@@ -111,7 +154,7 @@ pub(super) async fn accept_loop(
     mut retry: RetryDelay,
     mut dispatch: impl FnMut(NamedPipeServer, OpenInstance),
 ) -> Infallible {
-    let open_instances = Arc::new(());
+    let open_instances = Arc::new(Mutex::new(0));
 
     info!(%pipe_name, listening_instances, "Starting named pipe server");
 
@@ -119,19 +162,15 @@ pub(super) async fn accept_loop(
 
     loop {
         while listening.len() < listening_instances {
-            let first_instance = Arc::strong_count(&open_instances) == 1;
-            match create_instance(pipe_name, first_instance) {
-                Ok(server) => {
+            match OpenInstance::create(pipe_name, &open_instances, create_instance) {
+                (_, Ok((server, instance))) => {
                     retry.reset();
-                    let instance = OpenInstance {
-                        _count: Arc::clone(&open_instances),
-                    };
                     listening.push(async move {
                         let result = server.connect().await;
                         (server, instance, result)
                     });
                 }
-                Err(error) => {
+                (first_instance, Err(error)) => {
                     error!(
                         error = format!("{error:#}"),
                         %pipe_name,
@@ -195,7 +234,6 @@ impl RetryDelay {
 #[cfg(test)]
 mod tests {
     use std::os::windows::io::AsRawHandle as _;
-    use std::sync::Mutex;
     use std::time::Instant;
 
     use devolutions_pedm_shared::pipe::{open_client, verify_server};
@@ -424,7 +462,7 @@ mod tests {
                 let attempts = Arc::clone(&attempts);
                 move |pipe_name, first_instance| {
                     let result = create_owned_test_instance(pipe_name, first_instance);
-                    attempts.lock().expect("lock").push((first_instance, result.is_ok()));
+                    attempts.lock().push((first_instance, result.is_ok()));
                     result
                 }
             },
@@ -434,7 +472,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert!(!task.is_finished(), "a failed first instance is retried");
         {
-            let attempts = attempts.lock().expect("lock");
+            let attempts = attempts.lock();
             assert!(attempts.len() >= 2);
             assert!(
                 attempts.iter().all(|&attempt| attempt == (true, false)),
@@ -459,7 +497,7 @@ mod tests {
             {
                 let attempts = Arc::clone(&attempts);
                 move |pipe_name, first_instance| {
-                    let mut attempts = attempts.lock().expect("lock");
+                    let mut attempts = attempts.lock();
                     attempts.push(first_instance);
                     // Fail the two attempts that follow the first connection, leaving no instance listening.
                     if matches!(attempts.len(), 2 | 3) {
@@ -479,7 +517,7 @@ mod tests {
         let _second_client = open_client_when_listening(&pipe_name).await;
         let _second = next_dispatched(&mut dispatched).await;
 
-        let attempts = attempts.lock().expect("lock").clone();
+        let attempts = attempts.lock().clone();
         assert!(attempts[0]);
         assert!(
             attempts[3],
@@ -487,5 +525,42 @@ mod tests {
         );
 
         task.abort();
+    }
+
+    #[tokio::test]
+    async fn the_pipe_name_stays_claimed_until_the_last_instance_is_released() {
+        let pipe_name = unique_pipe_name("handover");
+        let open_instances = Arc::new(Mutex::new(0));
+
+        let (first_instance, created) = OpenInstance::create(&pipe_name, &open_instances, &create_owned_test_instance);
+        assert!(first_instance);
+        let (first_server, first) = created.expect("create the first instance");
+        let first_server = Mutex::new(Some(first_server));
+
+        // Close the last server handle while the next instance is created, then try to claim the name in between.
+        let squatted = Mutex::new(None);
+        let (first_instance, created) =
+            OpenInstance::create(&pipe_name, &open_instances, &|pipe_name, first_instance| {
+                drop(first_server.lock().take());
+                let claimed = ServerOptions::new().first_pipe_instance(true).create(pipe_name);
+                *squatted.lock() = Some(claimed.is_ok());
+                create_owned_test_instance(pipe_name, first_instance)
+            });
+        assert!(!first_instance);
+        assert_eq!(
+            *squatted.lock(),
+            Some(false),
+            "nobody else can claim the name meanwhile"
+        );
+        let (second_server, second) = created.expect("the next instance joins the server's pipe");
+
+        drop(second_server);
+        drop(first);
+        drop(second);
+        assert_eq!(*open_instances.lock(), 0);
+        ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&pipe_name)
+            .expect("the name is released with the last instance");
     }
 }
