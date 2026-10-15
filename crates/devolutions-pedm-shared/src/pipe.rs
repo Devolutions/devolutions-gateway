@@ -16,9 +16,19 @@ use win_api_wrappers::raw::Win32::Storage::FileSystem::{
     FILE_FLAG_OVERLAPPED, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_DATA, READ_CONTROL, SECURITY_IMPERSONATION,
     SYNCHRONIZE,
 };
+use win_api_wrappers::raw::Win32::System::Pipes::GetNamedPipeServerProcessId;
+use win_api_wrappers::raw::Win32::System::Services::{
+    OpenSCManagerW, OpenServiceW, QueryServiceStatusEx, SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO,
+    SERVICE_QUERY_STATUS, SERVICE_RUNNING, SERVICE_STATUS_PROCESS,
+};
+use win_api_wrappers::raw::core::Owned;
+use win_api_wrappers::utils::WideString;
 
 /// Default name of the PEDM pipe.
 pub const PIPE_NAME: &str = r"\\.\pipe\DevolutionsPEDM";
+
+/// Name of the Devolutions Agent service, whose process serves the PEDM pipe.
+pub const AGENT_SERVICE_NAME: &str = "DevolutionsAgent";
 
 /// Access the PEDM server grants to clients, and the access clients request.
 ///
@@ -46,9 +56,80 @@ pub fn open_client(pipe_name: &str) -> std::io::Result<NamedPipeClient> {
 
 /// Check that the pipe server is the PEDM service, before sending anything to it.
 ///
-/// A standard user cannot open the process or token of a LocalSystem service, so the check relies on the pipe owner instead.
-/// It must be SYSTEM or the Administrators group: a standard user cannot assign either, and LocalSystem defaults to Administrators.
+/// The pipe must be owned by SYSTEM or Administrators ([`verify_owner`]),
+/// and its server must be the process of the Devolutions Agent service ([`verify_server_process`]).
 pub fn verify_server(pipe: &NamedPipeClient) -> anyhow::Result<()> {
+    verify_owner(pipe)?;
+    verify_server_process(pipe, AGENT_SERVICE_NAME)
+}
+
+/// Check that the server process of `pipe` is the running process of the `service_name` service.
+///
+/// A pipe instance shares the security descriptor of its name, so the owner alone does not identify which process created an instance.
+/// A standard user cannot open the process or token of a LocalSystem service, but can query the process ID of a service.
+pub fn verify_server_process(pipe: &NamedPipeClient, service_name: &str) -> anyhow::Result<()> {
+    let server_process_id = server_process_id(pipe)?;
+    let service_process_id = service_process_id(service_name)?;
+
+    if server_process_id != service_process_id {
+        bail!(
+            "the PEDM pipe server is not trusted because it is not the {service_name} service process (server process {server_process_id}, service process {service_process_id})"
+        );
+    }
+
+    Ok(())
+}
+
+/// Return the ID of the process serving the client end of a pipe.
+pub fn server_process_id(pipe: &NamedPipeClient) -> anyhow::Result<u32> {
+    let mut process_id = 0;
+
+    // SAFETY: The handle is a valid named pipe client handle owned by `pipe`, and `process_id` is valid for writes.
+    unsafe { GetNamedPipeServerProcessId(HANDLE(pipe.as_raw_handle().cast()), &mut process_id) }
+        .context("failed to query the PEDM pipe server process")?;
+
+    Ok(process_id)
+}
+
+/// Return the process ID of a running service.
+pub fn service_process_id(service_name: &str) -> anyhow::Result<u32> {
+    let service_name_wide = WideString::from(service_name);
+
+    // SAFETY: FFI call with no outstanding preconditions.
+    let manager = unsafe { OpenSCManagerW(None, None, SC_MANAGER_CONNECT) }
+        .context("failed to connect to the service control manager")?;
+    // SAFETY: On success, `OpenSCManagerW` returns a handle owned by the caller.
+    let manager = unsafe { Owned::new(manager) };
+
+    // SAFETY: `manager` is a valid handle and `service_name_wide` is a valid NUL-terminated UTF-16 string.
+    let service = unsafe { OpenServiceW(*manager, service_name_wide.as_pcwstr(), SERVICE_QUERY_STATUS) }
+        .with_context(|| format!("failed to open the {service_name} service"))?;
+    // SAFETY: On success, `OpenServiceW` returns a handle owned by the caller.
+    let service = unsafe { Owned::new(service) };
+
+    let mut status = SERVICE_STATUS_PROCESS::default();
+    let mut bytes_needed = 0;
+
+    // SAFETY: The slice covers exactly `status`, which is valid for writes and outlives the slice.
+    // `SERVICE_STATUS_PROCESS` is plain data, so any bytes written to it form a valid value.
+    let buffer =
+        unsafe { core::slice::from_raw_parts_mut((&raw mut status).cast::<u8>(), size_of::<SERVICE_STATUS_PROCESS>()) };
+
+    // SAFETY: `service` is a valid handle, and `buffer` is large enough for `SC_STATUS_PROCESS_INFO`.
+    unsafe { QueryServiceStatusEx(*service, SC_STATUS_PROCESS_INFO, Some(buffer), &mut bytes_needed) }
+        .with_context(|| format!("failed to query the {service_name} service status"))?;
+
+    if status.dwCurrentState != SERVICE_RUNNING || status.dwProcessId == 0 {
+        bail!("the {service_name} service is not running");
+    }
+
+    Ok(status.dwProcessId)
+}
+
+/// Check that the pipe is owned by SYSTEM or the Administrators group.
+///
+/// A standard user cannot assign either owner, and LocalSystem defaults to Administrators.
+pub fn verify_owner(pipe: &NamedPipeClient) -> anyhow::Result<()> {
     let mut owner = PSID::default();
     let mut descriptor = PSECURITY_DESCRIPTOR::default();
 

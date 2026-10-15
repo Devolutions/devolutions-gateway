@@ -236,7 +236,9 @@ mod tests {
     use std::os::windows::io::AsRawHandle as _;
     use std::time::Instant;
 
-    use devolutions_pedm_shared::pipe::{open_client, verify_server};
+    use devolutions_pedm_shared::pipe::{
+        open_client, server_process_id, service_process_id, verify_server, verify_server_process,
+    };
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
     use tokio::sync::mpsc;
@@ -562,5 +564,39 @@ mod tests {
             .first_pipe_instance(true)
             .create(&pipe_name)
             .expect("the name is released with the last instance");
+    }
+
+    #[tokio::test]
+    async fn clients_identify_the_server_process() {
+        let pipe_name = unique_pipe_name("process");
+        let server = create_client_access_pipe(&pipe_name);
+        let client = open_client(&pipe_name).expect("open the pipe");
+        server.connect().await.expect("accept the client");
+
+        assert_eq!(
+            server_process_id(&client).expect("query the server process"),
+            std::process::id()
+        );
+    }
+
+    #[test]
+    fn standard_users_can_query_the_process_of_a_running_service() {
+        // The Windows Event Log service always runs, and its default security descriptor lets interactive users query it.
+        let process_id = service_process_id("EventLog").expect("query the EventLog service process");
+        assert_ne!(process_id, 0);
+        assert_ne!(process_id, std::process::id());
+
+        service_process_id("DevolutionsPEDM.test.missing").expect_err("an unknown service is rejected");
+    }
+
+    #[tokio::test]
+    async fn clients_reject_pipes_not_served_by_the_service_process() {
+        let pipe_name = unique_pipe_name("impostor");
+        let server = create_client_access_pipe(&pipe_name);
+        let client = open_client(&pipe_name).expect("open the pipe");
+        server.connect().await.expect("accept the client");
+
+        verify_server_process(&client, "EventLog").expect_err("the test process is not the service process");
+        verify_server_process(&client, "DevolutionsPEDM.test.missing").expect_err("an unknown service is rejected");
     }
 }
