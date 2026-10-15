@@ -5,7 +5,6 @@ using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
 namespace Devolutions.Agent.Desktop.SingleInstance
@@ -222,24 +221,31 @@ namespace Devolutions.Agent.Desktop.SingleInstance
                 return;
             }
 
-            Task<string[]> read = Task.Run(() => Protocol.ReadMessage(this.pipe));
+            DateTime deadline = SingleInstancePipe.Deadline();
+            string[] args;
 
-            if (!SingleInstancePipe.Wait(read, () => NativeMethods.CancelIoEx(this.pipe.SafePipeHandle, IntPtr.Zero)))
+            try
+            {
+                args = Protocol.ReadMessage((buffer, offset, count) => SingleInstancePipe.Read(this.pipe, buffer, offset, count, deadline));
+                SingleInstancePipe.Write(this.pipe, new[] { Protocol.Ack }, deadline);
+            }
+            catch (TimeoutException)
             {
                 this.log.Warn($"Timed out reading from single-instance client {clientProcessId}");
                 return;
             }
 
-            string[] args = read.GetAwaiter().GetResult();
-
-            this.pipe.WriteByte(Protocol.Ack);
-            this.pipe.Flush();
-
             this.dispatch(args);
 
             // Disconnecting discards unread data, so let the client read the acknowledgement and close its end first.
-            Task<int> close = Task.Run(() => this.pipe.ReadByte());
-            SingleInstancePipe.Wait(close, () => NativeMethods.CancelIoEx(this.pipe.SafePipeHandle, IntPtr.Zero));
+            try
+            {
+                SingleInstancePipe.Read(this.pipe, new byte[1], 0, 1, SingleInstancePipe.Deadline());
+            }
+            catch (TimeoutException)
+            {
+                // The client did not close its end in time; disconnect it anyway.
+            }
         }
     }
 }

@@ -1,9 +1,9 @@
 using System;
 using System.ComponentModel;
+using System.IO;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
-using System.Threading.Tasks;
 
 namespace Devolutions.Agent.Desktop.SingleInstance
 {
@@ -18,25 +18,30 @@ namespace Devolutions.Agent.Desktop.SingleInstance
         /// </summary>
         public static string Name(ProcessIdentity identity) => $"Devolutions.Agent.Desktop.{identity.User.Value}.{identity.SessionId}";
 
+        public static DateTime Deadline() => DateTime.UtcNow.AddMilliseconds(IoTimeoutMs);
+
         /// <summary>
-        /// Waits for <paramref name="task"/> to complete, or calls <paramref name="abort"/> and returns false on timeout.
+        /// Reads from an asynchronous pipe, or throws <see cref="TimeoutException"/> once the read is cancelled and completed.
         /// </summary>
-        public static bool Wait(Task task, Action abort)
+        public static int Read(PipeStream pipe, byte[] buffer, int offset, int count, DateTime deadline)
         {
-            IAsyncResult result = task;
+            IAsyncResult result = pipe.BeginRead(buffer, offset, count, null, null);
 
-            if (result.AsyncWaitHandle.WaitOne(IoTimeoutMs))
+            return Complete(pipe, result, pipe.EndRead, deadline);
+        }
+
+        /// <summary>
+        /// Writes to an asynchronous pipe, or throws <see cref="TimeoutException"/> once the write is cancelled and completed.
+        /// </summary>
+        public static void Write(PipeStream pipe, byte[] buffer, DateTime deadline)
+        {
+            IAsyncResult result = pipe.BeginWrite(buffer, 0, buffer.Length, null, null);
+
+            Complete(pipe, result, r =>
             {
-                return true;
-            }
-
-            abort();
-
-            // Let the aborted I/O complete so the pipe is idle before it is reused or closed.
-            result.AsyncWaitHandle.WaitOne(IoTimeoutMs);
-            task.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
-
-            return false;
+                pipe.EndWrite(r);
+                return 0;
+            }, deadline);
         }
 
         /// <summary>
@@ -47,7 +52,8 @@ namespace Devolutions.Agent.Desktop.SingleInstance
         {
             string pipeName = Name(identity);
 
-            using NamedPipeClientStream pipe = new(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous, TokenImpersonationLevel.Identification);
+            using NamedPipeClientStream pipe = new(".", pipeName, PipeAccessRights.ReadData | PipeAccessRights.WriteData,
+                PipeOptions.Asynchronous, TokenImpersonationLevel.Identification, HandleInheritability.None);
 
             try
             {
@@ -72,25 +78,50 @@ namespace Devolutions.Agent.Desktop.SingleInstance
                 return false;
             }
 
-            Task<int> exchange = Task.Run(() =>
-            {
-                Protocol.WriteMessage(pipe, args);
-                return pipe.ReadByte();
-            });
+            DateTime deadline = Deadline();
+            byte[] ack = new byte[1];
 
-            if (!Wait(exchange, pipe.Dispose))
+            try
+            {
+                Write(pipe, Protocol.Encode(args), deadline);
+
+                if (Read(pipe, ack, 0, 1, deadline) != 1 || ack[0] != Protocol.Ack)
+                {
+                    log.Warn($"Process {serverProcessId} did not acknowledge forwarded arguments");
+                    return false;
+                }
+            }
+            catch (TimeoutException)
             {
                 log.Warn($"Timed out forwarding arguments to process {serverProcessId}");
                 return false;
             }
 
-            if (exchange.GetAwaiter().GetResult() != Protocol.Ack)
+            return true;
+        }
+
+        private static T Complete<T>(PipeStream pipe, IAsyncResult result, Func<IAsyncResult, T> end, DateTime deadline)
+        {
+            TimeSpan remaining = deadline - DateTime.UtcNow;
+
+            if (result.AsyncWaitHandle.WaitOne(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero))
             {
-                log.Warn($"Process {serverProcessId} did not acknowledge forwarded arguments");
-                return false;
+                return end(result);
             }
 
-            return true;
+            NativeMethods.CancelIoEx(pipe.SafePipeHandle, IntPtr.Zero);
+
+            // Wait for the cancelled operation so that no I/O is pending when the pipe is reused or closed.
+            try
+            {
+                end(result);
+            }
+            catch (Exception e) when (e is IOException || e is OperationCanceledException)
+            {
+                // Expected for a cancelled operation.
+            }
+
+            throw new TimeoutException("pipe operation timed out");
         }
     }
 }

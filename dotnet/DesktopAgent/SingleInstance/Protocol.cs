@@ -103,16 +103,12 @@ namespace Devolutions.Agent.Desktop.SingleInstance
             return args;
         }
 
-        public static void WriteMessage(Stream stream, string[] args)
+        /// <summary>
+        /// Reads one message using <paramref name="read"/>, which has the same contract as <see cref="Stream.Read"/>.
+        /// </summary>
+        public static string[] ReadMessage(Func<byte[], int, int, int> read)
         {
-            byte[] message = Encode(args);
-            stream.Write(message, 0, message.Length);
-            stream.Flush();
-        }
-
-        public static string[] ReadMessage(Stream stream)
-        {
-            byte[] header = ReadExactly(stream, LengthSize);
+            byte[] header = ReadExactly(read, LengthSize);
             int offset = 0;
             int payloadLength = ReadInt32(header, ref offset);
 
@@ -121,24 +117,24 @@ namespace Devolutions.Agent.Desktop.SingleInstance
                 throw new InvalidDataException("invalid message length");
             }
 
-            return DecodePayload(ReadExactly(stream, payloadLength));
+            return DecodePayload(ReadExactly(read, payloadLength));
         }
 
-        private static byte[] ReadExactly(Stream stream, int count)
+        private static byte[] ReadExactly(Func<byte[], int, int, int> read, int count)
         {
             byte[] buffer = new byte[count];
-            int read = 0;
+            int total = 0;
 
-            while (read < count)
+            while (total < count)
             {
-                int n = stream.Read(buffer, read, count - read);
+                int n = read(buffer, total, count - total);
 
                 if (n == 0)
                 {
                     throw new EndOfStreamException("truncated message");
                 }
 
-                read += n;
+                total += n;
             }
 
             return buffer;
