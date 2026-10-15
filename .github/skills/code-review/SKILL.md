@@ -9,12 +9,13 @@ Inspect the diff, its stated goal, and repository guidance before selecting cond
 
 - Run `external-contract-reviewer` only when the change may affect HTTP or OpenAPI behavior, WebSocket behavior, relay or tunneling semantics, configuration schemas, or agent and platform protocols.
 - Run `code-compressor` for every diff, limiting it to changed code.
+- Run `rust-style-reviewer` when Rust code changes, limiting it to changed lines.
 - Run `docs-compressor` when documentation, rustdoc, explanatory comments, or instructional prose changes.
 - Run `prose-verifier` when hand-maintained prose changes in a format where source line breaks are stylistic.
 - Run `skeptical-reviewer` last for every diff.
 
 Prefer one `rubber-duck` sub-agent per applicable skill.
-Run the contract, compression, documentation, and prose reviews in parallel.
+Run the contract, compression, style, documentation, and prose reviews in parallel.
 Give every agent the change goal, review scope, base and head references, relevant repository guidance, and an instruction to invoke its named skill, inspect the diff itself, make no edits, and return only evidence-backed findings.
 If sub-agents or skill invocation are unavailable, apply the same skills directly and keep the ordering.
 
