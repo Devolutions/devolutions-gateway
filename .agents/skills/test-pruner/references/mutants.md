@@ -43,12 +43,12 @@ A run is complete only when every test of the clean run has an `ok` or `FAILED` 
 Run from the directory that contains `mutants.out`:
 
 ```powershell
-$expected = Select-String -Path <clean-run-log> -Pattern '^test (\S+) \.\.\. (ok|FAILED)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
+$expected = Select-String -Path <clean-run-log> -Pattern '^test (\S+)(?: - should panic)? \.\.\. (ok|FAILED)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
 (Get-Content -Raw mutants.out/outcomes.json | ConvertFrom-Json).outcomes |
     Where-Object { $_.scenario.Mutant -and $_.summary -in 'CaughtMutant', 'Timeout' } |
     ForEach-Object {
         $mutant = $_.scenario.Mutant.name
-        $results = Select-String -Path "mutants.out/$($_.log_path)" -Pattern '^test (\S+) \.\.\. (ok|FAILED)$'
+        $results = Select-String -Path "mutants.out/$($_.log_path)" -Pattern '^test (\S+)(?: - should panic)? \.\.\. (ok|FAILED)$'
         $seen = $results | ForEach-Object { $_.Matches[0].Groups[1].Value }
         $failed = $results | Where-Object { $_.Matches[0].Groups[2].Value -eq 'FAILED' } | ForEach-Object { $_.Matches[0].Groups[1].Value }
         if ($_.summary -eq 'CaughtMutant' -and $failed -and -not (Compare-Object @($expected) @($seen))) { $failed | ForEach-Object { "$mutant`t$_" } }
