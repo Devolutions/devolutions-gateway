@@ -57,12 +57,12 @@ class FakeWebSocket {
     this.onmessage?.(new MessageEvent('message', { data }));
   }
 
-  emitClose(): void {
-    this.onclose?.(new CloseEvent('close', { code: 1006 }));
+  emitClose(code = 1006, reason = '', wasClean = false): void {
+    this.onclose?.(new CloseEvent('close', { code, reason, wasClean }));
   }
 
-  emitError(): void {
-    this.onerror?.(new Event('error'));
+  emitError(event: Event = new Event('error')): void {
+    this.onerror?.(event);
   }
 
   /** A failed handshake, as browsers report it: error, then close with 1006. */
@@ -86,6 +86,85 @@ describe('ServerWebSocket', () => {
     vi.unstubAllGlobals();
     FakeWebSocket.latest = null;
     FakeWebSocket.instances = [];
+    vi.restoreAllMocks();
+  });
+
+  it('dispatches error before close and preserves close metadata', async () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const order: string[] = [];
+    const error = vi.fn(() => {
+      order.push('error');
+    });
+    const close = vi.fn((event: CloseEvent) => {
+      order.push('close');
+      expect(event.code).toBe(1006);
+      expect(event.wasClean).toBe(false);
+    });
+    websocket.onerror(error);
+    websocket.onclose(close);
+    const socket = FakeWebSocket.latest;
+    if (!socket) {
+      throw new Error('Socket was not created');
+    }
+    socket.protocol = 'jrec-shadow.v2';
+    socket.emitOpen();
+    socket.emitError();
+    socket.emitClose(1006, 'not logged', false);
+    expect(close).not.toHaveBeenCalled();
+    await settle();
+    expect(error).toHaveBeenCalledOnce();
+    expect(close).toHaveBeenCalledOnce();
+    expect(order).toEqual(['error', 'close']);
+  });
+
+  it('dispatches a stream end after an earlier native error', async () => {
+    const websocket = new ServerWebSocket('ws://example.test');
+    const order: string[] = [];
+    websocket.onerror(() => {
+      order.push('error');
+    });
+    websocket.onmessage((message) => {
+      order.push(message.type);
+    }, vi.fn());
+    const socket = FakeWebSocket.latest;
+    socket?.emitOpen();
+    socket?.emitError();
+    socket?.emitMessage(encodedMessage(3));
+    await settle();
+    expect(order).toEqual(['error', 'stream-ended']);
+  });
+
+  it('does not log chunks, raw events, source URLs, reasons, error messages, or payloads', async () => {
+    const secret = 'FAKE_SECRET_SENTINEL';
+    const loggers = [
+      vi.spyOn(console, 'debug').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+    ];
+    const websocket = new ServerWebSocket(`ws://example.test/${secret}?token=${secret}`);
+    websocket.onerror(vi.fn());
+    websocket.onclose(vi.fn());
+    websocket.onmessage(vi.fn(), vi.fn());
+    const socket = FakeWebSocket.latest;
+    if (!socket) {
+      throw new Error('Socket was not created');
+    }
+    socket.protocol = secret;
+    socket.emitOpen();
+    for (let index = 0; index < 50; index++) {
+      socket.emitMessage(encodedMessage(0, secret));
+    }
+    await settle();
+    socket.emitMessage(encodedMessage(1, JSON.stringify({ codec: 'vp8', secret })));
+    const event = new ErrorEvent('error', { message: secret, filename: secret });
+    Object.defineProperty(event, 'target', { value: socket });
+    socket.emitError(event);
+    socket.emitClose(1006, secret, false);
+    await settle();
+    for (const logger of loggers) {
+      expect(logger).not.toHaveBeenCalled();
+    }
   });
 
   it('falls back to shadow protocol v1 when the v2 handshake fails', async () => {

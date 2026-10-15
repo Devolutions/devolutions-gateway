@@ -16,6 +16,8 @@ export class PlaybackClip {
   private debug = false;
   private complete = false;
   private finishing: Promise<void> | null = null;
+  private disposed = false;
+  private cancelOpen!: () => void;
 
   constructor(readonly metadata: PlaybackClipMetadata) {
     this.video.src = this.objectUrl;
@@ -38,6 +40,10 @@ export class PlaybackClip {
         cleanup();
         reject(new Error('MediaSource closed before it opened'));
       };
+      this.cancelOpen = () => {
+        cleanup();
+        reject(new DOMException('stream interrupted', 'AbortError'));
+      };
 
       this.mediaSource.addEventListener('sourceopen', onOpen);
       this.mediaSource.addEventListener('sourceclose', onClose);
@@ -45,11 +51,14 @@ export class PlaybackClip {
   }
 
   async open(): Promise<void> {
+    this.ensureActive();
     await this.opened;
+    this.ensureActive();
   }
 
   async append(data: Uint8Array): Promise<void> {
     await this.opened;
+    this.ensureActive();
     if (this.complete || !this.sourceBuffer) {
       throw new Error('Cannot append to a completed clip');
     }
@@ -58,6 +67,7 @@ export class PlaybackClip {
 
   async finish(): Promise<void> {
     await this.opened;
+    this.ensureActive();
     if (this.finishing) {
       return this.finishing;
     }
@@ -69,6 +79,7 @@ export class PlaybackClip {
     this.complete = true;
     this.finishing = (async () => {
       await sourceBuffer.whenIdle();
+      this.ensureActive();
       if (this.mediaSource.readyState !== 'open') {
         throw new Error('Cannot finish a MediaSource that is not open');
       }
@@ -87,10 +98,22 @@ export class PlaybackClip {
   }
 
   dispose(): void {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
+    this.cancelOpen();
+    this.sourceBuffer?.dispose();
     this.video.pause();
     this.video.removeAttribute('src');
     this.video.load();
     this.video.remove();
     URL.revokeObjectURL(this.objectUrl);
+  }
+
+  private ensureActive(): void {
+    if (this.disposed) {
+      throw new DOMException('stream interrupted', 'AbortError');
+    }
   }
 }
