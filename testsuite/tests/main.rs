@@ -10,3 +10,4 @@ mod network_scanner;
 mod service_accounts;
 mod sysevent;
 mod timing;
+mod websocket;
