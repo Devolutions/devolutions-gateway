@@ -1,19 +1,21 @@
 ---
 name: test-pruner
-description: Prune, strengthen, and consolidate the tests of one Rust crate or module using oracle classification and cargo-mutants evidence. Use when the user asks to remove redundant tests, dedupe or consolidate tests with rstest or proptest, audit test value, or clean up AI-written tests. For reviewing the tests of a single pull request, use `test-oracle-reviewer` instead.
+description: Prune, strengthen, and consolidate tests using oracle classification and cargo-mutants evidence, for one Rust crate or module or for a pull request's diff. Use when the user asks to remove redundant tests, dedupe or consolidate tests with rstest or proptest, audit test value, clean up AI-written tests, or get a mutation-backed review of a pull request's tests. For a quick oracle-only check of a pull request's tests, use `test-oracle-reviewer` instead.
 ---
 
 # Test pruner
 
-Work on one crate or module per run so mutation runs stay affordable and pull requests stay reviewable.
+Scope each run to one crate or module, or to one pull request's diff, so mutation runs stay affordable and results stay reviewable.
 Decide from two independent measurements: whether the expected value is justified independently of the code, and which faults only this test catches.
 Mutation testing alone cannot tell a test that matches itself from a correct one, and oracle review alone cannot tell which tests are the sole guard for a fault.
 
 ## Measure
 
 Invoke `test-oracle-reviewer` on every test in scope and record independent, self-derived, or unknown with evidence.
-Run cargo-mutants on the scoped source to get the caught set, adding domain mutants from `references/mutants.md` because generic mutants are weak on codec code.
-For the self-derived and unknown tests only, build the kill matrix of mutant by test described there; cargo-mutants reports per suite, and attributing every test is the cost explosion to avoid.
+Run cargo-mutants on the scoped source as described in `references/mutants.md`, adding domain mutants from its catalogs because generic mutants miss most domain faults.
+Build the kill matrix of mutant by test from the cargo-mutants logs; it needs no per-test reruns.
+For tests with several assertions, record which assertion fails for each kill.
+Run the scoped suite repeatedly on the clean tree, for example 15 times, to find flaky tests before trusting any kill.
 
 ## Decide
 
@@ -27,6 +29,7 @@ Challenge a test of unknown oracle.
 Deletion is a set decision, not a per-test verdict.
 Two tests that both catch mutant M each have zero unique kills, and deleting both loses M.
 Choose the deletion set so the caught mutants afterward equal the caught mutants before.
+The same rule applies to assertions: one that never fails across its test's kills is a deletion candidate.
 
 Never propose deleting a regression test tied to an issue or fuzz crash, a test of untrusted-input parsing or bounds checks, or a doctest; strengthen or merge those only.
 Treat a suite that deliberately uses snapshots as a change detector: dedupe it, do not delete it.
@@ -34,11 +37,11 @@ Report flaky tests separately; deleting one hides a bug.
 
 ## Challenge
 
-Give a fresh-context agent the test, the code under test, and the mutants the rest of the suite already catches, and ask for one mutant that this test catches and the others miss, as a patch.
-Run the patch; arguments do not count.
+Give a fresh-context agent the test, the code under test, and the mutants the rest of the suite already catches, and ask for one mutant that this test catches and the others miss, as a patch only.
+Apply and run the patch yourself; arguments do not count.
 Add any mutant it finds to the domain catalog regardless of the verdict.
-If it finds none, send the case to the test's human author with what is asserted, the oracle finding, its kills, and the failed challenge.
-If the author was an agent, route to CODEOWNERS; an agent confirming its own test is worthless.
+If it finds none, send the case to a human with what is asserted, the oracle finding, its kills, and the failed challenge: the test's author, or the pull request author or a human reviewer when an agent wrote the test.
+An agent confirming its own test is worthless.
 
 ## Consolidate
 
@@ -51,6 +54,11 @@ Do not add a never-panics property where a fuzz target already covers it.
 
 The caught-mutant set never shrinks except through deletions a human approves in a pull request.
 Rerun the caught set after every deletion set and every consolidation, verify by rerunning rather than reasoning, and revert on any loss.
-Open separate pull requests for deletions, consolidations, and strengthenings; they are different reviews.
-Put the oracle table, kill matrix, challenge results, and found bugs in the pull request description.
+Report surviving mutants as coverage gaps, and mark likely-equivalent ones as such.
+
+In crate mode, open separate pull requests for deletions, consolidations, and strengthenings; they are different reviews.
+Put the oracle table, kill matrix, challenge results, survivors, and found bugs in the pull request description.
 Change only tests and source comments; never modify non-test source otherwise.
+
+In pull request mode, post one review instead: inline comments on the affected tests, with the tables in `<details>` blocks.
+Deletions, consolidations, strengthenings, and small non-test changes that enable an independent oracle become requests to the author, with the current caught set as the bar.

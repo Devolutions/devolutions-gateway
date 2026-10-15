@@ -1,50 +1,55 @@
 # cargo-mutants mechanics
 
 cargo-mutants reports whether the suite caught each mutant.
-It has no per-test attribution and no user-defined mutation operators, so both are built on its outputs.
+It has no user-defined mutation operators and keeps per-test results only in its logs, so both are built on its outputs.
+These notes target cargo-mutants 27.1.
 
-## Baseline
+## Run
+
+Scope with `--file '<package-dir>/src/<module>/**'` for a crate or module, or `--in-diff <diff>` for a pull request.
+Package directories differ: `devolutions-gateway/src` sits at the repository root, while most libraries live under `crates/`.
 
 ```sh
-cargo mutants --file 'crates/<crate>/src/<module>/**' --test-package <crate> --jobs 4
+cargo mutants --file '<path>' --test-package <test-package> --in-place --baseline skip --timeout <s> --build-timeout <s> -- --no-fail-fast <cargo-test-args>
 ```
 
-Outputs under `mutants.out/`: `caught.txt`, `missed.txt`, `unviable.txt`, `outcomes.json`, and `diff/` with one patch per mutant.
-Use the same `--test-package` or `--test-workspace` for the baseline and every rerun; changing test scope makes mutants caught by another crate's tests appear missed.
+The baseline phase ignores `--test-package` and tests the mutated package, so it fails when the tests live in `testsuite`.
+Run the scoped tests once by hand instead, then skip the baseline and set both timeouts to a few times the measured test run and incremental build.
+Arguments after `--` go to `cargo test`, and a second `--` reaches the test binary: `-- --no-fail-fast --test integration_tests -- websocket::` runs only the `websocket` tests of the `testsuite` binary.
+`--no-fail-fast` keeps one failing test binary from hiding the results of the others.
+
+The default mode copies the tree and cold-builds the workspace; `--in-place` reuses the warm `target/` and is much cheaper.
+It mutates the worktree during the run, so read code with `git show HEAD:<path>` meanwhile, run no other cargo command against the same `target/`, and check `git status` afterwards.
+
+Outputs under `mutants.out/`: `caught.txt`, `missed.txt`, `unviable.txt`, `outcomes.json`, `log/` with one log per mutant, and `diff/` with one patch per mutant.
+Keep the same test scope and flags for every run; changing test scope makes mutants caught by other tests appear missed.
 Mutant names include a line number, so compare caught sets with the line number stripped.
 Do not use `--iterate`; it skips mutants caught in previous runs, the opposite of a rerun.
 
 ## Kill matrix
 
-For each caught mutant, record which flagged tests catch it.
-One build per mutant is the cheap form:
+Each log holds the test harness output for its mutant, with one `ok` or `FAILED` line per test.
+A test caught a mutant when its line reads `FAILED`, so parse the logs instead of rerunning tests:
 
-```sh
-for d in mutants.out/diff/*.diff; do
-  git apply "$d"
-  cargo test -p <crate> --no-run 2>/dev/null
-  for t in $FLAGGED_TESTS; do
-    cargo test -p <crate> -q -- --exact "$t" >/dev/null 2>&1 && echo "$d $t PASS" || echo "$d $t FAIL"
-  done
-  git checkout -- .
-done
+```powershell
+Get-ChildItem mutants.out/log/*.log | ForEach-Object {
+    $mutant = $_.BaseName
+    Select-String -Path $_.FullName -Pattern '^test (\S+) \.\.\. FAILED$' |
+        ForEach-Object { "$mutant`t$($_.Matches[0].Groups[1].Value)" }
+}
 ```
 
-`FAIL` means the test caught the mutant.
-A unique kill is a mutant caught by exactly one flagged test and by no unflagged test.
-The floor is what the suite catches with all flagged tests skipped (`cargo mutants ... -- -- --skip <t1> --skip <t2>`); everything above the floor must stay covered by a retained test.
+A unique kill is a mutant caught by exactly one test in scope.
+For assertion-level evidence, read the `panicked at <file>:<line>` location of each failure; an assertion whose line never appears across its test's kills catches nothing the others miss.
 
 ## Rerun
 
-```sh
-cargo mutants --file 'crates/<crate>/src/<module>/**' --test-package <crate> --baseline skip
-```
-
+Rerun with the same scope and flags after each change.
 Any mutant that moved from caught to missed without an approved deletion explaining it means revert.
 
 ## Domain mutants
 
-Write each as a small patch; apply, run `cargo test -p <crate>`, revert; caught means any test failed.
+Write each as a small patch; apply, run the scoped tests, revert; caught means any test failed.
 Patches are pull request evidence, not repository files.
 
 Codec catalog:
@@ -58,5 +63,14 @@ Codec catalog:
 - Write one byte fewer than `size()` reports.
 - Return `Ok` on a malformed-input branch that returns `Err`.
 - Accept a reserved or out-of-range enum value.
+
+Async and resource catalog:
+
+- Remove or shorten a deadline.
+- Detach a task instead of aborting it, or hold a `JoinHandle` where an abort-on-drop handle is required.
+- Return early before a drain or flush.
+- Swallow an error as `Ok`.
+- Skip recording a state flag.
+- Swap two status or close codes.
 
 Add every mutant the challenger produces that the rest of the suite misses.

@@ -8,11 +8,11 @@ description: Judge whether a test's expected value is justified independently of
 A test whose expected value came from the code under test detects change, not bugs.
 For each test, ask whether the expected value can be justified without running the code.
 
-Independent sources: a spec example, an external capture, a hand-derived value, a real property such as round-trip or `encode` writing exactly `size()` bytes, or a reference model.
-Self-derived sources: a snapshot of current output, a value computed through the code or a shared helper, a mock that returns what is then asserted, `is_ok()` or `!is_empty()` alone, or a restatement of what a derive or the type system guarantees.
+Independent sources: a spec example, an external capture, a hand-derived value, an input the test chose itself and asserts was honored, a real property such as round-trip or `encode` writing exactly `size()` bytes, or a reference model.
+Self-derived sources: a snapshot of current output, a value computed through the code or a shared helper, a production constant or message copied into the test, a mock that returns what is then asserted, `is_ok()` or `!is_empty()` alone, or a restatement of what a derive or the type system guarantees.
 
 Verify instead of guessing.
-Check comments and `git log -p` for the origin, then decode a byte vector field by field against the governing spec section and show the breakdown.
+Check comments and `git log -p` for the origin, then check the value against the governing spec section: decode a byte vector field by field and show the breakdown, or cite the section that defines the protocol behavior, such as RFC 6455 §5.5.1.
 A value pasted from the code's output is independent once it checks out against the spec, and a spec vector nobody re-read is not; verification is the property, origin is only a hint.
 
 Classify each test as independent, self-derived, or unknown, with evidence.
@@ -21,4 +21,5 @@ When a value is wrong, report a bug; do not adjust the value or the code.
 Unknown is an outcome, not a guess in either direction.
 
 In a pull request review, comment on each self-derived test with the independent source to use and leave the fix to the author.
-Run `cargo mutants --in-diff <diff>` when available and report missed mutants in changed code as a separate finding.
+When that source needs a small non-test change, such as an injectable deadline the test can choose, request the change.
+For mutation evidence on the same pull request, use `test-pruner` in pull request mode.
