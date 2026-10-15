@@ -7,7 +7,7 @@ Drive the binary whenever the behaviour is reachable that way.
 ## Run the binary
 
 Start Gateway, Agent, or jetsocat through `testsuite::cli` with a `DgwConfig::builder()` from `testsuite::dgw_config`, then drive it through its CLI, HTTP API, and WebSocket endpoints.
-Use `disable_token_validation(true)` with an unsigned JWT instead of signing real tokens.
+Use `disable_token_validation(true)` with an unsigned JWT instead of signing real tokens, except in tests of token validation itself, which the flag bypasses entirely.
 When a behaviour cannot be reached from outside, add a small `__debug__` config knob or environment variable to the binary rather than linking the implementation.
 
 ## Dependencies are a design signal
