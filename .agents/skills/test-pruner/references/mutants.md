@@ -14,7 +14,7 @@ cargo mutants --file '<path>' --test-package <test-package> --in-place --baselin
 ```
 
 The baseline phase ignores `--test-package` and tests the mutated package, so it fails when the tests live in `testsuite`.
-Run the scoped tests once by hand instead, then skip the baseline and set both timeouts to a few times the measured test run and incremental build.
+Run the scoped tests once by hand instead and keep the log, then skip the baseline and set both timeouts to a few times the measured test run and incremental build.
 Arguments after `--` go to `cargo test`, and a second `--` reaches the test binary: `-- --no-fail-fast --test integration_tests -- <module>::` runs only that module's tests of the `testsuite` binary.
 Confirm the clean scoped run executes tests before trusting any result; a filter that matches nothing passes silently and yields an empty kill matrix.
 `--no-fail-fast` keeps one failing test binary from hiding the results of the others.
@@ -26,7 +26,8 @@ It mutates the worktree during the run, so read code with `git show HEAD:<path>`
 
 Outputs under `mutants.out/`: `caught.txt`, `missed.txt`, `unviable.txt`, `outcomes.json`, `log/` with one log per mutant, and `diff/` with one patch per mutant.
 Keep the same test scope and flags for every run; changing test scope makes mutants caught by other tests appear missed.
-Key mutants by their full name from `outcomes.json`; stripping line numbers merges distinct mutants, and test-only edits do not move source lines.
+Within one run, key mutants by their full name from `outcomes.json`; stripping coordinates merges distinct mutants.
+Across runs, coordinates shift whenever an edit above a function adds or removes lines, such as a test module in the middle of a file or a source comment, so match mutants by file, function, and replacement, and compare diff text with hunk headers removed when several share that key.
 Do not use `--iterate`; it skips mutants caught in previous runs, the opposite of a rerun.
 Read `unviable.txt`: when a function returns through a `Result` type alias, cargo-mutants cannot build its `Ok` replacement and drops it there without warning, so add that mutant by hand; for a check, "always `Ok`" is the mutant that matters most.
 Patches in `mutants.out/diff/` carry the mutant description in their `+++` line; to apply one, rewrite that line to the path and use `git apply -p0`.
@@ -36,18 +37,20 @@ Patches in `mutants.out/diff/` carry the mutant description in their `+++` line;
 Each log holds the test harness output for its mutant, with one `ok` or `FAILED` line per test.
 A test caught a mutant when its line reads `FAILED`, so parse the logs instead of rerunning tests.
 Key the matrix on `outcomes.json`, which maps each mutant name to its log; log file names do not distinguish mutants at the same position.
-A mutant caught by timeout has incomplete per-test results, because a hung test leaves no line and earlier `FAILED` lines may be partial, so rerun its tests one at a time.
+A run is complete only when every test of the clean run has an `ok` or `FAILED` line; a hung test or an aborted process leaves lines missing while earlier `FAILED` lines look valid, so rerun such a mutant's tests one at a time.
 Run from the directory that contains `mutants.out`:
 
 ```powershell
+$expected = Select-String -Path <clean-run-log> -Pattern '^test (\S+) \.\.\. (ok|FAILED)$' | ForEach-Object { $_.Matches[0].Groups[1].Value }
 (Get-Content -Raw mutants.out/outcomes.json | ConvertFrom-Json).outcomes |
     Where-Object { $_.scenario.Mutant -and $_.summary -in 'CaughtMutant', 'Timeout' } |
     ForEach-Object {
         $mutant = $_.scenario.Mutant.name
-        $failed = Select-String -Path "mutants.out/$($_.log_path)" -Pattern '^test (\S+) \.\.\. FAILED$' |
-            ForEach-Object { $_.Matches[0].Groups[1].Value }
-        if ($_.summary -eq 'Timeout' -or -not $failed) { "$mutant`t<$($_.summary): incomplete per-test results, rerun tests individually>" }
-        if ($_.summary -ne 'Timeout') { $failed | ForEach-Object { "$mutant`t$_" } }
+        $results = Select-String -Path "mutants.out/$($_.log_path)" -Pattern '^test (\S+) \.\.\. (ok|FAILED)$'
+        $seen = $results | ForEach-Object { $_.Matches[0].Groups[1].Value }
+        $failed = $results | Where-Object { $_.Matches[0].Groups[2].Value -eq 'FAILED' } | ForEach-Object { $_.Matches[0].Groups[1].Value }
+        if ($_.summary -eq 'CaughtMutant' -and $failed -and -not (Compare-Object @($expected) @($seen))) { $failed | ForEach-Object { "$mutant`t$_" } }
+        else { "$mutant`t<$($_.summary): incomplete per-test results, rerun tests individually>" }
     }
 ```
 
