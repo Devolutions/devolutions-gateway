@@ -747,6 +747,21 @@ describe('ShadowPlayer', () => {
     expect(player.shadowRoot?.querySelector('button[aria-label="Play"]')).not.toBeNull();
   });
 
+  it('restores playback intent when native Play follows native Pause', async () => {
+    const { player, clip } = await startLiveClip();
+    clip.queuePlaybackEvents();
+    player.play();
+    await flushMicrotasks();
+    clip.userPause();
+    expect(player.shadowRoot?.querySelector('button[aria-label="Play"]')).not.toBeNull();
+
+    clip.userResume();
+    await flushMicrotasks();
+    expect(clip.video.paused).toBe(false);
+    expect(clip.pause).not.toHaveBeenCalled();
+    expect(player.shadowRoot?.querySelector('button[aria-label="Pause"]')).not.toBeNull();
+  });
+
   it('does not move a playable paused clip across a newly buffered gap', async () => {
     const { player, socket, clip } = await startLiveClip();
     clip.queuePlaybackEvents();
@@ -822,8 +837,28 @@ describe('ShadowPlayer', () => {
     expect(clip.play).not.toHaveBeenCalled();
     player.setControls(true);
     expect(player.shadowRoot?.querySelector('.control-bar')).not.toBeNull();
+    expect(player.shadowRoot?.querySelector('.replay-button.visible')).not.toBeNull();
     player.setControls(false);
     expect(player.shadowRoot?.querySelector('.control-bar')).toBeNull();
+    expect(player.shadowRoot?.querySelector('.replay-button.visible')).toBeNull();
+  });
+
+  it('restores replay when controls are toggled after playback completes', async () => {
+    const { player, socket, clip } = await startLiveClip();
+    player.setControls(false);
+    player.setControls(true);
+    expect(player.shadowRoot?.querySelector('.replay-button.visible')).toBeNull();
+    const ended = socket.emitMessage({ type: 'stream-ended' });
+    await flushMicrotasks();
+    clip.resolveFinish();
+    await ended;
+    clip.end();
+    expect(player.shadowRoot?.querySelector('.replay-button.visible')).not.toBeNull();
+
+    player.setControls(false);
+    expect(player.shadowRoot?.querySelector('.replay-button.visible')).toBeNull();
+    player.setControls(true);
+    expect(player.shadowRoot?.querySelector('.replay-button.visible')).not.toBeNull();
   });
 
   it('announces playable readiness once and delivers readiness to late listeners', async () => {

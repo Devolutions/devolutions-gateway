@@ -215,6 +215,7 @@ export class ShadowPlayer extends HTMLElement {
       this.controls.onAction((action) => this.handleControlsAction(action));
       this.controls.render({ type: 'labels', labels: this.controlLabels });
     }
+    this._replayButton?.classList.toggle('visible', this.isSequencePlaybackComplete());
     this.renderAllSegments();
     this.renderPlayerControls();
   }
@@ -505,10 +506,7 @@ export class ShadowPlayer extends HTMLElement {
     );
     video.addEventListener('play', () => {
       if (this.activeClip === clip && !video.paused) {
-        if (!this.shouldPlay) {
-          video.pause();
-          return;
-        }
+        this.shouldPlay = true;
         this.catchUpToLiveEdge();
         this.renderPlayerControls();
       }
