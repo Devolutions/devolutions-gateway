@@ -7663,7 +7663,6 @@ dependencies = [
  "agent-tunnel-proto",
  "anyhow",
  "assert_cmd",
- "axum 0.8.9",
  "base64 0.23.1",
  "camino",
  "devolutions-gateway",

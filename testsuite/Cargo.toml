@@ -17,9 +17,7 @@ harness = true
 
 [dependencies]
 anyhow = "1.0"
-axum = { version = "0.8", default-features = false, features = ["http1", "ws"] }
 assert_cmd = "2.2"
-devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 dynosaur = "0.3"
 escargot = "0.5"
 expect-test = "1.5"
@@ -38,6 +36,7 @@ agent-tunnel = { path = "../crates/agent-tunnel", features = ["test-utils"] }
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto", features = ["serde"] }
 base64 = "0.23"
 camino = "1"
+devolutions-gateway-task = { path = "../crates/devolutions-gateway-task" }
 devolutions-gateway = { path = "../devolutions-gateway" }
 futures-util = "0.3"
 agent-tunnel-libsql.path = "../crates/agent-tunnel-libsql"

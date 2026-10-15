@@ -9,4 +9,3 @@ pub mod dgw_config;
 pub mod http;
 pub mod mcp_client;
 pub mod mcp_server;
-pub mod websocket;
