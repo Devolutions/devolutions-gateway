@@ -24,7 +24,8 @@ Never delete an independent test on mutant evidence: the mutant sample is tiny n
 Strengthen a self-derived test with unique kills by replacing its expected value with an independent one; if none exists, keep it and mark it `// oracle: self-derived; sole guard for <mutants>`.
 A strengthened test that fails is a finding, never a task to make it pass.
 Delete a self-derived test with no unique kills.
-Challenge a test of unknown oracle.
+A test of unknown oracle with unique kills has already passed the challenge; strengthen it.
+Challenge a test of unknown oracle without unique kills.
 
 Deletion is a set decision, not a per-test verdict.
 Two tests that both catch mutant M each have zero unique kills, and deleting both loses M.
@@ -40,12 +41,12 @@ Report flaky tests separately; deleting one hides a bug.
 Give a fresh-context agent the test, the code under test, and the mutants the rest of the suite already catches, and ask for one mutant that this test catches and the others miss, as a patch only.
 Apply and run the patch yourself; arguments do not count.
 Add any mutant it finds to the domain catalog regardless of the verdict.
-If it finds none, send the case to a human with what is asserted, the oracle finding, its kills, and the failed challenge: the test's author, or the file's CODEOWNERS when an agent wrote the test.
-An agent confirming its own test is worthless.
+If it finds none, ask the human who wrote or prompted the test for the source of its expected value, and accept a source you can check, never a confirmation.
+Without one, delete the test, or hand a protected test to the file's CODEOWNERS.
 
 ## Consolidate
 
-Keep `#[case::name]` on rstest cases so failures stay readable.
+Keep rstest case names readable, with `#[case::name]` or enum-valued `#[values]`.
 Use proptest only for a real property; an assertion that re-implements the unit is a self-derived test with random inputs.
 Round-trip passes symmetric bugs, so every codec module keeps spec or capture vectors.
 Do not add a never-panics property where a fuzz target already covers it.
@@ -54,10 +55,10 @@ Do not add a never-panics property where a fuzz target already covers it.
 
 The caught-mutant set never shrinks except through deletions a human approves in a pull request.
 Rerun the caught set after every deletion set and every consolidation, verify by rerunning rather than reasoning, and revert on any loss.
-Report surviving mutants as coverage gaps, and mark likely-equivalent ones as such.
+Triage surviving mutants as equivalent, coverage gap, or bug lead; a mutant that survives because its code is unreachable is a bug lead.
 
-In crate mode, open separate pull requests for deletions, consolidations, and strengthenings; they are different reviews.
-Put the oracle table, kill matrix, challenge results, survivors, and found bugs in the pull request description.
+In crate mode, open separate pull requests for deletions, consolidations, and strengthenings, or separate commits when amending an open pull request; they are different reviews.
+Put the oracle table, kill matrix, challenge results, survivors, and found bugs in a pull request comment; the pull request body is the squash commit.
 Change only tests and source comments; never modify non-test source otherwise.
 
 In pull request mode, post one review instead: inline comments on the affected tests, with the tables in `<details>` blocks.

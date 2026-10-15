@@ -6,7 +6,7 @@ These notes target cargo-mutants 27.1.
 
 ## Run
 
-Scope with `--file '<package-dir>/src/<module>/**'` for a crate or module, or `--in-diff <diff>` for a pull request.
+Scope with `--file '<package-dir>/src/<module>/**'` for a crate or module, `--re '<fn>|<fn>'` for a pull request's changed functions, or `--in-diff <diff>` for its whole diff; build time dominates, so scope first.
 Package directories differ: `devolutions-gateway/src` sits at the repository root, while most libraries live under `crates/`.
 
 ```sh
@@ -17,14 +17,18 @@ The baseline phase ignores `--test-package` and tests the mutated package, so it
 Run the scoped tests once by hand instead, then skip the baseline and set both timeouts to a few times the measured test run and incremental build.
 Arguments after `--` go to `cargo test`, and a second `--` reaches the test binary: `-- --no-fail-fast --test integration_tests -- websocket::` runs only the `websocket` tests of the `testsuite` binary.
 `--no-fail-fast` keeps one failing test binary from hiding the results of the others.
+Pass `--features <f>` for feature-gated code; without it that code gets no mutants and nothing warns.
+Pass `--output <scratch-dir>` so `mutants.out` stays out of the checkout.
 
 The default mode copies the tree and cold-builds the workspace; `--in-place` reuses the warm `target/` and is much cheaper.
 It mutates the worktree during the run, so read code with `git show HEAD:<path>` meanwhile, run no other cargo command against the same `target/`, and check `git status` afterwards.
 
 Outputs under `mutants.out/`: `caught.txt`, `missed.txt`, `unviable.txt`, `outcomes.json`, `log/` with one log per mutant, and `diff/` with one patch per mutant.
 Keep the same test scope and flags for every run; changing test scope makes mutants caught by other tests appear missed.
-Mutant names include a line number, so compare caught sets with the line number stripped.
+Key mutants by their full name from `outcomes.json`; stripping line numbers merges distinct mutants, and test-only edits do not move source lines.
 Do not use `--iterate`; it skips mutants caught in previous runs, the opposite of a rerun.
+Read `unviable.txt`: when a function returns through a `Result` type alias, cargo-mutants cannot build its `Ok` replacement and drops it there without warning, so add that mutant by hand; for a check, "always `Ok`" is the mutant that matters most.
+Patches in `mutants.out/diff/` carry the mutant description in their `+++` line; to apply one, rewrite that line to the path and use `git apply -p0`.
 
 ## Kill matrix
 
@@ -79,5 +83,15 @@ Async and resource catalog:
 - Swallow an error as `Ok`.
 - Skip recording a state flag.
 - Swap two status or close codes.
+
+Decision and validation catalog, for each security or policy decision: remove it, weaken it, key it on the wrong identity, or apply it to the wrong object.
+
+- Always return `Ok` from the check.
+- Accept any candidate by dropping a filter.
+- Look up by the wrong key, such as a name hash instead of a thumbprint.
+- Stop after the first candidate.
+- Ignore one input source, such as caller-provided roots.
+- Skip verification of a candidate's chain.
+- Swap error precedence or report the wrong error.
 
 Add every mutant the challenger produces that the rest of the suite misses.

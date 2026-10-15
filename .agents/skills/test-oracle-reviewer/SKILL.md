@@ -14,8 +14,9 @@ Self-derived sources: a snapshot of current output, a value computed through the
 Verify instead of guessing.
 Check comments and `git log -p` for the origin, then check the value against the governing spec section: decode a byte vector field by field and show the breakdown, or cite the specification section that defines the behavior.
 A value pasted from the code's output is independent once it checks out against the spec, and a spec vector nobody re-read is not; verification is the property, origin is only a hint.
+A search-engine or AI summary is not a source; cite the primary document.
 
-Classify each test as independent, self-derived, or unknown, with evidence.
+Classify each test as independent, self-derived, or unknown, with evidence, and report per assertion when a test mixes classes.
 When a value checks out, add a one-line citation comment to the test, such as `// <spec> §<section> example` or `// hand-derived; see PR #N`, so the next review is cheap.
 When a value is wrong, report a bug; do not adjust the value or the code.
 Unknown is an outcome, not a guess in either direction.
