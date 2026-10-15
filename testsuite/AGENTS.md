@@ -1,7 +1,8 @@
 # Testsuite
 
-This crate exercises the shipped binaries the way users and CI do.
-It is not the place to re-test library internals.
+One crate and one test binary hold every integration test in the workspace, so the suite links once and runs as one process.
+A test either drives a shipped binary or exercises the public API of a library crate under `crates/`.
+Drive the binary whenever the behaviour is reachable that way.
 
 ## Run the binary
 
@@ -11,10 +12,10 @@ When a behaviour cannot be reached from outside, add a small `__debug__` config 
 
 ## Dependencies are a design signal
 
-The testsuite depends on the binaries' public surface and on generic tooling, not on the crates that implement them.
-Wanting `axum`, `devolutions-gateway`, `agent-tunnel`, or another internal crate usually means one of:
+A library crate under `crates/` is a contract and may be a dev-dependency when its public API is what the test checks.
+The binary crates are not: wanting `devolutions-gateway`, `devolutions-agent`, `jetsocat`, or a web framework such as `axum` usually means one of:
 
-- The test is a unit test and belongs in a `#[cfg(test)]` module next to the code, where those crates already are.
+- The test is a unit test and belongs in a `#[cfg(test)]` module next to the code.
 - The binary needs a knob so the behaviour becomes reachable.
 - The logic is generic and belongs in a shared crate such as `transport`, with its own unit tests.
 
