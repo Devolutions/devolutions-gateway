@@ -28,7 +28,7 @@ The result is `git show b6c98d77:AGENTS.md`: five headings (intent files, writin
 | Nightly rustfmt | One CI round-trip to learn; no skill states it. IronRDP dropped it because it formats with stable: verify before copying |
 | `#[expect(..., reason = "...")]` with its reason | Policy; the old text said `THINK before suppressing` without the why |
 | Pointer to `testsuite/AGENTS.md` | Non-standard Cargo layout; details live in the nested file (26 lines: run the binary, dependencies are a design signal, fewer stronger tests, timing tests run serially) |
-| `Issue: DGW-123` | The shared commit skill explicitly defers footer format to the repository |
+| `Issue: DGW-123` | The shared commit skill defers footer format to the repository; the one-line form stays here and the full rules live in the repo-local `commit-footer` skill the line points to |
 | Intent files, writing for the repository, untested-property comments | Policy no agent infers and no skill holds; taken from IronVNC and picky-rs |
 | Skills opener | For agents that do not auto-discover `.agents/skills/` |
 
