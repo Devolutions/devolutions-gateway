@@ -28,4 +28,10 @@ Before adding a test, name the bug it catches that existing tests miss and the i
 A test whose expected value was derived from the implementation detects change, not bugs; run the `test-oracle-reviewer` skill on new tests.
 Use `rstest` with named cases when tests check the same property and differ only in data.
 Use `proptest` only for a real property such as a round-trip; a property that re-implements the unit adds nothing.
-A test that must wait on the wall clock belongs in `tests/timing/` behind `#[ignore]`.
+
+## Timing tests
+
+Tests that assert a duration bound run serially, because concurrent tests inflate the measurement.
+Put them in `tests/timing/` with `#[ignore = "run serially by the timing-sensitive CI step"]`.
+A test that waits for a fixed delay is not a timing test.
+If the delay runs in the test process, `#[tokio::test(start_paused = true)]` advances the clock past it instantly; if it runs in the binary, make it injectable.
