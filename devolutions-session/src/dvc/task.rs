@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use devolutions_agent_shared::temp_file::{BATCH_UTF8_PREAMBLE, POWERSHELL_UTF8_ENCODING_PREAMBLE, TmpFileGuard};
-use devolutions_gateway_task::Task;
+use devolutions_gateway_task::{ChildTask, Task};
 use now_proto_pdu::ironrdp_core::IntoOwned;
 use now_proto_pdu::{
     ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
@@ -17,6 +17,7 @@ use now_proto_pdu::{
 };
 use tokio::select;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::time::{Instant, Interval, MissedTickBehavior};
 use tracing::{error, info, warn};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::process::Process;
@@ -181,8 +182,13 @@ async fn process_messages(
     }
 
     let server_caps = default_server_caps(pwsh_executable.is_some());
-    let heartbeat_interval = client_caps.heartbeat_interval().unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
     let downgraded_caps = client_caps.downgrade(&server_caps);
+    // Held only to stop the heartbeats on renegotiation and when this loop ends.
+    #[expect(
+        clippy::collection_is_never_read,
+        reason = "the task handle is a drop guard; it is assigned, never inspected"
+    )]
+    let mut _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
 
     // Send server capabilities back to the client.
     dvc_tx.send(server_caps.into()).await?;
@@ -214,6 +220,7 @@ async fn process_messages(
                                 // message processor.
                                 let server_caps = default_server_caps(pwsh_executable.is_some());
                                 let downgraded_caps = client_caps.downgrade(&server_caps);
+                                _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
 
                                 // Old exec sessions will be abandoned (IO loops will terminate
                                 // on old processor `Drop`).
@@ -295,16 +302,56 @@ async fn process_messages(
                     }
                 }
             }
-            _ = tokio::time::sleep(heartbeat_interval) => {
-                // Send periodic heartbeat message to the client.
-                dvc_tx.send(NowChannelHeartbeatMsg::default().into()).await?;
-            }
             _ = shutdown_signal.wait() => {
                 processor.shutdown_all_sessions().await;
                 return Ok(());
             }
         }
     }
+}
+
+/// Emits heartbeats on a dedicated task for a negotiated interval.
+///
+/// Message handlers run inside the processing loop and can pend for a long time, for instance when a child process
+/// stops reading its stdin; a heartbeat driven by that loop would stall with them while the outbound transport stays
+/// usable.
+/// Returns `None` when heartbeats are disabled.
+/// Dropping the returned task stops the heartbeats.
+fn spawn_heartbeat(
+    dvc_tx: WinapiSignaledSender<OwnedNowMessage>,
+    negotiated_interval: Option<core::time::Duration>,
+) -> Option<ChildTask<()>> {
+    let mut timer = heartbeat_timer(negotiated_interval)?;
+
+    Some(ChildTask::spawn(async move {
+        loop {
+            timer.tick().await;
+
+            if let Err(error) = dvc_tx.send(NowChannelHeartbeatMsg::default().into()).await {
+                // The processing loop observes the same closed channel and ends the task.
+                warn!(%error, "Failed to queue heartbeat; stopping heartbeats");
+                return;
+            }
+        }
+    }))
+}
+
+/// Builds the heartbeat timer for a negotiated interval.
+///
+/// The first tick is one period away, and a zero interval disables heartbeats entirely, as specified for
+/// `NOW_CHANNEL_SET_HEARTBEAT`.
+/// Without a negotiated interval, [`DEFAULT_HEARTBEAT_INTERVAL`] applies.
+fn heartbeat_timer(negotiated_interval: Option<core::time::Duration>) -> Option<Interval> {
+    let period = negotiated_interval.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
+
+    if period.is_zero() {
+        return None;
+    }
+
+    let mut timer = tokio::time::interval_at(Instant::now() + period, period);
+    timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
+
+    Some(timer)
 }
 
 fn default_server_caps(pwsh_available: bool) -> NowChannelCapsetMsg {
@@ -1272,4 +1319,165 @@ unsafe extern "C" {
         wlanguageid: u16,
         dwmillisedonds: u32,
     ) -> MESSAGEBOX_RESULT;
+}
+
+#[cfg(test)]
+mod tests {
+    use core::time::Duration;
+
+    use devolutions_gateway_task::ShutdownHandle;
+    use futures::poll;
+    use now_proto_pdu::{NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowMessage, OwnedNowMessage};
+
+    use super::{DEFAULT_HEARTBEAT_INTERVAL, heartbeat_timer, process_messages, spawn_heartbeat};
+    use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
+    use crate::dvc::io::DvcInitializationProgress;
+
+    /// A zero interval means "heartbeat disabled" per `NOW_CHANNEL_SET_HEARTBEAT`; a timer for it
+    /// would be always ready and flood the channel.
+    #[test]
+    fn zero_interval_disables_heartbeat() {
+        assert!(heartbeat_timer(Some(Duration::ZERO)).is_none());
+    }
+
+    #[tokio::test]
+    async fn missing_interval_uses_default() {
+        let timer = heartbeat_timer(None).expect("default interval creates a timer");
+
+        assert_eq!(timer.period(), DEFAULT_HEARTBEAT_INTERVAL);
+    }
+
+    #[tokio::test]
+    async fn negotiated_interval_is_used() {
+        let timer = heartbeat_timer(Some(Duration::from_secs(30))).expect("nonzero interval creates a timer");
+
+        assert_eq!(timer.period(), Duration::from_secs(30));
+    }
+
+    /// Heartbeats must keep flowing while the processing loop is stuck inside a message handler,
+    /// for instance on a child process that stopped reading its stdin; the outbound transport is
+    /// still usable and a client watchdog must not drop the connection.
+    #[tokio::test(start_paused = true)]
+    async fn heartbeats_continue_while_processing_loop_is_blocked() {
+        const PERIOD: Duration = Duration::from_secs(10);
+
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let _heartbeat = spawn_heartbeat(write_tx, Some(PERIOD)).expect("nonzero interval spawns heartbeats");
+
+        // Nothing else is polled from here on, which is exactly what a pending handler looks like.
+        // The first heartbeat is a full period away, never immediate.
+        tokio::task::yield_now().await;
+        assert!(write_rx.try_recv().is_err(), "heartbeat sent immediately");
+
+        for _ in 0..3 {
+            tokio::time::advance(PERIOD).await;
+            tokio::task::yield_now().await;
+
+            assert_heartbeat(write_rx.try_recv().expect("heartbeat sent after one period"));
+            assert!(write_rx.try_recv().is_err(), "more than one heartbeat per period");
+        }
+    }
+
+    /// Dropping the heartbeat task, as renegotiation and loop exit do, must stop the heartbeats.
+    #[tokio::test(start_paused = true)]
+    async fn dropping_heartbeat_task_stops_heartbeats() {
+        const PERIOD: Duration = Duration::from_secs(10);
+
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let heartbeat = spawn_heartbeat(write_tx, Some(PERIOD)).expect("nonzero interval spawns heartbeats");
+
+        // Let the task run and emit once, so the drop cancels a running task rather than one that never started.
+        tokio::time::advance(PERIOD).await;
+        tokio::task::yield_now().await;
+        write_rx.try_recv().expect("heartbeat sent after one period");
+
+        drop(heartbeat);
+
+        tokio::time::advance(PERIOD * 3).await;
+        tokio::task::yield_now().await;
+        assert!(
+            write_rx.try_recv().is_err(),
+            "heartbeat sent after the task was dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn zero_interval_spawns_no_heartbeat_task() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel::<OwnedNowMessage>().expect("create outbound channel");
+
+        assert!(spawn_heartbeat(write_tx, Some(Duration::ZERO)).is_none());
+    }
+
+    /// The processing loop must heartbeat at the negotiated interval, switch to the renegotiated one and stop the
+    /// previous task when the client sends a new capset, and stop heartbeating when it exits.
+    #[tokio::test(start_paused = true)]
+    async fn processing_loop_heartbeats_follow_negotiation_and_stop_on_exit() {
+        const FIRST_PERIOD: Duration = Duration::from_secs(30);
+        const SECOND_PERIOD: Duration = Duration::from_secs(10);
+
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        let capset_with_interval = |period| {
+            NowChannelCapsetMsg::default()
+                .with_heartbeat_interval(period)
+                .expect("valid heartbeat interval")
+        };
+
+        let mut loop_future = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+
+        read_tx
+            .send(capset_with_interval(FIRST_PERIOD).into())
+            .await
+            .expect("queue client capset");
+        assert!(poll!(loop_future.as_mut()).is_pending());
+        write_rx.try_recv().expect("negotiation reply was sent");
+
+        // Nothing polls the loop while time advances, like a pending handler.
+        tokio::time::advance(FIRST_PERIOD).await;
+        tokio::task::yield_now().await;
+        assert_heartbeat(write_rx.try_recv().expect("heartbeat sent after the first period"));
+        assert!(write_rx.try_recv().is_err(), "more than one heartbeat per period");
+
+        read_tx
+            .send(capset_with_interval(SECOND_PERIOD).into())
+            .await
+            .expect("queue renegotiation capset");
+        assert!(poll!(loop_future.as_mut()).is_pending());
+        write_rx.try_recv().expect("renegotiation reply was sent");
+
+        // Three short periods cover the moment the first task would have fired again had it survived.
+        for _ in 0..3 {
+            tokio::time::advance(SECOND_PERIOD).await;
+            tokio::task::yield_now().await;
+            assert_heartbeat(
+                write_rx
+                    .try_recv()
+                    .expect("heartbeat sent after the renegotiated period"),
+            );
+            assert!(write_rx.try_recv().is_err(), "more than one heartbeat per period");
+        }
+
+        read_tx
+            .send(NowChannelCloseMsg::default().into())
+            .await
+            .expect("queue channel close");
+        assert!(poll!(loop_future.as_mut()).is_ready());
+
+        tokio::time::advance(SECOND_PERIOD * 3).await;
+        tokio::task::yield_now().await;
+        assert!(
+            write_rx.try_recv().is_err(),
+            "heartbeat sent after the processing loop ended"
+        );
+    }
+
+    fn assert_heartbeat(message: OwnedNowMessage) {
+        assert!(
+            matches!(message, NowMessage::Channel(NowChannelMessage::Heartbeat(_))),
+            "expected a heartbeat, got {message:?}"
+        );
+    }
 }
