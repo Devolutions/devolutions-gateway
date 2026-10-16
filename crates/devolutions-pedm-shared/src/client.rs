@@ -72,30 +72,12 @@ impl Service<Uri> for NamedPipeConnector {
         Box::pin(async move {
             let mut iter = 0;
             loop {
-                // The client is impersonable as soon as the connection is accepted,
-                // so re-check before every attempt that the Agent service can still be serving the pipe.
+                // The client is impersonable as soon as the connection is accepted, and the server prevents
+                // impersonation by not letting users create pipe instances and by holding the pipe name
+                // continuously, so re-check before every attempt that the Agent service can still be serving it.
                 pipe::verify_service_running(pipe::AGENT_SERVICE_NAME)?;
 
-                // The first contact is made at the identification level, so a server that fails verification
-                // cannot act as the client; the impersonation level is granted only to a verified server.
-                let probe = pipe::open_client(pipe::PIPE_NAME, pipe::ClientImpersonation::Identification);
-
-                if iter < 5
-                    && probe
-                        .as_ref()
-                        .is_err_and(|e| e.raw_os_error() == Some(ERROR_PIPE_BUSY.0.cast_signed()))
-                {
-                    iter += 1;
-
-                    thread::sleep(Duration::from_millis(50));
-                    continue;
-                }
-
-                let probe = probe?;
-                pipe::verify_server(&probe)?;
-                drop(probe);
-
-                let client = pipe::open_client(pipe::PIPE_NAME, pipe::ClientImpersonation::Impersonation);
+                let client = pipe::open_client(pipe::PIPE_NAME);
 
                 if iter < 5
                     && client

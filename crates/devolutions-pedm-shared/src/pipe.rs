@@ -13,8 +13,8 @@ use win_api_wrappers::raw::Win32::Security::{
     WinLocalSystemSid,
 };
 use win_api_wrappers::raw::Win32::Storage::FileSystem::{
-    FILE_FLAG_OVERLAPPED, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_DATA, READ_CONTROL, SECURITY_IDENTIFICATION,
-    SECURITY_IMPERSONATION, SYNCHRONIZE,
+    FILE_FLAG_OVERLAPPED, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_DATA, READ_CONTROL, SECURITY_IMPERSONATION,
+    SYNCHRONIZE,
 };
 use win_api_wrappers::raw::Win32::System::Pipes::GetNamedPipeServerProcessId;
 use win_api_wrappers::raw::Win32::System::Services::{
@@ -38,39 +38,18 @@ pub const AGENT_SERVICE_NAME: &str = "DevolutionsAgent";
 pub const CLIENT_ACCESS: u32 =
     FILE_READ_DATA.0 | FILE_WRITE_DATA.0 | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0 | READ_CONTROL.0;
 
-/// Impersonation level a client grants to the pipe server.
+/// Open the client end of a PEDM pipe, requesting only [`CLIENT_ACCESS`].
 ///
-/// A client is impersonable from the moment its connection is accepted, before the server can prove its identity,
-/// so the first contact is made at the identification level.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ClientImpersonation {
-    /// The server can identify the client but cannot act as it. Use it for the connection that is verified.
-    Identification,
-    /// The server can act as the client. Grant it only to a server that [`verify_server`] accepted.
-    Impersonation,
-}
-
-impl ClientImpersonation {
-    fn qos(self) -> u32 {
-        match self {
-            Self::Identification => SECURITY_IDENTIFICATION.0,
-            Self::Impersonation => SECURITY_IMPERSONATION.0,
-        }
-    }
-}
-
-/// Open the client end of a PEDM pipe, requesting only [`CLIENT_ACCESS`], with `impersonation` as the
-/// impersonation level the server is granted.
-///
-/// The server impersonates its clients to act on their behalf. A client is impersonable from the moment its
-/// connection is accepted, so connect with [`ClientImpersonation::Identification`] first, call [`verify_server`]
-/// on that connection, connect again with [`ClientImpersonation::Impersonation`], and verify that connection too
-/// before sending anything. Call [`verify_service_running`] before opening the pipe.
-pub fn open_client(pipe_name: &str, impersonation: ClientImpersonation) -> std::io::Result<NamedPipeClient> {
+/// The server impersonates its clients to act on their behalf, so clients grant the `SecurityImpersonation` level.
+/// A client is impersonable from the moment its connection is accepted, so call [`verify_service_running`]
+/// before opening the pipe, and [`verify_server`] before sending anything. The impersonation exposure is bounded
+/// by the server: users cannot create pipe instances, the server holds the pipe name continuously, and the
+/// service is checked before connecting.
+pub fn open_client(pipe_name: &str) -> std::io::Result<NamedPipeClient> {
     let file = OpenOptions::new()
         .access_mode(CLIENT_ACCESS)
         .custom_flags(FILE_FLAG_OVERLAPPED.0)
-        .security_qos_flags(impersonation.qos())
+        .security_qos_flags(SECURITY_IMPERSONATION.0)
         .open(pipe_name)?;
 
     // SAFETY: The handle is a freshly opened overlapped named pipe client handle,
@@ -90,8 +69,9 @@ pub fn verify_service_running(service_name: &str) -> anyhow::Result<()> {
 ///
 /// The pipe must be owned by SYSTEM or Administrators ([`verify_owner`]),
 /// and its server must be the process of the Devolutions Agent service ([`verify_server_process`]).
-/// These checks run after the connection is accepted, so they do not protect a client from impersonation;
-/// [`verify_service_running`] must run before opening the pipe.
+/// These checks run after the connection is accepted, so they cannot by themselves prevent impersonation:
+/// the server prevents it by not letting users create pipe instances and by holding the pipe name continuously,
+/// and [`verify_service_running`] must run before opening the pipe.
 pub fn verify_server(pipe: &NamedPipeClient) -> anyhow::Result<()> {
     verify_owner(pipe)?;
     verify_server_process(pipe, AGENT_SERVICE_NAME)

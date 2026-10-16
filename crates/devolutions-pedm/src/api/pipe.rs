@@ -237,7 +237,7 @@ mod tests {
     use std::time::Instant;
 
     use devolutions_pedm_shared::pipe::{
-        ClientImpersonation, open_client, server_process_id, service_process_id, verify_server, verify_server_process,
+        open_client, server_process_id, service_process_id, verify_server, verify_server_process,
         verify_service_running,
     };
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
@@ -248,9 +248,7 @@ mod tests {
     use win_api_wrappers::raw::Win32::Foundation::{
         ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, GENERIC_WRITE, HANDLE,
     };
-    use win_api_wrappers::raw::Win32::Security::{
-        SECURITY_IMPERSONATION_LEVEL, SecurityIdentification, SecurityImpersonation, TOKEN_QUERY,
-    };
+    use win_api_wrappers::raw::Win32::Security::{SECURITY_IMPERSONATION_LEVEL, SecurityImpersonation, TOKEN_QUERY};
     use win_api_wrappers::raw::Win32::Storage::FileSystem::{
         FILE_APPEND_DATA, FILE_CREATE_PIPE_INSTANCE, FILE_READ_ATTRIBUTES, FILE_READ_DATA, FILE_WRITE_DATA,
         READ_CONTROL, SYNCHRONIZE,
@@ -307,7 +305,7 @@ mod tests {
     async fn open_client_when_listening(pipe_name: &str) -> NamedPipeClient {
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
-            match open_client(pipe_name, ClientImpersonation::Impersonation) {
+            match open_client(pipe_name) {
                 Ok(client) => return client,
                 Err(error)
                     if Instant::now() < deadline
@@ -371,8 +369,7 @@ mod tests {
         let pipe_name = unique_pipe_name("client");
         let mut server = create_client_access_pipe(&pipe_name);
 
-        let mut client =
-            open_client(&pipe_name, ClientImpersonation::Impersonation).expect("open the pipe with the client access");
+        let mut client = open_client(&pipe_name).expect("open the pipe with the client access");
         server.connect().await.expect("accept the client");
 
         client.write_all(b"ping").await.expect("client write");
@@ -429,34 +426,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_unverified_server_cannot_act_as_the_client() {
-        let pipe_name = unique_pipe_name("impersonation");
-        // A pipe owned by a standard user stands for a server that fails verification.
-        let security_attributes = SecurityAttributesInit {
-            owner: Some(current_user_sid()),
-            ..security_attributes(current_user_sid(), users_sid()).expect("build pipe security attributes")
-        }
-        .init();
-        let server = create_instance_with(&pipe_name, true, &security_attributes).expect("create the pipe");
-
-        // The pre-verification contact is made at the identification level.
-        let client =
-            open_client(&pipe_name, ClientImpersonation::Identification).expect("open the pipe for identification");
-        server.connect().await.expect("accept the client");
-
-        verify_server(&client).expect_err("the server fails verification");
-
-        let pipe = Pipe {
-            handle: Handle::new_borrowed(HANDLE(server.as_raw_handle().cast())).expect("valid pipe handle"),
-        };
-        assert_eq!(
-            impersonated_level(&pipe),
-            SecurityIdentification,
-            "the unverified server cannot act as the client"
-        );
-    }
-
-    #[tokio::test]
     async fn clients_reject_pipes_owned_by_a_standard_user() {
         let pipe_name = unique_pipe_name("owner");
         // Set the owner explicitly: an elevated test process would default to Administrators.
@@ -467,7 +436,7 @@ mod tests {
         .init();
         let server = create_instance_with(&pipe_name, true, &security_attributes).expect("create the pipe");
 
-        let client = open_client(&pipe_name, ClientImpersonation::Impersonation).expect("open the pipe");
+        let client = open_client(&pipe_name).expect("open the pipe");
         server.connect().await.expect("accept the client");
 
         verify_server(&client).expect_err("the pipe is not owned by SYSTEM or Administrators");
@@ -489,7 +458,7 @@ mod tests {
 
         // While the first client is still served, a burst of clients connects without waiting.
         let _clients = (0..LISTENING_INSTANCES)
-            .map(|_| open_client(&pipe_name, ClientImpersonation::Impersonation).expect("an instance is listening"))
+            .map(|_| open_client(&pipe_name).expect("an instance is listening"))
             .collect::<Vec<_>>();
         for _ in 0..LISTENING_INSTANCES {
             let _connection = next_dispatched(&mut dispatched).await;
@@ -632,7 +601,7 @@ mod tests {
     async fn clients_identify_the_server_process() {
         let pipe_name = unique_pipe_name("process");
         let server = create_client_access_pipe(&pipe_name);
-        let client = open_client(&pipe_name, ClientImpersonation::Impersonation).expect("open the pipe");
+        let client = open_client(&pipe_name).expect("open the pipe");
         server.connect().await.expect("accept the client");
 
         assert_eq!(
@@ -664,7 +633,7 @@ mod tests {
     async fn clients_reject_pipes_not_served_by_the_service_process() {
         let pipe_name = unique_pipe_name("impostor");
         let server = create_client_access_pipe(&pipe_name);
-        let client = open_client(&pipe_name, ClientImpersonation::Impersonation).expect("open the pipe");
+        let client = open_client(&pipe_name).expect("open the pipe");
         server.connect().await.expect("accept the client");
 
         verify_server_process(&client, "EventLog").expect_err("the test process is not the service process");

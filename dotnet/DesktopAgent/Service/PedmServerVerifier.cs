@@ -35,45 +35,13 @@ namespace Devolutions.Agent.Desktop.Service
         private const int ConnectTimeoutMilliseconds = 50;
 
         /// <summary>
-        /// Connects and verifies the pipe within a bounded budget, and returns a stream the server may impersonate.
-        /// The first contact is made at the identification level, so a server that fails verification cannot act as
-        /// the client; the impersonation level is granted only to a server that <see cref="Verify"/> accepted.
-        /// A client is impersonable as soon as its connection is accepted, so it must not wait for the pipe while the
-        /// Agent service is not running: connecting to whoever re-creates the name afterwards would defeat
-        /// <see cref="Verify"/>. The service is therefore checked again before each attempt, and the wait per attempt
-        /// is bounded.
+        /// Connects the pipe within a bounded budget, re-checking the service before every attempt.
+        /// A client is impersonable as soon as its connection is accepted, and the server prevents impersonation
+        /// by not letting users create pipe instances and by holding the pipe name continuously, so the pipe must
+        /// not be opened at all while the Agent service is not running: the service is checked before every
+        /// attempt, and the wait per attempt is bounded.
         /// </summary>
-        public static async Task<NamedPipeClientStream> ConnectAsync(
-            Func<TokenImpersonationLevel, NamedPipeClientStream> createPipe, CancellationToken cancellationToken)
-        {
-            NamedPipeClientStream probe = createPipe(TokenImpersonationLevel.Identification);
-
-            try
-            {
-                await ConnectWithinBudgetAsync(probe, cancellationToken).ConfigureAwait(false);
-                Verify(probe);
-            }
-            finally
-            {
-                probe.Dispose();
-            }
-
-            NamedPipeClientStream pipe = createPipe(TokenImpersonationLevel.Impersonation);
-
-            try
-            {
-                await ConnectWithinBudgetAsync(pipe, cancellationToken).ConfigureAwait(false);
-                Verify(pipe);
-                return pipe;
-            }
-            catch
-            {
-                pipe.Dispose();
-                throw;
-            }
-        }
-
-        private static async Task ConnectWithinBudgetAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+        public static async Task ConnectAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
         {
             for (int attempt = 1; ; attempt++)
             {
@@ -95,8 +63,9 @@ namespace Devolutions.Agent.Desktop.Service
         /// Requires the pipe to be owned by SYSTEM or Administrators, which a standard user cannot assign,
         /// and its server to be the Devolutions Agent service process.
         /// A pipe instance shares the security descriptor of its name, so the owner alone does not identify the server.
-        /// These checks run after the connection is accepted, so they do not protect a client from impersonation;
-        /// <see cref="EnsureServiceRunning"/> must run before the pipe is opened.
+        /// These checks run after the connection is accepted, so they cannot by themselves prevent impersonation:
+        /// the server prevents it by not letting users create pipe instances and by holding the pipe name
+        /// continuously, and <see cref="EnsureServiceRunning"/> must run before the pipe is opened.
         /// </summary>
         public static void Verify(NamedPipeClientStream pipe)
         {
