@@ -5,9 +5,9 @@ description: Round-based interview that surfaces durable design intent before wr
 
 # Grill for intent
 
-Read `intent-files` first.
 Intent is the human's; a draft from a vague brief is the agent's design under the human's name.
-Interview until every durable decision has been answered, then draft.
+Interview until every durable commitment has been put to the human and answered, then draft per `intent-files`.
+A commitment is a statement that rules out a plausible, locally correct change the human deliberately rejects; if nothing in the interview produces one, the right outcome is no file.
 
 ## The tree
 
@@ -16,11 +16,11 @@ Root questions, from which everything else branches:
 - **Boundary**: which unit, and what is deliberately outside it?
 - **Role**: why does it exist; what is lost if it is folded into a neighbour?
 - **Must remain true**: what would make the software wrong even with green tests?
-- **Chosen among alternatives**: where was one way picked over a reasonable other, and why?
+- **Rejected alternatives**: where was one way picked over a reasonable other, and why does the other stay excluded?
 - **Non-goals**: what is unsupported or was cut?
 - **Properties**: security, compatibility, concurrency and lifecycle, dependency boundaries, extension points.
 - **Future**: which directions must not be precluded?
-- **Precision**: what must be exact, and what stays a constraint for a contract or the implementation?
+- **Independence**: must anything here be implemented or tested independently of this code, so that a `CONTRACT.md` is warranted?
 
 ## Rounds
 
@@ -38,13 +38,13 @@ Facts are your job: look up dependencies, features, callers, and siblings before
 
 ## Grill like a reviewer
 
-- An absolute: ask which boundary it protects and what falsifies it; recommend the scoped form.
-- A claim about how code works: check the code and surface disagreement; "isn't always true" means find the actual rule.
-- Wishing or future tense: ask whether the behaviour exists; if so, state it normatively, otherwise mark it as not implemented.
-- A rule without a reason: ask for the reason first.
+- An absolute: ask which boundary it protects and what falsifies it; recommend the scoped form or the configurations it applies to.
+- A claim about how code works that the code contradicts: surface it and ask which is wrong, the code or the claim.
+- Wishing or future tense: ask whether the behaviour exists; if so state it normatively, otherwise mark it as a target.
+- A rule without a reason: ask what alternative it excludes and why.
 - A list of variants: ask whether the rule is the list or a property each variant satisfies.
-- Process ("run X after Y"): belongs in `AGENTS.md`; note and move on.
-- Exact detail (fields, limits, status codes): note for a later `CONTRACT.md` (see `contract-authoring`) and return to the decision behind it.
+- "Requires a decision", "run X after Y", anything about contributors: process; note it for `AGENTS.md` and ask for the software property behind it.
+- Exact detail (fields, limits, status codes): note it for a `CONTRACT.md` if independence warrants one, and return to the decision behind it.
 - Design still moving (names, packaging, two shapes): say so and keep grilling; do not draft mid-churn.
 
 Record provenance throughout: verbatim words, accepted proposals (quote the acceptance), proposals seen but undiscussed, gaps you filled.
@@ -52,5 +52,5 @@ Only the first two become intent text.
 
 ## Finish
 
-When the frontier is empty: summarise each decision in one line with its provenance, propose placement per `intent-files`, and ask for confirmation.
-Then draft per `intent-files`, with the `REVIEW.md` from its templates, run `intent-review` on the result, and hand over as drafts for the human to adopt.
+When the frontier is empty: summarise each commitment in one line with its provenance, propose placement, and ask for confirmation.
+Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand over as drafts the human adopts by approving each commitment.

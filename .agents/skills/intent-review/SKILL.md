@@ -5,41 +5,37 @@ description: Review INTENT.md and *.intent.md files or drafts for contradictions
 
 # Intent review
 
-Read `intent-files` first.
-Agents read intent literally, so an unscoped "never" or a stale reference becomes a wrong implementation later.
+An intent file holds design commitments that rule out deliberately rejected changes; agents read it literally before every change in its directory.
 Output is findings and proposals; the human applies them.
 
 ## Gather
 
-State which revision you reviewed; if the checkout may be behind, fetch the file from the remote default branch and say which findings apply to which version.
-Collect the files under review plus everything that applies cumulatively: broader `INTENT.md` up the tree, shared `docs/<feature>/INTENT.md` they link to, the `CONTRACT.md` they defer to.
-Contradictions mostly live between files.
-Read the governed code, not just the intent: the manifest, public surface, features, and configurations; most false absolutes are found there.
-Load `intent-files/references/pitfalls.md` as the checklist; skip its templates.
+State which revision you reviewed; if the checkout may be behind, fetch from the remote default branch and say which findings apply to which version.
+Collect everything that applies cumulatively: broader `INTENT.md` up the tree, shared intent the file says applies to it, the `CONTRACT.md` it defers to; contradictions mostly live between files.
+Read the governed code, manifest, features, and configurations; most false absolutes are found there.
+When a sentence feels wrong and you cannot name why, `intent-files/references/pitfalls.md` is the checklist.
 
 ## Lenses
 
 Apply each to every normative sentence; quote the sentence in the finding.
 
 - **Contradiction**: two statements that cannot both hold, including a specific file quietly narrowing a broader one.
+- **Not a commitment**: rules out no plausible change, or restates code, manifest, README, path, contract, or a sibling; "does that belong to this crate?"
+- **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
+- **Plan tense**: "we would like", "will be extended" for behaviour that already exists; or an unimplemented target not marked as such.
 - **Unscoped absolute**: `never`, `always`, `only`, `every`; which boundary, and does a sibling, feature flag, backend, or build falsify it?
 - **Unverified universal**: "every library does X" with no cited check.
-- **Plan tense**: "we would like", "will be extended", "we now want" for behaviour that already exists; a file that narrates the task that produced it reads like a ticket body.
-- **Wrong artifact**: process and anything phrased in terms of agents to `AGENTS.md`; exact fields, limits, statuses, check order to the contract; history to rationale or deletion.
-- **Restatement**: repeats the contract, a sibling, the README, the path, or what CI enforces; "does that belong to this crate?"
-- **Enforced but unwritten**: a wire format, state machine, or ordering the code enforces that no document states; propose where it belongs.
-- **Inventory**: a list the code owns; propose the rule form or a pointer.
-- **Implementation leak**: helper names, layout, one library's behaviour or numbers as a general rule.
-- **Missing reason**: a rule a contributor could plausibly "fix".
+- **Code disagrees**: the code does not do what the sentence says; report it as a divergence for the human, not as a defect in either.
+- **Enforced but unwritten**: a wire format, state machine, or dependency direction the code enforces that no document states; propose where it belongs.
+- **Incidental detail**: a helper name, layout, or one library's behaviour or number stated as a rule with nothing showing a human chose to pin it; a deliberately pinned implementation detail with its reason is a commitment, so when the reason is missing ask rather than flag.
+- **Missing reason**: a rule a contributor could plausibly "fix" because no alternative is named as excluded.
 - **Not checkable**: "handles", "supports", "properly"; propose an observable with a bound.
-- **Dangling reference**: removed rule still named, link or anchor that does not resolve, renamed symbol; verify against the tree.
-- **Missing boundary**: module file with no scope, or an obvious misreading not pre-empted.
-- **Duplication across siblings**: state once in the most general file.
-- **Style**: soft wraps, uppercase MUST in a declarative repository, decision IDs, session or approver names.
+- **Padding**: scope prose that placement already supplies, boundary notes repeated, headings for a handful of bullets, inventories whose owner is elsewhere.
+- **Hygiene**: links and anchors that do not resolve, removed rules still named, duplicated sentences across siblings, house style.
 
 ## Report
 
-Order by consequence: contradictions and false absolutes, then wrong artifact and restatement, then style.
+Order by consequence: contradictions and false absolutes, then not-a-commitment and process, then padding and hygiene.
 
 ```md
 ### <N>. <lens> — `<file>`
@@ -51,6 +47,5 @@ Order by consequence: contradictions and false absolutes, then wrong artifact an
 **Proposed:** <reworded sentence>, or move to `<artifact>`, or delete.
 ```
 
-Close with what is strong as written, the questions only the human can settle, and a one-line verdict: adopt, adopt after corrections, or rework.
-When two readings are plausible and the code does not settle which is intended, file a question rather than a finding.
+Close with what is strong as written, the questions only the human can settle (two plausible readings the code does not decide, which of two files is right), and a one-line verdict: adopt, adopt after corrections, or rework.
 A clean file gets a short report.

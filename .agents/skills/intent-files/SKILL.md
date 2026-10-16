@@ -5,52 +5,45 @@ description: Discipline for INTENT.md and *.intent.md files - what belongs, wher
 
 # Intent files
 
-An intent file records what a human has deliberately decided the software must remain.
-It is human-owned and authoritative where present; `CONTRACT.md` holds the exact normative interface, `AGENTS.md` holds how agents work, tests and code realise the result.
-If the repository has `docs/intent-files.md`, it is the house convention; read it once.
+An intent file holds the design commitments a human has made durable: each one rules out a plausible, locally correct change that was deliberately rejected.
+It is authoritative where present and optional everywhere; `AGENTS.md` constrains how contributors work, `CONTRACT.md` exists only when a surface must be implemented or tested independently of one implementation.
+If the repository has `docs/intent-files.md`, it is the house convention.
 
-## Ownership
+Agents may draft on request but never create, edit, or delete intent files on their own; a draft becomes intent when a human has approved each commitment, not merely committed the file.
+Write drafts where the user says, otherwise outside the source tree, and say so.
+When code, tests, contract, and intent disagree, report the divergence; the human decides which is wrong.
 
-Repositories forbid agents from creating or editing intent files, so that their presence proves human design work.
-Drafting on request is fine: a draft becomes intent only when the human edits and commits it.
-Write drafts where the user says, otherwise outside the source tree, and say so in the handoff.
-Never touch an intent file as a side effect of other work; a conflict between a change and intent is surfaced, not resolved by rewriting the intent.
+## Admission
+
+A statement belongs when all three hold:
+
+> Would the software be wrong if tests passed but this were violated?
+> Does it rule out a plausible change a human deliberately rejected, in a way a maintainer could not cheaply recover from code, manifest, or contract?
+> Can it be falsified, and is it consequential enough that violating it should stop a change?
+
+If it constrains how a contributor performs the work rather than the resulting software, it is `AGENTS.md`.
+"Adding a variant requires an explicit decision" is process; the intent is "a variant without an explicit mapping is rejected, never given a fallback".
+Default to no file: create one only when at least one commitment passes.
 
 ## Placement
 
-- `INTENT.md` at a crate, module, or service root that carries a role worth defending.
-- `<name>.intent.md` beside one file when a single module carries a policy its crate does not.
-- A shared `docs/<feature>/INTENT.md` beside `CONTRACT.md` when several components share a design; each component intent links to it, because intent applies by directory.
-- Cross-cutting rules live once in the most general file; siblings refer to them.
+`INTENT.md` at the narrowest directory covering all governed code; `<name>.intent.md` beside one file when a single module carries a policy its crate does not.
+Applicable files are cumulative and a specific file never overrides a broader one; a shared `docs/<feature>/INTENT.md` governs a component only when that component's own intent says so in a sentence, not through a bare link.
+Never one per source file, never mechanically.
 
-Never one per source file.
-Files are cumulative; a specific one adds to a broader one, and contradictions are for a human.
+## Shape
 
-## What belongs
+No mandatory sections; one commitment may be the whole file.
+A flat list for a handful; topical headings only when they aid retrieval; `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
+A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one.
+State precision in the wording (`exactly these`, `at least`, `may vary provided`) rather than labelling the file exact or broad.
+Normative present tense about the software, never about agents; `must not` only where a declarative sentence would be ambiguous; an unimplemented target is marked as such.
+Scope every `never`, `only`, `always` to the boundary it protects and name the configurations a conditional commitment applies to.
+A scope sentence earns its place only when placement leaves a likely misapplication, stated once, next to the commitment it qualifies.
+A small exact table is intent only when the closed set itself is the decision and nothing else owns it.
+An implementation detail (an ordering, a helper, a layout) is intent when a human chose to pin it and says why; the file should not become a description of the implementation, and incidental detail is the first thing a reviewer will question.
+When a file grows, cut first the statement that neither changes the set of acceptable implementations nor explains why an alternative is excluded.
 
-Two tests decide:
-
-> If tests passed but this were violated, would the software be wrong?
-> Would this matter if the contributor were human, not an agent?
-
-Yes to the first makes a candidate; no to the second sends it to `AGENTS.md`.
-Keep decisions, invariants, boundaries, security and compatibility properties, non-goals, and the reasons behind them.
-Drop anything one `grep` away, anything CI enforces, exact detail the contract owns, process, history, and what the README or the path already says.
-Precision may vary within a file: pin what must be exact, leave the rest as constraints; a complete specification belongs in `CONTRACT.md`.
-
-## Writing
-
-- One decision per bullet, reason on the next line.
-- Rules over inventories; point at the authoritative list instead of copying it.
-- Scope every `never`, `only`, `always` to the boundary it protects; agents read absolutes literally.
-- Name exceptions beside the rule, with their removal condition.
-- Observables a reviewer can check, with what they rule out; no "handles", "supports", "properly".
-- True for every configuration and backend, not the one you looked at.
-- Defer exact detail: "see `CONTRACT.md` §11".
-- Normative present tense about the software, never about agents or a plan; "we would like" fits only behaviour deliberately not implemented yet, marked as such.
-- Rationale, not history; one sentence per line; stable anchors for cross-file links.
-- Before handing back, check each sentence against the code; "isn't always true" means state the actual rule.
-
-Typical length is 10 to 40 lines: `Purpose`, `Invariants`, optionally `Scope`, `Design principle`, `Non-goals`, and a closing `> **Boundary:**` note.
-
-Read `references/examples.md` for complete files that passed review, `references/pitfalls.md` before handing a draft back, and `references/templates.md` for skeletons and the draft handoff note.
+`references/pitfalls.md` lists how drafts have failed review and what the maintainer said; read it before handing a draft back or when reviewing.
+`references/examples.md` points at files the maintainer wrote himself and says what makes each work.
+`references/handoff.md` has the review note and provenance table for a set of drafts.
