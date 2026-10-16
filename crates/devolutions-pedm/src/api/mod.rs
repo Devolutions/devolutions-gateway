@@ -17,19 +17,14 @@ use devolutions_pedm_shared::policy::User;
 use futures_util::future::BoxFuture;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server;
-use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+use tokio::net::windows::named_pipe::NamedPipeServer;
 use tower::Layer;
 use tower_http::timeout::TimeoutLayer;
 use tower_service::Service;
 use tracing::{error, info};
 use win_api_wrappers::handle::Handle;
-use win_api_wrappers::identity::sid::Sid;
-use win_api_wrappers::raw::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
-use win_api_wrappers::raw::Win32::Security::Authorization::{GRANT_ACCESS, SE_KERNEL_OBJECT, SetSecurityInfo};
-use win_api_wrappers::raw::Win32::Security::{DACL_SECURITY_INFORMATION, NO_INHERITANCE, WinBuiltinUsersSid};
-use win_api_wrappers::security::acl::{Acl, ExplicitAccess, Trustee};
+use win_api_wrappers::raw::Win32::Foundation::HANDLE;
 use win_api_wrappers::token::Token;
-use win_api_wrappers::undoc::PIPE_ACCESS_FULL_CONTROL;
 use win_api_wrappers::utils::Pipe;
 
 use crate::config::Config;
@@ -43,6 +38,7 @@ mod elevate_temporary;
 mod err;
 mod launch;
 mod log;
+mod pipe;
 mod policy;
 mod revoke;
 pub(crate) mod state;
@@ -91,42 +87,6 @@ async fn named_pipe_middleware(
     });
 
     Ok(next.run(request).await)
-}
-
-fn create_pipe(pipe_name: &str) -> anyhow::Result<NamedPipeServer> {
-    let pipe = ServerOptions::new().write_dac(true).create(pipe_name)?;
-
-    let dacl = Acl::new()?.set_entries(&[
-        ExplicitAccess {
-            access_permissions: GENERIC_READ.0 | GENERIC_WRITE.0,
-            access_mode: GRANT_ACCESS,
-            inheritance: NO_INHERITANCE,
-            trustee: Trustee::Sid(Sid::from_well_known(WinBuiltinUsersSid, None)?),
-        },
-        ExplicitAccess {
-            access_permissions: PIPE_ACCESS_FULL_CONTROL,
-            access_mode: GRANT_ACCESS,
-            inheritance: NO_INHERITANCE,
-            trustee: Trustee::Sid(Token::current_process_token().sid_and_attributes()?.sid),
-        },
-    ])?;
-
-    // SAFETY: `SetSecurityInfo` needs a handle and four potential inputs. Since `securityinfo` only
-    // mentions `DACL_SECURITY_INFORMATION`, only the `pDacl` argument is used.
-    unsafe {
-        SetSecurityInfo(
-            HANDLE(pipe.as_raw_handle().cast()),
-            SE_KERNEL_OBJECT,
-            DACL_SECURITY_INFORMATION,
-            None,
-            None,
-            Some(dacl.as_ptr().cast()),
-            None,
-        )
-        .ok()?;
-    }
-
-    Ok(pipe)
 }
 
 pub(crate) fn api_router() -> ApiRouter<AppState> {
@@ -180,27 +140,21 @@ pub async fn serve(config: Config, shutdown_signal: ShutdownSignal) -> Result<()
         .layer(LogLayer::new(state.clone())) // apply to the merged router
         .with_state(state.clone());
 
-    let mut make_service = app.into_make_service_with_connect_info::<RawNamedPipeConnectInfo>();
+    let make_service = app.into_make_service_with_connect_info::<RawNamedPipeConnectInfo>();
 
-    let pipe_name = &config.pipe_name;
-    let mut server = create_pipe(pipe_name)?;
-
-    // Log the server startup.
-    info!("Started named pipe server with name `{pipe_name}`");
     info!(
         "Run ID is {run_id}, request ID counter is {req_count}",
         run_id = state.startup_info.run_id,
         req_count = state.req_counter.load(Ordering::Relaxed)
     );
 
-    loop {
-        server.connect().await?;
-        let client = server;
-
-        server = create_pipe(pipe_name)?;
-
-        let Ok(tower_service) = make_service.call(&client).await;
+    let dispatch = |client: NamedPipeServer, instance: pipe::OpenInstance| {
+        let mut make_service = make_service.clone();
         tokio::spawn(async move {
+            // Keep the instance marked as open until the connection is closed.
+            let _instance = instance;
+
+            let Ok(tower_service) = make_service.call(&client).await;
             let socket = TokioIo::new(client);
 
             let hyper_service = hyper::service::service_fn(move |req| tower_service.clone().call(req));
@@ -215,7 +169,16 @@ pub async fn serve(config: Config, shutdown_signal: ShutdownSignal) -> Result<()
                 error!(%error, "Failed to serve connection");
             }
         });
-    }
+    };
+
+    match pipe::accept_loop(
+        &config.pipe_name,
+        pipe::LISTENING_INSTANCES,
+        &pipe::create_pipe_instance,
+        pipe::RetryDelay::default(),
+        dispatch,
+    )
+    .await {}
 }
 
 #[derive(Debug)]

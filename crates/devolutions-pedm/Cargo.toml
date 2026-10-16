@@ -23,10 +23,10 @@ serde = "1.0"
 serde_json = "1.0"
 sha1 = "0.11"
 sha2 = "0.10"
-tokio = { version = "1.52", features = ["net", "rt-multi-thread"] }
+tokio = { version = "1.52", features = ["net", "rt-multi-thread", "time"] }
 tower-service = "0.3"
 win-api-wrappers = { path = "../win-api-wrappers" }
-devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["policy"]}
+devolutions-pedm-shared = { path = "../devolutions-pedm-shared", features = ["policy", "pipe"]}
 devolutions-gateway-task = { path = "../devolutions-gateway-task" }
 devolutions-agent-shared = { path = "../devolutions-agent-shared" }
 camino = { version = "1", features = ["serde1"] }
@@ -44,6 +44,9 @@ libsql = { version = "0.10", optional = true, default-features = false, features
 tokio-postgres = { version = "0.7", optional = true, features = ["with-chrono-0_4"] }
 bb8 = { version = "0.9", optional = true }
 bb8-postgres = { version = "0.9", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.52", features = ["macros", "io-util"] }
 
 [features]
 default = ["libsql"]
