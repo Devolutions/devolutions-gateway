@@ -42,7 +42,7 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
 
 ## Testability
 
-Each rule maps to a conformance case, worded as an observable with a bound: "encode writes exactly `size()` bytes", never "handles" or "supports".
+Each rule maps to a conformance case, worded as an observable with a bound: "encode writes exactly `size()` bytes", never "handles" or "supports", which name no outcome a test could check and so let divergent implementations all comply.
 Shared vectors cover positive and negative cases, are deterministic, and an independent script recomputes them.
 The conformance section ties every claim to how it is tested, lists known gaps, and marks what is verified by review only.
 
