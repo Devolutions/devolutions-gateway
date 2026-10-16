@@ -41,7 +41,7 @@ pub use streamer::webm_stream;
 #[rustfmt::skip]
 pub use session::{
     RecordingClip, RecordingEvent, SHADOW_PROTOCOL_V2, SessionConfig, ShadowProtocolVersion, StartAt,
-    stream_session,
+    late_frames_moved, stream_session,
 };
 
 #[cfg(feature = "bench")]

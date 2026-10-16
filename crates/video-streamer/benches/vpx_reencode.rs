@@ -66,6 +66,8 @@ fn bench_reencode_first_500_tags(c: &mut Criterion) {
                         video_streamer::SessionConfig {
                             encoder_threads: 1,
                             adaptive_frame_skip: false,
+                            fill_interval: None,
+                            fill_delay: Duration::ZERO,
                         },
                         500,
                         per_iter_deadline,
