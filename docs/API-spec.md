@@ -470,6 +470,67 @@ i.e.:
 }
 ```
 
+## Errors
+
+Error responses carry a machine-readable body, following [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) (problem details for HTTP APIs), with the `application/problem+json` content type:
+
+```json
+{
+  "type": "about:blank",
+  "title": "Unauthorized",
+  "status": 401,
+  "error": "gateway_id_mismatch"
+}
+```
+
+- `type` is always `about:blank`: the HTTP status and the error code describe the problem.
+- `title` is the reason phrase of the HTTP status.
+- `status` is the HTTP status code.
+- `error` is the error code.
+
+.NET clients can read the body with the `ProblemDetails` type, which stores the error code in its `Extensions` dictionary, under the `error` key.
+
+The body never contains internal details, such as error messages, key names or claim values.
+The Gateway logs these details along with the error code.
+
+Error codes are public API.
+New codes can be added, but existing codes are never renamed or removed.
+Clients must treat unknown codes as generic failures, and rely on the HTTP status.
+
+When no specific code applies, the error code is derived from the HTTP status:
+`bad_request`, `unauthorized`, `forbidden`, `not_found`, `request_timeout`, `conflict`, `payload_too_large`, `internal_error`, `bad_gateway`, `service_unavailable`, `gateway_timeout` or `insufficient_storage`.
+
+Some errors don't carry this body yet, such as the errors raised while parsing a request body, and the `400` responses of `/jet/net/scan`, which have their own format.
+
+### Token and authorization errors
+
+| Code | Status | Meaning |
+|------|--------|---------|
+| `missing_token` | 401 | No token was found in the `Authorization` header or in the `token` query parameter. |
+| `malformed_token` | 401 | The token can't be decoded or decrypted, or its claims don't match the schema expected for its type. |
+| `bad_signature` | 401 | The token signature doesn't match the provisioner key of the Gateway. |
+| `unknown_subkey` | 401 | The token refers to a key ID (`kid`) that doesn't match the sub provisioner key of the Gateway. |
+| `expired` | 401 | The token has expired (`exp` claim). |
+| `not_yet_valid` | 401 | The token is not valid yet (`nbf` claim). |
+| `gateway_id_mismatch` | 401 | The token is restricted to another Gateway ID (`jet_gw_id` claim). |
+| `revoked` | 401 | The token contains a value revoked by the JSON Revocation List (JRL) of the Gateway. |
+| `unexpected_replay` | 401 | The token was already used, and can't be used again in this context. |
+| `invalid_token` | 401 | The token is rejected for a reason not covered by another code. |
+| `wrong_token_type` | 403 | The type of the token is not accepted by this route. |
+| `insufficient_scope` | 403 | The scope of the token doesn't grant access to this route. |
+
+`expired` and `not_yet_valid` often mean that the clocks of the token issuer and of the Gateway are out of sync: compare them with `GET /jet/diagnostics/clock`.
+For `gateway_id_mismatch`, the Gateway reports its ID in `GET /jet/health`, when requested with `Accept: application/json`.
+
+The Gateway verifies the token signature before checking any claim.
+Unless the token is signed by a key the Gateway trusts, the error code is `missing_token`, `malformed_token`, `bad_signature` or `unknown_subkey`.
+
+Token errors also carry a `WWW-Authenticate` header, as described by [RFC 6750](https://www.rfc-editor.org/rfc/rfc6750):
+
+- `Bearer` when the token is missing.
+- `Bearer error="invalid_token"` when the token is rejected (status 401).
+- `Bearer error="insufficient_scope"` when the scope of the token doesn't grant access to the route.
+
 ## OpenAPI
 
 Endpoints are documented using [OpenAPI specification](../devolutions-gateway/openapi/doc/index.adoc).

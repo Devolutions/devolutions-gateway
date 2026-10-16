@@ -64,6 +64,7 @@ pub(crate) struct AppTokenSignRequest {
     request_body(content = AppTokenSignRequest, description = "JSON-encoded payload specifying the desired claims", content_type = "application/json"),
     responses(
         (status = 200, description = "The application token has been granted", body = String),
+        // No error body declared: generated clients pick the first JSON media type of all responses, and would expect JSON on success.
         (status = 400, description = "Bad signature request"),
         (status = 401, description = "Invalid or missing authorization header"),
         (status = 403, description = "Insufficient permissions"),
@@ -277,6 +278,7 @@ pub(crate) struct SessionTokenSignRequest {
     request_body(content = SessionTokenSignRequest, description = "JSON-encoded payload specifying the desired claims", content_type = "application/json"),
     responses(
         (status = 200, description = "The application token has been granted", body = String),
+        // No error body declared: generated clients pick the first JSON media type of all responses, and would expect JSON on success.
         (status = 400, description = "Bad signature request"),
         (status = 401, description = "Invalid or missing authorization header"),
         (status = 403, description = "Insufficient permissions"),

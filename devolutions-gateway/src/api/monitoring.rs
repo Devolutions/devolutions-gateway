@@ -34,10 +34,10 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
     request_body(content = MonitorsConfig, description = "JSON object containing a list of monitors", content_type = "application/json"),
     responses(
         (status = 200, description = "New configuration was accepted, but not necessarily fully understood.", body = SetConfigResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Unexpected server error while starting monitors"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error while starting monitors", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.net.monitor.config"])),
 ))]
@@ -67,10 +67,10 @@ async fn handle_set_monitoring_config(
     path = "/jet/net/monitor/log/drain",
     responses(
         (status = 200, description = "Log was flushed and returned in the response body", body = MonitoringLogResponse),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
-        (status = 500, description = "Unexpected server error"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
+        (status = 500, description = "Unexpected server error", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.net.monitor.drain"])),
 ))]

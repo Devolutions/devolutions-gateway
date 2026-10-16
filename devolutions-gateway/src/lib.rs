@@ -18,6 +18,7 @@ pub mod cli;
 pub mod config;
 pub mod credential;
 pub mod credential_injection;
+pub mod error_code;
 pub mod extract;
 pub mod generic_client;
 pub mod http;
@@ -158,7 +159,10 @@ pub fn make_http_service(state: DgwState) -> axum::Router<()> {
                 ))
                 // This middleware goes above `TimeoutLayer` because it will receive errors returned by `TimeoutLayer`.
                 .layer(HandleErrorLayer::new(|_: axum::BoxError| async {
-                    hyper::StatusCode::REQUEST_TIMEOUT
+                    http::ApiError::new(
+                        hyper::StatusCode::REQUEST_TIMEOUT,
+                        error_code::ErrorCode::RequestTimeout,
+                    )
                 }))
                 .layer(TimeoutLayer::new(Duration::from_secs(15))),
         )
