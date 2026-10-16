@@ -56,6 +56,8 @@ describe('PlaybackClip', () => {
       createObjectURL: vi.fn(() => 'blob:test'),
       revokeObjectURL: vi.fn(),
     });
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => {});
   });
 
   afterEach(() => {
@@ -86,5 +88,32 @@ describe('PlaybackClip', () => {
     await append;
     await finish;
     expect(mediaSource?.endOfStreamCalls).toBe(1);
+  });
+
+  it('rejects opening work on disposal and does not create a SourceBuffer afterward', async () => {
+    const clip = new PlaybackClip({ codec: 'vp8', sequence: 0 });
+    const opened = expect(clip.open()).rejects.toMatchObject({ name: 'AbortError' });
+    const mediaSource = FakeMediaSource.latest;
+    const add = mediaSource && vi.spyOn(mediaSource, 'addSourceBuffer');
+    clip.dispose();
+    await opened;
+    mediaSource?.open();
+    expect(add).not.toHaveBeenCalled();
+    await expect(clip.append(new Uint8Array([1]))).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('cancels a pending append and endOfStream work without waiting for updateend', async () => {
+    const clip = new PlaybackClip({ codec: 'vp8', sequence: 0 });
+    const mediaSource = FakeMediaSource.latest;
+    mediaSource?.open();
+    await clip.open();
+    const appended = expect(clip.append(new Uint8Array([1]))).rejects.toMatchObject({ name: 'AbortError' });
+    const finished = expect(clip.finish()).rejects.toMatchObject({ name: 'AbortError' });
+    await Promise.resolve();
+    await Promise.resolve();
+    clip.dispose();
+    await appended;
+    await finished;
+    expect(mediaSource?.endOfStreamCalls).toBe(0);
   });
 });

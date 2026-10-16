@@ -146,6 +146,37 @@ Media loading and autoplay errors reject the promise.
 Both events are dispatched on the custom element and do not bubble.
 Use non-capturing listeners to receive typed custom events; capturing `timeupdate` listeners can also receive native video events without `detail`.
 
+### Live recording playback
+
+`LiveRecordingStreamer` configures live playback without exposing video elements or requiring native media overrides.
+Register lifecycle callbacks in the options so they are installed before the connection starts.
+
+```typescript
+const streamer = new LiveRecordingStreamer(api);
+const player = await streamer.stream(container, {
+  controls: false,
+  onReady: () => hidePlayableLoadingIndicator(),
+  onEnd: () => transitionToSavedRecording(),
+  onError: error => showPlaybackError(error),
+});
+
+// Public commands remain available when the built-in controls are disabled.
+player.pause();
+player.play();
+streamer.disconnect();
+```
+
+`stream(container, options?: LiveRecordingStreamOptions): Promise<ShadowPlayer>` resolves after component setup, without waiting for media readiness.
+Calling `stream(container)` keeps controls enabled by default.
+Existing calls also work with ShadowPlayer versions without the new lifecycle APIs.
+Requesting `controls: false` or `onReady` requires a ShadowPlayer that supports that feature; otherwise setup rejects with an explicit compatibility error.
+`onReady` means the first clip is playable, while `onEnd` means the server finished sending the stream, not that buffered playback finished.
+The optional `onError` callback also receives session-not-found errors alongside the streamer's `onSessionNotFound()` callback.
+On the updated ShadowPlayer, late `onReady` registration receives retained readiness; late `onEnd` and `onError` registration receives past outcomes only with `{ replay: true }`.
+An asynchronous end callback failure is delivered through `onError`.
+Disconnecting or replacing a stream cancels pending setup with `AbortError` and ignores its late callbacks.
+The player handles buffered starting positions, live-edge catch-up, and autoplay failures; consumers should not override native duration or register native media listeners.
+
 ## Project Structure
 
 - `src/video-player/player.ts`: Main web component implementation
