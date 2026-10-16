@@ -56,4 +56,4 @@ Only the first two become intent text.
 
 When the frontier is empty: summarise each commitment in one line with its provenance, propose placement, and ask for confirmation.
 Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand over as drafts the human adopts by approving each commitment.
-When a design is shared by several components, draft it once as an `INTENT.<feature>.md` part and list the directories it is copied into; the copies are one text.
+When a design is shared by several components, draft it once as an `INTENT.<feature>.md` part and list the directories that will symlink to it.

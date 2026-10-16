@@ -30,7 +30,7 @@ Default to no file: create one only when at least one commitment passes.
 
 `INTENT.md` at the narrowest directory covering all governed code; `<name>.intent.md` beside one file when a single module carries a policy its crate does not.
 Applicable files are those in the directory and its ancestors, cumulative, and a specific file never overrides a broader one; nothing follows a link.
-A design shared by several components is a part file, `INTENT.<feature>.md` or `<module>.intent.<feature>.md`, copied byte for byte into each governed directory; the copies are one text with several locations, and a drift between them is a defect.
+A design shared by several components is a part file, `INTENT.<feature>.md` or `<module>.intent.<feature>.md`, present in each governed directory; a symlink to one source keeps the parts identical, and where a symlink is not possible the copies are one text and a difference between them is a defect.
 Never one per source file, never mechanically.
 
 ## Shape
