@@ -21,7 +21,7 @@ Root questions, from which everything else branches:
 - **Properties**: security, compatibility, concurrency and lifecycle, dependency boundaries, extension points.
 - **Future**: which directions must not be precluded?
 - **Vocabulary**: which terms does this unit introduce, and what rule does each definition carry?
-- **Independence**: must anything here be implemented or tested independently of this code, so that a `CONTRACT.md` is warranted?
+- **Independence**: which other party must agree to anything here, so that a `CONTRACT.md` is warranted, and which interfaces have no such party and stay intent?
 
 ## Rounds
 

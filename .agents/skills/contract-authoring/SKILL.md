@@ -5,7 +5,9 @@ description: Author or revise a normative CONTRACT.md - an exact, testable speci
 
 # Contract authoring
 
-A contract is the normative text: a backend author implements from it alone, and the conformance suite derives its expectations from it and the standards it cites, never from an implementation.
+A contract defines a surface that two independently built parties must agree on: a backend author implements from it alone, and the conformance suite derives its expectations from it and the standards it cites, never from an implementation.
+It opens by naming the parties in scope, and a statement belongs only if one of them must agree to it.
+One party's own realisation (its config file, local storage, CLI, defaults) is not contract even when it is an interface; it is that party's intent, unless the scope names a second party that depends on it, and then only the parts they depend on enter.
 `INTENT.md` beside it explains the choices; the contract states the rules.
 
 ## Process

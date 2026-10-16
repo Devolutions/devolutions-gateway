@@ -6,7 +6,8 @@ description: Discipline for INTENT.md and *.intent.md files - the durable design
 # Intent files
 
 An intent file holds the design commitments a human has made durable: each one rules out a plausible, locally correct change that was deliberately rejected.
-It is authoritative where present and optional everywhere; `AGENTS.md` constrains how contributors work, `CONTRACT.md` exists only when a surface must be implemented or tested independently of one implementation.
+It is authoritative where present and optional everywhere; `AGENTS.md` constrains how contributors work, `CONTRACT.md` exists only for a surface that two independently built parties must agree on.
+A component's own interface (its CLI, config, storage) with the reason it is shaped so is intent, not contract, until a named second party depends on it.
 If the repository has `docs/intent-files.md`, it is the house convention.
 
 Agents may draft on request but never create, edit, or delete intent files on their own; a draft becomes intent when a human has approved each commitment, not merely committed the file.
