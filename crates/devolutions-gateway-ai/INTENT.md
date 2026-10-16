@@ -1,7 +1,7 @@
 # Background
 
-The AI crate serves as an HTTP client and a runner for tasks that are related to AI. 
-We do not want to serve it as a generic LLM client only. 
+The AI crate serves as an HTTP client and a runner for tasks that are related to AI.
+We do not want to serve it as a generic LLM client only.
 The crate provides methods for specific purposes, for example, to summarize a terminal session, or to generate AI analysis for a given recording video file.
 
 ## Tasks
@@ -13,7 +13,9 @@ It returns a stream of events that contains the progress of the analysis, and fi
 
 The final result is a series of JSON objects with timestamps and a natural language description of the events that happened during the recording.
 
-Analyze recording is trivial for terminal recordings. We pre-process the .trp file to .cast, and strip out some noises, then send as text to the AI services.
+Analyze recording is trivial for terminal recordings.
+We pre-process the .trp file to .cast, strip out some noise, then send it as text to the AI services.
 
-Analyze video recordings breaks down the video into frames, and we apply motion detection altorithms to filter out idle or close enough frames. Then we send the the frames in chronological order to the AI services in batches.
+Analyze video recordings breaks down the video into frames, and we apply motion detection algorithms to filter out idle or close enough frames.
+Then we send the frames in chronological order to the AI services in batches.
 
