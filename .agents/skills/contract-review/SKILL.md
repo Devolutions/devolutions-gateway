@@ -20,6 +20,7 @@ Apply each to every normative sentence; quote it.
 
 - **Party**: which second party in scope must agree to this sentence?
   None means it is one party's own realisation (config, storage, CLI) and belongs in that party's intent file.
+  Parties and example implementations are named without schedule ("e.g.: DVLS, PSU", never "DVLS now, PSU later"); timeline is not contract.
 - **Overreach**: a claim stronger than the mechanism guarantees ("prevents oracles" for "does not say which check failed"); propose the narrowed form.
 - **Open set**: an error, outcome, or input class not drawn from a closed, defined set; "bad input" is not a classification.
 - **Order for precedence**: an evaluation order where only which-outcome-wins matters, or two outcomes equally valid for one input.

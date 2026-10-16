@@ -25,7 +25,7 @@ Four probes decide most of them: is this authoritative or only explanatory; woul
 - **Not a commitment**: rules out no plausible change, would not survive a rewrite, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this crate?"
 - **Still satisfiable badly**: a commitment an undesirable implementation meets as written; propose the wording that excludes it.
 - **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
-- **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; propose the normative form or the explicit permission.
+- **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; schedule wording on examples or parties ("DVLS now, PSU later") where "e.g.: DVLS, PSU" is meant; propose the normative form or the explicit permission.
   A deferral the code has not realised is correct as written, not a finding.
 - **Unscoped absolute**: `never`, `always`, `only`, `every`; which boundary, and does a sibling, feature flag, backend, or build falsify it?
 - **Overstated**: `must`, "if and only if", "exactly these", an exhaustive list, with nothing showing the strength is intended; ask before proposing the weaker form.
