@@ -537,16 +537,16 @@ namespace DevolutionsGateway.Properties
                 string stringValue = this.FnGetPropValue(enableAgentTunnel.Id);
                 return WixProperties.GetPropertyValue<Boolean>(stringValue);
             }
-            set
-            {
+            set 
+            { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(enableAgentTunnel, value);
+                    this.runtimeSession.Set(enableAgentTunnel, value); 
                 }
             }
         }
 
-
+ 
         internal static readonly WixProperty<UInt32> agentTunnelPort = new()
         {
             Id = "P.AGENTTUNNELPORT",
@@ -565,16 +565,16 @@ namespace DevolutionsGateway.Properties
                 string stringValue = this.FnGetPropValue(agentTunnelPort.Id);
                 return WixProperties.GetPropertyValue<UInt32>(stringValue);
             }
-            set
-            {
+            set 
+            { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(agentTunnelPort, value);
+                    this.runtimeSession.Set(agentTunnelPort, value); 
                 }
             }
         }
 
-
+ 
         internal static readonly WixProperty<Boolean> hasPowerShell = new()
         {
             Id = "P.HasPowerShell",
@@ -989,11 +989,11 @@ namespace DevolutionsGateway.Properties
                 string stringValue = this.FnGetPropValue(existingServiceAccount.Id);
                 return WixProperties.GetPropertyValue<String>(stringValue);
             }
-            set
-            {
+            set 
+            { 
                 if (this.runtimeSession is not null)
                 {
-                    this.runtimeSession.Set(existingServiceAccount, value);
+                    this.runtimeSession.Set(existingServiceAccount, value); 
                 }
             }
         }
@@ -1391,6 +1391,35 @@ namespace DevolutionsGateway.Properties
         }
 
  
+        internal static readonly WixProperty<Boolean> didChooseNgrokNativeClientAccess = new()
+        {
+            Id = "P.DidChooseNgrokNativeClientAccess",
+            Default = false,
+            Name = "DidChooseNgrokNativeClientAccess",
+            Secure = false,
+            Hidden = false,
+            Public = false,
+            Encode = false,
+        };
+
+        /// <summary>A helper to manage UI state</summary>
+        public Boolean DidChooseNgrokNativeClientAccess
+        {
+            get
+            {
+                string stringValue = this.FnGetPropValue(didChooseNgrokNativeClientAccess.Id);
+                return WixProperties.GetPropertyValue<Boolean>(stringValue);
+            }
+            set 
+            { 
+                if (this.runtimeSession is not null)
+                {
+                    this.runtimeSession.Set(didChooseNgrokNativeClientAccess, value); 
+                }
+            }
+        }
+
+ 
         internal static readonly WixProperty<Boolean> enableCliGeneration = new()
         {
             Id = "P.ENABLECLIGENERATION",
@@ -1695,11 +1724,11 @@ namespace DevolutionsGateway.Properties
  
  
             enableAgentTunnel,
-
-
+ 
+ 
             agentTunnelPort,
-
-
+ 
+ 
             hasPowerShell,
  
  
@@ -1731,9 +1760,17 @@ namespace DevolutionsGateway.Properties
  
  
             serviceStart,
+ 
+ 
             serviceAccount,
+ 
+ 
             servicePassword,
+ 
+ 
             serviceAccountSid,
+ 
+ 
             existingServiceAccount,
  
  
@@ -1777,6 +1814,9 @@ namespace DevolutionsGateway.Properties
             ngrokRemoteAddress,
  
  
+            didChooseNgrokNativeClientAccess,
+ 
+ 
             enableCliGeneration,
  
  
@@ -1784,8 +1824,6 @@ namespace DevolutionsGateway.Properties
  
  
             installId,
- 
- 
  
  
             netFx45Version,
@@ -1809,3 +1847,4 @@ namespace DevolutionsGateway.Properties
         };
     }
 }
+

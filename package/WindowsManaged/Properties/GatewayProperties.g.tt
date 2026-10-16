@@ -308,6 +308,7 @@ namespace DevolutionsGateway.Properties
     new PropertyDefinition<string>("NgrokHttpDomain", ""),
     new PropertyDefinition<bool>("NgrokEnableTcp", false),
     new PropertyDefinition<string>("NgrokRemoteAddress", ""),
+    new PropertyDefinition<bool>("DidChooseNgrokNativeClientAccess", false, isPublic: false, hidden: false, secure: false, comment: "A helper to manage UI state"),
 
     new PropertyDefinition<bool>("EnableCliGeneration", false, isPublic: true, secure: false),
     new PropertyDefinition<bool>("DebugPowerShell", false),
