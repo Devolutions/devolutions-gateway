@@ -389,10 +389,12 @@ fn rename_new(from: &Utf8Path, to: &Utf8Path) -> anyhow::Result<()> {
 
     let from_c = CString::new(from.as_str()).context("invalid source key path")?;
     let to_c = CString::new(to.as_str()).context("invalid destination key path")?;
+    // The raw syscall avoids glibc's renameat2 wrapper, which requires glibc 2.28 (the release baseline is 2.27).
     // SAFETY: Both paths are NUL-terminated and point to live buffers.
     #[cfg(target_os = "linux")]
     let status = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             from_c.as_ptr(),
             libc::AT_FDCWD,
