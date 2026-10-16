@@ -35,13 +35,45 @@ namespace DevolutionsPedmDesktop
         private const int ConnectTimeoutMilliseconds = 50;
 
         /// <summary>
-        /// Connects the pipe within a bounded budget, re-checking the service before every attempt.
-        /// A client is impersonable as soon as its connection is accepted, so it must not wait for the pipe
-        /// while the Agent service is not running: connecting to whoever re-creates the name afterwards
-        /// would defeat <see cref="Verify"/>. The service is therefore checked again before each attempt,
-        /// and the wait per attempt is bounded.
+        /// Connects and verifies the pipe within a bounded budget, and returns a stream the server may impersonate.
+        /// The first contact is made at the identification level, so a server that fails verification cannot act as
+        /// the client; the impersonation level is granted only to a server that <see cref="Verify"/> accepted.
+        /// A client is impersonable as soon as its connection is accepted, so it must not wait for the pipe while the
+        /// Agent service is not running: connecting to whoever re-creates the name afterwards would defeat
+        /// <see cref="Verify"/>. The service is therefore checked again before each attempt, and the wait per attempt
+        /// is bounded.
         /// </summary>
-        public static async Task ConnectAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+        public static async Task<NamedPipeClientStream> ConnectAsync(
+            Func<TokenImpersonationLevel, NamedPipeClientStream> createPipe, CancellationToken cancellationToken)
+        {
+            NamedPipeClientStream probe = createPipe(TokenImpersonationLevel.Identification);
+
+            try
+            {
+                await ConnectWithinBudgetAsync(probe, cancellationToken).ConfigureAwait(false);
+                Verify(probe);
+            }
+            finally
+            {
+                probe.Dispose();
+            }
+
+            NamedPipeClientStream pipe = createPipe(TokenImpersonationLevel.Impersonation);
+
+            try
+            {
+                await ConnectWithinBudgetAsync(pipe, cancellationToken).ConfigureAwait(false);
+                Verify(pipe);
+                return pipe;
+            }
+            catch
+            {
+                pipe.Dispose();
+                throw;
+            }
+        }
+
+        private static async Task ConnectWithinBudgetAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
         {
             for (int attempt = 1; ; attempt++)
             {

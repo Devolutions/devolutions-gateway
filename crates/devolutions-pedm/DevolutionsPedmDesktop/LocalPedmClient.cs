@@ -1,6 +1,5 @@
 ﻿using System.IO.Pipes;
 using System.Net.Http;
-using System.Security.Principal;
 using Devolutions.Pedm.Client.Api;
 
 namespace DevolutionsPedmDesktop
@@ -13,27 +12,16 @@ namespace DevolutionsPedmDesktop
             {
                 ConnectCallback = async(ctx, ct) => {
                     // Request only the access the service grants to clients; ReadPermissions is needed by PedmServerVerifier.
-                    // The service impersonates the client to act on its behalf.
-                    var pipe = new NamedPipeClientStream(
-                        ".",
-                        "DevolutionsPEDM",
-                        PipeAccessRights.ReadData | PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes | PipeAccessRights.ReadPermissions,
-                        PipeOptions.None,
-                        TokenImpersonationLevel.Impersonation,
-                        HandleInheritability.None);
-
-                    try
-                    {
-                        await PedmServerVerifier.ConnectAsync(pipe, ct).ConfigureAwait(false);
-                        PedmServerVerifier.Verify(pipe);
-                    }
-                    catch
-                    {
-                        pipe.Dispose();
-                        throw;
-                    }
-
-                    return pipe;
+                    // The verifier grants the impersonation level only to a server it verified.
+                    return await PedmServerVerifier.ConnectAsync(
+                        level => new NamedPipeClientStream(
+                            ".",
+                            "DevolutionsPEDM",
+                            PipeAccessRights.ReadData | PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes | PipeAccessRights.ReadPermissions,
+                            PipeOptions.None,
+                            level,
+                            HandleInheritability.None),
+                        ct).ConfigureAwait(false);
                 }
             };
 

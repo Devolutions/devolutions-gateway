@@ -76,7 +76,26 @@ impl Service<Uri> for NamedPipeConnector {
                 // so re-check before every attempt that the Agent service can still be serving the pipe.
                 pipe::verify_service_running(pipe::AGENT_SERVICE_NAME)?;
 
-                let client = pipe::open_client(pipe::PIPE_NAME);
+                // The first contact is made at the identification level, so a server that fails verification
+                // cannot act as the client; the impersonation level is granted only to a verified server.
+                let probe = pipe::open_client(pipe::PIPE_NAME, pipe::ClientImpersonation::Identification);
+
+                if iter < 5
+                    && probe
+                        .as_ref()
+                        .is_err_and(|e| e.raw_os_error() == Some(ERROR_PIPE_BUSY.0.cast_signed()))
+                {
+                    iter += 1;
+
+                    thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+
+                let probe = probe?;
+                pipe::verify_server(&probe)?;
+                drop(probe);
+
+                let client = pipe::open_client(pipe::PIPE_NAME, pipe::ClientImpersonation::Impersonation);
 
                 if iter < 5
                     && client

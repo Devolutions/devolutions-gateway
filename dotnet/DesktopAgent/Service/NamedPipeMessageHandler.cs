@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Pipes;
 using System.Net.Http;
-using System.Security.Principal;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,16 +14,16 @@ namespace Devolutions.Agent.Desktop.Service
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             // Request only the access the service grants to clients; ReadPermissions is needed by PedmServerVerifier.
-            // The service impersonates the client to act on its behalf.
-            using NamedPipeClientStream pipeClient = new NamedPipeClientStream(
-                ".",
-                pipeName,
-                PipeAccessRights.ReadData | PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes | PipeAccessRights.ReadPermissions,
-                PipeOptions.Asynchronous,
-                TokenImpersonationLevel.Impersonation,
-                HandleInheritability.None);
-            PedmServerVerifier.ConnectAsync(pipeClient, cancellationToken).GetAwaiter().GetResult();
-            PedmServerVerifier.Verify(pipeClient);
+            // The verifier grants the impersonation level only to a server it verified.
+            using NamedPipeClientStream pipeClient = PedmServerVerifier.ConnectAsync(
+                level => new NamedPipeClientStream(
+                    ".",
+                    pipeName,
+                    PipeAccessRights.ReadData | PipeAccessRights.WriteData | PipeAccessRights.ReadAttributes | PipeAccessRights.ReadPermissions,
+                    PipeOptions.Asynchronous,
+                    level,
+                    HandleInheritability.None),
+                cancellationToken).GetAwaiter().GetResult();
 
             string requestMessage = SerializeRequest(request);
             byte[] requestBytes = Encoding.UTF8.GetBytes(requestMessage);
