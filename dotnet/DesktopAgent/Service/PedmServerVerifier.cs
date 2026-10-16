@@ -49,7 +49,7 @@ namespace Devolutions.Agent.Desktop.Service
 
                 try
                 {
-                    await pipe.ConnectAsync(ConnectTimeoutMilliseconds, cancellationToken);
+                    await pipe.ConnectAsync(ConnectTimeoutMilliseconds, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 catch (TimeoutException) when (attempt < ConnectAttempts)

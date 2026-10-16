@@ -24,7 +24,7 @@ namespace DevolutionsPedmDesktop
 
                     try
                     {
-                        await PedmServerVerifier.ConnectAsync(pipe, ct);
+                        await PedmServerVerifier.ConnectAsync(pipe, ct).ConfigureAwait(false);
                         PedmServerVerifier.Verify(pipe);
                     }
                     catch
