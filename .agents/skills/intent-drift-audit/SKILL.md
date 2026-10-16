@@ -35,7 +35,7 @@ Audited against: `<file>` (<n> statements), ...
 
 | ID | Statement (abridged) | Status | Evidence | Note |
 |---|---|---|---|---|
-| gateway-db/INTENT.md#I2 | Never depends on feature crates | Violates (introduced) | `crates/gateway-db/Cargo.toml:18` | adds `agent-tunnel` |
+| xtask/INTENT.md#dependencies | Only lexopt, anyhow, xshell, tinyjson | Violates (introduced) | `xtask/Cargo.toml:14` | adds `serde_json` |
 
 ### Violations
 <Per violation: what intent requires, what the code does, smallest conforming change as a proposal.>
@@ -46,5 +46,6 @@ Audited against: `<file>` (<n> statements), ...
 
 Lead with violations and partials, then cannot verify, then conforms.
 A clean audit is two lines plus the table.
+When the human wants the mapping kept, the table becomes an `EVIDENCE.md` beside the intent, one row per claim with the directive, intent line, and code paths that realise it and `[unsure]` on inferred rows.
 
 When the audit runs because you are about to change governed code, a violation you would introduce is a stop: surface the statement ID, evidence, and options to the human.

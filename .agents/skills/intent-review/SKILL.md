@@ -20,9 +20,9 @@ When a sentence feels wrong and you cannot name why, `intent-files/references/pi
 Apply each to every normative sentence; quote the sentence in the finding.
 
 - **Contradiction**: two statements that cannot both hold, including a specific file quietly narrowing a broader one.
-- **Not a commitment**: rules out no plausible change, or restates code, manifest, README, path, contract, or a sibling; "does that belong to this crate?"
+- **Not a commitment**: rules out no plausible change, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this crate?"
 - **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
-- **Plan tense**: "we would like", "will be extended" for behaviour that already exists; or an unimplemented target not marked as such.
+- **Plan or tentative tense**: "we would like", "will be extended" for behaviour that already exists; "I have in mind", "may be used" for a firm want; an unimplemented target not marked as such; propose the normative form or the explicit permission.
 - **Unscoped absolute**: `never`, `always`, `only`, `every`; which boundary, and does a sibling, feature flag, backend, or build falsify it?
 - **Unverified universal**: "every library does X" with no cited check.
 - **Code disagrees**: the code does not do what the sentence says; report it as a divergence for the human, not as a defect in either.

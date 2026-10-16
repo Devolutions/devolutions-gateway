@@ -20,6 +20,7 @@ Root questions, from which everything else branches:
 - **Non-goals**: what is unsupported or was cut?
 - **Properties**: security, compatibility, concurrency and lifecycle, dependency boundaries, extension points.
 - **Future**: which directions must not be precluded?
+- **Vocabulary**: which terms does this unit introduce, and what rule does each definition carry?
 - **Independence**: must anything here be implemented or tested independently of this code, so that a `CONTRACT.md` is warranted?
 
 ## Rounds
@@ -41,6 +42,7 @@ Facts are your job: look up dependencies, features, callers, and siblings before
 - An absolute: ask which boundary it protects and what falsifies it; recommend the scoped form or the configurations it applies to.
 - A claim about how code works that the code contradicts: surface it and ask which is wrong, the code or the claim.
 - Wishing or future tense: ask whether the behaviour exists; if so state it normatively, otherwise mark it as a target.
+- A tentative want ("I'd like", "I have in mind", "may"): ask whether it is a requirement, a permission, or a preference, and word it so.
 - A rule without a reason: ask what alternative it excludes and why.
 - A list of variants: ask whether the rule is the list or a property each variant satisfies.
 - "Requires a decision", "run X after Y", anything about contributors: process; note it for `AGENTS.md` and ask for the software property behind it.

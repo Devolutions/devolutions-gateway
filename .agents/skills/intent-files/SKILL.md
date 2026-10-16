@@ -19,7 +19,7 @@ A statement belongs when all three hold:
 
 > Would the software be wrong if tests passed but this were violated?
 > Does it rule out a plausible change a human deliberately rejected, in a way a maintainer could not cheaply recover from code, manifest, or contract?
-> Can it be falsified, and is it consequential enough that violating it should stop a change?
+> Could a reviewer cite it to reject a change?
 
 If it constrains how a contributor performs the work rather than the resulting software, it is `AGENTS.md`.
 "Adding a variant requires an explicit decision" is process; the intent is "a variant without an explicit mapping is rejected, never given a fallback".
@@ -33,17 +33,19 @@ Never one per source file, never mechanically.
 
 ## Shape
 
-No mandatory sections; one commitment may be the whole file.
-A flat list for a handful; topical headings only when they aid retrieval; `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
+No mandatory sections and no title; one commitment may be the whole file, and a new component's intent may run to a hundred lines when the commitments are many.
+A flat list for a handful; topical headings only when they aid retrieval; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
 A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one.
-State precision in the wording (`exactly these`, `at least`, `may vary provided`) rather than labelling the file exact or broad.
-Normative present tense about the software, never about agents; `must not` only where a declarative sentence would be ambiguous; an unimplemented target is marked as such.
+Normative in any mood (declarative, imperative, `must`, `should`); never plan tense, never addressed to agents.
+Distinguish a deferral ("for now") from a non-goal ("the intention is not to"); the word tells a reader whether to expect change.
+State precision in the wording (`exactly these`, `at least`, `may vary provided`, `is permitted to`) rather than labelling the file exact or broad.
 Scope every `never`, `only`, `always` to the boundary it protects and name the configurations a conditional commitment applies to.
 A scope sentence earns its place only when placement leaves a likely misapplication, stated once, next to the commitment it qualifies.
-A small exact table is intent only when the closed set itself is the decision and nothing else owns it.
-An implementation detail (an ordering, a helper, a layout) is intent when a human chose to pin it and says why; the file should not become a description of the implementation, and incidental detail is the first thing a reviewer will question.
+When the component introduces its own terms, a glossary (one heading per term, one to three sentences, an example) can carry the rules inside the definitions: "A missing requirement is an error, not an applicability skip."
+Specifics the human wants pinned (an exact set of variants, a dependency allowlist, a permitted tool, a pipeline order, a CLI's selector semantics) are intent even though they look like implementation; put them under the glossary entry of the concept they refine, or in a `<module>.intent.md` beside the one module they govern, and word them as the set or the permission, never as "things I have in mind" or "may be used", which read as optional.
+The file still does not describe the implementation: incidental detail is the first thing a reviewer questions, and doubt about where a statement belongs goes in the PR.
 When a file grows, cut first the statement that neither changes the set of acceptable implementations nor explains why an alternative is excluded.
 
 `references/pitfalls.md` lists how drafts have failed review and what the maintainer said; read it before handing a draft back or when reviewing.
-`references/examples.md` points at files the maintainer wrote himself and says what makes each work.
+`references/examples.md` points at the file the maintainer wrote by hand and says what makes it work.
 `references/handoff.md` has the review note and provenance table for a set of drafts.

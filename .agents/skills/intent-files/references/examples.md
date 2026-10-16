@@ -1,29 +1,18 @@
 # Examples the maintainer wrote
 
-Only files Benoit Cortier wrote or rewrote himself appear here; files other contributors drafted from an LLM skeleton are deliberately excluded.
-Read the file at the path given; what follows is only why it works.
+Only files the maintainer has confirmed as examples appear here.
+Read the file at the path given; what follows is only what makes it work.
 
-## `picky-crypto-rustcrypto/INTENT.md` (Devolutions/picky-rs)
+## `xtask/INTENT.md` (Devolutions/devolutions-gateway, branch `cbenoit-build-xtask-checks`)
 
-One commitment after review: `fips()` is always false, with the reason RustCrypto has no validated module, so the FIPS policy rejects it.
-Two generic bullets were cut ("a backend is a thin adapter", "it passes the conformance suite") because the contract crate's intent already owns the first and CI the second; what remains is the one fact specific to this crate.
-Its first Purpose sentence ("backend implemented on top of the RustCrypto crates") is path-level information and could go too; the feature policy below it is the real commitment.
+Written by hand for a new crate and committed as written, about 130 lines.
+No title; `## Overview` holds the purpose in one line, then non-goals ("The intention is not to rewrite ci.yml in Rust", "Do not preserve tlk.ps1 as an abstraction") and deferrals ("For now, ignore Windows installers", "remains a CI-only check for now") side by side, each one sentence.
+`## Dependencies` is a four-crate allowlist plus a goal ("compile under one second"): an inventory that is itself the decision.
+`## Pipeline` pins the stage order as an arrow diagram and numbered steps, and calls out the one ordering that matters (`canonicalize -> deduplicate -> apply declared coverage -> merge -> order`): implementation shape, deliberately chosen.
+`## CLI` gives the literal usage text and the selector semantics in four sentences ("Repeated check names form a union", "A selector that unexpectedly matches nothing is an error"): an exact contract inline, because nothing implements this interface independently.
+`## Concepts` is a glossary, one `###` per term, one to three sentences with an example; the rules live inside the definitions ("A missing requirement is an error, not an applicability skip", "Prerequisites must not be used to install missing requirements implicitly") and `NOTE:` marks a future direction or an anti-requirement.
+Voice mixes imperative, declarative and `should`; every sentence is normative and none is about agents.
+Beside it, `xtask/AGENTS.md` is seven lines of module-organisation policy for contributors ("Prefer vertical task modules", "Do not add or modify dependencies without explicit approval") and nothing else, and `xtask/EVIDENCE.md` maps each design claim to the directive, intent line, and code path that realise it, with `[unsure]` on inferred rows.
 
-## `picky-crypto-bundle/INTENT.md` (Devolutions/picky-rs)
-
-Six commitments, each checkable against `Cargo.toml` and `lib.rs`, each saying what it rules out: fixed composition order, no default features (so feature unioning stays deterministic), additive features, no cryptographic code, installs nothing itself, applies no policy.
-The last replaced "the bundle's `fips()` is false", which one configuration falsified; "a non-FIPS convenience that claims nothing" is the honest form.
-Detail that would drift (§11 semantics) is a pointer into `CONTRACT.md`, not a copy.
-
-## `picky-crypto/INTENT.md` (Devolutions/picky-rs)
-
-The contract crate's intent, next to a 950-line `CONTRACT.md`.
-Headings exist because there are enough commitments to need retrieval: a design principle in one bold sentence with its consequences and a test ("argument mapping never inspects the input beyond checking algorithm-fixed lengths and constant bytes"), a minimality rule with its three written exceptions, provider shape, process-wide default, invariants, non-goals.
-It is long because the decisions are many, not because the template demanded sections.
-
-## `docs/agent-identity/INTENT.md` (Devolutions/devolutions-gateway, PR #2000)
-
-Rationale beside a protocol contract shared by four components.
-Every bullet is a commitment with the alternative it excludes: "the token is deliberately not a JWT" (and why a signed token cannot work before enrollment), "the host and path are not signed because reverse proxies and IIS virtual directories can rewrite them", "the mock authority and agent implement the protocol independently" (so shared code cannot hide the same defect twice).
-An earlier draft restated the contract (token format, operations table); the maintainer made `CONTRACT.md` self-contained and kept here only the choices and their reasons.
-Component intents link here with stable anchors and say in a sentence that this file applies to them.
+The same author's `xtask/src/model.intent.md` shows the one thing to avoid: firm wants (the exact `Subject` variants; permission to use `cargo metadata` for discovery) written as "subjects I have in mind" and "may be used" because their placement was unclear.
+The set belongs under `### Subject` as "exactly these", the permission as "discovery is permitted to use `cargo metadata`", and the placement doubt in the PR.
