@@ -1,6 +1,6 @@
 ---
 name: agents-md
-description: Discipline for writing and updating AGENTS.md so it holds only what an agent cannot infer - policy, gotchas, and pointers - and stays under about 40 lines. Use when creating, editing, or adapting an AGENTS.md, instead of /init.
+description: Discipline for writing and updating AGENTS.md (or CLAUDE.md) so it holds only what an agent cannot infer - policy, gotchas, and pointers - and stays under about 40 lines. Use instead of /init when creating, editing, or adapting one.
 ---
 
 # AGENTS.md

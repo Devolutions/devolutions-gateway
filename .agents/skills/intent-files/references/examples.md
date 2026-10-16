@@ -5,7 +5,7 @@ Read the file at the path given; what follows is only what makes it work.
 
 ## `xtask/INTENT.md` (Devolutions/devolutions-gateway, branch `cbenoit-build-xtask-checks`)
 
-Written by hand for a new crate and committed as written, about 130 lines.
+Written by hand for a new crate and committed as written, about 100 sentences.
 No title; `## Overview` holds the purpose in one line, then non-goals ("The intention is not to rewrite ci.yml in Rust", "Do not preserve tlk.ps1 as an abstraction") and deferrals ("For now, ignore Windows installers", "remains a CI-only check for now") side by side, each one sentence.
 `## Dependencies` is a four-crate allowlist plus a goal ("compile under one second"): an inventory that is itself the decision.
 `## Pipeline` pins the stage order as an arrow diagram and numbered steps, and calls out the one ordering that matters (`canonicalize -> deduplicate -> apply declared coverage -> merge -> order`): implementation shape, deliberately chosen.

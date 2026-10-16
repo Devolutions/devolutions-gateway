@@ -1,6 +1,6 @@
 ---
 name: agents-md-review
-description: Audit an existing AGENTS.md line by line for wrong, stale, discoverable, duplicated, or content-free guidance and propose the pruned file. Use when asked to review, prune, shrink, or clean up an AGENTS.md.
+description: Audit an existing AGENTS.md or CLAUDE.md line by line for wrong, stale, discoverable, duplicated, or content-free guidance and propose the pruned file. Use when asked to review, prune, shrink, or clean up one.
 ---
 
 # AGENTS.md review

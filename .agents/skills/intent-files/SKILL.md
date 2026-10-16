@@ -1,6 +1,6 @@
 ---
 name: intent-files
-description: Discipline for INTENT.md and *.intent.md files - what belongs, where they go, how to word statements so they stay true. Use when drafting, revising, or reasoning about intent files, or when another intent skill needs the vocabulary.
+description: Discipline for INTENT.md and *.intent.md files - the durable design decisions and rationale behind a component; what belongs there versus CONTRACT.md or AGENTS.md, where they go, how to word statements so they stay true. Use when drafting or revising intent files, or when another intent skill needs the vocabulary.
 ---
 
 # Intent files
