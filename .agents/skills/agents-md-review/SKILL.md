@@ -29,7 +29,7 @@ Also look for what is **Missing**: policy the organisation applies elsewhere (in
 ```md
 | Block | Verdict | Evidence |
 |---|---|---|
-| `Issue: #456 (GitHub issue)` | Wrong | `cliff.toml` renders every `Issue:` as a Jira URL |
+| `Issue: #456`, `Issue: N/A` as valid footers | Wrong | `cliff.toml` turns every `Issue:` value into a Jira link; both render as garbage |
 | Scope list `dgw, agent, jetsocat, webapp` | Stale | `installer`, `agent-installer` missing; `commit-scope` skill has the table |
 | Branch naming | Never a convention | 2 of 60 merged PR branches carry a Jira key; maintainer confirms it was never decided |
 | Nightly rustfmt line | Keep | stable fmt fails CI; no skill states it |
