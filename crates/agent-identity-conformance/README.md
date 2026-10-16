@@ -18,7 +18,7 @@ On DVLS, supply `--disposable-dvls-target` only when rotation is safe, and provi
 The disposable rotation checks require no other active devices on the published root; otherwise they report `SKIP` before rotating.
 `--dvls-rotation-window-secs` defaults to 60; `--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
-Agent cases check the five required §10.5 metadata fields and their values at each send.
+Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
 The DVLS expiry-boundary test needs a configured leaf lifetime of roughly 10–30 seconds.
 `--expect-channel` defaults to `true`; use `--expect-channel false` when the server intentionally omits `config.agent_channel_url`.
@@ -30,7 +30,7 @@ The final summary reports counts, per-category durations and the reason for ever
 
 The runner reports a unique `KEY NAME PREFIX` for each run and writes it to `__debug__.identity.key_name_prefix` in every generated `agent.json`.
 Key names must be that prefix followed by a lowercase hyphenated UUID; file-backed keys live at `<data-dir>/identity/keys/<key_name>.p8`.
-After each agent test, the runner fails if any key with that prefix is absent from `identity.json` or `enrollment-in-progress.json`, then deletes only run-prefixed machine and file-backed keys on either target.
+After each agent test, the runner fails if any key with that prefix is absent from `identity.json` or `<data-dir>/identity/pending/<hex>.in-progress.json`, then deletes only run-prefixed machine and file-backed keys on either target.
 It rejects unrecorded `*.p8` files and PKCS#8 private keys anywhere under `<data-dir>/identity`, plus leftover temporary siblings of identity files; other unknown files produce warnings.
 On Windows, checking the key ACL without a current-user grant requires running the suite and agent as SYSTEM; without this fixture, the key-store case reports `SKIP`.
 `--authority-id` and `--second-authority-id` check server and stored authority IDs when supplied; they do not control cleanup.

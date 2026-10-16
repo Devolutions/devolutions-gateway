@@ -276,7 +276,6 @@ impl AgentCase {
         let second_root = ctx.second.as_ref().and_then(|target| target.ca_path.as_deref());
         match (first_root, second_root) {
             (Some(first), Some(second)) => {
-                // Interpret CONTRACT.md §10.1's extra_trusted_root path as a PEM bundle containing both mock CAs.
                 let mut roots = std::fs::read(first)?;
                 roots.push(b'\n');
                 roots.extend_from_slice(&std::fs::read(second)?);
@@ -361,6 +360,13 @@ impl AgentCase {
         self.in_progress_path_for(self.tokens.last().expect("pending token is tracked"))
     }
 
+    fn rejection_path_for(&self, token: &str) -> PathBuf {
+        self.path()
+            .join("identity")
+            .join("rejected")
+            .join(format!("{}.json", token_file_id(token)))
+    }
+
     fn metadata_override_path(&self) -> PathBuf {
         self.path().join("identity-metadata-override.json")
     }
@@ -403,7 +409,7 @@ impl AgentCase {
         let record: Value = serde_json::from_slice(&std::fs::read(path)?).context("read pending in-progress record")?;
         ensure!(record["version"] == 1, "in-progress enrollment has wrong version");
         ensure!(
-            record["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(token.as_bytes())),
+            record["token_sha256"] == token_file_id(token),
             "in-progress record does not belong to its pending token"
         );
         validate_key_name(&self.ctx.key_name_prefix, field(&record, "key_name")?)?;
@@ -630,10 +636,17 @@ impl AgentCase {
             let machine_keys_gone = true;
             if !self.pending_path_for(pending).exists()
                 && !self.in_progress_path_for(pending).exists()
+                && self.rejection_path_for(pending).exists()
                 && !self.has_stored_identity()?
                 && self.file_keys_with_prefix()?.is_empty()
                 && machine_keys_gone
             {
+                let marker: Value = serde_json::from_slice(&std::fs::read(self.rejection_path_for(pending))?)?;
+                ensure!(
+                    marker["version"] == 1 && marker["token_sha256"] == token_file_id(pending),
+                    "rejection marker has an invalid version or full-token hex hash"
+                );
+                time::OffsetDateTime::parse(field(&marker, "at")?, &Rfc3339)?;
                 return Ok(());
             }
             self.check_running()?;
@@ -1109,7 +1122,7 @@ async fn dropped_enrollment(case: &mut AgentCase, token: &Token) -> anyhow::Resu
                 "agent stored an identity before receiving a response"
             );
             ensure!(
-                progress["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(token.text.as_bytes())),
+                progress["token_sha256"] == token_file_id(&token.text),
                 "in-progress enrollment has the wrong full-token hash"
             );
             let key = field(&progress, "key_name")?.to_owned();
@@ -1250,7 +1263,7 @@ fn assert_stored_identity(case: &AgentCase, token: &Token, state: &Value, device
     }
     ensure!(state.get("rejected").is_none(), "new identity is already rejected");
     ensure!(
-        state["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(token.text.as_bytes())),
+        state["token_sha256"] == token_file_id(&token.text),
         "stored identity has wrong full-token hash"
     );
     ensure!(
@@ -1398,6 +1411,188 @@ pub(crate) async fn a_pending_file_enroll_success(ctx: Context) -> anyhow::Resul
     .await
 }
 
+pub(crate) async fn a_bad_pending_files_do_not_reject_valid_tokens(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let probe = new_token(case, 1).await?;
+            case.write_pending(&probe.text)?;
+            let _ = case.enrolled(&target, &probe).await?;
+            let token_a = new_token(case, 1).await?;
+            let token_b = new_token(case, 1).await?;
+            let token_c = new_token(case, 1).await?;
+            case.add_token(&token_a.text);
+            for (file_token, contents) in [
+                (&token_b.text, json!({ "version": 1, "token": token_a.text })),
+                (&token_c.text, json!({ "version": 2, "token": token_c.text })),
+            ] {
+                case.add_token(file_token);
+                let path = case.pending_path_for(file_token);
+                std::fs::create_dir_all(path.parent().context("pending directory")?)?;
+                // Stage outside the watched directory so only the complete malformed record is observed.
+                let staged = case
+                    .path()
+                    .join(format!("pending-fixture-{}.staged", uuid::Uuid::new_v4()));
+                let encoded = serde_json::to_vec(&contents)?;
+                #[cfg(windows)]
+                crate::windows::write_pending(&staged, &encoded)?;
+                #[cfg(unix)]
+                {
+                    use std::io::Write as _;
+                    use std::os::unix::fs::OpenOptionsExt as _;
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .mode(0o600)
+                        .open(&staged)?;
+                    file.write_all(&encoded)?;
+                }
+                std::fs::rename(staged, &path)?;
+                #[cfg(windows)]
+                crate::windows::pending_acl_is_protected(&path)?;
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            case.check_running()?;
+            for (name, token) in [("A", &token_a), ("B", &token_b), ("C", &token_c)] {
+                ensure!(
+                    !case.rejection_path_for(&token.text).exists(),
+                    "malformed pending file wrote a rejection marker for valid token {name}"
+                );
+            }
+            case.stop().await?;
+            for token in [&token_a, &token_b, &token_c] {
+                case.write_pending(&token.text)?;
+            }
+            case.start().await?;
+            let started = Instant::now();
+            loop {
+                let mut all_enrolled = true;
+                for (name, token) in [("A", &token_a), ("B", &token_b), ("C", &token_c)] {
+                    ensure!(
+                        !case.rejection_path_for(&token.text).exists(),
+                        "pending file wrote a rejection marker for valid token {name}"
+                    );
+                    let listing = target.devices_for(token, "").await?;
+                    expect_status(&listing, 200)?;
+                    let devices = count(&listing.body, "totalCount")?;
+                    let uses = count(&target.token_record(&token.id).await?.body, "usedCount")?;
+                    ensure!(
+                        devices <= 1 && uses <= 1,
+                        "correct pending token {name} created more than one device"
+                    );
+                    all_enrolled &= devices == 1
+                        && uses == 1
+                        && !case.pending_path_for(&token.text).exists()
+                        && !case.in_progress_path_for(&token.text).exists();
+                }
+                if all_enrolled {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "correct pending files did not each enroll within 20 seconds"
+                );
+                tokio::time::sleep(POLL).await;
+            }
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_undecryptable_pending_file_does_not_reject_token(ctx: Context) -> anyhow::Result<()> {
+    #[cfg(windows)]
+    {
+        return with_agent(ctx, None, false, |case| {
+            Box::pin(async move {
+                let target = case.ctx.target.clone();
+                let token = new_token(case, 1).await?;
+                let before = count(&target.requests(None).await?, "enroll_total")?;
+                case.write_pending(&token.text)?;
+                let pending = case.pending_path_for(&token.text);
+                std::fs::write(&pending, b"not a DPAPI blob")?;
+                crate::windows::pending_acl_is_protected(&pending)?;
+                case.start().await?;
+                let started = Instant::now();
+                loop {
+                    ensure!(
+                        count(&target.requests(None).await?, "enroll_total")? == before,
+                        "undecryptable pending file sent an enrollment request"
+                    );
+                    if !pending.exists() {
+                        break;
+                    }
+                    case.check_running()?;
+                    ensure!(
+                        started.elapsed() < WAIT,
+                        "agent did not delete the undecryptable pending file"
+                    );
+                    tokio::time::sleep(POLL).await;
+                }
+                ensure!(
+                    !case.rejection_path_for(&token.text).exists(),
+                    "undecryptable pending file wrote a rejection marker"
+                );
+                case.write_pending(&token.text)?;
+                let _ = case.enrolled(&target, &token).await?;
+                ensure!(
+                    !case.rejection_path_for(&token.text).exists()
+                        && count(&target.requests(None).await?, "enroll_total")? == before + 1,
+                    "valid token did not enroll once after an undecryptable pending file"
+                );
+                Ok(())
+            })
+        })
+        .await;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = ctx;
+        Err(crate::NotApplicable("DPAPI pending files require Windows").into())
+    }
+}
+
+pub(crate) async fn a_untrusted_tls_server_keeps_pending_token(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, false, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            let second = case.ctx.second.as_ref().context("second mock authority required")?;
+            let root = second.ca_path.as_ref().context("second mock TLS CA required")?;
+            let path = case.path().join("agent.json");
+            let mut config: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            config["__debug__"]["identity"]["extra_trusted_root"] = json!(root);
+            std::fs::write(path, serde_json::to_vec_pretty(&config)?)?;
+            let token = new_token(case, 1).await?;
+            let before = count(&target.requests(None).await?, "enroll_total")?;
+            case.start().await?;
+            case.write_pending(&token.text)?;
+            let started = Instant::now();
+            loop {
+                if case.in_progress_for(&token.text)?.is_some() {
+                    break;
+                }
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not process the pending token for TLS validation"
+                );
+                tokio::time::sleep(POLL).await;
+            }
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            case.check_running()?;
+            ensure!(
+                count(&target.requests(None).await?, "enroll_total")? == before
+                    && case.pending_path_for(&token.text).exists()
+                    && !case.rejection_path_for(&token.text).exists(),
+                "untrusted TLS did not preserve the processed pending token"
+            );
+            Ok(())
+        })
+    })
+    .await
+}
+
 pub(crate) async fn a_enroll_lost_response_retried_across_restart(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
@@ -1496,8 +1691,7 @@ pub(crate) async fn a_two_pending_tokens_same_authority_last_wins(ctx: Context) 
             let replacement_key = key_name(&replacement_state, "current")?.to_owned();
             ensure!(
                 replacement_key != original_key
-                    && replacement_state["token_sha256"]
-                        == URL_SAFE_NO_PAD.encode(Sha256::digest(replacement.text.as_bytes()))
+                    && replacement_state["token_sha256"] == token_file_id(&replacement.text)
                     && case.pending_path_for(&original_token.text).exists()
                     && case.in_progress_for(&original_token.text)?.is_some()
                     && key_exists(case, &original_key)?,
@@ -1506,7 +1700,7 @@ pub(crate) async fn a_two_pending_tokens_same_authority_last_wins(ctx: Context) 
             let (original_id, state) = case.enrolled(&target, &original_token).await?;
             ensure!(
                 original_id != replacement_id
-                    && state["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(original_token.text.as_bytes()))
+                    && state["token_sha256"] == token_file_id(&original_token.text)
                     && key_name(&state, "current")? == original_key,
                 "last completing token did not become the stored identity for its authority"
             );
@@ -1800,6 +1994,7 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
                         );
                         tokio::time::sleep(POLL).await;
                     }
+                    let observed_failure = Instant::now();
                     ensure!(
                         case.pending_path().exists(),
                         "transient HTTP error deleted the pending file"
@@ -1810,10 +2005,11 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
                         "transient HTTP error created a device or consumed a token use"
                     );
                     if response["retry_after_secs"] == 3 {
-                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        // Probe near the two-second cap without racing the next retry.
+                        tokio::time::sleep_until((observed_failure + Duration::from_millis(1_700)).into()).await;
                         ensure!(
                             count(&target.requests(Some(&token)).await?, "enroll")? == initial + index as u64 + 1,
-                            "agent ignored the Retry-After delay"
+                            "agent retried before the capped Retry-After delay"
                         );
                     }
                     if response["status"] == 302 {
@@ -2332,7 +2528,7 @@ pub(crate) async fn a_different_token_replaces_identity(ctx: Context) -> anyhow:
                 "same mock changed authority on re-enrollment"
             );
             ensure!(
-                next_state["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(next_token.text.as_bytes()))
+                next_state["token_sha256"] == token_file_id(&next_token.text)
                     && next_state["token_sha256"] != first_state["token_sha256"],
                 "replacement did not store the new token hash"
             );
@@ -2374,7 +2570,7 @@ pub(crate) async fn a_rejected_identity_replaced(ctx: Context) -> anyhow::Result
                 "new token retained the old rejection"
             );
             ensure!(
-                new_state["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(replacement.text.as_bytes()))
+                new_state["token_sha256"] == token_file_id(&replacement.text)
                     && new_state["token_sha256"] != old_state["token_sha256"],
                 "rejected identity replacement did not store the new token hash"
             );
@@ -4556,9 +4752,8 @@ pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
                 "second identity not stored"
             );
             ensure!(
-                first_state["token_sha256"] == URL_SAFE_NO_PAD.encode(Sha256::digest(first_token.text.as_bytes()))
-                    && second_state["token_sha256"]
-                        == URL_SAFE_NO_PAD.encode(Sha256::digest(second_token.text.as_bytes())),
+                first_state["token_sha256"] == token_file_id(&first_token.text)
+                    && second_state["token_sha256"] == token_file_id(&second_token.text),
                 "multi-authority token hashes are incorrect"
             );
             case.stop().await?;
@@ -4624,7 +4819,7 @@ pub(crate) async fn a_key_non_exportable(ctx: Context) -> anyhow::Result<()> {
         .await?;
         if !crate::windows::running_as_system()? {
             if !crate::windows::running_as_elevated_administrator()? {
-                return Err(crate::NotApplicable("requires an elevated administrator for the SYSTEM fixture").into());
+                return Err(crate::Incomplete("requires an elevated administrator for the SYSTEM fixture").into());
             }
             return system_fixture::run(ctx).await;
         }
@@ -5076,7 +5271,7 @@ mod tests {
         )
         .await?;
         let fixture_token = "dvaet1.fixturebag.fixturesecret";
-        let fixture_hash = URL_SAFE_NO_PAD.encode(Sha256::digest(fixture_token.as_bytes()));
+        let fixture_hash = token_file_id(fixture_token);
         case.add_token(fixture_token);
         let pending_name = case
             .pending_path()

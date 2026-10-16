@@ -805,7 +805,40 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
     Ok(())
 }
 
+pub(crate) async fn p_token_config_contributes_to_effective_config(ctx: Context) -> anyhow::Result<()> {
+    let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
+    let created = ctx
+        .target
+        .admin(
+            Method::POST,
+            "/enrollment-tokens",
+            Some(&json!({
+                "name": format!("conformance-{}", uuid::Uuid::new_v4()),
+                "maxUses": 1,
+                "expiresAt": expires,
+                "config": { "psu_channel_url": "https://psu.example" }
+            })),
+        )
+        .await?;
+    expect_status(&created, 201)?;
+    let token = Token {
+        text: field(&created.body, "token")?.to_owned(),
+        id: field(&created.body["record"], "id")?.to_owned(),
+    };
+    let identity = identity(&ctx.target, &token, "token-config").await?;
+    ensure!(
+        identity.config["psu_channel_url"] == "https://psu.example",
+        "enrollment omitted the token's product-specific config"
+    );
+    ensure!(
+        check_in_config(&ctx.target, &identity).await?["psu_channel_url"] == "https://psu.example",
+        "check-in omitted the token's product-specific config"
+    );
+    Ok(())
+}
+
 pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow::Result<()> {
+    let foreign_token = token(&ctx, 1).await?;
     let token = token(&ctx, 2).await?;
     let key = KeyPair::generate()?;
     let first = ctx
@@ -815,6 +848,7 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
     expect_status(&first, 200)?;
     let device_id = field(&first.body, "device_id")?;
     let before = device(&ctx.target, device_id).await?;
+    let foreign = identity(&ctx.target, &foreign_token, "foreign").await?;
     expect_status(
         &ctx.target
             .admin(Method::DELETE, &format!("/enrollment-tokens/{}", token.id), None)
@@ -844,9 +878,33 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
         401,
         "token_invalid",
     )?;
+    expect_error(
+        &ctx.target.enroll(&token.text, &foreign.key, &json!({})).await?,
+        401,
+        "token_invalid",
+    )?;
+    ctx.target.revoke(&foreign.device_id).await?;
+    expect_error(
+        &ctx.target.enroll(&token.text, &foreign.key, &json!({})).await?,
+        401,
+        "token_invalid",
+    )?;
+    expect_status(
+        &ctx.target
+            .admin(Method::DELETE, &format!("/devices/{}", foreign.device_id), None)
+            .await?,
+        204,
+    )?;
+    expect_error(
+        &ctx.target.enroll(&token.text, &foreign.key, &json!({})).await?,
+        401,
+        "token_invalid",
+    )?;
+    expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)?;
     ensure!(
-        count(&ctx.target.devices_for(&token, "").await?.body, "totalCount")? == 1,
-        "deleted token issued a second device"
+        count(&ctx.target.devices_for(&token, "").await?.body, "totalCount")? == 1
+            && device(&ctx.target, device_id).await? == before,
+        "deleted token issued another device or changed its own replayed device"
     );
     Ok(())
 }
@@ -927,8 +985,8 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
     for key in [&identity.key, &first_pending, &second_pending] {
         expect_error(
             &ctx.target.enroll(&other_token.text, key, &json!({})).await?,
-            403,
-            "device_revoked",
+            400,
+            "invalid_request",
         )?;
     }
     expect_status(
@@ -937,14 +995,17 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
             .await?,
         204,
     )?;
-    for bearer in [&other_token.text, &original_token.text] {
-        for key in [&identity.key, &first_pending, &second_pending] {
-            expect_error(
-                &ctx.target.enroll(bearer, key, &json!({})).await?,
-                403,
-                "device_revoked",
-            )?;
-        }
+    for key in [&identity.key, &first_pending, &second_pending] {
+        expect_error(
+            &ctx.target.enroll(&other_token.text, key, &json!({})).await?,
+            400,
+            "invalid_request",
+        )?;
+        expect_error(
+            &ctx.target.enroll(&original_token.text, key, &json!({})).await?,
+            403,
+            "device_revoked",
+        )?;
     }
     ensure!(
         count(&ctx.target.token_record(&other_token.id).await?.body, "usedCount")? == 0
@@ -1602,9 +1663,11 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
     let (_, mut identity) = issued(&ctx, "check-in").await?;
     let enrolled = identity.config.clone();
     let before = device(&ctx.target, &identity.device_id).await?;
+    let initial_seen = last_seen_at(&before)?.context("new device has no lastSeenAt")?;
+    let created_at = time::OffsetDateTime::parse(field(&before, "createdAt")?, &Rfc3339)?;
     ensure!(
-        enrolled["revision"].as_u64().is_some(),
-        "enrollment did not provide an unsigned config revision"
+        enrolled["revision"].as_u64().is_some() && created_at <= initial_seen,
+        "enrollment omitted a config revision or the device's initial lastSeenAt"
     );
     next_last_seen_second(&ctx).await?;
     let current = ctx
@@ -1618,7 +1681,7 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
         current.body["config"] == enrolled
             && current.body["renewal_requested"] == false
             && after["metadata"]["hostname"] == "current-check-in"
-            && last_seen_at(&before)?.is_none_or(|previous| current_seen > previous),
+            && initial_seen < current_seen,
         "current-certificate check-in did not return config or refresh metadata and lastSeenAt"
     );
     expect_status(
@@ -1918,6 +1981,52 @@ pub(crate) async fn p_same_tag_connect_components_rejected(ctx: Context) -> anyh
     Ok(())
 }
 
+pub(crate) async fn p_extra_signature_parameters_rejected_renew(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "extra-renew-parameter").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let key = KeyPair::generate()?;
+    let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "unchanged" } }))?;
+    for parameter in [";conformance=\"extra\"", ";conformance"] {
+        let mut headers = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
+        headers.input.push_str(parameter);
+        resign_input(&identity.key, &mut headers)?;
+        expect_error(
+            &ctx.target.signed_renew(&body, &headers, None).await?,
+            401,
+            "signature_invalid",
+        )?;
+        ensure!(
+            device(&ctx.target, &identity.device_id).await? == before,
+            "extra {parameter} renew signature parameter changed device state"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn p_extra_signature_parameters_rejected_connect(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "extra-connect-parameter").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    for parameter in [";conformance=\"extra\"", ";conformance"] {
+        let mut headers = identity.key.sign_now(&identity.thumbprint, "connect", None);
+        headers.input.push_str(parameter);
+        resign_input(&identity.key, &mut headers)?;
+        let failure = channel::open_with_headers(&ctx.target, &identity, headers)
+            .await
+            .err()
+            .with_context(|| format!("extra {parameter} parameter authenticated a channel"))?;
+        channel::expect_status(
+            failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+            Code::Unauthenticated,
+            "signature_invalid",
+        )?;
+        ensure!(
+            device(&ctx.target, &identity.device_id).await? == before,
+            "extra {parameter} connect signature parameter changed device state"
+        );
+    }
+    Ok(())
+}
+
 pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "wire-negatives").await?;
     let original = device(&ctx.target, &identity.device_id).await?;
@@ -2165,15 +2274,19 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     let (_, mut identity) = issued(&ctx, "confirm-idempotent").await?;
     let old_thumb = identity.thumbprint.clone();
     let original = device(&ctx.target, &identity.device_id).await?;
+    let initial_seen = last_seen_at(&original)?.context("new device has no lastSeenAt")?;
     let original_events = if ctx.mock() {
         Some(ctx.target.events(&identity.device_id).await?)
     } else {
         None
     };
+    next_last_seen_second(&ctx).await?;
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    let already_current = device(&ctx.target, &identity.device_id).await?;
     ensure!(
-        device(&ctx.target, &identity.device_id).await?["certificates"] == original["certificates"],
-        "confirm with an already current certificate changed its status"
+        already_current["certificates"] == original["certificates"]
+            && initial_seen < last_seen_at(&already_current)?.context("current confirm omitted lastSeenAt")?,
+        "confirm with an already current certificate changed status or did not refresh lastSeenAt"
     );
     if let Some(events) = &original_events {
         ensure!(
@@ -2186,23 +2299,30 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let before_promotion = device(&ctx.target, &identity.device_id).await?;
+    next_last_seen_second(&ctx).await?;
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let promoted = device(&ctx.target, &identity.device_id).await?;
     ensure!(
         has_certificate(&promoted, &old_thumb, "retired")
-            && has_certificate(&promoted, &identity.thumbprint, "current"),
-        "confirm did not promote pending and retire the previous current certificate"
+            && has_certificate(&promoted, &identity.thumbprint, "current")
+            && last_seen_at(&before_promotion)?.context("renew omitted lastSeenAt")?
+                < last_seen_at(&promoted)?.context("pending confirm omitted lastSeenAt")?,
+        "confirm did not promote pending, retire current or refresh lastSeenAt"
     );
     let events = if ctx.mock() {
         Some(ctx.target.events(&identity.device_id).await?)
     } else {
         None
     };
+    next_last_seen_second(&ctx).await?;
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let replayed = device(&ctx.target, &identity.device_id).await?;
     ensure!(
-        replayed["certificates"] == promoted["certificates"],
-        "idempotent confirm retry changed certificate statuses"
+        replayed["certificates"] == promoted["certificates"]
+            && last_seen_at(&promoted)?.context("confirmed device omitted lastSeenAt")?
+                < last_seen_at(&replayed)?.context("confirm retry omitted lastSeenAt")?,
+        "idempotent confirm retry changed certificate statuses or failed to refresh lastSeenAt"
     );
     if let Some(events) = events {
         ensure!(
@@ -2724,6 +2844,52 @@ pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context)
         server_time.seconds.abs_diff(after_time) <= 2,
         "Welcome server_time disagrees with lastSeenAt"
     );
+    Ok(())
+}
+
+pub(crate) async fn p_channel_agent_message_refreshes_last_seen(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "agent-message").await?;
+    let mut stream = channel::open(&ctx.target, &identity).await?;
+    stream.hello(&identity, &[]).await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let seen_before = last_seen_at(&before)?.context("authenticated Hello omitted lastSeenAt")?;
+    next_last_seen_second(&ctx).await?;
+    expect_status(
+        &ctx.target
+            .admin(
+                Method::POST,
+                &format!("/devices/{}/request-renewal", identity.device_id),
+                None,
+            )
+            .await?,
+        202,
+    )?;
+    let request = stream.next().await?;
+    ensure!(
+        matches!(
+            request.payload.as_ref(),
+            Some(agent_channel_proto::server_message::Payload::RenewRequested(_))
+        ),
+        "authenticated stream did not receive RenewRequested"
+    );
+    ensure!(
+        last_seen_at(&device(&ctx.target, &identity.device_id).await?)?.context("admin request omitted lastSeenAt")?
+            == seen_before,
+        "admin request or server push refreshed lastSeenAt before AgentMessage"
+    );
+    stream.ack(&request).await?;
+    let started = Instant::now();
+    loop {
+        let after = device(&ctx.target, &identity.device_id).await?;
+        if seen_before < last_seen_at(&after)?.context("AgentMessage omitted lastSeenAt")? {
+            break;
+        }
+        ensure!(
+            started.elapsed() < Duration::from_secs(5),
+            "authenticated AgentMessage did not refresh lastSeenAt"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
     Ok(())
 }
 
@@ -3614,6 +3780,39 @@ pub(crate) async fn p_stream_closes_at_not_after(ctx: Context) -> anyhow::Result
     ensure!(
         device(&ctx.target, &identity.device_id).await?["connected"] == false,
         "expired stream still connected"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_expired_certificate_refused_at_stream_open(ctx: Context) -> anyhow::Result<()> {
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
+    let (_, identity) = issued(&ctx, "expired-open").await?;
+    let before = device(&ctx.target, &identity.device_id).await?;
+    let not_after = time::OffsetDateTime::parse(field(&before["certificate"], "notAfter")?, &Rfc3339)?.unix_timestamp();
+    ctx.target
+        .advance(not_after - chain_evaluation_time(&ctx).await?)
+        .await?;
+    let failure = channel::open(&ctx.target, &identity)
+        .await
+        .err()
+        .context("expired certificate opened a stream")?;
+    channel::expect_status(
+        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        Code::Unauthenticated,
+        "certificate_expired",
+    )?;
+    let after = device(&ctx.target, &identity.device_id).await?;
+    ensure!(
+        after["connected"] == false
+            && after["metadata"] == before["metadata"]
+            && after["lastSeenAt"] == before["lastSeenAt"]
+            && ctx
+                .target
+                .events(&identity.device_id)
+                .await?
+                .iter()
+                .all(|event| event["type"] != "stream_authenticated"),
+        "expired opening authenticated a stream or changed device state"
     );
     Ok(())
 }

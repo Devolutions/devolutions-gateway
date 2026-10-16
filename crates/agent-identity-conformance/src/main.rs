@@ -323,6 +323,9 @@ impl Options {
 
 #[tokio::main]
 async fn main() {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("install rustls ring crypto provider");
     if let Err(error) = run().await {
         eprintln!("conformance runner error: {error:#}");
         std::process::exit(1);
@@ -548,6 +551,7 @@ const TESTS: &[Test] = &[
     p!(p_token_errors_distinct),
     p!(p_token_expired, mock_only),
     p!(p_enroll_idempotent_same_key),
+    p!(p_token_config_contributes_to_effective_config),
     p!(p_deleted_token_replays_own_key_only),
     p!(p_enroll_revoked_same_key_rejected),
     p!(p_enroll_certificate_key_reuse_rules),
@@ -562,6 +566,8 @@ const TESTS: &[Test] = &[
     p!(p_renew_rejects_sha384_csr),
     p!(p_same_tag_covered_components_rejected),
     p!(p_same_tag_connect_components_rejected).channel(),
+    p!(p_extra_signature_parameters_rejected_renew),
+    p!(p_extra_signature_parameters_rejected_connect).channel(),
     p!(p_signature_parser_wire_negatives),
     p!(p_replay_nonce_rejected),
     p!(p_replay_window_rejected),
@@ -590,6 +596,7 @@ const TESTS: &[Test] = &[
     p!(p_delete_only_when_revoked_then_unknown),
     p!(p_deleted_certificate_cannot_connect).channel(),
     p!(p_channel_hello_updates_metadata_and_connected).channel(),
+    p!(p_channel_agent_message_refreshes_last_seen).channel(),
     p!(p_handshake_barrier_holds_authentication, mock_only).channel(),
     p!(p_channel_proof_replay_fails).channel(),
     p!(p_channel_revoked_before_hello).channel(),
@@ -605,6 +612,7 @@ const TESTS: &[Test] = &[
     p!(p_reconnect_push_and_handoff, mock_only).channel(),
     p!(p_revocation_closes_stream).channel(),
     p!(p_stream_closes_at_not_after).channel(),
+    p!(p_expired_certificate_refused_at_stream_open, mock_only).channel(),
     p!(p_challenged_stream_expires_on_advance, mock_only).channel(),
     p!(p_pending_cert_auth_does_not_promote).channel(),
     p!(p_confirm_reconnects_and_closes_retired_stream_at_grace, mock_only).channel(),
@@ -633,6 +641,9 @@ const TESTS: &[Test] = &[
     p!(p_error_body_shape),
     p!(p_mock_fault_response_not_processed, mock_only),
     a!(a_pending_file_enroll_success),
+    a!(a_bad_pending_files_do_not_reject_valid_tokens),
+    a!(a_undecryptable_pending_file_does_not_reject_token, mock_only),
+    a!(a_untrusted_tls_server_keeps_pending_token, mock_only).second(),
     a!(a_enroll_lost_response_retried_across_restart, mock_only),
     a!(a_two_pending_tokens_same_authority_last_wins, mock_only),
     a!(
