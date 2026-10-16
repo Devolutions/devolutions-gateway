@@ -7,28 +7,13 @@ use agent_tunnel::authorization::{EnrollmentAttempt, EnrollmentOutcome};
 use agent_tunnel::cert::{CaManager, SignedAgentCert};
 use agent_tunnel::listener::AgentTunnelListener;
 use agent_tunnel::registry::AgentRegistry;
-use agent_tunnel_proto::{ControlMessage, ControlStream, DomainAdvertisement, SessionStream};
 use camino::Utf8PathBuf;
 use devolutions_gateway_task::ShutdownHandle;
-use ipnetwork::Ipv4Network;
 use tempfile::TempDir;
-use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-pub(super) async fn start_echo_server() -> (SocketAddr, JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind echo server");
-    let addr = listener.local_addr().expect("read echo server address");
-    let task = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("accept echo connection");
-        let (mut read, mut write) = stream.into_split();
-        tokio::io::copy(&mut read, &mut write).await.expect("echo data");
-    });
-
-    (addr, task)
-}
-
-pub(super) fn generate_csr_with_cn(cn: &str) -> (rcgen::KeyPair, String) {
+pub(crate) fn generate_csr_with_cn(cn: &str) -> (rcgen::KeyPair, String) {
     let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).expect("generate test key pair");
     let csr_pem = generate_csr_with_key(cn, &key_pair);
     (key_pair, csr_pem)
@@ -41,7 +26,7 @@ pub(super) fn generate_csr_with_key(cn: &str, key_pair: &rcgen::KeyPair) -> Stri
     csr.pem().expect("encode test csr")
 }
 
-async fn connect_quinn_client(
+pub(crate) async fn connect_quinn_client(
     ca_cert_pem: &str,
     client_cert_pem: &str,
     client_key_pem: &str,
@@ -219,33 +204,4 @@ pub(super) async fn wait_for_route_advertised(registry: &AgentRegistry, agent_id
         );
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
-}
-
-pub(super) async fn advertise_routes(
-    connection: &quinn::Connection,
-    registry: &AgentRegistry,
-    agent_id: Uuid,
-    epoch: u64,
-    subnets: Vec<Ipv4Network>,
-    domains: Vec<DomainAdvertisement>,
-) -> ControlStream<quinn::SendStream, quinn::RecvStream> {
-    let mut ctrl: ControlStream<_, _> = connection.open_bi().await.expect("open control stream").into();
-    ctrl.send(&ControlMessage::route_advertise(epoch, subnets, domains))
-        .await
-        .expect("send route advertisement");
-    wait_for_route_advertised(registry, agent_id, epoch).await;
-    ctrl
-}
-
-pub(super) async fn accept_session_request(
-    connection: &quinn::Connection,
-    session_id: Uuid,
-    expected_target: &str,
-) -> SessionStream<quinn::SendStream, quinn::RecvStream> {
-    let (send, recv) = connection.accept_bi().await.expect("accept session stream");
-    let mut session: SessionStream<_, _> = (send, recv).into();
-    let request = session.recv_request().await.expect("receive connect request");
-    assert_eq!(request.session_id(), session_id);
-    assert_eq!(request.target(), expected_target);
-    session
 }
