@@ -1,24 +1,21 @@
 # Background
-Provisioner tasks are tasks that are assigned to the Gateway.
-
+Provisioner Tasks are work that a provisioner (DVLS, Hub) assigns to Gateway.
 
 # Invariants
-Each provisioner task will have a task id. 
-Each provisioner task will have the following state:
-- Queued
-- Running {task specific payload}
-- Succeeded {task specific payload}
-- Failed {task specific payload}
-The state transitions are as follows:
-- Queued -> Running {task specific payload}
-- Running {task specific payload} -> Succeeded {task specific payload}
-- Running {task specific payload} -> Failed {task specific payload}
-- Running {task specific payload} -> Running {task specific payload} (update task specific payload)
-- Queued -> Failed {task specific payload} 
+The provisioner chooses each Task's ID, so it can ask again without knowing whether its first request went through.
 
-Tasks will have a deadline which is relative to the time it is received by the Gateway.
+A Task is in one of these states: `Queued`, `Running`, `Succeeded`, `Failed`.
+`Running`, `Succeeded` and `Failed` carry a payload whose shape belongs to the Task kind; `Queued` carries none.
+Only these transitions exist:
+- `Queued` -> `Running`
+- `Queued` -> `Failed`
+- `Running` -> `Running`, to replace the payload, such as with progress
+- `Running` -> `Succeeded`
+- `Running` -> `Failed`
 
-# Footnote
-Provisioner tasks and jobs are not the same thing.
-A Task has its own state; the job queue is only responsible for scheduling and retrying.
+Each Task has a deadline counted from when Gateway receives it.
+An unfinished Task past its deadline is failed, so a lost job can't block its target forever.
 
+# Tasks and jobs
+A Task is not a job.
+A Task keeps what was asked, how it went and how it ended, and stays for auditing after its job is gone; the job queue only schedules and retries the work.
