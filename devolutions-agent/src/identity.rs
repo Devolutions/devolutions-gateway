@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
 use agent_identity::pending::{self, PendingRead};
-use agent_identity::state::{EnrollmentDiscardReason, KeyRecord, KeySlots, Store, StoredIdentity};
+use agent_identity::state::{EnrollmentDiscardReason, KeyRecord, KeySlots, PendingDiscard, Store, StoredIdentity};
 use agent_identity::token::Token;
 use agent_identity::{csr, metadata};
 #[cfg(windows)]
@@ -86,7 +86,7 @@ impl Task for IdentityTask {
                     continue;
                 }
             };
-            let client = match Client::new(settings.extra_trusted_root.as_deref()) {
+            let client = match Client::new(conf.proxy.to_proxy_config(), settings.extra_trusted_root.as_deref()) {
                 Ok(client) => client,
                 Err(error) => {
                     if log_is_due(&mut last_trust_error) {
@@ -126,18 +126,13 @@ async fn wait_or_stop(shutdown: &mut ShutdownSignal, duration: Duration) -> bool
 
 enum PendingOutcome {
     Completed,
-    Retry {
-        retry_after: Option<Duration>,
-        decryption_failure: bool,
-    },
+    Retry { retry_after: Option<Duration> },
 }
 
 #[derive(Default)]
 struct RetryState {
     failures: u32,
     next_attempt: Option<Instant>,
-    decryption_failure_since: Option<Instant>,
-    last_decryption_error: Option<Instant>,
 }
 
 impl RetryState {
@@ -145,25 +140,8 @@ impl RetryState {
         self.next_attempt.is_none_or(|next| Instant::now() >= next)
     }
 
-    fn failed(&mut self, retry_after: Option<Duration>, decryption_failure: bool, settings: &dto::IdentityDebugConf) {
+    fn failed(&mut self, settings: &dto::IdentityDebugConf, retry_after: Option<Duration>) {
         let now = Instant::now();
-        if decryption_failure {
-            let since = *self.decryption_failure_since.get_or_insert(now);
-            if now.duration_since(since) >= Duration::from_secs(24 * 3600)
-                && self
-                    .last_decryption_error
-                    .is_none_or(|last| now.duration_since(last) >= Duration::from_secs(24 * 3600))
-            {
-                error!(
-                    "Agent Identity pending enrollment has failed DPAPI decryption for 24 hours; check machine data protection"
-                );
-                self.last_decryption_error = Some(now);
-            }
-        } else {
-            self.decryption_failure_since = None;
-            self.last_decryption_error = None;
-        }
-
         let max_backoff = Duration::from_secs(settings.backoff_max_secs.unwrap_or(3600).max(1));
         let exponential = Duration::from_secs((1u64 << self.failures.min(31)).min(max_backoff.as_secs()));
         let backoff = if settings.disable_jitter.unwrap_or_default() {
@@ -173,10 +151,14 @@ impl RetryState {
                 .mul_f64(rand::thread_rng().gen_range(0.5..=1.5))
                 .min(max_backoff)
         };
-        let delay = backoff.max(retry_after.unwrap_or_default());
+        let delay = retry_delay(max_backoff, backoff, retry_after);
         self.next_attempt = now.checked_add(delay).or_else(|| now.checked_add(max_backoff));
         self.failures = self.failures.saturating_add(1);
     }
+}
+
+fn retry_delay(maximum: Duration, backoff: Duration, retry_after: Option<Duration>) -> Duration {
+    backoff.max(retry_after.unwrap_or_default()).min(maximum)
 }
 
 async fn run_pending_enrollments(
@@ -206,21 +188,15 @@ async fn run_pending_enrollments(
                         Ok(PendingOutcome::Completed) => {
                             retries.remove(&path);
                         }
-                        Ok(PendingOutcome::Retry {
-                            retry_after,
-                            decryption_failure,
-                        }) => {
-                            retries
-                                .entry(path)
-                                .or_default()
-                                .failed(retry_after, decryption_failure, settings);
+                        Ok(PendingOutcome::Retry { retry_after }) => {
+                            retries.entry(path).or_default().failed(settings, retry_after);
                         }
                         Err(error) => {
                             warn!(
                                 error = format!("{error:#}"),
                                 "Cannot process Agent Identity pending enrollment"
                             );
-                            retries.entry(path).or_default().failed(None, false, settings);
+                            retries.entry(path).or_default().failed(settings, None);
                         }
                     }
                 }
@@ -249,35 +225,28 @@ async fn process_pending(
 ) -> anyhow::Result<PendingOutcome> {
     let token = match pending::read(path, settings.acl_grant_current_user.unwrap_or_default()) {
         Ok(PendingRead::Ready(token)) => token,
-        Ok(PendingRead::Malformed(_)) => {
-            store.discard_pending_file(path)?;
+        Ok(_) => {
+            // UNTESTED: Unusable files log warnings, while DPAPI failures log errors without token material.
+            // State tests cover file removal but do not capture service logs.
+            // When changing these outcomes, check both log levels and keep token contents out of the messages.
+            match store.discard_pending_file(path)? {
+                Some(PendingDiscard::MalformedToken) => {
+                    warn!("Discarded malformed Agent Identity enrollment token");
+                }
+                Some(PendingDiscard::Unusable) => {
+                    warn!("Discarded unusable Agent Identity pending file");
+                }
+                #[cfg(windows)]
+                Some(PendingDiscard::Undecryptable) => {
+                    error!("Could not decrypt Agent Identity pending file; discarded it");
+                }
+                None => {}
+            }
             return Ok(PendingOutcome::Completed);
-        }
-        Err(error) if is_decryption_failure(&error) => {
-            return Ok(PendingOutcome::Retry {
-                retry_after: None,
-                decryption_failure: true,
-            });
         }
         Err(error) => return Err(error),
     };
-    match enroll_pending(store, client, &token, settings).await {
-        Err(error) if is_decryption_failure(&error) => Ok(PendingOutcome::Retry {
-            retry_after: None,
-            decryption_failure: true,
-        }),
-        outcome => outcome,
-    }
-}
-
-#[cfg(windows)]
-fn is_decryption_failure(error: &anyhow::Error) -> bool {
-    error.downcast_ref::<pending::PendingDecryptionFailure>().is_some()
-}
-
-#[cfg(not(windows))]
-fn is_decryption_failure(_error: &anyhow::Error) -> bool {
-    false
+    enroll_pending(store, client, &token, settings).await
 }
 
 async fn enroll_pending(
@@ -300,7 +269,7 @@ async fn enroll_pending(
                 device_id: response.device_id,
                 base_url: token.base_url().clone(),
                 config: response.config,
-                token_sha256: token.sha256_base64url(),
+                token_sha256: hash.clone(),
                 rejected: None,
                 keys: KeySlots {
                     current: KeyRecord {
@@ -342,8 +311,34 @@ async fn enroll_pending(
             warn!(reason = %error, "Agent Identity enrollment will retry");
             Ok(PendingOutcome::Retry {
                 retry_after: error.retry_after(),
-                decryption_failure: false,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_after_is_capped_by_maximum_backoff() {
+        // `CONTRACT.md` §5.4 and `identity.intent.md` ("Configuration") cap `Retry-After` at the maximum backoff.
+        let maximum = Duration::from_secs(17);
+        assert_eq!(
+            retry_delay(maximum, Duration::from_secs(5), Some(Duration::from_secs(3600))),
+            maximum
+        );
+        assert_eq!(
+            retry_delay(maximum, Duration::from_secs(12), Some(Duration::from_secs(7))),
+            Duration::from_secs(12)
+        );
+        assert_eq!(
+            retry_delay(maximum, Duration::from_secs(5), Some(Duration::from_secs(9))),
+            Duration::from_secs(9)
+        );
+        assert_eq!(
+            retry_delay(maximum, Duration::from_secs(5), None),
+            Duration::from_secs(5)
+        );
     }
 }

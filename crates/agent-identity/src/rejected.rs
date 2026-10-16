@@ -2,14 +2,12 @@ use std::fs;
 use std::io::ErrorKind;
 
 use anyhow::{Context as _, ensure};
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Rfc3339;
 use time::{OffsetDateTime, UtcOffset};
 
-use crate::private_file;
+use crate::{pending, private_file};
 
 #[derive(Deserialize, Serialize)]
 struct Rejection {
@@ -33,19 +31,8 @@ fn directory(data_dir: &Utf8Path) -> Utf8PathBuf {
 }
 
 fn path(data_dir: &Utf8Path, hash_hex: &str) -> anyhow::Result<Utf8PathBuf> {
-    let _ = base64_hash(hash_hex)?;
+    ensure!(pending::valid_hash_hex(hash_hex), "invalid enrollment token hash");
     Ok(directory(data_dir).join(format!("{hash_hex}.json")))
-}
-
-fn base64_hash(hash_hex: &str) -> anyhow::Result<String> {
-    ensure!(
-        hash_hex.len() == 64
-            && hash_hex
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-        "invalid enrollment token hash"
-    );
-    Ok(URL_SAFE_NO_PAD.encode(hex::decode(hash_hex)?))
 }
 
 pub(crate) fn is_rejected(data_dir: &Utf8Path, hash_hex: &str) -> anyhow::Result<bool> {
@@ -66,9 +53,7 @@ pub(crate) fn is_rejected(data_dir: &Utf8Path, hash_hex: &str) -> anyhow::Result
     let marker: Rejection =
         serde_json::from_reader(file).map_err(|_| anyhow::anyhow!("invalid rejected-token marker"))?;
     ensure!(
-        marker.version == 1
-            && PERMANENT_CODES.contains(&marker.code.as_str())
-            && marker.token_sha256 == base64_hash(hash_hex)?,
+        marker.version == 1 && PERMANENT_CODES.contains(&marker.code.as_str()) && marker.token_sha256 == hash_hex,
         "invalid rejected-token marker"
     );
     let at =
@@ -89,7 +74,7 @@ pub(crate) fn mark_rejected(
     }
     let marker = Rejection {
         version: 1,
-        token_sha256: base64_hash(hash_hex)?,
+        token_sha256: hash_hex.to_owned(),
         code: code.into(),
         at: OffsetDateTime::now_utc()
             .format(&Rfc3339)
@@ -109,7 +94,7 @@ pub(crate) fn list_rejected(data_dir: &Utf8Path) -> anyhow::Result<Vec<String>> 
     for entry in entries {
         let entry = entry.context("read rejected-token marker entry")?;
         if let Some(hash_hex) = entry.file_name().to_str().and_then(|name| name.strip_suffix(".json"))
-            && base64_hash(hash_hex).is_ok()
+            && pending::valid_hash_hex(hash_hex)
             && is_rejected(data_dir, hash_hex)?
         {
             hashes.push(hash_hex.to_owned());
@@ -125,7 +110,7 @@ pub(crate) fn cleanup_temporary(data_dir: &Utf8Path) -> anyhow::Result<()> {
         |stem| {
             stem.strip_prefix('.')
                 .and_then(|name| name.strip_suffix(".json"))
-                .is_some_and(|hash_hex| base64_hash(hash_hex).is_ok())
+                .is_some_and(pending::valid_hash_hex)
         },
         |path, _| private_file::remove_file(path),
     )

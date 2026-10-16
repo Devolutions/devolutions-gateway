@@ -4,8 +4,6 @@ use std::io::{ErrorKind, Read as _};
 
 use agent_identity_keys::{self as keys, IdentityKey, KeyBackend, KeyOptions};
 use anyhow::{Context as _, ensure};
-use base64::Engine as _;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -59,6 +57,14 @@ pub enum EnrollmentDiscardReason {
     TokenExhausted,
     TokenExpired,
     TokenMalformed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PendingDiscard {
+    MalformedToken,
+    Unusable,
+    #[cfg(windows)]
+    Undecryptable,
 }
 
 impl EnrollmentDiscardReason {
@@ -370,7 +376,7 @@ impl Store {
             || self
                 .list_identities()?
                 .iter()
-                .any(|identity| identity.token_sha256 == token.sha256_base64url())
+                .any(|identity| identity.token_sha256 == hash_hex)
         {
             self.discard_pending_state_locked(&hash_hex)?;
             return Ok(None);
@@ -389,7 +395,7 @@ impl Store {
             None => {
                 let record = pending::InProgress {
                     version: 1,
-                    token_sha256: token.sha256_base64url(),
+                    token_sha256: hash_hex.clone(),
                     key_name: keys::new_key_name(&self.key_prefix),
                 };
                 pending::write_in_progress(
@@ -410,7 +416,7 @@ impl Store {
     }
 
     /// Persists a permanent-outcome marker before deleting the token, key, and in-progress record.
-    /// For a token rejected by local parsing, hash its raw text with [`crate::token::sha256_hex`].
+    /// The caller supplies the hash of a token read from its matching pending file.
     pub fn discard_enrollment(&self, hash_hex: &str, reason: EnrollmentDiscardReason) -> anyhow::Result<()> {
         let _lock = state_lock::acquire(&self.data_dir, self.key_options.acl_grant_current_user)?;
         rejected::mark_rejected(
@@ -444,8 +450,8 @@ impl Store {
         Ok(())
     }
 
-    /// Rechecks a malformed payload under the lock before marking it and deleting its pending state.
-    pub fn discard_pending_file(&self, path: &Utf8Path) -> anyhow::Result<()> {
+    /// Rechecks an unusable pending file under the lock before removing it.
+    pub fn discard_pending_file(&self, path: &Utf8Path) -> anyhow::Result<Option<PendingDiscard>> {
         let _lock = state_lock::acquire(&self.data_dir, self.key_options.acl_grant_current_user)?;
         let directory = pending::directory(&self.data_dir);
         ensure!(
@@ -461,26 +467,36 @@ impl Store {
         let hash_hex = name
             .strip_suffix(extension)
             .context("pending path has wrong extension")?;
+        ensure!(
+            pending::file_path(&self.data_dir, hash_hex)? == path,
+            "pending path has wrong name"
+        );
         // The writer may have replaced the file since the caller classified it.
-        let malformed = match pending::read(path, self.key_options.acl_grant_current_user) {
-            Ok(pending::PendingRead::Malformed(malformed)) => malformed,
-            Ok(pending::PendingRead::Ready(_)) => return Ok(()),
-            Err(error) if is_not_found(&error) => return Ok(()),
+        let discard = match pending::read(path, self.key_options.acl_grant_current_user) {
+            Ok(pending::PendingRead::MalformedToken) => {
+                rejected::mark_rejected(
+                    &self.data_dir,
+                    hash_hex,
+                    EnrollmentDiscardReason::TokenMalformed.code(),
+                    self.key_options.acl_grant_current_user,
+                )?;
+                self.discard_pending_state_locked(hash_hex)?;
+                PendingDiscard::MalformedToken
+            }
+            Ok(pending::PendingRead::Unusable) => {
+                private_file::remove_pending_file(path, self.key_options.acl_grant_current_user)?;
+                PendingDiscard::Unusable
+            }
+            #[cfg(windows)]
+            Ok(pending::PendingRead::Undecryptable) => {
+                private_file::remove_pending_file(path, self.key_options.acl_grant_current_user)?;
+                PendingDiscard::Undecryptable
+            }
+            Ok(pending::PendingRead::Ready(_)) => return Ok(None),
+            Err(error) if is_not_found(&error) => return Ok(None),
             Err(error) => return Err(error),
         };
-        rejected::mark_rejected(
-            &self.data_dir,
-            malformed.rejection_hash_hex(),
-            EnrollmentDiscardReason::TokenMalformed.code(),
-            self.key_options.acl_grant_current_user,
-        )?;
-        if let Ok(expected) = pending::file_path(&self.data_dir, hash_hex)
-            && expected == path
-        {
-            self.discard_pending_state_locked(hash_hex)
-        } else {
-            private_file::remove_pending_file(path, self.key_options.acl_grant_current_user)
-        }
+        Ok(Some(discard))
     }
 
     /// Removes a completed enrollment's pending state only after its key belongs to the saved identity.
@@ -494,7 +510,7 @@ impl Store {
             .read_identity(authority_id)?
             .context("stored enrollment identity is missing")?;
         ensure!(
-            identity.token_sha256 == pending_hash_base64url(hash_hex)?,
+            identity.token_sha256 == hash_hex,
             "stored identity belongs to a different enrollment"
         );
         let record = pending::read_in_progress(&self.data_dir, hash_hex)?;
@@ -592,7 +608,7 @@ impl Store {
             let path = pending::file_path(&self.data_dir, &hash_hex)?;
             let pending_file_is_missing = match pending::read(&path, self.key_options.acl_grant_current_user) {
                 Ok(pending::PendingRead::Ready(_)) => false,
-                Ok(pending::PendingRead::Malformed(_)) => {
+                Ok(_) => {
                     recorded.insert(record.key_name);
                     continue;
                 }
@@ -636,9 +652,7 @@ impl Store {
             "invalid stored identity config"
         );
         ensure!(
-            URL_SAFE_NO_PAD
-                .decode(&identity.token_sha256)
-                .is_ok_and(|bytes| bytes.len() == 32),
+            pending::valid_hash_hex(&identity.token_sha256),
             "invalid stored identity token hash"
         );
         for key in identity.keys.records() {
@@ -707,22 +721,11 @@ fn config_revision(config: &Value) -> anyhow::Result<u64> {
         .context("config is missing its revision")
 }
 
-fn pending_hash_base64url(hex: &str) -> anyhow::Result<String> {
-    ensure!(
-        hex.len() == 64
-            && hex
-                .bytes()
-                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)),
-        "invalid pending enrollment hash"
-    );
-    Ok(URL_SAFE_NO_PAD.encode(hex::decode(hex)?))
-}
-
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use serde_json::json;
-    use sha2::{Digest as _, Sha256};
 
     use super::*;
 
@@ -789,7 +792,7 @@ mod tests {
             device_id: Uuid::new_v4(),
             base_url: token.base_url().clone(),
             config: json!({"version": 1, "revision": 7}),
-            token_sha256: token.sha256_base64url(),
+            token_sha256: token.sha256_hex(),
             rejected: None,
             keys: KeySlots {
                 current: KeyRecord {
@@ -815,7 +818,7 @@ mod tests {
             "device_id": "28a70de9-724e-4ffb-8e8d-09f56971765d",
             "base_url": "https://example.test/dvls",
             "config": {"version": 1, "revision": 7, "future": {"nested": [1, null, true]}},
-            "token_sha256": URL_SAFE_NO_PAD.encode([1u8; 32]),
+            "token_sha256": hex::encode([1u8; 32]),
             "rejected": null,
             "keys": {
                 "current": {
@@ -919,26 +922,26 @@ mod tests {
     }
 
     #[test]
-    fn malformed_pending_payload_creates_a_token_malformed_marker() -> anyhow::Result<()> {
+    fn malformed_token_marks_only_its_matching_hash() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());
         }
         let store = directory.store()?;
-        let token = test_token()?;
-        let hash_hex = token.sha256_hex();
-        let path = pending::write(&directory.0, &token, true)?;
-        let malformed = serde_json::to_vec(&json!({"version": 2, "token": token.as_str()}))?;
+        let raw = "not a token";
+        let hash_hex = crate::token::sha256_hex(raw);
+        let path = pending::file_path(&directory.0, &hash_hex)?;
+        let malformed = serde_json::to_vec(&json!({"version": 1, "token": raw}))?;
         #[cfg(windows)]
         let contents = crate::windows::protect(&malformed)?;
         #[cfg(not(windows))]
         let contents = malformed;
         private_file::write_atomic(&directory.0, &path, &contents, true)?;
-        let pending::PendingRead::Malformed(malformed) = pending::read(&path, true)? else {
-            anyhow::bail!("wrong pending version was accepted")
-        };
-        assert_eq!(malformed.rejection_hash_hex(), hash_hex);
-        store.discard_pending_file(&path)?;
+        assert!(matches!(
+            pending::read(&path, true)?,
+            pending::PendingRead::MalformedToken
+        ));
+        assert_eq!(store.discard_pending_file(&path)?, Some(PendingDiscard::MalformedToken));
         assert!(!path.exists());
         let marker_path = directory
             .0
@@ -947,43 +950,59 @@ mod tests {
             .join(format!("{hash_hex}.json"));
         let marker: Value = serde_json::from_slice(&fs::read(marker_path)?)?;
         assert_eq!(marker["code"], "token_malformed");
-        assert_eq!(marker["token_sha256"], token.sha256_base64url());
-        pending::write(&directory.0, &token, true)?;
-        assert!(store.begin_enrollment(&token)?.is_none());
-        assert!(!path.exists());
-
-        let other = Token::parse(&format!(
-            "dvaet1.{}.{}",
-            URL_SAFE_NO_PAD.encode(r#"{"u":"https://other.test"}"#),
-            "A".repeat(43)
-        ))?;
-        let other_path = pending::write(&directory.0, &other, true)?;
-        let raw = br#"{"version":1,"token":null}"#;
-        let raw_hash = hex::encode(Sha256::digest(raw));
-        #[cfg(windows)]
-        let contents = crate::windows::protect(raw)?;
-        #[cfg(not(windows))]
-        let contents = raw.to_vec();
-        private_file::write_atomic(&directory.0, &other_path, &contents, true)?;
-        let pending::PendingRead::Malformed(malformed) = pending::read(&other_path, true)? else {
-            anyhow::bail!("non-string pending token was accepted")
-        };
-        assert_eq!(malformed.rejection_hash_hex(), raw_hash);
-        store.discard_pending_file(&other_path)?;
-        assert!(!other_path.exists());
-        let marker_path = directory
-            .0
-            .join("identity")
-            .join("rejected")
-            .join(format!("{raw_hash}.json"));
-        let marker: Value = serde_json::from_slice(&fs::read(marker_path)?)?;
-        assert_eq!(marker["token_sha256"], URL_SAFE_NO_PAD.encode(Sha256::digest(raw)));
-        assert_eq!(marker["code"], "token_malformed");
+        assert_eq!(marker["token_sha256"], hash_hex);
         Ok(())
     }
 
     #[test]
-    fn malformed_read_cannot_discard_a_rewritten_valid_pending_token() -> anyhow::Result<()> {
+    fn unusable_pending_keeps_its_record_until_reconciliation() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let hash_hex = token.sha256_hex();
+        let path = pending::write(&directory.0, &token, true)?;
+        let (record, _key) = store.begin_enrollment(&token)?.context("begin enrollment")?;
+        let unusable = br#"{"version":1,"token":null}"#;
+        #[cfg(windows)]
+        let contents = crate::windows::protect(unusable)?;
+        #[cfg(not(windows))]
+        let contents = unusable.to_vec();
+        private_file::write_atomic(&directory.0, &path, &contents, true)?;
+        assert!(matches!(pending::read(&path, true)?, pending::PendingRead::Unusable));
+        assert_eq!(store.discard_pending_file(&path)?, Some(PendingDiscard::Unusable));
+        assert!(!path.exists());
+        assert!(rejected::list_rejected(&directory.0)?.is_empty());
+        assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_some());
+        assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
+        store.reconcile()?;
+        assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
+        assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+        #[cfg(windows)]
+        {
+            pending::write(&directory.0, &token, true)?;
+            let (record, _key) = store.begin_enrollment(&token)?.context("begin enrollment")?;
+            private_file::write_atomic(&directory.0, &path, b"not encrypted", true)?;
+            assert!(matches!(
+                pending::read(&path, true)?,
+                pending::PendingRead::Undecryptable
+            ));
+            assert_eq!(store.discard_pending_file(&path)?, Some(PendingDiscard::Undecryptable));
+            assert!(!path.exists());
+            assert!(rejected::list_rejected(&directory.0)?.is_empty());
+            assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_some());
+            assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
+            store.reconcile()?;
+            assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
+            assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn unusable_read_cannot_discard_a_rewritten_valid_pending_token() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());
@@ -1000,12 +1019,10 @@ mod tests {
         #[cfg(not(windows))]
         let contents = malformed_body;
         private_file::write_atomic(&directory.0, &path, &contents, true)?;
-        let pending::PendingRead::Malformed(_) = pending::read(&path, true)? else {
-            anyhow::bail!("wrong pending version was accepted")
-        };
+        assert!(matches!(pending::read(&path, true)?, pending::PendingRead::Unusable));
         pending::write(&directory.0, &token, true)?;
 
-        store.discard_pending_file(&path)?;
+        assert_eq!(store.discard_pending_file(&path)?, None);
         assert!(matches!(
             pending::read(&path, true)?,
             pending::PendingRead::Ready(found) if found.sha256_hex() == token.sha256_hex()
@@ -1024,7 +1041,7 @@ mod tests {
     }
 
     #[test]
-    fn wrong_filename_marks_the_token_not_the_payload() -> anyhow::Result<()> {
+    fn wrong_filename_is_deleted_without_a_marker() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());
@@ -1037,28 +1054,12 @@ mod tests {
         #[cfg(windows)]
         let contents = crate::windows::protect(&payload)?;
         #[cfg(not(windows))]
-        let contents = payload.clone();
+        let contents = payload;
         private_file::write_atomic(&directory.0, &path, &contents, true)?;
-        let pending::PendingRead::Malformed(malformed) = pending::read(&path, true)? else {
-            anyhow::bail!("wrong-filename pending token was accepted")
-        };
-        assert_eq!(malformed.rejection_hash_hex(), token.sha256_hex());
-        store.discard_pending_file(&path)?;
+        assert!(matches!(pending::read(&path, true)?, pending::PendingRead::Unusable));
+        assert_eq!(store.discard_pending_file(&path)?, Some(PendingDiscard::Unusable));
         assert!(!path.exists());
-        let marker = directory
-            .0
-            .join("identity")
-            .join("rejected")
-            .join(format!("{}.json", token.sha256_hex()));
-        assert!(marker.exists());
-        assert!(
-            !directory
-                .0
-                .join("identity")
-                .join("rejected")
-                .join(format!("{}.json", hex::encode(Sha256::digest(&payload))))
-                .exists()
-        );
+        assert!(rejected::list_rejected(&directory.0)?.is_empty());
         Ok(())
     }
 
@@ -1085,7 +1086,7 @@ mod tests {
             &marker_path,
             serde_json::to_vec(&json!({
                 "version": 1,
-                "token_sha256": token.sha256_base64url(),
+                "token_sha256": token.sha256_hex(),
                 "code": "device_revoked",
                 "at": "2026-09-24T12:00:00Z"
             }))?,
@@ -1109,7 +1110,7 @@ mod tests {
             &record_path,
             serde_json::to_vec(&pending::InProgress {
                 version: 1,
-                token_sha256: token.sha256_base64url(),
+                token_sha256: token.sha256_hex(),
                 key_name: fake_key_name.clone(),
             })?,
         )?;
@@ -1138,7 +1139,7 @@ mod tests {
             device_id: Uuid::new_v4(),
             base_url: token.base_url().clone(),
             config: json!({"version": 1, "revision": 1}),
-            token_sha256: token.sha256_base64url(),
+            token_sha256: token.sha256_hex(),
             rejected: None,
             keys: KeySlots {
                 current: KeyRecord {
@@ -1257,7 +1258,7 @@ mod tests {
                 .join(format!("{hash_hex}.json"));
             let marker: Value = serde_json::from_slice(&fs::read(marker_path)?)?;
             assert_eq!(marker["code"], expected_code);
-            assert_eq!(marker["token_sha256"], token.sha256_base64url());
+            assert_eq!(marker["token_sha256"], token.sha256_hex());
             pending::write(&directory.0, &token, true)?;
             assert!(store.begin_enrollment(&token)?.is_none());
             assert!(!path.exists());

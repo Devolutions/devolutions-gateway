@@ -1569,7 +1569,7 @@ mod tests {
         drop(file);
         assert!(matches!(
             crate::pending::read(&path, true)?,
-            crate::pending::PendingRead::Malformed(_)
+            crate::pending::PendingRead::Unusable
         ));
         fs::remove_file(path)?;
         fs::remove_dir_all(data_dir)?;

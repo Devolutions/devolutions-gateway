@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fmt;
 use std::io::Cursor;
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use agent_identity_httpsig::{RequestSigner, Tag};
@@ -8,6 +10,7 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use camino::Utf8Path;
 use der::{Decode as _, Encode as _};
+use http_client_proxy::ProxyConfig;
 use p256::ecdsa::VerifyingKey;
 use p256::pkcs8::EncodePublicKey as _;
 use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
@@ -133,7 +136,9 @@ impl fmt::Display for ClientError {
 impl std::error::Error for ClientError {}
 
 pub struct Client {
-    http: reqwest::Client,
+    proxy: ProxyConfig,
+    extra_trusted_roots: Vec<reqwest::Certificate>,
+    http: Mutex<HashMap<Url, reqwest::Client>>,
 }
 
 #[derive(Deserialize)]
@@ -177,23 +182,52 @@ struct ErrorResponse {
 }
 
 impl Client {
-    pub fn new(extra_trusted_root: Option<&Utf8Path>) -> anyhow::Result<Self> {
+    pub fn new(proxy: ProxyConfig, extra_trusted_root: Option<&Utf8Path>) -> anyhow::Result<Self> {
+        let extra_trusted_roots = if let Some(path) = extra_trusted_root {
+            let pem = std::fs::read(path)?;
+            let roots: Vec<_> = rustls_pemfile::certs(&mut Cursor::new(&pem)).collect::<std::io::Result<_>>()?;
+            anyhow::ensure!(!roots.is_empty(), "extra trusted root contains no certificates");
+            roots
+                .iter()
+                .map(|root| reqwest::Certificate::from_der(root.as_ref()))
+                .collect::<reqwest::Result<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        Ok(Self {
+            proxy,
+            extra_trusted_roots,
+            http: Mutex::new(HashMap::new()),
+        })
+    }
+
+    fn http_for(&self, url: &Url) -> ClientResult<reqwest::Client> {
+        // UNTESTED: Each identity request must use the proxy selected for its own URL, including bypasses.
+        // Reqwest otherwise applies environment proxies to bypassed targets.
+        // A client cached for another URL keeps the proxy selected for that URL.
+        // Check per-authority routing, Manual Exclude and System NO_PROXY when changing this cache or builder.
+        let mut clients = self
+            .http
+            .lock()
+            .map_err(|_| ClientError::local("identity HTTP client cache unavailable"))?;
+        if let Some(client) = clients.get(url) {
+            return Ok(client.clone());
+        }
         let mut builder = reqwest::Client::builder()
             .use_rustls_tls()
             // Disable the bundled WebPKI roots, then restore only the OS roots.
             .tls_built_in_root_certs(false)
             .tls_built_in_native_certs(true)
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(Duration::from_secs(30));
-        if let Some(path) = extra_trusted_root {
-            let pem = std::fs::read(path)?;
-            let roots: Vec<_> = rustls_pemfile::certs(&mut Cursor::new(&pem)).collect::<std::io::Result<_>>()?;
-            anyhow::ensure!(!roots.is_empty(), "extra trusted root contains no certificates");
-            for root in roots {
-                builder = builder.add_root_certificate(reqwest::Certificate::from_der(root.as_ref())?);
-            }
+            .timeout(Duration::from_secs(30))
+            .no_proxy();
+        for root in &self.extra_trusted_roots {
+            builder = builder.add_root_certificate(root.clone());
         }
-        Ok(Self { http: builder.build()? })
+        let client = http_client_proxy::build_client_with_proxy(builder, url, &self.proxy)
+            .map_err(|_| ClientError::local("configure identity HTTP client"))?;
+        clients.insert(url.clone(), client.clone());
+        Ok(client)
     }
 
     pub async fn enroll(
@@ -207,7 +241,7 @@ impl Client {
         let body = serde_json::to_vec(&CsrRequest { csr: csr_der, metadata })
             .map_err(|_| ClientError::local("encode enroll request"))?;
         let request = self
-            .http
+            .http_for(&url)?
             .post(url)
             .bearer_auth(token.as_str())
             .header(CONTENT_TYPE, "application/json")
@@ -333,7 +367,7 @@ impl Client {
             )
             .map_err(|_| ClientError::local("sign identity request"))?;
         let mut request = self
-            .http
+            .http_for(url)?
             .post(url.clone())
             .header(CONTENT_TYPE, "application/json")
             .header("signature-input", headers.signature_input)
@@ -466,7 +500,7 @@ fn server_code_reason(code: String) -> TransientReason {
 fn parse_retry_after(value: &str, now: SystemTime) -> Option<Duration> {
     let value = value.trim();
     if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
-        value.parse().ok().map(Duration::from_secs)
+        Some(Duration::from_secs(value.parse().unwrap_or(u64::MAX)))
     } else {
         httpdate::parse_http_date(value)
             .ok()
@@ -715,6 +749,10 @@ mod tests {
     fn parses_retry_after_seconds_and_http_date() {
         let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
         assert_eq!(parse_retry_after(" 15 ", now), Some(Duration::from_secs(15)));
+        assert_eq!(
+            parse_retry_after("18446744073709551616", now),
+            Some(Duration::from_secs(u64::MAX))
+        );
         assert_eq!(
             parse_retry_after(&httpdate::fmt_http_date(now + Duration::from_secs(10)), now),
             Some(Duration::from_secs(10))

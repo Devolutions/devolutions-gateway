@@ -109,6 +109,7 @@ dependencies = [
  "der 0.8.1",
  "hex",
  "hostname 0.4.2",
+ "http-client-proxy",
  "httpdate",
  "libc",
  "p256 0.14.0-rc.14",

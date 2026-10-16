@@ -66,18 +66,9 @@ impl Token {
         &self.base_url
     }
 
-    pub fn sha256_base64url(&self) -> String {
-        sha256_base64url(&self.value)
-    }
-
     pub fn sha256_hex(&self) -> String {
         sha256_hex(&self.value)
     }
-}
-
-/// Hashes the full UTF-8 token text, including when parsing rejects its format.
-pub fn sha256_base64url(value: &str) -> String {
-    URL_SAFE_NO_PAD.encode(Sha256::digest(value.as_bytes()))
 }
 
 /// Hashes the full UTF-8 token text, including when parsing rejects its format.
@@ -122,10 +113,6 @@ mod tests {
         let raw = token_with_bag(r#"{"u":"https://example.test/dvls","extra":true}"#);
         let token = Token::parse(&raw)?;
         assert_eq!(token.base_url().as_str(), "https://example.test/dvls");
-        assert_eq!(
-            token.sha256_base64url(),
-            URL_SAFE_NO_PAD.encode(Sha256::digest(raw.as_bytes()))
-        );
         assert_eq!(token.sha256_hex(), hex::encode(Sha256::digest(raw.as_bytes())));
         assert_eq!(sha256_hex(&raw), token.sha256_hex());
         assert_eq!(token.sha256_hex().len(), 64);
