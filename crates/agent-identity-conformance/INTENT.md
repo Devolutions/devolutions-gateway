@@ -1,12 +1,12 @@
-# Agent Identity conformance tester
-
 This is the independent conformance suite for Agent Identity.
 Its expectations derive only from these sources, never from the implementation under test:
 
 - [CONTRACT.md](../../docs/agent-identity/CONTRACT.md) and its test vectors;
 - `agent-channel-proto`;
-- the DVLS admin API;
-- the agent's documented CLI, configuration and files.
+- the DVLS management interface, as `agent-identity-mock` replicates it;
+- the agent's CLI, configuration and files, as `devolutions-agent/src/identity.intent.md` and `crates/agent-identity/INTENT.md` define them.
+
+The mock implements the contract's agent-facing operations and channel independently of the agent.
 
 ## Shape
 
@@ -14,17 +14,18 @@ Its expectations derive only from these sources, never from the implementation u
 - Parameters: base URL, admin credentials, agent binary path, target (mock or DVLS).
 - Black box on both sides:
   - it drives the real agent binary through a generated configuration, pending-enrollment files, and the `identity enroll` command;
-  - it drives the authority through its admin API.
+  - it drives the authority through its management interface, and the mock also through its control surface.
 - It depends on no agent implementation crate.
 - What it observes, in order of preference:
-  1. the admin API;
+  1. the management interface;
   2. the agent's files;
   3. logs, as a last resort.
 - Tests that need mock fault injection are skipped when the target is DVLS.
-  A run that skips a test for a missing fixture fails as incomplete, so a partial run never reports success.
+  A run that skips a test for a missing fixture or privilege fails as incomplete unless `--allow-incomplete` is passed, so a partial run never reports success by default.
+  N/A is reserved for a test that does not apply to the platform.
 - The `testsuite` crate builds the mock and the tester, runs the mock, runs the tester against it, and requires every test to pass.
   No dependency is added to `testsuite` for this.
-- The suite must pass on Linux with the file key backend, and on Windows with the Windows key-store backend, against debug and release agent builds.
+- The suite must pass on Linux with the file key backend, and on Windows with the Windows key-store backend.
 
 ## Coverage
 
@@ -38,7 +39,7 @@ Its expectations derive only from these sources, never from the implementation u
   - consumed and deleted on success and on permanent errors, kept on transient ones;
   - a lost response is recovered across an agent restart;
   - the token never appears in logs;
-  - the same token again does nothing, even for a rejected identity;
+  - the same token again does nothing, even for a rejected identity or after a permanent enrollment outcome;
   - a different token creates a new device and replaces the local identity;
   - files for different tokens don't block each other.
 - **Impersonation:** device A cannot authenticate as device B, whether with a leaked token, with its own certificate, with any other certificate issued by the root, or by naming B in its requests.
@@ -75,9 +76,9 @@ Its expectations derive only from these sources, never from the implementation u
   - the rotation completes at the deadline, or as soon as no active device remains on the old root;
   - old-root certificates remain renewable afterwards;
   - emergency deadline.
-- **Admin API:**
+- **Management interface:**
   - pagination stays stable during concurrent enrollment;
   - views, filters and bounds;
-  - every route requires the admin permission.
+  - every route requires the management permission.
 - **Keys:** non-exportable, restricted, and matching the certificate on Windows; owner-only files elsewhere; no key is left orphaned.
 - **Multiple authorities:** identities for two authorities coexist, including across agent restarts.

@@ -1,5 +1,3 @@
-# Device key custody
-
 This crate holds device private keys.
 Keys belong to the device's Agent Identity.
 Features that authenticate as the device, such as Agent Tunnel after its migration, use these keys instead of their own.
@@ -21,12 +19,12 @@ A key exposes:
 - `signature::Signer<p256::ecdsa::DerSignature>`, used for CSRs;
 - its public key.
 
-Callers never handle signature encodings themselves.
+Callers never handle signature encodings themselves, and sign only through `try_sign`: a key-store failure must surface as an error, never as a panic.
 
 ## Backends
 
 - **Windows key store** (default on Windows):
-  - Microsoft Software Key Storage Provider, machine key, non-exportable, accessible only to SYSTEM.
+  - Microsoft Software Key Storage Provider, machine key, non-exportable, accessible only to SYSTEM, plus the agent process's user when the test-only `__debug__.identity.acl_grant_current_user` is set.
   - It hashes with SHA-256 and signs the digest with NCrypt, which yields r‖s.
   - It converts to DER with RustCrypto when the DER form is requested.
 - **File**: PKCS#8 with owner-only permissions.
