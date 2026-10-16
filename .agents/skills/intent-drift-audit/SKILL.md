@@ -17,15 +17,16 @@ Where a statement says "see `CONTRACT.md` §N", the contract section is the stat
 
 ## Verify
 
-Split each file into normative statements, one per bullet or sentence, skipping purpose prose, and give each a stable ID (`xtask/INTENT.md#dependencies`, `CONTRACT.md#6.3-errors`).
+Split each file into normative statements, one per bullet or sentence, skipping purpose prose; a sentence about an external producer or environment is context for the statements that depend on it, not a statement.
+Give each an ID of section plus ordinal (`xtask/INTENT.md#dependencies-1`, `CONTRACT.md#6.3-2`) so a later audit can diff against this one.
 A statement marked as deferred or prospective ("for now", "later", `NOTE:`) is a target, not a requirement; the implementation is expected not to realise it yet, and realising it anyway is worth a note.
-For each: cite `path:line`; decide **conforms**, **violates**, **partial** (some paths or configurations), **not yet realised** (a deferred target the code does not implement, which is the expected state), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
+For each: cite `path:line`; decide **conforms**, **violates**, **partial** (honoured on some paths, configurations, or the primary path and bypassed on another), **not yet realised** (a deferred target the code does not implement, which is the expected state), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
 Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement.
 Note `INVARIANT:` and `UNTESTED:` comments that relate; they are the code's own claims.
 "Probably fine" is cannot verify.
-Check every feature set and build the statement spans.
+When a statement's span is feature-gated or build-specific, check each variant.
 
-Also report **intent rot** (names, paths, sections the intent cites that no longer exist) and **not covered** (design-level changes in the diff that no statement speaks to: new public surface, dependency, fallback, configuration).
+Also report **intent rot** (names, paths, sections the intent cites that no longer exist, and plan tense for behaviour that now exists) and **not covered** (behaviour no statement decides: in a diff, new public surface, dependency, fallback, or configuration; in a module audit, any path that looks like a design choice or a latent defect).
 
 ## Report
 
@@ -36,16 +37,19 @@ Audited against: `<file>` (<n> statements), ...
 
 | ID | Statement (abridged) | Status | Evidence | Note |
 |---|---|---|---|---|
-| xtask/INTENT.md#dependencies | Only lexopt, anyhow, xshell, tinyjson | Violates (introduced) | `xtask/Cargo.toml:14` | adds `serde_json` |
+| xtask/INTENT.md#dependencies-1 | Only lexopt, anyhow, xshell, tinyjson | Violates (introduced) | `xtask/Cargo.toml:14` | adds `serde_json` |
 
 ### Violations
-<Per violation: what intent requires, what the code does, smallest conforming change as a proposal.>
+### Partials
+<Per entry: what intent requires, what the code does, smallest conforming change as a proposal.>
 
+### Cannot verify
+### Not yet realised
 ### Intent rot
 ### Not covered by intent
 ```
 
-Lead with violations and partials, then cannot verify, then not yet realised, then conforms.
+Lead the table with violations and partials, then cannot verify, then not yet realised, then conforms; drop empty sections.
 A clean audit is two lines plus the table.
 When the human wants the mapping kept, the table becomes an `EVIDENCE.md` beside the intent, one row per claim with the directive, intent line, and code paths that realise it and `[unsure]` on inferred rows.
 
