@@ -1,23 +1,23 @@
 ---
 name: intent-drift-audit
-description: Audit code, a diff, or a PR against the applicable INTENT.md and *.intent.md files and report conforms, violates, partial, or cannot-verify per statement with file:line evidence, ready for a PR comment. Use for intent conformance checks, automated review, or before modifying governed code.
+description: Audit code, a diff, or a PR against the applicable INTENT.md, *.intent.md, or CONTRACT.md and report conforms, violates, partial, or cannot-verify per statement with file:line evidence, ready for a PR comment. Use for intent or contract conformance checks, automated review, or before modifying governed code.
 ---
 
 # Intent drift audit
 
-Intent holds even when tests pass, so this audit reads code against each statement with evidence instead of trusting the suite.
-It reports; it never edits intent and never silently fixes code during a review.
+Intent and contracts hold even when tests pass, so this audit reads code against each statement with evidence instead of trusting the suite.
+It reports; it never edits intent or contract and never silently fixes code during a review.
 
 ## Scope
 
 Paths under audit: the diff, the named crate or module, or the subtree.
 State which revision you audited; if the checkout may be behind, fetch intent and code from the remote default branch or the PR head.
-Applicable intent is cumulative: every `INTENT.md` from the root down to each audited directory, every `*.intent.md` beside an audited file, and every shared `docs/<feature>/INTENT.md` they link to.
-Where a statement says "see `CONTRACT.md` §N", the contract section is the statement.
+Applicable intent is cumulative: every `INTENT.md` from the root down to each audited directory, every `*.intent.md` beside an audited file, and every shared intent those files say applies to them.
+Where a statement says "see `CONTRACT.md` §N", the contract section is the statement; when the user names a contract, audit an implementation against it directly, treating each operation's valid domain, must-support set, error mapping, and precedence as separate statements and the conformance suite's coverage of each as part of the evidence.
 
 ## Verify
 
-Split each file into normative statements, one per bullet or sentence, skipping purpose prose, and give each a stable ID (`streaming.intent.md#A3`).
+Split each file into normative statements, one per bullet or sentence, skipping purpose prose, and give each a stable ID (`xtask/INTENT.md#dependencies`, `CONTRACT.md#6.3-errors`).
 For each: cite `path:line`; decide **conforms**, **violates**, **partial** (some paths or configurations), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
 Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement.
 Note `INVARIANT:` and `UNTESTED:` comments that relate; they are the code's own claims.

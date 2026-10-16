@@ -29,7 +29,7 @@ A contract is the normative text: a backend author implements from it alone, and
 - Implementation-defined cases are listed with their exact allowed outcome set, never with examples, and are excluded from differential tests.
 - For every stored field: who initialises it, which operations update it, and which must not.
 - Every list exists once; a second copy of the error list drifted and lost a code.
-- The contract is the single source for the API: once the crate exists it carries no code, every public item cites its section, and a check enforces it.
+- The contract is the single source for the API it specifies; when it covers a code API, public items cite their section and a check keeps them in step.
 - When the contract needs a rule the intent lacks, the human amends `INTENT.md` first.
 - An example is not a rule: state what is free (order, case, whitespace) and add vectors that vary it, or a conforming library will reproduce none of them.
 - Put the exception where the rule is: "terminal, except during pending-key recovery".
@@ -44,4 +44,5 @@ Each rule maps to a conformance case, worded as an observable with a bound: "enc
 Shared vectors cover positive and negative cases, are deterministic, and an independent script recomputes them.
 The conformance section ties every claim to how it is tested, lists known gaps, and marks what is verified by review only.
 
-`references/shape.md` lists the moves two shipped contracts converged on; read it when structuring a new one.
+Shape is free: order sections so a reader finds all of an operation's rules in one place, and prescribe nothing else.
+`references/patterns.md` lists what review kept and what it fixed in two agent-written contracts; read it when revising one or checking a draft.
