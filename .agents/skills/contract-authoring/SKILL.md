@@ -35,7 +35,7 @@ A contract is the normative text: a backend author implements from it alone, and
 - Put the exception where the rule is: "terminal, except during pending-key recovery".
 - Strict where it matters, extensible elsewhere: optional fields older receivers ignore, but authentication data stays strict.
 - A derivable operation stays out unless a written exception (performance, validated-module boundary, a security property) sits next to it.
-- Leave out one library's behaviour and numbers, admin and UI surfaces, implementer choices, and process.
+- Leave out one library's behaviour and numbers, admin and UI surfaces, mock and test-harness control surfaces (those are the testsuite's intent), implementer choices, and process.
 - A rationale must be as true as its rule; measure before citing a cause.
 
 ## Testability

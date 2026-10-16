@@ -18,7 +18,7 @@ Where a statement says "see `CONTRACT.md` §N", the contract section is the stat
 ## Verify
 
 Split each file into normative statements, one per bullet or sentence, skipping purpose prose, and give each a stable ID (`xtask/INTENT.md#dependencies`, `CONTRACT.md#6.3-errors`).
-For each: cite `path:line`; decide **conforms**, **violates**, **partial** (some paths or configurations), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
+For each: cite `path:line`; decide **conforms**, **violates**, **partial** (some paths or configurations), **not yet realised** (the intent marks it as a target or deferral), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
 Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement.
 Note `INVARIANT:` and `UNTESTED:` comments that relate; they are the code's own claims.
 "Probably fine" is cannot verify.
@@ -44,7 +44,7 @@ Audited against: `<file>` (<n> statements), ...
 ### Not covered by intent
 ```
 
-Lead with violations and partials, then cannot verify, then conforms.
+Lead with violations and partials, then cannot verify, then not yet realised, then conforms.
 A clean audit is two lines plus the table.
 When the human wants the mapping kept, the table becomes an `EVIDENCE.md` beside the intent, one row per claim with the directive, intent line, and code paths that realise it and `[unsure]` on inferred rows.
 

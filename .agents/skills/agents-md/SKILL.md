@@ -13,14 +13,16 @@ What helped agents was locating the right place to change, not writing better pa
 
 A line earns its place when both hold:
 
-> Would it cost a CI round-trip or a production incident to discover?
+> Would it cost more than one cheap feedback round to discover and fix?
 > Does no skill or always-read file already state it?
 
+A lint or formatting miss costs one run of CI or of the repository's check command and is not worth a line; a testsuite written against the library instead of the CLI is a pile to redo, and is.
 Put positively: there is no way the agent learns this unless we write it.
 
 ## What belongs, in order of value
 
 - A pointer to a non-standard layout: "Integration tests are centralized in `testsuite`; see `testsuite/AGENTS.md`."
+- The default feedback loop when it is not the ecosystem's default: "`cargo xtask check-uncommitted` verifies local modifications."
 - A gotcha with its consequence: "Format with nightly rustfmt; stable `cargo fmt` produces different output and fails CI."
 - A policy with its reason: "Use `#[expect(lint, reason = "...")]` so the suppression explains itself and expires when it stops being needed."
 - Repository rules no tool enforces: intent-file handling, writing conventions for committed text, comment markers such as `INVARIANT:` and `UNTESTED:`.
