@@ -6,7 +6,7 @@ description: Review INTENT.md and *.intent.md files or drafts for contradictions
 # Intent review
 
 An intent file holds design commitments that rule out deliberately rejected changes; agents read it literally before every change in its directory.
-Output is findings and proposals; the human applies them.
+Review as a skeptical peer: findings and proposals, never a rewrite into a design document, and never new intent on the human's behalf.
 
 ## Gather
 
@@ -18,17 +18,21 @@ When a sentence feels wrong and you cannot name why, `intent-files/references/pi
 ## Lenses
 
 Apply each to every normative sentence; quote the sentence in the finding.
+Four probes decide most of them: is this authoritative or only explanatory; would changing it require a design decision; would it still matter after a rewrite; what undesirable implementation could still satisfy it.
 
 - **Contradiction**: two statements that cannot both hold, including a specific file quietly narrowing a broader one.
-- **Not a commitment**: rules out no plausible change, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this crate?"
+- **Not a commitment**: rules out no plausible change, would not survive a rewrite, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this crate?"
+- **Still satisfiable badly**: a commitment an undesirable implementation meets as written; propose the wording that excludes it.
 - **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
 - **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; propose the normative form or the explicit permission.
   A deferral the code has not realised is correct as written, not a finding.
 - **Unscoped absolute**: `never`, `always`, `only`, `every`; which boundary, and does a sibling, feature flag, backend, or build falsify it?
+- **Overstated**: `must`, "if and only if", "exactly these", an exhaustive list, with nothing showing the strength is intended; ask before proposing the weaker form.
 - **Unverified universal**: "every library does X" with no cited check.
 - **Code disagrees**: the code does not do what the sentence says; report it as a divergence for the human, not as a defect in either.
 - **Enforced but unwritten**: a wire format, state machine, or dependency direction the code enforces that no document states; propose where it belongs.
-- **Incidental detail**: a helper name, layout, or one library's behaviour or number stated as a rule with nothing showing a human chose to pin it; a deliberately pinned implementation detail with its reason is a commitment, so when the reason is missing ask rather than flag.
+- **Incidental detail**: a helper name, layout, or one library's behaviour or number stated as a rule with nothing showing a human chose to pin it; a deliberately pinned detail with its reason is a commitment, so ask rather than flag, and an author's insistence that it is intentional settles it.
+- **History for rationale**: "previously Gateway was stateless, which caused problems with deletion" where the intent is "deleting an agent survives Gateway restarts"; propose the property.
 - **Missing reason**: a rule a contributor could plausibly "fix" because no alternative is named as excluded.
 - **Not checkable**: "handles", "supports", "properly"; propose an observable with a bound.
 - **Padding**: scope prose that placement already supplies, boundary notes repeated, headings for a handful of bullets, inventories whose owner is elsewhere.
@@ -48,5 +52,5 @@ Order by consequence: contradictions and false absolutes, then not-a-commitment 
 **Proposed:** <reworded sentence>, or move to `<artifact>`, or delete.
 ```
 
-Close with what is strong as written, the questions only the human can settle (two plausible readings the code does not decide, which of two files is right), and a one-line verdict: adopt, adopt after corrections, or rework.
+Close with what is strong as written, the questions only the human can settle (two plausible readings the code does not decide, which of two files is right, what they want preserved where a proposal would change the design), and a one-line verdict: adopt, adopt after corrections, or rework.
 A clean file gets a short report.
