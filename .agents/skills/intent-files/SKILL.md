@@ -33,7 +33,6 @@ Default to no file: create one only when at least one commitment passes.
 Applicable files are those in the directory and its ancestors, cumulative, and a specific file never overrides a broader one; nothing follows a link.
 A design shared by several components is a part file, `INTENT.<feature>.md` or `<module>.intent.<feature>.md`, present in each governed directory; a symlink to one source keeps the parts identical, and where a symlink is not possible the copies are one text and a difference between them is a defect.
 A part is read from several directories, so it names repository paths as code (`docs/agent-identity/CONTRACT.md`) rather than relative links.
-Intent for a component that lives in another repository is drafted here as `INTENT.<component>.md` with a first line saying it is not merged and moves with the component; it leaves the branch before merge.
 Never one per source file, never mechanically.
 
 ## Shape
