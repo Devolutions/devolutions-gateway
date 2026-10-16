@@ -1,6 +1,6 @@
 # Agent RFC 9421 signing
 
-This crate implements, on the agent side, the RFC 9421 profile defined in [contract.intent.md](../../docs/agent-identity/contract.intent.md).
+This crate implements, on the agent side, the [normative RFC 9421 profile](../../docs/agent-identity/CONTRACT.md#agent-identity-signatures).
 
 ## Implementation decisions
 

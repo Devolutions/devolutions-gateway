@@ -54,7 +54,7 @@ Unless stated otherwise, implementations must follow these conventions.
   A deleted token authenticates only for an idempotent replay of a device that it created; every other use returns `token_invalid`.
 - The server evaluates enrollment in this order: (1) authenticate the token by finding its row and matching `SHA-256(secret)`, otherwise return `token_invalid`; (2) validate the body, CSR and metadata, otherwise return `invalid_request`; (3) look up the CSR public key for idempotence; (4) return `token_invalid` if the token is deleted, then `token_expired` if it is expired; (5) return `token_exhausted` if its uses are exhausted; (6) create the device.
   The idempotence lookup precedes deletion, expiry and exhaustion checks so a lost response can always be retried with the same token.
-- The server matches the CSR public key against every certificate it has issued:
+- The server matches the CSR public key against every certificate it has issued using the first matching rule below:
   - The key of the current certificate of a non-revoked device enrolled with the same token → `200` with that device and its current chain, without consuming a use or changing metadata or `last_seen_at`.
     A CSR proves past possession of the key, not present possession.
   - The key of a device enrolled with a different token → `invalid_request`.
@@ -80,6 +80,9 @@ Unless stated otherwise, implementations must follow these conventions.
 - Unknown keys within these limits are stored as-is and never used for authorization.
 - The server replaces stored metadata after each successful new enrollment, renewal, check-in or authenticated `Hello`.
   An idempotent enrollment replay does not update metadata.
+- `last_seen_at` is the server time of the most recent accepted agent action that establishes or proves possession of the device key.
+  Device creation initializes it; accepted renew, confirm and check-in requests, authenticated `Hello` messages and later agent messages on an authenticated stream update it.
+  An idempotent enrollment replay and stream closure do not update it.
 - Friendly name: evaluated once at enrollment from the token's format.
   Placeholders are `{<known metadata key>}` and `{token_name}`, where `token_name` is the enrollment token's name.
   `{{` and `}}` escape braces; an unpaired brace or unknown placeholder is rejected at token creation.
@@ -155,6 +158,7 @@ Request:
 
 - `authority_id` is stable for a server instance (DVLS: generated once, stored in settings).
 - The server generates `device_id` when it creates the device, and the ID remains stable for that device.
+- Creating the device initializes `last_seen_at` to the current server time; an idempotent enrollment replay leaves it unchanged.
 - The friendly name is evaluated and stored at enrollment (§3) and exposed only through the admin API (§9).
   It is not returned to the agent because (1) that’s not particularly useful, and (2) an administrator can rename the device later, possibly rendering the information stale.
 - `config` is versioned, and `version` identifies its schema; the agent ignores unknown fields.
@@ -199,7 +203,7 @@ This body is present on every non-2xx response under `{u}/api/agent-identity/v1/
 | `token_exhausted`     | 403  | `used_count = max_uses`                                                      | permanent                                         |
 | `token_expired`       | 401  | `now ≥ expires_at`                                                           | permanent                                         |
 | `device_revoked`      | 403  | Device revoked                                                               | terminal                                          |
-| `device_unknown`      | 401  | Certificate not registered, or device deleted                                | terminal                                          |
+| `device_unknown`      | 401  | Certificate not registered, or device deleted                                | terminal except during pending-key recovery       |
 | `certificate_expired` | 401  | Expired (for `connect`, `confirm`, `check-in`) or beyond grace (for `renew`) | see below                                         |
 | `signature_invalid`   | 401  | Bad signature, wrong `tag`, bad digest, replayed nonce, malformed params     | transient                                         |
 | `clock_skew`          | 401  | `created`/`expires` outside tolerance                                        | transient, adjust clock                           |
@@ -207,7 +211,9 @@ This body is present on every non-2xx response under `{u}/api/agent-identity/v1/
 
 `token_*` codes on a pending enrollment are permanent (the pending file is deleted).
 
-`device_revoked` and `device_unknown` record `rejected` on the stored identity (§10.3); the agent stops renewing and reconnecting for that authority.
+`device_revoked` records `rejected` on the stored identity (§10.3), and the agent stops renewing and reconnecting for that authority.
+A `device_unknown` response to the pending-key renewal used by §8.1 recovery does not record `rejected`; the agent first retries the same renewal with the old current key.
+Any other `device_unknown`, including one returned by that retry, records `rejected` and stops the identity.
 
 `certificate_expired`:
 
@@ -228,6 +234,7 @@ Servers accept request bodies up to 64 KiB on these endpoints; a larger body →
   - sends `Reconnect{reason:"certificate_rotated"}` on streams opened with the retired certificate;
   - closes those still open 60 s later with `OK`.
 - Already current → no-op (idempotent retry after a lost response).
+- Every successful confirm, including an already-current retry, sets `last_seen_at` to the current server time.
 - `204` in both cases.
 - `confirm` is the only operation that promotes a certificate; renew and channel connect never do.
 
@@ -390,6 +397,7 @@ message Reconnect {
    - `agent_channel_url` added (only reachable through §5.6 check-in): it connects.
 
 - No server push, metadata update or `connected` state happens before step 4 succeeds.
+- Every later `AgentMessage` received on the authenticated stream sets `last_seen_at` to the current server time.
 - Rationale: the header signature isn't bound to the stream; the fresh challenge makes captured opening headers (TLS-terminating proxies, TLS inspection, header logs) useless for opening a stream.
 - An active intermediary in the path is out of scope because it can read the plaintext, and V1 does not provide TLS channel binding.
 - Envelope `id` values are UUIDs.
@@ -402,6 +410,7 @@ message Reconnect {
 - Revocation: the server closes live streams with `PERMISSION_DENIED` + `error-code: device_revoked`.
 - A stream closes no later than its certificate's `notAfter` (`UNAUTHENTICATED` + `certificate_expired`).
 - When `confirm` promotes a pending certificate (§5.5), the previous `current` certificate is retired; its streams get `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open.
+- Closing a stream does not update `last_seen_at` because closure does not prove that the agent was present when the close was observed.
 - The agent sends an HTTP/2 keepalive every 30 s and reconnects with jittered exponential backoff from 1 s to 5 min.
   It stops reconnecting on `device_revoked` or `device_unknown`.
 
@@ -433,7 +442,7 @@ message Reconnect {
   - On `device_unknown`, the server holds neither certificate, so the agent retries the same renewal signed with the old current key while that certificate remains within grace.
 - If a pending key is unusable locally, the agent deletes the key and its slot, then renews with a fresh key signed by the current certificate while it is valid or within renewal grace.
   Issuing the new pending certificate retires the previous pending certificate as specified in §5.3.
-- `device_revoked` and `device_unknown` are terminal (§5.4).
+- Otherwise, `device_revoked` and `device_unknown` are terminal (§5.4).
 
 ### 8.2 Server certificate state
 
@@ -548,7 +557,8 @@ The installer never writes this section, and the agent logs a warning at start-u
 
 ### 10.2 Pending-enrollment files
 
-- One file per token, named by the SHA-256 of the full token's UTF-8 bytes in lowercase hexadecimal (`<hex>`):
+- `<hex>` is the SHA-256 of the full token's UTF-8 bytes encoded as lowercase hexadecimal and is used everywhere the agent stores the token hash.
+- One file per token, named `<hex>`:
   - Linux/macOS: `<data-dir>/identity/pending/<hex>.json`, mode `0600`, owned by the account that runs the agent service, with content `{ "version": 1, "token": "<token>" }`.
     The agent does not enforce file ownership.
   - Windows: `<data-dir>\identity\pending\<hex>.dat`, protected DACL granting SYSTEM full control only unless `acl_grant_current_user` is enabled, content = DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)` of the same JSON.
@@ -557,9 +567,9 @@ The installer never writes this section, and the agent logs a warning at start-u
 - The service reads the directory at start-up and polls it (default every 5 s).
 - Each pending file is independent: its own enrollment key, in-progress record and retry backoff.
   Requests are sent one at a time, and a pending file in transient backoff doesn't block the others.
-- The agent retries enrollment, deletes the pending state on success, a permanent token error or a locally malformed token, and keeps it after any other failure.
+- The agent retries enrollment, deletes the pending state on success, a permanent token error, `device_revoked` or a locally malformed token, and keeps it after any other failure.
 - Enrollment key:
-  - When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "...", "key_name": "..." }` in `<data-dir>/identity/pending/<hex>.in-progress.json` (written like `identity.json`; no secret).
+  - When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "<hex>", "key_name": "..." }` in `<data-dir>/identity/pending/<hex>.in-progress.json` (written like `identity.json`; no secret).
   - Every retry of that pending file, including after a restart, uses that key, so a lost response is recovered through enroll idempotence (§2).
   - Nothing is discarded before enrollment completes; the authority is only known from the enroll response.
   - On success, the key becomes the new identity's `current` key; the in-progress record is deleted with the pending file.
@@ -586,7 +596,7 @@ The installer never writes this section, and the agent logs a warning at start-u
     "revision": 1,
     "agent_channel_url": "https://host/dvls"
   },
-  "token_sha256": "<base64url SHA-256 of the full token's UTF-8 bytes>",
+  "token_sha256": "<hex>",
   "rejected": { "code": "device_revoked", "at": "2026-09-24T12:00:00Z" },
   "keys": {
     "current": { "key_name": "...", "certificate_chain": ["..."] },
@@ -596,9 +606,11 @@ The installer never writes this section, and the agent logs a warning at start-u
 }
 ```
 
-- `rejected` is absent until the server rejects the identity permanently: `device_revoked` or `device_unknown` on any signed request, channel open or live stream, or `certificate_expired` on a renewal beyond grace; `code` is that error code.
+- `rejected` is absent until the server rejects the identity permanently: `device_revoked` on any signed request, channel open or live stream; `device_unknown` outside the pending-key recovery exception below; or `certificate_expired` on a renewal beyond grace.
+  A `device_unknown` response to a renewal signed with the pending key during §8.1 recovery does not set `rejected`; the agent first retries the same renewal with the old current key.
+  A `device_unknown` response to that retry is permanent and sets `rejected`.
   The agent can't observe revocation otherwise.
-  Once `rejected` is set, the agent never renews or reconnects for that identity; only a new enrollment with a different token replaces it.
+  Once `rejected` is set, `code` contains the error code, and the agent never renews or reconnects for that identity; only a new enrollment with a different token replaces it.
 - `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists only between a successful `confirm` and the deletion of the old key (crash safety).
 - `config` is stored exactly as received, including unknown fields, and replaced only by a higher `revision`.
 - Key names have the form `DevolutionsAgent-Identity-<key_uuid>`, where `key_uuid` is a random UUID generated with each key.
@@ -650,3 +662,4 @@ The installer never writes this section, and the agent logs a warning at start-u
   - `POST time/advance` with `{ secs }` advances mock time and immediately re-evaluates stream expiry and rotation deadlines.
   - `GET events?device_id=<uuid>` returns that device's ordered channel and certificate events: `stream_opened`, `stream_authenticated`, `stream_closed` with status, and `cert_status_changed`.
     Each event has a monotonic sequence number so make-before-break ordering can be verified without polling.
+- The mock may expose additional test-only endpoints such as `__mock__/requests`, `__mock__/handshake` and `__mock__/reconnect`; they are not part of the authority protocol.

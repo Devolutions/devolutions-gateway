@@ -25,14 +25,14 @@ V1 must not preclude this migration.
 ## Specification
 
 The complete wire-level specification is [CONTRACT.md](../../docs/agent-identity/CONTRACT.md).
-[contract.intent.md](../../docs/agent-identity/contract.intent.md) records the decisions it must preserve.
-This file, `contract.intent.md` and the intent files of the crates listed below are cumulative.
+The shared [design rationale](../../docs/agent-identity/INTENT.md) explains the decisions it preserves.
+This file, that rationale and the intent files of the crates listed below are cumulative.
 
 ## Terminology
 
 - **Authority**: a server implementing the contract and owning the root(s) that issue device certificates.
-  DVLS is the first authority; PSU will implement the same contract.
-  Authorities differ only by base URL.
+  DVLS is the first authority; PSU will implement the same agent-facing contract.
+  Authorities use different base URLs and may provide product-specific configuration and management APIs.
 - **Enrollment token**: a reusable, use-capped, expiring credential that authorizes enrollment and nothing else.
 - **Device**: the authority-side record of an enrolled agent, identified by a UUID minted by the authority.
 - **Identity**: the agent-side state for one authority: keys, certificate chains, config, base URL, authority ID, and the SHA-256 of the token it was enrolled with.
@@ -65,7 +65,7 @@ Non-goals for V1:
    Identity is never derived from the enrollment token or from reported metadata.
 3. The enrollment token authorizes enrollment only.
    A leaked token can enroll new devices; it must never allow impersonating or altering an existing device.
-4. Device requests are authenticated only as specified in [contract.intent.md](../../docs/agent-identity/contract.intent.md) (Device authentication): the authority looks up the certificate it registered for the device, by thumbprint.
+4. Device requests to an authority are authenticated only as described in the [request-authentication rationale](../../docs/agent-identity/INTENT.md#agent-identity-request-authentication): the authority looks up the certificate it registered for the device by thumbprint.
    Chain validation alone is not authentication: any certificate the root issued chains successfully.
 5. Code downstream of authentication takes an `AuthenticatedDevice` that only the validator can construct.
    No API treats a device ID read from the wire as an identity.
@@ -93,7 +93,8 @@ Non-goals for V1:
 - Certificates and chains are stored in the agent data directory, not in a Windows certificate store.
   Private keys stay in their key backend (see `agent-identity-keys`).
 - Every key the agent creates is recorded in its state before it is created, so a crash never leaves an orphaned key.
-- When the authority rejects an identity (revoked, unknown, or expired beyond the renewal grace window), the agent records the rejection and stops renewing and reconnecting for that authority.
+- When the authority permanently rejects an identity because it is revoked, unknown after pending-key recovery, or expired beyond the renewal grace window, the agent records the rejection and stops renewing and reconnecting for that authority.
+  A `device_unknown` response during pending-key recovery first retries renewal with the old current key.
   Only an enrollment with a different token replaces a rejected identity.
 
 ### Pending-enrollment files
@@ -141,12 +142,12 @@ Beyond it, only an enrollment with a new token recovers.
 - Concerns are split into self-contained crates.
 - The channel crates are named `agent-channel-*`, not `agent-identity-*`, because the channel carries more than identity: renewal requests and config now, PEDM policies later.
 
-| Crate | Responsibility |
-|---|---|
-| `agent-identity` | Token parsing, CSR, per-authority storage, REST client, enrollment, renewal, check-in |
-| `agent-identity-keys` | Key custody |
-| `agent-identity-httpsig` | RFC 9421 signing profile and tower layer |
-| `agent-channel-proto` | Channel contract, for Rust and .NET |
-| `agent-channel-client` | Channel client, depends on `agent-channel-proto` |
-| `agent-identity-mock` | Mock authority (binary) |
-| `agent-identity-conformance` | Conformance tester (binary) |
+| Crate                        | Responsibility                                                                        |
+| ---------------------------- | ------------------------------------------------------------------------------------- |
+| `agent-identity`             | Token parsing, CSR, per-authority storage, REST client, enrollment, renewal, check-in |
+| `agent-identity-keys`        | Key custody                                                                           |
+| `agent-identity-httpsig`     | RFC 9421 signing profile and tower layer                                              |
+| `agent-channel-proto`        | Channel contract, for Rust and .NET                                                   |
+| `agent-channel-client`       | Channel client, depends on `agent-channel-proto`                                      |
+| `agent-identity-mock`        | Mock authority (binary)                                                               |
+| `agent-identity-conformance` | Conformance tester (binary)                                                           |

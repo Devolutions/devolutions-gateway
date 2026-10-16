@@ -1,3 +1,5 @@
+# Agent Identity – Design Rationale
+
 [CONTRACT.md][contract] defines the protocol, and [test-vectors.json][vectors] contains shared test data.
 This file explains the main design choices and the reasons behind them.
 It repeats contract details only when needed to explain a design choice.
@@ -52,7 +54,9 @@ It repeats contract details only when needed to explain a design choice.
 - A missing `agent_channel_url` means that the authority is not offering a channel to that device.
 - Metadata is inventory data collected when the agent sends it.
   A successful enrollment, renewal, check-in or authenticated `Hello` replaces the stored metadata, but an enrollment replay does not.
-  Renewal, check-in and authenticated `Hello` also update `last_seen_at` because they prove current possession of the device key.
+  A new enrollment initializes `last_seen_at`.
+  Renewal, confirm, check-in, authenticated `Hello` and later agent messages on the authenticated stream update it because they prove current possession of the device key.
+  Enrollment replay and stream closure do not update it.
   Metadata is never used for authorization.
 - Check-in is only a fallback for configuration and renewal requests while no channel is working.
   Features that need server push require the agent channel.
@@ -67,6 +71,8 @@ It repeats contract details only when needed to explain a design choice.
   If it occurs during pending-key recovery, the agent first retries renewal with the key that was current before renewal.
 - Every agent-facing HTTP error response contains `server_time`, which the agent may use only for one retry after `clock_skew`.
 
+<a id="agent-identity-request-authentication"></a>
+
 ## Request authentication
 
 - The [RFC 9421 profile][contract-signatures] defines the signed request format and verification order.
@@ -76,7 +82,7 @@ It repeats contract details only when needed to explain a design choice.
 - The authority records a nonce only after the request signature and any body digest are valid.
   Requests with an invalid signature or body digest therefore cannot consume nonce storage.
 - The authority authenticates a device through a registered current or pending certificate and proof of its private key.
-  The agent does not send the certificate itself, and validating a certificate chain alone does not prove that the device is still authorized.
+  The agent does not send the certificate itself to the authority, and validating a certificate chain alone does not prove that the device is still authorized.
 - Published trust anchors help third parties validate certificate chains, but they do not include revocation information.
 
 ## Agent channel
