@@ -183,7 +183,7 @@ Applicable intent files are cumulative.
 A more specific file does not silently override broader intent.
 Contradictions require human resolution.
 
-Intent that several components share is a part file, `INTENT.<feature>.md` or `<name>.intent.<feature>.md`, symlinked into each directory it governs.
+Intent that several components share is a part file, `INTENT.<feature>.md` or `<name>.intent.<feature>.md`, symlinked into each directory it governs; a `<name>.intent.<feature>.md` part governs that module only.
 The copies are one text; a difference between them is a defect.
 Applicability follows directories only; a link to another file confers none.
 

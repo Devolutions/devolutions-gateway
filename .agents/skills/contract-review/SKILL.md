@@ -18,6 +18,8 @@ Run every state-changing operation through the gap questions in `contract-author
 
 Apply each to every normative sentence; quote it.
 
+- **Party**: which second party in scope must agree to this sentence?
+  None means it is one party's own realisation (config, storage, CLI) and belongs in that party's intent file.
 - **Overreach**: a claim stronger than the mechanism guarantees ("prevents oracles" for "does not say which check failed"); propose the narrowed form.
 - **Open set**: an error, outcome, or input class not drawn from a closed, defined set; "bad input" is not a classification.
 - **Order for precedence**: an evaluation order where only which-outcome-wins matters, or two outcomes equally valid for one input.
@@ -27,13 +29,12 @@ Apply each to every normative sentence; quote it.
 - **One-implementation bias**: a library's behaviour, a number, or a rationale true for one backend; ask whether it was written to fit one implementation.
 - **Unmeasured cause**: a rationale citing a mechanism nobody measured.
 - **Untestable**: "handles", "supports", "properly"; propose an observable with a bound and the conformance case that checks it.
-- **Scope creep**: admin, UI, mock control, implementer choices, or one party's own realisation (config, storage, CLI) inside the contract when no party in scope depends on it; propose the party's intent file.
+- **Scope creep**: admin, UI, mock control, implementer choices, or any section that neither constrains a party in scope nor is exercised by a conformance test; propose the owning crate's intent file or deletion.
 - **Intent gap**: a rule the contract needs that `INTENT.md` lacks; the human amends the intent first.
-- **Weight**: a section that neither constrains an implementation nor is exercised by a test; propose cutting it.
 
 ## Report
 
-Order by consequence: unspecified failure paths and overreach, then open sets and second copies, then wording and weight.
+Order by consequence: party and unspecified failure paths, then overreach, open sets and second copies, then wording.
 
 ```md
 ### <N>. <lens> — §<section>

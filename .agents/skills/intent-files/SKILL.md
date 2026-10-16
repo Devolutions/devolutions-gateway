@@ -19,7 +19,7 @@ When code, tests, contract, and intent disagree, report the divergence; the huma
 A statement belongs when all three hold:
 
 > Would the software be wrong if tests passed but this were violated?
-> Does it rule out a plausible change a human deliberately rejected, in a way a maintainer could not cheaply recover from code, manifest, or contract?
+> Does it rule out a plausible change a human deliberately rejected, rather than restating the contract without naming the rejected alternative?
 > Could a reviewer cite it to reject a change?
 
 If it constrains how a contributor performs the work rather than the resulting software, it is `AGENTS.md`.
@@ -32,6 +32,8 @@ Default to no file: create one only when at least one commitment passes.
 `INTENT.md` at the narrowest directory covering all governed code; `<name>.intent.md` beside one file when a single module carries a policy its crate does not.
 Applicable files are those in the directory and its ancestors, cumulative, and a specific file never overrides a broader one; nothing follows a link.
 A design shared by several components is a part file, `INTENT.<feature>.md` or `<module>.intent.<feature>.md`, present in each governed directory; a symlink to one source keeps the parts identical, and where a symlink is not possible the copies are one text and a difference between them is a defect.
+A part is read from several directories, so it names repository paths as code (`docs/agent-identity/CONTRACT.md`) rather than relative links.
+Intent for a component that lives in another repository is drafted here as `INTENT.<component>.md` with a first line saying it is not merged and moves with the component; it leaves the branch before merge.
 Never one per source file, never mechanically.
 
 ## Shape
@@ -40,7 +42,7 @@ No mandatory sections and no title; one commitment may be the whole file, and a 
 A flat list for a handful; topical headings only when they aid retrieval; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
 A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one, and reasons live in the same file as the commitments they support, never in a separate rationale document.
 Normative in any mood (declarative, imperative, `must`, `should`); never addressed to agents.
-Everything written normatively is to be realised now; what is not is marked in the sentence ("for now", "later", a `NOTE:`), so an implementer knows not to build it yet and a reviewer knows not to expect it.
+Everything written normatively is to be realised by the time the branch merges; what is not is marked in the sentence ("for now", "later", a `NOTE:`), so an implementer knows not to build it yet and a reviewer knows not to expect it.
 Distinguish a deferral ("for now") from a non-goal ("the intention is not to"); the word tells a reader whether to expect change.
 State precision in the wording (`exactly these`, `at least`, `may vary provided`, `is permitted to`) rather than labelling the file exact or broad.
 Scope every `never`, `only`, `always` to the boundary it protects and name the configurations a conditional commitment applies to.

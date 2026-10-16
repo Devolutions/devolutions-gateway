@@ -23,5 +23,5 @@ They are not shape references; use them to recognise what review kept and what i
 - Two encodings for one concept: hex and base64url for the same hash.
 - Lost-response, deleted-in-between, concurrency, and expiry-mid-flow paths unspecified until a critique asked.
 - A verifier accepting the client's own list of covered components.
-- A product's admin API and the mock's control surface inside the contract; both are product or test surface, and the mock's belongs in the conformance crate's intent.
+- A product's admin API and the mock's control surface inside the contract; both are product or test surface, and each belongs in the intent of the crate that implements it.
 - Length: one runs to 950 lines, and whether each section constrains an implementation or is exercised by a test is the first question for a rewrite.
