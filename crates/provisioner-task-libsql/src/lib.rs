@@ -28,6 +28,8 @@ const COLUMNS: &str =
 
 /// Tasks kept in the `provisioner_task_records` table of `gateway.db`.
 pub struct LibSqlProvisionerTaskStore {
+    // Every caller shares this one connection and SQLite can't nest transactions on it, so calls take turns.
+    // Opening a connection per call would let SQLite's write lock do this instead.
     conn: Mutex<Connection>,
 }
 

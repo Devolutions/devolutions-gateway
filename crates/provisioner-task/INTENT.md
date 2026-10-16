@@ -19,5 +19,6 @@ The state transitions are as follows:
 Tasks will have a deadline which is relative to the time it is received by the Gateway.
 
 # Footnote
-Provisioner tasks and jobs are not the same thing. Task has its own state, the job queue is merely for scheduling and retrying.
+Provisioner tasks and jobs are not the same thing.
+A Task has its own state; the job queue is only responsible for scheduling and retrying.
 
