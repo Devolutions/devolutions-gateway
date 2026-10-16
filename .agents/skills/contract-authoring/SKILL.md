@@ -43,6 +43,8 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
 ## Testability
 
 Each rule maps to a conformance case, worded as an observable with a bound: "encode writes exactly `size()` bytes", never "handles" or "supports", which name no outcome a test could check and so let divergent implementations all comply.
+"The backend supports RSA-PSS" is met by signing, by returning `Unsupported`, or by producing bytes nobody verifies; "signing with RSA-PSS returns a signature that verifies under the public key, or `Unsupported` before any key material is read" is one outcome and one test.
+"The parser handles truncated input" is met by an error, a caught panic, or a zero-filled struct; "a truncated input returns `Error::Truncated` and consumes nothing" is one outcome and one test.
 Shared vectors cover positive and negative cases, are deterministic, and an independent script recomputes them.
 The conformance section ties every claim to how it is tested, lists known gaps, and marks what is verified by review only.
 
