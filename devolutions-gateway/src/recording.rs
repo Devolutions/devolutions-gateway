@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
@@ -1074,6 +1074,71 @@ async fn remux(input_path: Utf8PathBuf) {
         std::fs::rename(&output_path, &input_path).context("failed to override remuxed file")?;
 
         debug!(%input_path, "Successfully remuxed video recording");
+
+        if let Err(error) = compact(&input_path) {
+            warn!(error = format!("{error:#}"), %input_path, "Recording compaction failed");
+        }
+
+        Ok(())
+    }
+}
+
+/// Replaces a recording with a re-encoded copy that keeps only the frames whose picture changed, when it is smaller.
+fn compact(input_path: &Utf8Path) -> anyhow::Result<()> {
+    let file_name = input_path
+        .file_name()
+        .with_context(|| format!("invalid path (not a file): {input_path}"))?;
+    let parent = input_path.parent().context("failed to retrieve parent folder")?;
+    let raw_path = parent.join(format!("compacting_{file_name}"));
+    let compacted_path = parent.join(format!("compacted_{file_name}"));
+
+    let result = compact_impl(input_path, &raw_path, &compacted_path);
+
+    for path in [&raw_path, &compacted_path] {
+        if path.exists() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
+    return result;
+
+    fn compact_impl(input_path: &Utf8Path, raw_path: &Utf8Path, compacted_path: &Utf8Path) -> anyhow::Result<()> {
+        let stats = match video_streamer::compact_webm(input_path.as_std_path(), raw_path.as_std_path())
+            .context("failed to compact recording")?
+        {
+            video_streamer::CompactOutcome::Written(stats) => stats,
+            video_streamer::CompactOutcome::Skipped(reason) => {
+                debug!(%input_path, ?reason, "Recording compaction skipped");
+                return Ok(());
+            }
+        };
+
+        // The compacted file has no cues and no duration until remuxed.
+        cadeau::xmf::muxer::webm_remux(raw_path, compacted_path)
+            .with_context(|| format!("failed to remux file {raw_path} to {compacted_path}"))?;
+
+        let original_size = std::fs::metadata(input_path)
+            .context("failed to read recording metadata")?
+            .len();
+        let compacted_size = std::fs::metadata(compacted_path)
+            .context("failed to read compacted recording metadata")?
+            .len();
+
+        if compacted_size >= original_size {
+            debug!(%input_path, original_size, compacted_size, "Compacted recording is not smaller; keep the original");
+            return Ok(());
+        }
+
+        std::fs::rename(compacted_path, input_path).context("failed to override compacted file")?;
+
+        info!(
+            %input_path,
+            original_size,
+            compacted_size,
+            stats.input_frames,
+            stats.kept_frames,
+            "Compacted video recording"
+        );
 
         Ok(())
     }

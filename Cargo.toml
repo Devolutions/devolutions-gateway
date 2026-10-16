@@ -33,6 +33,9 @@ lto = true
 
 [patch.crates-io]
 tracing-appender = { git = "https://github.com/CBenoit/tracing.git", rev = "42097daf92e683cf18da7639ddccb056721a796c" }
+# TODO: drop once cadeau with the VPX encoder quantizer range (Devolutions/cadeau#87) is published.
+cadeau = { git = "https://github.com/Devolutions/cadeau.git", rev = "e56c47c748531b6c5925bec4f3b4405a7ccbfec1" }
+xmf-sys = { git = "https://github.com/Devolutions/cadeau.git", rev = "e56c47c748531b6c5925bec4f3b4405a7ccbfec1" }
 
 [workspace.lints.rust]
 # Declare the custom cfgs.
