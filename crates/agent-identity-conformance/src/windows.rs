@@ -228,9 +228,9 @@ pub(crate) fn write_pending(path: &Path, contents: &[u8]) -> anyhow::Result<()> 
 pub(crate) fn write_protected_file(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     let current_user = current_user_sid()?;
     let sddl = if current_user == "S-1-5-18" {
-        "D:P(A;;FA;;;SY)".to_owned()
+        "O:SYD:P(A;;FA;;;SY)".to_owned()
     } else {
-        format!("D:P(A;;FA;;;SY)(A;;FA;;;{current_user})")
+        format!("O:{current_user}D:P(A;;FA;;;SY)(A;;FA;;;{current_user})")
     };
     let sddl = wide(std::ffi::OsStr::new(&sddl));
     let mut raw = PSECURITY_DESCRIPTOR::default();
@@ -829,6 +829,8 @@ pub(crate) fn cleanup_machine_keys(prefix: &str) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use windows::Win32::Security::OWNER_SECURITY_INFORMATION;
+
     use super::*;
 
     struct OwnedChild(std::process::Child);
@@ -906,6 +908,39 @@ mod tests {
         let json = br#"{"version":1,"token":"test-only"}"#;
         write_pending(&path, json)?;
         pending_acl_is_protected(&path)?;
+        let path_wide = wide(path.as_os_str());
+        let mut raw = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: path_wide is NUL-terminated and raw receives an allocated security descriptor.
+        let result = unsafe {
+            GetNamedSecurityInfoW(
+                PCWSTR::from_raw(path_wide.as_ptr()),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                None,
+                None,
+                None,
+                None,
+                &mut raw,
+            )
+        };
+        ensure!(result.0 == 0, "could not read pending-file owner ({})", result.0);
+        let descriptor = SecurityDescriptor(raw);
+        let mut sddl = PWSTR::null();
+        // SAFETY: The descriptor is valid and the output string is owned until freed with LocalFree.
+        unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                descriptor.0,
+                SDDL_REVISION_1,
+                OWNER_SECURITY_INFORMATION,
+                &mut sddl,
+                None,
+            )?
+        };
+        // SAFETY: The conversion returned a NUL-terminated string allocated for the caller.
+        let owner = unsafe { sddl.to_string() };
+        // SAFETY: LocalFree releases the SDDL string allocated by the conversion.
+        unsafe { LocalFree(Some(HLOCAL(sddl.0.cast()))) };
+        assert_eq!(owner?, format!("O:{}", canonical_sddl_sid(&current_user_sid()?)?));
         let encrypted = std::fs::read(&path)?;
         assert_machine_scope(&encrypted)?;
         ensure!(
