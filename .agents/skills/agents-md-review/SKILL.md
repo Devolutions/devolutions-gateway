@@ -21,6 +21,9 @@ Check each block against reality before judging it; one piece of evidence per ve
 - Everything else against the test above: **Discoverable**, **Content-free**, or **Plain command**.
 - An always-loaded pointer to a long guide: **Misplaced**; it belongs in the skill that needs it.
 
+A block can earn more than one verdict, each with its own evidence; lead with the one that needs no human confirmation.
+A footer that `cliff.toml` renders as garbage is **Wrong** whether or not anyone decided it, and **Never a convention** on top once the maintainer says nobody did.
+
 Also look for what is **Missing**: policy the organisation applies elsewhere (intent-file rules, writing conventions, comment markers) and non-standard layouts with no pointer.
 `agents-md/references/before-after.md` is one repository's worked answer; re-verify every row against the repository in front of you, never paste it.
 
@@ -29,7 +32,7 @@ Also look for what is **Missing**: policy the organisation applies elsewhere (in
 ```md
 | Block | Verdict | Evidence |
 |---|---|---|
-| `Issue: #456`, `Issue: N/A` as valid footers | Wrong | `cliff.toml` turns every `Issue:` value into a Jira link; both render as garbage |
+| `Issue: #456`, `Issue: N/A` as valid footers | Wrong, Never a convention | `cliff.toml` turns every `Issue:` value into a Jira link; maintainer confirms neither was decided |
 | Scope list `dgw, agent, jetsocat, webapp` | Stale | `installer`, `agent-installer` missing; `commit-scope` skill has the table |
 | Branch naming | Never a convention | 2 of 60 merged PR branches carry a Jira key; maintainer confirms it was never decided |
 | Nightly rustfmt line | Keep | stable fmt fails CI; no skill states it |
