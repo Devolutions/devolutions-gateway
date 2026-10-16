@@ -22,8 +22,7 @@ V1 must not preclude this migration.
 
 ## Terminology
 
-- **Authority**: a server implementing the contract and owning the root(s) that issue device certificates.
-  DVLS is the first authority; PSU will implement the same agent-facing contract.
+- **Authority**: a server implementing the contract and owning the root(s) that issue device certificates (e.g.: DVLS, PSU).
   Authorities use different base URLs and may provide product-specific configuration and management APIs, but never a product-specific variant of the agent-facing protocol.
 - **Enrollment token**: a reusable, use-capped, expiring credential that authorizes enrollment and nothing else.
 - **Device**: the authority-side record of an enrolled agent, identified by a UUID minted by the authority.

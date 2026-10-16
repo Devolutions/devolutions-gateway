@@ -10,7 +10,7 @@
 This contract defines what two independently built parties must agree on:
 
 - the agent (Devolutions Agent), which enrolls and authenticates;
-- an authority (DVLS now, PSU later), which enrolls and authenticates agents.
+- an authority (e.g.: DVLS, PSU), which enrolls and authenticates agents.
 
 Third-party relying parties may also read the published roots (§5.1).
 Each party's own realization (the agent's local files, configuration and CLI; an authority's storage, administration and hosting) is that party's intent, not contract.
