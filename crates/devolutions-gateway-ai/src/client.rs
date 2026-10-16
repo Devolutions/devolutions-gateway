@@ -208,14 +208,27 @@ impl fmt::Debug for AiClient {
 pub(crate) struct Prompt<'a> {
     /// Instructions of the purpose.
     pub(crate) system: &'a str,
-    /// Data the purpose works on, such as a session transcript.
-    pub(crate) input: &'a str,
+    /// Data the purpose works on, such as a session transcript or screenshots, in order.
+    pub(crate) input: &'a [Input<'a>],
     pub(crate) max_output_tokens: u32,
+}
+
+/// Part of the data a purpose works on.
+#[derive(Clone, Copy)]
+pub(crate) enum Input<'a> {
+    Text(&'a str),
+    /// A PNG image.
+    Png(&'a [u8]),
 }
 
 impl AiClient {
     pub fn builder() -> AiClientBuilder {
         AiClientBuilder::default()
+    }
+
+    /// Model requested from the provider.
+    pub(crate) fn model(&self) -> &str {
+        &self.model
     }
 
     /// Sends one completion request and returns the text of the answer.
@@ -230,8 +243,15 @@ impl AiClient {
         debug!(
             provider = ?self.provider,
             model = %self.model,
-            base_url = %self.base_url,
-            input_len = prompt.input.len(),
+            input_len = prompt
+                .input
+                .iter()
+                .map(|input| match input {
+                    Input::Text(text) => text.len(),
+                    Input::Png(_) => 0,
+                })
+                .sum::<usize>(),
+            images = prompt.input.iter().filter(|input| matches!(input, Input::Png(_))).count(),
             max_output_tokens = prompt.max_output_tokens,
             "Send AI completion request"
         );
@@ -252,13 +272,13 @@ impl AiClient {
             .timeout(self.request_timeout)
             .send()
             .await
-            .map_err(|error| error::transport(&error, api_key))?;
+            .map_err(|error| error::transport(error, api_key))?;
 
         let status = response.status();
         let retry_after = error::retry_after(response.headers());
         let body = read_body(response)
             .await
-            .map_err(|error| error::transport(&error, api_key))?;
+            .map_err(|error| error::transport(error, api_key))?;
 
         if !status.is_success() {
             // An error body over the limit is not parsed, so the error holds the reason phrase of the status.
