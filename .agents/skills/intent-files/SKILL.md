@@ -23,20 +23,23 @@ A statement belongs when all three hold:
 
 If it constrains how a contributor performs the work rather than the resulting software, it is `AGENTS.md`.
 "Adding a variant requires an explicit decision" is process; the intent is "a variant without an explicit mapping is rejected, never given a fallback".
+A test can enforce a property without recording why it exists; the intent beside it says what the test protects, so that an agent facing a red check escalates instead of deleting the test.
 Default to no file: create one only when at least one commitment passes.
 
 ## Placement
 
 `INTENT.md` at the narrowest directory covering all governed code; `<name>.intent.md` beside one file when a single module carries a policy its crate does not.
-Applicable files are cumulative and a specific file never overrides a broader one; a shared `docs/<feature>/INTENT.md` governs a component only when that component's own intent says so in a sentence, not through a bare link.
+Applicable files are those in the directory and its ancestors, cumulative, and a specific file never overrides a broader one; nothing follows a link.
+A design shared by several components is a part file, `INTENT.<feature>.md` or `<module>.intent.<feature>.md`, copied byte for byte into each governed directory; the copies are one text with several locations, and a drift between them is a defect.
 Never one per source file, never mechanically.
 
 ## Shape
 
 No mandatory sections and no title; one commitment may be the whole file, and a new component's intent may run to a hundred lines when the commitments are many.
 A flat list for a handful; topical headings only when they aid retrieval; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
-A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one.
-Normative in any mood (declarative, imperative, `must`, `should`); never plan tense, never addressed to agents.
+A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one, and reasons live in the same file as the commitments they support, never in a separate rationale document.
+Normative in any mood (declarative, imperative, `must`, `should`); never addressed to agents.
+Everything written normatively is to be realised now; what is not is marked in the sentence ("for now", "later", a `NOTE:`), so an implementer knows not to build it yet and a reviewer knows not to expect it.
 Distinguish a deferral ("for now") from a non-goal ("the intention is not to"); the word tells a reader whether to expect change.
 State precision in the wording (`exactly these`, `at least`, `may vary provided`, `is permitted to`) rather than labelling the file exact or broad.
 Scope every `never`, `only`, `always` to the boundary it protects and name the configurations a conditional commitment applies to.

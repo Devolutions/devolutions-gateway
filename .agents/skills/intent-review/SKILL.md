@@ -11,7 +11,7 @@ Output is findings and proposals; the human applies them.
 ## Gather
 
 State which revision you reviewed; if the checkout may be behind, fetch from the remote default branch and say which findings apply to which version.
-Collect everything that applies cumulatively: broader `INTENT.md` up the tree, shared intent the file says applies to it, the `CONTRACT.md` it defers to; contradictions mostly live between files.
+Collect everything that applies cumulatively: broader `INTENT.md` up the tree, every `INTENT.<feature>.md` part in the same directories, the `CONTRACT.md` it defers to; contradictions mostly live between files, and copies of a part file that differ are a finding on their own.
 Read the governed code, manifest, features, and configurations; most false absolutes are found there.
 When a sentence feels wrong and you cannot name why, `intent-files/references/pitfalls.md` is the checklist.
 
@@ -22,7 +22,8 @@ Apply each to every normative sentence; quote the sentence in the finding.
 - **Contradiction**: two statements that cannot both hold, including a specific file quietly narrowing a broader one.
 - **Not a commitment**: rules out no plausible change, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this crate?"
 - **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
-- **Plan or tentative tense**: "we would like", "will be extended" for behaviour that already exists; "I have in mind", "may be used" for a firm want; an unimplemented target not marked as such; propose the normative form or the explicit permission.
+- **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; propose the normative form or the explicit permission.
+  A deferral the code has not realised is correct as written, not a finding.
 - **Unscoped absolute**: `never`, `always`, `only`, `every`; which boundary, and does a sibling, feature flag, backend, or build falsify it?
 - **Unverified universal**: "every library does X" with no cited check.
 - **Code disagrees**: the code does not do what the sentence says; report it as a divergence for the human, not as a defect in either.

@@ -12,13 +12,14 @@ It reports; it never edits intent or contract and never silently fixes code duri
 
 Paths under audit: the diff, the named crate or module, or the subtree.
 State which revision you audited; if the checkout may be behind, fetch intent and code from the remote default branch or the PR head.
-Applicable intent is cumulative: every `INTENT.md` from the root down to each audited directory, every `*.intent.md` beside an audited file, and every shared intent those files say applies to them.
+Applicable intent is cumulative: every `INTENT.md` and `INTENT.<feature>.md` from the root down to each audited directory, and every `*.intent.md` or `*.intent.<feature>.md` beside an audited file.
 Where a statement says "see `CONTRACT.md` §N", the contract section is the statement; when the user names a contract, audit an implementation against it directly, treating each operation's valid domain, must-support set, error mapping, and precedence as separate statements and the conformance suite's coverage of each as part of the evidence.
 
 ## Verify
 
 Split each file into normative statements, one per bullet or sentence, skipping purpose prose, and give each a stable ID (`xtask/INTENT.md#dependencies`, `CONTRACT.md#6.3-errors`).
-For each: cite `path:line`; decide **conforms**, **violates**, **partial** (some paths or configurations), **not yet realised** (the intent marks it as a target or deferral), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
+A statement marked as deferred or prospective ("for now", "later", `NOTE:`) is a target, not a requirement; the implementation is expected not to realise it yet, and realising it anyway is worth a note.
+For each: cite `path:line`; decide **conforms**, **violates**, **partial** (some paths or configurations), **not yet realised** (a deferred target the code does not implement, which is the expected state), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
 Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement.
 Note `INVARIANT:` and `UNTESTED:` comments that relate; they are the code's own claims.
 "Probably fine" is cannot verify.

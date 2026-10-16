@@ -36,11 +36,11 @@ Examples without the rule behind them are the costliest lines; agents copy the e
 
 ```text
 AGENTS.md    always loaded     policy, gotchas, pointers          < 40 lines
-skill        loaded on match   self-contained rules for one task  no outbound pointers unless conditional
+skill        loaded on match   rules for one task; may load the skills it builds on
 STYLE.md     loaded by a reviewer skill when a rule's intent is unclear
 ```
 
-Load each file at the latest point where it pays for itself; an always-loaded file pointing at a 700-line guide is a cost on every task.
+Load each file at the latest point where it pays for itself; an always-loaded file pointing at a 700-line guide is a cost on every task, while a skill pointing at the one it depends on keeps both small.
 A directory with its own policy gets a nested `AGENTS.md` and one pointer from the root.
 
 ## Keeping it true

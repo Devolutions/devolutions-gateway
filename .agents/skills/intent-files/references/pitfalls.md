@@ -58,7 +58,8 @@ Use it as the checklist when reviewing or before handing a draft back.
 
 - "The two intent files now disagree. Both are human-owned, so the wording needs the maintainer's approval." ([picky-rs #572](https://github.com/Devolutions/picky-rs/pull/572#discussion_r4282323307))
 - After "thin adapter" was dropped, "the thin-adapter rule applies to backends only" pointed at nothing; grep for every reference when removing a rule.
-- Renaming `contract.intent.md` to `INTENT.md` broke four links; stable anchors fixed it.
+- Crate intents linked to a shared design file under `docs/`; renaming it broke four links, and a link confers no applicability under the convention.
+  A shared design is an `INTENT.<feature>.md` part copied into each governed directory.
 
 ## Timing
 
