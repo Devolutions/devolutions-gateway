@@ -28,8 +28,8 @@ const COLUMNS: &str =
 
 /// Tasks kept in the `provisioner_task_records` table of `gateway.db`.
 pub struct LibSqlProvisionerTaskStore {
-    // Every caller shares this one connection and SQLite can't nest transactions on it, so calls take turns.
-    // Opening a connection per call would let SQLite's write lock do this instead.
+    // Each change of state is one transaction so it stays atomic (see INTENT.md), and SQLite can't nest
+    // transactions on this shared connection, so callers take turns.
     conn: Mutex<Connection>,
 }
 
@@ -41,72 +41,6 @@ impl LibSqlProvisionerTaskStore {
         migrate(&conn).await?;
 
         Ok(Self { conn: Mutex::new(conn) })
-    }
-
-    async fn find(conn: &Connection, id: Uuid) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
-        conn.query(
-            &format!("SELECT {COLUMNS} FROM provisioner_task_records WHERE id = ?1"),
-            params![id.to_string()],
-        )
-        .await
-        .context("query task")?
-        .next()
-        .await
-        .context("read task")?
-        .as_ref()
-        .map(task_from_row)
-        .transpose()
-    }
-
-    async fn find_unfinished(
-        conn: &Connection,
-        kind: &str,
-        target: &str,
-    ) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
-        conn.query(
-            &format!(
-                "SELECT {COLUMNS} FROM provisioner_task_records
-                 WHERE kind = ?1 AND target = ?2 AND state IN ('queued', 'running')"
-            ),
-            params![kind, target],
-        )
-        .await
-        .context("query unfinished task")?
-        .next()
-        .await
-        .context("read unfinished task")?
-        .as_ref()
-        .map(task_from_row)
-        .transpose()
-    }
-
-    /// Fails `task` if it is unfinished and past its deadline, then returns it as stored.
-    async fn fail_if_overdue(
-        conn: &Connection,
-        task: ProvisionerTaskRecord,
-        now: OffsetDateTime,
-    ) -> anyhow::Result<ProvisionerTaskRecord> {
-        if task.state.is_finished() || now < task.deadline_at {
-            return Ok(task);
-        }
-
-        let payload = serde_json::json!({
-            "reason": "timed out",
-            "details": { "lastPayload": task.payload },
-            "attempts": task.attempts,
-        });
-
-        conn.execute(
-            "UPDATE provisioner_task_records SET state = 'failed', payload = ?2, finished_at = ?3
-             WHERE id = ?1 AND state IN ('queued', 'running')",
-            params![task.id.to_string(), payload.to_string(), now.unix_timestamp()],
-        )
-        .await
-        .context("fail overdue task")?;
-
-        warn!(task.id = %task.id, task.kind = %task.kind, attempts = task.attempts, "Task timed out");
-
-        Self::find(conn, task.id).await?.context("overdue task is missing")
     }
 
     /// Ends the Task as `state` if it is currently in one of `from`.
@@ -126,11 +60,11 @@ impl LibSqlProvisionerTaskStore {
             .await
             .context("begin task finish")?;
 
-        let Some(task) = Self::find(&tx, id).await? else {
+        let Some(task) = find(&tx, id).await? else {
             tx.rollback().await.context("end task finish")?;
             return Ok(false);
         };
-        let task = Self::fail_if_overdue(&tx, task, now).await?;
+        let task = fail_if_overdue(&tx, task, now).await?;
 
         if !from.contains(&task.state) {
             tx.commit().await.context("commit task finish")?;
@@ -154,6 +88,68 @@ impl LibSqlProvisionerTaskStore {
     }
 }
 
+async fn find(conn: &Connection, id: Uuid) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
+    conn.query(
+        &format!("SELECT {COLUMNS} FROM provisioner_task_records WHERE id = ?1"),
+        params![id.to_string()],
+    )
+    .await
+    .context("query task")?
+    .next()
+    .await
+    .context("read task")?
+    .as_ref()
+    .map(task_from_row)
+    .transpose()
+}
+
+async fn find_unfinished(conn: &Connection, kind: &str, target: &str) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
+    conn.query(
+        &format!(
+            "SELECT {COLUMNS} FROM provisioner_task_records
+             WHERE kind = ?1 AND target = ?2 AND state IN ('queued', 'running')"
+        ),
+        params![kind, target],
+    )
+    .await
+    .context("query unfinished task")?
+    .next()
+    .await
+    .context("read unfinished task")?
+    .as_ref()
+    .map(task_from_row)
+    .transpose()
+}
+
+/// Fails `task` if it is unfinished and past its deadline, then returns it as stored.
+async fn fail_if_overdue(
+    conn: &Connection,
+    task: ProvisionerTaskRecord,
+    now: OffsetDateTime,
+) -> anyhow::Result<ProvisionerTaskRecord> {
+    if task.state.is_finished() || now < task.deadline_at {
+        return Ok(task);
+    }
+
+    let payload = serde_json::json!({
+        "reason": "timed out",
+        "details": { "lastPayload": task.payload },
+        "attempts": task.attempts,
+    });
+
+    conn.execute(
+        "UPDATE provisioner_task_records SET state = 'failed', payload = ?2, finished_at = ?3
+         WHERE id = ?1 AND state IN ('queued', 'running')",
+        params![task.id.to_string(), payload.to_string(), now.unix_timestamp()],
+    )
+    .await
+    .context("fail overdue task")?;
+
+    warn!(task.id = %task.id, task.kind = %task.kind, attempts = task.attempts, "Task timed out");
+
+    find(conn, task.id).await?.context("overdue task is missing")
+}
+
 #[async_trait]
 impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
     async fn create(&self, task: NewProvisionerTaskRecord, now: OffsetDateTime) -> anyhow::Result<CreateOutcome> {
@@ -163,8 +159,8 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .await
             .context("begin task creation")?;
 
-        if let Some(existing) = Self::find(&tx, task.id).await? {
-            let existing = Self::fail_if_overdue(&tx, existing, now).await?;
+        if let Some(existing) = find(&tx, task.id).await? {
+            let existing = fail_if_overdue(&tx, existing, now).await?;
             let same_request =
                 existing.kind == task.kind && existing.target == task.target && existing.params == task.params;
             tx.commit().await.context("commit task lookup")?;
@@ -176,8 +172,8 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             });
         }
 
-        if let Some(unfinished) = Self::find_unfinished(&tx, &task.kind, &task.target).await? {
-            let unfinished = Self::fail_if_overdue(&tx, unfinished, now).await?;
+        if let Some(unfinished) = find_unfinished(&tx, &task.kind, &task.target).await? {
+            let unfinished = fail_if_overdue(&tx, unfinished, now).await?;
 
             if !unfinished.state.is_finished() {
                 tx.rollback().await.context("end task creation")?;
@@ -202,7 +198,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         .await
         .context("insert task")?;
 
-        let created = Self::find(&tx, task.id).await?.context("created task is missing")?;
+        let created = find(&tx, task.id).await?.context("created task is missing")?;
         tx.commit().await.context("commit task creation")?;
 
         Ok(CreateOutcome::Created(created))
@@ -215,11 +211,11 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .await
             .context("begin task lookup")?;
 
-        let Some(task) = Self::find(&tx, id).await? else {
+        let Some(task) = find(&tx, id).await? else {
             tx.rollback().await.context("end task lookup")?;
             return Ok(None);
         };
-        let task = Self::fail_if_overdue(&tx, task, now).await?;
+        let task = fail_if_overdue(&tx, task, now).await?;
         tx.commit().await.context("commit task lookup")?;
 
         Ok(Some(task))
@@ -238,7 +234,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .await
             .context("begin task attempt")?;
 
-        let Some(task) = Self::find(&tx, id).await? else {
+        let Some(task) = find(&tx, id).await? else {
             tx.rollback().await.context("end task attempt")?;
             return Ok(AttemptStart::Unknown);
         };
@@ -248,7 +244,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             return Ok(AttemptStart::Superseded);
         }
 
-        let task = Self::fail_if_overdue(&tx, task, now).await?;
+        let task = fail_if_overdue(&tx, task, now).await?;
 
         if task.state.is_finished() {
             tx.commit().await.context("commit task attempt")?;
@@ -264,7 +260,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         .await
         .context("start task attempt")?;
 
-        let started = Self::find(&tx, id).await?.context("started task is missing")?;
+        let started = find(&tx, id).await?.context("started task is missing")?;
         tx.commit().await.context("commit task attempt")?;
 
         Ok(AttemptStart::Started(started))
@@ -277,11 +273,11 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .await
             .context("begin job token replacement")?;
 
-        let Some(task) = Self::find(&tx, id).await? else {
+        let Some(task) = find(&tx, id).await? else {
             tx.rollback().await.context("end job token replacement")?;
             return Ok(false);
         };
-        let task = Self::fail_if_overdue(&tx, task, now).await?;
+        let task = fail_if_overdue(&tx, task, now).await?;
 
         let replaced = !task.state.is_finished();
 
@@ -324,7 +320,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
 
         let mut unfinished = Vec::with_capacity(tasks.len());
         for task in tasks {
-            let task = Self::fail_if_overdue(&tx, task, now).await?;
+            let task = fail_if_overdue(&tx, task, now).await?;
             if !task.state.is_finished() {
                 unfinished.push(task);
             }
@@ -342,11 +338,11 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             .await
             .context("begin running task update")?;
 
-        let Some(task) = Self::find(&tx, id).await? else {
+        let Some(task) = find(&tx, id).await? else {
             tx.rollback().await.context("end running task update")?;
             return Ok(false);
         };
-        let task = Self::fail_if_overdue(&tx, task, now).await?;
+        let task = fail_if_overdue(&tx, task, now).await?;
 
         let running = task.state == ProvisionerTaskState::Running;
 
