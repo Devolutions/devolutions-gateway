@@ -61,11 +61,11 @@ pub fn build_cargo_command(request: &PackageRequest) -> anyhow::Result<Vec<Strin
 }
 
 fn validate_cargo_request(request: &PackageRequest) -> anyhow::Result<()> {
-    if request.client.requested_elevation == Elevation::Elevated {
-        bail!("cargo elevated operations are not supported by the broker");
-    }
     if request.options.scope == Some(Scope::Machine) {
         bail!("cargo machine-scope operations are not supported by the broker");
+    }
+    if crate::evaluator::effective_execution_elevation(request) == Elevation::Elevated {
+        bail!("cargo elevated operations are not supported by the broker");
     }
     if !request.source.name.eq_ignore_ascii_case(CRATES_IO_SOURCE_NAME) {
         bail!("cargo package source must be crates.io");
@@ -247,6 +247,7 @@ mod tests {
     fn elevated_cargo_operations_are_rejected() {
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = None;
 
         let error = build_cargo_command(&request).expect_err("elevated cargo should fail");
 
