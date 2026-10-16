@@ -153,9 +153,11 @@ Class | Method | HTTP request | Description
 *HeartbeatApi* | [**GetHeartbeat**](docs/HeartbeatApi.md#getheartbeat) | **GET** /jet/heartbeat | Performs a heartbeat check
 *JrecApi* | [**DeleteManyRecordings**](docs/JrecApi.md#deletemanyrecordings) | **DELETE** /jet/jrec/delete | Mass-deletes recordings stored on this instance
 *JrecApi* | [**DeleteRecording**](docs/JrecApi.md#deleterecording) | **DELETE** /jet/jrec/delete/{id} | Deletes a recording stored on this instance
+*JrecApi* | [**GetAiAnalysis**](docs/JrecApi.md#getaianalysis) | **GET** /jet/jrec/{session_id}/ai-analysis/{task_id} | Gets an AI analysis of a recorded session
 *JrecApi* | [**ListRecordings**](docs/JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance
 *JrecApi* | [**PullRecordingFile**](docs/JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session
 *JrecApi* | [**PullRecordingSession**](docs/JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive
+*JrecApi* | [**StartAiAnalysis**](docs/JrecApi.md#startaianalysis) | **POST** /jet/jrec/{session_id}/ai-analysis | Starts an AI analysis of a recorded session
 *JrlApi* | [**GetJrlInfo**](docs/JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info
 *JrlApi* | [**UpdateJrl**](docs/JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token
 *NetApi* | [**GetNetConfig**](docs/NetApi.md#getnetconfig) | **GET** /jet/net/config | Lists network interfaces
@@ -186,6 +188,14 @@ Class | Method | HTTP request | Description
  - [Model.AgentDomainAdvertisement](docs/AgentDomainAdvertisement.md)
  - [Model.AgentInfo](docs/AgentInfo.md)
  - [Model.AgentStatus](docs/AgentStatus.md)
+ - [Model.AiAnalysisConflict](docs/AiAnalysisConflict.md)
+ - [Model.AiAnalysisConflictCode](docs/AiAnalysisConflictCode.md)
+ - [Model.AiAnalysisFailedPayload](docs/AiAnalysisFailedPayload.md)
+ - [Model.AiAnalysisRequest](docs/AiAnalysisRequest.md)
+ - [Model.AiAnalysisRunningPayload](docs/AiAnalysisRunningPayload.md)
+ - [Model.AiAnalysisSucceededPayload](docs/AiAnalysisSucceededPayload.md)
+ - [Model.AiAnalysisUsage](docs/AiAnalysisUsage.md)
+ - [Model.AiProvider](docs/AiProvider.md)
  - [Model.AppCredential](docs/AppCredential.md)
  - [Model.AppCredentialKind](docs/AppCredentialKind.md)
  - [Model.AppTokenContentType](docs/AppTokenContentType.md)
@@ -237,6 +247,8 @@ Class | Method | HTTP request | Description
  - [Model.SubProvisionerKey](docs/SubProvisionerKey.md)
  - [Model.Subscriber](docs/Subscriber.md)
  - [Model.TargetConnectionOptions](docs/TargetConnectionOptions.md)
+ - [Model.TaskInfo](docs/TaskInfo.md)
+ - [Model.TaskState](docs/TaskState.md)
  - [Model.TrafficEventResponse](docs/TrafficEventResponse.md)
  - [Model.TransportProtocolResponse](docs/TransportProtocolResponse.md)
  - [Model.UpdateProductInfo](docs/UpdateProductInfo.md)
