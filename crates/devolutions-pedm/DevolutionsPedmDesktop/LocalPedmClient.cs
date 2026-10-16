@@ -12,10 +12,6 @@ namespace DevolutionsPedmDesktop
             var httpHandler = new StandardSocketsHttpHandler
             {
                 ConnectCallback = async(ctx, ct) => {
-                    // A client is impersonable as soon as the connection is accepted,
-                    // so do not connect at all while the Agent service cannot be serving the pipe.
-                    PedmServerVerifier.EnsureServiceRunning();
-
                     // Request only the access the service grants to clients; ReadPermissions is needed by PedmServerVerifier.
                     // The service impersonates the client to act on its behalf.
                     var pipe = new NamedPipeClientStream(
@@ -28,7 +24,7 @@ namespace DevolutionsPedmDesktop
 
                     try
                     {
-                        await pipe.ConnectAsync(ct);
+                        await PedmServerVerifier.ConnectAsync(pipe, ct);
                         PedmServerVerifier.Verify(pipe);
                     }
                     catch

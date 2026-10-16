@@ -3,6 +3,8 @@ using System.ComponentModel;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.Win32.SafeHandles;
 
 namespace DevolutionsPedmDesktop
@@ -27,6 +29,34 @@ namespace DevolutionsPedmDesktop
         public static void EnsureServiceRunning()
         {
             RequireAgentServiceProcessId();
+        }
+
+        private const int ConnectAttempts = 5;
+        private const int ConnectTimeoutMilliseconds = 50;
+
+        /// <summary>
+        /// Connects the pipe within a bounded budget, re-checking the service before every attempt.
+        /// A client is impersonable as soon as its connection is accepted, so it must not wait for the pipe
+        /// while the Agent service is not running: connecting to whoever re-creates the name afterwards
+        /// would defeat <see cref="Verify"/>. The service is therefore checked again before each attempt,
+        /// and the wait per attempt is bounded.
+        /// </summary>
+        public static async Task ConnectAsync(NamedPipeClientStream pipe, CancellationToken cancellationToken)
+        {
+            for (int attempt = 1; ; attempt++)
+            {
+                EnsureServiceRunning();
+
+                try
+                {
+                    await pipe.ConnectAsync(ConnectTimeoutMilliseconds, cancellationToken);
+                    return;
+                }
+                catch (TimeoutException) when (attempt < ConnectAttempts)
+                {
+                    // The pipe may appear shortly; retry while the service is running.
+                }
+            }
         }
 
         /// <summary>
