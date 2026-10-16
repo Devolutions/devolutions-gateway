@@ -190,8 +190,9 @@ async fn process_messages(
     )]
     let mut _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
 
-    // Send server capabilities back to the client.
-    dvc_tx.send(server_caps.into()).await?;
+    // Reply with the negotiated capset so the client sees the capabilities and heartbeat interval
+    // the agent applies, not the server default that omits the interval.
+    dvc_tx.send(downgraded_caps.clone().into()).await?;
 
     let mut processor = MessageProcessor::new(
         downgraded_caps,
@@ -225,13 +226,13 @@ async fn process_messages(
                                 // Old exec sessions will be abandoned (IO loops will terminate
                                 // on old processor `Drop`).
                                 processor = MessageProcessor::new(
-                                    downgraded_caps,
+                                    downgraded_caps.clone(),
                                     dvc_tx.clone(),
                                     io_notification_tx.clone(),
                                     pwsh_executable.clone(),
                                 );
 
-                                dvc_tx.send(server_caps.into()).await?;
+                                dvc_tx.send(downgraded_caps.into()).await?;
                             }
                             Err(error) => {
                                 error!(%error, "Failed to process DVC message");
@@ -1327,11 +1328,59 @@ mod tests {
 
     use devolutions_gateway_task::ShutdownHandle;
     use futures::poll;
-    use now_proto_pdu::{NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowMessage, OwnedNowMessage};
+    use now_proto_pdu::{
+        NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowMessage,
+        NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
+    };
 
     use super::{DEFAULT_HEARTBEAT_INTERVAL, heartbeat_timer, process_messages, spawn_heartbeat};
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
+
+    /// The negotiation reply must be the downgraded capset, so the client sees the capabilities
+    /// and heartbeat interval the agent applies rather than the server default, which carries no
+    /// interval at all.
+    #[tokio::test]
+    async fn negotiation_replies_with_downgraded_capset() {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        // STYLE_SHELL is not supported by the agent and must be removed; the agent advertises no
+        // interval, so the client's one is the negotiated minimum.
+        let client_caps = NowChannelCapsetMsg::default()
+            .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
+            .with_session_capset(NowSessionCapsetFlags::LOCK | NowSessionCapsetFlags::MSGBOX)
+            .with_exec_capset(NowExecCapsetFlags::STYLE_RUN | NowExecCapsetFlags::STYLE_SHELL)
+            .with_heartbeat_interval(Duration::from_secs(30))
+            .expect("30 s is a valid heartbeat interval");
+
+        let expected_caps = NowChannelCapsetMsg::default()
+            .with_system_capset(NowSystemCapsetFlags::SHUTDOWN)
+            .with_session_capset(NowSessionCapsetFlags::LOCK | NowSessionCapsetFlags::MSGBOX)
+            .with_exec_capset(NowExecCapsetFlags::STYLE_RUN)
+            .with_heartbeat_interval(Duration::from_secs(30))
+            .expect("30 s is a valid heartbeat interval");
+
+        read_tx.send(client_caps.into()).await.expect("queue client capset");
+        read_tx
+            .send(NowChannelCloseMsg::default().into())
+            .await
+            .expect("queue channel close");
+
+        process_messages(read_rx, write_tx, shutdown_signal, &init_progress)
+            .await
+            .expect("negotiation followed by close completes cleanly");
+
+        let reply = write_rx.try_recv().expect("negotiation reply was sent");
+
+        let NowMessage::Channel(NowChannelMessage::Capset(reply)) = reply else {
+            panic!("expected a NOW_CHANNEL_CAPSET reply, got {reply:?}");
+        };
+
+        assert_eq!(reply, expected_caps);
+    }
 
     /// A zero interval means "heartbeat disabled" per `NOW_CHANNEL_SET_HEARTBEAT`; a timer for it
     /// would be always ready and flood the channel.
