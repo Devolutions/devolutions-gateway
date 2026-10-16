@@ -623,14 +623,12 @@ impl MessageProcessor {
                 // from this process.
             }
             NowMessage::Rdm(NowRdmMessage::Capabilities(rdm_caps_msg)) => {
-                match self.rdm_handler.process_capabilities(rdm_caps_msg).await {
-                    Ok(response_msg) => {
-                        self.dvc_tx.send(response_msg).await?;
-                    }
-                    Err(error) => {
-                        error!(%error, "Failed to process RDM capabilities message");
-                    }
-                }
+                // Capability responses are matched by send order, so the request is answered even
+                // when processing fails; only an unbuildable fallback reply ends the channel.
+                let processed = self.rdm_handler.process_capabilities(rdm_caps_msg).await;
+                let response_msg = RdmMessageProcessor::capabilities_reply(processed)?;
+
+                self.dvc_tx.send(response_msg).await?;
             }
             NowMessage::Rdm(NowRdmMessage::AppStart(rdm_app_start_msg)) => {
                 // Start RDM in background task (non-blocking) - needs capabilities
