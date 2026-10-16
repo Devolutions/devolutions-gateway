@@ -6,7 +6,8 @@ description: Review INTENT.md and *.intent.md files or drafts for contradictions
 # Intent review
 
 An intent file holds design commitments that rule out deliberately rejected changes; agents read it literally before every change in its directory.
-Review as a skeptical peer: findings and proposals, never a rewrite into a design document, and never new intent on the human's behalf.
+Review as a skeptical peer: findings and proposals, never a rewrite into a design document.
+A proposal rewords a commitment the human already holds; when a finding can only be fixed by deciding what the software should be, ask instead of proposing.
 
 ## Gather
 
