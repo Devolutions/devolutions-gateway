@@ -5,18 +5,12 @@ use std::process::{Command, Output, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
-use devolutions_gateway::target_addr::TargetAddr;
-use devolutions_gateway::token::{
-    AccessScope, ApplicationProtocol, AssociationTokenClaims, ConnectionMode, EnrollmentTokenClaims,
-    ReconnectionPolicy, RecordingPolicy, ScopeTokenClaims, SessionTtl,
-};
 use futures_util::{SinkExt as _, StreamExt as _};
 use ipnetwork::Ipv4Network;
-use nonempty::NonEmpty;
 use picky::jose::jws::JwsAlg;
 use picky::jose::jwt::CheckedJwtSig;
 use picky::key::PrivateKey;
-use serde::Serialize;
+use serde_json::json;
 use testsuite::cli::{agent_assert_cmd, agent_tokio_cmd, dgw_tokio_cmd, wait_for_tcp_port};
 use testsuite::dgw_config::{AgentTunnelConfig, DgwConfig};
 use tokio::net::TcpListener;
@@ -317,9 +311,8 @@ fn unix_timestamp() -> i64 {
     .expect("system time should fit in an i64")
 }
 
-fn sign<T: Serialize>(key: &PrivateKey, content_type: &str, claims: &T) -> String {
+fn sign(key: &PrivateKey, content_type: &str, mut claims: serde_json::Value) -> String {
     let now = unix_timestamp();
-    let mut claims = serde_json::to_value(claims).expect("serialize test claims");
     let claims = claims.as_object_mut().expect("test claims should be an object");
     claims.insert("iat".to_owned(), serde_json::json!(now));
     claims.insert("nbf".to_owned(), serde_json::json!(now - 1));
@@ -328,30 +321,43 @@ fn sign<T: Serialize>(key: &PrivateKey, content_type: &str, claims: &T) -> Strin
         .expect("sign test token")
 }
 
-fn association_token(key: &PrivateKey, target: TargetAddr, agent_id: Option<Uuid>) -> (Uuid, String) {
+fn association_token(key: &PrivateKey, target: &str, agent_id: Option<Uuid>) -> (Uuid, String) {
     let session_id = Uuid::new_v4();
-    let claims = AssociationTokenClaims {
-        jet_aid: session_id,
-        jet_ap: ApplicationProtocol::unknown(),
-        jet_cm: ConnectionMode::Fwd {
-            targets: NonEmpty::new(target),
-        },
-        jet_rec: RecordingPolicy::None,
-        jet_flt: false,
-        jet_ttl: SessionTtl::Unlimited,
-        jet_reuse: ReconnectionPolicy::Disallowed,
-        exp: unix_timestamp() + 60,
-        jti: Uuid::new_v4(),
-        cert_thumb256: None,
-        jet_agent_id: agent_id,
-    };
-    (session_id, sign(key, "ASSOCIATION", &claims))
+    let claims = json!({
+        "jet_aid": session_id,
+        "jet_ap": "unknown",
+        "jet_cm": "fwd",
+        "dst_hst": target,
+        "exp": unix_timestamp() + 60,
+        "jti": Uuid::new_v4(),
+        "jet_agent_id": agent_id,
+    });
+    (session_id, sign(key, "ASSOCIATION", claims))
+}
+
+fn scope_token(key: &PrivateKey, scope: &str) -> String {
+    let claims = json!({
+        "scope": scope,
+        "exp": unix_timestamp() + 60,
+        "jti": Uuid::new_v4(),
+    });
+    sign(key, "SCOPE", claims)
+}
+
+fn enrollment_token(key: &PrivateKey, gateway_url: String, agent_name: &str) -> String {
+    let claims = json!({
+        "exp": unix_timestamp() + 60,
+        "jti": Uuid::new_v4(),
+        "jet_gw_url": gateway_url,
+        "jet_agent_name": agent_name,
+    });
+    sign(key, "ENROLLMENT", claims)
 }
 
 fn forwarding_request(
     http_port: u16,
     key: &PrivateKey,
-    target: TargetAddr,
+    target: &str,
     agent_id: Option<Uuid>,
 ) -> tokio_tungstenite::tungstenite::http::Request<()> {
     let (session_id, token) = association_token(key, target, agent_id);
@@ -378,7 +384,7 @@ fn start_gateway(config_dir: &Path) -> Child {
 async fn round_trip(
     http_port: u16,
     key: &PrivateKey,
-    target: TargetAddr,
+    target: &str,
     agent_id: Option<Uuid>,
     payload: &[u8],
 ) -> anyhow::Result<()> {
@@ -395,15 +401,10 @@ async fn round_trip(
     Ok(())
 }
 
-async fn wait_for_round_trip(
-    http_port: u16,
-    key: &PrivateKey,
-    target: TargetAddr,
-    payload: &[u8],
-) -> anyhow::Result<()> {
+async fn wait_for_round_trip(http_port: u16, key: &PrivateKey, target: &str, payload: &[u8]) -> anyhow::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        let error = match round_trip(http_port, key, target.clone(), None, payload).await {
+        let error = match round_trip(http_port, key, target, None, payload).await {
             Ok(()) => return Ok(()),
             Err(error) => error,
         };
@@ -428,14 +429,9 @@ async fn wait_for_registered_agent(
     let mut last_response = serde_json::Value::Null;
 
     loop {
-        let claims = ScopeTokenClaims {
-            scope: AccessScope::AgentRead,
-            exp: unix_timestamp() + 60,
-            jti: Uuid::new_v4(),
-        };
         let response = client
             .get(format!("http://127.0.0.1:{http_port}/jet/tunnel/agents"))
-            .bearer_auth(sign(key, "SCOPE", &claims))
+            .bearer_auth(scope_token(key, "gateway.agent.read"))
             .send()
             .await;
 
@@ -493,14 +489,9 @@ async fn wait_for_registered_agent(
 }
 
 fn enrollment_token_file(key: &PrivateKey, http_port: u16, agent_name: &str) -> tempfile::NamedTempFile {
-    let claims = EnrollmentTokenClaims {
-        exp: unix_timestamp() + 60,
-        jti: Uuid::new_v4(),
-        jet_gw_url: format!("http://{DOCKER_GATEWAY_HOST}:{http_port}"),
-        jet_agent_name: agent_name.to_owned(),
-    };
+    let token = enrollment_token(key, format!("http://{DOCKER_GATEWAY_HOST}:{http_port}"), agent_name);
     let file = tempfile::NamedTempFile::new().expect("create enrollment token file");
-    std::fs::write(file.path(), sign(key, "ENROLLMENT", &claims)).expect("write enrollment token file");
+    std::fs::write(file.path(), token).expect("write enrollment token file");
     file
 }
 
@@ -542,7 +533,7 @@ async fn assert_explicit_ip_is_refused(http_port: u16, key: &PrivateKey, agent_i
     let (mut socket, _) = tokio_tungstenite::connect_async(forwarding_request(
         http_port,
         key,
-        TargetAddr::from_components("tcp", "127.0.0.1", port).expect("build refused target"),
+        &format!("tcp://127.0.0.1:{port}"),
         Some(agent_id),
     ))
     .await
@@ -563,14 +554,9 @@ async fn assert_explicit_ip_is_refused(http_port: u16, key: &PrivateKey, agent_i
 }
 
 async fn delete_agent(http_port: u16, key: &PrivateKey, agent_id: Uuid) {
-    let claims = ScopeTokenClaims {
-        scope: AccessScope::AgentDelete,
-        exp: unix_timestamp() + 60,
-        jti: Uuid::new_v4(),
-    };
     let response = reqwest::Client::new()
         .delete(format!("http://127.0.0.1:{http_port}/jet/tunnel/agents/{agent_id}"))
-        .bearer_auth(sign(key, "SCOPE", &claims))
+        .bearer_auth(scope_token(key, "gateway.agent.delete"))
         .send()
         .await
         .expect("delete Agent");
@@ -578,14 +564,9 @@ async fn delete_agent(http_port: u16, key: &PrivateKey, agent_id: Uuid) {
 }
 
 async fn list_agents(http_port: u16, key: &PrivateKey) -> Vec<serde_json::Value> {
-    let claims = ScopeTokenClaims {
-        scope: AccessScope::AgentRead,
-        exp: unix_timestamp() + 60,
-        jti: Uuid::new_v4(),
-    };
     reqwest::Client::new()
         .get(format!("http://127.0.0.1:{http_port}/jet/tunnel/agents"))
-        .bearer_auth(sign(key, "SCOPE", &claims))
+        .bearer_auth(scope_token(key, "gateway.agent.read"))
         .send()
         .await
         .expect("list Agents")
@@ -599,7 +580,7 @@ async fn list_agents(http_port: u16, key: &PrivateKey) -> Vec<serde_json::Value>
 async fn assert_agent_stays_rejected(
     http_port: u16,
     key: &PrivateKey,
-    target: TargetAddr,
+    target: &str,
     agent_id: Uuid,
     duration: Duration,
 ) {
@@ -609,7 +590,7 @@ async fn assert_agent_stays_rejected(
             round_trip(
                 http_port,
                 key,
-                target.clone(),
+                target,
                 Some(agent_id),
                 b"deleted Agent must stay rejected"
             )
@@ -649,13 +630,11 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
         .expect("gateway http port ready");
 
     let agent_config = tempfile::tempdir().expect("create agent config directory");
-    let enrollment_claims = EnrollmentTokenClaims {
-        exp: unix_timestamp() + 60,
-        jti: Uuid::new_v4(),
-        jet_gw_url: format!("http://127.0.0.1:{}", config.http_port()),
-        jet_agent_name: "smoke-agent".to_owned(),
-    };
-    let enrollment_token = sign(&provisioner_key, "ENROLLMENT", &enrollment_claims);
+    let enrollment_token = enrollment_token(
+        &provisioner_key,
+        format!("http://127.0.0.1:{}", config.http_port()),
+        "smoke-agent",
+    );
     agent_assert_cmd()
         .env("DAGENT_CONFIG_PATH", agent_config.path())
         .args([
@@ -695,36 +674,26 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
         .spawn()
         .expect("start agent");
     let (echo_port, echo_task) = start_echo_server().await;
-    let echo_target = TargetAddr::from_components("tcp", "localhost", echo_port).expect("build echo target");
+    let echo_target = format!("tcp://localhost:{echo_port}");
 
-    wait_for_round_trip(
-        config.http_port(),
-        &provisioner_key,
-        echo_target.clone(),
-        b"before restart",
-    )
-    .await
-    .expect("forward before restart");
+    wait_for_round_trip(config.http_port(), &provisioner_key, &echo_target, b"before restart")
+        .await
+        .expect("forward before restart");
     gateway.kill().await.expect("stop gateway");
     gateway.wait().await.expect("wait for gateway shutdown");
     gateway = start_gateway(config.config_dir());
     wait_for_tcp_port(config.http_port())
         .await
         .expect("restarted gateway http port ready");
-    wait_for_round_trip(
-        config.http_port(),
-        &provisioner_key,
-        echo_target.clone(),
-        b"after restart",
-    )
-    .await
-    .expect("forward after restart");
+    wait_for_round_trip(config.http_port(), &provisioner_key, &echo_target, b"after restart")
+        .await
+        .expect("forward after restart");
     assert_explicit_ip_is_refused(config.http_port(), &provisioner_key, agent_id).await;
     delete_agent(config.http_port(), &provisioner_key, agent_id).await;
     assert_agent_stays_rejected(
         config.http_port(),
         &provisioner_key,
-        echo_target.clone(),
+        &echo_target,
         agent_id,
         Duration::from_secs(2),
     )
@@ -739,7 +708,7 @@ async fn enrolled_agent_forwards_domain_only_route_and_reconnects() {
     assert_agent_stays_rejected(
         config.http_port(),
         &provisioner_key,
-        echo_target,
+        &echo_target,
         agent_id,
         Duration::from_secs(2),
     )
@@ -786,13 +755,12 @@ async fn docker_isolates_real_agent_dns_and_ip_routes() {
         .start_target(&docker.dns_agent_ip)
         .expect("start dns target container");
     docker.wait_for_target().expect("wait for dns target container");
-    let exact_target =
-        TargetAddr::from_components("tcp", DOCKER_EXACT_ROUTE, DOCKER_TARGET_PORT).expect("build exact dns target");
+    let exact_target = format!("tcp://{DOCKER_EXACT_ROUTE}:{DOCKER_TARGET_PORT}");
     assert!(
         round_trip(
             config.http_port(),
             &provisioner_key,
-            exact_target.clone(),
+            &exact_target,
             None,
             b"must fail without agent"
         )
@@ -824,27 +792,21 @@ async fn docker_isolates_real_agent_dns_and_ip_routes() {
         || container_logs(&docker.dns_agent_container),
     )
     .await;
-    wait_for_round_trip(
-        config.http_port(),
-        &provisioner_key,
-        exact_target.clone(),
-        b"exact DNS route",
-    )
-    .await
-    .unwrap_or_else(|error| {
-        panic!(
-            "exact dns route failed: {error:#}; agent logs={}; target logs={}",
-            container_logs(&docker.dns_agent_container),
-            container_logs(&docker.target_container)
-        )
-    });
+    wait_for_round_trip(config.http_port(), &provisioner_key, &exact_target, b"exact DNS route")
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "exact dns route failed: {error:#}; agent logs={}; target logs={}",
+                container_logs(&docker.dns_agent_container),
+                container_logs(&docker.target_container)
+            )
+        });
     assert_container_running(&docker.target_container);
-    let wildcard_target = TargetAddr::from_components("tcp", DOCKER_WILDCARD_TARGET, DOCKER_TARGET_PORT)
-        .expect("build wildcard dns target");
+    let wildcard_target = format!("tcp://{DOCKER_WILDCARD_TARGET}:{DOCKER_TARGET_PORT}");
     wait_for_round_trip(
         config.http_port(),
         &provisioner_key,
-        wildcard_target.clone(),
+        &wildcard_target,
         b"wildcard DNS route",
     )
     .await
@@ -875,7 +837,7 @@ async fn docker_isolates_real_agent_dns_and_ip_routes() {
     wait_for_round_trip(
         config.http_port(),
         &provisioner_key,
-        wildcard_target,
+        &wildcard_target,
         b"DNS route after restart",
     )
     .await
@@ -893,12 +855,12 @@ async fn docker_isolates_real_agent_dns_and_ip_routes() {
         .start_target(&docker.ip_agent_ip)
         .expect("start ip target container");
     docker.wait_for_target().expect("wait for ip target container");
-    let ip_target = TargetAddr::from_components("tcp", &docker.target_ip, DOCKER_TARGET_PORT).expect("build ip target");
+    let ip_target = format!("tcp://{}:{DOCKER_TARGET_PORT}", docker.target_ip);
     assert!(
         round_trip(
             config.http_port(),
             &provisioner_key,
-            ip_target.clone(),
+            &ip_target,
             None,
             b"must fail without IP agent"
         )
@@ -931,7 +893,7 @@ async fn docker_isolates_real_agent_dns_and_ip_routes() {
         || container_logs(&docker.ip_agent_container),
     )
     .await;
-    wait_for_round_trip(config.http_port(), &provisioner_key, ip_target, b"IP route")
+    wait_for_round_trip(config.http_port(), &provisioner_key, &ip_target, b"IP route")
         .await
         .unwrap_or_else(|error| {
             panic!(
