@@ -17,7 +17,7 @@ Doc comments link to the governing specification with reference-style links and 
 
 Write each field's size with its name (`4 /* ReturnCode */`), never bare arithmetic or `size_of`.
 
-Define invariants with `// INVARIANT:` as a doc comment on the field, before the loop, or in the function doc for outputs.
+Define invariants with `// INVARIANT:` as a doc comment on the field, before the loop, at the code for a local invariant, or in the function doc for outputs.
 Reference them without the prefix when justifying an assumption or a lint suppression.
 State checks positively (`if !(idx < len)`) and prefer `<` and `<=` over `>` and `>=`.
 
