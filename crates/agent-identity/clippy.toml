@@ -5,4 +5,5 @@ accept-comment-above-attributes = true
 # Device keys can fail (for example in the Windows key store); sign would panic, so identity code calls try_sign.
 disallowed-methods = [
     { path = "signature::Signer::sign", reason = "use try_sign: device key signing is fallible" },
+    { path = "libc::renameat2", reason = "needs glibc 2.28; the Linux release baseline is glibc 2.27, so call the renameat2 syscall directly" },
 ]
