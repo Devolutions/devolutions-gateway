@@ -1,11 +1,8 @@
 use core::{future, time};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::Context as _;
 use axum::extract::ws::{self, CloseFrame, WebSocket};
 use bytes::Bytes;
-use devolutions_gateway_task::{ChildTask, ShutdownSignal};
+use devolutions_gateway_task::ShutdownSignal;
 use futures::{SinkExt as _, StreamExt as _};
 use tap::Pipe as _;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -34,7 +31,7 @@ pub fn handle(
 
 pub fn handle_messages(
     ws: WebSocket,
-    mut shutdown_signal: impl transport::KeepAliveShutdown,
+    shutdown_signal: impl transport::KeepAliveShutdown,
     keep_alive_interval: time::Duration,
 ) -> (
     impl futures::Stream<Item = Result<Bytes, axum::Error>>
@@ -44,36 +41,14 @@ pub fn handle_messages(
     + 'static,
     MessageCloseHandle,
 ) {
-    let ws = transport::Shared::new(ws);
-    let mut keepalive_socket = ws.shared();
-    let keepalive = ChildTask::spawn(async move {
-        loop {
-            tokio::select! {
-                () = tokio::time::sleep(keep_alive_interval) => {
-                    if let Err(error) = keepalive_socket.send(ws::Message::Ping(Bytes::new())).await {
-                        warn!(%error, "WebM WebSocket keepalive failed");
-                        break;
-                    }
-                }
-                () = shutdown_signal.wait() => break,
-            }
-        }
-    });
-    let peer_closed = Arc::new(AtomicBool::new(false));
+    let (ws, sentinel) = with_sentinel(ws, shutdown_signal, keep_alive_interval);
     let close_handle = MessageCloseHandle {
-        socket: ws.shared(),
-        keepalive,
-        peer_closed: Arc::clone(&peer_closed),
+        sentinel,
+        ws: ws.shared(),
     };
 
     let messages = ws
-        .take_while(move |item| {
-            let closed = matches!(item, Ok(ws::Message::Close(_)));
-            if closed {
-                peer_closed.store(true, Ordering::Relaxed);
-            }
-            future::ready(!closed)
-        })
+        .take_while(|item| future::ready(!matches!(item, Ok(ws::Message::Close(_)))))
         .filter_map(|item| {
             item.map(|msg| match msg {
                 ws::Message::Text(s) => Some(Bytes::from(s)),
@@ -89,79 +64,37 @@ pub fn handle_messages(
     (messages, close_handle)
 }
 
-/// Completes the WebM closing handshake, with a five-second deadline for sending and draining.
+/// Retains the WebSocket until the closing exchange completes or its drain deadline expires.
 pub struct MessageCloseHandle {
-    socket: transport::Shared<WebSocket>,
-    keepalive: ChildTask<()>,
-    peer_closed: Arc<AtomicBool>,
+    sentinel: transport::CloseWebSocketHandle,
+    ws: transport::Shared<WebSocket>,
 }
 
 impl MessageCloseHandle {
-    pub async fn normal_close(self) -> anyhow::Result<()> {
-        self.close(1000, String::new(), time::Duration::from_secs(5)).await
+    pub async fn normal_close(self) {
+        self.sentinel.normal_close().await;
+        wait_for_close(self.ws, time::Duration::from_secs(5)).await;
     }
 
-    pub async fn server_error(self, message: String) -> anyhow::Result<()> {
-        self.close(1011, message, time::Duration::from_secs(5)).await
-    }
-
-    async fn close(mut self, code: u16, reason: String, timeout: time::Duration) -> anyhow::Result<()> {
-        tokio::time::timeout(timeout, async move {
-            self.keepalive.abort();
-            if let Err(error) = self.keepalive.join().await
-                && !error.is_cancelled()
-            {
-                return Err(anyhow::Error::new(error).context("join websocket keepalive"));
-            }
-            if !self.peer_closed.load(Ordering::Relaxed)
-                && let Err(error) = self
-                    .socket
-                    .send(ws::Message::Close(Some(CloseFrame {
-                        code,
-                        reason: reason.into(),
-                    })))
-                    .await
-            {
-                if socket_is_closed(&error) {
-                    return Ok(());
-                }
-                return Err(anyhow::Error::new(error).context("send websocket close"));
-            }
-            loop {
-                if let Err(error) = self.socket.flush().await {
-                    if socket_is_closed(&error) {
-                        return Ok(());
-                    }
-                    return Err(anyhow::Error::new(error).context("flush websocket close"));
-                }
-                if self.peer_closed.load(Ordering::Relaxed) {
-                    return Ok(());
-                }
-                match self.socket.next().await {
-                    Some(Ok(ws::Message::Close(_))) => self.peer_closed.store(true, Ordering::Relaxed),
-                    Some(Ok(_)) => {}
-                    Some(Err(error)) if socket_is_closed(&error) => return Ok(()),
-                    Some(Err(error)) => return Err(anyhow::Error::new(error).context("drain websocket close")),
-                    None => return Ok(()),
-                }
-            }
-        })
-        .await
-        .context("websocket closing handshake timed out")?
+    pub async fn server_error(self, message: String) {
+        self.sentinel.server_error(message).await;
+        wait_for_close(self.ws, time::Duration::from_secs(5)).await;
     }
 }
 
-fn socket_is_closed(error: &axum::Error) -> bool {
-    use std::error::Error as _;
-    error
-        .source()
-        .and_then(|source| source.downcast_ref::<tungstenite::Error>())
-        .is_some_and(|error| {
-            matches!(
-                error,
-                tungstenite::Error::ConnectionClosed | tungstenite::Error::AlreadyClosed
-            )
-        })
+async fn wait_for_close(mut ws: transport::Shared<WebSocket>, timeout: time::Duration) {
+    // Reading also flushes the Close response tungstenite queues when the peer closes first.
+    let drain = async {
+        while let Some(message) = ws.next().await {
+            if let Err(error) = message {
+                debug!(%error, "WebSocket closing handshake failed");
+                break;
+            }
+        }
+    };
+    if tokio::time::timeout(timeout, drain).await.is_err() {
+        debug!("WebSocket closing handshake timed out");
+    }
 }
 
 /// Shares the WebSocket with a keep-alive task, which also sends the close frame through the returned handle.
@@ -223,7 +156,7 @@ mod tests {
     use tokio_tungstenite::tungstenite::Message;
     use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
-    use super::{KeepAliveShutdownSignal, handle_messages};
+    use super::{KeepAliveShutdownSignal, handle_messages, wait_for_close};
 
     type ClientSocket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -263,10 +196,11 @@ mod tests {
                 messages.send(terminal.into()).await?;
                 drop(messages);
                 if failed {
-                    close.server_error("test stream failure".to_owned()).await
+                    close.server_error("test stream failure".to_owned()).await;
                 } else {
-                    close.normal_close().await
+                    close.normal_close().await;
                 }
+                anyhow::Ok(())
             });
 
             client.send(Message::Binary(vec![1].into())).await?;
@@ -308,7 +242,8 @@ mod tests {
             let task = ChildTask::spawn(async move {
                 messages.send(vec![3].into()).await?;
                 drop(messages);
-                close.normal_close().await
+                close.normal_close().await;
+                anyhow::Ok(())
             });
             assert_eq!(next_message(&mut client).await?, Message::Binary(vec![3].into()));
             client.close(None).await?;
@@ -332,7 +267,8 @@ mod tests {
             let task = ChildTask::spawn(async move {
                 assert!(messages.next().await.is_none());
                 drop(messages);
-                close.normal_close().await
+                close.normal_close().await;
+                anyhow::Ok(())
             });
             client.close(None).await?;
             // RFC 6455, Section 5.5.1 requires a reply; tungstenite echoes the peer's empty Close payload.
@@ -346,17 +282,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn webm_client_abort_surfaces_a_close_error_without_hanging() -> anyhow::Result<()> {
+    async fn webm_client_abort_finishes_cleanup_without_hanging() -> anyhow::Result<()> {
         tokio::time::timeout(Duration::from_secs(2), async {
             let (server, client, _listener) = loopback_pair().await?;
             let (_shutdown, signal) = ShutdownHandle::new();
             let (messages, close) = handle_messages(server, KeepAliveShutdownSignal(signal), Duration::from_secs(60));
             drop(client);
             drop(messages);
-            close
-                .normal_close()
-                .await
-                .expect_err("aborted peer has no closing handshake");
+            close.normal_close().await;
             anyhow::Ok(())
         })
         .await
@@ -364,31 +297,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn webm_missing_close_reply_times_out_instead_of_reporting_success() -> anyhow::Result<()> {
+    async fn webm_missing_close_reply_bounds_the_drain() -> anyhow::Result<()> {
         let (server, _client, _listener) = loopback_pair().await?;
         let (_shutdown, signal) = ShutdownHandle::new();
         let (messages, close) = handle_messages(server, KeepAliveShutdownSignal(signal), Duration::from_secs(60));
         drop(messages);
+        close.sentinel.normal_close().await;
         tokio::time::pause();
         let deadline = Duration::from_millis(100);
         let started = tokio::time::Instant::now();
-        let error = tokio::time::timeout(Duration::from_secs(1), close.close(1000, String::new(), deadline))
+        tokio::time::timeout(Duration::from_secs(1), wait_for_close(close.ws, deadline))
             .await
-            .context("close deadline failed to bound cleanup")?
-            .expect_err("peer did not acknowledge Close");
-        assert!(error.is::<tokio::time::error::Elapsed>());
+            .context("close deadline failed to bound cleanup")?;
         assert!(deadline <= started.elapsed());
         Ok(())
     }
 
     #[tokio::test]
-    async fn dropping_webm_close_owner_cancels_keepalive_and_releases_the_socket() -> anyhow::Result<()> {
+    async fn dropping_webm_close_owner_stops_keepalive_and_releases_the_socket() -> anyhow::Result<()> {
         tokio::time::timeout(Duration::from_secs(2), async {
             let (server, mut client, _listener) = loopback_pair().await?;
             let (_shutdown, signal) = ShutdownHandle::new();
             let (messages, close) = handle_messages(server, KeepAliveShutdownSignal(signal), Duration::from_millis(10));
             drop(messages);
-            // Sole guard for dropping the owner without close(): its keepalive must release the socket.
+            // Dropping the last close sender must let the sentinel exit and release its socket.
             drop(close);
             assert!(client.next().await.transpose().is_err());
             anyhow::Ok(())
@@ -411,7 +343,7 @@ mod tests {
             let (_shutdown, signal) = ShutdownHandle::new();
             let (messages, close) = handle_messages(server, KeepAliveShutdownSignal(signal), Duration::from_secs(60));
             drop(messages);
-            close.normal_close().await?;
+            close.normal_close().await;
             assert_orderly_eof(&mut client).await?;
             anyhow::Ok(())
         })

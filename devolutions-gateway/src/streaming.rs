@@ -336,12 +336,13 @@ async fn setup_webm_streaming(
 
     match streaming_result {
         Err(error) => {
-            if let Err(close_error) = close_handle.server_error("webm streaming failure".to_owned()).await {
-                warn!(error = %close_error, "WebM WebSocket error closing failed");
-            }
+            close_handle.server_error("webm streaming failure".to_owned()).await;
             Err(error)
         }
-        Ok(()) => close_handle.normal_close().await.context("close webm websocket"),
+        Ok(()) => {
+            close_handle.normal_close().await;
+            Ok(())
+        }
     }
 }
 
