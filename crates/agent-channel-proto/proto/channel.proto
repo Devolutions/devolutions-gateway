@@ -31,7 +31,7 @@ message ServerMessage {
   }
 }
 
-// C19: the device's effective config (§5.2 shape) as a UTF-8 JSON object.
+// The device's effective config (§5.2 shape) as a UTF-8 JSON object.
 message ConfigUpdate {
   string config_json = 1;
 }

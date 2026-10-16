@@ -3,6 +3,17 @@
 ## History
 
 - v1.0 (2026-09-25) by @CBenoit
+- v1.1 (2026-10-17): scoped to the agent–authority interface; the DVLS admin API, the agent's local behavior and the mock server moved to intent files; the channel schema is referenced from `channel.proto`; wording fixes from the contract audit.
+
+## Parties
+
+This contract defines what two independently built parties must agree on:
+
+- the agent (Devolutions Agent), which enrolls and authenticates;
+- an authority (DVLS now, PSU later), which enrolls and authenticates agents.
+
+Third-party relying parties may also read the published roots (§5.1).
+Each party's own realization (the agent's local files, configuration and CLI; an authority's storage, administration and hosting) is that party's intent, not contract.
 
 ## Definitions
 
@@ -10,7 +21,6 @@
 - `base64url` means URL- and filename-safe Base64 alphabet (RFC 4648 §5) without padding.
 - An authority is the product server that enrolls and authenticates agents; "server" means the authority unless stated otherwise.
 - SPKI means the DER-encoded X.509 `SubjectPublicKeyInfo` structure.
-- `<data-dir>` means the agent's configured data directory.
 
 ## 1. Protocol conventions
 
@@ -40,20 +50,22 @@ Unless stated otherwise, implementations must follow these conventions.
   The agent ignores unknown fields.
   V1 fields:
   - `u` (required): absolute `https` product base URL without a query or fragment, e.g. `https://host/dvls`.
-- `secret`: `base64url` of 32 random bytes; opaque to the agent.
+- `secret`: `base64url` of 32 random bytes; opaque to the agent beyond this format.
 - Total length ≤ 4096 bytes.
   The agent rejects malformed tokens locally without contacting the server and treats the failure as permanent.
 
 ### 2.1 Authority behavior
 
+- A token has a name, a use limit (`max_uses`), an expiry, an optional friendly-name format (§3) and an optional product-specific contribution to each enrolled device's config (§5.2).
+  None of them changes after creation, and a deleted token is never restored, so the `token_*` outcomes of §5.4 are permanent.
 - The server stores only `SHA-256(secret)`.
 - A token can create a device only when it exists, has not been deleted, has not expired, and `used_count < max_uses`.
 - A token use is consumed in the transaction that creates the device.
 - Re-enrollment with the same token and CSR public key returns the existing device without consuming another use.
 - Deleting a token retains its secret hash and `deleted_at` as a tombstone.
-  A deleted token authenticates only for an idempotent replay of a device that it created; every other use returns `token_invalid`.
-- The server evaluates enrollment in this order: (1) authenticate the token by finding its row and matching `SHA-256(secret)`, otherwise return `token_invalid`; (2) validate the body, CSR and metadata, otherwise return `invalid_request`; (3) look up the CSR public key for idempotence; (4) return `token_invalid` if the token is deleted, then `token_expired` if it is expired; (5) return `token_exhausted` if its uses are exhausted; (6) create the device.
-  The idempotence lookup precedes deletion, expiry and exhaustion checks so a lost response can always be retried with the same token.
+  A deleted token authenticates only for an idempotent replay of a device that it created; every other use returns `token_invalid`, whatever the CSR public key matches.
+- When several outcomes apply to one enrollment, the earliest in this list wins: (1) `token_invalid` when no token matches `SHA-256(secret)`; (2) `invalid_request` for an invalid body, CSR or metadata; (3) the result of the CSR public key lookup below, except that a deleted token gets `token_invalid` for anything but an idempotent replay; (4) `token_invalid` for a deleted token, then `token_expired` for an expired one; (5) `token_exhausted`; (6) a new device.
+  The lookup outranks deletion, expiry and exhaustion so that a lost response can be retried with the same token after that token is deleted, expired or exhausted.
 - The server matches the CSR public key against every certificate it has issued using the first matching rule below:
   - The key of the current certificate of a non-revoked device enrolled with the same token → `200` with that device and its current chain, without consuming a use or changing metadata or `last_seen_at`.
     A CSR proves past possession of the key, not present possession.
@@ -74,7 +86,7 @@ Unless stated otherwise, implementations must follow these conventions.
 
 - JSON object of string → string.
 - Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
-- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes with no C0/C1 control characters; whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values.
+- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes with no C0, DEL (U+007F) or C1 control characters; whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values.
 - `metadata` is required in enroll, renew and check-in bodies and may be an empty object; an absent or non-object value → `invalid_request`.
 - Anything else (nested values, non-strings, limits exceeded) → `invalid_request`.
 - Unknown keys within these limits are stored as-is and never used for authorization.
@@ -88,17 +100,32 @@ Unless stated otherwise, implementations must follow these conventions.
   `{{` and `}}` escape braces; an unpaired brace or unknown placeholder is rejected at token creation.
   Missing metadata values evaluate to empty.
   The result is trimmed and truncated to 255 characters; an empty result falls back to the device ID.
-  "Characters" means Unicode scalar values here and in `PATCH /devices/{id}`, and truncation never splits one.
+  "Characters" means Unicode scalar values, and truncation never splits one.
   Default format: `{hostname}`.
+
+### 3.1 Metadata sent by the agent
+
+- The agent sends a metadata object at enroll, at renew, at check-in and in every `Hello`, collected at send time (so it reflects current values).
+- Always present, non-empty: `hostname`, `os_name`, `os_version`, `arch`, `agent_version`.
+- Present when the OS provides a value: `fqdn`, `domain`, `machine_id`.
+- No other keys in V1.
+- Values use these stable representations so servers can display and filter them consistently:
+  - `hostname`: the OS host name, without domain.
+  - `arch`: `x86_64`, `aarch64` or `x86`; any other architecture reports its Rust `std::env::consts::ARCH` value.
+  - `agent_version`: the agent's own product version string, the same one the binary's version resource and package report.
+  - `machine_id`: Windows SMBIOS system UUID, lowercase hyphenated; Linux `/etc/machine-id` as-is; macOS `IOPlatformUUID`, lowercase hyphenated.
+- The agent never sends a value that violates §3:
+  - It removes C0, DEL and C1 control characters and truncates to 1024 UTF-8 bytes on a character boundary.
+  - An optional key whose value is empty after that is omitted.
+  - A required key that ends up empty gets the value `unknown`.
 
 ## 4. Certificates
 
 - Chains are leaf-first, any length; the agent never assumes a tier count.
-- DVLS: root P-256, 10 years, `CN=<product> Agent Identity Root <n>`, created on first use, where `<n>` is the root generation number.
-- Leaf: P-256, `CN=<device_id>`, SAN URI `urn:uuid:<device_id>`, EKU clientAuth, KeyUsage digitalSignature, validity default 90 days, capped at the issuing root's `notAfter`.
+- The root profile and the number of CA tiers are each authority's choice.
+- Leaf: P-256, `CN=<device_id>`, SAN URI `urn:uuid:<device_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
 - The server ignores CSR subject and extensions; it only takes the public key (P-256 required, else `invalid_request`) and verifies the CSR self-signature (else `invalid_request`).
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
-- The leaf lifetime is a server setting with a default of 90 days.
 
 ## 5. Agent-facing HTTP API (product-neutral)
 
@@ -156,11 +183,9 @@ Request:
 }
 ```
 
-- `authority_id` is stable for a server instance (DVLS: generated once, stored in settings).
+- `authority_id` is stable for a server instance.
 - The server generates `device_id` when it creates the device, and the ID remains stable for that device.
-- Creating the device initializes `last_seen_at` to the current server time; an idempotent enrollment replay leaves it unchanged.
-- The friendly name is evaluated and stored at enrollment (§3) and exposed only through the admin API (§9).
-  It is not returned to the agent because (1) that’s not particularly useful, and (2) an administrator can rename the device later, possibly rendering the information stale.
+- The friendly name (§3) is not returned to the agent.
 - `config` is versioned, and `version` identifies its schema; the agent ignores unknown fields.
 - `config.revision` is an unsigned integer assigned by the server and strictly increases per device whenever the device's effective config changes.
   The agent replaces its stored config only with a higher revision.
@@ -178,7 +203,7 @@ Request:
 - Request: `{ "csr": "...", "metadata": { ... } }` for the new key.
 - `200`: `{ "certificate_chain": [ ... ] }`.
 - Idempotent on the new public key.
-- Every accepted renew request, including an idempotent retry that returns the existing pending chain, replaces the device's metadata and sets `last_seen_at` to the current server time.
+- Every accepted renew request, including an idempotent retry that returns the existing pending chain, replaces the device's metadata (§3).
 - The key of the device's pending certificate → `200` replaying that pending chain after a lost response; the key of any other certificate the server has issued, including this device's current or retired certificates and every certificate of another device, → `invalid_request`; any other key receives a new pending certificate.
 - At most one `pending` certificate per device: a renew with a different new key retires the previous pending certificate.
 - Accepted with a `current` or `pending` certificate that is unexpired, or expired by less than its own lifetime (`now < notAfter + (notAfter − notBefore)`).
@@ -209,41 +234,39 @@ This body is present on every non-2xx response under `{u}/api/agent-identity/v1/
 | `clock_skew`          | 401  | `created`/`expires` outside tolerance                                        | transient, adjust clock                           |
 | `invalid_request`     | 400  | Malformed body, CSR or metadata                                              | transient (agent bug; keep retrying with backoff) |
 
-`token_*` codes on a pending enrollment are permanent (the pending file is deleted).
+`token_*` codes are permanent: the agent never retries that token.
 
-`device_revoked` records `rejected` on the stored identity (§10.3), and the agent stops renewing and reconnecting for that authority.
-A `device_unknown` response to the pending-key renewal used by §8.1 recovery does not record `rejected`; the agent first retries the same renewal with the old current key.
-Any other `device_unknown`, including one returned by that retry, records `rejected` and stops the identity.
+A terminal outcome ends the identity for that authority: the agent never renews, checks in or reconnects for it again, and only a new enrollment with a different token replaces it.
+`device_revoked` is terminal.
+A `device_unknown` response to the pending-key renewal used by §8.1 recovery is not terminal; the agent first retries the same renewal with the old current key.
+Any other `device_unknown`, including one returned by that retry, is terminal.
 
 `certificate_expired`:
 
 - On `connect` or `check-in`: the agent renews immediately (§8), signing with the expired certificate, which renew still accepts within its grace; it retries the operation only after `confirm`.
 - On `renew`: the certificate is beyond grace.
-  The agent records `rejected { code: "certificate_expired" }` and stops; only a new enrollment with a different token recovers.
+  It is terminal.
 - On `confirm`: see §8.
 
 Any failure not classified above is transient, including an unrecognized or unparseable `4xx`, `429`, any `5xx`, a `3xx`, and network or TLS errors.
-The agent retries transient failures with jittered exponential backoff and honors `Retry-After` when present.
+The agent retries transient failures with jittered exponential backoff and honors `Retry-After` when present, up to its maximum retry backoff.
 Servers accept request bodies up to 64 KiB on these endpoints; a larger body → `413 invalid_request`.
 
 ### 5.5 `POST confirm`
 
 - Signed with the **pending** certificate's key (§6), `tag="confirm"`, components `("@method")`, empty body.
 - The signing certificate must be the device's `pending` or `current` certificate and unexpired (no grace), else §6 step 4 errors.
-- Pending → it becomes `current`, the previous `current` becomes `retired`, and the server:
-  - sends `Reconnect{reason:"certificate_rotated"}` on streams opened with the retired certificate;
-  - closes those still open 60 s later with `OK`.
+- Pending → it becomes `current`, and the previous `current` becomes `retired`; §7.4 specifies what happens to streams opened with the retired certificate.
 - Already current → no-op (idempotent retry after a lost response).
-- Every successful confirm, including an already-current retry, sets `last_seen_at` to the current server time.
 - `204` in both cases.
 - `confirm` is the only operation that promotes a certificate; renew and channel connect never do.
 
 ### 5.6 `POST check-in` (HTTP fallback)
 
 - Signed with the current key (§6), `tag="check-in"`, components `("@method" "content-digest")`.
-- Request: `{ "metadata": { ... } }` (§3, §10.5; required).
+- Request: `{ "metadata": { ... } }` (§3; required).
 - The signing certificate must be `current` or `pending` and unexpired (no grace).
-- The server updates the device's metadata and `last_seen_at`, as for a `Hello` (§7.3).
+- The server replaces the device's metadata (§3).
   Unlike an idempotent enroll replay, a check-in carries a fresh signature and nonce, so it proves present possession of the key.
 - `200`:
 
@@ -259,7 +282,7 @@ Servers accept request bodies up to 64 KiB on these endpoints; a larger body →
 ```
 
 - `config`: the device's effective config (same shape as in §5.2, with its current `revision`); the agent stores and applies it as for a `ConfigUpdate` (§7.3 step 7).
-- `renewal_requested`: the device's request-renewal flag (§9.2, and set by rotation); when `true`, the agent starts a renewal (§8).
+- `renewal_requested`: the device's request-renewal flag (§8.2); when `true`, the agent starts a renewal (§8).
 - It's the only HTTP fallback; with a working channel, config and renewal requests arrive through §7.3 and the agent never checks in.
   When the agent checks in:
   - no `config.agent_channel_url`: at service start, then every 24 h (±10% jitter);
@@ -273,12 +296,14 @@ Servers accept request bodies up to 64 KiB on these endpoints; a larger body →
 
 - Label `sig`.
 - `Signature-Input: sig=(<components>);created=<int>;expires=<int>;nonce="<base64url 16 random bytes>";keyid="<thumbprint>";alg="ecdsa-p256-sha256";tag="<renew|connect|confirm|check-in>"`.
+- Signature parameters may appear in any order; each parameter listed above appears exactly once, and no other parameter is allowed.
+  A verifier builds `@signature-params` from the received member (RFC 9421 §2.3); the line above shows one order.
 - Components: `renew` and `check-in` → `("@method" "content-digest")`; `connect` and `confirm` → `("@method")`.
 - `Content-Digest: sha-256=:<base64>:` (RFC 9530).
 - Signature: ECDSA P-256 over SHA-256 of the signature base, raw 64-byte `r‖s`.
 - Agent sets `expires = created + 60`.
-- Server checks, in this order:
-  1. Parse; exactly one signature labelled `sig`; all parameters present; `alg` matches; the covered components are **exactly** the tag's list above, in that order, each once → else `signature_invalid`.
+- Server checks; when several fail, the error of the earliest failing step is returned, and step 6 runs only after steps 1–5 pass:
+  1. Parse; exactly one signature labelled `sig`; exactly the listed parameters, each once; `alg` matches; the covered components are **exactly** the tag's list above, in that order, each once → else `signature_invalid`.
      A verifier never relies on the client-declared list alone: an under-covered request, such as `renew` covering only `@method`, must fail here.
      For `renew` and `check-in`, exactly one `Content-Digest` member using `sha-256` is required.
   2. `tag` matches the endpoint → else `signature_invalid`.
@@ -299,76 +324,9 @@ Servers accept request bodies up to 64 KiB on these endpoints; a larger body →
 
 ### 7.1 Service
 
-The gRPC package is `devolutions.agent.channel.v1`.
-All language bindings, including the Rust `agent-channel-proto` crate and .NET `Devolutions.Agent.Channel` package, must use the following schema.
-
-```proto
-syntax = "proto3";
-package devolutions.agent.channel.v1;
-
-option csharp_namespace = "Devolutions.Agent.Channel.V1";
-
-import "google/protobuf/timestamp.proto";
-
-service AgentChannel {
-  rpc Connect(stream AgentMessage) returns (stream ServerMessage);
-}
-
-message AgentMessage {
-  string id = 1;
-  optional string correlation_id = 2;
-  oneof payload {
-    Hello hello = 10;
-    Ack ack = 11;
-  }
-}
-
-message ServerMessage {
-  string id = 1;
-  optional string correlation_id = 2;
-  oneof payload {
-    Welcome welcome = 10;
-    Ack ack = 11;
-    RenewRequested renew_requested = 12;
-    Reconnect reconnect = 13;
-    Challenge challenge = 14;
-    ConfigUpdate config_update = 15;
-  }
-}
-
-// The device's effective config (§5.2 shape) as a UTF-8 JSON object.
-message ConfigUpdate {
-  string config_json = 1;
-}
-
-message Challenge {
-  // 32 random bytes, fresh per stream.
-  bytes challenge = 1;
-}
-
-message Hello {
-  map<string, string> metadata = 1;
-  repeated string capabilities = 2;
-  map<string, uint64> applied_state_versions = 3;
-  // Proof of key possession bound to this stream (§7.3).
-  bytes proof = 4;
-}
-
-message Welcome {
-  google.protobuf.Timestamp server_time = 1;
-}
-
-message Ack {}
-
-message RenewRequested {
-  // "admin" or "rotation".
-  string reason = 1;
-}
-
-message Reconnect {
-  string reason = 1;
-}
-```
+The gRPC package is `devolutions.agent.channel.v1`, and its schema is [`crates/agent-channel-proto/proto/channel.proto`](../../crates/agent-channel-proto/proto/channel.proto) at this contract's revision.
+Every language binding, including the Rust `agent-channel-proto` crate and the .NET `Devolutions.Agent.Channel` package, is generated from that file.
+The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage` and `ServerMessage` envelopes.
 
 ### 7.2 URL and path prefix
 
@@ -383,7 +341,7 @@ message Reconnect {
 3. The agent sends `Hello` with `correlation_id` = Challenge `id` and `proof` = ECDSA P-256 / SHA-256, raw 64-byte `r‖s`, by the same key, over the bytes:
    `"devolutions-agent-identity/v1/channel-proof" ‖ 0x00 ‖ challenge (32 bytes) ‖ connect nonce (UTF-8 bytes of the `nonce` parameter)`.
 4. The server verifies `proof` with the public key of the certificate that authenticated the opening request.
-   On success it replies `Welcome` (`correlation_id` = Hello `id`), updates metadata, `last_seen_at` and `connected`, and only then treats the stream as authenticated.
+   On success it replies `Welcome` (`correlation_id` = Hello `id`), replaces the device's metadata (§3), and only then treats the stream as authenticated.
    On failure, or if no `Hello` arrives within 10 s, it closes the stream with `UNAUTHENTICATED` + `error-code: signature_invalid`.
 5. If the request-renewal flag is set, the server sends `RenewRequested` after `Welcome` on every connect until the device confirms a newer certificate; the agent replies `Ack` (`correlation_id` = message `id`).
 6. `Reconnect` asks the agent to open a new stream; the agent opens it, then closes the old one.
@@ -396,9 +354,8 @@ message Reconnect {
    - `agent_channel_url` changed: it reconnects to the new URL, opening the new stream before closing the old one;
    - `agent_channel_url` added (only reachable through §5.6 check-in): it connects.
 
-- No server push, metadata update or `connected` state happens before step 4 succeeds.
-- Every later `AgentMessage` received on the authenticated stream sets `last_seen_at` to the current server time.
-- Rationale: the header signature isn't bound to the stream; the fresh challenge makes captured opening headers (TLS-terminating proxies, TLS inspection, header logs) useless for opening a stream.
+- No server push or metadata update happens before step 4 succeeds.
+- Rationale: the header signature isn't bound to the stream; the fresh challenge makes captured opening headers (TLS-terminating proxies, TLS inspection, header logs) insufficient to authenticate a stream.
 - An active intermediary in the path is out of scope because it can read the plaintext, and V1 does not provide TLS channel binding.
 - Envelope `id` values are UUIDs.
 - Unknown payloads are ignored.
@@ -410,26 +367,20 @@ message Reconnect {
 - Revocation: the server closes live streams with `PERMISSION_DENIED` + `error-code: device_revoked`.
 - A stream closes no later than its certificate's `notAfter` (`UNAUTHENTICATED` + `certificate_expired`).
 - When `confirm` promotes a pending certificate (§5.5), the previous `current` certificate is retired; its streams get `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open.
-- Closing a stream does not update `last_seen_at` because closure does not prove that the agent was present when the close was observed.
 - The agent sends an HTTP/2 keepalive every 30 s and reconnects with jittered exponential backoff from 1 s to 5 min.
-  It stops reconnecting on `device_revoked` or `device_unknown`.
-
-### 7.5 Availability
-
-- DVLS emits `config.agent_channel_url` only when it runs on Kestrel, or IIS in-process on Windows build ≥ 20348 (Server 2022) / ≥ 22000 (Windows 11), and an admin setting "Agent channel enabled" (default on) is not turned off; the setting covers reverse proxies that break gRPC.
-- There is no fallback channel transport; §5.6 check-in carries only config and renewal requests.
+  It stops reconnecting on a terminal outcome (§5.4).
 
 ## 8. Renewal and rotation
 
 ### 8.1 Agent renewal
 
 1. Trigger at `notBefore + 2/3 × lifetime + jitter` (jitter uniform in `[0, 1/12 × lifetime]`), or on `RenewRequested`.
-2. Generate the new key and record it as `pending` (§10.3 write-before-create).
+2. Generate the new key and record it as `pending` before sending any request.
 3. `POST renew` with its CSR, signed with the current key; retry with the same CSR on failure.
 4. Store the returned chain on the `pending` slot.
 5. `POST confirm` signed with the new key; retry with backoff.
    While the outcome of a `confirm` is unknown, the agent sends no other signed request to that authority and opens no stream; it retries `confirm` first, since `confirm` is idempotent.
-6. On `204`, `pending` becomes `current`; the agent records the old key as `previous`, deletes it, and then removes `previous` according to the §10.3 delete-before-remove rule.
+6. On `204`, `pending` becomes `current`, and the agent deletes the old key.
 7. Reconnect the agent channel, if any, with the new certificate by opening the new stream before closing the old one.
 
 #### Failure handling
@@ -438,7 +389,7 @@ message Reconnect {
 - `certificate_expired` on `confirm` means the pending certificate expired before it was confirmed.
   The agent cannot know whether an earlier `confirm` succeeded after a lost response, so it renews **signed with the pending key**; the server accepts a pending or current certificate within its renewal grace, whichever state it holds.
   - On success, the agent continues at step 4 with the new pending certificate and deletes the previous pending key after the next `confirm` succeeds.
-  - On `certificate_expired` beyond grace, the agent records `rejected { code: "certificate_expired" }`.
+  - On `certificate_expired` beyond grace, the identity is terminal (§5.4).
   - On `device_unknown`, the server holds neither certificate, so the agent retries the same renewal signed with the old current key while that certificate remains within grace.
 - If a pending key is unusable locally, the agent deletes the key and its slot, then renews with a fresh key signed by the current certificate while it is valid or within renewal grace.
   Issuing the new pending certificate retires the previous pending certificate as specified in §5.3.
@@ -446,220 +397,22 @@ message Reconnect {
 
 ### 8.2 Server certificate state
 
-- DVLS records each issued device certificate as `pending`, `current` or `retired`.
+- The server records each issued device certificate as `pending`, `current` or `retired`.
 - A `pending` certificate becomes `current` only through `confirm` (§5.5).
 - Renewal grace lasts for the certificate's own lifetime, as defined in §5.3.
+- The server sets a device's request-renewal flag when it wants that device to renew, for example at an administrator's request or at rotation start (§8.3).
 - The request-renewal flag is cleared when the device confirms a certificate issued after the flag was set.
 
 ### 8.3 Root rotation
 
-- Rotation is started through the admin API (§9.3).
-- The `deadline` is an RFC 3339 timestamp or the literal `"now"`; a value at or before the current time requests an emergency rotation.
-  When omitted, it defaults to the rotation maximum.
-- The rotation maximum is the latest `notAfter` among unexpired current or pending certificates of non-revoked devices issued by the old root, or the current time when there are none.
-  An explicit deadline after this maximum → `400`.
+- The authority starts a rotation and chooses its deadline.
 - At rotation start, the server creates and publishes the new root alongside the old root, destroys the old root's private key, and issues every new certificate from the new root.
 - The server sets the request-renewal flag for each non-revoked device with a current or pending certificate issued by the old root.
-  It sends `RenewRequested{reason:"rotation"}` to connected affected devices at a bounded, configurable rate and continues until every such connected device has been notified.
+  It sends `RenewRequested{reason:"rotation"}` to connected affected devices at a bounded rate and continues until every such connected device has been notified.
   The persistent request-renewal flag covers devices that are disconnected or not yet notified.
-- When `activeDevicesOnOldRoot` reaches 0, whether at rotation start or later, rotation completes immediately as though its deadline had passed.
+- When no non-revoked device holds an unexpired current or pending certificate issued by the old root, whether at rotation start or later, rotation completes immediately as though its deadline had passed.
   This count cannot increase because all new certificates use the new root and revocation is final.
 - Rotation also completes when its deadline passes.
   Completion removes the old root from `GET trust-anchor`.
 - The server continues to recognize registered certificates issued by the old root after completion without requiring that root to remain published.
   The endpoint-specific validity rules still apply, and a device whose old-root certificate is expired but within renewal grace can renew onto the new root.
-
-## 9. Admin HTTP API (DVLS-specific)
-
-This API uses camelCase JSON keys and the `pageNumber`/`pageSize` pagination defined in §9.2; the other protocol conventions in §1 still apply.
-
-Base: `{u}/api/v3/agent-identity`.
-Auth: DVLS session token from application-identity (or user) login, `Authorization: Bearer`.
-Every endpoint requires the "Agent identity management" permission, which roles may grant to users and application identities; built-in administrators have it implicitly.
-Missing permission → `403`.
-This contract defines endpoint-specific error statuses but does not standardize DVLS admin error bodies.
-The mock returns `{ "error": "<code>", "message": "<human text>" }` with the specified HTTP status.
-
-### 9.1 Enrollment tokens
-
-- `POST /enrollment-tokens` body `{ name, maxUses (1..1_000_000), expiresAt (≤ now + 365 d), friendlyNameFormat?, config? }` → `201 { token: "<full token>", record: TokenRecord }`; the full token is returned only here.
-  `friendlyNameFormat` follows §3, and `config` contributes the product-specific fields in each enrolled device's effective config.
-- `GET /enrollment-tokens?pageNumber&pageSize` → page of `TokenRecord`.
-- `GET /enrollment-tokens/{id}` → `TokenRecord`; `DELETE /enrollment-tokens/{id}` → `204`.
-- `TokenRecord`: `{ id, name, maxUses, usedCount, expiresAt, state: "active"|"exhausted"|"expired", friendlyNameFormat, config, createdAt, createdBy }`.
-
-### 9.2 Devices
-
-- `GET /devices` query: `pageNumber` (≥ 1, default 1), `pageSize` (1..100, default 25), `view=summary|full`, `metadata=k1,k2`, `status=active|revoked|expired`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (friendly-name substring, case-insensitive).
-  Each device receives a strictly increasing creation key when inserted, and listings sort by that key; `created_at` is non-decreasing in this order.
-  A page walk returns every device that existed when the walk started at least once, and exactly once when no enrollment overlaps the walk; only a deletion during the walk can make it miss one.
-  A device whose enrollment overlaps the walk may be missing from it or make the next page repeat one entry; clients deduplicate by `id`.
-  Device IDs remain UUIDs and are not used as the listing sort key.
-- Page shape: `{ data: [...], currentPage, pageSize, totalCount, totalPages }`.
-- Summary: `{ id, friendlyName, status, connected, lastSeenAt, certificate: { notAfter, issuer } }` plus the requested `metadata` subset.
-  `connected` is true while the device has at least one authenticated live stream.
-- Full adds `metadata`, `certificates: [{ thumbprint, serialNumber, notBefore, notAfter, issuer, status }]`, `enrollmentToken: { id, name }`, `createdAt`, `revokedAt`, `renewalRequested`.
-- Device status is `revoked` after revocation, `expired` when not revoked and no current certificate is unexpired, and `active` otherwise.
-- `GET /devices/{id}` → full; `PATCH /devices/{id}` `{ friendlyName }` (1..255) → full.
-- `view=full` always includes all metadata; `metadata=k1,k2` only extends `summary`.
-- `pageNumber` beyond the last page returns an empty `data` array.
-- `POST /devices/{id}/revoke` → `204` (idempotent); `DELETE /devices/{id}` → `204`, or `409` unless revoked.
-- `POST /devices/{id}/request-renewal` sets the request-renewal flag, sends `RenewRequested{reason:"admin"}` on each authenticated live stream and returns `202`.
-
-### 9.3 Rotation
-
-- `POST /ca/rotation` `{ deadline? }` → `202 Rotation`; `409` if one is in progress.
-- `GET /ca/rotation` → `Rotation`: `{ phase: "idle"|"rotating", oldRoot?: { thumbprint, notAfter }, newRoot?: { thumbprint, notAfter }, deadline?, activeDevicesOnOldRoot }`.
-- `activeDevicesOnOldRoot` counts non-revoked devices with an unexpired current or pending certificate issued by the old root.
-
-## 10. Agent local behavior
-
-### 10.1 Configuration (`agent.json`)
-
-```json
-{
-  "Identity": { "Enabled": true, "KeyBackend": "KeyStore" },
-  "__debug__": {
-    "identity": {
-      "renewal_after_secs": 5,
-      "disable_jitter": true,
-      "extra_trusted_root": "C:\\path\\mock-cas.pem",
-      "backoff_max_secs": 2,
-      "pending_poll_interval_ms": 200,
-      "acl_grant_current_user": true,
-      "key_name_prefix": "DevolutionsAgentTest-3f2a9c1e-",
-      "metadata_override_path": "C:\\path\\metadata.json",
-      "check_in_interval_secs": 5,
-      "channel_failure_check_in_after_secs": 3
-    }
-  }
-}
-```
-
-The unsupported `__debug__.identity` section provides conformance controls and is honored in every build.
-The installer never writes this section, and the agent logs a warning at start-up whenever the section contains a setting.
-
-- `renewal_after_secs`: replaces the scheduled renewal time in §8.1 with the specified number of seconds after the certificate's `notBefore`.
-- `disable_jitter`: disables renewal, check-in and retry jitter.
-- `backoff_max_secs`: caps identity-operation retry backoff at the specified number of seconds.
-- `pending_poll_interval_ms`: replaces the default 5 s pending-directory poll interval (§10.2).
-- `check_in_interval_secs` and `channel_failure_check_in_after_secs`: replace the 24 h and 1 h values in §5.6.
-  Setting either field disables check-in jitter.
-- `key_name_prefix`: replaces the default `DevolutionsAgent-Identity-` key-name prefix (§10.3).
-- `metadata_override_path`: path to a JSON object of string values that the agent reads before every enroll, renew, check-in and `Hello`.
-  Known keys (§10.5) replace collected values, unknown keys are ignored, and a missing or unreadable file means no override.
-- `extra_trusted_root`: path to a PEM file containing one or more certificates that the agent adds to the TLS trust store in addition to the OS roots.
-- `acl_grant_current_user` (Windows only): additionally grants the agent process's user access to key-store keys and pending-enrollment files.
-  Pending files still use a protected DACL.
-
-- `KeyBackend`: `KeyStore` (Windows default; Microsoft Software KSP, machine key, non-exportable) or `File` (default elsewhere; PKCS#8 `0600`).
-- `Identity.Enabled` default `true`: the task is idle without a pending file or stored identity.
-
-### 10.2 Pending-enrollment files
-
-- `<hex>` is the SHA-256 of the full token's UTF-8 bytes encoded as lowercase hexadecimal and is used everywhere the agent stores the token hash.
-- One file per token, named `<hex>`:
-  - Linux/macOS: `<data-dir>/identity/pending/<hex>.json`, mode `0600`, owned by the account that runs the agent service, with content `{ "version": 1, "token": "<token>" }`.
-    The agent does not enforce file ownership.
-  - Windows: `<data-dir>\identity\pending\<hex>.dat`, protected DACL granting SYSTEM full control only unless `acl_grant_current_user` is enabled, content = DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)` of the same JSON.
-    `.dat` because the content is an opaque DPAPI blob, not JSON.
-  - Writing the same token twice (e.g. an Intune re-run) overwrites the same file.
-- The service reads the directory at start-up and polls it (default every 5 s).
-- Each pending file is independent: its own enrollment key, in-progress record and retry backoff.
-  Requests are sent one at a time, and a pending file in transient backoff doesn't block the others.
-- The agent retries enrollment, deletes the pending state on success, a permanent token error, `device_revoked` or a locally malformed token, and keeps it after any other failure.
-- Enrollment key:
-  - When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "<hex>", "key_name": "..." }` in `<data-dir>/identity/pending/<hex>.in-progress.json` (written like `identity.json`; no secret).
-  - Every retry of that pending file, including after a restart, uses that key, so a lost response is recovered through enroll idempotence (§2).
-  - Nothing is discarded before enrollment completes; the authority is only known from the enroll response.
-  - On success, the key becomes the new identity's `current` key; the in-progress record is deleted with the pending file.
-  - `device_revoked` on enroll is also permanent because the device created by this enrollment was revoked before the agent received the response.
-    The agent stores no identity, and recovery requires a different token.
-  - Every permanent outcome deletes the pending file, its in-progress record and its enrollment key.
-- If a pending token has the same hash as any stored identity, whether active or rejected, the agent deletes the pending state without sending a request.
-- The agent enrolls a token with a different hash; on success, the new identity replaces any stored identity for the returned `authority_id`, and the agent deletes the old identity's keys.
-  If two pending tokens enroll with the same authority, the last one to complete wins; the other device record stays on the server for the admin to revoke or delete.
-- The token is never logged, even partially.
-
-### 10.3 Stored identities
-
-- `<data-dir>/identity/authorities/<authority_id>/identity.json`:
-
-```json
-{
-  "version": 1,
-  "authority_id": "...",
-  "device_id": "...",
-  "base_url": "https://host/dvls",
-  "config": {
-    "version": 1,
-    "revision": 1,
-    "agent_channel_url": "https://host/dvls"
-  },
-  "token_sha256": "<hex>",
-  "rejected": { "code": "device_revoked", "at": "2026-09-24T12:00:00Z" },
-  "keys": {
-    "current": { "key_name": "...", "certificate_chain": ["..."] },
-    "pending": { "key_name": "...", "certificate_chain": ["..."] },
-    "previous": { "key_name": "...", "certificate_chain": ["..."] }
-  }
-}
-```
-
-- `rejected` is absent until the server rejects the identity permanently: `device_revoked` on any signed request, channel open or live stream; `device_unknown` outside the pending-key recovery exception below; or `certificate_expired` on a renewal beyond grace.
-  A `device_unknown` response to a renewal signed with the pending key during §8.1 recovery does not set `rejected`; the agent first retries the same renewal with the old current key.
-  A `device_unknown` response to that retry is permanent and sets `rejected`.
-  The agent can't observe revocation otherwise.
-  Once `rejected` is set, `code` contains the error code, and the agent never renews or reconnects for that identity; only a new enrollment with a different token replaces it.
-- `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists only between a successful `confirm` and the deletion of the old key (crash safety).
-- `config` is stored exactly as received, including unknown fields, and replaced only by a higher `revision`.
-- Key names have the form `DevolutionsAgent-Identity-<key_uuid>`, where `key_uuid` is a random UUID generated with each key.
-  The authority isn't known when the enrollment key is created, and key-store keys can't be renamed.
-  The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
-- The agent writes a key's name to its record (`identity.json` or `pending/<hex>.in-progress.json`) before creating the key, and deletes a key before removing its name from the record.
-  So a crash never leaves an unrecorded key, and every existing key with the agent's prefix is recorded.
-  A recorded key that doesn't exist yet (or anymore) is regenerated or dropped at start-up.
-- Writes are atomic (write temp + rename).
-
-### 10.4 CLI
-
-- `devolutions-agent identity enroll <token>` validates the token format, writes the pending file, prints its path and exits with status 0.
-  For an invalid token or write failure, it does not report success and exits with a nonzero status.
-
-### 10.5 Metadata sent by the agent
-
-- The agent sends a metadata object (§3) at enroll, at renew, at check-in and in every `Hello`, collected at send time (so it reflects current values).
-- Always present, non-empty: `hostname`, `os_name`, `os_version`, `arch`, `agent_version`.
-- Present when the OS provides a value: `fqdn`, `domain`, `machine_id`.
-- No other keys in V1.
-- Values use these stable representations so servers can display and filter them consistently:
-  - `hostname`: the OS host name, without domain.
-  - `arch`: Rust `std::env::consts::ARCH` naming (`x86_64`, `aarch64`, `x86`).
-  - `agent_version`: the agent's own product version string, the same one the binary's version resource and package report.
-  - `machine_id`: Windows SMBIOS system UUID, lowercase hyphenated; Linux `/etc/machine-id` as-is; macOS `IOPlatformUUID`, lowercase hyphenated.
-- The agent never sends a value that violates §3:
-  - It removes C0/C1 control characters and truncates to 1024 UTF-8 bytes on a character boundary.
-  - An optional key whose value is empty after that is omitted.
-  - A required key that ends up empty gets the value `unknown`.
-
-## 11. Mock server (conformance only)
-
-- The mock independently implements §5, §7 and §9; the channel schema in §7.1 is its only implementation artifact shared with the agent.
-- It serves under a configurable path prefix, which the conformance configuration sets to `/mock`.
-- The mock-only control API is under `{u}/__mock__/`:
-  - `POST faults` accepts `{ drop_next_response?: "enroll"|"renew"|"confirm"|"check-in", clock_skew_secs?, leaf_lifetime_secs?, channel_available?, channel_broken?, rotation_rate_limit_per_sec?, fail_next_response?: { endpoint: "enroll"|"renew"|"confirm"|"check-in", status: <int>, error?: <§5.4 code> } }`.
-    - `drop_next_response` processes the next request to that endpoint but drops its response.
-    - `clock_skew_secs` offsets the mock's wall clock by the specified number of seconds.
-    - `leaf_lifetime_secs` sets the lifetime of subsequently issued leaf certificates.
-    - `channel_available: false` makes new enroll responses omit `config.agent_channel_url` and makes channel opens fail with `UNAVAILABLE`.
-      Changing `channel_available` bumps every device's config revision, adds or removes the URL, and pushes `ConfigUpdate` on live streams.
-    - `channel_broken: true` makes channel opens fail with `UNAVAILABLE` without changing device config.
-    - `rotation_rate_limit_per_sec` sets the maximum number of rotation notifications sent per second and defaults to 10.
-    - `fail_next_response` returns the specified one-shot failure without processing the request.
-      When `error` is present, the response uses the §5.4 body; otherwise its body is empty to exercise the agent's handling of a nonconforming error.
-  - `POST config` with `{ "fields": { ... } }` merges fields other than `version`, `revision` and `agent_channel_url` into every device's effective config, increments each revision and pushes `ConfigUpdate` on live streams.
-  - `POST reset` clears mutable mock state and restores the default fault settings.
-  - `POST time/advance` with `{ secs }` advances mock time and immediately re-evaluates stream expiry and rotation deadlines.
-  - `GET events?device_id=<uuid>` returns that device's ordered channel and certificate events: `stream_opened`, `stream_authenticated`, `stream_closed` with status, and `cert_status_changed`.
-    Each event has a monotonic sequence number so make-before-break ordering can be verified without polling.
-- The mock may expose additional test-only endpoints such as `__mock__/requests`, `__mock__/handshake` and `__mock__/reconnect`; they are not part of the authority protocol.
