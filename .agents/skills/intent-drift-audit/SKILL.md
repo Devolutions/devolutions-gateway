@@ -1,6 +1,6 @@
 ---
 name: intent-drift-audit
-description: Audit code, a diff, or a PR against the applicable INTENT.md, *.intent.md, or CONTRACT.md and report conforms, violates, partial, or cannot-verify per statement with file:line evidence, ready for a PR comment. Use for intent or contract conformance checks, automated review, or before modifying governed code.
+description: Audit code, a diff, or a PR against the applicable INTENT.md, *.intent.md, or CONTRACT.md and report conforms, violates, partial, or cannot-verify per statement with file:line evidence, ready for a PR comment. Use once an implementation claims to realise its intent, for conformance checks, automated review, or before modifying governed code; not mid-implementation.
 ---
 
 # Intent drift audit
@@ -20,8 +20,8 @@ Where a statement says "see `CONTRACT.md` §N", the contract section is the stat
 Split each file into normative statements, one per bullet or sentence, skipping purpose prose; a sentence about an external producer or environment is context for the statements that depend on it, not a statement.
 Give each an ID of section plus ordinal (`xtask/INTENT.md#dependencies-1`, `CONTRACT.md#6.3-2`) so a later audit can diff against this one.
 A statement marked as deferred or prospective ("for now", "later", `NOTE:`) is a target, not a requirement; the implementation is expected not to realise it yet, and realising it anyway is worth a note.
-Intent is realised by merge, so on an unmerged branch a statement whose implementation is still being built is **in progress**, listed once with the work that will realise it, not a violation.
-For each: cite `path:line`; decide **conforms**, **violates**, **partial** (honoured on some paths, configurations, or the primary path and bypassed on another), **not yet realised** (a deferred target the code does not implement, which is the expected state), **in progress** (unmerged branch, implementation pending), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
+The audit compares intent with its realisation, so it runs on code that claims to realise the intent, on a merged tree or a branch whose implementation is finished; mid-implementation, say so and stop, because every unfinished statement would read as a violation.
+For each: cite `path:line`; decide **conforms**, **violates**, **partial** (honoured on some paths, configurations, or the primary path and bypassed on another), **not yet realised** (a deferred target the code does not implement, which is the expected state), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
 Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement.
 Note `INVARIANT:` and `UNTESTED:` comments that relate; they are the code's own claims.
 "Probably fine" is cannot verify.
@@ -50,7 +50,7 @@ Audited against: `<file>` (<n> statements), ...
 ### Not covered by intent
 ```
 
-Lead the table with violations and partials, then cannot verify, then in progress and not yet realised, then conforms; drop empty sections.
+Lead the table with violations and partials, then cannot verify, then not yet realised, then conforms; drop empty sections.
 A clean audit is two lines plus the table.
 When the human wants the mapping kept, the table becomes an `EVIDENCE.md` beside the intent, one row per claim with the directive, intent line, and code paths that realise it and `[unsure]` on inferred rows.
 
