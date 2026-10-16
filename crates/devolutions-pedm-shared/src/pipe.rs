@@ -41,7 +41,8 @@ pub const CLIENT_ACCESS: u32 =
 /// Open the client end of a PEDM pipe, requesting only [`CLIENT_ACCESS`].
 ///
 /// The server impersonates its clients to act on their behalf, so clients allow the `SecurityImpersonation` level.
-/// Call [`verify_server`] before sending anything.
+/// A client is impersonable from the moment its connection is accepted, so call [`verify_service_running`]
+/// before opening the pipe, and [`verify_server`] before sending anything.
 pub fn open_client(pipe_name: &str) -> std::io::Result<NamedPipeClient> {
     let file = OpenOptions::new()
         .access_mode(CLIENT_ACCESS)
@@ -54,10 +55,20 @@ pub fn open_client(pipe_name: &str) -> std::io::Result<NamedPipeClient> {
     unsafe { NamedPipeClient::from_raw_handle(file.into_raw_handle()) }
 }
 
+/// Check that the `service_name` service is running, before opening the pipe.
+///
+/// A client is impersonable as soon as its connection is accepted, before any post-connect check runs.
+/// While the trusted server cannot be serving the pipe, do not connect at all.
+pub fn verify_service_running(service_name: &str) -> anyhow::Result<()> {
+    service_process_id(service_name).map(|_| ())
+}
+
 /// Check that the pipe server is the PEDM service, before sending anything to it.
 ///
 /// The pipe must be owned by SYSTEM or Administrators ([`verify_owner`]),
 /// and its server must be the process of the Devolutions Agent service ([`verify_server_process`]).
+/// These checks run after the connection is accepted, so they do not protect a client from impersonation;
+/// [`verify_service_running`] must run before opening the pipe.
 pub fn verify_server(pipe: &NamedPipeClient) -> anyhow::Result<()> {
     verify_owner(pipe)?;
     verify_server_process(pipe, AGENT_SERVICE_NAME)

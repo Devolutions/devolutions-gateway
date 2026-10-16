@@ -20,9 +20,21 @@ namespace DevolutionsPedmDesktop
         private const uint ServiceRunning = 4;
 
         /// <summary>
+        /// Requires the Devolutions Agent service to be running, before the pipe is opened.
+        /// A client is impersonable as soon as its connection is accepted, so it must not connect at all
+        /// while the trusted server cannot be serving the pipe.
+        /// </summary>
+        public static void EnsureServiceRunning()
+        {
+            RequireAgentServiceProcessId();
+        }
+
+        /// <summary>
         /// Requires the pipe to be owned by SYSTEM or Administrators, which a standard user cannot assign,
         /// and its server to be the Devolutions Agent service process.
         /// A pipe instance shares the security descriptor of its name, so the owner alone does not identify the server.
+        /// These checks run after the connection is accepted, so they do not protect a client from impersonation;
+        /// <see cref="EnsureServiceRunning"/> must run before the pipe is opened.
         /// </summary>
         public static void Verify(NamedPipeClientStream pipe)
         {
@@ -39,12 +51,17 @@ namespace DevolutionsPedmDesktop
                 throw new UnauthorizedAccessException("The PEDM pipe server is not trusted because its process could not be identified.", new Win32Exception());
             }
 
-            uint serviceProcessId = GetServiceProcessId(AgentServiceName);
+            uint serviceProcessId = RequireAgentServiceProcessId();
 
             if (serverProcessId != serviceProcessId)
             {
                 throw new UnauthorizedAccessException($"The PEDM pipe server is not trusted because it is not the {AgentServiceName} service process.");
             }
+        }
+
+        private static uint RequireAgentServiceProcessId()
+        {
+            return GetServiceProcessId(AgentServiceName);
         }
 
         private static uint GetServiceProcessId(string serviceName)

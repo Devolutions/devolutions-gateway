@@ -14,6 +14,10 @@ namespace Devolutions.Agent.Desktop.Service
     {
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            // A client is impersonable as soon as the connection is accepted,
+            // so do not connect at all while the Agent service cannot be serving the pipe.
+            PedmServerVerifier.EnsureServiceRunning();
+
             // Request only the access the service grants to clients; ReadPermissions is needed by PedmServerVerifier.
             // The service impersonates the client to act on its behalf.
             using NamedPipeClientStream pipeClient = new NamedPipeClientStream(

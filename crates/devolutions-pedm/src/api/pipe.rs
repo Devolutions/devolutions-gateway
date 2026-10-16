@@ -238,6 +238,7 @@ mod tests {
 
     use devolutions_pedm_shared::pipe::{
         open_client, server_process_id, service_process_id, verify_server, verify_server_process,
+        verify_service_running,
     };
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
@@ -587,6 +588,15 @@ mod tests {
         assert_ne!(process_id, std::process::id());
 
         service_process_id("DevolutionsPEDM.test.missing").expect_err("an unknown service is rejected");
+    }
+
+    #[test]
+    fn the_client_refuses_to_connect_while_the_service_is_not_running() {
+        // The pre-connect check must fail closed, so a client never opens the pipe while the Agent service is stopped.
+        verify_service_running("DevolutionsPEDM.test.missing").expect_err("an unknown service is rejected");
+
+        // The Windows Event Log service always runs, and its default security descriptor lets interactive users query it.
+        verify_service_running("EventLog").expect("a running service passes the pre-connect check");
     }
 
     #[tokio::test]

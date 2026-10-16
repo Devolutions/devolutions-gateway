@@ -70,6 +70,10 @@ impl Service<Uri> for NamedPipeConnector {
 
     fn call(&mut self, _req: Uri) -> Self::Future {
         Box::pin(async move {
+            // The client is impersonable as soon as the connection is accepted,
+            // so do not connect at all while the Agent service cannot be serving the pipe.
+            pipe::verify_service_running(pipe::AGENT_SERVICE_NAME)?;
+
             let mut iter = 0;
             loop {
                 let client = pipe::open_client(pipe::PIPE_NAME);
