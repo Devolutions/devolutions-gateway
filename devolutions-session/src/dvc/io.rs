@@ -212,18 +212,7 @@ pub fn run_dvc_io(
                 // Send all messages over the channel.
                 for message in messages {
                     debug!(?message, "DVC message received");
-                    // We do non-blocking send to avoid blocking the IO thread. Processing
-                    // task is expected to be fast enough to keep up with the incoming messages.
-                    match read_tx.try_send(message) {
-                        Ok(_) => {}
-                        Err(TrySendError::Full(_)) => {
-                            error!("DVC message was dropped due to channel overflow");
-                        }
-                        Err(e) => {
-                            error!("DVC message was dropped due to closed channel");
-                            return Err(e.into());
-                        }
-                    }
+                    forward_to_processor(&read_tx, message)?;
                 }
                 // Prepare async read file operation one more time.
                 // SAFETY: No preconditions.
@@ -259,6 +248,33 @@ pub fn run_dvc_io(
                 // Spurious wakeup or wait failure
             }
         };
+    }
+}
+
+/// Hands a decoded message to the processing task without blocking.
+///
+/// The send is non-blocking because the IO thread also services outbound writes:
+/// blocking here while the processing task awaits an outbound send would deadlock both sides.
+/// A full queue therefore ends the channel rather than dropping the message.
+/// NOW capability responses carry no request id, so a lost request would silently shift every later response the
+/// client matches by send order.
+///
+/// Returning an error makes [`run_dvc_io`] exit, which drops [`DvcIoContext`] and with it the WTS channel handle.
+// UNTESTED: the client observes a DVC close when this returns an error.
+// The close happens through `Drop` of `DvcIoContext` when `run_dvc_io` returns, and requires a live RDP session to
+// observe.
+// When changing the IO loop, keep `run_dvc_io` returning the error rather than continuing.
+fn forward_to_processor(read_tx: &Sender<NowMessage<'static>>, message: NowMessage<'static>) -> anyhow::Result<()> {
+    match read_tx.try_send(message) {
+        Ok(()) => Ok(()),
+        Err(TrySendError::Full(_)) => {
+            error!("Closing the DVC channel because the processing task fell behind incoming messages");
+            anyhow::bail!("DVC input queue overflow");
+        }
+        Err(error @ TrySendError::Closed(_)) => {
+            error!("DVC message was dropped due to closed channel");
+            Err(error.into())
+        }
     }
 }
 
@@ -456,8 +472,36 @@ mod tests {
     use std::time::Duration;
 
     use futures::poll;
+    use now_proto_pdu::{NowChannelHeartbeatMsg, NowMessage};
+    use tokio::sync::mpsc;
 
-    use super::{DVC_RETRY_DELAYS, DvcInitializationProgress, dvc_retry_delay};
+    use super::{DVC_RETRY_DELAYS, DvcInitializationProgress, dvc_retry_delay, forward_to_processor};
+
+    /// A full input queue must end the IO loop instead of dropping the message: the processing
+    /// task is still alive, so a silent drop would desynchronize the client's order-based
+    /// response matching with nothing to signal it.
+    #[test]
+    fn full_input_queue_is_an_error_not_a_drop() {
+        let (read_tx, mut read_rx) = mpsc::channel::<NowMessage<'static>>(1);
+        let heartbeat = || NowMessage::from(NowChannelHeartbeatMsg::default());
+
+        forward_to_processor(&read_tx, heartbeat()).expect("first message fits the queue");
+
+        let error = forward_to_processor(&read_tx, heartbeat()).expect_err("second message overflows the queue");
+        assert!(error.to_string().contains("overflow"), "unexpected error: {error}");
+
+        // The queued message is intact, and no further message was forwarded.
+        assert!(read_rx.try_recv().is_ok());
+        assert!(read_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn closed_input_queue_is_an_error() {
+        let (read_tx, read_rx) = mpsc::channel::<NowMessage<'static>>(1);
+        drop(read_rx);
+
+        forward_to_processor(&read_tx, NowChannelHeartbeatMsg::default().into()).expect_err("closed queue is reported");
+    }
 
     #[test]
     fn dvc_retry_delays_are_bounded() {
