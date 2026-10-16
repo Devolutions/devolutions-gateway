@@ -1347,7 +1347,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
+          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
@@ -1403,7 +1403,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
+          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
