@@ -89,7 +89,7 @@ impl AgentChannel for ChannelService {
             state.requests.connect += 1;
             state.requests.request_sequence.push("connect");
             if !state.faults.channel_available || state.faults.channel_broken {
-                // §7.5: the channel is not hosted.
+                // The mock control can make the channel unavailable or broken.
                 return Err(Status::unavailable("channel not available"));
             }
             let result = if duplicate_signature {
@@ -478,14 +478,25 @@ async fn run_stream(
         tokio::select! {
             message = client.next() => {
                 match message {
-                    Some(Ok(AgentMessage {
-                        correlation_id: Some(correlation),
-                        payload: Some(agent_message::Payload::Ack(_)),
-                        ..
-                    })) if awaiting_ack.remove(&correlation) => {
-                        app.state.lock().await.requests.correlated_acks += 1;
+                    Some(Ok(message)) => {
+                        let now = app.now();
+                        let mut state = app.state.lock().await;
+                        // UNTESTED: any authenticated message, even an unknown payload, refreshes `last_seen_at`.
+                        // The timestamp tracks key possession and drives admin last-seen filters.
+                        // When changing this branch, check `lastSeenAt` after an `Ack` and an unknown payload.
+                        if let Some(device) = state.devices.get_mut(&device_id) {
+                            device.last_seen_at = Some(now);
+                        }
+                        if let AgentMessage {
+                            correlation_id: Some(correlation),
+                            payload: Some(agent_message::Payload::Ack(_)),
+                            ..
+                        } = message
+                            && awaiting_ack.remove(&correlation)
+                        {
+                            state.requests.correlated_acks += 1;
+                        }
                     }
-                    Some(Ok(_)) => {}
                     Some(Err(_)) | None => break,
                 }
             }

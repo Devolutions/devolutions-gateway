@@ -1,7 +1,7 @@
 //! CONTRACT.md §6 ordered signature checks and nonce commits.
 
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -174,8 +174,7 @@ pub(crate) fn verify_request(
     lookup: &mut dyn FnMut(&str) -> Option<RegisteredCert>,
     nonces: &mut NonceStore,
 ) -> Result<AuthenticatedDevice, Rejection> {
-    // Step 1: parse both headers, exactly one `sig` member each, all six parameters,
-    // profile algorithm, profile covered components.
+    // Step 1 parses one `sig` member with exactly six profile parameters, the algorithm, and the covered components.
     let signature_input = header_str(signature_input)?;
     let signature = header_str(signature)?;
 
@@ -235,18 +234,16 @@ pub(crate) fn verify_request(
         }
     }
 
+    if inner.params.len() != 6 {
+        return Err(Rejection::SignatureInvalid);
+    }
     let created = int_param(inner, "created")?;
     let expires = int_param(inner, "expires")?;
     let nonce = str_param(inner, "nonce")?;
     let keyid = str_param(inner, "keyid")?;
     let alg = str_param(inner, "alg")?;
     let tag = str_param(inner, "tag")?;
-    let mut param_keys = HashSet::new();
-    if inner.params.iter().any(|param| !param_keys.insert(param.key.as_str()))
-        || !valid_base64url_bytes(nonce, 16)
-        || !valid_base64url_bytes(keyid, 32)
-        || alg != PROFILE_ALG
-    {
+    if !valid_base64url_bytes(nonce, 16) || !valid_base64url_bytes(keyid, 32) || alg != PROFILE_ALG {
         return Err(Rejection::SignatureInvalid);
     }
 
@@ -370,7 +367,10 @@ fn signature_base(method: &str, content_digest: Option<&[u8]>, inner: &sfv::Inne
 
 #[cfg(test)]
 mod tests {
-    use super::NonceStore;
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+
+    use super::{Endpoint, NonceStore, Rejection, verify_request};
 
     #[test]
     fn nonce_conflict_keeps_original_expiry_through_boundary() {
@@ -380,5 +380,35 @@ mod tests {
         assert!(!store.insert_fresh("key", "nonce", 120, 62));
         assert!(!store.insert_fresh("key", "nonce", 120, 120));
         assert!(store.insert_fresh("key", "nonce", 200, 121));
+    }
+
+    #[test]
+    fn rejects_extra_signature_parameters_including_bare_boolean() {
+        let header = format!(
+            "sig=(\"@method\");created=100;expires=160;nonce=\"{}\";keyid=\"{}\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+            URL_SAFE_NO_PAD.encode([0u8; 16]),
+            URL_SAFE_NO_PAD.encode([0u8; 32])
+        );
+        let verify = |input: &str| {
+            let mut lookup = |_: &str| None;
+            let mut nonces = NonceStore::default();
+            verify_request(
+                Endpoint::Confirm,
+                "POST",
+                Some(input.as_bytes()),
+                Some(b"sig=:AA==:"),
+                None,
+                &[],
+                120,
+                &mut lookup,
+                &mut nonces,
+            )
+            .err()
+        };
+
+        assert_eq!(verify(&header), Some(Rejection::DeviceUnknown));
+        for suffix in [";extra=1", ";extra"] {
+            assert_eq!(verify(&format!("{header}{suffix}")), Some(Rejection::SignatureInvalid));
+        }
     }
 }

@@ -1,5 +1,9 @@
-//! In-memory state and business logic (CONTRACT.md §2–§9, §11). One mutex around
-//! `State` makes enrollment and rotation critical sections trivially correct.
+//! This module holds in-memory state for the [agent contract][contract], [DVLS admin API][dvls] and [mock control][mock].
+//! One mutex around `State` serializes enrollment and rotation.
+//!
+//! [contract]: ../../../docs/agent-identity/CONTRACT.md
+//! [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#admin-http-api
+//! [mock]: ../INTENT.md#mock-only-control
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
@@ -65,7 +69,7 @@ impl ApiError {
     }
 }
 
-/// §11 `faults.drop_next_response` target.
+/// Identifies which mock endpoint drops its next response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DropTarget {
     Enroll,
@@ -89,7 +93,7 @@ pub(crate) enum MalformedChannelUrl {
     Fragment,
 }
 
-/// §11 fault knobs. Merged field-by-field by `POST __mock__/faults`.
+/// Holds mock fault knobs merged field-by-field by `POST __mock__/faults`.
 #[derive(Debug, Clone)]
 pub(crate) struct Faults {
     pub(crate) drop_next_response: Option<DropTarget>,
@@ -133,7 +137,8 @@ impl RenewReason {
     }
 }
 
-/// Enrollment token record (§9.1). Only the SHA-256 of the secret is stored (§2).
+/// Stores a DVLS enrollment token.
+/// Only the SHA-256 of the secret is stored (§2).
 pub(crate) struct Token {
     pub(crate) id: Uuid,
     pub(crate) name: String,
@@ -151,7 +156,7 @@ pub(crate) struct Token {
 }
 
 impl Token {
-    /// §9.1 `state` field. `expired` wins over `exhausted` when both hold.
+    /// Returns the DVLS token state, where `expired` wins over `exhausted`.
     pub(crate) fn state(&self, now: i64) -> &'static str {
         if now >= self.expires_at {
             "expired"
@@ -191,7 +196,7 @@ fn issued_key_hash(public_key: &VerifyingKey) -> [u8; 32] {
     sha2::Sha256::digest(ca::public_key_der(public_key)).into()
 }
 
-/// A registered device (§9.2).
+/// Stores a registered DVLS device.
 pub(crate) struct Device {
     pub(crate) id: Uuid,
     pub(crate) friendly_name: String,
@@ -230,7 +235,7 @@ impl Device {
         self.revoked_at.is_some()
     }
 
-    /// §9.2 `status` filter value.
+    /// Returns the DVLS device-status filter value.
     pub(crate) fn status(&self, now: i64) -> &'static str {
         if self.revoked() {
             "revoked"
@@ -275,7 +280,7 @@ fn has_live_old_root_stream(device: &Device, streams: &HashMap<Uuid, StreamHandl
     })
 }
 
-/// An in-progress CA rotation (§9.3).
+/// Tracks an in-progress DVLS CA rotation.
 pub(crate) struct Rotation {
     /// Thumbprints of the old and new roots.
     pub(crate) old_root: String,
@@ -310,6 +315,14 @@ pub(crate) struct Event {
     pub(crate) body: Value,
 }
 
+struct IssuedKey {
+    device_id: Uuid,
+    token_id: Uuid,
+    thumbprint: String,
+    /// Records the original issuance time in Unix seconds, even after device deletion.
+    issued_at: i64,
+}
+
 pub struct State {
     pub(crate) tokens: HashMap<Uuid, Token>,
     /// SHA-256(secret) → token ID (§2).
@@ -317,8 +330,8 @@ pub struct State {
     pub(crate) devices: HashMap<Uuid, Device>,
     /// Certificate thumbprint → device.
     pub(crate) cert_index: HashMap<String, Uuid>,
-    /// SHA-256(SPKI DER) → issuing device and certificate, retained after deletion.
-    issued_keys: HashMap<[u8; 32], (Uuid, String)>,
+    /// INVARIANT: each issued SPKI key retains its token and issuance time after device deletion.
+    issued_keys: HashMap<[u8; 32], IssuedKey>,
     /// All known roots; the issuing root is the last one, `published` gates
     /// `trust-anchor` listing.
     pub(crate) roots: Vec<RootCa>,
@@ -541,7 +554,7 @@ impl State {
         self.record_event(device_id, "stream_closed", fields);
     }
 
-    /// The root new leaves are issued from (the newest one, §9.3).
+    /// Returns the newest root, which issues new leaves during DVLS rotation.
     pub(crate) fn issuing_root(&self) -> &RootCa {
         self.roots.last().expect("at least one root")
     }
@@ -608,6 +621,10 @@ impl State {
             .iter()
             .position(|cert| cert.thumbprint == thumbprint)
             .expect("authenticated certificate exists");
+        // UNTESTED: both promotion and an already-current retry refresh `last_seen_at`.
+        // Confirm proves current key possession, and admin last-seen filters depend on this timestamp.
+        // When changing this branch, check admin `lastSeenAt` after both confirm paths.
+        device.last_seen_at = Some(now);
         if device.certs[idx].status == CertStatus::Current {
             return;
         }
@@ -677,34 +694,37 @@ impl State {
         name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         let csr_key_hash = issued_key_hash(&csr_key);
-        if let Some((device_id, thumbprint)) = self.issued_keys.get(&csr_key_hash) {
-            let Some(device) = self.devices.get(device_id) else {
-                return Err(ApiError::device_revoked());
-            };
-            if device.revoked() {
-                return Err(ApiError::device_revoked());
+        let token = self.tokens.get(&token_id).expect("hash index consistent");
+        if let Some(issued) = self.issued_keys.get(&csr_key_hash) {
+            let device = self.devices.get(&issued.device_id);
+            if issued.token_id == token_id
+                && device.is_some_and(|device| {
+                    !device.revoked()
+                        && device
+                            .current_cert()
+                            .is_some_and(|cert| cert.thumbprint == issued.thumbprint)
+                })
+            {
+                let chain = self.chain_for_current(issued.device_id)?;
+                return Ok(EnrollOutcome {
+                    device_id: issued.device_id,
+                    certificate_chain: chain,
+                });
             }
-            let certificate = device
-                .certs
-                .iter()
-                .find(|cert| cert.thumbprint == *thumbprint)
-                .expect("issued key index is consistent");
-            if certificate.status != CertStatus::Current {
-                return Err(ApiError::invalid_request(
-                    "CSR key belongs to a pending or retired certificate",
-                ));
+            if token.deleted_at.is_some() {
+                return Err(ApiError::token_invalid());
             }
-            if device.token_id != token_id {
+            if issued.token_id != token_id {
                 return Err(ApiError::invalid_request("CSR key belongs to another enrollment token"));
             }
-            let chain = self.chain_for_current(*device_id)?;
-            return Ok(EnrollOutcome {
-                device_id: *device_id,
-                certificate_chain: chain,
-            });
+            if device.is_none_or(Device::revoked) {
+                return Err(ApiError::device_revoked());
+            }
+            return Err(ApiError::invalid_request(
+                "CSR key belongs to a pending or retired certificate",
+            ));
         }
 
-        let token = self.tokens.get(&token_id).expect("hash index consistent");
         if token.deleted_at.is_some() {
             return Err(ApiError::token_invalid());
         }
@@ -751,7 +771,14 @@ impl State {
         self.last_created_at = created_at;
         let created_seq = self.next_device_seq;
         self.next_device_seq += 1;
-        let mut config = json!({ "version": 1, "revision": 1 });
+        let mut config = self.tokens[&token_id]
+            .config
+            .as_ref()
+            .map(|config| config.as_object().expect("token config is an object").clone())
+            .unwrap_or_default();
+        config.insert("version".to_owned(), json!(1));
+        config.insert("revision".to_owned(), json!(1));
+        config.remove("agent_channel_url");
         if self.faults.channel_available {
             let url = match self.faults.malformed_channel_url {
                 Some(MalformedChannelUrl::Http) => base_url.replacen("https://", "http://", 1),
@@ -759,7 +786,7 @@ impl State {
                 Some(MalformedChannelUrl::Fragment) => format!("{base_url}#identity_probe"),
                 None => base_url.to_owned(),
             };
-            config["agent_channel_url"] = json!(url);
+            config.insert("agent_channel_url".to_owned(), json!(url));
         }
         let device = Device {
             id: device_id,
@@ -770,14 +797,22 @@ impl State {
             last_seen_at: Some(now),
             revoked_at: None,
             renewal_requested: None,
-            config,
+            config: Value::Object(config),
             token_id,
             token_name,
             certs: vec![cert],
         };
         assert!(
             self.issued_keys
-                .insert(csr_key_hash, (device_id, cert_thumbprint.clone()))
+                .insert(
+                    csr_key_hash,
+                    IssuedKey {
+                        device_id,
+                        token_id,
+                        thumbprint: cert_thumbprint.clone(),
+                        issued_at: leaf.not_before,
+                    },
+                )
                 .is_none(),
             "public key uniqueness was checked under the state lock"
         );
@@ -825,16 +860,16 @@ impl State {
         name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         let csr_key_hash = issued_key_hash(&csr_key);
-        if let Some((owner, thumbprint)) = self.issued_keys.get(&csr_key_hash) {
-            let Some(device) = self.devices.get(owner) else {
+        if let Some(issued) = self.issued_keys.get(&csr_key_hash) {
+            let Some(device) = self.devices.get(&issued.device_id) else {
                 return Err(ApiError::invalid_request("CSR key belongs to an issued certificate"));
             };
             let certificate = device
                 .certs
                 .iter()
-                .find(|cert| cert.thumbprint == *thumbprint)
+                .find(|cert| cert.thumbprint == issued.thumbprint)
                 .expect("issued key index is consistent");
-            if *owner != device_id || certificate.status != CertStatus::Pending {
+            if issued.device_id != device_id || certificate.status != CertStatus::Pending {
                 return Err(ApiError::invalid_request("CSR key belongs to an issued certificate"));
             }
             let root = self
@@ -868,9 +903,21 @@ impl State {
         for thumbprint in retired {
             self.cert_status_changed(device_id, &thumbprint, Some(CertStatus::Pending), CertStatus::Retired);
         }
+        let token_id = self.devices[&device_id].token_id;
+        // UNTESTED: a renewed key keeps its original issuance time after device deletion.
+        // Deleted devices must never make issued keys reusable or erase their issuance history.
+        // When changing renewal, issue a pending key, delete its device, and inspect `issued_keys`.
         assert!(
             self.issued_keys
-                .insert(csr_key_hash, (device_id, leaf.thumbprint.clone()))
+                .insert(
+                    csr_key_hash,
+                    IssuedKey {
+                        device_id,
+                        token_id,
+                        thumbprint: leaf.thumbprint.clone(),
+                        issued_at: leaf.not_before,
+                    },
+                )
                 .is_none(),
             "public key uniqueness was checked under the state lock"
         );
@@ -894,7 +941,7 @@ impl State {
         Ok(vec![leaf.der, root_der])
     }
 
-    /// §9.2 revoke: idempotent, closes live streams PERMISSION_DENIED + device_revoked.
+    /// DVLS revocation is idempotent and closes live streams with `PERMISSION_DENIED` + `device_revoked`.
     pub(crate) fn revoke(&mut self, device_id: Uuid, now: i64) -> Result<(), ApiError> {
         let device = self
             .devices
@@ -908,7 +955,7 @@ impl State {
         Ok(())
     }
 
-    /// §9.2 delete: only when revoked.
+    /// DVLS device deletion requires prior revocation.
     pub(crate) fn delete_device(&mut self, device_id: Uuid, now: i64) -> Result<(), ApiError> {
         let device = self
             .devices
@@ -933,12 +980,20 @@ impl State {
                 Some("device_unknown"),
             );
         }
-        self.devices.remove(&device_id);
+        let removed = self.devices.remove(&device_id).expect("device exists");
+        debug_assert!(
+            removed.certs.iter().all(|cert| {
+                self.issued_keys
+                    .get(&issued_key_hash(&cert.public_key))
+                    .is_some_and(|issued| issued.issued_at == cert.not_before)
+            }),
+            "issued keys retain their original issuance times after deletion"
+        );
         self.complete_rotation_if_ready(now);
         Ok(())
     }
 
-    /// §9.2 request-renewal: sets the flag (reason `admin`) and pushes to live streams.
+    /// DVLS request-renewal sets the flag (reason `admin`) and pushes to live streams.
     pub(crate) fn request_renewal(&mut self, device_id: Uuid) -> Result<(), ApiError> {
         let min_issued_seq = self.serial_seq;
         let device = self
@@ -953,7 +1008,7 @@ impl State {
         Ok(())
     }
 
-    /// Starts a §9.3 rotation with the supplied deadline or the active old-root certificate maximum.
+    /// Starts a DVLS rotation with the supplied deadline or the active old-root certificate maximum.
     /// The maximum is the latest `notAfter` of an unexpired current or pending old-root certificate of a non-revoked device, or `now` if none exist.
     pub(crate) fn start_rotation(&mut self, deadline: Option<i64>, now: i64) -> Result<(), ApiError> {
         if self.rotation.is_some() {
@@ -1040,7 +1095,7 @@ impl State {
         }
     }
 
-    /// Counts non-revoked devices with an unexpired current or pending old-root certificate (§9.3 `activeDevicesOnOldRoot`).
+    /// Counts non-revoked devices with unexpired current or pending certificates from the old root.
     pub(crate) fn active_devices_on_old_root(&self, now: i64) -> u64 {
         let Some(rotation) = &self.rotation else {
             return 0;
@@ -1126,8 +1181,8 @@ impl State {
         self.drain_rotation_pushes(now);
     }
 
-    /// §11 reset: clears tokens, devices, nonces, faults, rotation and the clock
-    /// offset; creates a fresh root. Live streams are closed with `device_unknown`.
+    /// Mock reset clears tokens, devices, nonces, faults, rotation and the clock offset.
+    /// It creates a fresh root and closes live streams with `device_unknown`.
     pub(crate) fn reset(&mut self, now: i64) -> anyhow::Result<()> {
         let stream_ids: Vec<Uuid> = self.streams.keys().copied().collect();
         for id in &stream_ids {
@@ -1372,6 +1427,91 @@ mod tests {
         );
         assert_eq!(state.tokens[&token_id].used_count, 0);
         assert!(state.devices.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn issued_key_origin_and_time_survive_device_deletion() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::new(now)?;
+        let (owner_token_id, owner_secret) = state.create_token("owner".to_owned(), 1, now + 3600, None, None, now);
+        let (other_token_id, other_secret) = state.create_token("other".to_owned(), 1, now + 3600, None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let key_hash = issued_key_hash(&check_csr(&csr).expect("valid CSR"));
+        let device_id = state
+            .enroll(&owner_secret, &csr, Map::new(), now, "https://localhost/mock")
+            .expect("enrollment succeeds")
+            .device_id;
+        let reject = |state: &mut State, secret: &[u8; 32]| {
+            state
+                .enroll(secret, &csr, Map::new(), now, "https://localhost/mock")
+                .err()
+                .expect("enrollment is rejected")
+                .code
+        };
+
+        state.tokens.get_mut(&owner_token_id).expect("owner token").deleted_at = Some(now);
+        assert_eq!(
+            state
+                .enroll(&owner_secret, &csr, Map::new(), now, "https://localhost/mock")
+                .expect("deleted token replays its current key")
+                .device_id,
+            device_id
+        );
+        state.tokens.get_mut(&other_token_id).expect("other token").deleted_at = Some(now);
+        assert_eq!(reject(&mut state, &other_secret), "token_invalid");
+        state.tokens.get_mut(&other_token_id).expect("other token").deleted_at = None;
+        assert_eq!(reject(&mut state, &other_secret), "invalid_request");
+
+        state.revoke(device_id, now).expect("revocation succeeds");
+        assert_eq!(reject(&mut state, &owner_secret), "token_invalid");
+        state.tokens.get_mut(&owner_token_id).expect("owner token").deleted_at = None;
+        assert_eq!(reject(&mut state, &owner_secret), "device_revoked");
+        assert_eq!(reject(&mut state, &other_secret), "invalid_request");
+
+        state.delete_device(device_id, now).expect("deletion succeeds");
+        assert_eq!(reject(&mut state, &owner_secret), "device_revoked");
+        assert_eq!(reject(&mut state, &other_secret), "invalid_request");
+        let issued = &state.issued_keys[&key_hash];
+        assert_eq!(issued.device_id, device_id);
+        assert_eq!(issued.token_id, owner_token_id);
+        assert_eq!(issued.issued_at, now);
+        Ok(())
+    }
+
+    #[test]
+    fn enrollment_includes_token_config_at_initial_revision() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::new(now)?;
+        let token_config = json!({ "psu_channel_url": "https://psu.example", "product_enabled": true });
+        let (token_id, secret) =
+            state.create_token("test".to_owned(), 1, now + 3600, None, Some(token_config.clone()), now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let device_id = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .expect("enrollment succeeds")
+            .device_id;
+        let config = &state.devices[&device_id].config;
+        assert_eq!(config["version"], 1);
+        assert_eq!(config["revision"], 1);
+        assert_eq!(config["agent_channel_url"], "https://localhost/mock");
+        assert_eq!(config["psu_channel_url"], "https://psu.example");
+        assert_eq!(config["product_enabled"], true);
+        assert_eq!(state.tokens[&token_id].config, Some(token_config));
+
+        let fields = json!({ "psu_channel_url": "https://psu.example" })
+            .as_object()
+            .cloned()
+            .expect("config fields");
+        assert_eq!(state.merge_config_fields(&fields), 0);
+        assert_eq!(state.devices[&device_id].config_revision(), 1);
+        state.update_channel_available(false, "https://localhost/mock");
+        assert_eq!(state.devices[&device_id].config_revision(), 2);
+        assert!(state.devices[&device_id].config.get("agent_channel_url").is_none());
         Ok(())
     }
 }

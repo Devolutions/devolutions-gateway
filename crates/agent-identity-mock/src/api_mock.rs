@@ -1,4 +1,8 @@
-//! Mock-only control API (CONTRACT.md §11), under `<prefix>/__mock__`. No auth.
+//! This module serves the mock control API ([mock intent][mock-intent], "Mock-only control")
+//! under `<prefix>/__mock__`.
+//! No authentication is required.
+//!
+//! [mock-intent]: ../INTENT.md#mock-only-control
 
 use std::sync::Arc;
 
@@ -236,8 +240,7 @@ fn faults_view(faults: &Faults) -> Value {
     })
 }
 
-/// `POST faults` merges fields (§11): absent keys are unchanged, `null` clears an
-/// optional field.
+/// `POST faults` merges fields: absent keys are unchanged, and `null` clears an optional field.
 async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     app.tick().await;
     let value: Value = match serde_json::from_slice(&body) {
@@ -365,9 +368,8 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     Json(faults_view(&state.faults)).into_response()
 }
 
-/// `POST reset` (§11): clears tokens, devices, nonces, faults, rotation and the clock
-/// offset; creates a fresh root; keeps `authority_id`, the TLS certificate and the
-/// admin token.
+/// `POST reset` clears tokens, devices, nonces, faults, rotation and the clock offset.
+/// It creates a fresh root but keeps `authority_id`, the TLS certificate and the admin token.
 async fn reset(AxumState(app): AxumState<Arc<App>>) -> Response {
     let mut state = app.state.lock().await;
     app.clock.reset();

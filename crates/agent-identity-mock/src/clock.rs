@@ -1,5 +1,7 @@
-//! Mock clock (CONTRACT.md §11): real time plus a manually advanced offset and a
-//! fault-injected skew. Used for everything time-related in the mock.
+//! The mock clock combines real time, a manually advanced offset and a fault-injected skew.
+//! The [mock control surface][mock-control] ("Mock-only control") uses it for every time-related operation.
+//!
+//! [mock-control]: ../INTENT.md#mock-only-control
 
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};

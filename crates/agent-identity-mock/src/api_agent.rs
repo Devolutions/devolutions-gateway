@@ -16,8 +16,7 @@ use crate::app::{App, rfc3339};
 use crate::oracle::{AuthenticatedDevice, Endpoint, Rejection, verify_request};
 use crate::state::{ApiError, DropTarget, FailNextResponse, State};
 
-/// Header set on a success response when `faults.drop_next_response` fires; the
-/// dispatcher turns it into a connection abort without a response (§11).
+/// Marks a processed mock fault; the dispatcher aborts the connection without responding.
 pub(crate) const DROP_HEADER: &str = "x-mock-drop";
 pub(crate) const INJECTED_HEADER: &str = "x-mock-injected";
 
@@ -192,7 +191,7 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
     };
     let should_drop = state.faults.drop_next_response == Some(DropTarget::Enroll);
     if should_drop {
-        // One-shot: process and commit, then abort without a response (§11).
+        // The mock-only drop fault commits the request, then aborts without a response.
         state.faults.drop_next_response = None;
         state.barrier_triggered = Some(DropTarget::Enroll);
     }

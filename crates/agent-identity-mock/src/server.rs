@@ -1,5 +1,9 @@
-//! HTTPS server: one port, ALPN `h2` and `http/1.1`, REST (axum) and gRPC (tonic)
-//! dispatched on the path after stripping the path prefix (CONTRACT.md §7.2, §11).
+//! The HTTPS server serves REST (axum) and gRPC (tonic) on one port with ALPN `h2` and `http/1.1`.
+//! The dispatcher strips the path prefix defined by [CONTRACT.md][contract] ("7.2 URL and path prefix")
+//! and the [mock intent][mock-intent] ("Mock-only control").
+//!
+//! [contract]: ../../../docs/agent-identity/CONTRACT.md#72-url-and-path-prefix
+//! [mock-intent]: ../INTENT.md#mock-only-control
 
 use std::convert::Infallible;
 use std::fmt;
@@ -27,8 +31,7 @@ type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type OutBody = http_body_util::combinators::UnsyncBoxBody<Bytes, BoxError>;
 type OutResponse = http::Response<OutBody>;
 
-/// Service error used to abort a connection without a response
-/// (`faults.drop_next_response`, §11).
+/// Aborts the connection for the mock's `faults.drop_next_response` control.
 #[derive(Debug)]
 pub struct ConnectionAborted;
 
@@ -119,7 +122,7 @@ impl Dispatcher {
             .await
             .unwrap_or_else(|never: Infallible| match never {});
         if response.headers_mut().remove(DROP_HEADER).is_some() {
-            // The fault fired: commit happened; abort without responding (§11).
+            // The mock drop fault committed the request, so abort without responding.
             return Err(ConnectionAborted);
         }
         let injected = response.headers_mut().remove(INJECTED_HEADER).is_some();
@@ -156,7 +159,7 @@ impl Service<http::Request<Incoming>> for Dispatcher {
 }
 
 /// Strips `prefix` from `path`: `/mock/api/...` → `/api/...`; `/mock` → `/`.
-/// Returns `None` when the path is outside the prefix (§11: 404).
+/// Returns `None` when the path is outside the prefix; the caller responds with 404.
 fn strip_prefix<'a>(prefix: &str, path: &'a str) -> Option<&'a str> {
     if path == prefix {
         return Some("/");

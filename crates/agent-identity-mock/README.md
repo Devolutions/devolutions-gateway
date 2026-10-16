@@ -1,7 +1,7 @@
 # agent-identity-mock
 
-Mock server for the Agent Identity V1 contract (`docs/agent-identity/CONTRACT.md`), used as the conformance oracle.
-It implements §2–§9 and §11 in memory, strictly and literally.
+Mock server for the [Agent Identity V1 contract][contract], used as the conformance oracle.
+It implements the agent-facing protocol, the [DVLS admin API][dvls-admin] and the [mock controls][mock-control] in memory.
 It shares only `crates/agent-channel-proto` (the generated gRPC types) with the agent.
 
 ## Usage
@@ -55,12 +55,13 @@ Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are 
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.
 Friendly names are stored server-side and appear only in the admin device API.
 Config revisions start at 1 and increase only on effective changes; `ConfigUpdate` follows `Welcome` for stale Hellos and is pushed to live streams after a change.
+A token's optional `config` object supplies product-specific fields to its enrolled devices; it cannot set `version`, `revision` or `agent_channel_url`.
 The mock uses a test-only unbounded push queue so config bursts cannot silently detach authenticated streams or discard termination messages.
 `POST __mock__/config` adds unknown fields so tests can check that agents preserve them.
 Only confirm promotes a pending certificate: old streams receive `Reconnect{reason:"certificate_rotated"}` and close with `OK` after 60 mock-clock seconds if still open.
 The channel gRPC method is `POST <prefix>/devolutions.agent.channel.v1.AgentChannel/Connect` with `signature-input`/`signature` metadata (`tag="connect"`); open failures are gRPC statuses with an `error-code` trailer (§7.4).
 
-### Admin (CONTRACT.md §9), `Authorization: Bearer <admin-token>`
+### Admin ([DVLS admin API][dvls-admin]), `Authorization: Bearer <admin-token>`
 
 Missing or invalid admin auth returns 401 `{ "error", "message" }`; all admin errors use that shape with the matching HTTP status.
 For permission tests, `<admin-token>-unprivileged` is authenticated without Agent identity management permission and returns 403.
@@ -81,9 +82,9 @@ For permission tests, `<admin-token>-unprivileged` is authenticated without Agen
 | GET | `/api/v3/agent-identity/ca/rotation` | `{ phase: "idle"\|"rotating", oldRoot?, newRoot?, deadline?, activeDevicesOnOldRoot }`; the count includes each non-revoked device with an unexpired current or pending old-root certificate. |
 
 A rotation completes immediately when no active old-root device remains, including at rotation start, and publishes only the new root.
-Certificate issuance and token-use consumption share the state lock; issued SPKI SHA-256 hashes remain reserved after device deletion.
+Certificate issuance and token-use consumption share the state lock; issued key hashes stay reserved, and original issuance times remain stored after device deletion.
 
-### Mock control (CONTRACT.md §11), no auth
+### Mock control ([mock controls][mock-control]), no auth
 
 | Method | Path | Notes |
 |---|---|---|
@@ -119,9 +120,13 @@ The RFC 9421 Appendix B.2.4 vector exercises its raw P-256 verifier without wide
 Its crate-local runtime API is `verify_request`, `verify_channel_proof`, `check_csr`, `content_digest_header`, `Endpoint`, `Rejection`, `RegisteredCert`, `CertStatus`, `NonceStore` and `AuthenticatedDevice`.
 Vector tests also use the test-only `verify_raw_signature` entry to check the RFC example and the positive fixtures' exact signed bases.
 Callers supply the certificate lookup, nonce store and current Unix time; the oracle performs no I/O or asynchronous work.
-The oracle depends only on `p256`, `sha2`, `base64`, `uuid`, `x509-cert`, `der` and `spki` outside the standard library, and never on other mock modules or workspace crates.
-The X.509, DER and SPKI crates supply CSR structure types; P-256 performs signature verification.
+The oracle depends only on `p256`, `sha2`, `base64`, `uuid`, `x509-cert` and `der` outside the standard library, and never on other mock modules or workspace crates.
+X.509 and DER supply CSR structure types; P-256 performs signature verification.
 
 ## Tests
 
 `cargo test -p agent-identity-mock` replays every signature, proof and CSR vector through the verifier and validators used by the server.
+
+[contract]: ../../docs/agent-identity/CONTRACT.md
+[dvls-admin]: ../../docs/agent-identity/INTENT.DVLS.md#admin-http-api
+[mock-control]: INTENT.md#mock-only-control

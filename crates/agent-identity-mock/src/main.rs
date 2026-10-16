@@ -137,8 +137,8 @@ async fn main() -> anyhow::Result<()> {
     });
     write_ready_file(&args.state_dir, &ready.to_string())?;
 
-    // Rotation deadline and rate-limited push ticker (§9.3); the lazy check on every
-    // request is the primary path, this covers idle servers with live streams.
+    // DVLS rotation deadlines and rate-limited pushes follow INTENT.DVLS.md, "Rotation".
+    // Requests are the primary path; the ticker covers idle servers with live streams.
     let ticker_app = Arc::clone(&app);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));

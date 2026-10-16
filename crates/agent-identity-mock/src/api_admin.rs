@@ -1,7 +1,10 @@
-//! Admin API (CONTRACT.md §9), under `<prefix>/api/v3/agent-identity`.
+//! This module serves the DVLS admin API ([DVLS intent][dvls-intent], "Admin HTTP API")
+//! under `<prefix>/api/v3/agent-identity`.
 //!
 //! Follows DVLS conventions: camelCase keys, DVLS paging, `Authorization: Bearer`, and
 //! `{ "error", "message" }` error bodies.
+//!
+//! [dvls-intent]: ../../../docs/agent-identity/INTENT.DVLS.md#admin-http-api
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -116,7 +119,7 @@ fn paginate(items: Vec<Value>, page_number: u64, page_size: u64) -> Value {
     })
 }
 
-// ==== §9.1 enrollment tokens ====
+// ==== DVLS enrollment tokens ====
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,6 +129,19 @@ struct CreateTokenRequest {
     expires_at: String,
     friendly_name_format: Option<String>,
     config: Option<Value>,
+}
+
+fn validate_token_config(config: &Value) -> Result<(), ApiError> {
+    let fields = config
+        .as_object()
+        .ok_or_else(|| ApiError::invalid_request("config must be a JSON object"))?;
+    if fields
+        .keys()
+        .any(|name| matches!(name.as_str(), "version" | "revision" | "agent_channel_url"))
+    {
+        return Err(ApiError::invalid_request("config cannot replace reserved fields"));
+    }
+    Ok(())
 }
 
 fn token_record(token: &Token, now: i64) -> Value {
@@ -168,6 +184,11 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Respo
         && let Err(message) = crate::name_eval::validate_friendly_name_format(format)
     {
         return admin_error(&ApiError::invalid_request(message));
+    }
+    if let Some(config) = &request.config
+        && let Err(error) = validate_token_config(config)
+    {
+        return admin_error(&error);
     }
 
     let mut state = app.state.lock().await;
@@ -233,7 +254,7 @@ async fn delete_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>)
     }
 }
 
-// ==== §9.2 devices ====
+// ==== DVLS devices ====
 
 fn device_summary(app: &App, state: &State, device: &Device, metadata_keys: Option<&[String]>) -> Value {
     let now = app.now();
@@ -469,7 +490,7 @@ async fn request_renewal(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uui
     }
 }
 
-// ==== §9.3 rotation ====
+// ==== DVLS rotation ====
 
 #[derive(Deserialize)]
 struct StartRotationRequest {
@@ -533,4 +554,28 @@ async fn get_rotation(AxumState(app): AxumState<Arc<App>>) -> Response {
     app.tick().await;
     let state = app.state.lock().await;
     Json(rotation_view(&state, app.now())).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::validate_token_config;
+
+    #[test]
+    fn token_config_accepts_only_product_fields() {
+        assert!(validate_token_config(&json!({ "psu_channel_url": "https://psu.example" })).is_ok());
+
+        for config in [
+            json!(true),
+            json!({ "version": 2 }),
+            json!({ "revision": 3 }),
+            json!({ "agent_channel_url": "https://elsewhere.example" }),
+        ] {
+            assert_eq!(
+                validate_token_config(&config).expect_err("config is invalid").code,
+                "invalid_request"
+            );
+        }
+    }
 }
