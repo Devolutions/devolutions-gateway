@@ -15,7 +15,8 @@ Check each block against reality before judging it; one piece of evidence per ve
 
 - Examples and formats against the config that consumes them (changelog generator, release tooling, CI workflows): **Wrong**.
 - Lists against the tree and the remote default branch: **Stale**.
-- Claimed conventions against history (`gh pr list --state merged --limit 60 --json headRefName,title`): **Never a convention**.
+- Claimed conventions against history (`gh pr list --state merged --limit 60 --json headRefName,title`) and provenance: **Never a convention** when nobody follows it and no maintainer decided it.
+  A maintainer may be introducing a convention deliberately, so an unfollowed rule with unclear provenance is a question for the human; the target is the rule a `/init` run invented on its own, such as `Issue: N/A` when no ticket applies.
 - Rules against the installed skills and always-read files: **Duplicated**.
 - Everything else against the test above: **Discoverable**, **Content-free**, or **Plain command**.
 - An always-loaded pointer to a long guide: **Misplaced**; it belongs in the skill that needs it.
@@ -30,7 +31,7 @@ Also look for what is **Missing**: policy the organisation applies elsewhere (in
 |---|---|---|
 | `Issue: #456 (GitHub issue)` | Wrong | `cliff.toml` renders every `Issue:` as a Jira URL |
 | Scope list `dgw, agent, jetsocat, webapp` | Stale | `installer`, `agent-installer` missing; `commit-scope` skill has the table |
-| Branch naming | Never a convention | 2 of 60 merged PR branches carry a Jira key |
+| Branch naming | Never a convention | 2 of 60 merged PR branches carry a Jira key; no maintainer decision behind it |
 | Nightly rustfmt line | Keep | stable fmt fails CI; no skill states it |
 ```
 
