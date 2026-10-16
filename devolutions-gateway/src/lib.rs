@@ -30,6 +30,7 @@ pub mod log;
 pub mod middleware;
 pub mod ngrok;
 pub mod plugin_manager;
+pub mod provisioner_tasks;
 pub mod provisioning;
 pub mod proxy;
 pub mod rd_clean_path;
@@ -68,6 +69,7 @@ pub struct DgwState {
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
+    pub provisioner_tasks: provisioner_tasks::runner::ProvisionerTaskRunner,
 }
 
 #[doc(hidden)]
@@ -82,7 +84,7 @@ pub struct MockHandles {
 
 impl DgwState {
     #[doc(hidden)]
-    pub fn mock(json_config: &str) -> anyhow::Result<(Self, MockHandles)> {
+    pub async fn mock(json_config: &str) -> anyhow::Result<(Self, MockHandles)> {
         let conf_handle = config::ConfHandle::mock(json_config)?;
         let token_cache = Arc::new(token::new_token_cache());
         let jrl = Arc::new(parking_lot::Mutex::new(token::JrlTokenClaims::default()));
@@ -95,6 +97,15 @@ impl DgwState {
         let provisioning = provisioning::ProvisioningStore::new();
         let synthetic_kdc_registry = credential_injection::SyntheticKdcRegistry::new();
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
+        let task_store = gateway_db::GatewayDb::open_path(":memory:").await?.connect().await?;
+        let task_store = Arc::new(provisioner_task_libsql::LibSqlProvisionerTaskStore::open(task_store).await?);
+        let provisioner_tasks = provisioner_tasks::task_runner(
+            task_store,
+            Arc::new(job_queue_handle.clone()),
+            conf_handle.clone(),
+            recording_manager_handle.clone(),
+            provisioning.clone(),
+        );
 
         let state = Self {
             conf_handle,
@@ -110,6 +121,7 @@ impl DgwState {
             synthetic_kdc_registry,
             monitoring_state,
             agent_tunnel_handle: None,
+            provisioner_tasks,
         };
 
         let handles = MockHandles {

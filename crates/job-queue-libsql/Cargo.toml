@@ -19,3 +19,6 @@ tracing = "0.1"
 typed-builder = "0.21"
 ulid = { version = "1.2", features = ["uuid"] }
 uuid = "1.23"
+
+[dev-dependencies]
+tokio = { version = "1.52", features = ["macros", "rt"] }
