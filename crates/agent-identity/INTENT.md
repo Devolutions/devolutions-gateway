@@ -44,6 +44,8 @@ The location and format of the files below are stable, because the conformance t
   - A permanent outcome is a `token_*` error, `device_revoked` (the device this enrollment created was revoked before the agent received the response), or a locally malformed token.
     It deletes the pending file, its in-progress record and its enrollment key, and writes a rejection marker; the agent stores no identity, and recovery requires a different token.
   - A Windows pending file that cannot be decrypted is deleted with an error log and no rejection marker, because the token it holds may be valid; re-running the install command recovers.
+  - A pending file in an accepted form whose content the agent cannot use (its name is not the hash of the token it holds, its version is unsupported, its content is not a JSON object, or it is oversized) is deleted with a warning log and no rejection marker.
+    Only `identity enroll` writes pending files, so such a file was written by hand and never becomes usable, and a correct file for the same token can still enroll.
   - Any other failure keeps the pending state, and the agent retries.
 - A rejection marker is `<data-dir>/identity/rejected/<hex>.json` = `{ "version": 1, "token_sha256": "<hex>", "code": "<code>", "at": "<RFC 3339>" }`, where `code` is the contract error code or `token_malformed`.
   It holds no secret and is never deleted; tokens are immutable at the authority, so a permanent outcome never becomes wrong.
