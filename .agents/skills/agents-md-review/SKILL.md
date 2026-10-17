@@ -5,7 +5,7 @@ description: Audit an existing AGENTS.md or CLAUDE.md line by line for wrong, st
 
 # AGENTS.md review
 
-A line in `AGENTS.md` earns its place only if it would cost a CI round-trip or an incident to discover and no skill or always-read file already states it.
+A line in `AGENTS.md` earns its place only if discovering and fixing it would cost more than one cheap feedback round and no skill or always-read file already states it.
 Every other line is paid on every task, and a wrong example is the costliest because agents copy it.
 
 ## Verify, then classify

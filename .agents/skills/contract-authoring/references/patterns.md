@@ -11,7 +11,6 @@ They are not shape references; use them to recognise what review kept and what i
 - Stored-field ownership as one sentence naming the operations: "renewal, confirm and check-in update `last_seen_at`; an idempotent enrollment replay and stream closure do not".
 - The error section as the only list of codes, mappings, and retry rules.
 - Exceptions inline with the rule they relax.
-- Product-specific surfaces (admin API, mock) in late sections marked outside the product-neutral contract.
 
 ## Fixed by review, so look for them
 

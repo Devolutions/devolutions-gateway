@@ -47,7 +47,7 @@ Facts are your job: look up dependencies, features, callers, and siblings before
 - A list of variants: ask whether the rule is the list or a property each variant satisfies.
 - A fuzzy or overloaded word ("account", "session"): propose the canonical term and the avoided ones, and check that the code uses it.
 - "Requires a decision", "run X after Y", anything about contributors: process; note it for `AGENTS.md` and ask for the software property behind it.
-- Exact detail (fields, limits, status codes): note it for a `CONTRACT.md` if independence warrants one, and return to the decision behind it.
+- Exact detail (fields, limits, status codes): note it for a `CONTRACT.md` if a second party must agree to it, and return to the decision behind it.
 - Design still moving (names, packaging, two shapes): say so and keep grilling; do not draft mid-churn.
 
 Record provenance throughout: verbatim words, accepted proposals (quote the acceptance), proposals seen but undiscussed, gaps you filled.
