@@ -199,6 +199,7 @@ if ($WebScheme -eq 'https' -and
         "-keyout", $TlsPrivateKeyFile,
         "-out", $TlsCertificateFile,
         "-subj", "/CN=$Hostname",
+        "-addext", "subjectAltName=DNS:$Hostname",
         "-days", "1825"
     )
 
