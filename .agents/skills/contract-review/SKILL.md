@@ -21,6 +21,8 @@ Apply each to every normative sentence; quote it.
 - **Party**: which second party in scope must agree to this sentence?
   None means it is one party's own realisation (config, storage, CLI) and belongs in that party's intent file.
   Parties and example implementations are named without schedule ("e.g.: DVLS, PSU", never "DVLS now, PSU later"); timeline is not contract.
+- **Intent contradiction**: the contract says what its `INTENT.md` excludes, or excludes what the intent commits to; detail beyond the intent is expected, disagreement is not, and which side is wrong is the human's call.
+- **Stage talk**: "V1", "initially", "will be", "for now" in a contract; the contract states the whole surface, and what is realised today is the co-located intent file's deferral.
 - **Overreach**: a claim stronger than the mechanism guarantees ("prevents oracles" for "does not say which check failed"); propose the narrowed form.
 - **Open set**: an error, outcome, or input class not drawn from a closed, defined set; "bad input" is not a classification.
 - **Order for precedence**: an evaluation order where only which-outcome-wins matters, or two outcomes equally valid for one input.
@@ -31,11 +33,11 @@ Apply each to every normative sentence; quote it.
 - **Unmeasured cause**: a rationale citing a mechanism nobody measured.
 - **Untestable**: "handles", "supports", "properly", a condition without a stated outcome, or two outcomes in one sentence; propose an observable with a bound and the conformance case that checks it.
 - **Scope creep**: admin, UI, mock control, implementer choices, or any section that neither constrains a party in scope nor is exercised by a conformance test; propose the owning component's intent file or deletion.
-- **Intent gap**: a rule the contract needs that `INTENT.md` lacks; the human amends the intent first.
+- **Intent gap**: a rule the contract needs that `INTENT.md` lacks; a contract rule with no intent behind it is a design decision nobody made, so the human amends the intent first.
 
 ## Report
 
-Order by consequence: party and unspecified failure paths, then overreach, open sets and second copies, then wording.
+Order by consequence: party, intent contradiction, and gaps, then overreach, open sets and second copies, then wording.
 
 ```md
 ### <N>. <lens> — §<section>

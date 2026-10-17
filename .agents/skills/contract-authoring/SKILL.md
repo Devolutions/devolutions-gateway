@@ -16,7 +16,7 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
    Inventory every call site the contract will serve, with `file:line`.
    Read each reference implementation or host at a pinned version and record, per operation, whether it is native, argument mapping, workaround, or unsupported, with evidence.
    Host conventions (naming case, pagination, proxies that rewrite paths) become rules; a reference you did not read becomes a false universal.
-2. **Settle the design by interview**, one frontier of decisions per round, as in `grill-intent`.
+2. **Settle the design by interview**, one frontier of decisions per round; the human decides, and the agent may draft the normative wording for each decision, since a contract is agent-written under human approval.
    Number every clarification and log who decided it.
 3. **Draft, then critique with two lenses**: overkill and gaps.
    Run every state-changing operation through `references/critique-lenses.md`.
@@ -33,7 +33,8 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
 - Every list exists once; a second copy of the error list drifted and lost a code.
 - A `Definitions` section opens the contract with one entry per term the parties must share, in the glossary shape from `intent-files` (what it *is*, then its rules, an *Avoid:* line where a competing word exists); one encoding per concept, and the same word for the same thing throughout.
 - The contract is the single source for the API it specifies; when it covers a code API, public items cite their section and a check keeps them in step.
-- When the contract needs a rule the intent lacks, the human amends `INTENT.md` first.
+- When the contract needs a rule the intent lacks, the human amends `INTENT.md` first; a contract rule with no intent behind it is a design decision nobody made.
+- A contract has no versions and no deferral markers: it describes the whole surface as it must be, and the subset realised today is a deferral in the co-located intent file, extended by editing; a version negotiated on the wire is content, a release stage is not.
 - An example is not a rule: state what is free (order, case, whitespace) and add vectors that vary it, or a conforming library will reproduce none of them.
 - Put the exception where the rule is: "terminal, except during pending-key recovery".
 - Strict where it matters, extensible elsewhere: optional fields older receivers ignore, but authentication data stays strict.
@@ -47,7 +48,7 @@ Write each rule with one condition and one response ("when …", "while …", "i
 Each rule maps to a conformance case, worded as an observable with a bound: "encode writes exactly `size()` bytes", never "handles" or "supports", which name no outcome a test could check and so let divergent implementations all comply.
 "The backend supports RSA-PSS" is met by signing, by returning `Unsupported`, or by producing bytes nobody verifies; "signing with RSA-PSS returns a signature that verifies under the public key, or `Unsupported` before any key material is read" is one outcome and one test.
 "The parser handles truncated input" is met by an error, a caught panic, or a zero-filled struct; "a truncated input returns `Error::Truncated` and consumes nothing" is one outcome and one test.
-Shared vectors cover positive and negative cases, are deterministic, and an independent script recomputes them.
+Where the parties share test vectors, they cover positive and negative cases, are deterministic, and an independent script recomputes them.
 The conformance section ties every claim to how it is tested, lists known gaps, and marks what is verified by review only.
 
 Shape is free: order sections so a reader finds all of an operation's rules in one place, and prescribe nothing else.
