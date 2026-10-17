@@ -40,7 +40,7 @@ A file per source file is the exception, never the default, and never mechanical
 No mandatory sections, no title, and no length budget; one commitment may be the whole file, and intent is read on demand by directory, like a doc comment, not loaded on every task.
 A flat list for a handful; topical headings only when they aid retrieval; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
 A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one, and reasons live in the same file as the commitments they support, never in a separate rationale document.
-One meaning per verb: the declarative present or an imperative states a requirement, `should` a recommendation, `may` a permission, `can` a capability; never addressed to agents.
+One meaning per verb: the declarative present or an imperative states a requirement, `should` a recommendation, `may` a permission, `can` a capability; never addressed to agents; sentences follow `prose-writer`.
 Everything written normatively is to be realised by the time the branch merges; what is not is marked in the sentence ("for now", "later", a `NOTE:`), so an implementer knows not to build it yet and a reviewer knows not to expect it.
 Distinguish a deferral ("for now") from a non-goal ("the intention is not to"); the word tells a reader whether to expect change.
 State precision in the wording (`exactly these`, `at least`, `may vary provided`, `is permitted to`) rather than labelling the file exact or broad.

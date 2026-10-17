@@ -1,6 +1,6 @@
 ---
 name: contract-authoring
-description: Author or revise a normative CONTRACT.md - an exact, testable specification of an interface, protocol, or provider boundary that independent implementations and a conformance suite derive from. Use when designing a spec, contract, protocol document, or provider API that several components or backends must agree on.
+description: Author or extend a normative CONTRACT.md - an exact, testable specification of an interface, protocol, or provider boundary that independent implementations and a conformance suite derive from. Use when designing a spec, contract, protocol document, or provider API that several components or backends must agree on.
 ---
 
 # Contract authoring
