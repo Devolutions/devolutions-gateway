@@ -6,7 +6,7 @@ Report with severities and section references; the author adjudicates each findi
 ## Lens A: overkill
 
 For each mechanism ask what breaks without it: two modes or encodings that could be one, a tombstone or knob serving a case nobody has, a configurable value that could be fixed, an admin or debug surface only one product or only tests need.
-Keep what has a named failure; cut the rest or move it to a product-specific section.
+Keep what has a named failure; cut the rest, or move it to the intent or document of the party that owns it when it is that party's own realisation.
 
 ## Lens B: gaps
 
