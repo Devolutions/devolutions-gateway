@@ -22,11 +22,12 @@ Apply each to every normative sentence; quote the sentence in the finding.
 Four probes decide most of them: is this authoritative or only explanatory; would changing it require a design decision; would it still matter after a rewrite; what undesirable implementation could still satisfy it.
 
 - **Contradiction**: two statements that cannot both hold, including a specific file quietly narrowing a broader one.
-- **Not a commitment**: rules out no plausible change, would not survive a rewrite, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this component?"
+- **Not a commitment**: rules out no plausible change, would not survive a rewrite, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; at section level, scope prose that placement already supplies, boundary notes repeated, headings for a handful of bullets, inventories whose owner is elsewhere; "does that belong to this component?"
 - **Still satisfiable badly**: a commitment an undesirable implementation meets as written; propose the wording that excludes it.
 - **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
-- **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; schedule wording on examples or parties ("DVLS now, PSU later") where "e.g.: DVLS, PSU" is meant; propose the normative form or the explicit permission.
+- **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; propose the normative form or the explicit permission.
   A deferral the code has not realised is correct as written, not a finding.
+- **Schedule on parties**: "DVLS now, PSU later" where "e.g.: DVLS, PSU" is meant; timeline is not intent.
 - **Unscoped absolute**: `never`, `always`, `only`, `every`; which boundary, and does a sibling, feature flag, backend, or build falsify it?
 - **Overstated**: `must`, "if and only if", "exactly these", an exhaustive list, with nothing showing the strength is intended; ask before proposing the weaker form.
 - **Unverified universal**: "every library does X" with no cited check.
@@ -36,12 +37,11 @@ Four probes decide most of them: is this authoritative or only explanatory; woul
 - **History for rationale**: "previously Gateway was stateless, which caused problems with deletion" where the intent is "deleting an agent survives Gateway restarts"; propose the property.
 - **Missing reason**: a rule a contributor could plausibly "fix" because no alternative is named as excluded.
 - **Not checkable**: "handles", "supports", "properly", a condition without a stated outcome, or two outcomes in one sentence; propose an observable with a bound.
-- **Padding**: scope prose that placement already supplies, boundary notes repeated, headings for a handful of bullets, inventories whose owner is elsewhere.
 - **Hygiene**: links and anchors that do not resolve, removed rules still named, a synonym the glossary avoids, duplicated sentences across siblings, house style.
 
 ## Report
 
-Order by consequence: contradictions and false absolutes, then not-a-commitment and process, then padding and hygiene.
+Order by consequence: contradictions and false absolutes, then not-a-commitment and process, then hygiene.
 
 ```md
 ### <N>. <lens> — `<file>`
