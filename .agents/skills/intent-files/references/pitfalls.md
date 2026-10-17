@@ -16,7 +16,7 @@ Use it as the checklist when reviewing or before handing a draft back.
 - "The intent file should be normative. 'We would like to...' only fits behavior we intentionally haven't implemented yet, and this behavior is already implemented." ([devolutions-gateway #1942](https://github.com/Devolutions/devolutions-gateway/pull/1942#discussion_r4157014381))
 - "This sounds like a ticket body. Write in present tense, in a normative way, describing how things are expected to be at any point in time." ([#2003](https://github.com/Devolutions/devolutions-gateway/pull/2003#discussion_r4129433952))
 - Firm wants written tentatively because their placement was unclear: "I'm not sure yet what is the correct place to document these, but here are subjects I have in mind" and "`cargo metadata` may be used".
-  The set and the permission were requirements; state them as such and put the placement doubt in the PR.
+  The set and the permission were requirements; state them as such, and put the placement doubt in the PR rather than the file.
 - A future direction is allowed as a short, labelled "Later, X could …" note, or as a constraint ("V1 must not preclude this migration").
 
 ## Not true, or not true everywhere

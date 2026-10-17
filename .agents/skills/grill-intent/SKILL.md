@@ -6,8 +6,8 @@ description: Round-based interview in which the human writes each design commitm
 # Grill for intent
 
 Intent is the human's: the human writes each commitment, and the agent never writes intent from code or a brief.
-The agent's part is to find the decisions, give the context needed to take each one, verify what the human decides, and clean up the wording to the conventions in `intent-files`.
-A commitment is a statement that rules out a plausible, locally correct change the human deliberately rejects; if nothing in the interview produces one, the right outcome is no file.
+The agent's part is to find the decisions, give the context needed to take each one, verify what the human decides, and clean up the wording to the conventions in `intent-files`, which also defines a commitment.
+If nothing in the interview produces one, the right outcome is no file.
 
 ## The tree
 
@@ -21,7 +21,7 @@ Root questions, from which everything else branches; settle vocabulary first, be
 - **Non-goals**: what is unsupported or was cut?
 - **Properties**: security, compatibility, concurrency and lifecycle, dependency boundaries, extension points.
 - **Future**: which directions must not be precluded?
-- **Independence**: which other party must agree to anything here, so that a `CONTRACT.md` is warranted, and which interfaces have no such party and stay intent?
+- **Second party**: which other party must agree to anything here, so that a `CONTRACT.md` is warranted, and which interfaces have no such party and stay intent?
 
 ## Rounds
 
@@ -47,8 +47,8 @@ Record the human's sentence; tidy it to the conventions only, keeping their word
 
 - An absolute: ask which boundary it protects and what falsifies it; show the sibling, feature flag, or build that would, and let the human scope it.
 - A claim about how code works that the code contradicts: surface it and ask which is wrong, the code or the claim.
-- Wishing or future tense: ask whether the behaviour exists; if so state it normatively, otherwise mark it as a target.
-- A tentative want ("I'd like", "I have in mind", "may"): ask whether it is a requirement, a permission, or a preference, and word it so.
+- Wishing or future tense: ask whether the behaviour exists; if so, ask for the sentence as a requirement, otherwise for the deferral marker.
+- A tentative want ("I'd like", "I have in mind", "may"): ask whether it is a requirement, a permission, or a preference, and for the sentence that says which.
 - A rule without a reason: ask what alternative it excludes and why.
 - A list of variants: ask whether the rule is the list or a property each variant satisfies.
 - A fuzzy or overloaded word ("account", "session"): show where the code and the conversation use it differently, and ask for the canonical term and the avoided ones.
@@ -62,5 +62,5 @@ Only the first two become intent text; the third is listed for the human and nev
 ## Finish
 
 When the frontier is empty: list each commitment in the human's words with its provenance, propose placement, and ask for confirmation.
-Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand over as drafts the human adopts by approving each commitment.
+Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand the assembled file back for the human to confirm ordering, placement, and tidying.
 When a design is shared by several components, draft it once as an `INTENT.<feature>.md` part and list the directories that will symlink to it.

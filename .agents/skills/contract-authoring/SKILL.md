@@ -31,6 +31,7 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
 - Implementation-defined cases are listed with their exact allowed outcome set, never with examples, and are excluded from differential tests.
 - For every stored field: who initialises it, which operations update it, and which must not.
 - Every list exists once; a second copy of the error list drifted and lost a code.
+- A `Definitions` section opens the contract with one entry per term the parties must share, in the glossary shape from `intent-files` (what it *is*, then its rules, an *Avoid:* line where a competing word exists); one encoding per concept, and the same word for the same thing throughout.
 - The contract is the single source for the API it specifies; when it covers a code API, public items cite their section and a check keeps them in step.
 - When the contract needs a rule the intent lacks, the human amends `INTENT.md` first.
 - An example is not a rule: state what is free (order, case, whitespace) and add vectors that vary it, or a conforming library will reproduce none of them.
