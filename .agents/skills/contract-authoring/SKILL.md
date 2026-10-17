@@ -42,6 +42,7 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
 
 ## Testability
 
+Write each rule with one condition and one response ("when …", "while …", "if … then …") and one meaning per verb: declarative present for a requirement, `should` a recommendation, `may` a permission, `can` a capability.
 Each rule maps to a conformance case, worded as an observable with a bound: "encode writes exactly `size()` bytes", never "handles" or "supports", which name no outcome a test could check and so let divergent implementations all comply.
 "The backend supports RSA-PSS" is met by signing, by returning `Unsupported`, or by producing bytes nobody verifies; "signing with RSA-PSS returns a signature that verifies under the public key, or `Unsupported` before any key material is read" is one outcome and one test.
 "The parser handles truncated input" is met by an error, a caught panic, or a zero-filled struct; "a truncated input returns `Error::Truncated` and consumes nothing" is one outcome and one test.

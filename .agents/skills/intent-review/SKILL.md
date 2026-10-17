@@ -35,9 +35,9 @@ Four probes decide most of them: is this authoritative or only explanatory; woul
 - **Incidental detail**: a helper name, layout, or one library's behaviour or number stated as a rule with nothing showing a human chose to pin it; a deliberately pinned detail with its reason is a commitment, so ask rather than flag, and an author's insistence that it is intentional settles it.
 - **History for rationale**: "previously Gateway was stateless, which caused problems with deletion" where the intent is "deleting an agent survives Gateway restarts"; propose the property.
 - **Missing reason**: a rule a contributor could plausibly "fix" because no alternative is named as excluded.
-- **Not checkable**: "handles", "supports", "properly"; propose an observable with a bound.
+- **Not checkable**: "handles", "supports", "properly", a condition without a stated outcome, or two outcomes in one sentence; propose an observable with a bound.
 - **Padding**: scope prose that placement already supplies, boundary notes repeated, headings for a handful of bullets, inventories whose owner is elsewhere.
-- **Hygiene**: links and anchors that do not resolve, removed rules still named, duplicated sentences across siblings, house style.
+- **Hygiene**: links and anchors that do not resolve, removed rules still named, a synonym the glossary avoids, duplicated sentences across siblings, house style.
 
 ## Report
 

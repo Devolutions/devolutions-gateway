@@ -40,16 +40,19 @@ Never one per source file, never mechanically.
 No mandatory sections and no title; one commitment may be the whole file, and a new component's intent may run to a hundred lines when the commitments are many.
 A flat list for a handful; topical headings only when they aid retrieval; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
 A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one, and reasons live in the same file as the commitments they support, never in a separate rationale document.
-Normative in any mood (declarative, imperative, `must`, `should`); never addressed to agents.
+One meaning per verb: the declarative present or an imperative states a requirement, `should` a recommendation, `may` a permission, `can` a capability; never addressed to agents.
 Everything written normatively is to be realised by the time the branch merges; what is not is marked in the sentence ("for now", "later", a `NOTE:`), so an implementer knows not to build it yet and a reviewer knows not to expect it.
 Distinguish a deferral ("for now") from a non-goal ("the intention is not to"); the word tells a reader whether to expect change.
 State precision in the wording (`exactly these`, `at least`, `may vary provided`, `is permitted to`) rather than labelling the file exact or broad.
+Give a conditional commitment a trigger or state and one response ("when a token is deleted, …", "while a rotation is in progress, …", "if the response is lost, then …"); one condition and one outcome per sentence is what a reviewer can check and an audit can split.
 Scope every `never`, `only`, `always` to the boundary it protects and name the configurations a conditional commitment applies to.
 A scope sentence earns its place only when placement leaves a likely misapplication, stated once, next to the commitment it qualifies.
-When the component introduces its own terms, a glossary (one heading per term, one to three sentences, an example) can carry the rules inside the definitions: "A missing requirement is an error, not an applicability skip."
+When the component introduces its own terms, a glossary entry per term opens with one or two sentences saying what it *is*, continues with its commitments, and ends with an example where the boundary is unclear and an *Avoid:* line where a competing word exists; a heading per term when entries carry commitments or will be cited, a flat `**Term**:` list otherwise; commitments that outgrow an entry move to their own section with a pointer from the entry.
+Only coined terms; a general programming concept is not glossary material.
 Specifics the human wants pinned (an exact set of variants, a dependency allowlist, a permitted tool, a pipeline order, a CLI's selector semantics) are intent even though they look like implementation; put them under the glossary entry of the concept they refine, or in a `<module>.intent.md` beside the one module they govern, and word them as the set or the permission, never as "things I have in mind" or "may be used", which read as optional.
 The file still does not describe the implementation: incidental detail is the first thing a reviewer questions, and doubt about where a statement belongs goes in the PR.
 When a file grows, cut first the statement that neither changes the set of acceptable implementations nor explains why an alternative is excluded.
+A commitment that will be cited in reviews may carry a short name ("the single-classification rule") so it is referred to, not restated.
 
 `references/pitfalls.md` lists how drafts have failed review and what the maintainer said; read it before handing a draft back or when reviewing.
 `references/examples.md` points at the file the maintainer wrote by hand and says what makes it work.

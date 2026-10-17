@@ -29,7 +29,7 @@ Apply each to every normative sentence; quote it.
 - **Example as rule**: a transcript or template whose free aspects (order, case, whitespace) are not stated; propose the statement and vectors that vary them.
 - **One-implementation bias**: a library's behaviour, a number, or a rationale true for one backend; ask whether it was written to fit one implementation.
 - **Unmeasured cause**: a rationale citing a mechanism nobody measured.
-- **Untestable**: "handles", "supports", "properly"; propose an observable with a bound and the conformance case that checks it.
+- **Untestable**: "handles", "supports", "properly", a condition without a stated outcome, or two outcomes in one sentence; propose an observable with a bound and the conformance case that checks it.
 - **Scope creep**: admin, UI, mock control, implementer choices, or any section that neither constrains a party in scope nor is exercised by a conformance test; propose the owning crate's intent file or deletion.
 - **Intent gap**: a rule the contract needs that `INTENT.md` lacks; the human amends the intent first.
 

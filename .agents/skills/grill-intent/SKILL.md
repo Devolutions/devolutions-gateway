@@ -11,8 +11,9 @@ A commitment is a statement that rules out a plausible, locally correct change t
 
 ## The tree
 
-Root questions, from which everything else branches:
+Root questions, from which everything else branches; settle vocabulary first, because exact nouns make most commitments one sentence:
 
+- **Vocabulary**: which terms does this unit coin, what is each, which synonyms are avoided, and what rule does each definition carry?
 - **Boundary**: which unit, and what is deliberately outside it?
 - **Role**: why does it exist; what is lost if it is folded into a neighbour?
 - **Must remain true**: what would make the software wrong even with green tests?
@@ -20,7 +21,6 @@ Root questions, from which everything else branches:
 - **Non-goals**: what is unsupported or was cut?
 - **Properties**: security, compatibility, concurrency and lifecycle, dependency boundaries, extension points.
 - **Future**: which directions must not be precluded?
-- **Vocabulary**: which terms does this unit introduce, and what rule does each definition carry?
 - **Independence**: which other party must agree to anything here, so that a `CONTRACT.md` is warranted, and which interfaces have no such party and stay intent?
 
 ## Rounds
@@ -45,6 +45,7 @@ Facts are your job: look up dependencies, features, callers, and siblings before
 - A tentative want ("I'd like", "I have in mind", "may"): ask whether it is a requirement, a permission, or a preference, and word it so.
 - A rule without a reason: ask what alternative it excludes and why.
 - A list of variants: ask whether the rule is the list or a property each variant satisfies.
+- A fuzzy or overloaded word ("account", "session"): propose the canonical term and the avoided ones, and check that the code uses it.
 - "Requires a decision", "run X after Y", anything about contributors: process; note it for `AGENTS.md` and ask for the software property behind it.
 - Exact detail (fields, limits, status codes): note it for a `CONTRACT.md` if independence warrants one, and return to the decision behind it.
 - Design still moving (names, packaging, two shapes): say so and keep grilling; do not draft mid-churn.
