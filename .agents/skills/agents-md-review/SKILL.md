@@ -11,9 +11,10 @@ Every other line is paid on every task, and a wrong example is the costliest bec
 ## Verify, then classify
 
 Review the file as given and state which revision.
-Check each block against reality before judging it; one piece of evidence per verdict is enough, and a config that would render an example wrong suffices without hunting for observed breakage.
+Check each block against reality before judging it; one piece of evidence per verdict is enough.
 
-- Examples and formats against the config that consumes them (changelog generator, release tooling, CI workflows): **Wrong**.
+- Examples and formats against the tool that consumes them (changelog generator, release tooling, CI workflows): **Wrong**.
+  Reading the tool's configuration is enough; a footer that `cliff.toml` turns into a broken link is wrong whether or not a bad changelog has shipped.
 - Lists against the tree and the remote default branch: **Stale**.
 - Claimed conventions against history (`gh pr list --state merged --limit 60 --json headRefName,title`): **Never a convention** when nobody follows it and the maintainer confirms nobody decided it.
   A maintainer may be introducing the rule deliberately, and a human committer proves nothing about who decided it, so an unfollowed rule the maintainer has not ruled on goes on the human-decision list.
