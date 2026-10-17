@@ -35,4 +35,5 @@ A separate, unauthenticated control surface under `{u}/__mock__/` lets the teste
 - reset all mutable state;
 - read a device's ordered channel and certificate events, each with a monotonic sequence number, so that make-before-break ordering can be checked without polling.
 
+The control surface may also offer other test-only controls and observations that the tester needs, such as per-operation request counters, pausing the channel handshake or a retry, a redirect target, a server-initiated reconnect, or a stale config.
 This control surface is never part of the contract, and its request shapes are documented in the mock's README.
