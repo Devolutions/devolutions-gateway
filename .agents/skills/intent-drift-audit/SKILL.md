@@ -10,7 +10,7 @@ It reports; it never edits intent or contract and never silently fixes code duri
 
 ## Scope
 
-Paths under audit: the diff, the named crate or module, or the subtree.
+Paths under audit: the diff, the named component or module, or the subtree.
 State which revision you audited; if the checkout may be behind, fetch intent and code from the remote default branch or the PR head.
 Applicable intent is cumulative: every `INTENT.md` and `INTENT.<feature>.md` from the root down to each audited directory, and every `*.intent.md` or `*.intent.<feature>.md` beside an audited file.
 Where a statement says "see `CONTRACT.md` §N", the contract section is the statement; when the user names a contract, audit an implementation against it directly, treating each operation's valid domain, must-support set, error mapping, and precedence as separate statements and the conformance suite's coverage of each as part of the evidence.

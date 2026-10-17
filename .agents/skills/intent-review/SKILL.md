@@ -22,7 +22,7 @@ Apply each to every normative sentence; quote the sentence in the finding.
 Four probes decide most of them: is this authoritative or only explanatory; would changing it require a design decision; would it still matter after a rewrite; what undesirable implementation could still satisfy it.
 
 - **Contradiction**: two statements that cannot both hold, including a specific file quietly narrowing a broader one.
-- **Not a commitment**: rules out no plausible change, would not survive a rewrite, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this crate?"
+- **Not a commitment**: rules out no plausible change, would not survive a rewrite, or restates code, manifest, README, path, contract, or a sibling without adding a constraint or reason not recoverable there; "does that belong to this component?"
 - **Still satisfiable badly**: a commitment an undesirable implementation meets as written; propose the wording that excludes it.
 - **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
 - **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; schedule wording on examples or parties ("DVLS now, PSU later") where "e.g.: DVLS, PSU" is meant; propose the normative form or the explicit permission.

@@ -78,8 +78,8 @@ A specific helper, file layout, or internal abstraction belongs in `INTENT.md` o
 
 `INTENT.md` must remain human-owned.
 
-Agents must not generate intent files on behalf of humans.
-Otherwise, the presence of `INTENT.md` would no longer show that durable human design work took place.
+An agent does not write intent from code or a brief.
+It may interview the human and record the commitments the human states in their own words, so that the presence of `INTENT.md` still shows that a human decided.
 
 This rule does not mean that intent can never change.
 It means that changing intent is a human design action, not an implementation action delegated to an agent.

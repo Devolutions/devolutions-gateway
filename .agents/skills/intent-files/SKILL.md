@@ -10,7 +10,7 @@ It is authoritative where present and optional everywhere; `AGENTS.md` constrain
 A component's own interface (its CLI, config, storage) with the reason it is shaped so is intent, not contract, until a named second party depends on it.
 If the repository has `docs/intent-files.md`, it is the house convention.
 
-Agents may draft on request but never create, edit, or delete intent files on their own; a draft becomes intent when a human has approved each commitment, not merely committed the file.
+An agent never writes intent from code or a brief, and never creates, edits, or deletes an intent file on its own; it may interview the human (`grill-intent`), record the commitments the human states in their own words, tidy them to these conventions, and hand them back as a draft the human adopts, so that a file's presence still means a human decided.
 Write drafts where the user says, otherwise outside the source tree, and say so.
 When code, tests, contract, and intent disagree, report the divergence; the human decides which is wrong.
 
@@ -29,7 +29,7 @@ Default to no file: create one only when at least one commitment passes.
 
 ## Placement
 
-`INTENT.md` at the narrowest directory covering all governed code; `<name>.intent.md` beside one file when a single module carries a policy its crate does not.
+`INTENT.md` at the narrowest directory covering all governed code; `<name>.intent.md` beside one file when a single module carries a policy its component does not.
 Applicable files are those in the directory and its ancestors, cumulative, and a specific file never overrides a broader one; nothing follows a link.
 A design shared by several components is a part file, `INTENT.<feature>.md` or `<module>.intent.<feature>.md`, present in each governed directory; a symlink to one source keeps the parts identical, and where a symlink is not possible the copies are one text and a difference between them is a defect.
 A part is read from several directories, so it names repository paths as code (`docs/agent-identity/CONTRACT.md`) rather than relative links.

@@ -33,7 +33,6 @@ Keep it while drafting; attach it or fold it into `REVIEW.md`.
 
 | Level | Meaning | Where it goes |
 |---|---|---|
-| 1 | The human's own words, quoted verbatim | May become intent directly |
-| 2 | Agent proposal the human explicitly accepted, acceptance quoted | May become intent |
-| 3 | Agent proposal present in a plan the human approved but never discussed on its own | List for the human to confirm |
-| 4 | Filled in by the agent while drafting, never discussed | List for the human to confirm; never silently committed |
+| 1 | The human's own words, quoted verbatim | Intent text |
+| 2 | The human's words tidied to the conventions, original quoted beside | Intent text |
+| 3 | Filled in by the agent while drafting, never stated by the human | List for the human; never written as intent |

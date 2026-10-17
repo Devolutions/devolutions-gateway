@@ -23,13 +23,13 @@ Put positively: there is no way the agent learns this unless we write it.
 
 - A pointer to a non-standard layout: "Integration tests are centralized in `testsuite`; see `testsuite/AGENTS.md`."
 - The default feedback loop when it is not the ecosystem's default: "`cargo xtask check-uncommitted` verifies local modifications."
-- A gotcha with its consequence: "Format with nightly rustfmt; stable `cargo fmt` produces different output and fails CI."
+- A gotcha whose fix is not one cheap round: "Integration tests exercise the CLI binary, not the crate as a library; see `testsuite/AGENTS.md`."
 - A policy with its reason: "Use `#[expect(lint, reason = "...")]` so the suppression explains itself and expires when it stops being needed."
 - Repository rules no tool enforces: intent-file handling, writing conventions for committed text, comment markers such as `INVARIANT:` and `UNTESTED:`.
 - The one repo-specific fact a shared skill defers to the repo, when it fits in a line; otherwise a repo-local skill.
 - One opener saying where skills live, for agents that do not discover them.
 
-What `/init` generates is the blacklist: product overview, directory map, command lists, "follow standard conventions", inventories of crates or scopes, and lossy summaries of `STYLE.md`.
+What `/init` generates is the blacklist: product overview, directory map, command lists, "follow standard conventions", inventories of packages or scopes, and lossy summaries of `STYLE.md`.
 Examples without the rule behind them are the costliest lines; agents copy the example, mistakes included.
 
 ## Division of labour
