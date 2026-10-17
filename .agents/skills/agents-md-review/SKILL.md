@@ -10,7 +10,7 @@ Every other line is paid on every task, and a wrong example is the costliest bec
 
 ## Verify, then classify
 
-Audit the file on the remote default branch; if the local copy differs, report it as stale and move on.
+Review the file as given and state which revision.
 Check each block against reality before judging it; one piece of evidence per verdict is enough, and a config that would render an example wrong suffices without hunting for observed breakage.
 
 - Examples and formats against the config that consumes them (changelog generator, release tooling, CI workflows): **Wrong**.
@@ -35,7 +35,7 @@ Also look for what is **Missing**: policy the organisation applies elsewhere (in
 | `Issue: #456`, `Issue: N/A` as valid footers | Wrong, Never a convention | `cliff.toml` turns every `Issue:` value into a Jira link; maintainer confirms neither was decided |
 | Scope list `dgw, agent, jetsocat, webapp` | Stale | `installer`, `agent-installer` missing; `commit-scope` skill has the table |
 | Branch naming | Never a convention | 2 of 60 merged PR branches carry a Jira key; maintainer confirms it was never decided |
-| Nightly rustfmt line | Keep | stable fmt fails CI; no skill states it |
+| Tests drive the CLI binary, not the library; see `testsuite/AGENTS.md` | Keep | redoing a library-level testsuite is more than one round; no skill states it |
 ```
 
 Then propose the full pruned file, list what moved to a skill or a nested `AGENTS.md`, and list what needs a human decision.

@@ -26,7 +26,7 @@ Put positively: there is no way the agent learns this unless we write it.
 - A gotcha whose fix is not one cheap round: "Integration tests exercise the CLI binary, not the crate as a library; see `testsuite/AGENTS.md`."
 - A policy with its reason: "Use `#[expect(lint, reason = "...")]` so the suppression explains itself and expires when it stops being needed."
 - Repository rules no tool enforces: intent-file handling, writing conventions for committed text, comment markers such as `INVARIANT:` and `UNTESTED:`.
-- The one repo-specific fact a shared skill defers to the repo, when it fits in a line; otherwise a repo-local skill.
+- The one fact a shared skill leaves to the repository, such as the issue-reference footer format, when it fits in a line; otherwise a repo-local skill.
 - One opener saying where skills live, for agents that do not discover them.
 
 What `/init` generates is the blacklist: product overview, directory map, command lists, "follow standard conventions", inventories of packages or scopes, and lossy summaries of `STYLE.md`.
@@ -35,11 +35,12 @@ Examples without the rule behind them are the costliest lines; agents copy the e
 ## Division of labour
 
 ```text
-AGENTS.md    always loaded     policy, gotchas, pointers          < 40 lines
+AGENTS.md    always loaded     policy, gotchas, pointers
 skill        loaded on match   rules for one task; may load the skills it builds on
 STYLE.md     loaded by a reviewer skill when a rule's intent is unclear
 ```
 
+The root file enters every context, so about 40 lines is the rule of thumb; a nested file loads for fewer tasks and may run longer; past the mark, flag it for the human rather than cut a gotcha to fit.
 Load each file at the latest point where it pays for itself; an always-loaded file pointing at a 700-line guide is a cost on every task, while a skill pointing at the one it depends on keeps both small.
 A directory with its own policy gets a nested `AGENTS.md` and one pointer from the root.
 
