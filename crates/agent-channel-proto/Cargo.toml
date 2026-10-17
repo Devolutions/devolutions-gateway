@@ -1,0 +1,20 @@
+[package]
+name = "agent-channel-proto"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+description = "Protobuf and gRPC definitions for the agent channel"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+prost = "0.13"
+prost-types = "0.13"
+tonic = { version = "0.12", default-features = false, features = ["codegen", "prost"] }
+
+[build-dependencies]
+prost-build = "0.13"
+protoc-bin-vendored = "3"
+tonic-build = "0.12"
