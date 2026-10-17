@@ -46,7 +46,7 @@ impl ManualProxyConfig {
 
             // Domain suffix match (starts with dot).
             if let Some(suffix) = pattern.strip_prefix('.') {
-                if host.ends_with(suffix) || host == suffix {
+                if host == suffix || host.ends_with(pattern) {
                     return true;
                 }
                 continue;
@@ -325,4 +325,25 @@ pub fn get_or_create_cached_client(
     cache.insert(cache_key, client.clone());
 
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn domain_exclusion_respects_label_boundaries() -> anyhow::Result<()> {
+        let config = ManualProxyConfig {
+            exclude: vec![".corp.local".to_owned()],
+            ..Default::default()
+        };
+        for (target, bypass) in [
+            ("https://corp.local", true),
+            ("https://a.corp.local", true),
+            ("https://evilcorp.local", false),
+        ] {
+            assert_eq!(config.should_bypass(&Url::parse(target)?), bypass, "{target}");
+        }
+        Ok(())
+    }
 }
