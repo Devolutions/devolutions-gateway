@@ -26,8 +26,8 @@ Root questions, from which everything else branches; settle vocabulary first, be
 ## Rounds
 
 The frontier is every question whose prerequisites are settled.
-When code exists, open with a brief before the first round: what the component is, what it does today, its backends, callers, and dependencies, in plain language and in the human's vocabulary, so that the questions can point into it instead of each restating the code.
-The human knows how much of it they need; a short brief they confirm still catches the places where their memory and the code disagree.
+When code exists, open with a short brief before the first round: what the component is, what it does today, its backends, callers, and dependencies, in plain language and in the human's vocabulary, so that the questions can point into it instead of each restating the code.
+The human expands it by asking; a short brief they confirm still catches the places where their memory and the code disagree.
 Ask the whole frontier in one round, numbered.
 Each question gives the human what they need to decide, in plain language: the part of the brief it turns on, what the options are, and how each could go wrong later; it does not recommend an answer, because a recommended answer the human accepts is the agent's design under the human's name.
 
