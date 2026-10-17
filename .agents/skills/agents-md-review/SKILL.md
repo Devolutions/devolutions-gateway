@@ -1,0 +1,43 @@
+---
+name: agents-md-review
+description: Audit an existing AGENTS.md or CLAUDE.md line by line for wrong, stale, discoverable, duplicated, or content-free guidance and propose the pruned file. Use when asked to review, prune, shrink, or clean up one.
+---
+
+# AGENTS.md review
+
+A line in `AGENTS.md` earns its place only if discovering and fixing it would cost more than one cheap feedback round and no skill or always-read file already states it.
+Every other line is paid on every task, and a wrong example is the costliest because agents copy it.
+
+## Verify, then classify
+
+Review the file as given and state which revision.
+Check each block against reality before judging it; one piece of evidence per verdict is enough.
+
+- Examples and formats against the tool that consumes them (changelog generator, release tooling, CI workflows): **Wrong**.
+  Reading the tool's configuration is enough; a footer that `cliff.toml` turns into a broken link is wrong whether or not a bad changelog has shipped.
+- Lists against the tree and the remote default branch: **Stale**.
+- Claimed conventions against history (`gh pr list --state merged --limit 60 --json headRefName,title`): **Never a convention** when nobody follows it and the maintainer confirms nobody decided it.
+  A maintainer may be introducing the rule deliberately, and a human committer proves nothing about who decided it, so an unfollowed rule the maintainer has not ruled on goes on the human-decision list.
+- Rules against the installed skills and always-read files: **Duplicated**.
+- Everything else against the test above: **Discoverable**, **Content-free**, or **Plain command**.
+- An always-loaded pointer to a long guide: **Misplaced**; it belongs in the skill that needs it.
+
+A block can earn more than one verdict, each with its own evidence; lead with the one that needs no human confirmation.
+A footer that `cliff.toml` renders as garbage is **Wrong** whether or not anyone decided it, and **Never a convention** on top once the maintainer says nobody did.
+
+Also look for what is **Missing**: policy the organisation applies elsewhere (intent-file rules, writing conventions, comment markers) and non-standard layouts with no pointer.
+`agents-md/references/before-after.md` is one repository's worked answer; re-verify every row against the repository in front of you, never paste it.
+
+## Report
+
+```md
+| Block | Verdict | Evidence |
+|---|---|---|
+| `Issue: #456`, `Issue: N/A` as valid footers | Wrong, Never a convention | `cliff.toml` turns every `Issue:` value into a Jira link; maintainer confirms neither was decided |
+| Scope list `dgw, agent, jetsocat, webapp` | Stale | `installer`, `agent-installer` missing; `commit-scope` skill has the table |
+| Branch naming | Never a convention | 2 of 60 merged PR branches carry a Jira key; maintainer confirms it was never decided |
+| Tests drive the CLI binary, not the library; see `testsuite/AGENTS.md` | Keep | redoing a library-level testsuite is more than one round; no skill states it |
+```
+
+Then propose the full pruned file, list what moved to a skill or a nested `AGENTS.md`, and list what needs a human decision.
+Do not apply the changes unless asked.
