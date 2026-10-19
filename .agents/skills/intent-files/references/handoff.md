@@ -1,38 +1,34 @@
-# Draft handoff
+# Handoff note
 
-Write these next to a set of drafts so the human adopts commitments deliberately rather than committing a file.
-
-## `REVIEW.md`
+Written with a set of intent drafts so the human can confirm the assembled file.
+It is a session artifact: save it in the harness's artifact area when one exists, otherwise outside the source tree, and never stage or commit it.
+When the drafts go up in a pull request, its content becomes a PR comment, not part of the body, because the body becomes the squash commit and the changelog.
 
 ```md
-# Intent drafts: review notes
+# Intent drafts: handoff
 
-<What these drafts were checked against: decision log, contract version, code at commit.>
-These remain drafts until a human approves each commitment and commits the files.
+<Code revision the interview read.>
 
-## Corrections (a draft contradicted a later decision)
+## Provenance
 
-| Draft said | Now | Decided in |
-|---|---|---|
-
-## Additions (decisions made since the drafts)
+| # | Commitment as written | Human's words (if tidied) | Level |
+|---|---|---|---|
 
 ## Left out on purpose
 
-<What was deliberately kept in the contract, the plan, or AGENTS.md instead.>
+<What came up and went to AGENTS.md, a contract, or the PR instead, so it is not asked again.>
 
-## For the human to decide
+## Placement
 
-1. <Placement.>
-2. <Gaps the drafter filled that were never discussed.>
+<Which file each commitment landed in, and which directories symlink to a shared part.>
 ```
 
-## Provenance table
-
-Keep it while drafting; attach it or fold it into `REVIEW.md`.
+Levels:
 
 | Level | Meaning | Where it goes |
 |---|---|---|
 | 1 | The human's own words, quoted verbatim | Intent text |
 | 2 | The human's words tidied to the conventions, original quoted beside | Intent text |
-| 3 | Filled in by the agent while drafting, never stated by the human | List for the human; never written as intent |
+| 3 | Filled in by the agent while drafting, never stated by the human | Listed here for the human; never written as intent |
+
+An open question at handoff means the frontier was not empty; ask it before handing off rather than listing it here.

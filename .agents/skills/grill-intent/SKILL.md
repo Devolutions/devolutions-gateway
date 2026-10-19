@@ -68,5 +68,5 @@ Only the first two become intent text; the third is listed for the human and nev
 ## Finish
 
 When the frontier is empty: list each commitment in the human's words with its provenance, propose placement, and ask for confirmation.
-Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand the assembled file back for the human to confirm ordering, placement, and tidying.
+Then draft, write the handoff note from `intent-files/references/handoff.md` as a session artifact (never staged or committed; it becomes a PR comment when the drafts go up), and hand the assembled file back for the human to confirm ordering, placement, and tidying.
 When a design is shared by several components, draft it once as an `INTENT.<feature>.md` part and list the directories that will symlink to it.
