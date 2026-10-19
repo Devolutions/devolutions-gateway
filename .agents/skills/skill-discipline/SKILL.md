@@ -1,12 +1,12 @@
 ---
 name: skill-discipline
-description: Content standard for writing and reviewing agent skills (SKILL.md and references) - every sentence earns its place, one job per skill, rationale with each rule, no ceremony. Use when drafting, revising, or reviewing a skill's text; pair with tessl-skill-linting for structure and skill-creator for evals.
+description: Content standard for writing and reviewing agent skills (SKILL.md and references) - every sentence earns its place, one job per skill, rationale with each rule, no ceremony. Use when drafting, revising, or reviewing a skill's text.
 ---
 
 # Skill discipline
 
 A skill is loaded whole into an agent's context whenever its description matches, so each sentence costs every task that triggers it.
-`tessl-skill-linting` checks structure and `skill-creator` runs evals; this skill is the test each sentence must pass.
+This skill is the test each sentence must pass; structure checks and evals belong to other tools.
 
 ## The test
 
@@ -29,7 +29,6 @@ No history, stages, session or decision references; the reader is a future agent
 ## No ceremony
 
 No "Overview" that restates the description, no closing summary, no mandatory headings, no example that merely illustrates a rule the reader already understood.
-A length or count is an observation with its cause ("files that pass the test have come out under 40 lines, because the root file enters every context"), never a target to pad or trim toward.
 
 ## Words
 
