@@ -8,7 +8,7 @@ description: Review Devolutions Gateway pull requests and diffs using focused co
 Inspect the diff, its stated goal, and repository guidance before selecting conditional reviewers:
 
 - Run `external-contract-reviewer` only when the change may affect HTTP or OpenAPI behavior, WebSocket behavior, relay or tunneling semantics, configuration schemas, or agent and platform protocols.
-- Run `intent-drift-audit` when the diff touches a directory governed by an `INTENT.md`, `INTENT.*.md`, or `*.intent.md`, or changes a surface a `CONTRACT.md` specifies.
+- Run `intent-drift-audit` when the diff touches a path governed by an `INTENT*.md` in its directory or an ancestor, or by a `*.intent*.md` beside the changed module, or changes a surface a `CONTRACT.md` specifies.
 - Run `intent-review` when the diff adds or changes an intent file.
 - Run `contract-review` when the diff changes a `CONTRACT.md`.
 - Run `code-compressor` for every diff, limiting it to changed code.
