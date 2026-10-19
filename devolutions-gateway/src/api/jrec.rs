@@ -644,8 +644,16 @@ struct RecordingZipManifestFile {
     file_name: String,
 }
 
+/// Whether `file_name` names a file directly inside the recording folder.
+///
+/// On Windows, a `:` starts a drive prefix (`C:secret.webm`), which makes joining the name replace the folder,
+/// or an alternate data stream.
 fn is_safe_recording_file_name(file_name: &str) -> bool {
-    !file_name.is_empty() && !file_name.contains("..") && !file_name.contains('/') && !file_name.contains('\\')
+    !file_name.is_empty()
+        && !file_name.contains("..")
+        && !file_name.contains('/')
+        && !file_name.contains('\\')
+        && !file_name.contains(':')
 }
 
 fn recording_file_content_type(path: &Utf8Path) -> &'static str {
@@ -1006,6 +1014,8 @@ mod tests {
         assert!(!is_safe_recording_file_name("../secret.webm"));
         assert!(!is_safe_recording_file_name("a/b.webm"));
         assert!(!is_safe_recording_file_name("a\\b.webm"));
+        assert!(!is_safe_recording_file_name("C:secret.webm"));
+        assert!(!is_safe_recording_file_name("recording-0.webm:stream"));
     }
 
     #[test]
