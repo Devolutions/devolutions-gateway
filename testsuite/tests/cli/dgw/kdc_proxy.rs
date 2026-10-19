@@ -132,6 +132,11 @@ async fn kdc_proxy_falls_back_to_direct_tcp_without_a_matching_route() {
     let response = post_kdc_proxy(config.http_port(), token).await;
 
     assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body = response.bytes().await.expect("read KDC proxy reply");
+    assert!(
+        body.windows(KERB_REPLY.len()).any(|window| window == KERB_REPLY),
+        "KDC proxy reply must carry the Kerberos reply from the directly reached KDC: {body:x?}"
+    );
     kdc_task.await.expect("kdc task panicked");
     agent
         .assert_no_session("a KDC outside every advertised route must not go through the agent")
