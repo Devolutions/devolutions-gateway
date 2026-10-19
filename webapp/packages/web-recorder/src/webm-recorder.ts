@@ -1,3 +1,5 @@
+import { RECORDING_ENDED_CLOSE_CODE } from './close-codes';
+
 const CANVAS_STREAM_FPS = 8;
 const MEDIA_RECORDER_INTERVAL_MS = 10;
 
@@ -72,7 +74,7 @@ export class WebMRecorder {
     this.resolveStart = null;
     this.rejectStart = null;
 
-    this.closeWebSocket();
+    this.closeWebSocket(RECORDING_ENDED_CLOSE_CODE);
     this.cleanupResources();
     this.fireTelemetry('recording-stopped');
   }
@@ -252,8 +254,9 @@ export class WebMRecorder {
   }
 
   private handleMediaRecorderStop(): void {
-    this.closeWebSocket();
     const error = this.pendingError; // read before cleanupResources() clears it
+    // Only a stop() the user asked for ends the recording; a failure leaves it open for a reconnection.
+    this.closeWebSocket(error ? undefined : RECORDING_ENDED_CLOSE_CODE);
     // Settle the start promise before cleanup resets isCleaningUp.
     if (error) {
       // Pre-start failure — recording was never confirmed to the consumer.
@@ -329,7 +332,7 @@ export class WebMRecorder {
     }
   }
 
-  private closeWebSocket(): void {
+  private closeWebSocket(code?: number): void {
     if (!this.ws) {
       return;
     }
@@ -338,7 +341,7 @@ export class WebMRecorder {
     this.ws.onerror = null;
 
     if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-      this.ws.close();
+      this.ws.close(code);
     }
   }
 }
