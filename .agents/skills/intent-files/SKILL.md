@@ -10,7 +10,7 @@ It is authoritative where present and optional everywhere; `AGENTS.md` constrain
 A component's own interface (its CLI, config, storage) with the reason it is shaped so is intent, not contract, until a named second party depends on it.
 If the repository has `docs/intent-files.md`, it is the house convention.
 
-An agent never writes intent from code or a brief, and never creates, edits, or deletes an intent file on its own; it may interview the human (`grill-intent`), record the commitments the human states in their own words, tidy them to these conventions, and hand the assembled file back for the human to confirm, since ordering, placement, and tidying are the agent's and the human has seen only the sentences.
+An agent never writes intent from code or a brief, and never creates, edits, or deletes an intent file on its own; it may interview the human (`grill-intent`), record the commitments the human states or adopts, tidy them to these conventions, and hand the assembled file back for the human to confirm, since ordering, placement, and tidying are the agent's and the human has seen only the sentences.
 Write drafts where the user says, otherwise outside the source tree, since an intent file in the tree is authoritative the moment it exists; say where.
 When code, tests, contract, and intent disagree, report the divergence; the human decides which is wrong.
 

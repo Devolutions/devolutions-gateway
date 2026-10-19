@@ -16,7 +16,7 @@ When the drafts go up in a pull request, its content becomes a PR comment, not p
 
 ## Left out on purpose
 
-<What came up and went to AGENTS.md, a contract, or the PR instead, so it is not asked again.>
+<What came up and went to AGENTS.md, a contract, another component's intent file (named), or the PR instead, so it is not asked again.>
 
 ## Placement
 
@@ -29,6 +29,7 @@ Levels:
 |---|---|---|
 | 1 | The human's own words, quoted verbatim | Intent text |
 | 2 | The human's words tidied to the conventions, original quoted beside | Intent text |
-| 3 | Filled in by the agent while drafting, never stated by the human | Listed here for the human; never written as intent |
+| 3 | Agent wording the human adopted: an option label or candidate sentence they copied, or a delegated choice they approved | Intent text, marked so the record shows the human decided but did not word it |
+| 4 | Filled in by the agent while drafting, never stated or adopted by the human | Listed here for the human; never written as intent |
 
 An open question at handoff means the frontier was not empty; ask it before handing off rather than listing it here.

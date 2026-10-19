@@ -27,12 +27,13 @@ The frontier is every question whose prerequisites are settled.
 When code exists, open with a short brief as its own turn, before any question: what the component is, what it does today, its backends, callers, and dependencies, in plain language and in the human's vocabulary.
 End the brief by inviting the human to ask for more or to confirm it; expand where asked, and ask the first round only after they confirm, since a short brief they confirm still catches the places where their memory and the code disagree.
 Ask the whole frontier in one round, numbered, with the context the round needs as annexes below the questions: each annex holds the facts for one question or one shared topic, cited with `path:line`, and a question refers to its annex rather than restating the code.
-Each question gives the human what they need to decide, in plain language: the fact it turns on, what the options are, and how each could go wrong later; it does not recommend an answer, because a recommended answer the human accepts is the agent's design under the human's name.
+Each question gives the human what they need to decide: the fact it turns on, what the options are, and how each could go wrong later; it does not recommend an answer, because a recommended answer the human accepts is the agent's design under the human's name.
+Plain language, checkably: a question names behaviour, not identifiers; identifiers and `path:line` live in the annex; the skill's own vocabulary ("frontier", "closed set") never reaches the human.
 
 ```text
 ❓ **Q1** - **<title>**: <what is at stake, in one or two sentences>
 <Today: the fact this question turns on; details in annex A.>
-<Options, each with how it could go wrong.>
+<Options as short labels, each with how it could go wrong.>
 <Write your commitment in your own words, or say "no commitment here".>
 
 ---
@@ -42,10 +43,11 @@ Each question gives the human what they need to decide, in plain language: the f
 
 Wait for answers, recompute the frontier, repeat.
 Look up dependencies, features, callers, and siblings before asking.
-Offer options only when they are a closed set the facts define (the variants that exist, yes or no on what the code does today, the list it already uses, two readings of the human's own sentence), and always include "no commitment here".
+Offer options only when they are a closed set the facts define (the variants that exist, yes or no on what the code does today, the list it already uses, two readings of the human's own sentence), as labels rather than finished sentences so that the human writes the sentence, and always include "no commitment here".
 Alternatives the human may not know are information, not options: mention them in the annex with what each is good for and where it fails, so the human can widen the choice, and then let them write the commitment.
+When the human asks for a recommendation, show what their earlier answers already settle and assemble those words into a candidate sentence for them to accept or rewrite; when they delegate outright, write it and record it as agent wording the human adopted.
 When an answer arrives, verify it against the code and the other answers; if it is false today, contradicts another commitment, or has a consequence the human may not have seen, say so with the evidence and ask them to confirm or rewrite before recording it.
-Record the human's sentence; tidy it to the conventions only, keeping their words where they are exact.
+Record the human's sentence; tidy it to the conventions only, keeping their words where they are exact, and do not re-present tidied sentences each round, since the final list is where the human confirms them.
 
 ## Grill like a reviewer
 
@@ -57,9 +59,10 @@ Record the human's sentence; tidy it to the conventions only, keeping their word
 - A fuzzy or overloaded word ("account", "session"): show where the code and the conversation use it differently, and ask for the canonical term and the avoided ones.
 - "Requires a decision", "run X after Y", anything about contributors: process; note it for `AGENTS.md` and ask for the software property behind it.
 - Exact detail (fields, limits, status codes): note it for a `CONTRACT.md` if a second party must agree to it, and return to the decision behind it.
+- A decision about a sibling component: note it with its destination file for the handoff, and return to this component.
 - Design still moving (names, packaging, two shapes): say so and keep grilling; do not draft mid-churn, since every rename re-edits every file that carries the name.
 
-Record provenance throughout at the three levels `intent-files/references/handoff.md` defines.
+Record provenance throughout at the four levels `intent-files/references/handoff.md` defines.
 
 ## Finish
 
