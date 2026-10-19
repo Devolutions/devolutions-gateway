@@ -31,7 +31,7 @@ Apply each to every normative sentence and quote it, so the author finds it afte
 - **Unmeasured cause**: a rationale citing a mechanism nobody measured.
 - **Untestable**: "handles", "supports", "properly", a condition without a stated outcome, or two outcomes in one sentence; propose an observable with a bound and the conformance case that checks it.
 - **Scope creep**: admin, UI, mock control, implementer choices, or any section that neither constrains a party in scope nor is exercised by a conformance test; propose the owning component's intent file or deletion.
-- **Intent gap**: a rule the contract needs that `INTENT.md` lacks; a contract rule with no intent behind it is a design decision nobody made, so the human amends the intent first.
+- **Intent gap**: a contract rule that takes a design decision `INTENT.md` does not, as opposed to adding detail; the human records the decision in the intent first, since a decision made only in the contract is one nobody made.
 
 ## Report
 

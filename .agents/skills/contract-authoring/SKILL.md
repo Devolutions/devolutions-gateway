@@ -33,7 +33,7 @@ Of a party's own realisation (`intent-files`), only the parts a named second par
 - Every list exists once; a second copy may drift.
 - A `Definitions` section with one entry per term the parties must share, in the glossary shape from `intent-files`; one encoding per concept, and the same word for the same thing throughout.
 - The contract is the single source for the API it specifies; when it covers a code API, public items cite their section and a check keeps them in step.
-- When the contract needs a rule the intent lacks, the human amends `INTENT.md` first; a contract rule with no intent behind it is a design decision nobody made.
+- Detail beyond the intent is the contract's job, but when a contract rule needs a design decision the intent does not take, the human records that decision in `INTENT.md` first; a design decision made only in the contract is one nobody made.
 - A contract has no versions and no deferral markers: it describes the whole surface as it must be, and the subset realised today is a deferral in the co-located intent file, extended by editing; a version negotiated on the wire is content.
 - An example is not a rule: state what is free (order, case, whitespace) and add vectors that vary it, or a conforming library will reproduce none of them.
 - Put the exception where the rule is: "terminal, except during pending-key recovery".
