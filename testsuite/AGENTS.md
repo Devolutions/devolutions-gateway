@@ -9,6 +9,7 @@ Drive the binary whenever the behaviour is reachable that way.
 Start Gateway, Agent, or jetsocat through `testsuite::cli` with a `DgwConfig::builder()` from `testsuite::dgw_config`, then drive it through its CLI, HTTP API, and WebSocket endpoints.
 Use `disable_token_validation(true)` with an unsigned JWT instead of signing real tokens, except in tests of token validation itself, which the flag bypasses entirely.
 When a behaviour cannot be reached from outside, add a small `__debug__` config knob or environment variable to the binary rather than linking the implementation.
+`DgwConfig` picks unused ports itself; bind any other listener to `127.0.0.1:0` and read the port back, and take a port a binary needs up front from `test_utils::find_unused_ports`, because parallel tests collide on a fixed port.
 
 ## Dependencies are a design signal
 

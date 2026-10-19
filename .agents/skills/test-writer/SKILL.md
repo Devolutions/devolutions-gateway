@@ -8,7 +8,6 @@ description: Design Rust tests that catch bugs, choosing between an example test
 First name the bug the test catches that existing tests miss; without one it costs runtime and maintenance and guards nothing.
 Take the expected value from a source independent of the code under test, as `test-oracle-reviewer` defines; a value derived from the implementation detects change, not bugs.
 Reach nothing beyond loopback, because an external host makes a failure unreproducible.
-Bind `127.0.0.1:0` and read the port back; when a spawned binary needs the port first, pick an unused one with the existing helper rather than a constant, because parallel tests collide on a fixed port.
 
 ## Properties
 
