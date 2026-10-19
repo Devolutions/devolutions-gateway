@@ -113,6 +113,42 @@ pub fn agent_tokio_cmd() -> tokio::process::Command {
     cmd
 }
 
+pub fn agent_path() -> &'static std::path::Path {
+    &AGENT_BIN_PATH
+}
+
+static AGENT_IDENTITY_MOCK_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
+    escargot::CargoBuild::new()
+        .manifest_path("../crates/agent-identity-mock/Cargo.toml")
+        .bin("agent-identity-mock")
+        .current_release()
+        .current_target()
+        .run()
+        .expect("build Agent Identity mock")
+        .path()
+        .to_path_buf()
+});
+
+pub fn agent_identity_mock_path() -> &'static std::path::Path {
+    &AGENT_IDENTITY_MOCK_BIN_PATH
+}
+
+static AGENT_IDENTITY_CONFORMANCE_BIN_PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
+    escargot::CargoBuild::new()
+        .manifest_path("../crates/agent-identity-conformance/Cargo.toml")
+        .bin("agent-identity-conformance")
+        .current_release()
+        .current_target()
+        .run()
+        .expect("build Agent Identity conformance tester")
+        .path()
+        .to_path_buf()
+});
+
+pub fn agent_identity_conformance_path() -> &'static std::path::Path {
+    &AGENT_IDENTITY_CONFORMANCE_BIN_PATH
+}
+
 pub fn assert_stderr_eq(output: &assert_cmd::assert::Assert, expected: expect_test::Expect) {
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     expected.assert_eq(stderr);

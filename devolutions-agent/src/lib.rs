@@ -8,6 +8,7 @@ extern crate tracing;
 pub mod config;
 pub mod domain_detect;
 pub mod enrollment;
+pub mod identity;
 pub mod log;
 pub mod psu_agent;
 pub mod remote_desktop;

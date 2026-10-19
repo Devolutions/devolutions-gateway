@@ -1293,6 +1293,10 @@ jobs:
         run: dotnet test utils/dotnet/GatewayUtils.sln
         shell: pwsh
 
+      - name: Build agent channel package
+        run: ./crates/agent-channel-proto/dotnet/build.ps1
+        shell: pwsh
+
   agent-installer-event-log-tests:
     name: Agent installer Event Log lifecycle tests
     runs-on: windows-2022
