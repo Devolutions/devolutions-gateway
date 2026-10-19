@@ -11,7 +11,7 @@ You plan, brief leads, relay decisions, verify reports, and keep the state; you 
 
 1. `grill-intent` with the human, structure first (units, packaging, names), because drafting intent while these move re-edits every file that carries a name.
 2. `contract-authoring` and `contract-review` when a second party must agree; the contract is its own pull request, approved before anything is built against it.
-3. `blind-testsuite` as its own pull request, from the contract, before any implementation.
+3. `blind-testsuite` as its own pull request when there is a contract, written from it before any implementation.
 4. Implementation pull requests, one lead each, stacked on the suite where they must run it.
 5. `intent-drift-audit` over the whole realisation after the last merge, with a summary of the decision log for the human.
 

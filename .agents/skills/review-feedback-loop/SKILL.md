@@ -29,5 +29,5 @@ Where a pipeline reviews every pushed head on its own, the push is the request: 
 - A fix that reintroduces an earlier finding: escalate with both; alternating fixes converge on nothing.
 - Only a human's approval remains: report the head and stop; do not poll.
 
-Before pushing to a branch the human may also have pushed to, fetch, re-verify their commits, and force-push only with lease pinned to the head you last saw.
+Fetch before pushing; when the branch has moved, rebase onto its new head so the human's commits stay in it, and force only with lease pinned to that head, because a lease guards against pushes after your fetch, not before it.
 Record the reviewer's final verdict verbatim with the head SHA it applies to.

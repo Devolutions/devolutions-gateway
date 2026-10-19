@@ -18,7 +18,7 @@ Write the plan as an artifact outside the tree, never committed, with the accept
 A decision the brief, intent files, and contract do not settle is not yours: escalate with options, how each could go wrong, and a recommendation, and let no worker encode it in a test or code meanwhile, since whatever lands first becomes the text the rest is bent to.
 Within autonomy - naming inside repository conventions, test structure, which published vector, a classification a stated rule decides, non-semantic documentation - decide, record in the plan, flag in the report.
 Two approaches within autonomy with trade-offs paper cannot settle are a `variants` tournament, run as sub-agents before committing to either.
-A change to an intent file, `CONTRACT.md`, or blind suite never rides this pull request: escalate it, and wait or stack on the pull request that carries it.
+A change to an intent file, `CONTRACT.md`, or blind suite that this pull request does not own never rides it: escalate, and wait or stack on the pull request that carries it.
 
 ## Sub-agents
 
@@ -40,6 +40,6 @@ Check each acceptance criterion against evidence you produced, byte-compare appr
 
 ## Pull request and report
 
-Open the pull request per the repository's conventions, the body carrying purpose, acceptance criteria with evidence, deviations from the brief, and open questions; run `review-feedback-loop` once findings arrive.
+Open the pull request per the repository's conventions, and put the acceptance evidence, deviations from the brief, and open questions in a comment, because a body that becomes the squash commit carries rationale, not process; run `review-feedback-loop` once findings arrive.
 Report per `references/templates.md`: head SHA and CI run let the reader verify instead of trust, and every non-success job is named, because a summary count hides the one that matters.
 Merging is the human's: report, mark the status waiting, and stop rather than polling.
