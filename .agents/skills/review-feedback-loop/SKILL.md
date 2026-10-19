@@ -1,6 +1,6 @@
 ---
 name: review-feedback-loop
-description: Work through findings on an open pull request from Copilot or human reviewers - fix what is substantive, answer a wrong finding with the governing intent or contract, re-request once per change, stop on unchanged-code findings or oscillation. Use when asked to address review comments or bring a pull request with outstanding findings to approval.
+description: Work through findings on an open pull request from Copilot, a review pipeline, or human reviewers - fix what is substantive, answer a wrong finding with the governing intent or contract, one review round per change, stop on unchanged-code findings or oscillation. Use when asked to address review comments or bring a pull request with outstanding findings to approval.
 ---
 
 # Review feedback loop
@@ -16,15 +16,16 @@ A finding is a claim about the code; the loop ends when the claims stop changing
 
 A logic fix takes the path the original code took - worker, reviewer, lead verification - when a `lead` loop exists; a trivial fix (typo, wording, comment) is applied directly.
 
-## Reply and re-request
+## Reply and the next round
 
 Reply to each thread in one sentence with the fixing commit or the answering clause, with the repository's comment footer when one is defined.
 Resolve the automated threads you fixed; leave a human's thread for the human unless the repository's convention says otherwise.
-Re-request the automated reviewer once per substantive change and not after a comment-only one, since a round costs minutes and returns findings proportional to the diff it sees.
+One review round per substantive change and none after a comment-only one, since a round costs minutes and returns findings proportional to the diff it sees.
+Where a pipeline reviews every pushed head on its own, the push is the request: batch a round's fixes into one push, because each head spends one of a bounded number of reviews, and answer findings that need no code change with the pipeline's hand-off command rather than a push.
 
 ## Stop
 
-- Findings only on code no change since the last round touched: triage and fix them, but do not re-request; hand what remains to the human, because the reviewer will keep finding them and each fix invites the next.
+- Findings only on code no change since the last round touched: triage and fix them, but request no further round; hand what remains to the human, because the reviewer will keep finding them and each fix invites the next.
 - A fix that reintroduces an earlier finding: escalate with both; alternating fixes converge on nothing.
 - Only a human's approval remains: report the head and stop; do not poll.
 
