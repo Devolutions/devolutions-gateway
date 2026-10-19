@@ -317,7 +317,8 @@ impl ProvisioningStore {
         self.connection_options.lock().get(&jti).map(|entry| entry.expires_at)
     }
 
-    /// Encrypts and stores the secret of a provisioner task until `expires_at`, replacing any earlier secret of the Task.
+    /// Encrypts and stores the secret of a provisioner Task until `expires_at`,
+    /// replacing any earlier secret of the Task.
     ///
     /// The secret is opaque to the store.
     pub fn insert_task_secret(
@@ -350,7 +351,7 @@ impl ProvisioningStore {
             let Some(entry) = task_secrets.get(&task_id) else {
                 return Ok(None);
             };
-            if now >= entry.expires_at {
+            if entry.expires_at <= now {
                 task_secrets.remove(&task_id);
                 return Ok(None);
             }
