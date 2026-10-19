@@ -18,6 +18,9 @@ The executable must be a native Windows program, such as `pwsh.exe` or `powershe
 The user's profile is not loaded, no interactive desktop or UAC prompt is created, and the process receives the user's base environment plus the requested overrides.
 Run As changes the process identity; it does not bypass Windows logon policy or grant additional privileges.
 
+Windows briefly creates an always-suspended copy of the Agent as a pipe-handle donor so concurrent process launches cannot inherit another job's streams.
+The donor is terminated after launch or failure and belongs to a kill-on-close job for Agent-exit cleanup.
+
 Credentials travel only in the protobuf message on the authenticated TLS stream, not in metadata, environment variables, command-line arguments, or configuration.
 The agent redacts the credential message in debug output and clears its decoded credential strings and temporary UTF-16 password after use.
 Child stdout, stderr, and other job output remain application-controlled; scripts must not print secrets.

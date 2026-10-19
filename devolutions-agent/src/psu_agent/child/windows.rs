@@ -8,16 +8,20 @@ use tokio::process::{ChildStderr, ChildStdin, ChildStdout};
 use tokio::task::JoinHandle;
 use win_api_wrappers::handle::{Handle, HandleWrapper as _};
 use win_api_wrappers::process::Process;
-use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::thread::{Thread, ThreadAttributeList, ThreadAttributeType};
 use win_api_wrappers::token::Token;
 use win_api_wrappers::utils::{Pipe, WideString, environment_block};
-use windows::Win32::Foundation::{HANDLE, HANDLE_FLAG_INHERIT, HANDLE_FLAGS, SetHandleInformation};
+use windows::Win32::Foundation::{DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE};
 use windows::Win32::Globalization::{CSTR_EQUAL, CSTR_GREATER_THAN, CSTR_LESS_THAN, CompareStringOrdinal};
 use windows::Win32::Security::{LOGON32_LOGON_BATCH, LOGON32_PROVIDER_DEFAULT, LogonUserW};
+use windows::Win32::System::JobObjects::{
+    CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
+};
 use windows::Win32::System::Threading::{
-    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, EXTENDED_STARTUPINFO_PRESENT,
-    PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW,
+    CREATE_NO_WINDOW, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateProcessW,
+    EXTENDED_STARTUPINFO_PRESENT, GetCurrentProcess, PROC_THREAD_ATTRIBUTE_JOB_LIST, PROCESS_INFORMATION,
+    STARTF_USESTDHANDLES, STARTUPINFOEXW, UpdateProcThreadAttribute,
 };
 use windows::core::{PCWSTR, PWSTR};
 use zeroize::Zeroizing;
@@ -83,37 +87,36 @@ impl Child {
         let current_directory = command.get_current_dir().map(WideString::from).unwrap_or_default();
         let mut environment = environment(token, command)?;
 
-        let inheritable = SecurityAttributesInit {
-            inherit_handle: true,
-            ..Default::default()
-        }
-        .init();
-        let (stdin_read, stdin_write) = Pipe::new_anonymous(Some(&inheritable), 0)?;
-        let (stdout_read, stdout_write) = Pipe::new_anonymous(Some(&inheritable), 0)?;
-        let (stderr_read, stderr_write) = Pipe::new_anonymous(Some(&inheritable), 0)?;
-        for pipe in [&stdin_write, &stdout_read, &stderr_read] {
-            // SAFETY: Each pipe owns a valid handle, and this only clears the inheritance flag.
-            unsafe { SetHandleInformation(pipe.handle.raw(), HANDLE_FLAG_INHERIT.0, HANDLE_FLAGS(0)) }?;
-        }
-
-        let inherited = ThreadAttributeType::HandleList(vec![
-            stdin_read.handle.raw(),
-            stdout_write.handle.raw(),
-            stderr_write.handle.raw(),
-        ]);
-        let mut attributes = ThreadAttributeList::with_count(1)?;
+        let (stdin_read, stdin_write) = Pipe::new_anonymous(None, 0)?;
+        let (stdout_read, stdout_write) = Pipe::new_anonymous(None, 0)?;
+        let (stderr_read, stderr_write) = Pipe::new_anonymous(None, 0)?;
+        let parent = HandleParent::new()?;
+        let stdin = parent.inherit(stdin_read.handle.raw())?;
+        let stdout = parent.inherit(stdout_write.handle.raw())?;
+        let stderr = parent.inherit(stderr_write.handle.raw())?;
+        let inherited = ThreadAttributeType::HandleList(vec![stdin, stdout, stderr]);
+        let parent_attribute = ThreadAttributeType::ParentProcess(&parent.process);
+        let mut attributes = ThreadAttributeList::with_count(2)?;
         attributes.update(&inherited)?;
+        attributes.update(&parent_attribute)?;
         let mut startup = STARTUPINFOEXW::default();
         let mut desktop = WideString::from("");
         startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).expect("STARTUPINFOEXW size fits in u32");
         // An empty desktop selects the target logon's window station instead of inheriting the service's desktop.
         startup.StartupInfo.lpDesktop = desktop.as_pwstr();
         startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
-        startup.StartupInfo.hStdInput = stdin_read.handle.raw();
-        startup.StartupInfo.hStdOutput = stdout_write.handle.raw();
-        startup.StartupInfo.hStdError = stderr_write.handle.raw();
+        startup.StartupInfo.hStdInput = stdin;
+        startup.StartupInfo.hStdOutput = stdout;
+        startup.StartupInfo.hStdError = stderr;
         startup.lpAttributeList = attributes.raw();
         let mut information = PROCESS_INFORMATION::default();
+
+        #[cfg(test)]
+        tests::BEFORE_CREATE.with(|callback| {
+            if let Some(callback) = callback.take() {
+                callback(&parent.process);
+            }
+        });
 
         // SAFETY: All buffers, pipe handles, the token and the attribute list remain valid for the call.
         // The handle list restricts inheritance to the three child pipe ends.
@@ -202,6 +205,112 @@ impl Drop for Child {
             && let Err(error) = self.start_kill()
         {
             debug!(%error, "Failed to kill credentialed PSU child process on drop");
+        }
+    }
+}
+
+// An explicit handle list alone cannot stop unrelated std::process launches from inheriting our handles.
+// Keep all inheritable handles in an always-suspended process instead.
+// https://devblogs.microsoft.com/oldnewthing/20200306-00/?p=103538
+struct HandleParent {
+    process: Process,
+    job: Option<Handle>,
+}
+
+impl HandleParent {
+    fn new() -> anyhow::Result<Self> {
+        // SAFETY: An unnamed job with default security attributes has no preconditions.
+        let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }.context("failed to create handle-donor job")?;
+        // SAFETY: This function owns the handle returned by CreateJobObjectW.
+        let job = unsafe { Handle::new_owned(job) }?;
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        // The donor dies with the Agent, but the real child must outlive the donor.
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+        // SAFETY: The job is valid and the buffer matches the information class and size.
+        unsafe {
+            SetInformationJobObject(
+                job.raw(),
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                u32::try_from(size_of_val(&limits)).expect("job limit information size fits in u32"),
+            )
+        }
+        .context("failed to configure handle-donor job")?;
+        let mut attributes = ThreadAttributeList::with_count(1)?;
+        let jobs = [job.raw()];
+        // SAFETY: The list is initialized, and the job handle array remains alive through CreateProcessW.
+        unsafe {
+            UpdateProcThreadAttribute(
+                attributes.raw(),
+                0,
+                PROC_THREAD_ATTRIBUTE_JOB_LIST as usize,
+                Some(jobs.as_ptr().cast()),
+                size_of_val(&jobs),
+                None,
+                None,
+            )
+        }
+        .context("failed to assign handle-donor job at creation")?;
+        let executable = WideString::from(&std::env::current_exe().context("failed to locate Agent executable")?);
+        let mut startup = STARTUPINFOEXW::default();
+        startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).expect("STARTUPINFOEXW size fits in u32");
+        startup.lpAttributeList = attributes.raw();
+        let mut information = PROCESS_INFORMATION::default();
+        // SAFETY: All buffers and the job attribute remain valid for the call.
+        // No handles are inherited, and the initial thread is never resumed.
+        unsafe {
+            CreateProcessW(
+                executable.as_pcwstr(),
+                None,
+                None,
+                None,
+                false,
+                CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+                None,
+                PCWSTR::null(),
+                &startup.StartupInfo,
+                &mut information,
+            )
+        }
+        .context("failed to create suspended handle donor")?;
+        // SAFETY: Successful CreateProcessW returned owned process and thread handles.
+        let process = Process::from(unsafe { Handle::new_owned(information.hProcess) }?);
+        // SAFETY: This function owns the distinct initial-thread handle returned above.
+        let _thread = unsafe { Handle::new_owned(information.hThread) }?;
+        Ok(Self {
+            process,
+            job: Some(job),
+        })
+    }
+
+    fn inherit(&self, handle: HANDLE) -> anyhow::Result<HANDLE> {
+        // SAFETY: Retrieving the current process pseudo handle has no preconditions.
+        let current_process = unsafe { GetCurrentProcess() };
+        let mut remote = HANDLE::default();
+        // SAFETY: Both process handles are valid; DuplicateHandle validates the source handle.
+        // The returned handle belongs to the donor, which closes it when terminated.
+        unsafe {
+            DuplicateHandle(
+                current_process,
+                handle,
+                self.process.handle.raw(),
+                &mut remote,
+                0,
+                true,
+                DUPLICATE_SAME_ACCESS,
+            )
+        }
+        .context("failed to duplicate pipe into handle donor")?;
+        Ok(remote)
+    }
+}
+
+impl Drop for HandleParent {
+    fn drop(&mut self) {
+        drop(self.job.take());
+        if let Err(error) = self.process.wait(None) {
+            warn!(%error, "Failed to wait for PSU handle donor");
         }
     }
 }
@@ -304,10 +413,19 @@ fn set_environment_variable(
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
     use windows::Win32::Security::{SecurityImpersonation, TOKEN_ALL_ACCESS, TokenPrimary};
 
     use super::*;
+
+    type BeforeCreate = Box<dyn FnOnce(&Process)>;
+
+    thread_local! {
+        pub(super) static BEFORE_CREATE: RefCell<Option<BeforeCreate>> = RefCell::new(None);
+    }
 
     fn current_token() -> Token {
         use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -431,7 +549,71 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unrelated_process_does_not_inherit_token_process_output_pipes() {
+        let unrelated = Rc::new(RefCell::new(None));
+        let donor = Rc::new(RefCell::new(None));
+        BEFORE_CREATE.with(|callback| {
+            let unrelated = Rc::clone(&unrelated);
+            let donor = Rc::clone(&donor);
+            callback.replace(Some(Box::new(move |process| {
+                *donor.borrow_mut() = Some(Process::from(process.handle.try_clone().expect("retain donor process")));
+                *unrelated.borrow_mut() = Some(
+                    tokio::process::Command::new("ping.exe")
+                        .args(["-n", "60", "127.0.0.1"])
+                        .stdin(std::process::Stdio::null())
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .kill_on_drop(true)
+                        .spawn()
+                        .expect("spawn unrelated process while native handles exist"),
+                );
+            })));
+        });
+        let token = current_token();
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoLogo",
+            "-NoProfile",
+            "-Command",
+            "[Console]::WriteLine('token-output')",
+        ]);
+        let mut child = Child::spawn_with_token(&token, &command).expect("spawn token process");
+        assert_eq!(
+            donor
+                .borrow()
+                .as_ref()
+                .expect("donor process")
+                .wait(Some(0))
+                .expect("donor terminated"),
+            windows::Win32::Foundation::WAIT_OBJECT_0
+        );
+        let tree = child.attach_tree().expect("track and resume token process");
+        assert!(child.wait().await.expect("wait for token process").success());
+        let mut stdout = Vec::new();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            child.stdout.take().expect("stdout").read_to_end(&mut stdout),
+        )
+        .await;
+        let mut unrelated = unrelated.borrow_mut().take().expect("unrelated process");
+        assert!(unrelated.try_wait().expect("check unrelated process").is_none());
+        unrelated.kill().await.expect("kill unrelated process");
+        tree.release();
+        result
+            .expect("unrelated process retained token stdout")
+            .expect("read stdout");
+        assert_eq!(String::from_utf8(stdout).expect("stdout UTF-8").trim(), "token-output");
+    }
+
+    #[tokio::test]
     async fn token_process_rejects_missing_working_directory() {
+        let donor = Rc::new(RefCell::new(None));
+        BEFORE_CREATE.with(|callback| {
+            let donor = Rc::clone(&donor);
+            callback.replace(Some(Box::new(move |process| {
+                *donor.borrow_mut() = Some(Process::from(process.handle.try_clone().expect("retain donor process")));
+            })));
+        });
         let token = current_token();
         let directory = tempfile::tempdir().expect("create parent directory");
         let mut command = Command::new("powershell.exe");
@@ -440,6 +622,46 @@ mod tests {
             .err()
             .expect("missing directory must fail");
         assert!(format!("{error:#}").contains("CreateProcessAsUserW failed"));
+        assert_eq!(
+            donor
+                .borrow()
+                .as_ref()
+                .expect("donor process")
+                .wait(Some(0))
+                .expect("donor terminated"),
+            windows::Win32::Foundation::WAIT_OBJECT_0
+        );
+    }
+
+    #[test]
+    fn failed_handle_duplication_closes_the_donor_and_its_copied_handles() {
+        let process;
+        {
+            let donor = HandleParent::new().expect("create donor");
+            process = Process::from(donor.process.handle.try_clone().expect("retain donor process"));
+            let (read, _) = Pipe::new_anonymous(None, 0).expect("create pipe");
+            donor.inherit(read.handle.raw()).expect("copy first pipe handle");
+            let error = donor
+                .inherit(HANDLE::default())
+                .expect_err("copying invalid handle must fail");
+            assert!(format!("{error:#}").contains("failed to duplicate pipe into handle donor"));
+        }
+        assert_eq!(
+            process.wait(Some(0)).expect("donor terminated"),
+            windows::Win32::Foundation::WAIT_OBJECT_0
+        );
+    }
+
+    #[test]
+    fn closing_donor_job_terminates_the_suspended_process() {
+        let mut donor = HandleParent::new().expect("create donor");
+        let process = Process::from(donor.process.handle.try_clone().expect("retain donor process"));
+        // Closing the only job handle models Agent exit without relying on HandleParent::drop.
+        drop(donor.job.take());
+        assert_eq!(
+            process.wait(Some(5000)).expect("wait for donor"),
+            windows::Win32::Foundation::WAIT_OBJECT_0
+        );
     }
 
     #[tokio::test]
