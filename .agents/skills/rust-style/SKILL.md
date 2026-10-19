@@ -12,12 +12,12 @@ Log messages start with a capital and have no trailing period.
 Record data as structured fields rather than interpolating it (`info!(%server_addr, "Looked up server address")`), and name error fields `error`.
 Reserve `info!` for rare lifecycle milestones, `debug!` for significant one-off events, and `trace!` for anything that repeats.
 
-Inline comments are full sentences with a capital and a period; brief field tags such as `// VER` need neither.
+Inline comments and doc comments are full sentences, one sentence per line, with a capital and a period; brief field tags such as `// VER` need neither.
 Doc comments link to the governing specification with reference-style links and quote the section title.
 
 Write each field's size with its name (`4 /* ReturnCode */`), never bare arithmetic or `size_of`.
 
-Define invariants with `// INVARIANT:` as a doc comment on the field, before the loop, at the code for a local invariant, or in the function doc for outputs.
+Define invariants with an `INVARIANT:` comment in the field's doc comment, before the loop, at the code for a local invariant, or in the function doc for outputs.
 Reference them without the prefix when justifying an assumption or a lint suppression.
 State checks positively (`if !(idx < len)`) and prefer `<` and `<=` over `>` and `>=`.
 
