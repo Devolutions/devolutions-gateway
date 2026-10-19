@@ -23,7 +23,7 @@ export interface AiAnalysisSucceededPayload {
      */
     model: string;
     /**
-     * Version of the instructions sent to the AI provider.
+     * Versions of the prompts that wrote the log, such as `session-actions-4+session-summary-1`.
      */
     promptVersion: string;
     usage?: AiAnalysisUsage | null;

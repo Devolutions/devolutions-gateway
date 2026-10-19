@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **FileName** | **string** | Name of the new log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;. | 
 **Model** | **string** | Model that wrote the log, as reported by the AI provider; the requested model when it reports none. | 
-**PromptVersion** | **string** | Version of the instructions sent to the AI provider. | 
+**PromptVersion** | **string** | Versions of the prompts that wrote the log, such as &#x60;session-actions-4+session-summary-1&#x60;. | 
 **Usage** | [**AiAnalysisUsage**](AiAnalysisUsage.md) |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)

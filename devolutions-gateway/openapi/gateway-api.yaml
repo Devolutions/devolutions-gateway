@@ -398,11 +398,14 @@ paths:
       description: |-
         Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a
         new log, listed under `artifacts.ai-analysis` in its manifest.
+        The answer is in the `locale` the recorder writes on the `session.start` of its first events log; without one, it is
+        in the default language of the AI analysis.
         The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
         which the `Location` header of a 202 answer names.
 
-        Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from
-        scratch: it removes the earlier AI analysis of the session, even a succeeded one, so a session holds at most one.
+        Sending the same request again returns the same Task and starts nothing new.
+        A new Task for the session starts from scratch: it removes the earlier AI analysis of the session, even a succeeded
+        one, so a session holds at most one.
         The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
         Tasks.
       operationId: StartAiAnalysis
@@ -1669,7 +1672,7 @@ components:
           description: Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
         promptVersion:
           type: string
-          description: Version of the instructions sent to the AI provider.
+          description: Versions of the prompts that wrote the log, such as `session-actions-4+session-summary-1`.
         usage:
           allOf:
           - $ref: '#/components/schemas/AiAnalysisUsage'
