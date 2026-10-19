@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review Devolutions Gateway pull requests and diffs using focused contract, compression, documentation, prose, and skeptical passes. Use whenever Copilot code review is requested or a proposed change needs review.
+description: Review Devolutions Gateway pull requests and diffs using focused contract, intent, compression, style, test, documentation, prose, and skeptical passes. Use whenever Copilot code review is requested or a proposed change needs review.
 ---
 
 # Code review
@@ -13,12 +13,13 @@ Inspect the diff, its stated goal, and repository guidance before selecting cond
 - Run `contract-review` when the diff changes a `CONTRACT.md`.
 - Run `code-compressor` for every diff, limiting it to changed code.
 - Run `rust-style-reviewer` when Rust code changes, limiting it to changed lines.
+- Run `test-reviewer` when Rust tests change; it runs `test-oracle-reviewer` itself, so do not add that pass separately.
 - Run `docs-compressor` when documentation, rustdoc, explanatory comments, or instructional prose changes.
 - Run `prose-verifier` when hand-maintained prose changes in a format where source line breaks are stylistic.
 - Run `skeptical-reviewer` last for every diff.
 
 Prefer one `rubber-duck` sub-agent per applicable skill.
-Run the contract, intent, compression, style, documentation, and prose reviews in parallel.
+Run the contract, intent, compression, style, test, documentation, and prose reviews in parallel.
 Give every agent the change goal, review scope, base and head references, relevant repository guidance, and an instruction to invoke its named skill, inspect the diff itself, make no edits, and return only evidence-backed findings.
 If sub-agents or skill invocation are unavailable, apply the same skills directly and keep the ordering.
 
