@@ -12,7 +12,7 @@ A finding is a claim about the code; the loop ends when the claims stop changing
 - Correctness, security, intent, contract, or style the repository's rules decide: fix.
 - Wrong, or in conflict with an intent file or `CONTRACT.md`: reply with the file and clause, change nothing.
 - A decision no intent, contract, or brief states: escalate, because a fix is the least reviewed place for a decision to land.
-- A change to an intent file, `CONTRACT.md`, or blind suite: escalate; those have their own pull request.
+- A change to an intent file, `CONTRACT.md`, or blind suite: escalate; it belongs to the pull request that owns the text.
 
 A logic fix takes the path the original code took - worker, reviewer, lead verification - when a `lead` loop exists; a trivial fix (typo, wording, comment) is applied directly.
 

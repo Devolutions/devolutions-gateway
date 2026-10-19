@@ -31,4 +31,5 @@ Write the suite before the implementation; merge it once one implementation runs
 ## Read-only during implementation
 
 An implementation pull request never edits the suite or the contract.
-A test that looks wrong, or a clause with no test, is escalated with the vector or clause, expected and observed values, and the cited source; the fix is its own pull request by a fresh author with the same inputs and its own reviewer.
+A test that looks wrong, or a clause with no test, is escalated with the vector or clause, expected and observed values, and the cited source.
+The fix goes to the pull request that owns the suite - the open one through its lead, or a new one once it has merged - by a fresh author with the same inputs, who receives the decision and not the implementation's output, so the suite stays blind.

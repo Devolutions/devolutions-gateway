@@ -31,5 +31,5 @@ A second party or a `CONTRACT.md` change promotes to Effort: the contract is its
 ## Wrong-flow signals
 
 - An expected value you cannot justify independently of the code under test: the oracle, perhaps the seam, is wrong; see `test-oracle-reviewer`.
-- An intent file, `CONTRACT.md`, or blind suite edited inside an implementation pull request: that change is its own pull request first.
+- An intent file, `CONTRACT.md`, or blind suite edited inside an implementation pull request: that change belongs to the pull request that owns the text.
 - More open pull requests than you can verify one by one: stop opening new ones.

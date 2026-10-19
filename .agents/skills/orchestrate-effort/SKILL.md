@@ -15,7 +15,8 @@ You plan, brief leads, relay decisions, verify reports, and keep the state; you 
 4. Implementation pull requests, one lead each, stacked on the suite where they must run it.
 5. `intent-drift-audit` over the whole realisation after the last merge, with a summary of the decision log for the human.
 
-A decision that changes a contract, an intent file, or the suite goes to its own pull request before the implementation that needs it, and you never direct such a change inside an implementation pull request, because text amended to fit one implementation stops governing the others.
+Keep the contract and suite leads alive while implementations run against their open pull requests, so an escalation from an implementation lead becomes your decision and a message to the lead that owns the text.
+A change to a contract, an intent file, or the suite goes to the pull request that owns it - the open one through its lead, or a new one once it has merged - never into the implementation pull request, because text amended to fit one implementation stops governing the others.
 
 ## Models
 
