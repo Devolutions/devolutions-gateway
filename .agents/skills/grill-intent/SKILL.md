@@ -59,7 +59,7 @@ Record the human's sentence; tidy it to the conventions only, keeping their word
 - A fuzzy or overloaded word ("account", "session"): show where the code and the conversation use it differently, and ask for the canonical term and the avoided ones.
 - "Requires a decision", "run X after Y", anything about contributors: process; note it for `AGENTS.md` and ask for the software property behind it.
 - Exact detail (fields, limits, status codes): note it for a `CONTRACT.md` if a second party must agree to it, and return to the decision behind it.
-- Design still moving (names, packaging, two shapes): say so and keep grilling; do not draft mid-churn.
+- Design still moving (names, packaging, two shapes): say so and keep grilling; do not draft mid-churn, since every rename re-edits every file that carries the name.
 
 Record provenance throughout: the human's words verbatim, the human's words after tidying, and anything the agent filled in while drafting.
 Only the first two become intent text; the third is listed for the human and never written as intent.
@@ -67,5 +67,5 @@ Only the first two become intent text; the third is listed for the human and nev
 ## Finish
 
 When the frontier is empty: list each commitment in the human's words with its provenance, propose placement, and ask for confirmation.
-Then draft, write the handoff note from `intent-files/references/handoff.md` as a session artifact (never staged or committed; it becomes a PR comment when the drafts go up), and hand the assembled file back for the human to confirm ordering, placement, and tidying.
+Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand the assembled file back for the human to confirm ordering, placement, and tidying.
 When a design is shared by several components, draft it once as an `INTENT.<feature>.md` part and list the directories that will symlink to it.

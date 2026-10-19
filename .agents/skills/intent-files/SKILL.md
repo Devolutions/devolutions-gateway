@@ -11,7 +11,7 @@ A component's own interface (its CLI, config, storage) with the reason it is sha
 If the repository has `docs/intent-files.md`, it is the house convention.
 
 An agent never writes intent from code or a brief, and never creates, edits, or deletes an intent file on its own; it may interview the human (`grill-intent`), record the commitments the human states in their own words, tidy them to these conventions, and hand the assembled file back for the human to confirm, since ordering, placement, and tidying are the agent's and the human has seen only the sentences.
-Write drafts where the user says, otherwise outside the source tree, and say so.
+Write drafts where the user says, otherwise outside the source tree, since an intent file in the tree is authoritative the moment it exists; say where.
 When code, tests, contract, and intent disagree, report the divergence; the human decides which is wrong.
 
 ## Admission
@@ -55,5 +55,5 @@ When a file grows, cut first what fails Admission.
 A commitment that will be cited in reviews may carry a short name ("the single-classification rule") so it is referred to, not restated.
 
 `references/pitfalls.md` lists how drafts have failed review and what the maintainer said; read it before handing a draft back or when reviewing.
-`references/examples.md` points at the file the maintainer wrote by hand and says what makes it work.
+`references/examples.md` points at the file the maintainer wrote by hand and says what makes it work; read it when unsure what a finished file looks like.
 `references/handoff.md` has the handoff note and provenance table for a set of drafts; the note is a session artifact, never committed.

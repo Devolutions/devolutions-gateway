@@ -16,18 +16,18 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
    Inventory every call site the contract will serve, with `file:line`.
    Read each reference implementation or host at a pinned version and record, per operation, whether it is native, argument mapping, workaround, or unsupported, with evidence.
    Host conventions (naming case, pagination, proxies that rewrite paths) become rules; a reference you did not read becomes a false universal.
-2. **Settle the design by interview**, one frontier of decisions per round; the human decides, and the agent may draft the normative wording for each decision, since a contract is agent-written under human approval.
+2. **Settle the design by interview**, one frontier of decisions per round as in `grill-intent`; the human decides, and the agent may draft the normative wording for each decision, since a contract is agent-written under human approval.
    Number every clarification and log who decided it.
 3. **Draft, then critique with two lenses**: overkill and gaps.
    Run every state-changing operation through `references/critique-lenses.md`.
 4. **Freeze** once the design is approved.
-   Afterwards it changes only for implementation defects, in its own PR ahead of the code that needs it.
+   Afterwards it changes only for implementation defects, in its own PR ahead of the code that needs it, so the change is reviewed as a rule and not excused by the code it unblocks.
    Implementers never edit the contract or the test suite to make code pass; they escalate with evidence from the cited source.
 
 ## Content rules
 
 - Per operation: the valid domain, the must-support set, the exact error for each class of invalid input from a closed error set, and the precedence of outcomes.
-  Phrase precedence as which outcome wins, not as an evaluation order.
+  Phrase precedence as which outcome wins, not as an evaluation order, since only the outcome is observable and an order binds a backend's internal checks.
 - Implementation-defined cases are listed with their exact allowed outcome set, never with examples, and are excluded from differential tests.
 - For every stored field: who initialises it, which operations update it, and which must not.
 - Every list exists once; a second copy may drift.
@@ -37,8 +37,8 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
 - A contract has no versions and no deferral markers: it describes the whole surface as it must be, and the subset realised today is a deferral in the co-located intent file, extended by editing; a version negotiated on the wire is content.
 - An example is not a rule: state what is free (order, case, whitespace) and add vectors that vary it, or a conforming library will reproduce none of them.
 - Put the exception where the rule is: "terminal, except during pending-key recovery".
-- Strict where it matters, extensible elsewhere: optional fields older receivers ignore, but authentication data stays strict.
-- A derivable operation stays out unless a written exception (performance, validated-module boundary, a security property) sits next to it.
+- Strict where it matters, extensible elsewhere: optional fields older receivers ignore, but authentication data stays strict, since an ignored field in authentication data is an unverified input.
+- A derivable operation stays out unless a written exception (performance, validated-module boundary, a security property) sits next to it, since each one widens what every backend must implement and test for a result the primitives already give.
 - Leave out one library's behaviour and numbers, admin and UI surfaces, mock and test-harness control surfaces (those are the intent of the component that implements them), implementer choices, and process.
 - A rationale must be as true as its rule; measure before citing a cause.
 
