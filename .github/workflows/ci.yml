@@ -343,8 +343,19 @@ jobs:
       - name: Configure Windows runner
         if: ${{ runner.os == 'Windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          ./ci/choco-install.ps1 nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -727,15 +738,26 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          ./ci/choco-install.ps1 wixtoolset -ArgumentList '--version', '3.14.0', '--allow-downgrade', '--force'
+          Install-ChocoPackage wixtoolset --version 3.14.0 --allow-downgrade --force
 
           # WiX is installed on Windows runners but not in the PATH
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          ./ci/choco-install.ps1 nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1009,9 +1031,20 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          ./ci/choco-install.ps1 wixtoolset -ArgumentList '--version', '3.14.0', '--allow-downgrade', '--force'
+          Install-ChocoPackage wixtoolset --version 3.14.0 --allow-downgrade --force
 
           # Devolutions PEDM needs MakeAppx.exe
           Write-Output "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1020,7 +1053,7 @@ jobs:
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          ./ci/choco-install.ps1 nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append

@@ -247,18 +247,22 @@ jobs:
       - name: Configure runner (Windows)
         if: ${{ matrix.os == 'windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           echo "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
-          # The loop is inline rather than ci/choco-install.ps1 because this job checks out the packaged run's commit, which may predate that script.
-          for ($Attempt = 1; $true; $Attempt++) {
-            choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
-            if ($LASTEXITCODE -eq 0) { break }
-            if ($Attempt -ge 4) { throw "choco install wixtoolset failed after $Attempt attempts with exit code $LASTEXITCODE" }
-            Start-Sleep -Seconds (30 * $Attempt)
-          }
+          Install-ChocoPackage wixtoolset --version 3.14.0 --allow-downgrade --force
           $WixBinPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
           echo $WixBinPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           # WixSharp reads WIXSHARP_WIXDIR as a fallback when WixSharpBinPath MSBuild property
