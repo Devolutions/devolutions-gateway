@@ -21,7 +21,7 @@ Apply each to every normative sentence and quote it, so the author finds it afte
 - **Party**: which second party in scope must agree to this sentence?
   None means it is one party's own realisation (config, storage, CLI) and belongs in that party's intent file.
 - **Intent contradiction**: the contract says what its `INTENT.md` excludes, or excludes what the intent commits to; detail beyond the intent is expected, disagreement is not, and which side is wrong is the human's call.
-- **Stage talk**: "V1", "initially", "will be", "for now", or a party named with a stage ("A now, B later" for "e.g.: A, B"); the contract states the whole surface, and what is realised today is the co-located intent file's deferral.
+- **Stage talk**: "V1", "initially", "will be", "for now", or a party named with a stage ("A now, B later" for "e.g.: A, B"), since a release stage is not a rule a party agrees to; the contract states the whole surface, and what is realised today is the co-located intent file's deferral.
 - **Overreach**: a claim stronger than the mechanism guarantees ("prevents oracles" for "does not say which check failed"); propose the narrowed form.
 - **Open set**: an error, outcome, or input class not drawn from a closed, defined set; "bad input" is not a classification.
 - **Order for precedence**: an evaluation order where only which-outcome-wins matters, or two outcomes equally valid for one input.

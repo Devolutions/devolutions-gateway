@@ -22,7 +22,7 @@ In a glossary entry the opening definition is context and each sentence after it
 Statements in an ancestor file that govern code outside the audited paths are out of scope: skip them and count them in the header.
 Give each an ID of section plus ordinal (`xtask/INTENT.md#requirements-1`, `CONTRACT.md#6.3-2`) so a later audit can diff against this one.
 A statement marked as deferred or prospective ("for now", "later", `NOTE:`) is a target, not a requirement; realising it anyway is worth a note.
-The audit compares intent with its realisation, so it runs on code that claims to realise the intent, on a merged tree or a branch whose implementation is finished; mid-implementation, say so and stop, because every unfinished statement would read as a violation.
+It runs on a merged tree or a branch whose implementation is finished; mid-implementation, say so and stop, because every unfinished statement would read as a violation.
 For each: cite `path:line`; decide **conforms**, **violates**, **partial** (honoured on some paths, configurations, or the primary path and bypassed on another), **not yet realised** (a deferred target), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
 Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement, since they have no `path:line` to cite.
 Note `INVARIANT:` and `UNTESTED:` comments that relate; they are the code's own claims.

@@ -40,7 +40,7 @@ A file per source file is the exception, never the default, and never mechanical
 No mandatory sections, no title (the directory names the component), and no length budget; one commitment may be the whole file, and intent is read on demand by directory, like a doc comment, not loaded on every task.
 A flat list for a handful; topical headings only when they aid retrieval; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
 A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one, and reasons live in the same file as the commitments they support, so that two documents cannot drift apart.
-One meaning per verb: the declarative present or an imperative states a requirement, `should` a recommendation, `may` a permission, `can` a capability; never addressed to agents, since that constrains the contributor, not the software; sentences follow `prose-writer`.
+One meaning per verb, because that is what lets a reader tell a requirement from advice: the declarative present or an imperative states a requirement, `should` a recommendation, `may` a permission, `can` a capability; never addressed to agents, since that constrains the contributor, not the software; sentences follow `prose-writer`.
 Everything written normatively is to be realised by the time the branch merges; what is not is marked in the sentence ("for now", "later", a `NOTE:`), so an implementer knows not to build it yet and a reviewer knows not to expect it.
 Distinguish a deferral ("for now") from a non-goal ("the intention is not to"); the word tells a reader whether to expect change.
 State precision in the wording (`exactly these`, `at least`, `may vary provided`, `is permitted to`) rather than labelling the file exact or broad.
@@ -56,4 +56,4 @@ A commitment that will be cited in reviews may carry a short name ("the single-c
 
 `references/pitfalls.md` lists how drafts have failed review and what the maintainer said; read it before handing a draft back or when reviewing.
 `references/examples.md` points at the file the maintainer wrote by hand and says what makes it work; read it when unsure what a finished file looks like.
-`references/handoff.md` has the handoff note and provenance table for a set of drafts.
+`references/handoff.md` is the handoff note and provenance table to write when handing drafts back.

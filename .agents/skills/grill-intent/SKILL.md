@@ -5,9 +5,7 @@ description: Round-based interview in which the human writes each design commitm
 
 # Grill for intent
 
-Intent is the human's: the human writes each commitment, and the agent never writes intent from code or a brief.
-The agent's part is to find the decisions, give the context needed to take each one, verify what the human decides, and clean up the wording to the conventions in `intent-files`, which also defines a commitment.
-If nothing in the interview produces one, the right outcome is no file.
+Intent is the human's (`intent-files`): the human writes each commitment, and the agent's part is to find the decisions, give the context each needs, verify what the human decides, and tidy the wording to its conventions.
 
 ## The tree
 

@@ -18,7 +18,7 @@ Put positively: there is no way the agent learns this unless the skill says it.
 
 A skill does one thing; the description names that thing and the moments it applies, in two sentences.
 Distinct workflows that trigger separately are separate skills, and a skill may load the skills it builds on; a concept defined there is pointed to, not re-explained, while a lens or procedure is this skill's own even when its subject is defined elsewhere.
-One sentence of premise from a dependency is allowed when it names the dependency and says what this skill does with it ("verdicts apply the test in `agents-md`"); a second sentence re-explaining it is not, and a lens may restate an authoring rule when the two skills load independently.
+One sentence of premise from a dependency is allowed when it names the dependency and says what this skill does with it ("verdicts apply the test in `agents-md`"); a second sentence re-explaining it is not, and a lens may restate an authoring rule when the two skills are used independently, even if one names the other.
 A `references/` file holds only material needed conditionally, named from the body with the condition that calls for it.
 
 ## Reasons where they pay
@@ -39,7 +39,7 @@ Address the agent as the reader doing the task; never describe what agents are l
 
 ## Reviewing a skill
 
-Quote each sentence that fails the test and name which part: discoverable, re-explains a concept another skill defines, surprising rule without its reason, ceremony, two jobs, incident for mechanism, third person about agents.
+Quote each sentence that fails the test and name which part: discoverable, re-explains a concept another skill defines, surprising rule without its reason, ceremony, two jobs, incident for mechanism, describes what agents are like instead of stating the rule (a mechanism about the artifact's readers is not this).
 Ask "why" of any confident rule before accepting it; procedure steps and conventions are exempt.
 Propose the shorter sentence or the deletion; do not edit, and do not compress past meaning.
 Report what is strong as written, so it is not touched.
