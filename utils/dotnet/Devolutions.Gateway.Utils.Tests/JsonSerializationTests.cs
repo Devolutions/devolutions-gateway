@@ -220,6 +220,16 @@ public class JsonSerializationTests
     }
 
     [Fact]
+    public void ScopeClaimsRecordingsSearch()
+    {
+        const string EXPECTED = """{"scope":"gateway.recordings.search","jet_gw_id":"ccbaad3f-4627-4666-8bb5-cb6a1a7db815"}""";
+
+        var claims = new ScopeClaims(gatewayId, AccessScope.GatewayRecordingsSearch);
+        string result = JsonSerializer.Serialize(claims);
+        Assert.Equal(EXPECTED, result);
+    }
+
+    [Fact]
     public void EnrollmentClaimsAllFields()
     {
         const string EXPECTED = """{"jet_gw_url":"http://gw.example.com:7777","jet_agent_name":"site-a"}""";
