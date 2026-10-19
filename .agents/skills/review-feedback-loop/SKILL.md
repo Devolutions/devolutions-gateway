@@ -1,11 +1,11 @@
 ---
 name: review-feedback-loop
-description: Work through findings on an open pull request from Copilot, a review pipeline, or human reviewers - fix what is substantive, answer a wrong finding with the governing intent or contract, one review round per change, stop on unchanged-code findings or oscillation. Use when asked to address review comments or bring a pull request with outstanding findings to approval.
+description: Work through findings on an open pull request from Copilot, a review pipeline, or human reviewers - fix what is substantive, answer a wrong finding with the governing intent or contract, one review round per change, until a round returns nothing you accept. Use when asked to address review comments or bring a pull request with outstanding findings to approval.
 ---
 
 # Review feedback loop
 
-A finding is a claim about the code; the loop ends when the claims stop changing the code, not when the reviewer runs out of them.
+A finding is a claim about the code: verify it before acting on it, and loop until a round returns no finding you accept, since a reviewer that saw the fixes is the only evidence they held.
 
 ## Triage
 
@@ -26,7 +26,7 @@ Where a pipeline reviews every pushed head on its own, the push is the request: 
 
 ## Stop
 
-- Findings only on code no change since the last round touched: triage and fix them, but request no further round; hand what remains to the human, because the reviewer will keep finding them and each fix invites the next.
+- A round returns no finding, or only findings you answered without a change: record the verdict and stop; the human judges the answers, since the same diff re-reviewed returns the same claims.
 - A fix that reintroduces an earlier finding: escalate with both; alternating fixes converge on nothing.
 - Only a human's approval remains: report the head and stop, since a human's turnaround is unbounded and watching for it burns a session for nothing.
 
