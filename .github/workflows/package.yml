@@ -251,7 +251,7 @@ jobs:
 
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
+          ./ci/choco-install.ps1 wixtoolset -ArgumentList '--version', '3.14.0', '--allow-downgrade', '--force'
           $WixBinPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
           echo $WixBinPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           # WixSharp reads WIXSHARP_WIXDIR as a fallback when WixSharpBinPath MSBuild property
