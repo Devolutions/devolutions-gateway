@@ -1426,6 +1426,102 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.searchRecordings]
+==== searchRecordings
+
+`POST /jet/jrec/search`
+
+Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+
+===== Description
+
+The query is a case-insensitive substring, matched against the raw text of each line. Gateway does not interpret the logs, so any part of a line can match, field names included. Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched, and a line longer than 256 KiB is matched on its first 256 KiB only. Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same `query`, `recordings` and `startTime` again, with the `nextCursor` of the previous page as `cursor`. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
+
+
+// markup not found, no include::{specDir}jet/jrec/search/POST/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| RecordingSearchRequest
+| JSON-encoded search request <<RecordingSearchRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<RecordingSearchResponse>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| Matching log lines
+|  <<RecordingSearchResponse>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/jrec/search/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Jrl]
 === Jrl
 
@@ -3371,6 +3467,7 @@ endif::internal-generation[]
 | gateway.net.monitor.drain
 | gateway.agent.delete
 | gateway.agent.read
+| gateway.recordings.search
 
 |===
 
@@ -5203,6 +5300,161 @@ Current auto-update schedule for Devolutions Agent.
 |===
 
 
+[#RecordingSearchHit]
+=== _RecordingSearchHit_ 
+
+A line that holds the search text.
+
+
+[.fields-RecordingSearchHit]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| fileName
+| X
+| 
+|   String  
+| Name of the `.slog` artifact holding the line, as listed in `recording.json`.
+|     
+
+| line
+| X
+| 
+|   String  
+| The line's text without its line break; bytes that are not UTF-8 read as U+FFFD.
+|     
+
+| lineNumber
+| X
+| 
+|   Long  
+| Number of the line in the file, counting from 1.
+| int64    
+
+| offset
+| X
+| 
+|   Long  
+| Byte offset of the line in the file.
+| int64    
+
+| recordingId
+| X
+| 
+|   UUID  
+| The recording whose artifact holds the line.
+| uuid    
+
+| truncated
+| X
+| 
+|   Boolean  
+| The line is longer than 256 KiB, so `line` holds only its start, and the file holds the rest.
+|     
+
+|===
+
+
+
+[#RecordingSearchRequest]
+=== _RecordingSearchRequest_ 
+
+What to search for, and in which recordings.
+
+Unknown fields are rejected, so that an option added later is never silently ignored by a Gateway that predates it.
+
+
+[.fields-RecordingSearchRequest]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| cursor
+| 
+| X
+|   String  
+| Where the page starts: the `nextCursor` of the previous page, sent unchanged with the same `query`, `recordings` and `startTime`.
+|     
+
+| maxHits
+| 
+| X
+|   Integer  
+| Most hits in the page, from 1 to 1000; 1000 when missing.
+| int32    
+
+| query
+| X
+| 
+|   String  
+| Text to search for, ignoring case; leading and trailing spaces are part of it.
+|     
+
+| recordings
+| X
+| 
+| <<RecordingSelection>>    
+| 
+|     
+
+| startTime
+| 
+| X
+| <<StartTimeRange>>    
+| 
+|     
+
+|===
+
+
+
+[#RecordingSearchResponse]
+=== _RecordingSearchResponse_ 
+
+The lines that hold the search text.
+
+
+[.fields-RecordingSearchResponse]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| hits
+| X
+| 
+|   List   of <<RecordingSearchHit>>
+| Matching lines, newest recording first when searching all recordings, otherwise in the requested order.
+|     
+
+| nextCursor
+| 
+| X
+|   String  
+| Where the next page starts; absent when every log has been read.  The cursor is opaque, and its format may change between versions. A page with fewer hits than asked for may still be followed by more pages.
+|     
+
+|===
+
+
+
+[#RecordingSelection]
+=== _RecordingSelection_ 
+
+&#x60;&quot;all&quot;&#x60;, or a list of recording IDs.
+
+A repeated ID is searched once, and an empty list searches nothing.
+
+
+[.fields-RecordingSelection]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+|===
+
+
+
 [#ScanOriginDto]
 === _ScanOriginDto_ 
 
@@ -5465,6 +5717,37 @@ Desired auto-update schedule to apply to Devolutions Agent.
 |   Integer  
 | Start of the maintenance window as seconds past midnight in local time (default: `7200` = 02:00).
 | int32    
+
+|===
+
+
+
+[#StartTimeRange]
+=== _StartTimeRange_ 
+
+A range of recording start times, as written in &#x60;recording.json&#x60;, that includes &#x60;from&#x60; and excludes &#x60;to&#x60;.
+
+A missing end leaves that side of the range open.
+
+
+[.fields-StartTimeRange]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| from
+| 
+| X
+|   Date  
+| Earliest start time searched.
+| date-time    
+
+| to
+| 
+| X
+|   Date  
+| Recordings that start at this time or later are not searched.
+| date-time    
 
 |===
 

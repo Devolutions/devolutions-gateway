@@ -156,6 +156,7 @@ Class | Method | HTTP request | Description
 *JrecApi* | [**ListRecordings**](docs/JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance
 *JrecApi* | [**PullRecordingFile**](docs/JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session
 *JrecApi* | [**PullRecordingSession**](docs/JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive
+*JrecApi* | [**SearchRecordings**](docs/JrecApi.md#searchrecordings) | **POST** /jet/jrec/search | Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
 *JrlApi* | [**GetJrlInfo**](docs/JrlApi.md#getjrlinfo) | **GET** /jet/jrl/info | Retrieves current JRL (Json Revocation List) info
 *JrlApi* | [**UpdateJrl**](docs/JrlApi.md#updatejrl) | **POST** /jet/jrl | Updates JRL (Json Revocation List) using a JRL token
 *NetApi* | [**GetNetConfig**](docs/NetApi.md#getnetconfig) | **GET** /jet/net/config | Lists network interfaces
@@ -227,6 +228,10 @@ Class | Method | HTTP request | Description
  - [Model.PreflightOutput](docs/PreflightOutput.md)
  - [Model.PreflightOutputKind](docs/PreflightOutputKind.md)
  - [Model.PubKeyFormat](docs/PubKeyFormat.md)
+ - [Model.RecordingSearchHit](docs/RecordingSearchHit.md)
+ - [Model.RecordingSearchRequest](docs/RecordingSearchRequest.md)
+ - [Model.RecordingSearchResponse](docs/RecordingSearchResponse.md)
+ - [Model.RecordingSelection](docs/RecordingSelection.md)
  - [Model.ScanOriginDto](docs/ScanOriginDto.md)
  - [Model.ScanResultSourceDto](docs/ScanResultSourceDto.md)
  - [Model.SessionInfo](docs/SessionInfo.md)
@@ -234,6 +239,7 @@ Class | Method | HTTP request | Description
  - [Model.SessionTokenSignRequest](docs/SessionTokenSignRequest.md)
  - [Model.SetConfigResponse](docs/SetConfigResponse.md)
  - [Model.SetUpdateScheduleRequest](docs/SetUpdateScheduleRequest.md)
+ - [Model.StartTimeRange](docs/StartTimeRange.md)
  - [Model.SubProvisionerKey](docs/SubProvisionerKey.md)
  - [Model.Subscriber](docs/Subscriber.md)
  - [Model.TargetConnectionOptions](docs/TargetConnectionOptions.md)
