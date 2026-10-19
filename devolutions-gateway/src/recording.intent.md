@@ -8,3 +8,10 @@ When connection is established with request of recordings for the session, if re
 # Artifacts
 Artifacts are files that are not recordings, currently only have `ai-analysis` with combination to `slog` file type.
 Currently, we do not have an api endpoint to push artifacts, but we will have one in the future.
+
+
+# Ending a recording
+We use WebSocket close code 4011 to indicate that the producer actively terminates the recording.
+As soon as 4011 is received, the streamer subscribers are notified immediately, and the associated session is closed subject to the recording policy.
+Every other close, including a WebSocket close without a code or with code 1000, is treated as network flickering or a size change.
+In that case, the liveness of the recording is subject to the reconnection timeout.
