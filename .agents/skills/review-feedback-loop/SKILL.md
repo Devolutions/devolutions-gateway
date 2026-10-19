@@ -21,13 +21,14 @@ A logic fix takes the path the original code took - worker, reviewer, lead verif
 Reply to each thread in one sentence with the fixing commit or the answering clause, with the repository's comment footer when one is defined.
 Resolve the automated threads you fixed; leave a human's thread for the human unless the repository's convention says otherwise.
 One review round per substantive change and none after a comment-only one, since a round costs minutes and returns findings proportional to the diff it sees.
+Watch for the round's result - the reviewer's new review, or its check run where the pipeline posts one - and triage it when it lands, because the loop is open until someone reads the verdict.
 Where a pipeline reviews every pushed head on its own, the push is the request: batch a round's fixes into one push, because each head spends one of a bounded number of reviews, and answer findings that need no code change with the pipeline's hand-off command rather than a push.
 
 ## Stop
 
 - Findings only on code no change since the last round touched: triage and fix them, but request no further round; hand what remains to the human, because the reviewer will keep finding them and each fix invites the next.
 - A fix that reintroduces an earlier finding: escalate with both; alternating fixes converge on nothing.
-- Only a human's approval remains: report the head and stop; do not poll.
+- Only a human's approval remains: report the head and stop, since a human's turnaround is unbounded and watching for it burns a session for nothing.
 
 Fetch before pushing; when the branch has moved, rebase onto its new head so the human's commits stay in it, and force only with lease pinned to that head, because a lease guards against pushes after your fetch, not before it.
 Record the reviewer's final verdict verbatim with the head SHA it applies to.

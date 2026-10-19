@@ -12,11 +12,11 @@ Every flow is the same loop at a different scale: decide what must hold, write t
 | Flow | When | Run |
 |---|---|---|
 | Fix | One behaviour at one seam; every decision it needs is already in the intent, the contract, or the bug report | `tdd` here, then the repository's review skill (`code-review` where provided) |
-| Change | One pull request; may raise a design decision or need more than one pair of hands | `grill-intent` for any decision no intent file states, then `lead` |
+| Change | One pull request; may raise a design decision or need more than one pair of hands | `grill-intent` for any decision none of those states, then `lead` |
 | Effort | Several pull requests, a second party that must agree on an interface, or a suite written blind | `orchestrate-effort` |
 
 Promote when a signal appears rather than starting big, because each tier adds sessions and context to keep in step.
-A decision no intent file states promotes to Change: stop and run `grill-intent` rather than settling it in a test or code, since the first place a decision lands becomes the text everything else is bent to.
+A decision neither the intent, the contract, nor the report states promotes to Change: stop and run `grill-intent` rather than settling it in a test or code, since the first place a decision lands becomes the text everything else is bent to.
 A second party or a `CONTRACT.md` change promotes to Effort: the contract is its own pull request before the code that realises it.
 
 ## Where the other skills enter

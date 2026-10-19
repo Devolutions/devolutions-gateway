@@ -23,7 +23,7 @@ A change to an intent file, `CONTRACT.md`, or blind suite that this pull request
 ## Sub-agents
 
 One task per sub-agent, briefed from an artifact per `references/templates.md`, pointing at paths rather than copying them so the sub-agent reads current text, and listing what it must not read as well as what it must, because isolation is only what the brief denies.
-Workers write code and tests in your worktree or branch and never push or open the pull request; testers follow `test-writer` where provided, suite authors `blind-testsuite`.
+Workers write code and tests in your worktree or branch, each behaviour through `tdd` or against the blind suite's failing checks where one exists, and never push or open the pull request; testers follow `test-writer` where provided, suite authors `blind-testsuite`.
 
 ## Review loop
 
