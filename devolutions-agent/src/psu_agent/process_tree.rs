@@ -124,13 +124,19 @@ impl ProcessTree {
 
     #[cfg(windows)]
     fn try_attach(child: &Child) -> anyhow::Result<Self> {
+        use anyhow::Context as _;
+
+        let process = child.raw_handle().context("child process already exited")?;
+        Self::attach_native(process)
+    }
+
+    #[cfg(windows)]
+    pub(super) fn attach_native(process: std::os::windows::io::RawHandle) -> anyhow::Result<Self> {
         use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
 
         use anyhow::Context as _;
         use windows::Win32::Foundation::HANDLE;
         use windows::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
-
-        let process = child.raw_handle().context("child process already exited")?;
 
         // SAFETY: Creating an unnamed job object with default security attributes has no preconditions.
         let job =
