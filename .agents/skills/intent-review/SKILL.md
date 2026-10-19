@@ -12,13 +12,13 @@ A proposal rewords a commitment the human already holds; when a finding can only
 ## Gather
 
 State which revision you reviewed; if the checkout may be behind, fetch from the remote default branch and say which findings apply to which version.
-Collect everything that applies cumulatively: broader `INTENT.md` up the tree, every `INTENT.<feature>.md` part in the same directories, the `CONTRACT.md` it defers to; contradictions mostly live between files, and copies of a part file that differ are a finding on their own.
+Collect every file `intent-files` Placement makes applicable and the `CONTRACT.md` it defers to; contradictions mostly live between files, and copies of a part file that differ are a finding on their own.
 Read the governed code, manifest, features, and configurations; most false absolutes are found there.
 When a sentence feels wrong and you cannot name why, `intent-files/references/pitfalls.md` is the checklist.
 
 ## Lenses
 
-Apply each to every normative sentence; quote the sentence in the finding.
+Apply each to every normative sentence and quote the sentence in the finding, so the author finds it after edits.
 Four probes decide most of them: is this authoritative or only explanatory; would changing it require a design decision; would it still matter after a rewrite; what undesirable implementation could still satisfy it.
 
 - **Contradiction**: two statements that cannot both hold, including a specific file quietly narrowing a broader one.
@@ -27,7 +27,7 @@ Four probes decide most of them: is this authoritative or only explanatory; woul
 - **Process in intent clothing**: "requires a decision", "run X", anything about agents or contributors; propose the software property behind it, or `AGENTS.md`.
 - **Plan or tentative tense**: "we would like", "will be extended", "later" for behaviour that already exists, since a realised commitment must read as normative; "I have in mind", "may be used" for a firm want; propose the normative form or the explicit permission.
   A deferral the code has not realised is correct as written, not a finding.
-- **Schedule on parties**: "DVLS now, PSU later" where "e.g.: DVLS, PSU" is meant; timeline is not intent.
+- **Schedule on parties**: a party or example named with a stage ("A now, B later" for "e.g.: A, B"); timeline is not intent.
 - **Unscoped absolute**: `never`, `always`, `only`, `every`; which boundary, and does a sibling, feature flag, backend, or build falsify it?
 - **Overstated**: `must`, "if and only if", "exactly these", an exhaustive list, with nothing showing the strength is intended; ask before proposing the weaker form.
 - **Unverified universal**: "every library does X" with no cited check.

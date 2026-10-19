@@ -16,11 +16,11 @@ Run every state-changing operation through the gap questions in `contract-author
 
 ## Lenses
 
-Apply each to every normative sentence; quote it.
+Apply each to every normative sentence and quote it, so the author finds it after edits.
 
 - **Party**: which second party in scope must agree to this sentence?
   None means it is one party's own realisation (config, storage, CLI) and belongs in that party's intent file.
-  Parties and example implementations are named without schedule ("e.g.: DVLS, PSU", never "DVLS now, PSU later"); timeline is not contract.
+  Parties and example implementations are named without schedule ("e.g.: Product A, Product B", never "A now, B later"); timeline is not contract.
 - **Intent contradiction**: the contract says what its `INTENT.md` excludes, or excludes what the intent commits to; detail beyond the intent is expected, disagreement is not, and which side is wrong is the human's call.
 - **Stage talk**: "V1", "initially", "will be", "for now" in a contract; the contract states the whole surface, and what is realised today is the co-located intent file's deferral.
 - **Overreach**: a claim stronger than the mechanism guarantees ("prevents oracles" for "does not say which check failed"); propose the narrowed form.

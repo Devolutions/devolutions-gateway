@@ -17,14 +17,14 @@ Put positively: there is no way the agent learns this unless the skill says it.
 ## One job
 
 A skill does one thing; the description names that thing and the moments it applies, in two sentences.
-Distinct workflows that trigger separately are separate skills, and a skill may load the skills it builds on instead of restating them.
+Distinct workflows that trigger separately are separate skills, and a skill may load the skills it builds on; a concept defined there is pointed to, not re-explained, while a lens or procedure is this skill's own even when its subject is defined elsewhere.
 A `references/` file holds only material needed conditionally, named from the body with the condition that calls for it.
 
-## Each rule with its reason
+## Reasons where they pay
 
-A rule the agent cannot see the point of is the first it drops under pressure; write the because, in the same sentence or the next.
+A rule the agent cannot see the point of is the first it drops under pressure, so a rule that is surprising, costly to get wrong, or tempting to "fix" carries its because in the same sentence or the next; a plain convention may stand as a convention.
 Prefer the reason to the imperative: "`should` is a recommendation, because one meaning per verb is what lets an audit tell a requirement from advice" over "always use `must` for requirements".
-No history, stages, session or decision references; the reader is a future agent, not a participant.
+Write the mechanism, not the incident: "a second copy may drift", not "a second copy drifted and lost a code"; no stages, sessions, or decision references, since the reader is a future agent, not a participant.
 
 ## No ceremony
 
@@ -38,7 +38,7 @@ Address the agent as the reader doing the task; never describe what agents are l
 
 ## Reviewing a skill
 
-Quote each sentence that fails the test and name which part: discoverable, restates another skill, rule without reason, ceremony, two jobs, history.
+Quote each sentence that fails the test and name which part: discoverable, re-explains a concept another skill defines, surprising rule without its reason, ceremony, two jobs, incident for mechanism.
 Ask "why" of any confident sentence before accepting it.
 Propose the shorter sentence or the deletion; do not edit, and do not compress past meaning.
 Report what is strong as written, so it is not touched.

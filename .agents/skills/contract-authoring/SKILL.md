@@ -6,7 +6,7 @@ description: Author or extend a normative CONTRACT.md - an exact, testable speci
 # Contract authoring
 
 A contract defines a surface that two independently built parties must agree on: a backend author implements from it alone, and the conformance suite derives its expectations from it and the standards it cites, never from an implementation.
-It opens by naming the parties in scope without schedule ("e.g.: DVLS, PSU", not "DVLS now, PSU later"), and a statement belongs only if one of them must agree to it.
+It names the parties in scope without schedule ("e.g.: Product A, Product B", not "A now, B later"), since a release stage is not a rule a party agrees to, and a statement belongs only if one of them must agree to it.
 One party's own realisation (its config file, local storage, CLI, defaults) is not contract even when it is an interface; it is that party's intent, unless the scope names a second party that depends on it, and then only the parts they depend on enter.
 `INTENT.md` beside it explains the choices; the contract states the rules.
 
@@ -30,11 +30,11 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
   Phrase precedence as which outcome wins, not as an evaluation order.
 - Implementation-defined cases are listed with their exact allowed outcome set, never with examples, and are excluded from differential tests.
 - For every stored field: who initialises it, which operations update it, and which must not.
-- Every list exists once; a second copy of the error list drifted and lost a code.
-- A `Definitions` section opens the contract with one entry per term the parties must share, in the glossary shape from `intent-files` (what it *is*, then its rules, an *Avoid:* line where a competing word exists); one encoding per concept, and the same word for the same thing throughout.
+- Every list exists once; a second copy may drift.
+- A `Definitions` section with one entry per term the parties must share, in the glossary shape from `intent-files`; one encoding per concept, and the same word for the same thing throughout.
 - The contract is the single source for the API it specifies; when it covers a code API, public items cite their section and a check keeps them in step.
 - When the contract needs a rule the intent lacks, the human amends `INTENT.md` first; a contract rule with no intent behind it is a design decision nobody made.
-- A contract has no versions and no deferral markers: it describes the whole surface as it must be, and the subset realised today is a deferral in the co-located intent file, extended by editing; a version negotiated on the wire is content, a release stage is not.
+- A contract has no versions and no deferral markers: it describes the whole surface as it must be, and the subset realised today is a deferral in the co-located intent file, extended by editing; a version negotiated on the wire is content.
 - An example is not a rule: state what is free (order, case, whitespace) and add vectors that vary it, or a conforming library will reproduce none of them.
 - Put the exception where the rule is: "terminal, except during pending-key recovery".
 - Strict where it matters, extensible elsewhere: optional fields older receivers ignore, but authentication data stays strict.
@@ -47,9 +47,8 @@ One party's own realisation (its config file, local storage, CLI, defaults) is n
 Write each rule with one condition and one response ("when …", "while …", "if … then …") and one meaning per verb: declarative present for a requirement, `should` a recommendation, `may` a permission, `can` a capability.
 Each rule maps to a conformance case, worded as an observable with a bound: "encode writes exactly `size()` bytes", never "handles" or "supports", which name no outcome a test could check and so let divergent implementations all comply.
 "The backend supports RSA-PSS" is met by signing, by returning `Unsupported`, or by producing bytes nobody verifies; "signing with RSA-PSS returns a signature that verifies under the public key, or `Unsupported` before any key material is read" is one outcome and one test.
-"The parser handles truncated input" is met by an error, a caught panic, or a zero-filled struct; "a truncated input returns `Error::Truncated` and consumes nothing" is one outcome and one test.
 Where the parties share test vectors, they cover positive and negative cases, are deterministic, and an independent script recomputes them.
 The conformance section ties every claim to how it is tested, lists known gaps, and marks what is verified by review only.
 
-Shape is free: order sections so a reader finds all of an operation's rules in one place, and prescribe nothing else.
+Beyond that, shape is free: order sections so a reader finds all of an operation's rules in one place.
 `references/patterns.md` lists what review kept and what it fixed in two agent-written contracts; read it when revising one or checking a draft.

@@ -23,7 +23,6 @@ Put positively: there is no way the agent learns this unless we write it.
 
 - A pointer to a non-standard layout: "Integration tests are centralized in `testsuite`; see `testsuite/AGENTS.md`."
 - The default feedback loop when it is not the ecosystem's default: "`cargo xtask check-uncommitted` verifies local modifications."
-- A gotcha whose fix is not one cheap round: "Integration tests exercise the CLI binary, not the crate as a library; see `testsuite/AGENTS.md`."
 - A policy with its reason: "Use `#[expect(lint, reason = "...")]` so the suppression explains itself and expires when it stops being needed."
 - Repository rules no tool enforces: intent-file handling, writing conventions for committed text, comment markers such as `INVARIANT:` and `UNTESTED:`.
 - The one fact a shared skill leaves to the repository, such as the issue-reference footer format, when it fits in a line; otherwise a repo-local skill.
@@ -42,7 +41,7 @@ STYLE.md     loaded by a reviewer skill when a rule's intent is unclear
 
 The root file enters every context, so about 40 lines is the rule of thumb; a nested file loads for fewer tasks and may run longer; past the mark, flag it for the human rather than cut a gotcha to fit.
 Load each file at the latest point where it pays for itself; an always-loaded file pointing at a 700-line guide is a cost on every task, while a skill pointing at the one it depends on keeps both small.
-A directory with its own policy gets a nested `AGENTS.md` and one pointer from the root.
+A directory with its own policy gets a nested `AGENTS.md` and one pointer from the root, since the nested file loads for fewer tasks.
 
 ## Keeping it true
 

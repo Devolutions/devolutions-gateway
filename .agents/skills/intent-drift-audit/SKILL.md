@@ -1,6 +1,6 @@
 ---
 name: intent-drift-audit
-description: Audit code, a diff, or a PR against the applicable INTENT.md, *.intent.md, or CONTRACT.md and report conforms, violates, partial, or cannot-verify per statement with file:line evidence, ready for a PR comment. Use once an implementation claims to realise its intent, for conformance checks, automated review, or before modifying governed code; not mid-implementation.
+description: Audit code, a diff, or a PR against the applicable INTENT.md, *.intent.md, or CONTRACT.md and report conforms, violates, partial, not-yet-realised, or cannot-verify per statement with file:line evidence, ready for a PR comment. Use once an implementation claims to realise its intent, for conformance checks, automated review, or before modifying governed code; not mid-implementation.
 ---
 
 # Intent drift audit
@@ -12,8 +12,8 @@ It reports; it never edits intent or contract and never silently fixes code duri
 
 Paths under audit: the diff, the named component or module, or the subtree.
 State which revision you audited; if the checkout may be behind, fetch intent and code from the remote default branch or the PR head.
-Applicable intent is cumulative: every `INTENT.md` and `INTENT.<feature>.md` from the root down to each audited directory, and every `*.intent.md` or `*.intent.<feature>.md` beside an audited file.
-Where a statement says "see `CONTRACT.md` §N", the contract section is the statement; when the user names a contract, audit an implementation against it directly, treating each operation's valid domain, must-support set, error mapping, and precedence as separate statements and the conformance suite's coverage of each as part of the evidence.
+Applicable intent is what `intent-files` Placement makes cumulative for each audited path.
+Where a statement says "see `CONTRACT.md` §N", the contract section is the statement; when the user names a contract, audit an implementation against it directly, treating each item `contract-authoring` requires per operation as a statement and the conformance suite's coverage of each as part of the evidence.
 
 ## Verify
 
@@ -23,8 +23,8 @@ Statements in an ancestor file that govern code outside the audited paths are ou
 Give each an ID of section plus ordinal (`xtask/INTENT.md#dependencies-1`, `xtask/INTENT.md#requirements-1`, `CONTRACT.md#6.3-2`) so a later audit can diff against this one.
 A statement marked as deferred or prospective ("for now", "later", `NOTE:`) is a target, not a requirement; the implementation is expected not to realise it yet, and realising it anyway is worth a note.
 The audit compares intent with its realisation, so it runs on code that claims to realise the intent, on a merged tree or a branch whose implementation is finished; mid-implementation, say so and stop, because every unfinished statement would read as a violation.
-For each: cite `path:line`; decide **conforms**, **violates**, **partial** (honoured on some paths, configurations, or the primary path and bypassed on another), **not yet realised** (a deferred target the code does not implement, which is the expected state), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
-Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement.
+For each: cite `path:line`; decide **conforms**, **violates**, **partial** (honoured on some paths, configurations, or the primary path and bypassed on another), **not yet realised** (a deferred target), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.
+Statements that need design judgement rather than code reading are audited only when the diff plainly bears on them, and labelled as judgement, since they have no `path:line` to cite.
 Note `INVARIANT:` and `UNTESTED:` comments that relate; they are the code's own claims.
 "Probably fine" is cannot verify: a status of conforms needs `path:line` or a check that establishes the property, not the absence of an obvious counterexample.
 When a statement's span is feature-gated or build-specific, check each variant.

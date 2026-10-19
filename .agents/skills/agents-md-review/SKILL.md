@@ -14,16 +14,15 @@ Review the file as given and state which revision.
 Check each block against reality before judging it; one piece of evidence per verdict is enough.
 
 - Examples and formats against the tool that consumes them (changelog generator, release tooling, CI workflows): **Wrong**.
-  Reading the tool's configuration is enough; a footer that `cliff.toml` turns into a broken link is wrong whether or not a bad changelog has shipped.
+  Reading the tool's configuration is enough; what it would render wrongly is wrong whether or not the bad output has shipped.
 - Lists against the tree and the remote default branch: **Stale**.
-- Claimed conventions against history (`gh pr list --state merged --limit 60 --json headRefName,title`): **Never a convention** when nobody follows it and the maintainer confirms nobody decided it.
+- Claimed conventions against merged-PR history: **Never a convention** when nobody follows it and the maintainer confirms nobody decided it.
   A maintainer may be introducing the rule deliberately, and a human committer proves nothing about who decided it, so an unfollowed rule the maintainer has not ruled on goes on the human-decision list.
 - Rules against the installed skills and always-read files: **Duplicated**.
 - Everything else against the test above: **Discoverable**, **Content-free**, or **Plain command**.
 - An always-loaded pointer to a long guide: **Misplaced**; it belongs in the skill that needs it.
 
-A block can earn more than one verdict, each with its own evidence; lead with the one that needs no human confirmation.
-A footer that `cliff.toml` renders as garbage is **Wrong** whether or not anyone decided it, and **Never a convention** on top once the maintainer says nobody did.
+A block can earn more than one verdict, each with its own evidence; lead with the one that needs no human confirmation, so pruning can start before the maintainer answers.
 
 Also look for what is **Missing**: policy the organisation applies elsewhere (intent-file rules, writing conventions, comment markers) and non-standard layouts with no pointer.
 `agents-md/references/before-after.md` is one repository's worked answer; re-verify every row against the repository in front of you, never paste it.

@@ -39,7 +39,7 @@ Each question gives the human what they need to decide, in plain language: the f
 
 ---
 
-**Annex A** - <topic>: <what the code does, with path:line; alternatives the human may not know, with what each is good for and where it fails.>
+**Annex A** - <topic>: <facts with path:line; alternatives.>
 ```
 
 Wait for answers, recompute the frontier, repeat.
@@ -52,7 +52,6 @@ Record the human's sentence; tidy it to the conventions only, keeping their word
 ## Grill like a reviewer
 
 - An absolute: ask which boundary it protects and what falsifies it; show the sibling, feature flag, or build that would, and let the human scope it.
-- A claim about how code works that the code contradicts: surface it and ask which is wrong, the code or the claim.
 - Wishing or future tense: ask whether the behaviour exists; if so, ask for the sentence as a requirement, otherwise for the deferral marker.
 - A tentative want ("I'd like", "I have in mind", "may"): ask whether it is a requirement, a permission, or a preference, and for the sentence that says which.
 - A rule without a reason: ask what alternative it excludes and why.
