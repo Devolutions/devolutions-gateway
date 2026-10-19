@@ -41,7 +41,7 @@ Each question gives the human what they need to decide, in plain language: the f
 ```
 
 Wait for answers, recompute the frontier, repeat.
-Facts are your job: look up dependencies, features, callers, and siblings before asking; decisions are the human's.
+Look up dependencies, features, callers, and siblings before asking.
 Offer options only when they are a closed set the facts define (the variants that exist, yes or no on what the code does today, the list it already uses, two readings of the human's own sentence), and always include "no commitment here".
 Alternatives the human may not know are information, not options: mention them in the annex with what each is good for and where it fails, so the human can widen the choice, and then let them write the commitment.
 When an answer arrives, verify it against the code and the other answers; if it is false today, contradicts another commitment, or has a consequence the human may not have seen, say so with the evidence and ask them to confirm or rewrite before recording it.
@@ -65,4 +65,3 @@ Record provenance throughout at the three levels `intent-files/references/handof
 
 When the frontier is empty: list each commitment in the human's words with its provenance, propose placement, and ask for confirmation.
 Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand the assembled file back for the human to confirm ordering, placement, and tidying.
-When a design is shared by several components, draft it once as an `INTENT.<feature>.md` part and list the directories that will symlink to it.

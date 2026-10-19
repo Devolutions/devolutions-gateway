@@ -40,7 +40,7 @@ Of a party's own realisation (`intent-files`), only the parts a named second par
 - Strict where it matters, extensible elsewhere: optional fields older receivers ignore, but authentication data stays strict, since an ignored field in authentication data is an unverified input.
 - A derivable operation stays out unless a written exception (performance, validated-module boundary, a security property) sits next to it, since each one widens what every backend must implement and test for a result the primitives already give.
 - Leave out one library's behaviour and numbers, admin and UI surfaces, mock and test-harness control surfaces (those are the intent of the component that implements them), implementer choices, and process.
-- A rationale must be as true as its rule; measure before citing a cause.
+- A rationale must be as true as its rule, since a reader who finds the cause false drops the rule with it; measure before citing a cause.
 
 ## Testability
 

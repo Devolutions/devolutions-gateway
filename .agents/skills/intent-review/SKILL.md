@@ -6,7 +6,6 @@ description: Review INTENT.md and *.intent.md files or drafts for contradictions
 # Intent review
 
 Intent files are defined in `intent-files`; agents read them literally before every change in their directory, so a loose sentence becomes a wrong implementation.
-Review as a skeptical peer: findings and proposals, never a rewrite into a design document.
 A proposal rewords a commitment the human already holds; when a finding can only be fixed by deciding what the software should be, ask instead of proposing.
 
 ## Gather

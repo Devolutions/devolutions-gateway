@@ -41,5 +41,5 @@ Address the agent as the reader doing the task; never describe what agents are l
 
 Quote each sentence that fails the test and name which part: discoverable, re-explains a concept another skill defines, surprising rule without its reason, ceremony, two jobs, incident for mechanism, describes what agents are like instead of stating the rule (a mechanism about the artifact's readers is not this).
 Ask "why" of any confident rule before accepting it; procedure steps and conventions are exempt.
-Propose the shorter sentence or the deletion; do not edit, and do not compress past meaning.
+Propose the shorter sentence, the deletion, or the sentence with its reason; do not edit, and do not compress past meaning.
 Report what is strong as written, so it is not touched.

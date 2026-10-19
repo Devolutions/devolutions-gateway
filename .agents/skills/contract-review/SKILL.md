@@ -6,7 +6,6 @@ description: Review a normative CONTRACT.md for overreach, unspecified failure p
 # Contract review
 
 A contract is implemented and tested by parties who read only it, so every ambiguity becomes a divergence between implementations.
-Output is findings and proposals; the human decides.
 
 ## Gather
 
