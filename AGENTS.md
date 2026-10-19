@@ -20,7 +20,7 @@ Code comments and doc comments follow the same rule as Markdown: each sentence s
 
 Format with nightly rustfmt (`cargo +nightly fmt --all`); stable `cargo fmt` produces different output and fails CI.
 Think before silencing a lint, then use `#[expect(clippy::<lint>, reason = "...")]` so the suppression explains itself and expires when it stops being needed.
-Write Rust with the `rust-style` skill.
+Write Rust with the `rust-style` skill and tests with the `test-writer` skill.
 Integration tests are centralized in the `testsuite` crate; see `testsuite/AGENTS.md`.
 
 ## Untested-property comments
