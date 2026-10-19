@@ -27,6 +27,7 @@ Unless the user has already said, ask before creating leads or sub-agents which 
 Two are scheduled: the intent is adopted, and the contract, when there is one, is approved before the suite.
 Everything else is decided within the current rules, logged, and reported for the human to veto; a decision log read once costs less than a question per entry.
 Stop and ask only for a change to intent or contract text, a public API or dependency outside the plan, a security trade-off, or a scope expansion.
+A decision the human has not committed and no fact settles, or an escalation with alternatives, is a `variants` experiment: report its start and proceed within the budget the rules set, and the human decides from its brief rather than from a question.
 A question carries background, options with how each could go wrong, and your recommendation; a placement or formatting choice is a default plus "say if not"; small items are batched, each with its recommendation.
 Approved wording is final unless new evidence shows it false or contradictory, since each re-presentation costs the human a context switch and churns text leads already act on.
 

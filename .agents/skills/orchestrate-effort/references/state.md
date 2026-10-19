@@ -4,9 +4,10 @@ Several small files rather than one, so each is read whole and edited without an
 
 | Artifact | Holds | Who reads it |
 |---|---|---|
-| `rules.md` | Current rules by topic: process, intent, contract, suite, per-stage plan and acceptance; authoritative; updated in the same edit as the decision that changes a rule | Leads and you |
-| `decisions.md` | Numbered log `D1..`, each with date, who decided, the decision, and its rationale; a superseded entry keeps its text and gains `superseded by Dn` | You |
+| `rules.md` | Current rules by topic: process, intent, contract, suite, per-stage plan and acceptance, experiment budget (variants per run, runs per effort, or none); authoritative; a rule resting on an unresolved experiment is marked provisional with its brief, guides implementation and not merge; updated in the same edit as the decision that changes a rule | Leads and you |
+| `decisions.md` | Numbered log `D1..`, each with date, who decided, the decision, and its rationale; a provisional entry says so until the human adopts or reverses it; a superseded entry keeps its text and gains `superseded by Dn` | You |
 | `escalations.md` | Numbered `E1..`, each with the lead, the question, the options, and the decision it led to | You |
+| `experiments/<n>.md` | Each `variants` decision brief, as written | You, the human |
 | `briefs/<lead>.md` | The kickoff sent to each lead, as sent | You, the lead |
 | `reports/<lead>-<n>.md` | Each lead report, as received, with your verification result appended | You |
 | `approved/<repo path>` | Every approved normative text (intent, contract) at approval time, byte-compared against the tree at every copy | You, leads before copying |

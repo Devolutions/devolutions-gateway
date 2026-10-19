@@ -17,6 +17,7 @@ Write the plan as an artifact outside the tree, never committed, with the accept
 
 A decision the brief, intent files, and contract do not settle is not yours: escalate with options, how each could go wrong, and a recommendation, and let no worker encode it in a test or code meanwhile, since whatever lands first becomes the text the rest is bent to.
 Within autonomy - naming inside repository conventions, test structure, which published vector, a classification a stated rule decides, non-semantic documentation - decide, record in the plan, flag in the report.
+Two approaches within autonomy with trade-offs paper cannot settle are a `variants` tournament, run as sub-agents before committing to either.
 A change to an intent file, `CONTRACT.md`, or blind suite never rides this pull request: escalate it, and wait or stack on the pull request that carries it.
 
 ## Sub-agents

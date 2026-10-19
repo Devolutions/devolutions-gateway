@@ -26,6 +26,7 @@ A second party or a `CONTRACT.md` change promotes to Effort: the contract is its
 - `blind-testsuite`: when a wrong expected value would be invisible to the implementer, as in cryptography, codecs, and wire protocols; written from the contract before any implementation.
 - `test-writer` for every test, `test-reviewer` and `test-oracle-reviewer` through `code-review`, and `test-pruner` once tests have outgrown their value, where the repository provides them.
 - `intent-drift-audit`: once a realisation is claimed complete, in the lead's final check or the reviewer's pass, never mid-implementation.
+- `variants`: when a named design choice needs implementation evidence rather than a paper answer.
 - `review-feedback-loop`: once a pull request has findings.
 
 ## Wrong-flow signals
