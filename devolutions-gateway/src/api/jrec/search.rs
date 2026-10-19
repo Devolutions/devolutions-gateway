@@ -265,12 +265,12 @@ impl Search {
         // UNTESTED: the hit-bytes budget stops the search and reports `limitReached`.
         // It bounds the response size, which the hit count alone does not, because a line can be large.
         // When changing it, keep both the hit count and the hit bytes bounded.
-        if self.hits.len() == MAX_HITS || MAX_HIT_BYTES < self.hit_bytes + line.len() {
+        if MAX_HITS <= self.hits.len() || MAX_HIT_BYTES < self.hit_bytes + line.len() {
             self.limit_reached = true;
             return false;
         }
 
-        // The line was parsed as JSON already.
+        // INVARIANT: `line` was parsed as JSON already, so this never skips a hit.
         let Ok(entry) = serde_json::from_slice::<Box<RawValue>>(line) else {
             return true;
         };
@@ -367,6 +367,7 @@ fn viewer_entry(text: &SearchText, line: &[u8]) -> ViewerEntry {
 }
 
 fn exceeds_max_object_depth(fields: &serde_json::Map<String, Value>) -> bool {
+    // INVARIANT: `depth` is how deep the value sits, counting the entry object as depth 1.
     let mut stack: Vec<(&Value, usize)> = fields.values().map(|value| (value, 2)).collect();
 
     while let Some((value, depth)) = stack.pop() {
@@ -545,8 +546,11 @@ struct LineRead {
 
 /// Reads the next line into `line`, without its line break, and returns `None` at the end of the file.
 ///
-/// The reader never holds more than [`MAX_LINE_BYTES`] of one line in memory.
+/// INVARIANT: `line` never holds more than [`MAX_LINE_BYTES`] and a trailing `\r`.
 async fn read_line(reader: &mut BufReader<File>, line: &mut Vec<u8>) -> io::Result<Option<LineRead>> {
+    // The log parser strips a trailing `\r` before it measures the line.
+    const MAX_BUFFERED_BYTES: usize = MAX_LINE_BYTES + 1;
+
     line.clear();
     let mut read = LineRead {
         bytes: 0,
@@ -556,14 +560,18 @@ async fn read_line(reader: &mut BufReader<File>, line: &mut Vec<u8>) -> io::Resu
     loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
-            return Ok((read.bytes != 0).then_some(read));
+            if read.bytes == 0 {
+                return Ok(None);
+            }
+
+            break;
         }
 
         let line_break = available.iter().position(|&byte| byte == b'\n');
         let chunk = &available[..line_break.unwrap_or(available.len())];
 
         if !read.too_long {
-            if line.len() + chunk.len() <= MAX_LINE_BYTES {
+            if line.len() + chunk.len() <= MAX_BUFFERED_BYTES {
                 line.extend_from_slice(chunk);
             } else {
                 read.too_long = true;
@@ -576,13 +584,20 @@ async fn read_line(reader: &mut BufReader<File>, line: &mut Vec<u8>) -> io::Resu
         read.bytes += u64::try_from(consumed).expect("buffer length fits in u64");
 
         if line_break.is_some() {
-            if line.last() == Some(&b'\r') {
-                line.pop();
-            }
-
-            return Ok(Some(read));
+            break;
         }
     }
+
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+
+    if MAX_LINE_BYTES < line.len() {
+        read.too_long = true;
+        line.clear();
+    }
+
+    Ok(Some(read))
 }
 
 #[cfg(test)]
@@ -595,7 +610,7 @@ mod tests {
         SearchText::new(query).expect("non-empty query")
     }
 
-    fn matches(query: &str, line: &str) -> ViewerEntry {
+    fn viewer_entry_of(query: &str, line: &str) -> ViewerEntry {
         viewer_entry(&search_text(query), line.as_bytes())
     }
 
@@ -607,7 +622,7 @@ mod tests {
     fn matches_field_values_ignoring_case(#[case] query: &str, #[case] expected: ViewerEntry) {
         let line = r#"{"timestamp":"t","seq":1,"event":"session.action","description":"Created User","object":"Help Desk Ottawa"}"#;
 
-        assert_eq!(matches(query, line), expected);
+        assert_eq!(viewer_entry_of(query, line), expected);
     }
 
     #[rstest]
@@ -621,14 +636,14 @@ mod tests {
     #[case::too_deep(r#"{"timestamp":"t","seq":1,"event":"e","description":"hit","x":[[[[[[[[1]]]]]]]]}"#)]
     #[case::not_an_object(r#"["hit"]"#)]
     fn skips_entries_the_viewers_drop(#[case] line: &str) {
-        assert_eq!(matches("hit", line), ViewerEntry::Hidden);
+        assert_eq!(viewer_entry_of("hit", line), ViewerEntry::Hidden);
     }
 
     #[test]
     fn keeps_an_entry_at_the_max_depth() {
         let line = r#"{"timestamp":"t","seq":1,"event":"e","description":"hit","x":[[[[[[[1]]]]]]]}"#;
 
-        assert_eq!(matches("hit", line), ViewerEntry::Match);
+        assert_eq!(viewer_entry_of("hit", line), ViewerEntry::Match);
     }
 
     #[test]
@@ -636,8 +651,8 @@ mod tests {
         let description = format!("{}tail", "a".repeat(MAX_STRING_LENGTH));
         let line = format!(r#"{{"timestamp":"t","seq":1,"event":"e","description":"{description}"}}"#);
 
-        assert_eq!(matches("tail", &line), ViewerEntry::NoMatch);
-        assert_eq!(matches("aaa", &line), ViewerEntry::Match);
+        assert_eq!(viewer_entry_of("tail", &line), ViewerEntry::NoMatch);
+        assert_eq!(viewer_entry_of("aaa", &line), ViewerEntry::Match);
     }
 
     #[rstest]
@@ -648,7 +663,7 @@ mod tests {
         let line =
             r#"{"timestamp":"t","seq":1,"event":"e","description":"d","parameters":{"New name":"Hull","Count":2}}"#;
 
-        assert_eq!(matches(query, line), expected);
+        assert_eq!(viewer_entry_of(query, line), expected);
     }
 
     #[test]
@@ -660,8 +675,8 @@ mod tests {
             parameters.join(",")
         );
 
-        assert_eq!(matches("z199", &line), ViewerEntry::Match);
-        assert_eq!(matches("late", &line), ViewerEntry::NoMatch);
+        assert_eq!(viewer_entry_of("z199", &line), ViewerEntry::Match);
+        assert_eq!(viewer_entry_of("late", &line), ViewerEntry::NoMatch);
     }
 
     #[test]
@@ -671,8 +686,8 @@ mod tests {
             r#"{{"timestamp":"t","seq":1,"event":"e","description":"d","parameters":{{"{name}x":"first","{name}y":"second"}}}}"#
         );
 
-        assert_eq!(matches("first", &line), ViewerEntry::Match);
-        assert_eq!(matches("second", &line), ViewerEntry::NoMatch);
+        assert_eq!(viewer_entry_of("first", &line), ViewerEntry::Match);
+        assert_eq!(viewer_entry_of("second", &line), ViewerEntry::NoMatch);
     }
 
     #[test]
@@ -694,26 +709,36 @@ mod tests {
         assert_eq!(entries, [("2", "4"), ("10", "2"), ("b", "6"), ("a", "3"), ("01", "5")]);
     }
 
-    #[rstest]
-    #[case::all(r#""all""#, Some(None))]
-    #[case::listed(
-        r#"["00000000-0000-0000-0000-000000000002","00000000-0000-0000-0000-000000000001"]"#,
-        Some(Some(vec![Uuid::from_u128(2), Uuid::from_u128(1)]))
-    )]
-    #[case::empty_list("[]", Some(Some(Vec::new())))]
-    #[case::other_word(r#""some""#, None)]
-    #[case::all_in_a_list(r#"["all"]"#, None)]
-    fn parses_the_recording_selection(#[case] recordings: &str, #[case] expected: Option<Option<Vec<Uuid>>>) {
+    fn parse_recordings(recordings: &str) -> serde_json::Result<RecordingSelection> {
         let request = format!(r#"{{"query":"q","recordings":{recordings}}}"#);
 
-        let actual = serde_json::from_str::<RecordingSearchRequest>(&request)
-            .ok()
-            .map(|request| match request.recordings {
-                RecordingSelection::All(AllRecordings::All) => None,
-                RecordingSelection::Listed(recording_ids) => Some(recording_ids),
-            });
+        serde_json::from_str::<RecordingSearchRequest>(&request).map(|request| request.recordings)
+    }
 
-        assert_eq!(actual, expected);
+    #[test]
+    fn parses_all_recordings() {
+        let recordings = parse_recordings(r#""all""#).expect("valid selection");
+
+        assert!(matches!(recordings, RecordingSelection::All(AllRecordings::All)));
+    }
+
+    #[rstest]
+    #[case::ids(
+        r#"["00000000-0000-0000-0000-000000000002","00000000-0000-0000-0000-000000000001"]"#,
+        vec![Uuid::from_u128(2), Uuid::from_u128(1)]
+    )]
+    #[case::empty("[]", Vec::new())]
+    fn parses_listed_recordings(#[case] recordings: &str, #[case] expected: Vec<Uuid>) {
+        let recordings = parse_recordings(recordings).expect("valid selection");
+
+        assert!(matches!(recordings, RecordingSelection::Listed(recording_ids) if recording_ids == expected));
+    }
+
+    #[rstest]
+    #[case::other_word(r#""some""#)]
+    #[case::all_in_a_list(r#"["all"]"#)]
+    fn rejects_other_recording_selections(#[case] recordings: &str) {
+        assert!(parse_recordings(recordings).is_err());
     }
 
     async fn search_lines(content: &str) -> RecordingSearchResponse {
@@ -773,6 +798,17 @@ mod tests {
             .map(|hit| serde_json::from_str::<Value>(hit.entry.get()).expect("JSON entry")["seq"].clone())
             .collect();
         assert_eq!(seqs, [serde_json::json!(0), serde_json::json!(2)]);
+    }
+
+    #[tokio::test]
+    async fn keeps_a_line_at_the_limit_ending_with_crlf() {
+        let padding = MAX_LINE_BYTES - entry_line(0, "hit").len();
+        let line = entry_line(0, &format!("hit{}", "x".repeat(padding)));
+        assert_eq!(line.len(), MAX_LINE_BYTES);
+
+        let response = search_lines(&format!("{line}\r\n")).await;
+
+        assert_eq!(response.hits.len(), 1);
     }
 
     #[tokio::test]
