@@ -162,7 +162,7 @@ async fn handle_jrec_push(
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
 ) {
-    let (stream, close_handle) = crate::ws::handle(
+    let (stream, close_handle, received_close) = crate::ws::handle_with_received_close(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal.clone()),
         keep_alive_interval,
@@ -170,6 +170,7 @@ async fn handle_jrec_push(
 
     let result = crate::recording::ClientPush::builder()
         .client_stream(stream)
+        .received_close(received_close)
         .recordings(recordings)
         .claims(claims)
         .file_type(file_type)
