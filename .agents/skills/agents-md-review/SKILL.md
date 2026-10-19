@@ -5,8 +5,7 @@ description: Audit an existing AGENTS.md or CLAUDE.md line by line for wrong, st
 
 # AGENTS.md review
 
-A line in `AGENTS.md` earns its place only if discovering and fixing it would cost more than one cheap feedback round and no skill or always-read file already states it.
-Every other line is paid on every task, and a wrong example is the costliest because agents copy it.
+Verdicts apply the test in `agents-md`: more than one cheap feedback round to discover and fix, and stated in no skill or always-read file.
 
 ## Verify, then classify
 
@@ -33,8 +32,6 @@ Also look for what is **Missing**: policy the organisation applies elsewhere (in
 | Block | Verdict | Evidence |
 |---|---|---|
 | `Issue: #456`, `Issue: N/A` as valid footers | Wrong, Never a convention | `cliff.toml` turns every `Issue:` value into a Jira link; maintainer confirms neither was decided |
-| Scope list `dgw, agent, jetsocat, webapp` | Stale | `installer`, `agent-installer` missing; `commit-scope` skill has the table |
-| Branch naming | Never a convention | 2 of 60 merged PR branches carry a Jira key; maintainer confirms it was never decided |
 | Tests drive the CLI binary, not the library; see `testsuite/AGENTS.md` | Keep | redoing a library-level testsuite is more than one round; no skill states it |
 ```
 

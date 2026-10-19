@@ -61,8 +61,7 @@ Record the human's sentence; tidy it to the conventions only, keeping their word
 - Exact detail (fields, limits, status codes): note it for a `CONTRACT.md` if a second party must agree to it, and return to the decision behind it.
 - Design still moving (names, packaging, two shapes): say so and keep grilling; do not draft mid-churn, since every rename re-edits every file that carries the name.
 
-Record provenance throughout: the human's words verbatim, the human's words after tidying, and anything the agent filled in while drafting.
-Only the first two become intent text; the third is listed for the human and never written as intent.
+Record provenance throughout at the three levels `intent-files/references/handoff.md` defines.
 
 ## Finish
 

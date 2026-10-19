@@ -56,4 +56,4 @@ A commitment that will be cited in reviews may carry a short name ("the single-c
 
 `references/pitfalls.md` lists how drafts have failed review and what the maintainer said; read it before handing a draft back or when reviewing.
 `references/examples.md` points at the file the maintainer wrote by hand and says what makes it work; read it when unsure what a finished file looks like.
-`references/handoff.md` has the handoff note and provenance table for a set of drafts; the note is a session artifact, never committed.
+`references/handoff.md` has the handoff note and provenance table for a set of drafts.

@@ -7,7 +7,7 @@ description: Author or extend a normative CONTRACT.md - an exact, testable speci
 
 A contract defines a surface that two independently built parties must agree on: a backend author implements from it alone, and the conformance suite derives its expectations from it and the standards it cites, never from an implementation.
 It names the parties in scope without schedule ("e.g.: Product A, Product B", not "A now, B later"), since a release stage is not a rule a party agrees to, and a statement belongs only if one of them must agree to it.
-One party's own realisation (its config file, local storage, CLI, defaults) is not contract even when it is an interface; it is that party's intent, unless the scope names a second party that depends on it, and then only the parts they depend on enter.
+Of a party's own realisation (`intent-files`), only the parts a named second party depends on enter.
 `INTENT.md` beside it explains the choices; the contract states the rules.
 
 ## Process
