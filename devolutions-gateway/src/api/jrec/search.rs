@@ -57,7 +57,6 @@ pub(crate) struct RecordingSearchRequest {
 /// `"all"`, or a list of recording IDs.
 ///
 /// A repeated ID is searched once, and an empty list searches nothing.
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub(crate) enum RecordingSelection {
@@ -65,11 +64,40 @@ pub(crate) enum RecordingSelection {
     Listed(Vec<Uuid>),
 }
 
-#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum AllRecordings {
     All,
+}
+
+// The derived schema puts `"all"` in its own enum schema, which version 7.9.0 of the C# client generator turns into
+// a `oneOf` constructor that does not compile.
+#[cfg(feature = "openapi")]
+impl<'__s> utoipa::ToSchema<'__s> for RecordingSelection {
+    fn schema() -> (&'__s str, utoipa::openapi::RefOr<utoipa::openapi::schema::Schema>) {
+        use utoipa::openapi::schema::{
+            ArrayBuilder, KnownFormat, ObjectBuilder, OneOfBuilder, SchemaFormat, SchemaType,
+        };
+
+        let all = ObjectBuilder::new()
+            .schema_type(SchemaType::String)
+            .enum_values(Some(["all"]));
+
+        let listed = ArrayBuilder::new().items(
+            ObjectBuilder::new()
+                .schema_type(SchemaType::String)
+                .format(Some(SchemaFormat::KnownFormat(KnownFormat::Uuid))),
+        );
+
+        let schema = OneOfBuilder::new()
+            .item(all)
+            .item(listed)
+            .description(Some(
+                "`\"all\"`, or a list of recording IDs.\n\nA repeated ID is searched once, and an empty list searches nothing.",
+            ));
+
+        ("RecordingSelection", schema.into())
+    }
 }
 
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -270,7 +298,7 @@ impl Search {
             return false;
         }
 
-        // INVARIANT: `line` was parsed as JSON already, so this never skips a hit.
+        // `viewer_entry` parsed the line as JSON already, so this never skips a hit.
         let Ok(entry) = serde_json::from_slice::<Box<RawValue>>(line) else {
             return true;
         };
@@ -546,7 +574,7 @@ struct LineRead {
 
 /// Reads the next line into `line`, without its line break, and returns `None` at the end of the file.
 ///
-/// INVARIANT: `line` never holds more than [`MAX_LINE_BYTES`] and a trailing `\r`.
+/// INVARIANT: on return, `line` holds at most [`MAX_LINE_BYTES`] bytes.
 async fn read_line(reader: &mut BufReader<File>, line: &mut Vec<u8>) -> io::Result<Option<LineRead>> {
     // The log parser strips a trailing `\r` before it measures the line.
     const MAX_BUFFERED_BYTES: usize = MAX_LINE_BYTES + 1;
@@ -729,9 +757,11 @@ mod tests {
     )]
     #[case::empty("[]", Vec::new())]
     fn parses_listed_recordings(#[case] recordings: &str, #[case] expected: Vec<Uuid>) {
-        let recordings = parse_recordings(recordings).expect("valid selection");
+        let RecordingSelection::Listed(recording_ids) = parse_recordings(recordings).expect("valid selection") else {
+            panic!("expected a list of recording IDs");
+        };
 
-        assert!(matches!(recordings, RecordingSelection::Listed(recording_ids) if recording_ids == expected));
+        assert_eq!(recording_ids, expected);
     }
 
     #[rstest]
@@ -809,6 +839,27 @@ mod tests {
         let response = search_lines(&format!("{line}\r\n")).await;
 
         assert_eq!(response.hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn keeps_a_last_line_at_the_limit_ending_with_cr() {
+        let padding = MAX_LINE_BYTES - entry_line(0, "hit").len();
+        let line = entry_line(0, &format!("hit{}", "x".repeat(padding)));
+
+        let response = search_lines(&format!("{line}\r")).await;
+
+        assert_eq!(response.hits.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn skips_a_line_one_byte_over_the_limit() {
+        let padding = MAX_LINE_BYTES + 1 - entry_line(0, "hit").len();
+        let line = entry_line(0, &format!("hit{}", "x".repeat(padding)));
+        assert_eq!(line.len(), MAX_LINE_BYTES + 1);
+
+        let response = search_lines(&format!("{line}\n")).await;
+
+        assert!(response.hits.is_empty());
     }
 
     #[tokio::test]
