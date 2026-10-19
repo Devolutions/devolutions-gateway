@@ -1,6 +1,6 @@
 # Lead templates
 
-Both are session artifacts: save them in the harness's artifact area and never commit them.
+Session artifacts: save in the harness's artifact area, never commit.
 
 ## Sub-agent brief
 
