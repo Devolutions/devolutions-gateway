@@ -251,7 +251,14 @@ jobs:
 
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          ./ci/choco-install.ps1 wixtoolset -ArgumentList '--version', '3.14.0', '--allow-downgrade', '--force'
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The loop is inline rather than ci/choco-install.ps1 because this job checks out the packaged run's commit, which may predate that script.
+          for ($Attempt = 1; $true; $Attempt++) {
+            choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($Attempt -ge 4) { throw "choco install wixtoolset failed after $Attempt attempts with exit code $LASTEXITCODE" }
+            Start-Sleep -Seconds (30 * $Attempt)
+          }
           $WixBinPath = "C:\Program Files (x86)\WiX Toolset v3.14\bin"
           echo $WixBinPath | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           # WixSharp reads WIXSHARP_WIXDIR as a fallback when WixSharpBinPath MSBuild property

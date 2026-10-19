@@ -16,14 +16,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Chocolatey reports success with 0, and with 1641 or 3010 when a reboot is pending.
-$SuccessExitCodes = @(0, 1641, 3010)
-
 for ($Attempt = 1; $Attempt -le $MaxAttempts; $Attempt++) {
 	Write-Host "Installing $Package (attempt $Attempt of $MaxAttempts)"
 	& choco install $Package --no-progress @ArgumentList
 
-	if ($SuccessExitCodes -contains $LASTEXITCODE) {
+	if ($LASTEXITCODE -eq 0) {
 		return
 	}
 
