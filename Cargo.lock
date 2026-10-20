@@ -100,6 +100,7 @@ dependencies = [
  "hyper-util",
  "p256 0.14.0-rc.14",
  "rcgen",
+ "rstest",
  "rustls 0.23.43",
  "rustls-native-certs",
  "serde_json",

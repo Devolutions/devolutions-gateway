@@ -19,8 +19,11 @@ use url::Url;
 
 use crate::transport::Transport;
 
+mod closure;
 mod stream;
 mod transport;
+
+pub use crate::closure::{Closure, ClosureClass, TerminalCode, TransientKind};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const OPENING_TIMEOUT: Duration = Duration::from_secs(30);
@@ -85,6 +88,13 @@ pub enum Event {
     Reconnect { id: String, reason: String },
     /// A newer effective config, as a JSON object; the caller acknowledges `id`.
     ConfigUpdate { id: String, config_json: String },
+    /// The stream closed or its opening failed.
+    ///
+    /// The channel opens a new stream after `reopen_after`; without one, the channel has stopped.
+    Closed {
+        closure: Closure,
+        reopen_after: Option<Duration>,
+    },
 }
 
 /// One channel: a stream that is reopened after each transient closure.

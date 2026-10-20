@@ -11,9 +11,11 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use p256::pkcs8::DecodePrivateKey as _;
+use rstest::rstest;
 use signature::Verifier as _;
+use tonic::{Code, Status};
 
-use self::authority::{Mode, TestAuthority, WAIT, vectors};
+use self::authority::{Mode, Pki, TestAuthority, WAIT, vectors};
 use super::*;
 
 const CHANNEL_PROOF_DOMAIN: &[u8] = b"devolutions-agent-identity/v1/channel-proof";
@@ -95,7 +97,7 @@ impl Identity {
 }
 
 fn client(authority: &TestAuthority, settings: Settings) -> anyhow::Result<ChannelClient> {
-    ChannelClient::new(ProxyConfig::Off, &[authority.ca.clone()], settings)
+    ChannelClient::new(ProxyConfig::Off, std::slice::from_ref(&authority.ca), settings)
 }
 
 fn new_id() -> String {
@@ -107,6 +109,27 @@ async fn next_event(channel: &mut Channel) -> Event {
         .await
         .expect("no channel event in time")
         .expect("channel stopped")
+}
+
+/// Waits for the next closure.
+async fn next_closure(channel: &mut Channel) -> (Closure, Option<Duration>) {
+    match next_event(channel).await {
+        Event::Closed { closure, reopen_after } => (closure, reopen_after),
+        event => panic!("expected a closure, got {event:?}"),
+    }
+}
+
+const SERVER_TIME: &str = "2026-10-21T00:00:00Z";
+
+/// A gRPC status as the authority closes a stream with it ([CONTRACT.md] §7.4).
+fn closing_status(code: Code, error_code: Option<&str>) -> Status {
+    let mut status = Status::new(code, "closed by the test authority");
+    if let Some(error_code) = error_code {
+        let metadata = status.metadata_mut();
+        metadata.insert("error-code", error_code.parse().expect("ASCII error code"));
+        metadata.insert("server-time", SERVER_TIME.parse().expect("ASCII time"));
+    }
+    status
 }
 
 async fn assert_no_event(channel: &mut Channel) {
@@ -365,5 +388,190 @@ async fn pings_the_connection_at_the_keepalive_interval() -> anyhow::Result<()> 
     tokio::time::sleep(Duration::from_secs(1)).await;
     let pings = authority.pings() - before;
     assert!((5..=12).contains(&pings), "{pings} pings in 1 s at a 100 ms interval");
+    Ok(())
+}
+
+#[rstest]
+#[case::identity_revoked(
+    Code::PermissionDenied,
+    "identity_revoked",
+    ClosureClass::Terminal(TerminalCode::IdentityRevoked)
+)]
+#[case::identity_unknown(
+    Code::Unauthenticated,
+    "identity_unknown",
+    ClosureClass::Terminal(TerminalCode::IdentityUnknown)
+)]
+#[case::certificate_expired(Code::Unauthenticated, "certificate_expired", ClosureClass::CertificateExpired)]
+#[case::signature_invalid(
+    Code::Unauthenticated,
+    "signature_invalid",
+    ClosureClass::Transient(TransientKind::Outage)
+)]
+#[case::invalid_request(
+    Code::InvalidArgument,
+    "invalid_request",
+    ClosureClass::Transient(TransientKind::Outage)
+)]
+#[case::unavailable(Code::Unavailable, "unavailable", ClosureClass::Transient(TransientKind::Outage))]
+#[case::unknown_code(
+    Code::Unauthenticated,
+    "unknown_to_the_agent",
+    ClosureClass::Transient(TransientKind::Outage)
+)]
+#[tokio::test]
+async fn reports_a_refused_opening_with_its_status_trailers_and_class(
+    #[case] code: Code,
+    #[case] error_code: &str,
+    #[case] class: ClosureClass,
+) -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+
+    // CONTRACT.md §7.4 and §5.4.
+    authority
+        .next_opening()
+        .await
+        .refuse(closing_status(code, Some(error_code)));
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, class);
+    assert_eq!(closure.grpc_code, Some(code));
+    assert_eq!(closure.error_code.as_deref(), Some(error_code));
+    assert_eq!(closure.server_time.as_deref(), Some(SERVER_TIME));
+    Ok(())
+}
+
+#[rstest]
+#[case::revoked(
+    Code::PermissionDenied,
+    Some("identity_revoked"),
+    ClosureClass::Terminal(TerminalCode::IdentityRevoked)
+)]
+#[case::expired(Code::Unauthenticated, Some("certificate_expired"), ClosureClass::CertificateExpired)]
+#[case::rotated(Code::Ok, None, ClosureClass::Transient(TransientKind::Outage))]
+#[case::without_error_code(Code::Internal, None, ClosureClass::Transient(TransientKind::Outage))]
+#[tokio::test]
+async fn reports_the_closure_of_an_authenticated_stream(
+    #[case] code: Code,
+    #[case] error_code: Option<&str>,
+    #[case] class: ClosureClass,
+) -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    stream.close(closing_status(code, error_code)).await;
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, class);
+    assert_eq!(closure.grpc_code, Some(code));
+    assert_eq!(closure.error_code.as_deref(), error_code);
+    Ok(())
+}
+
+#[rstest]
+#[case::revoked(Code::PermissionDenied, "identity_revoked")]
+#[case::unknown(Code::Unauthenticated, "identity_unknown")]
+#[case::expired(Code::Unauthenticated, "certificate_expired")]
+#[tokio::test]
+async fn stops_after_a_terminal_or_expired_certificate_closure(
+    #[case] code: Code,
+    #[case] error_code: &str,
+) -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+
+    // CONTRACT.md §7.4: the agent reconnects unless the identity is terminal; §5.4: it renews before retrying.
+    authority
+        .next_opening()
+        .await
+        .refuse(closing_status(code, Some(error_code)));
+    let (_, reopen_after) = next_closure(&mut channel).await;
+    assert_eq!(reopen_after, None);
+    let end = tokio::time::timeout(WAIT, channel.next_event()).await?;
+    assert_eq!(end, None, "the channel keeps running");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_refused_connection_is_an_outage() -> anyhow::Result<()> {
+    let authority = TestAuthority::start(Mode::Grpc).await?;
+    let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = Url::parse(&format!("https://localhost:{}/dvls", unused.local_addr()?.port()))?;
+    drop(unused);
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&url))?;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(closure.grpc_code, None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_untrusted_server_certificate_is_an_outage() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let other_root = Pki::generate()?.ca;
+    let client = ChannelClient::new(ProxyConfig::Off, &[other_root], Settings::default())?;
+    let mut channel = client.connect(identity.target(&authority.url))?;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert!(authority.opening_within(Duration::ZERO).await.is_none());
+    Ok(())
+}
+
+#[rstest]
+#[case::html_over_http2(Mode::HtmlOverHttp2)]
+#[case::http1_without_alpn(Mode::Http1WithoutAlpn)]
+#[case::http1_alpn(Mode::Http1Alpn)]
+#[tokio::test]
+async fn a_path_that_cannot_carry_grpc_is_reported_as_such(#[case] mode: Mode) -> anyhow::Result<()> {
+    let authority = TestAuthority::start(mode).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+
+    // crates/agent-channel-client/INTENT.md: "a reverse proxy that answers without HTTP/2 or gRPC".
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::NoGrpcPath));
+    Ok(())
+}
+
+#[tokio::test]
+async fn closes_without_hello_when_the_challenge_is_not_32_bytes() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+
+    // CONTRACT.md §7.3 step 3 proves a 32-byte challenge.
+    stream.challenge(&[1; 31]).await;
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert!(!matches!(stream.receive_within(WAIT).await, Some(Ok(Some(_)))));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_proof_signing_failure_closes_the_stream_as_an_outage() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let mut identity = Identity::from_vectors("device-a")?;
+    identity.key = Arc::new(TestKey {
+        name: identity.key.name.clone(),
+        key: identity.key.key.clone(),
+        fail_proofs: true,
+    });
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+
+    stream.challenge(&[1; 32]).await;
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert!(!matches!(stream.receive_within(WAIT).await, Some(Ok(Some(_)))));
     Ok(())
 }
