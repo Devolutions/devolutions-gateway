@@ -2,56 +2,43 @@ use anyhow::Context as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use der::Encode as _;
+use der::asn1::BitString;
 use device_key::DeviceKey;
-use p256::ecdsa::{DerSignature, VerifyingKey};
-use signature::{Keypair, Signer};
-use spki::{AlgorithmIdentifierOwned, DynSignatureAlgorithmIdentifier, ObjectIdentifier};
-use x509_cert::builder::{Builder as _, RequestBuilder};
-use x509_cert::name::Name;
+use spki::{AlgorithmIdentifierOwned, ObjectIdentifier, SubjectPublicKeyInfoOwned};
+use x509_cert::request::{CertReq, CertReqInfo, Version};
 
 const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 
-struct CsrSigner<'a>(&'a dyn DeviceKey);
-
-impl Keypair for CsrSigner<'_> {
-    type VerifyingKey = VerifyingKey;
-
-    fn verifying_key(&self) -> Self::VerifyingKey {
-        self.0.public_key()
-    }
-}
-
-impl DynSignatureAlgorithmIdentifier for CsrSigner<'_> {
-    fn signature_algorithm_identifier(&self) -> spki::Result<AlgorithmIdentifierOwned> {
-        Ok(AlgorithmIdentifierOwned {
+/// Creates the base64 DER PKCS#10 request for an on-device key.
+///
+/// The request carries no attributes, as `CONTRACT.md` §4 "Certificates" requires.
+/// It is built by hand because x509-cert's `RequestBuilder` always adds an `extensionRequest` attribute, which is invalid when empty.
+pub fn create(key: &dyn DeviceKey) -> anyhow::Result<String> {
+    let info = CertReqInfo {
+        version: Version::V1,
+        subject: "CN=Agent Identity".parse().context("parse CSR subject")?,
+        public_key: SubjectPublicKeyInfoOwned::from_key(&key.public_key()).context("encode CSR public key")?,
+        attributes: Default::default(),
+    };
+    let signature = key
+        .try_sign(&info.to_der().context("encode CSR info")?)
+        .context("sign CSR")?;
+    let csr = CertReq {
+        info,
+        algorithm: AlgorithmIdentifierOwned {
             oid: ECDSA_WITH_SHA256,
             parameters: None,
-        })
-    }
-}
-
-impl Signer<DerSignature> for CsrSigner<'_> {
-    fn try_sign(&self, message: &[u8]) -> signature::Result<DerSignature> {
-        self.0.try_sign(message).map(|signature| signature.to_der())
-    }
-}
-
-/// Creates the base64 DER PKCS#10 request for an on-device key.
-pub fn create(key: &dyn DeviceKey) -> anyhow::Result<String> {
-    let subject: Name = "CN=Agent Identity".parse().context("parse CSR subject")?;
-    let csr = RequestBuilder::new(subject)
-        .context("build CSR")?
-        .build::<_, DerSignature>(&CsrSigner(key))
-        .context("sign CSR")?;
+        },
+        signature: BitString::from_bytes(signature.to_der().as_bytes()).context("encode CSR signature")?,
+    };
     Ok(STANDARD.encode(csr.to_der().context("encode CSR")?))
 }
 
 #[cfg(test)]
 mod tests {
     use der::{Decode as _, Encode as _};
-    use p256::ecdsa::{Signature, SigningKey};
-    use signature::Verifier as _;
-    use x509_cert::request::CertReq;
+    use p256::ecdsa::{DerSignature, Signature, SigningKey, VerifyingKey};
+    use signature::{Signer, Verifier as _};
 
     use super::*;
 
@@ -100,6 +87,18 @@ mod tests {
 
         key.fail = true;
         assert!(create(&key).is_err());
+        Ok(())
+    }
+
+    // `CONTRACT.md` §4: the agent's CSR carries no attributes.
+    #[test]
+    fn csr_carries_no_attributes() -> anyhow::Result<()> {
+        let key = TestKey {
+            signing_key: SigningKey::from_slice(&[1u8; 32])?,
+            fail: false,
+        };
+        let csr = CertReq::from_der(&STANDARD.decode(create(&key)?)?)?;
+        assert_eq!(csr.info.attributes.len(), 0);
         Ok(())
     }
 }
