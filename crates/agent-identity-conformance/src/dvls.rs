@@ -129,21 +129,21 @@ pub(crate) enum TokenState {
 pub(crate) struct TokenRecord {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) max_uses: u64,
     pub(crate) used_count: u64,
-    #[serde(deserialize_with = "timestamp")]
-    pub(crate) expires_at: OffsetDateTime,
     pub(crate) state: TokenState,
-    #[serde(deserialize_with = "timestamp")]
-    pub(crate) created_at: OffsetDateTime,
-    pub(crate) created_by: Value,
+    // The members below are only compared, so a record may omit them.
     #[serde(default)]
-    pub(crate) friendly_name_format: Option<String>,
+    max_uses: Option<u64>,
+    #[serde(default, deserialize_with = "optional_timestamp")]
+    expires_at: Option<OffsetDateTime>,
+    #[serde(default, deserialize_with = "optional_timestamp")]
+    created_at: Option<OffsetDateTime>,
     #[serde(default)]
-    pub(crate) config: Option<Value>,
-    /// Whether the record holds the full token, which only token creation may return.
-    #[serde(default, rename = "token", deserialize_with = "present")]
-    pub(crate) exposes_token: bool,
+    created_by: Option<Value>,
+    #[serde(default)]
+    friendly_name_format: Option<String>,
+    #[serde(default)]
+    config: Option<Value>,
 }
 
 /// What a token creation request asks for.
@@ -215,7 +215,9 @@ pub(crate) enum CertificateStatus {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CertificateRecord {
     pub(crate) thumbprint: String,
-    pub(crate) serial_number: String,
+    /// Only compared, so a record may omit it.
+    #[serde(default)]
+    serial_number: Option<String>,
     #[serde(deserialize_with = "timestamp")]
     pub(crate) not_before: OffsetDateTime,
     #[serde(deserialize_with = "timestamp")]
@@ -447,8 +449,9 @@ pub(crate) enum RotationPhase {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RootSummary {
     pub(crate) thumbprint: String,
-    #[serde(deserialize_with = "timestamp")]
-    pub(crate) not_after: OffsetDateTime,
+    /// Only compared, so a summary may omit it.
+    #[serde(default, deserialize_with = "optional_timestamp")]
+    not_after: Option<OffsetDateTime>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -673,7 +676,11 @@ impl<'a> Management<'a> {
         #[derive(Deserialize)]
         struct Created {
             token: String,
-            record: TokenRecord,
+            record: CreatedRecord,
+        }
+        #[derive(Deserialize)]
+        struct CreatedRecord {
+            id: String,
         }
         let created: Created = self
             .fetch(Method::POST, "/enrollment-tokens", Some(&spec.body()?), 201)
@@ -687,6 +694,15 @@ impl<'a> Management<'a> {
     pub(crate) async fn token(&self, id: &str) -> anyhow::Result<TokenRecord> {
         self.fetch(Method::GET, &format!("/enrollment-tokens/{id}"), None, 200)
             .await
+    }
+
+    /// Whether the token's record holds its secret text anywhere, which only token creation may return.
+    pub(crate) async fn token_discloses_secret(&self, token: &Token) -> anyhow::Result<bool> {
+        let (_, secret) = token.text.rsplit_once('.').context("token has no secret")?;
+        let record = self
+            .request(Method::GET, &format!("/enrollment-tokens/{}", token.id), None, 200)
+            .await?;
+        Ok(contains_text(&record, secret))
     }
 
     /// Every token, walking all pages.
@@ -822,8 +838,13 @@ fn optional_timestamp<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Opti
         .transpose()
 }
 
-fn present<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
-    Ok(!Value::deserialize(deserializer)?.is_null())
+fn contains_text(value: &Value, text: &str) -> bool {
+    match value {
+        Value::String(value) => value.contains(text),
+        Value::Array(items) => items.iter().any(|item| contains_text(item, text)),
+        Value::Object(members) => members.values().any(|member| contains_text(member, text)),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

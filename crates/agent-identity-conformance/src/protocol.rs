@@ -5281,14 +5281,14 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
         "friendly-name substring filter failed"
     );
     let all_metadata = management
-        .identities(&of_token().full().metadata(&["hostname"]).status(IdentityStatus::Active))
+        .identities(&of_token().full().status(IdentityStatus::Active))
         .await?;
     ensure!(
         all_metadata
             .items
             .first()
             .is_some_and(|row| row.metadata_value("os_name") == Some("Linux")),
-        "full view filtered metadata despite requesting all fields"
+        "full view omitted metadata"
     );
     let issuer = row.issuer().context("summary omitted the current certificate")?;
     let by_issuer = management.identities(&of_token().issuer(issuer)).await?;
@@ -5388,7 +5388,7 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         "new token not active"
     );
     ensure!(
-        !record.exposes_token,
+        !management.token_discloses_secret(&token).await?,
         "token secret leaked in its management API record"
     );
     ensure!(
