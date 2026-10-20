@@ -18,8 +18,7 @@ struct Entry<'a> {
     object: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     parameters: Option<&'a BTreeMap<String, String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    source: Option<&'static str>,
+    source: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -35,7 +34,7 @@ impl<'a> Entry<'a> {
             description,
             object: None,
             parameters: None,
-            source: None,
+            source: "ai",
             model: None,
             prompt_version: None,
         }
@@ -61,7 +60,6 @@ impl<W: std::io::Write> SlogWriter<W> {
 
         let timestamp = timestamp(start_time, Duration::ZERO)?;
         writer.write(Entry {
-            source: Some("ai"),
             model: Some(model),
             prompt_version: Some(prompt_version),
             ..Entry::new(0, timestamp, "session.start", "Session started")
@@ -140,7 +138,7 @@ mod tests {
     }
 
     #[test]
-    fn writes_the_shipped_schema_with_ai_fields_on_session_start() {
+    fn writes_the_shipped_schema_with_the_source_on_every_line() {
         let actions = [
             action(1500, "Listed files", Some("/var/log"), &[("Command", "ls /var/log")]),
             action(62_250, "Closed the shell", None, &[]),
@@ -150,9 +148,9 @@ mod tests {
 
         let expected = [
             r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"session-actions-3"}"#,
-            r#"{"timestamp":"2026-08-20T19:43:56.500Z","seq":1,"event":"session.action","description":"Listed files","object":"/var/log","parameters":{"Command":"ls /var/log"}}"#,
-            r#"{"timestamp":"2026-08-20T19:44:57.250Z","seq":2,"event":"session.action","description":"Closed the shell"}"#,
-            r#"{"timestamp":"2026-08-20T19:45:25.000Z","seq":3,"event":"session.end","description":"Session ended"}"#,
+            r#"{"timestamp":"2026-08-20T19:43:56.500Z","seq":1,"event":"session.action","description":"Listed files","object":"/var/log","parameters":{"Command":"ls /var/log"},"source":"ai"}"#,
+            r#"{"timestamp":"2026-08-20T19:44:57.250Z","seq":2,"event":"session.action","description":"Closed the shell","source":"ai"}"#,
+            r#"{"timestamp":"2026-08-20T19:45:25.000Z","seq":3,"event":"session.end","description":"Session ended","source":"ai"}"#,
         ];
         assert_eq!(slog, expected.map(|line| format!("{line}\n")).concat());
     }
@@ -170,5 +168,6 @@ mod tests {
         assert_eq!(events[1]["event"], "session.end");
         assert_eq!(events[1]["seq"], 1);
         assert_eq!(events[1]["timestamp"], "1970-01-01T00:00:05.000Z");
+        assert!(events.iter().all(|event| event["source"] == "ai"));
     }
 }
