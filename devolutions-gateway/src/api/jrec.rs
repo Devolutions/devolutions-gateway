@@ -31,7 +31,7 @@ use crate::api::heartbeat::recording_storage_health;
 use crate::artifacts::JrecArtifacts;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{PushOutcome, RecordingMessageSender};
+use crate::recording::{PushOutcome, PushTarget, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -66,6 +66,14 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
 #[serde(rename_all = "camelCase")]
 struct JrecPushQueryParam {
     file_type: RecordingFileType,
+    artifact: Option<PushArtifact>,
+}
+
+/// An artifact a recorder pushes next to its recording, instead of a recording clip.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum PushArtifact {
+    Events,
 }
 
 #[derive(Deserialize)]
@@ -91,6 +99,14 @@ async fn jrec_push(
     if claims.jet_rop != RecordingOperation::Push {
         return Err(HttpError::forbidden().msg("expected push operation"));
     }
+
+    let target = match (query.artifact, query.file_type) {
+        (None, file_type) => PushTarget::Clip(file_type),
+        (Some(PushArtifact::Events), RecordingFileType::SessionRecordingLog) => PushTarget::Events,
+        (Some(PushArtifact::Events), _) => {
+            return Err(HttpError::bad_request().msg("the events artifact is a session recording log"));
+        }
+    };
 
     let conf = conf_handle.get_conf();
 
@@ -138,7 +154,7 @@ async fn jrec_push(
             recordings,
             shutdown_signal,
             claims,
-            query.file_type,
+            target,
             session_id,
             source_addr,
             Duration::from_secs(conf_handle.get_conf().debug.ws_keep_alive_interval),
@@ -154,7 +170,7 @@ async fn handle_jrec_push(
     recordings: RecordingMessageSender,
     shutdown_signal: ShutdownSignal,
     claims: JrecTokenClaims,
-    file_type: RecordingFileType,
+    target: PushTarget,
     session_id: Uuid,
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
@@ -169,7 +185,7 @@ async fn handle_jrec_push(
         .client_stream(stream)
         .recordings(recordings)
         .claims(claims)
-        .file_type(file_type)
+        .target(target)
         .session_id(session_id)
         .shutdown_signal(shutdown_signal)
         .build()

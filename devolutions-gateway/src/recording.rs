@@ -79,9 +79,18 @@ pub struct ClientPush<S> {
     recordings: RecordingMessageSender,
     claims: JrecTokenClaims,
     client_stream: S,
-    file_type: RecordingFileType,
+    target: PushTarget,
     session_id: Uuid,
     shutdown_signal: ShutdownSignal,
+}
+
+/// What a push writes.
+#[derive(Debug, Clone, Copy)]
+pub enum PushTarget {
+    /// A clip of the recording, listed in `files`.
+    Clip(RecordingFileType),
+    /// The session events log, an artifact the recorder pushes next to its recording.
+    Events,
 }
 
 impl<S> ClientPush<S>
@@ -93,7 +102,7 @@ where
             recordings,
             claims,
             mut client_stream,
-            file_type,
+            target,
             session_id,
             mut shutdown_signal,
         } = self;
@@ -109,10 +118,18 @@ where
             }
         };
 
-        let (recording_file, progress) = match recordings.connect(session_id, file_type, disconnected_ttl).await {
+        let connected = match target {
+            PushTarget::Clip(file_type) => recordings
+                .connect(session_id, file_type, disconnected_ttl)
+                .await
+                .map(|(path, progress)| (path, Some(progress))),
+            PushTarget::Events => recordings.connect_events(session_id).await.map(|path| (path, None)),
+        };
+
+        let (recording_file, progress) = match connected {
             Ok(connected) => connected,
             Err(e) => {
-                warn!(error = format!("{e:#}"), "Unable to start recording");
+                warn!(error = format!("{e:#}"), ?target, "Unable to start recording");
                 client_stream.shutdown().await.context("shutdown")?;
                 return Ok(PushOutcome::Done);
             }
@@ -122,7 +139,7 @@ where
 
         let mut open_options = fs::OpenOptions::new();
 
-        open_options.read(false).write(true).truncate(true).create(true);
+        open_options.read(false).write(true).create(true).truncate(true);
 
         #[cfg(windows)]
         {
@@ -135,7 +152,9 @@ where
 
         let res = match open_options.open(&recording_file).await {
             Ok(file) => {
-                progress.mark_recording();
+                if let Some(progress) = &progress {
+                    progress.mark_recording();
+                }
                 // Wrap WriteProgressWriter inside a BufWriter to reduce the number of flushes.
                 let (file, flush_signal) = WriteProgressWriter::new(file);
                 // larger buffer size to reduce the number of flushes
@@ -148,7 +167,9 @@ where
                         loop {
                             tokio::select! {
                                 _ = flush_signal.notified() => {
-                                    progress.notify_data();
+                                    if let Some(progress) = &progress {
+                                        progress.notify_data();
+                                    }
                                 },
                                 _ = shutdown_signal_clone.wait() => {
                                     break;
@@ -179,7 +200,7 @@ where
                 let _ = signal_loop.await;
 
                 let flush_result = file.flush().await;
-                if flush_result.is_ok() {
+                if let (Ok(()), Some(progress)) = (&flush_result, &progress) {
                     progress.notify_data();
                 }
 
@@ -196,9 +217,15 @@ where
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
 
-        info!(?res, "Recording finished");
+        info!(?target, ?res, "Recording finished");
 
-        recordings.disconnect(session_id).await.context("disconnect")?;
+        match target {
+            PushTarget::Clip(_) => recordings.disconnect(session_id).await.context("disconnect")?,
+            PushTarget::Events => recordings
+                .disconnect_events(session_id)
+                .await
+                .context("disconnect events")?,
+        }
 
         res
     }
@@ -360,6 +387,13 @@ enum RecordingManagerMessage {
     Disconnect {
         id: Uuid,
     },
+    ConnectEvents {
+        id: Uuid,
+        channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
+    },
+    DisconnectEvents {
+        id: Uuid,
+    },
     GetState {
         id: Uuid,
         channel: oneshot::Sender<Option<OnGoingRecordingState>>,
@@ -397,6 +431,12 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("kind", kind)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::ConnectEvents { id, channel: _ } => {
+                f.debug_struct("ConnectEvents").field("id", id).finish_non_exhaustive()
+            }
+            RecordingManagerMessage::DisconnectEvents { id } => {
+                f.debug_struct("DisconnectEvents").field("id", id).finish()
+            }
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -465,6 +505,25 @@ impl RecordingMessageSender {
             .await
             .ok()
             .context("couldn't send Remove message")
+    }
+
+    /// Returns the new events log of this push.
+    async fn connect_events(&self, id: Uuid) -> anyhow::Result<Utf8PathBuf> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::ConnectEvents { id, channel: tx })
+            .await
+            .ok()
+            .context("couldn't send ConnectEvents message")?;
+        rx.await.context("couldn't receive ConnectEvents result")?
+    }
+
+    async fn disconnect_events(&self, id: Uuid) -> anyhow::Result<()> {
+        self.channel
+            .send(RecordingManagerMessage::DisconnectEvents { id })
+            .await
+            .ok()
+            .context("couldn't send DisconnectEvents message")
     }
 
     pub async fn get_state(&self, id: Uuid) -> anyhow::Result<Option<OnGoingRecordingState>> {
@@ -573,6 +632,8 @@ impl Ord for DisconnectedTtl {
 pub struct RecordingManagerTask {
     rx: RecordingMessageReceiver,
     ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
+    /// Sessions whose recorder is pushing its events log.
+    events_pushes: HashSet<Uuid>,
     recordings_path: Utf8PathBuf,
     session_manager_handle: SessionMessageSender,
     job_queue_handle: JobQueueHandle,
@@ -588,6 +649,7 @@ impl RecordingManagerTask {
         Self {
             rx,
             ongoing_recordings: HashMap::new(),
+            events_pushes: HashSet::new(),
             recordings_path,
             session_manager_handle,
             job_queue_handle,
@@ -819,6 +881,39 @@ impl RecordingManagerTask {
         Ok(artifact_path)
     }
 
+    fn handle_connect_events(&mut self, id: Uuid) -> anyhow::Result<Utf8PathBuf> {
+        if self.events_pushes.contains(&id) {
+            anyhow::bail!("concurrent events push for the same session is not supported");
+        }
+
+        let recording_path = self.recordings_path.join(id.to_string());
+        let manifest_path = recording_path.join("recording.json");
+
+        // The session folder and manifest belong to the recording, so the events push never creates them.
+        if !manifest_path.exists() {
+            anyhow::bail!("an events push needs the recording of the session to start first");
+        }
+
+        let mut manifest = JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
+
+        let events = manifest.artifacts.of_kind_mut(ArtifactKind::Events);
+        let file_name = ArtifactKind::Events.file_name(events.len());
+        events.push(JrecArtifact {
+            file_name: file_name.clone(),
+        });
+        manifest
+            .save_to_file(&manifest_path)
+            .context("write manifest to disk")?;
+
+        self.events_pushes.insert(id);
+
+        Ok(recording_path.join(file_name))
+    }
+
+    fn handle_disconnect_events(&mut self, id: Uuid) {
+        self.events_pushes.remove(&id);
+    }
+
     fn handle_remove(&mut self, id: Uuid) {
         if let Some(ongoing) = self.ongoing_recordings.get(&id) {
             match ongoing.state {
@@ -960,6 +1055,12 @@ async fn recording_manager_task(
                             }
                         }
                     }
+                    RecordingManagerMessage::ConnectEvents { id, channel } => {
+                        let _ = channel.send(manager.handle_connect_events(id));
+                    }
+                    RecordingManagerMessage::DisconnectEvents { id } => {
+                        manager.handle_disconnect_events(id);
+                    }
                     RecordingManagerMessage::GetState { id, channel } => {
                         let response = manager.ongoing_recordings.get(&id).map(|ongoing| ongoing.state.clone());
                         let _ = channel.send(response);
@@ -1008,11 +1109,15 @@ async fn recording_manager_task(
         };
 
         debug!(?msg, "Received message");
-        if let RecordingManagerMessage::Disconnect { id } = msg {
-            if let Err(e) = manager.handle_disconnect(id).await {
-                error!(error = format!("{e:#}"), "handle_disconnect");
+        match msg {
+            RecordingManagerMessage::Disconnect { id } => {
+                if let Err(e) = manager.handle_disconnect(id).await {
+                    error!(error = format!("{e:#}"), "handle_disconnect");
+                }
+                manager.ongoing_recordings.remove(&id);
             }
-            manager.ongoing_recordings.remove(&id);
+            RecordingManagerMessage::DisconnectEvents { id } => manager.handle_disconnect_events(id),
+            _ => {}
         }
     }
 
@@ -1178,6 +1283,21 @@ mod tests {
 
         fn read_file(&self, id: Uuid, file_name: &str) -> String {
             std::fs::read_to_string(self.recordings_path.join(id.to_string()).join(file_name)).expect("read file")
+        }
+
+        async fn try_connect_events(&self, id: Uuid) -> anyhow::Result<String> {
+            let path = self.sender.connect_events(id).await?;
+            Ok(path.file_name().expect("file name").to_owned())
+        }
+
+        async fn connect_events(&self, id: Uuid) -> String {
+            self.try_connect_events(id).await.expect("connect events")
+        }
+
+        async fn disconnect_events(&self, id: Uuid) {
+            self.sender.disconnect_events(id).await.expect("disconnect events");
+            // Messages are processed in order, so this waits for the disconnect to be handled.
+            self.sender.get_count().await.expect("sync with manager");
         }
     }
 
@@ -1419,6 +1539,85 @@ mod tests {
         ));
         assert!(harness.sender.active_recordings.contains(recorded));
         assert_eq!(harness.sender.get_count().await.expect("count"), 1);
+    }
+
+    #[tokio::test]
+    async fn events_log_goes_to_artifacts() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+
+        let clip = harness.connect(id, WEBM).await;
+        let log = harness.connect_events(id).await;
+
+        assert_eq!(clip, "recording-0.webm");
+        assert_eq!(log, "events-0.slog");
+        let manifest = harness.read_manifest(id);
+        let files = manifest["files"].as_array().expect("files");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0]["fileName"], "recording-0.webm");
+        assert_eq!(
+            manifest["artifacts"],
+            json!({ "events": [{ "fileName": "events-0.slog" }] })
+        );
+    }
+
+    #[tokio::test]
+    async fn an_events_push_before_the_recording_is_refused() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+
+        assert!(harness.try_connect_events(id).await.is_err());
+        assert!(!harness.recordings_path.join(id.to_string()).exists());
+    }
+
+    #[tokio::test]
+    async fn a_second_events_push_is_refused() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+
+        harness.connect(id, WEBM).await;
+        harness.connect_events(id).await;
+
+        assert!(harness.try_connect_events(id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_reconnecting_events_push_writes_a_new_log() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+
+        harness.connect(id, WEBM).await;
+        let first = harness.connect_events(id).await;
+        harness.disconnect_events(id).await;
+        let second = harness.connect_events(id).await;
+
+        assert_eq!(first, "events-0.slog");
+        assert_eq!(second, "events-1.slog");
+        assert_eq!(
+            harness.read_manifest(id)["artifacts"],
+            json!({ "events": [{ "fileName": "events-0.slog" }, { "fileName": "events-1.slog" }] })
+        );
+    }
+
+    #[tokio::test]
+    async fn an_events_push_never_keeps_the_recording_alive() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+
+        harness.sender.connect(id, WEBM, Duration::ZERO).await.expect("connect");
+        harness.connect_events(id).await;
+        assert!(harness.sender.active_recordings.contains(id));
+        assert_eq!(harness.sender.get_count().await.expect("count"), 1);
+
+        harness.disconnect(id).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while harness.sender.get_state(id).await.expect("get state").is_some() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("the recording ends");
+        assert!(!harness.sender.active_recordings.contains(id));
     }
 
     #[test]
