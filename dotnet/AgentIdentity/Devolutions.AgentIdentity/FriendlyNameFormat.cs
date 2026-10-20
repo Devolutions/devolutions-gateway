@@ -96,14 +96,14 @@ public sealed class FriendlyNameFormat
     /// A lone surrogate is no scalar value, so it becomes U+FFFD REPLACEMENT CHARACTER.
     /// An empty result falls back to the identity ID.
     /// </remarks>
-    /// <param name="metadata">The metadata that the enroll request reports.</param>
+    /// <param name="metadata">The metadata that the enroll request reports, as its body parser validated it.</param>
     /// <param name="tokenName">The name of the token that the request presents.</param>
     /// <param name="identityId">The ID of the new identity.</param>
     /// <returns>The friendly name, or the identity ID in lowercase hyphenated form.</returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="metadata"/> or <paramref name="tokenName"/> is null.
     /// </exception>
-    public string Evaluate(IReadOnlyDictionary<string, string> metadata, string tokenName, Guid identityId)
+    public string Evaluate(AgentMetadata metadata, string tokenName, Guid identityId)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(tokenName);
