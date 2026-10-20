@@ -27,7 +27,7 @@ internal static class TestIdentity
                 opening.Opening.Challenge.Challenge.Challenge_.Span,
                 TestRequest.DefaultNonce);
             ChannelHandshakeResult handshake =
-                opening.Opening.VerifyHello(VectorChannel.HelloMessage(opening.Opening, proof));
+                await opening.Opening.VerifyHelloAsync(VectorChannel.HelloMessage(opening.Opening, proof));
             Assert.True(handshake.Succeeded, handshake.FailureDetail);
 
             return handshake.Identity;
