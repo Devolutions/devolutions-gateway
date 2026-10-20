@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 
 namespace Devolutions.AgentIdentity.Tests;
@@ -289,7 +290,8 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     public void ReturnsTheValidatedCsr()
     {
         CsrVector vector = TestVectors.Instance.Csr["valid"];
-        byte[] expected = [.. CertificateSigningRequestTests.P256SubjectPublicKeyInfoPrefix, .. vector.PublicKeySec1!];
+        Assert.NotNull(vector.PublicKeySec1);
+        byte[] expected = [.. CertificateSigningRequestTests.P256SubjectPublicKeyInfoPrefix, .. vector.PublicKeySec1];
 
         CertificateSigningRequest csr = AssertValid(ParseText(Body(ValidMetadata, ""))).Csr!;
 
@@ -322,33 +324,53 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     }
 
     // CONTRACT.md §1: base64 in any form but the canonical one is invalid.
-    // Each form decodes, under a lenient decoder, to the valid request.
-    public static TheoryData<string, string> NonCanonicalCsrs()
+    // Each test alters the canonical base64 of a request that the body accepts,
+    // into a form that a lenient decoder would still read as that request.
+    // The requests are built here rather than read from the vector file,
+    // so that each form applies to them whatever request the file holds.
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void RejectsCsrWithoutPadding(int octetsInFinalQuantum)
     {
-        // The request is 226 octets long, so its final quantum holds one octet, two padding characters,
-        // and four pad bits in the character before them, which the canonical form sets to zero.
-        const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        string valid = ValidCsr;
-        Assert.EndsWith("==", valid);
-        char withPadBit = Alphabet[Alphabet.IndexOf(valid[^3]) | 1];
+        string canonical = CanonicalCsr(octetsInFinalQuantum);
 
-        return new TheoryData<string, string>
-        {
-            { "missing padding", valid.TrimEnd('=') },
-            { "non-zero pad bit", valid[..^3] + withPadBit + "==" },
-            { "line break", valid[..64] + "\n" + valid[64..] },
-            { "space", valid[..64] + " " + valid[64..] },
-            { "base64url alphabet", valid.Replace('+', '-').Replace('/', '_') },
-        };
+        AssertOnlyCanonicalCsrIsValid(canonical, canonical.TrimEnd('='));
     }
 
+    // RFC 4648 §3.5: the pad bits of the final quantum, four after one octet and two after two octets, are zero.
+    // The character before the padding holds them, so setting its lowest bit sets one pad bit.
     [Theory]
-    [MemberData(nameof(NonCanonicalCsrs))]
-    public void RejectsCsrInNonCanonicalBase64(string form, string csr)
+    [InlineData(1)]
+    [InlineData(2)]
+    public void RejectsCsrWithNonZeroPadBit(int octetsInFinalQuantum)
     {
-        Assert.NotEqual(ValidCsr, csr);
+        const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        string canonical = CanonicalCsr(octetsInFinalQuantum);
+        int last = canonical.TrimEnd('=').Length - 1;
+        char withPadBit = Alphabet[Alphabet.IndexOf(canonical[last]) | 1];
 
-        AssertInvalid(ParseText(BodyWithCsr(Quote(csr), ValidMetadata)), form);
+        AssertOnlyCanonicalCsrIsValid(canonical, canonical[..last] + withPadBit + canonical[(last + 1)..]);
+    }
+
+    // A lenient decoder skips white space, such as the line breaks that RFC 7468 places every 64 characters.
+    [Theory]
+    [InlineData("\n")]
+    [InlineData(" ")]
+    public void RejectsCsrWithWhiteSpace(string whiteSpace)
+    {
+        string canonical = CanonicalCsr(1);
+
+        AssertOnlyCanonicalCsrIsValid(canonical, canonical[..64] + whiteSpace + canonical[64..]);
+    }
+
+    // RFC 4648 §5: the base64url alphabet writes - and _ for the + and / of base64.
+    [Fact]
+    public void RejectsCsrInTheBase64UrlAlphabet()
+    {
+        string canonical = CanonicalCsr(1);
+
+        AssertOnlyCanonicalCsrIsValid(canonical, canonical.Replace('+', '-').Replace('/', '_'));
     }
 
     [Fact]
@@ -374,6 +396,36 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     private static string BodyWithCsr(string? csr, string? metadata, string extraMembers = "")
     {
         return JsonObject(csr is null ? null : $"\"csr\": {csr}", MetadataMember(metadata), extraMembers);
+    }
+
+    // The canonical base64 of a request whose DER length leaves the given number of octets in the final quantum,
+    // and whose encoding uses both + and /.
+    // Each attempt signs another subject, so that the search does not rely on random signatures.
+    private static string CanonicalCsr(int octetsInFinalQuantum)
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+
+        for (int attempt = 0; attempt < 64; attempt++)
+        {
+            byte[] subject = new X500DistinguishedName($"CN=attempt {attempt}").RawData;
+            byte[] der = TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject), key);
+            string base64 = Convert.ToBase64String(der);
+
+            if (der.Length % 3 == octetsInFinalQuantum && base64.Contains('+') && base64.Contains('/'))
+            {
+                return base64;
+            }
+        }
+
+        throw new InvalidOperationException("No request met the conditions in 64 attempts.");
+    }
+
+    private void AssertOnlyCanonicalCsrIsValid(string canonical, string altered)
+    {
+        Assert.NotEqual(canonical, altered);
+        AssertValid(ParseText(BodyWithCsr(Quote(canonical), ValidMetadata)));
+
+        AssertInvalid(ParseText(BodyWithCsr(Quote(altered), ValidMetadata)));
     }
 
     // The base64 alphabet needs no escape in a JSON string; a line break does.
