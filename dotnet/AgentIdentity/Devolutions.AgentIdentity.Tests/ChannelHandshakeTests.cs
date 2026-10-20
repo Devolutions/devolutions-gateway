@@ -71,14 +71,31 @@ public class ChannelHandshakeTests
                 opening.VerifyHelloAsync(VectorChannel.HelloMessage(opening, OtherKeyProof)),
             ["a Hello with invalid metadata"] = opening => opening.VerifyHelloAsync(
                 Altered(VectorChannel.ValidHelloMessage(opening), LaterFailures["invalid metadata"])),
-            ["no Hello in time"] = opening => ValueTask.FromResult(opening.HelloTimedOut()),
+            ["no Hello in time"] = opening => opening.HelloTimedOutAsync(),
         };
 
     public static TheoryData<string> SignatureFailureNames => new(SignatureFailures.Keys);
 
     public static TheoryData<string> ScenarioNames => new(Scenarios.Keys);
 
-    public static TheoryData<string> WrongRegistryAnswerNames => new(WrongRegistryAnswers.Keys);
+    public static TheoryData<string> ClosureNames => new(Closures.Keys);
+
+    // Each wrong answer of the registry, to each of the two calls that read it.
+    public static TheoryData<string, string> WrongRegistryAnswersAndCalls
+    {
+        get
+        {
+            TheoryData<string, string> cases = new();
+
+            foreach (string answer in WrongRegistryAnswers.Keys)
+            {
+                cases.Add(answer, "a valid Hello");
+                cases.Add(answer, "no Hello in time");
+            }
+
+            return cases;
+        }
+    }
 
     // Each failure decided before the message, with each failure that the handshake checks after it.
     public static TheoryData<string, string> EarlyAndLaterFailures
@@ -93,6 +110,26 @@ public class ChannelHandshakeTests
                 foreach (string later in early.Skip(i + 1).Concat(MessageFailures.Keys))
                 {
                     cases.Add(early[i], later);
+                }
+            }
+
+            return cases;
+        }
+    }
+
+    // Each closure, with each closure checked after it and with the timeout itself.
+    public static TheoryData<string, string> ClosuresAndLaterTimeoutFailures
+    {
+        get
+        {
+            TheoryData<string, string> cases = new();
+            string[] closures = [.. Closures.Keys];
+
+            for (int i = 0; i < closures.Length; i++)
+            {
+                foreach (string later in closures.Skip(i + 1).Append("no Hello in time"))
+                {
+                    cases.Add(closures[i], later);
                 }
             }
 
@@ -139,12 +176,12 @@ public class ChannelHandshakeTests
                 Altered(VectorChannel.ValidHelloMessage(opening), LaterFailures["invalid metadata"]),
         };
 
-    // The failures that the handshake decides from the registry and the clock before it reads the message,
-    // in the order it checks them, with the code and the gRPC status that close the stream (CONTRACT.md §7.4).
+    // CONTRACT.md §7.4: the closures that apply to a stream even while it awaits its Hello, in the order the
+    // handshake checks them, with the code and the gRPC status that close the stream.
     // The certificate of device-a expires 70 days after the vector opening, so a reading after its notAfter is also
     // after the Hello timeout.
     private static OrderedDictionary<string, (Scenario Scenario, AgentIdentityErrorCode Code, StatusCode Status)>
-        EarlyFailures => new()
+        Closures => new()
         {
             ["the certificate is no longer registered"] = (
                 new Scenario { CertificateRemoved = true },
@@ -158,18 +195,33 @@ public class ChannelHandshakeTests
                 new Scenario { HandshakeTime = DeviceANotAfter.AddTicks(1) },
                 AgentIdentityErrorCode.CertificateExpired,
                 StatusCode.Unauthenticated),
+        };
+
+    // The failures that the handshake decides from the registry and the clock before it reads the message:
+    // the closures, then a late Hello.
+    private static OrderedDictionary<string, (Scenario Scenario, AgentIdentityErrorCode Code, StatusCode Status)>
+        EarlyFailures => new(Closures)
+        {
             ["the Hello is late"] = (
                 new Scenario { HandshakeTime = VectorChannel.OpeningTime.AddSeconds(10).AddTicks(1) },
                 AgentIdentityErrorCode.SignatureInvalid,
                 StatusCode.Unauthenticated),
         };
 
-    // Every scenario by name: a valid handshake, then each early failure and each message failure.
+    // No first message arrives, and the host ends the handshake for the timeout.
+    private static Scenario NoHello => new() { FirstMessage = null };
+
+    // Every scenario by name: a valid handshake, each early failure, each message failure,
+    // and the timeout, alone and after each closure.
     private static Dictionary<string, Scenario> Scenarios =>
         new[] { KeyValuePair.Create("a valid Hello", new Scenario()) }
             .Concat(EarlyFailures.Select(failure => KeyValuePair.Create(failure.Key, failure.Value.Scenario)))
             .Concat(MessageFailures.Select(
                 failure => KeyValuePair.Create(failure.Key, new Scenario { FirstMessage = failure.Value })))
+            .Append(KeyValuePair.Create("no Hello in time", NoHello))
+            .Concat(Closures.Select(closure => KeyValuePair.Create(
+                $"no Hello in time, and {closure.Key}",
+                closure.Value.Scenario.And(NoHello))))
             .ToDictionary();
 
     // A raw 64-byte signature over the right bytes, by the key of device-b.
@@ -273,8 +325,8 @@ public class ChannelHandshakeTests
         AssertFailed(result, AgentIdentityErrorCode.IdentityUnknown, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.md §7.4: when a confirm retires the certificate of a stream, the stream gets Reconnect and closes later,
-    // so a stream whose certificate was retired during the handshake authenticates and reports the retirement.
+    // CONTRACT.md §7.4: a stream whose certificate is retired while it awaits its Hello still completes the handshake,
+    // then gets the treatment of every stream of a retired certificate, so the result reports the retirement.
     // Failing it would send a healthy agent the terminal identity_unknown.
     [Fact]
     public async Task CertificateRetiredDuringTheHandshakeAuthenticatesAsRetired()
@@ -326,15 +378,14 @@ public class ChannelHandshakeTests
     // The registry answers a thumbprint with the certificate issued under it, for its one identity,
     // so another answer is a host bug, which must fail as a server error rather than draw an outcome the agent acts on.
     [Theory]
-    [MemberData(nameof(WrongRegistryAnswerNames))]
-    public async Task RegistryAnsweringForAnotherCertificateOrIdentityThrows(string answer)
+    [MemberData(nameof(WrongRegistryAnswersAndCalls))]
+    public async Task RegistryAnsweringForAnotherCertificateOrIdentityThrows(string answer, string call)
     {
         VectorAuthority authority = new();
         ChannelOpening opening = await VectorChannel.OpenAsync(authority);
         authority.Registry.Register(opening.CertificateThumbprint, WrongRegistryAnswers[answer]());
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening)).AsTask());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await HandshakeEnds[call](opening));
     }
 
     // The handshake ends when VerifyHelloAsync is called, not when the registry answers,
@@ -350,10 +401,31 @@ public class ChannelHandshakeTests
             opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
         Assert.False(verifying.IsCompleted);
 
-        Assert.Throws<InvalidOperationException>(() => opening.HelloTimedOut());
-
+        ValueTask<ChannelHandshakeResult> timingOut = opening.HelloTimedOutAsync();
         answer.SetResult();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => timingOut.AsTask());
         Assert.True((await verifying).Succeeded);
+    }
+
+    // The timeout ends the handshake when HelloTimedOutAsync is called too,
+    // so a Hello that arrives during its lookup cannot authenticate a stream that is being closed.
+    [Fact]
+    public async Task TimeoutEndsTheHandshakeBeforeTheRegistryAnswers()
+    {
+        VectorAuthority authority = new();
+        ChannelOpening opening = await VectorChannel.OpenAsync(authority);
+        TaskCompletionSource answer = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        authority.Registry.Gate = answer.Task;
+        ValueTask<ChannelHandshakeResult> timingOut = opening.HelloTimedOutAsync();
+        Assert.False(timingOut.IsCompleted);
+
+        ValueTask<ChannelHandshakeResult> verifying =
+            opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
+        answer.SetResult();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => verifying.AsTask());
+        AssertFailed(await timingOut, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
     // CONTRACT.md §6 reads the clock before the registry, and so does the handshake,
@@ -528,7 +600,7 @@ public class ChannelHandshakeTests
     {
         ChannelOpening opening = await VectorChannel.OpenAsync();
 
-        ChannelHandshakeResult result = opening.HelloTimedOut();
+        ChannelHandshakeResult result = await opening.HelloTimedOutAsync();
 
         AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
@@ -544,9 +616,39 @@ public class ChannelHandshakeTests
     {
         (ChannelOpening opening, _) = await OpenBeforeNotAfterAsync(DeviceANotAfter.AddTicks(ticksAfterNotAfter));
 
-        ChannelHandshakeResult result = opening.HelloTimedOut();
+        ChannelHandshakeResult result = await opening.HelloTimedOutAsync();
 
         AssertFailed(result, expectedCode, StatusCode.Unauthenticated);
+    }
+
+    // CONTRACT.md §7.4: revocation and expiry close a stream still awaiting its Hello ahead of the failures of §7.3
+    // step 4, the timeout included, and so does a deletion, which leaves the certificate unregistered.
+    [Theory]
+    [MemberData(nameof(ClosureNames))]
+    public async Task TimeoutOfAClosedStreamFailsWithTheClosure(string closure)
+    {
+        (Scenario scenario, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Closures[closure];
+
+        ChannelHandshakeResult result = await HandshakeAsync(scenario.And(NoHello));
+
+        AssertFailed(result, expectedCode, expectedStatus);
+    }
+
+    // CONTRACT.md §7.4: the closures keep their order while the stream awaits its Hello,
+    // so an identity revoked and then deleted during that wait gets identity_unknown.
+    [Theory]
+    [MemberData(nameof(ClosuresAndLaterTimeoutFailures))]
+    public async Task ClosureWinsOverLaterFailureWithoutHello(string early, string later)
+    {
+        (Scenario earlyScenario, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Closures[early];
+        ChannelHandshakeResult earlyAlone = await HandshakeAsync(earlyScenario.And(NoHello));
+        ChannelHandshakeResult laterAlone = await HandshakeAsync(Scenarios[later].And(NoHello));
+
+        ChannelHandshakeResult result = await HandshakeAsync(earlyScenario.And(Scenarios[later]).And(NoHello));
+
+        Assert.NotEqual(laterAlone.FailureDetail, earlyAlone.FailureDetail);
+        AssertFailed(result, expectedCode, expectedStatus);
+        Assert.Equal(earlyAlone.FailureDetail, result.FailureDetail);
     }
 
     // CONTRACT.md §7.3 step 4: the server waits 10 s for the Hello.
@@ -685,7 +787,9 @@ public class ChannelHandshakeTests
             VectorChannel.RegisterDevice(authority.Registry, scenario.Status, scenario.IdentityRevoked);
         }
 
-        return await opening.VerifyHelloAsync(scenario.FirstMessage(opening));
+        return scenario.FirstMessage is { } firstMessage
+            ? await opening.VerifyHelloAsync(firstMessage(opening))
+            : await opening.HelloTimedOutAsync();
     }
 
     // Opens a stream five seconds before the certificate of device-a expires, with a valid Hello signed for it,
@@ -731,7 +835,8 @@ public class ChannelHandshakeTests
         // The time of the opening when null.
         public DateTimeOffset? HandshakeTime { get; init; }
 
-        public Func<ChannelOpening, AgentMessage> FirstMessage { get; init; } = VectorChannel.ValidHelloMessage;
+        // When null, no message arrives and the host ends the handshake for the timeout.
+        public Func<ChannelOpening, AgentMessage>? FirstMessage { get; init; } = VectorChannel.ValidHelloMessage;
 
         // This scenario with the changes of a later one to the registry and the clock, and with its first message.
         // The only clock readings combined are after notAfter and after the timeout, and the first is after both.

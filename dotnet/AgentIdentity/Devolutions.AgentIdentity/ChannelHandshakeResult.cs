@@ -47,11 +47,9 @@ public sealed class ChannelHandshakeResult
     /// <remarks>
     /// The stream stays bound to the certificate that opened it,
     /// so the host closes the stream no later than <see cref="AuthenticatedIdentity.CertificateNotAfter"/>.
-    /// When a confirm retired that certificate during the handshake,
+    /// When that certificate was retired during the handshake,
     /// <see cref="AuthenticatedIdentity.CertificateStatus"/> is <see cref="CertificateStatus.Retired"/>,
-    /// and the host treats the stream as every stream of a retired certificate (CONTRACT.md §7.4):
-    /// it sends <c>Reconnect</c> with reason <c>certificate_rotated</c>,
-    /// and closes the stream with <c>OK</c> 60 s later.
+    /// and CONTRACT.md §7.4 says how the host treats a stream of a retired certificate.
     /// </remarks>
     public AuthenticatedIdentity? Identity { get; }
 
