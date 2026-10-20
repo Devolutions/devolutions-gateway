@@ -146,7 +146,10 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
 ///
 /// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
 async fn open(shared: &Shared, target: &Target) -> anyhow::Result<Opened> {
-    let service = shared.transport.connect(&target.url).await?;
+    let service = shared
+        .transport
+        .connect(&target.url, shared.settings.keepalive_interval)
+        .await?;
     let signer = RequestSigner::new(Arc::clone(&target.key), &target.leaf_certificate_der);
     let service = ChannelLayer::new(signer, &target.url).layer(service);
     let (_, origin) = endpoint(&target.url)?;

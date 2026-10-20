@@ -347,3 +347,23 @@ async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
     assert_ne!(hello.id, ack.id);
     Ok(())
 }
+
+#[tokio::test]
+async fn pings_the_connection_at_the_keepalive_interval() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let settings = Settings {
+        keepalive_interval: Duration::from_millis(100),
+        ..Settings::default()
+    };
+    let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    let before = authority.pings();
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let pings = authority.pings() - before;
+    assert!((5..=12).contains(&pings), "{pings} pings in 1 s at a 100 ms interval");
+    Ok(())
+}

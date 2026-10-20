@@ -4,6 +4,7 @@ use std::future::{Future, poll_fn};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use anyhow::Context as _;
 use http::{Request, Response, Uri};
@@ -11,7 +12,7 @@ use http_client_proxy::ProxyConfig;
 use hyper::body::Incoming;
 use hyper::client::conn::http2;
 use hyper_util::client::legacy::connect::HttpConnector;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use rustls::RootCertStore;
 use rustls::pki_types::{CertificateDer, ServerName};
 use tokio_rustls::TlsConnector;
@@ -20,6 +21,11 @@ use tower::Service;
 use url::{Host, Url};
 
 const ALPN_H2: &[u8] = b"h2";
+/// How long a keepalive ping may go unanswered before the connection counts as lost.
+// UNTESTED: an unanswered keepalive ping fails the connection after this timeout.
+// That turns a silently dropped connection, for example after a NAT idle timeout, into a closure the channel reopens.
+// When changing the HTTP/2 builder, keep a keepalive timeout and `keep_alive_while_idle`.
+const KEEPALIVE_ACK_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub(crate) struct Transport {
     tls: Arc<rustls::ClientConfig>,
@@ -49,7 +55,7 @@ impl Transport {
     }
 
     /// Connects to the authority of `url` and completes the HTTP/2 handshake.
-    pub(crate) async fn connect(&self, url: &Url) -> anyhow::Result<Http2Service> {
+    pub(crate) async fn connect(&self, url: &Url, keepalive_interval: Duration) -> anyhow::Result<Http2Service> {
         let _ = &self.proxy;
         let (server_name, origin) = endpoint(url)?;
         let mut connector = HttpConnector::new();
@@ -61,6 +67,10 @@ impl Transport {
             .connect(server_name, tcp)
             .await?;
         let (send_request, connection) = http2::Builder::new(TokioExecutor::new())
+            .timer(TokioTimer::new())
+            .keep_alive_interval(keepalive_interval)
+            .keep_alive_timeout(KEEPALIVE_ACK_TIMEOUT)
+            .keep_alive_while_idle(true)
             .handshake(TokioIo::new(tls))
             .await?;
         tokio::spawn(async move {
