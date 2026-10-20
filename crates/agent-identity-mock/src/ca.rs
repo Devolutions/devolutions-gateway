@@ -1,5 +1,5 @@
 //! In-memory CA per CONTRACT.md §4: a P-256 root per rotation generation and
-//! per-device leaves (`CN=<device_id>`, SAN URI `urn:uuid:<device_id>`, EKU
+//! per-identity leaves (`CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU
 //! clientAuth, KU digitalSignature).
 
 use std::str::FromStr as _;
@@ -150,7 +150,7 @@ pub(crate) struct Leaf {
 /// Issues a leaf per §4; the lifetime is capped at the issuing root's `notAfter`.
 pub(crate) fn issue_leaf(
     root: &RootCa,
-    device_id: uuid::Uuid,
+    identity_id: uuid::Uuid,
     public_key: &VerifyingKey,
     serial: u64,
     now: i64,
@@ -162,8 +162,8 @@ pub(crate) fn issue_leaf(
         .context("leaf validity end overflowed")?
         .min(root.not_after);
     anyhow::ensure!(not_after > not_before, "issuing root has expired");
-    let subject = Name::from_str(&format!("CN={device_id}")).context("leaf name")?;
-    let san_uri = Ia5String::new(&format!("urn:uuid:{device_id}")).context("leaf SAN URI")?;
+    let subject = Name::from_str(&format!("CN={identity_id}")).context("leaf name")?;
+    let san_uri = Ia5String::new(&format!("urn:uuid:{identity_id}")).context("leaf SAN URI")?;
     let mut builder = new_builder(&root.name, &subject, public_key, serial, not_before, not_after)?;
     builder
         .add_extension(&BasicConstraints {

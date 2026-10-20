@@ -20,7 +20,7 @@ use tonic::metadata::{AsciiMetadataValue, MetadataMap};
 use tonic::{Code, Request, Response, Status, Streaming};
 use uuid::Uuid;
 
-use crate::app::App;
+use crate::app::{App, rfc3339};
 use crate::name_eval;
 use crate::oracle::{CertStatus, Endpoint, Rejection, verify_channel_proof, verify_request};
 use crate::state::{StreamHandle, StreamPush};
@@ -33,34 +33,23 @@ pub(crate) struct ChannelService {
     pub(crate) app: Arc<App>,
 }
 
-fn error_status(code: Code, error_code: &str) -> Status {
+/// Builds a stream failure status with the `error-code` and `server-time` trailers ([CONTRACT.md][contract], "7.4 Termination").
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
+fn error_status(code: Code, error_code: &'static str, now: i64) -> Status {
     let mut metadata = MetadataMap::new();
-    metadata.insert(
-        "error-code",
-        AsciiMetadataValue::from_static(error_code_static(error_code)),
-    );
+    metadata.insert("error-code", AsciiMetadataValue::from_static(error_code));
+    let server_time = AsciiMetadataValue::try_from(rfc3339(now)).expect("RFC 3339 timestamps are ASCII");
+    metadata.insert("server-time", server_time);
     Status::with_metadata(code, error_code, metadata)
 }
 
-fn error_code_static(code: &str) -> &'static str {
-    // All codes we ever emit; `from_static` needs a 'static str.
-    match code {
-        "signature_invalid" => "signature_invalid",
-        "clock_skew" => "clock_skew",
-        "device_unknown" => "device_unknown",
-        "device_revoked" => "device_revoked",
-        "certificate_expired" => "certificate_expired",
-        "invalid_request" => "invalid_request",
-        _ => "signature_invalid",
-    }
-}
-
-fn rejection_status(rejection: Rejection) -> Status {
+fn rejection_status(rejection: Rejection, now: i64) -> Status {
     let code = match rejection {
-        Rejection::DeviceRevoked => Code::PermissionDenied,
+        Rejection::IdentityRevoked => Code::PermissionDenied,
         _ => Code::Unauthenticated,
     };
-    error_status(code, rejection.code())
+    error_status(code, rejection.code(), now)
 }
 
 #[tonic::async_trait]
@@ -96,12 +85,12 @@ impl AgentChannel for ChannelService {
                 Err(Rejection::SignatureInvalid)
             } else {
                 let crate::state::State {
-                    devices,
+                    identities,
                     cert_index,
                     nonces,
                     ..
                 } = &mut *state;
-                let mut lookup = |keyid: &str| crate::state::lookup_cert(devices, cert_index, keyid);
+                let mut lookup = |keyid: &str| crate::state::lookup_cert(identities, cert_index, keyid);
                 verify_request(
                     Endpoint::Connect,
                     "POST",
@@ -118,14 +107,14 @@ impl AgentChannel for ChannelService {
                 state.challenged_streams.insert(
                     stream_id,
                     StreamHandle {
-                        device_id: auth.device_id(),
+                        identity_id: auth.identity_id(),
                         cert_thumbprint: auth.cert_thumbprint().to_owned(),
                         tx: push_tx.clone(),
                         retire_at: None,
                     },
                 );
                 state.record_event(
-                    auth.device_id(),
+                    auth.identity_id(),
                     "stream_opened",
                     serde_json::json!({
                         "stream_id": stream_id,
@@ -135,7 +124,7 @@ impl AgentChannel for ChannelService {
             }
             result
         };
-        let auth = auth.map_err(rejection_status)?;
+        let auth = auth.map_err(|rejection| rejection_status(rejection, now))?;
 
         tokio::spawn(run_stream(
             app,
@@ -169,7 +158,7 @@ async fn close_with(out: &mpsc::Sender<Result<ServerMessage, Status>>, status: S
 async fn finish_stream(
     app: &App,
     stream_id: Uuid,
-    device_id: Uuid,
+    identity_id: Uuid,
     cert_thumbprint: &str,
     status: &str,
     error_code: Option<&str>,
@@ -177,32 +166,32 @@ async fn finish_stream(
     app.state
         .lock()
         .await
-        .close_stream(stream_id, device_id, cert_thumbprint, status, error_code);
+        .close_stream(stream_id, identity_id, cert_thumbprint, status, error_code);
 }
 
 async fn close_opening_push(
     app: &App,
     out: &mpsc::Sender<Result<ServerMessage, Status>>,
     stream_id: Uuid,
-    device_id: Uuid,
+    identity_id: Uuid,
     cert_thumbprint: &str,
     push: Option<StreamPush>,
 ) {
     let (code, error_code) = match push {
         Some(StreamPush::CloseExpired) => (Code::Unauthenticated, "certificate_expired"),
-        Some(StreamPush::CloseUnknown) => (Code::Unauthenticated, "device_unknown"),
-        Some(StreamPush::CloseRevoked) => (Code::PermissionDenied, "device_revoked"),
+        Some(StreamPush::CloseUnknown) => (Code::Unauthenticated, "identity_unknown"),
+        Some(StreamPush::CloseRevoked) => (Code::PermissionDenied, "identity_revoked"),
         Some(StreamPush::CloseOk) => {
-            finish_stream(app, stream_id, device_id, cert_thumbprint, "OK", None).await;
+            finish_stream(app, stream_id, identity_id, cert_thumbprint, "OK", None).await;
             return;
         }
         _ => (Code::Unauthenticated, "signature_invalid"),
     };
-    close_with(out, error_status(code, error_code)).await;
+    close_with(out, error_status(code, error_code, app.now())).await;
     finish_stream(
         app,
         stream_id,
-        device_id,
+        identity_id,
         cert_thumbprint,
         if code == Code::PermissionDenied {
             "PERMISSION_DENIED"
@@ -217,13 +206,13 @@ async fn close_opening_push(
 async fn run_stream(
     app: Arc<App>,
     stream_id: Uuid,
-    auth: crate::oracle::AuthenticatedDevice,
+    auth: crate::oracle::AuthenticatedIdentity,
     mut client: Streaming<AgentMessage>,
     push_tx: mpsc::UnboundedSender<StreamPush>,
     mut push_rx: mpsc::UnboundedReceiver<StreamPush>,
     out: mpsc::Sender<Result<ServerMessage, Status>>,
 ) {
-    let device_id = auth.device_id();
+    let identity_id = auth.identity_id();
     let cert_thumbprint = auth.cert_thumbprint().to_owned();
 
     // §7.3 step 2: the Challenge is the first server message.
@@ -238,7 +227,7 @@ async fn run_stream(
         }),
     );
     if !send(&out, challenge_msg).await {
-        finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
+        finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
         return;
     }
 
@@ -247,11 +236,11 @@ async fn run_stream(
         result = tokio::time::timeout(HELLO_TIMEOUT, client.next()) => match result {
             Ok(Some(Ok(message))) => message,
             Ok(Some(Err(_))) | Ok(None) | Err(_) => {
-                close_with(&out, error_status(Code::Unauthenticated, "signature_invalid")).await;
+                close_with(&out, error_status(Code::Unauthenticated, "signature_invalid", app.now())).await;
                 finish_stream(
                     &app,
                     stream_id,
-                    device_id,
+                    identity_id,
                     &cert_thumbprint,
                     "UNAUTHENTICATED",
                     Some("signature_invalid"),
@@ -261,7 +250,7 @@ async fn run_stream(
             }
         },
         push = push_rx.recv() => {
-            close_opening_push(&app, &out, stream_id, device_id, &cert_thumbprint, push).await;
+            close_opening_push(&app, &out, stream_id, identity_id, &cert_thumbprint, push).await;
             return;
         }
     };
@@ -274,11 +263,15 @@ async fn run_stream(
             _ => false,
         };
     if !hello_ok {
-        close_with(&out, error_status(Code::Unauthenticated, "signature_invalid")).await;
+        close_with(
+            &out,
+            error_status(Code::Unauthenticated, "signature_invalid", app.now()),
+        )
+        .await;
         finish_stream(
             &app,
             stream_id,
-            device_id,
+            identity_id,
             &cert_thumbprint,
             "UNAUTHENTICATED",
             Some("signature_invalid"),
@@ -297,11 +290,11 @@ async fn run_stream(
         .map(|(k, v)| (k.clone(), Value::String(v.clone())))
         .collect();
     if name_eval::validate_metadata(&metadata).is_err() {
-        close_with(&out, error_status(Code::InvalidArgument, "invalid_request")).await;
+        close_with(&out, error_status(Code::InvalidArgument, "invalid_request", app.now())).await;
         finish_stream(
             &app,
             stream_id,
-            device_id,
+            identity_id,
             &cert_thumbprint,
             "INVALID_ARGUMENT",
             Some("invalid_request"),
@@ -324,12 +317,12 @@ async fn run_stream(
                     }
                 }
                 push = push_rx.recv() => {
-                    close_opening_push(&app, &out, stream_id, device_id, &cert_thumbprint, push).await;
+                    close_opening_push(&app, &out, stream_id, identity_id, &cert_thumbprint, push).await;
                     return;
                 }
                 message = client.next() => {
                     if message.is_none_or(|message| message.is_err()) {
-                        finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
+                        finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
                         return;
                     }
                 }
@@ -345,27 +338,28 @@ async fn run_stream(
         state.tick(now);
         let rejection = match state.lookup_cert(&cert_thumbprint) {
             Some(cert)
-                if cert.device_id == device_id && matches!(cert.status, CertStatus::Current | CertStatus::Pending) =>
+                if cert.identity_id == identity_id
+                    && matches!(cert.status, CertStatus::Current | CertStatus::Pending) =>
             {
                 if cert.revoked {
-                    Some(Rejection::DeviceRevoked)
+                    Some(Rejection::IdentityRevoked)
                 } else if cert.not_before > now || now >= cert.not_after {
                     Some(Rejection::CertificateExpired)
                 } else {
                     None
                 }
             }
-            _ => Some(Rejection::DeviceUnknown),
+            _ => Some(Rejection::IdentityUnknown),
         };
         if let Some(rejection) = rejection {
             Err(rejection)
         } else {
             state.challenged_streams.remove(&stream_id);
-            if state.is_connected(device_id) {
+            if state.is_connected(identity_id) {
                 state.requests.overlap_open += 1;
             }
             state.record_event(
-                device_id,
+                identity_id,
                 "stream_authenticated",
                 serde_json::json!({
                     "stream_id": stream_id,
@@ -374,25 +368,25 @@ async fn run_stream(
                 }),
             );
             let (reason, config_update) = state
-                .devices
-                .get_mut(&device_id)
-                .map(|device| {
-                    device.metadata = metadata;
-                    device.last_seen_at = Some(now);
-                    let revision = device.config_revision();
+                .identities
+                .get_mut(&identity_id)
+                .map(|identity| {
+                    identity.metadata = metadata;
+                    identity.last_seen_at = Some(now);
+                    let revision = identity.config_revision();
                     let update = (applied_config_revision < revision).then(|| {
                         (
-                            serde_json::to_string(&device.config).expect("device config is serializable"),
+                            serde_json::to_string(&identity.config).expect("identity config is serializable"),
                             revision,
                         )
                     });
-                    (device.renewal_requested.as_ref().map(|f| f.reason.as_str()), update)
+                    (identity.renewal_requested.as_ref().map(|f| f.reason.as_str()), update)
                 })
-                .expect("authenticated device exists");
+                .expect("authenticated identity exists");
             state.streams.insert(
                 stream_id,
                 StreamHandle {
-                    device_id,
+                    identity_id,
                     cert_thumbprint: cert_thumbprint.clone(),
                     tx: push_tx,
                     retire_at: None,
@@ -405,13 +399,13 @@ async fn run_stream(
     let (renewal_reason, config_update) = match authentication {
         Ok(result) => result,
         Err(rejection) => {
-            close_with(&out, rejection_status(rejection)).await;
+            close_with(&out, rejection_status(rejection, app.now())).await;
             finish_stream(
                 &app,
                 stream_id,
-                device_id,
+                identity_id,
                 &cert_thumbprint,
-                if rejection == Rejection::DeviceRevoked {
+                if rejection == Rejection::IdentityRevoked {
                     "PERMISSION_DENIED"
                 } else {
                     "UNAUTHENTICATED"
@@ -432,7 +426,7 @@ async fn run_stream(
         }),
     );
     if !send(&out, welcome).await {
-        finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
+        finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
         return;
     }
 
@@ -446,11 +440,11 @@ async fn run_stream(
         );
         awaiting_ack.insert(message.id.clone());
         if !send(&out, message).await {
-            finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
+            finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
             return;
         }
         app.state.lock().await.record_event(
-            device_id,
+            identity_id,
             "config_update_sent",
             serde_json::json!({ "stream_id": stream_id, "revision": revision }),
         );
@@ -465,7 +459,7 @@ async fn run_stream(
         );
         awaiting_ack.insert(message.id.clone());
         if !send(&out, message).await {
-            finish_stream(&app, stream_id, device_id, &cert_thumbprint, "OK", None).await;
+            finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
             return;
         }
     }
@@ -484,8 +478,8 @@ async fn run_stream(
                         // UNTESTED: any authenticated message, even an unknown payload, refreshes `last_seen_at`.
                         // The timestamp tracks key possession and drives admin last-seen filters.
                         // When changing this branch, check `lastSeenAt` after an `Ack` and an unknown payload.
-                        if let Some(device) = state.devices.get_mut(&device_id) {
-                            device.last_seen_at = Some(now);
+                        if let Some(identity) = state.identities.get_mut(&identity_id) {
+                            identity.last_seen_at = Some(now);
                         }
                         if let AgentMessage {
                             correlation_id: Some(correlation),
@@ -541,17 +535,17 @@ async fn run_stream(
                     // Make-before-break: end of stream with OK.
                     Some(StreamPush::CloseOk) => break,
                     Some(StreamPush::CloseRevoked) => {
-                        close_with(&out, error_status(Code::PermissionDenied, "device_revoked")).await;
-                        termination = ("PERMISSION_DENIED", Some("device_revoked"));
+                        close_with(&out, error_status(Code::PermissionDenied, "identity_revoked", app.now())).await;
+                        termination = ("PERMISSION_DENIED", Some("identity_revoked"));
                         break;
                     }
                     Some(StreamPush::CloseUnknown) => {
-                        close_with(&out, error_status(Code::Unauthenticated, "device_unknown")).await;
-                        termination = ("UNAUTHENTICATED", Some("device_unknown"));
+                        close_with(&out, error_status(Code::Unauthenticated, "identity_unknown", app.now())).await;
+                        termination = ("UNAUTHENTICATED", Some("identity_unknown"));
                         break;
                     }
                     Some(StreamPush::CloseExpired) => {
-                        close_with(&out, error_status(Code::Unauthenticated, "certificate_expired")).await;
+                        close_with(&out, error_status(Code::Unauthenticated, "certificate_expired", app.now())).await;
                         termination = ("UNAUTHENTICATED", Some("certificate_expired"));
                         break;
                     }
@@ -565,16 +559,16 @@ async fn run_stream(
                 let outcome = {
                     let state = app.state.lock().await;
                     match state.lookup_cert(&cert_thumbprint) {
-                        None => Some(Rejection::DeviceUnknown),
-                        Some(cert) if cert.revoked => Some(Rejection::DeviceRevoked),
+                        None => Some(Rejection::IdentityUnknown),
+                        Some(cert) if cert.revoked => Some(Rejection::IdentityRevoked),
                         Some(cert) if now >= cert.not_after => Some(Rejection::CertificateExpired),
                         Some(_) => None,
                     }
                 };
                 if let Some(rejection) = outcome {
-                    close_with(&out, rejection_status(rejection)).await;
+                    close_with(&out, rejection_status(rejection, app.now())).await;
                     termination = (
-                        if rejection == Rejection::DeviceRevoked {
+                        if rejection == Rejection::IdentityRevoked {
                             "PERMISSION_DENIED"
                         } else {
                             "UNAUTHENTICATED"
@@ -590,10 +584,27 @@ async fn run_stream(
     finish_stream(
         &app,
         stream_id,
-        device_id,
+        identity_id,
         &cert_thumbprint,
         termination.0,
         termination.1,
     )
     .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use tonic::Code;
+
+    use super::error_status;
+
+    #[test]
+    fn stream_failure_carries_error_code_and_server_time_trailers() {
+        let status = error_status(Code::Unauthenticated, "clock_skew", 1_790_000_000);
+        let trailer = |name: &str| status.metadata().get(name).and_then(|value| value.to_str().ok());
+
+        assert_eq!(status.code(), Code::Unauthenticated);
+        assert_eq!(trailer("error-code"), Some("clock_skew"));
+        assert_eq!(trailer("server-time"), Some("2026-09-21T14:13:20Z"));
+    }
 }

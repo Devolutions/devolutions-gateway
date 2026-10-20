@@ -56,3 +56,5 @@ tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 x509-cert = { version = "0.3", features = ["builder"] }
 
+[dev-dependencies]
+rstest = "0.25"

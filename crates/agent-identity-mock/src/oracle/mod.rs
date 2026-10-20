@@ -15,7 +15,7 @@ use p256::ecdsa::signature::Verifier as _;
 use p256::ecdsa::{Signature, VerifyingKey};
 pub(crate) use proof::verify_channel_proof;
 pub(crate) use verify::{
-    AuthenticatedDevice, CertStatus, Endpoint, NonceStore, RegisteredCert, Rejection, verify_request,
+    AuthenticatedIdentity, CertStatus, Endpoint, NonceStore, RegisteredCert, Rejection, verify_request,
 };
 
 /// Verifies a raw P-256 / SHA-256 signature over supplied bytes.

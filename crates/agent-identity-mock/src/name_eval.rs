@@ -1,4 +1,7 @@
-//! CONTRACT.md §3: metadata limits and friendly-name format evaluation.
+//! Metadata limits ([CONTRACT.md][contract], "3. Metadata") and DVLS friendly-name format evaluation ([DVLS intent][dvls-intent], "Enrollment tokens").
+//!
+//! [contract]: ../../../docs/agent-identity/CONTRACT.md#3-metadata
+//! [dvls-intent]: ../../../docs/agent-identity/INTENT.DVLS.md#enrollment-tokens
 
 use serde_json::{Map, Value};
 
@@ -70,12 +73,12 @@ pub(crate) fn validate_friendly_name_format(format: &str) -> Result<(), String> 
 
 /// Renders the friendly name: validated format, missing values evaluate to empty,
 /// `{{`/`}}` escape braces, result trimmed and truncated to 255 chars, empty falls back
-/// to the device ID.
+/// to the identity ID.
 pub(crate) fn render_friendly_name(
     format: &str,
     metadata: &Map<String, Value>,
     token_name: &str,
-    device_id: uuid::Uuid,
+    identity_id: uuid::Uuid,
 ) -> String {
     let mut out = String::new();
     // The format was validated at token creation.
@@ -95,7 +98,7 @@ pub(crate) fn render_friendly_name(
     let trimmed = out.trim();
     let truncated: String = trimmed.chars().take(MAX_FRIENDLY_NAME_CHARS).collect();
     if truncated.is_empty() {
-        device_id.to_string()
+        identity_id.to_string()
     } else {
         truncated
     }

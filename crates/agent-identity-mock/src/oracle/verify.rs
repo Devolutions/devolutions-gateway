@@ -42,8 +42,8 @@ impl Endpoint {
 pub(crate) enum Rejection {
     SignatureInvalid,
     ClockSkew,
-    DeviceUnknown,
-    DeviceRevoked,
+    IdentityUnknown,
+    IdentityRevoked,
     CertificateExpired,
 }
 
@@ -52,15 +52,15 @@ impl Rejection {
         match self {
             Rejection::SignatureInvalid => "signature_invalid",
             Rejection::ClockSkew => "clock_skew",
-            Rejection::DeviceUnknown => "device_unknown",
-            Rejection::DeviceRevoked => "device_revoked",
+            Rejection::IdentityUnknown => "identity_unknown",
+            Rejection::IdentityRevoked => "identity_revoked",
             Rejection::CertificateExpired => "certificate_expired",
         }
     }
 
     pub(crate) fn http_status(self) -> u16 {
         match self {
-            Rejection::DeviceRevoked => 403,
+            Rejection::IdentityRevoked => 403,
             _ => 401,
         }
     }
@@ -87,7 +87,7 @@ impl CertStatus {
 /// What the verifier needs to know about the certificate behind a `keyid`.
 #[derive(Debug, Clone)]
 pub(crate) struct RegisteredCert {
-    pub(crate) device_id: Uuid,
+    pub(crate) identity_id: Uuid,
     pub(crate) revoked: bool,
     pub(crate) status: CertStatus,
     /// Unix seconds.
@@ -120,17 +120,17 @@ impl NonceStore {
 
 /// A successfully authenticated request. Constructible only by [`verify_request`], so
 /// handlers downstream of authentication can trust the identity fields.
-pub(crate) struct AuthenticatedDevice {
-    device_id: Uuid,
+pub(crate) struct AuthenticatedIdentity {
+    identity_id: Uuid,
     cert_thumbprint: String,
     /// The `nonce` parameter of the signature, UTF-8 as received (§7.3 binds it).
     nonce: String,
     public_key: VerifyingKey,
 }
 
-impl AuthenticatedDevice {
-    pub(crate) fn device_id(&self) -> Uuid {
-        self.device_id
+impl AuthenticatedIdentity {
+    pub(crate) fn identity_id(&self) -> Uuid {
+        self.identity_id
     }
 
     pub(crate) fn cert_thumbprint(&self) -> &str {
@@ -173,7 +173,7 @@ pub(crate) fn verify_request(
     now: i64,
     lookup: &mut dyn FnMut(&str) -> Option<RegisteredCert>,
     nonces: &mut NonceStore,
-) -> Result<AuthenticatedDevice, Rejection> {
+) -> Result<AuthenticatedIdentity, Rejection> {
     // Step 1 parses one `sig` member with exactly six profile parameters, the algorithm, and the covered components.
     let signature_input = header_str(signature_input)?;
     let signature = header_str(signature)?;
@@ -263,10 +263,10 @@ pub(crate) fn verify_request(
     // Step 4: resolve the keyid.
     let cert = match lookup(keyid) {
         Some(cert) if matches!(cert.status, CertStatus::Current | CertStatus::Pending) => cert,
-        _ => return Err(Rejection::DeviceUnknown),
+        _ => return Err(Rejection::IdentityUnknown),
     };
     if cert.revoked {
-        return Err(Rejection::DeviceRevoked);
+        return Err(Rejection::IdentityRevoked);
     }
     let valid = match endpoint {
         Endpoint::Connect | Endpoint::Confirm | Endpoint::CheckIn => cert.not_before <= now && now < cert.not_after,
@@ -294,8 +294,8 @@ pub(crate) fn verify_request(
         return Err(Rejection::SignatureInvalid);
     }
 
-    Ok(AuthenticatedDevice {
-        device_id: cert.device_id,
+    Ok(AuthenticatedIdentity {
+        identity_id: cert.identity_id,
         cert_thumbprint: keyid.to_owned(),
         nonce: nonce.to_owned(),
         public_key: cert.public_key,
@@ -369,6 +369,7 @@ fn signature_base(method: &str, content_digest: Option<&[u8]>, inner: &sfv::Inne
 mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use rstest::rstest;
 
     use super::{Endpoint, NonceStore, Rejection, verify_request};
 
@@ -406,9 +407,65 @@ mod tests {
             .err()
         };
 
-        assert_eq!(verify(&header), Some(Rejection::DeviceUnknown));
+        assert_eq!(verify(&header), Some(Rejection::IdentityUnknown));
         for suffix in [";extra=1", ";extra"] {
             assert_eq!(verify(&format!("{header}{suffix}")), Some(Rejection::SignatureInvalid));
         }
+    }
+
+    /// Check-in headers for an unregistered key.
+    struct CheckInHeaders {
+        signature_input: String,
+        signature: String,
+        content_digest: String,
+    }
+
+    impl CheckInHeaders {
+        /// Well-formed headers whose byte sequences are 64 and 32 zero bytes in canonical base64 (RFC 4648 §4).
+        fn well_formed() -> Self {
+            Self {
+                signature_input: format!(
+                    "sig=(\"@method\" \"content-digest\");created=100;expires=160;nonce=\"{}\";keyid=\"{}\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+                    URL_SAFE_NO_PAD.encode([0u8; 16]),
+                    URL_SAFE_NO_PAD.encode([0u8; 32])
+                ),
+                signature: format!("sig=:{}==:", "A".repeat(86)),
+                content_digest: format!("sha-256=:{}=:", "A".repeat(43)),
+            }
+        }
+
+        fn verify(&self) -> Option<Rejection> {
+            verify_request(
+                Endpoint::CheckIn,
+                "POST",
+                Some(self.signature_input.as_bytes()),
+                Some(self.signature.as_bytes()),
+                Some(self.content_digest.as_bytes()),
+                &[],
+                120,
+                &mut |_| None,
+                &mut NonceStore::default(),
+            )
+            .err()
+        }
+    }
+
+    #[test]
+    fn well_formed_check_in_headers_reach_key_lookup() {
+        assert_eq!(CheckInHeaders::well_formed().verify(), Some(Rejection::IdentityUnknown));
+    }
+
+    #[rstest]
+    #[case::signature_nonzero_trailing_bits(|h: &mut CheckInHeaders| h.signature = format!("sig=:{}B==:", "A".repeat(85)))]
+    #[case::signature_missing_padding(|h: &mut CheckInHeaders| h.signature = format!("sig=:{}:", "A".repeat(86)))]
+    #[case::digest_nonzero_trailing_bits(|h: &mut CheckInHeaders| h.content_digest = format!("sha-256=:{}B=:", "A".repeat(42)))]
+    #[case::digest_missing_padding(|h: &mut CheckInHeaders| h.content_digest = format!("sha-256=:{}:", "A".repeat(43)))]
+    #[case::repeated_signature_input_label(|h: &mut CheckInHeaders| h.signature_input = format!("{0}, {0}", h.signature_input))]
+    #[case::repeated_signature_label(|h: &mut CheckInHeaders| h.signature = format!("{0}, {0}", h.signature))]
+    #[case::repeated_digest_member(|h: &mut CheckInHeaders| h.content_digest = format!("{0}, {0}", h.content_digest))]
+    fn noncanonical_base64_or_repeated_member_is_signature_invalid(#[case] malform: fn(&mut CheckInHeaders)) {
+        let mut headers = CheckInHeaders::well_formed();
+        malform(&mut headers);
+        assert_eq!(headers.verify(), Some(Rejection::SignatureInvalid));
     }
 }

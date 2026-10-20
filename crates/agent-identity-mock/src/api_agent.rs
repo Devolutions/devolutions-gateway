@@ -13,7 +13,7 @@ use base64::Engine as _;
 use serde_json::{Map, Value, json};
 
 use crate::app::{App, rfc3339};
-use crate::oracle::{AuthenticatedDevice, Endpoint, Rejection, verify_request};
+use crate::oracle::{AuthenticatedIdentity, Endpoint, Rejection, verify_request};
 use crate::state::{ApiError, DropTarget, FailNextResponse, State};
 
 /// Marks a processed mock fault; the dispatcher aborts the connection without responding.
@@ -100,9 +100,14 @@ async fn trust_anchor(AxumState(app): AxumState<Arc<App>>) -> Response {
 }
 
 /// Parses `Authorization: Bearer <token>`; the token must be well-formed
-/// (`dvaet1.<bag>.<secret>`, 32-byte secret) to even reach the lookup (§5.4
-/// `token_invalid`).
+/// (`dvaet1.<bag>.<secret>`, 32-byte secret) to even reach the lookup, and a
+/// repeated header is `token_invalid` ([CONTRACT.md][contract], "2.1 Authority behavior").
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#21-authority-behavior
 fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
+    if headers.get_all(AUTHORIZATION).iter().count() != 1 {
+        return Err(ApiError::token_invalid());
+    }
     let header = headers
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
@@ -183,7 +188,7 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
     let outcome = match state.enroll(&secret, &csr_der, metadata, now, &app.base_url) {
         Ok(outcome) => outcome,
         Err(err) => {
-            if err.code == "device_revoked" {
+            if err.code == "identity_revoked" {
                 *state.requests.enroll_revoked_by_token.entry(token_id).or_default() += 1;
             }
             return api_error_response(&app, &err);
@@ -196,16 +201,16 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
         state.barrier_triggered = Some(DropTarget::Enroll);
     }
     let config = state
-        .devices
-        .get(&outcome.device_id)
-        .expect("enrolled device exists")
+        .identities
+        .get(&outcome.identity_id)
+        .expect("enrolled identity exists")
         .config
         .clone();
     drop(state);
 
     let body = json!({
         "authority_id": app.authority_id,
-        "device_id": outcome.device_id,
+        "identity_id": outcome.identity_id,
         "certificate_chain": outcome
             .certificate_chain
             .iter()
@@ -258,7 +263,7 @@ async fn renew(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: By
         Err(rejection) => return rejection_response(&app, rejection),
     };
     state.record_event(
-        auth.device_id(),
+        auth.identity_id(),
         "renew_received",
         json!({ "cert_thumbprint": auth.cert_thumbprint() }),
     );
@@ -354,17 +359,17 @@ async fn check_in(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body:
         Ok(metadata) => metadata,
         Err(error) => return api_error_response(&app, &error),
     };
-    let device = state
-        .devices
-        .get_mut(&auth.device_id())
-        .expect("authenticated device exists");
-    device.metadata = metadata;
-    device.last_seen_at = Some(now);
-    let renewal_requested = device.renewal_requested.is_some();
-    let config = device.config.clone();
-    let revision = device.config_revision();
+    let identity = state
+        .identities
+        .get_mut(&auth.identity_id())
+        .expect("authenticated identity exists");
+    identity.metadata = metadata;
+    identity.last_seen_at = Some(now);
+    let renewal_requested = identity.renewal_requested.is_some();
+    let config = identity.config.clone();
+    let revision = identity.config_revision();
     state.record_event(
-        auth.device_id(),
+        auth.identity_id(),
         "check_in_received",
         json!({ "revision": revision, "renewal_requested": renewal_requested }),
     );
@@ -398,7 +403,7 @@ fn authenticate(
     headers: &HeaderMap,
     body: &[u8],
     now: i64,
-) -> Result<AuthenticatedDevice, Rejection> {
+) -> Result<AuthenticatedIdentity, Rejection> {
     if headers.get_all("signature-input").iter().count() != 1
         || headers.get_all("signature").iter().count() != 1
         || matches!(endpoint, Endpoint::Renew | Endpoint::CheckIn)
@@ -411,12 +416,12 @@ fn authenticate(
     let signature = header_bytes("signature");
     let content_digest = header_bytes("content-digest");
     let State {
-        devices,
+        identities,
         cert_index,
         nonces,
         ..
     } = state;
-    let mut lookup = |keyid: &str| crate::state::lookup_cert(devices, cert_index, keyid);
+    let mut lookup = |keyid: &str| crate::state::lookup_cert(identities, cert_index, keyid);
     verify_request(
         endpoint,
         "POST",

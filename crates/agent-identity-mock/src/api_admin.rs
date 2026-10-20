@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::app::{App, parse_rfc3339, rfc3339};
 use crate::oracle::CertStatus;
-use crate::state::{ApiError, Device, State, Token};
+use crate::state::{ApiError, Identity, State, Token};
 
 const MAX_PAGE_SIZE: u64 = 100;
 const DEFAULT_PAGE_SIZE: u64 = 25;
@@ -34,13 +34,13 @@ pub(crate) fn router(app: Arc<App>) -> Router {
     let authed = Router::new()
         .route("/enrollment-tokens", post(create_token).get(list_tokens))
         .route("/enrollment-tokens/{id}", get(get_token).delete(delete_token))
-        .route("/devices", get(list_devices))
+        .route("/identities", get(list_identities))
         .route(
-            "/devices/{id}",
-            get(get_device).patch(patch_device).delete(delete_device),
+            "/identities/{id}",
+            get(get_identity).patch(patch_identity).delete(delete_identity),
         )
-        .route("/devices/{id}/revoke", post(revoke_device))
-        .route("/devices/{id}/request-renewal", post(request_renewal))
+        .route("/identities/{id}/revoke", post(revoke_identity))
+        .route("/identities/{id}/request-renewal", post(request_renewal))
         .route("/ca/rotation", post(start_rotation).get(get_rotation))
         .route_layer(middleware::from_fn_with_state(Arc::clone(&app), admin_auth));
     Router::new().nest("/api/v3/agent-identity", authed).with_state(app)
@@ -254,46 +254,46 @@ async fn delete_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>)
     }
 }
 
-// ==== DVLS devices ====
+// ==== DVLS identities ====
 
-fn device_summary(app: &App, state: &State, device: &Device, metadata_keys: Option<&[String]>) -> Value {
+fn identity_summary(app: &App, state: &State, identity: &Identity, metadata_keys: Option<&[String]>) -> Value {
     let now = app.now();
     let mut view = json!({
-        "id": device.id,
-        "friendlyName": device.friendly_name,
-        "status": device.status(now),
-        "connected": state.is_connected(device.id),
+        "id": identity.id,
+        "friendlyName": identity.friendly_name,
+        "status": identity.status(now),
+        "connected": state.is_connected(identity.id),
     });
-    if let Some(last_seen_at) = device.last_seen_at {
+    if let Some(last_seen_at) = identity.last_seen_at {
         view["lastSeenAt"] = json!(rfc3339(last_seen_at));
     }
-    if let Some(current) = device.current_cert() {
+    if let Some(current) = identity.current_cert() {
         view["certificate"] = json!({
             "notAfter": rfc3339(current.not_after),
             "issuer": current.issuer,
         });
     }
     if let Some(keys) = metadata_keys {
-        view["metadata"] = metadata_subset(device, keys);
+        view["metadata"] = metadata_subset(identity, keys);
     }
     view
 }
 
-fn metadata_subset(device: &Device, keys: &[String]) -> Value {
+fn metadata_subset(identity: &Identity, keys: &[String]) -> Value {
     let mut map = serde_json::Map::new();
     for key in keys {
-        if let Some(value) = device.metadata.get(key) {
+        if let Some(value) = identity.metadata.get(key) {
             map.insert(key.clone(), value.clone());
         }
     }
     Value::Object(map)
 }
 
-fn device_full(app: &App, state: &State, device: &Device) -> Value {
-    let mut view = device_summary(app, state, device, None);
-    view["metadata"] = Value::Object(device.metadata.clone());
+fn identity_full(app: &App, state: &State, identity: &Identity) -> Value {
+    let mut view = identity_summary(app, state, identity, None);
+    view["metadata"] = Value::Object(identity.metadata.clone());
     view["certificates"] = Value::Array(
-        device
+        identity
             .certs
             .iter()
             .map(|c| {
@@ -312,16 +312,16 @@ fn device_full(app: &App, state: &State, device: &Device) -> Value {
             })
             .collect(),
     );
-    view["enrollmentToken"] = json!({ "id": device.token_id, "name": device.token_name });
-    view["createdAt"] = json!(rfc3339(device.created_at));
-    if let Some(revoked_at) = device.revoked_at {
+    view["enrollmentToken"] = json!({ "id": identity.token_id, "name": identity.token_name });
+    view["createdAt"] = json!(rfc3339(identity.created_at));
+    if let Some(revoked_at) = identity.revoked_at {
         view["revokedAt"] = json!(rfc3339(revoked_at));
     }
-    view["renewalRequested"] = json!(device.renewal_requested.is_some());
+    view["renewalRequested"] = json!(identity.renewal_requested.is_some());
     view
 }
 
-struct DeviceQuery {
+struct IdentityQuery {
     view_full: bool,
     metadata_keys: Option<Vec<String>>,
     status: Option<String>,
@@ -334,7 +334,7 @@ struct DeviceQuery {
     page_size: u64,
 }
 
-fn parse_device_query(query: &HashMap<String, String>) -> Result<DeviceQuery, ApiError> {
+fn parse_identity_query(query: &HashMap<String, String>) -> Result<IdentityQuery, ApiError> {
     let (page_number, page_size) = parse_page_params(query)?;
     let view_full = match query.get("view").map(String::as_str) {
         None | Some("summary") => false,
@@ -368,7 +368,7 @@ fn parse_device_query(query: &HashMap<String, String>) -> Result<DeviceQuery, Ap
             Some(parse_rfc3339(raw).ok_or_else(|| ApiError::invalid_request("lastSeenAfter must be RFC 3339"))?)
         }
     };
-    Ok(DeviceQuery {
+    Ok(IdentityQuery {
         view_full,
         metadata_keys,
         status,
@@ -382,17 +382,20 @@ fn parse_device_query(query: &HashMap<String, String>) -> Result<DeviceQuery, Ap
     })
 }
 
-async fn list_devices(AxumState(app): AxumState<Arc<App>>, Query(query): Query<HashMap<String, String>>) -> Response {
+async fn list_identities(
+    AxumState(app): AxumState<Arc<App>>,
+    Query(query): Query<HashMap<String, String>>,
+) -> Response {
     app.tick().await;
-    let query = match parse_device_query(&query) {
+    let query = match parse_identity_query(&query) {
         Ok(q) => q,
         Err(err) => return admin_error(&err),
     };
     let state = app.state.lock().await;
     let now = app.now();
 
-    let mut devices: Vec<&Device> = state
-        .devices
+    let mut identities: Vec<&Identity> = state
+        .identities
         .values()
         .filter(|d| {
             query.status.as_ref().is_none_or(|s| d.status(now) == s)
@@ -413,39 +416,39 @@ async fn list_devices(AxumState(app): AxumState<Arc<App>>, Query(query): Query<H
                     .is_none_or(|q| d.friendly_name.to_lowercase().contains(&q.to_lowercase()))
         })
         .collect();
-    devices.sort_by_key(|device| device.created_seq);
+    identities.sort_by_key(|identity| identity.created_seq);
 
-    let views: Vec<Value> = devices
+    let views: Vec<Value> = identities
         .into_iter()
         .map(|d| {
             if query.view_full {
-                device_full(&app, &state, d)
+                identity_full(&app, &state, d)
             } else {
-                device_summary(&app, &state, d, query.metadata_keys.as_deref())
+                identity_summary(&app, &state, d, query.metadata_keys.as_deref())
             }
         })
         .collect();
     Json(paginate(views, query.page_number, query.page_size)).into_response()
 }
 
-async fn get_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
+async fn get_identity(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
     app.tick().await;
     let state = app.state.lock().await;
-    match state.devices.get(&id) {
-        Some(device) => Json(device_full(&app, &state, device)).into_response(),
-        None => admin_error(&ApiError::not_found("unknown device")),
+    match state.identities.get(&id) {
+        Some(identity) => Json(identity_full(&app, &state, identity)).into_response(),
+        None => admin_error(&ApiError::not_found("unknown identity")),
     }
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PatchDeviceRequest {
+struct PatchIdentityRequest {
     friendly_name: String,
 }
 
-async fn patch_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>, body: Bytes) -> Response {
+async fn patch_identity(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>, body: Bytes) -> Response {
     app.tick().await;
-    let request: PatchDeviceRequest = match serde_json::from_slice(&body) {
+    let request: PatchIdentityRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
         Err(_) => return admin_error(&ApiError::invalid_request("malformed JSON body")),
     };
@@ -454,15 +457,15 @@ async fn patch_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>,
         return admin_error(&ApiError::invalid_request("friendlyName must be 1..255 characters"));
     }
     let mut state = app.state.lock().await;
-    let Some(device) = state.devices.get_mut(&id) else {
-        return admin_error(&ApiError::not_found("unknown device"));
+    let Some(identity) = state.identities.get_mut(&id) else {
+        return admin_error(&ApiError::not_found("unknown identity"));
     };
-    device.friendly_name = request.friendly_name;
-    let device = state.devices.get(&id).expect("device exists");
-    Json(device_full(&app, &state, device)).into_response()
+    identity.friendly_name = request.friendly_name;
+    let identity = state.identities.get(&id).expect("identity exists");
+    Json(identity_full(&app, &state, identity)).into_response()
 }
 
-async fn revoke_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
+async fn revoke_identity(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
     app.tick().await;
     let now = app.now();
     let mut state = app.state.lock().await;
@@ -472,10 +475,10 @@ async fn revoke_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>
     }
 }
 
-async fn delete_device(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
+async fn delete_identity(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>) -> Response {
     app.tick().await;
     let mut state = app.state.lock().await;
-    match state.delete_device(id, app.now()) {
+    match state.delete_identity(id, app.now()) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(err) => admin_error(&err),
     }
@@ -499,7 +502,7 @@ struct StartRotationRequest {
 
 fn rotation_view(state: &State, now: i64) -> Value {
     match &state.rotation {
-        None => json!({ "phase": "idle", "activeDevicesOnOldRoot": 0 }),
+        None => json!({ "phase": "idle", "activeIdentitiesOnOldRoot": 0 }),
         Some(rotation) => {
             let root_view = |thumbprint: &str| {
                 state
@@ -511,7 +514,7 @@ fn rotation_view(state: &State, now: i64) -> Value {
             let mut view = json!({
                 "phase": "rotating",
                 "deadline": rfc3339(rotation.deadline),
-                "activeDevicesOnOldRoot": state.active_devices_on_old_root(now),
+                "activeIdentitiesOnOldRoot": state.active_identities_on_old_root(now),
             });
             if let Some(old) = root_view(&rotation.old_root) {
                 view["oldRoot"] = old;

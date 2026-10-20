@@ -20,12 +20,17 @@ struct Args {
     state_dir: PathBuf,
 }
 
-fn parse_args() -> anyhow::Result<Args> {
+/// Parses the command-line arguments, without the program name.
+///
+/// The listen address must be a loopback address because the control surface is unauthenticated ([mock intent][mock-intent], "Mock-only control").
+///
+/// [mock-intent]: ../INTENT.md#mock-only-control
+fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Args> {
     let mut listen = None;
     let mut path_prefix = None;
     let mut admin_token = None;
     let mut state_dir = None;
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         let mut value = |flag: &str| args.next().ok_or_else(|| anyhow::anyhow!("missing value for {flag}"));
         match arg.as_str() {
@@ -46,8 +51,12 @@ fn parse_args() -> anyhow::Result<Args> {
     if !path_prefix.starts_with('/') || path_prefix.ends_with('/') {
         anyhow::bail!("--path-prefix must start with `/` and not end with `/`");
     }
+    let listen: SocketAddr = listen.context("missing --listen")?;
+    if !listen.ip().is_loopback() {
+        anyhow::bail!("--listen must be a loopback address because the mock control surface is unauthenticated");
+    }
     Ok(Args {
-        listen: listen.context("missing --listen")?,
+        listen,
         path_prefix,
         admin_token: admin_token.context("missing --admin-token")?,
         state_dir: state_dir.context("missing --state-dir")?,
@@ -106,7 +115,7 @@ fn write_ready_file(state_dir: &Path, contents: &str) -> anyhow::Result<()> {
 )]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = parse_args()?;
+    let args = parse_args(std::env::args().skip(1))?;
     std::fs::create_dir_all(&args.state_dir).context("create state dir")?;
 
     let (tls_config, ca_pem) = tls_config()?;
@@ -152,4 +161,45 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("agent-identity-mock listening on {base_url}");
     let acceptor = TlsAcceptor::from(Arc::new(tls_config));
     serve(listener, acceptor, Dispatcher::new(app)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::parse_args;
+
+    fn args_with_listen(listen: &str) -> Vec<String> {
+        [
+            "--listen",
+            listen,
+            "--path-prefix",
+            "/mock",
+            "--admin-token",
+            "secret",
+            "--state-dir",
+            "state",
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    }
+
+    #[rstest]
+    #[case::ipv4("127.0.0.1:0")]
+    #[case::ipv6("[::1]:0")]
+    fn loopback_listen_address_is_accepted(#[case] listen: &str) {
+        let args = parse_args(args_with_listen(listen)).expect("loopback address is accepted");
+        assert_eq!(args.listen.to_string(), listen);
+    }
+
+    #[rstest]
+    #[case::ipv4_unspecified("0.0.0.0:0")]
+    #[case::ipv6_unspecified("[::]:0")]
+    #[case::ipv4_routable("192.0.2.1:0")]
+    fn non_loopback_listen_address_is_refused(#[case] listen: &str) {
+        let error = parse_args(args_with_listen(listen))
+            .err()
+            .expect("non-loopback address is refused");
+        assert!(error.to_string().contains("loopback"), "{error}");
+    }
 }

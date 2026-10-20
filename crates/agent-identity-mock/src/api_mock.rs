@@ -47,13 +47,13 @@ async fn requests(AxumState(app): AxumState<Arc<App>>, Query(query): Query<Reque
         || state.requests.enroll_by_token.values().sum(),
         |id| state.requests.enroll_by_token.get(&id).copied().unwrap_or(0),
     );
-    let enroll_device_revoked = query.token_id.map_or_else(
+    let enroll_identity_revoked = query.token_id.map_or_else(
         || state.requests.enroll_revoked_by_token.values().sum(),
         |id| state.requests.enroll_revoked_by_token.get(&id).copied().unwrap_or(0),
     );
     Json(json!({
         "enroll": enroll,
-        "enroll_device_revoked": enroll_device_revoked,
+        "enroll_identity_revoked": enroll_identity_revoked,
         "enroll_total": state.requests.enroll_total,
         "enroll_retry_503": state.requests.enroll_retry_503,
         "renew": state.requests.renew,
@@ -81,14 +81,14 @@ async fn redirect_target(AxumState(app): AxumState<Arc<App>>) -> StatusCode {
 
 #[derive(Deserialize)]
 struct EventQuery {
-    device_id: Uuid,
+    identity_id: Uuid,
 }
 
 async fn events(AxumState(app): AxumState<Arc<App>>, Query(query): Query<EventQuery>) -> Json<Value> {
     let state = app.state.lock().await;
     Json(json!({
         "events": state.events.iter()
-            .filter(|event| event.device_id == query.device_id)
+            .filter(|event| event.identity_id == query.identity_id)
             .map(|event| &event.body)
             .collect::<Vec<_>>(),
     }))
@@ -150,15 +150,15 @@ async fn retry_barrier(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Resp
 
 #[derive(Deserialize)]
 struct ReconnectRequest {
-    device_id: Uuid,
+    identity_id: Uuid,
 }
 
 async fn reconnect(AxumState(app): AxumState<Arc<App>>, Json(request): Json<ReconnectRequest>) -> Response {
     let mut state = app.state.lock().await;
-    if !state.devices.contains_key(&request.device_id) {
-        return control_error(&ApiError::not_found("unknown device"));
+    if !state.identities.contains_key(&request.identity_id) {
+        return control_error(&ApiError::not_found("unknown identity"));
     }
-    state.push_to_device(request.device_id, &PushKind::Reconnect("mock"));
+    state.push_to_identity(request.identity_id, &PushKind::Reconnect("mock"));
     StatusCode::ACCEPTED.into_response()
 }
 
@@ -178,22 +178,22 @@ async fn update_config(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Resp
     }
     let mut state = app.state.lock().await;
     let updated = state.merge_config_fields(fields);
-    Json(json!({ "updatedDevices": updated })).into_response()
+    Json(json!({ "updatedIdentities": updated })).into_response()
 }
 
 #[derive(Deserialize)]
 struct StaleConfigRequest {
-    device_id: Uuid,
+    identity_id: Uuid,
     revision: u64,
 }
 
 async fn stale_config(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     let request: StaleConfigRequest = match serde_json::from_slice(&body) {
         Ok(request) => request,
-        Err(_) => return control_error(&ApiError::invalid_request("body requires device_id and revision")),
+        Err(_) => return control_error(&ApiError::invalid_request("body requires identity_id and revision")),
     };
     let mut state = app.state.lock().await;
-    match state.replay_stale_config(request.device_id, request.revision) {
+    match state.replay_stale_config(request.identity_id, request.revision) {
         Ok(sent) => Json(json!({ "sent": sent })).into_response(),
         Err(error) => control_error(&error),
     }
@@ -287,8 +287,8 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                             "token_invalid" => "token_invalid",
                             "token_exhausted" => "token_exhausted",
                             "token_expired" => "token_expired",
-                            "device_revoked" => "device_revoked",
-                            "device_unknown" => "device_unknown",
+                            "identity_revoked" => "identity_revoked",
+                            "identity_unknown" => "identity_unknown",
                             "certificate_expired" => "certificate_expired",
                             "signature_invalid" => "signature_invalid",
                             "clock_skew" => "clock_skew",
@@ -368,7 +368,7 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     Json(faults_view(&state.faults)).into_response()
 }
 
-/// `POST reset` clears tokens, devices, nonces, faults, rotation and the clock offset.
+/// `POST reset` clears tokens, identities, nonces, faults, rotation and the clock offset.
 /// It creates a fresh root but keeps `authority_id`, the TLS certificate and the admin token.
 async fn reset(AxumState(app): AxumState<Arc<App>>) -> Response {
     let mut state = app.state.lock().await;

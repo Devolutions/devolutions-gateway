@@ -1,4 +1,7 @@
 //! Run the shared vectors (`docs/agent-identity/test-vectors.json`) through the oracle's public API.
+//! The vectors and their pass rule are defined by the [shared intent][intent] ("Conformance").
+//!
+//! [intent]: ../../../docs/agent-identity/INTENT.agent-identity.md#conformance
 
 use std::collections::{HashMap, HashSet};
 
@@ -33,11 +36,11 @@ struct SignatureSection {
 
 #[derive(Deserialize)]
 struct RegisteredVector {
-    device_id: Uuid,
+    identity_id: Uuid,
     keyid: String,
     public_key_sec1: String,
     certificate_status: String,
-    device_revoked: bool,
+    identity_revoked: bool,
     not_before: i64,
     not_after: i64,
 }
@@ -122,8 +125,8 @@ fn registry(registered: &[RegisteredVector]) -> HashMap<String, RegisteredCert> 
         .map(|r| {
             let key_bytes = STANDARD.decode(&r.public_key_sec1).expect("valid public_key_sec1");
             let cert = RegisteredCert {
-                device_id: r.device_id,
-                revoked: r.device_revoked,
+                identity_id: r.identity_id,
+                revoked: r.identity_revoked,
                 status: status_of(&r.certificate_status),
                 not_before: r.not_before,
                 not_after: r.not_after,

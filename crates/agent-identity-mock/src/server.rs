@@ -80,7 +80,11 @@ impl Dispatcher {
         }
     }
 
-    async fn handle(self, request: http::Request<Incoming>) -> Result<OutResponse, ConnectionAborted> {
+    async fn handle<B>(self, request: http::Request<B>) -> Result<OutResponse, ConnectionAborted>
+    where
+        B: http_body::Body<Data = Bytes> + Send + 'static,
+        B::Error: Into<BoxError> + Send + 'static,
+    {
         if request
             .headers()
             .get(http::header::CONTENT_TYPE)
@@ -197,5 +201,116 @@ pub async fn serve(listener: TcpListener, acceptor: TlsAcceptor, dispatcher: Dis
                 tracing::debug!(%error, "Connection ended with an error");
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use axum::body::Bytes;
+    use axum::http;
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use http_body_util::{BodyExt as _, Full};
+    use rstest::rstest;
+    use serde_json::Value;
+    use tokio::sync::{Mutex, watch};
+    use uuid::Uuid;
+
+    use super::Dispatcher;
+    use crate::app::App;
+    use crate::clock::MockClock;
+    use crate::state::State;
+
+    /// CONTRACT.md §5.4: servers accept agent-facing request bodies up to 64 KiB.
+    const BODY_LIMIT: usize = 64 * 1024;
+
+    fn app() -> anyhow::Result<Arc<App>> {
+        let clock = MockClock::new();
+        let state = State::new(clock.now())?;
+        Ok(Arc::new(App {
+            authority_id: Uuid::new_v4(),
+            base_url: "https://127.0.0.1:1/mock".to_owned(),
+            prefix: "/mock".to_owned(),
+            admin_token: "admin".to_owned(),
+            unprivileged_token: "admin-unprivileged".to_owned(),
+            clock,
+            handshake_gate: watch::channel(true).0,
+            state: Mutex::new(state),
+        }))
+    }
+
+    /// Posts to an agent-facing endpoint and returns the status and the §5.4 error code.
+    async fn post(app: &Arc<App>, endpoint: &str, authorization: &[&str], body: Vec<u8>) -> (u16, String) {
+        let mut request = http::Request::post(format!("/mock/api/agent-identity/v1/{endpoint}"));
+        for value in authorization {
+            request = request.header(http::header::AUTHORIZATION, *value);
+        }
+        let request = request.body(Full::new(Bytes::from(body))).expect("valid request");
+        let response = Dispatcher::new(Arc::clone(app))
+            .handle(request)
+            .await
+            .expect("the mock answers");
+        let status = response.status().as_u16();
+        let body = response.into_body().collect().await.expect("readable body").to_bytes();
+        let body: Value = serde_json::from_slice(&body).expect("JSON error body");
+        (status, body["error"].as_str().expect("error code").to_owned())
+    }
+
+    #[rstest]
+    #[case::enroll("enroll")]
+    #[case::renew("renew")]
+    #[case::confirm("confirm")]
+    #[case::check_in("check-in")]
+    #[tokio::test]
+    async fn oversized_body_is_413_before_authentication(#[case] endpoint: &str) -> anyhow::Result<()> {
+        let response = post(&app()?, endpoint, &[], vec![b' '; BODY_LIMIT + 1]).await;
+        assert_eq!(response, (413, "invalid_request".to_owned()));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn body_at_the_limit_reaches_authentication() -> anyhow::Result<()> {
+        let response = post(&app()?, "enroll", &[], vec![b' '; BODY_LIMIT]).await;
+        assert_eq!(response, (401, "token_invalid".to_owned()));
+        Ok(())
+    }
+
+    #[rstest]
+    #[case::enroll("enroll", "token_invalid")]
+    #[case::renew("renew", "signature_invalid")]
+    #[case::confirm("confirm", "signature_invalid")]
+    #[case::check_in("check-in", "signature_invalid")]
+    #[tokio::test]
+    async fn authentication_error_wins_over_invalid_body(
+        #[case] endpoint: &str,
+        #[case] code: &str,
+    ) -> anyhow::Result<()> {
+        let response = post(&app()?, endpoint, &[], b"not json".to_vec()).await;
+        assert_eq!(response, (401, code.to_owned()));
+        Ok(())
+    }
+
+    #[rstest]
+    #[case::single_header(1, (400, "invalid_request"))]
+    #[case::repeated_header(2, (401, "token_invalid"))]
+    #[tokio::test]
+    async fn enrollment_token_is_checked_before_the_body(
+        #[case] header_count: usize,
+        #[case] expected: (u16, &str),
+    ) -> anyhow::Result<()> {
+        let app = app()?;
+        let now = app.now();
+        let (_, secret) = app
+            .state
+            .lock()
+            .await
+            .create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let authorization = format!("Bearer dvaet1.e30.{}", URL_SAFE_NO_PAD.encode(secret));
+        let headers = vec![authorization.as_str(); header_count];
+        let response = post(&app, "enroll", &headers, b"not json".to_vec()).await;
+        assert_eq!(response, (expected.0, expected.1.to_owned()));
+        Ok(())
     }
 }
