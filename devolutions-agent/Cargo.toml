@@ -13,6 +13,7 @@ workspace = true
 
 [dependencies]
 agent-identity = { path = "../crates/agent-identity" }
+agent-sysevent-codes = { path = "../crates/agent-sysevent-codes" }
 device-key = { path = "../crates/device-key" }
 agent-tunnel-proto = { path = "../crates/agent-tunnel-proto" }
 anyhow = "1"
@@ -44,6 +45,7 @@ rustls-pki-types = "1"
 sha2 = "0.10"
 serde_json = "1"
 serde = { version = "1", features = ["derive"] }
+sysevent = { path = "../crates/sysevent" }
 tap = "1.0"
 tempfile = "3"
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
@@ -85,6 +87,7 @@ time = { version = "0.3", features = ["local-offset", "macros", "parsing"] }
 devolutions-pedm = { path = "../crates/devolutions-pedm" }
 notify-debouncer-mini = "0.6"
 now-package-broker = { path = "../crates/now-package-broker" }
+sysevent-winevent = { path = "../crates/sysevent-winevent" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
@@ -107,9 +110,10 @@ features = [
     "Win32_System_Diagnostics_ToolHelp",
 ]
 
-# Used by `psu_agent::process_tree`, see its module documentation.
 [target.'cfg(unix)'.dependencies]
+# Used by `psu_agent::process_tree`, see its module documentation.
 libc = "0.2"
+sysevent-syslog = { path = "../crates/sysevent-syslog" }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3.0"

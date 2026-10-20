@@ -1907,6 +1907,7 @@ name = "devolutions-agent"
 version = "2026.3.3"
 dependencies = [
  "agent-identity",
+ "agent-sysevent-codes",
  "agent-tunnel-proto",
  "anyhow",
  "async-trait",
@@ -1947,6 +1948,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sysevent",
+ "sysevent-syslog",
+ "sysevent-winevent",
  "tap",
  "tempfile",
  "thiserror 2.0.20",

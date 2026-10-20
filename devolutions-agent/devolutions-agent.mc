@@ -85,6 +85,20 @@ Language=German
 Boot-Stacktrace geschrieben. Kontext=%1 Pfad=%2
 .
 
+; 1100-1199 Agent Identity
+
+MessageId=1100
+SymbolicName=IDENTITY_KEY_BACKEND_UNAVAILABLE
+Language=English
+Agent Identity key backend unavailable. Context=%1 Backend=%2 Error=%3
+.
+Language=French
+Fournisseur de clés d’Agent Identity indisponible. Contexte=%1 Fournisseur=%2 Erreur=%3
+.
+Language=German
+Schlüssel-Backend von Agent Identity nicht verfügbar. Kontext=%1 Backend=%2 Fehler=%3
+.
+
 ; 6000-6099 User Sessions
 
 MessageId=6000

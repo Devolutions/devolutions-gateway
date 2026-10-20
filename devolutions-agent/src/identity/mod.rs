@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
@@ -16,22 +17,27 @@ use agent_identity::{csr, metadata};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use device_key::KeyBackend;
+use device_key::{BackendUnavailable, KeyBackend};
 use devolutions_agent_shared::get_data_dir;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use rand::Rng as _;
+use sysevent::SystemEventSink;
 use tokio::time::sleep;
 
 use self::config::{IdentityDebugConf, IdentityKeyBackend};
-use crate::config::ConfHandle;
+use crate::config::{Conf, ConfHandle};
 
 pub struct IdentityTask {
     conf_handle: ConfHandle,
+    system_events: Arc<dyn SystemEventSink>,
 }
 
 impl IdentityTask {
     pub fn new(conf_handle: ConfHandle) -> Self {
-        Self { conf_handle }
+        Self {
+            conf_handle,
+            system_events: Arc::clone(&crate::SYSTEM_LOGGER),
+        }
     }
 }
 
@@ -40,68 +46,99 @@ impl Task for IdentityTask {
     type Output = anyhow::Result<()>;
     const NAME: &'static str = "identity";
 
-    async fn run(self, mut shutdown: ShutdownSignal) -> anyhow::Result<()> {
-        let conf = self.conf_handle.get_conf();
-        let settings = conf.debug.identity.clone().unwrap_or_default();
-        let data_dir = get_data_dir();
-        let poll_interval = Duration::from_millis(settings.pending_poll_interval_ms.unwrap_or(5_000).max(1));
-        let mut last_store_error = None;
-        let mut last_trust_error = None;
+    async fn run(self, shutdown: ShutdownSignal) -> anyhow::Result<()> {
+        run_identity(
+            &self.conf_handle.get_conf(),
+            get_data_dir(),
+            self.system_events.as_ref(),
+            shutdown,
+        )
+        .await
+    }
+}
 
-        loop {
-            let backend = match conf.identity.key_backend {
-                IdentityKeyBackend::File => Store::file_backend(&data_dir),
-                IdentityKeyBackend::WindowsSoftwareProvider => KeyBackend::WindowsSoftwareProvider,
-            };
-            let store = Store::new(
-                data_dir.clone(),
-                backend,
-                settings
-                    .key_name_prefix
-                    .clone()
-                    .unwrap_or_else(|| IDENTITY_KEY_PREFIX.to_owned()),
-                settings.acl_grant_current_user.unwrap_or_default(),
-            )
-            .context("initialize Agent Identity store")
-            .and_then(|store| {
-                store.reconcile().context("reconcile Agent Identity store")?;
-                Ok(store)
-            });
-            let store = match store {
-                Ok(store) => store,
-                Err(error) => {
-                    if log_is_due(&mut last_store_error) {
-                        error!(
-                            error = format!("{error:#}"),
-                            directory = %data_dir.join("identity"),
-                            "Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account"
-                        );
-                    }
-                    if wait_or_stop(&mut shutdown, poll_interval).await {
-                        return Ok(());
-                    }
-                    continue;
-                }
-            };
-            let client = match Client::new(conf.proxy.to_proxy_config(), settings.extra_trusted_root.as_deref()) {
-                Ok(client) => client,
-                Err(error) => {
-                    if log_is_due(&mut last_trust_error) {
-                        warn!(
-                            error = format!("{error:#}"),
-                            "Cannot initialize Agent Identity HTTPS trust; retrying"
-                        );
-                    }
-                    if wait_or_stop(&mut shutdown, poll_interval).await {
-                        return Ok(());
-                    }
-                    continue;
-                }
-            };
+async fn run_identity(
+    conf: &Conf,
+    data_dir: Utf8PathBuf,
+    system_events: &dyn SystemEventSink,
+    mut shutdown: ShutdownSignal,
+) -> anyhow::Result<()> {
+    let settings = conf.debug.identity.clone().unwrap_or_default();
+    let poll_interval = Duration::from_millis(settings.pending_poll_interval_ms.unwrap_or(5_000).max(1));
+    let mut last_store_error = None;
+    let mut last_trust_error = None;
 
-            // A per-authority runner can share this reconciled store and client with pending enrollment.
-            return run_pending_enrollments(&store, &client, &data_dir, &settings, poll_interval, &mut shutdown).await;
-        }
+    loop {
+        let backend = match conf.identity.key_backend {
+            IdentityKeyBackend::File => Store::file_backend(&data_dir),
+            IdentityKeyBackend::WindowsSoftwareProvider => KeyBackend::WindowsSoftwareProvider,
+        };
+        let store = Store::new(
+            data_dir.clone(),
+            backend,
+            settings
+                .key_name_prefix
+                .clone()
+                .unwrap_or_else(|| IDENTITY_KEY_PREFIX.to_owned()),
+            settings.acl_grant_current_user.unwrap_or_default(),
+        )
+        .context("initialize Agent Identity store")
+        .and_then(|store| {
+            store.reconcile().context("reconcile Agent Identity store")?;
+            Ok(store)
+        });
+        let store = match store {
+            Ok(store) => store,
+            Err(error) => {
+                if let Some(unavailable) = error
+                    .chain()
+                    .find_map(|cause| cause.downcast_ref::<BackendUnavailable>())
+                {
+                    // `crates/agent-identity/INTENT.md` ("Identities"): never retry or fall back to another backend.
+                    error!(
+                        backend = unavailable.backend,
+                        error = format!("{error:#}"),
+                        "Agent Identity key backend is unavailable; Agent Identity is stopped"
+                    );
+                    if let Err(emit_error) = system_events.emit(agent_sysevent_codes::identity_key_backend_unavailable(
+                        unavailable.backend,
+                        &error,
+                    )) {
+                        warn!(error = %emit_error, "Cannot report the Agent Identity key backend failure to the system log");
+                    }
+                    return Ok(());
+                }
+                if log_is_due(&mut last_store_error) {
+                    error!(
+                        error = format!("{error:#}"),
+                        directory = %data_dir.join("identity"),
+                        "Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account"
+                    );
+                }
+                if wait_or_stop(&mut shutdown, poll_interval).await {
+                    return Ok(());
+                }
+                continue;
+            }
+        };
+        let client = match Client::new(conf.proxy.to_proxy_config(), settings.extra_trusted_root.as_deref()) {
+            Ok(client) => client,
+            Err(error) => {
+                if log_is_due(&mut last_trust_error) {
+                    warn!(
+                        error = format!("{error:#}"),
+                        "Cannot initialize Agent Identity HTTPS trust; retrying"
+                    );
+                }
+                if wait_or_stop(&mut shutdown, poll_interval).await {
+                    return Ok(());
+                }
+                continue;
+            }
+        };
+
+        // A per-authority runner can share this reconciled store and client with pending enrollment.
+        return run_pending_enrollments(&store, &client, &data_dir, &settings, poll_interval, &mut shutdown).await;
     }
 }
 
@@ -316,6 +353,61 @@ async fn enroll_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(windows))]
+    #[tokio::test]
+    async fn unavailable_key_backend_stops_identity_after_one_system_event() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Identities"): an unavailable backend is reported once and stops the
+        // identity feature before it touches any state; the Windows software provider never exists on this platform.
+        let data_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("identity-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&data_dir)?;
+        let conf = Conf::from_conf_file(&serde_json::from_value(serde_json::json!({
+            "Identity": { "KeyBackend": "WindowsSoftwareProvider" }
+        }))?)?;
+        let events = RecordingSink::default();
+        let (_shutdown_handle, shutdown) = devolutions_gateway_task::ShutdownHandle::new();
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_identity(&conf, data_dir.clone(), &events, shutdown),
+        )
+        .await;
+        let leftovers = std::fs::read_dir(&data_dir)?.count();
+        std::fs::remove_dir_all(&data_dir)?;
+
+        outcome.context("identity task kept running")??;
+        let entries = events.0.lock();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].event_code, Some(1100));
+        assert!(
+            entries[0]
+                .fields
+                .contains(&("backend".to_owned(), "WindowsSoftwareProvider".to_owned())),
+            "{:?}",
+            entries[0].fields
+        );
+        assert_eq!(leftovers, 0);
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    #[derive(Default)]
+    struct RecordingSink(parking_lot::Mutex<Vec<sysevent::Entry>>);
+
+    #[cfg(not(windows))]
+    impl SystemEventSink for RecordingSink {
+        fn emit(&self, entry: sysevent::Entry) -> Result<(), sysevent::SysEventError> {
+            self.0.lock().push(entry);
+            Ok(())
+        }
+
+        fn flush(&self) -> Result<(), sysevent::SysEventError> {
+            Ok(())
+        }
+    }
 
     #[test]
     fn retry_after_is_capped_by_maximum_backoff() {
