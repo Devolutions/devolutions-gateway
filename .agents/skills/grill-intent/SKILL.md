@@ -48,6 +48,7 @@ Alternatives the human may not know are information, not options: mention them i
 When the human asks for a recommendation, show what their earlier answers already settle and assemble those words into a candidate sentence for them to accept or rewrite; when they delegate outright, write it and record it as agent wording the human adopted.
 When an answer arrives, verify it against the code and the other answers; if it is false today, contradicts another commitment, or has a consequence the human may not have seen, say so with the evidence and ask them to confirm or rewrite before recording it.
 Record the human's sentence; tidy it to the conventions only, keeping their words where they are exact, and do not re-present tidied sentences each round, since the final list is where the human confirms them.
+Keep a ledger of alternatives: ones the human voiced, options they hesitated between, and any you hold strongly, each with its reason, so that the rejected ones reach the intent file as rationale and the unsettled ones can become an experiment.
 
 ## Grill like a reviewer
 
@@ -67,4 +68,6 @@ Record provenance throughout at the four levels `intent-files/references/handoff
 ## Finish
 
 When the frontier is empty: list each commitment in the human's words with its provenance, propose placement, and ask for confirmation.
+A question no fact settles and the human cannot settle on paper is offered as a `variants` experiment, with candidates from the ledger, criteria, and budget; they may run it, decide now, or say "no commitment here".
+Record a question sent to a run as pending; when its brief returns, the human adopts, rewrites, or rejects a candidate sentence before anything is recorded in the draft.
 Then draft, write the handoff note from `intent-files/references/handoff.md`, and hand the assembled file back for the human to confirm ordering, placement, and tidying.

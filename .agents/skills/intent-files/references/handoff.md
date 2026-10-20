@@ -21,6 +21,10 @@ When the drafts go up in a pull request, its content becomes a PR comment, not p
 ## Placement
 
 <Which file each commitment landed in, and which directories symlink to a shared part.>
+
+## Pending experiments
+
+<Questions sent to a `variants` run, each with its candidates; when a brief returns, only a sentence the human adopted or rewrote is recorded, with its provenance level.>
 ```
 
 Levels:
