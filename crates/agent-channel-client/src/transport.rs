@@ -9,15 +9,22 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use anyhow::Context as _;
-use http::{Request, Response, Uri};
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+use http::{HeaderValue, Request, Response, Uri};
 use http_client_proxy::ProxyConfig;
 use hyper::body::Incoming;
 use hyper::client::conn::http2;
 use hyper_util::client::legacy::connect::HttpConnector;
+use hyper_util::client::legacy::connect::proxy::Tunnel;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use percent_encoding::percent_decode_str;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{AlertDescription, RootCertStore};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
+use tokio_rustls::client::TlsStream;
 use tonic::body::BoxBody;
 use tower::Service;
 use url::{Host, Url};
@@ -32,45 +39,58 @@ const ALPN_H2: &[u8] = b"h2";
 const KEEPALIVE_ACK_TIMEOUT: Duration = Duration::from_secs(20);
 
 pub(crate) struct Transport {
+    /// Verifies authorities and offers HTTP/2.
     tls: Arc<rustls::ClientConfig>,
+    /// Verifies HTTPS proxies.
+    proxy_tls: Arc<rustls::ClientConfig>,
     proxy: ProxyConfig,
 }
+
+/// A connection the authority's TLS session runs over: direct, or tunnelled through a proxy.
+trait Io: AsyncRead + AsyncWrite + Send + Unpin {}
+
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> Io for T {}
+
+type BoxError = Box<dyn Error + Send + Sync>;
 
 impl Transport {
     pub(crate) fn new(proxy: ProxyConfig, extra_trusted_roots: &[CertificateDer<'_>]) -> anyhow::Result<Self> {
         let mut roots = RootCertStore::empty();
-        // UNTESTED: authorities are trusted through the OS trust store.
-        // The tests trust only their own root, since adding one to the OS store would change the machine.
+        // UNTESTED: authorities and HTTPS proxies are trusted through the OS trust store.
+        // The tests trust only their own roots, since adding one to the OS store would change the machine.
         // When changing this, check a connection to an authority whose certificate chains to an OS root.
         roots.add_parsable_certificates(rustls_native_certs::load_native_certs().certs);
         for root in extra_trusted_roots {
             roots.add(root.clone().into_owned()).context("add extra trusted root")?;
         }
-        let mut tls = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
-            .with_safe_default_protocol_versions()
-            .context("configure TLS versions")?
-            .with_root_certificates(roots)
-            .with_no_client_auth();
-        tls.alpn_protocols = vec![ALPN_H2.to_vec()];
+        let roots = Arc::new(roots);
+        let config = |alpn_protocols: Vec<Vec<u8>>| -> anyhow::Result<Arc<rustls::ClientConfig>> {
+            let mut config =
+                rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                    .with_safe_default_protocol_versions()
+                    .context("configure TLS versions")?
+                    .with_root_certificates(Arc::clone(&roots))
+                    .with_no_client_auth();
+            config.alpn_protocols = alpn_protocols;
+            Ok(Arc::new(config))
+        };
         Ok(Self {
-            tls: Arc::new(tls),
+            tls: config(vec![ALPN_H2.to_vec()])?,
+            proxy_tls: config(Vec::new())?,
             proxy,
         })
     }
 
-    /// Connects to the authority of `url` and completes the HTTP/2 handshake.
+    /// Connects to the authority of `url`, through the proxy the agent's proxy settings select for it, and completes
+    /// the HTTP/2 handshake.
     pub(crate) async fn connect(&self, url: &Url, keepalive_interval: Duration) -> Result<Http2Service, Closure> {
-        let _ = &self.proxy;
         let (server_name, origin) = endpoint(url).map_err(|error| Closure::outage(format!("{error:#}")))?;
-        let mut connector = HttpConnector::new();
-        connector.enforce_http(false);
-        connector.set_nodelay(true);
-        poll_fn(|cx| connector.poll_ready(cx))
-            .await
-            .map_err(outage("resolve"))?;
-        let tcp = connector.call(origin).await.map_err(outage("connect"))?.into_inner();
+        let io: Box<dyn Io> = match http_client_proxy::proxy_for_url(url, &self.proxy) {
+            Some(proxy) => self.tunnel(&proxy, origin).await?,
+            None => Box::new(tcp(origin).await.map_err(outage("connect"))?),
+        };
         let tls = TlsConnector::from(Arc::clone(&self.tls))
-            .connect(server_name, tcp)
+            .connect(server_name, io)
             .await
             .map_err(|error| {
                 // A server that supports no protocol the client offers refuses ALPN with this alert (RFC 7301 §3.2).
@@ -103,10 +123,94 @@ impl Transport {
         });
         Ok(Http2Service(send_request))
     }
+
+    /// Opens an HTTP CONNECT tunnel to `target` through `proxy`, with the proxy credentials of its user info.
+    async fn tunnel(&self, proxy: &Url, target: Uri) -> Result<Box<dyn Io>, Closure> {
+        let proxy_endpoint = match (proxy.host_str(), proxy.port_or_known_default()) {
+            (Some(host), Some(port)) => format!("{}://{host}:{port}", proxy.scheme())
+                .parse::<Uri>()
+                .map_err(outage("proxy URL"))?,
+            _ => return Err(Closure::outage("proxy URL without host")),
+        };
+        let authorization = basic_authorization(proxy);
+        match proxy.scheme() {
+            "http" => {
+                let tunnel = open_tunnel(http_connector(), proxy_endpoint, authorization, target).await?;
+                Ok(Box::new(tunnel.into_inner()))
+            }
+            "https" => {
+                let tls = Arc::clone(&self.proxy_tls);
+                let connector = tower::service_fn(move |proxy: Uri| tls_to_proxy(Arc::clone(&tls), proxy));
+                let tunnel = open_tunnel(connector, proxy_endpoint, authorization, target).await?;
+                Ok(Box::new(tunnel.into_inner()))
+            }
+            scheme => Err(Closure::outage(format!("unsupported proxy scheme {scheme}"))),
+        }
+    }
 }
 
-fn outage<E: Error + 'static>(step: &'static str) -> impl FnOnce(E) -> Closure {
-    move |error| Closure::outage(error_chain(step, &error))
+fn http_connector() -> HttpConnector {
+    let mut connector = HttpConnector::new();
+    connector.enforce_http(false);
+    connector.set_nodelay(true);
+    connector
+}
+
+async fn tcp(endpoint: Uri) -> Result<TcpStream, BoxError> {
+    let mut connector = http_connector();
+    poll_fn(|cx| connector.poll_ready(cx)).await?;
+    Ok(connector.call(endpoint).await?.into_inner())
+}
+
+async fn tls_to_proxy(tls: Arc<rustls::ClientConfig>, proxy: Uri) -> Result<TokioIo<TlsStream<TcpStream>>, BoxError> {
+    let host = proxy.host().ok_or("proxy URL without host")?;
+    let server_name = ServerName::try_from(host.trim_start_matches('[').trim_end_matches(']').to_owned())?;
+    let tcp = tcp(proxy).await?;
+    Ok(TokioIo::new(TlsConnector::from(tls).connect(server_name, tcp).await?))
+}
+
+async fn open_tunnel<C>(
+    connector: C,
+    proxy: Uri,
+    authorization: Option<HeaderValue>,
+    target: Uri,
+) -> Result<C::Response, Closure>
+where
+    C: Service<Uri>,
+    C::Future: Send + 'static,
+    C::Response: hyper::rt::Read + hyper::rt::Write + Unpin + Send + 'static,
+    C::Error: Into<BoxError>,
+{
+    let mut tunnel = Tunnel::new(proxy, connector);
+    if let Some(authorization) = authorization {
+        tunnel = tunnel.with_auth(authorization);
+    }
+    poll_fn(|cx| tunnel.poll_ready(cx))
+        .await
+        .map_err(outage("connect to the proxy"))?;
+    tunnel.call(target).await.map_err(outage("proxy tunnel"))
+}
+
+/// Returns the `Proxy-Authorization` value for the percent-decoded user info of `proxy`, as reqwest sends it for the
+/// agent's other requests.
+fn basic_authorization(proxy: &Url) -> Option<HeaderValue> {
+    if proxy.username().is_empty() && proxy.password().is_none() {
+        return None;
+    }
+    let decode = |part: &str| percent_decode_str(part).decode_utf8_lossy().into_owned();
+    let credentials = format!(
+        "{}:{}",
+        decode(proxy.username()),
+        decode(proxy.password().unwrap_or_default())
+    );
+    HeaderValue::try_from(format!("Basic {}", STANDARD.encode(credentials))).ok()
+}
+
+fn outage<E: Into<BoxError>>(step: &'static str) -> impl FnOnce(E) -> Closure {
+    move |error| {
+        let error: BoxError = error.into();
+        Closure::outage(error_chain(step, &*error))
+    }
 }
 
 /// Returns the TLS server name and the `https` origin of `url`.
@@ -129,8 +233,8 @@ pub(crate) struct Http2Service(http2::SendRequest<BoxBody>);
 
 impl Service<Request<BoxBody>> for Http2Service {
     type Response = Response<Incoming>;
-    type Error = Box<dyn Error + Send + Sync>;
-    type Future = Pin<Box<dyn Future<Output = Result<Response<Incoming>, Self::Error>> + Send>>;
+    type Error = BoxError;
+    type Future = Pin<Box<dyn Future<Output = Result<Response<Incoming>, BoxError>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.0.poll_ready(cx).map_err(Into::into)

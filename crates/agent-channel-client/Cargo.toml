@@ -15,9 +15,11 @@ agent-identity-httpsig = { path = "../agent-identity-httpsig" }
 device-key = { path = "../device-key" }
 http-client-proxy = { path = "../http-client-proxy" }
 anyhow = "1"
+base64 = "0.22"
 http = "1"
 hyper = { version = "1", features = ["client", "http2"] }
 hyper-util = { version = "0.1", features = ["client-legacy", "client-proxy", "http2", "tokio"] }
+percent-encoding = "2"
 rand = "0.10"
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
@@ -26,12 +28,11 @@ tokio = { version = "1.52", features = ["macros", "rt", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = "0.1"
 tonic = { version = "0.12", default-features = false, features = ["codegen", "prost"] }
-tower = "0.5"
+tower = { version = "0.5", features = ["util"] }
 url = "2.5"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-base64 = "0.22"
 hyper = { version = "1", features = ["http1", "http2", "server"] }
 hyper-util = { version = "0.1", features = ["server", "service", "tokio"] }
 p256 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }

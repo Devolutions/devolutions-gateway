@@ -99,6 +99,7 @@ dependencies = [
  "hyper 1.10.1",
  "hyper-util",
  "p256 0.14.0-rc.14",
+ "percent-encoding",
  "rand 0.10.2",
  "rcgen",
  "rstest",

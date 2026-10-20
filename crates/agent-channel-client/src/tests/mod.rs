@@ -1,4 +1,5 @@
 mod authority;
+mod proxy;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -18,6 +19,7 @@ use time::format_description::well_known::Rfc3339;
 use tonic::{Code, Status};
 
 use self::authority::{Mode, Pki, TestAuthority, WAIT, vectors};
+use self::proxy::TestProxy;
 use super::*;
 
 const CHANNEL_PROOF_DOMAIN: &[u8] = b"devolutions-agent-identity/v1/channel-proof";
@@ -725,5 +727,105 @@ async fn opens_a_new_stream_while_the_current_one_stays_open() -> anyhow::Result
         Some(Ok(None) | Err(_))
     ));
     assert!(next_stream.receive_within(Duration::from_millis(300)).await.is_none());
+    Ok(())
+}
+
+fn manual_proxy(proxy: &str, exclude: &[&str]) -> anyhow::Result<ProxyConfig> {
+    Ok(ProxyConfig::Manual(http_client_proxy::ManualProxyConfig {
+        https: Some(Url::parse(proxy)?),
+        exclude: exclude.iter().map(|pattern| (*pattern).to_owned()).collect(),
+        ..Default::default()
+    }))
+}
+
+/// The value of the header `name` in an HTTP/1.1 request head.
+fn header<'head>(head: &'head str, name: &str) -> Option<&'head str> {
+    head.lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(field, _)| field.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.trim())
+}
+
+fn authority_address(authority: &TestAuthority) -> String {
+    format!("127.0.0.1:{}", authority.url.port().expect("authority port"))
+}
+
+#[tokio::test]
+async fn tunnels_through_an_http_proxy_with_the_credentials_of_its_url() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let proxy = TestProxy::start(None).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    // The user info decodes to `agent@corp` and `p:ss`.
+    let proxy_config = manual_proxy(&format!("http://agent%40corp:p%3Ass@{}", proxy.host), &[])?;
+    let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
+    let mut channel = client.connect(identity.target(&authority.url))?;
+    authority.next_opening().await.accept().authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    let heads = proxy.heads();
+    assert_eq!(heads.len(), 1);
+    let head = &heads[0];
+    assert!(
+        head.starts_with(&format!("CONNECT {} HTTP/1.1\r\n", authority_address(&authority))),
+        "{head}"
+    );
+    let credentials = STANDARD.encode("agent@corp:p:ss");
+    assert_eq!(
+        header(head, "proxy-authorization"),
+        Some(format!("Basic {credentials}").as_str())
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn tunnels_through_an_https_proxy() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let proxy_pki = Pki::generate()?;
+    let proxy = TestProxy::start(Some(proxy_pki.server_config(&[])?)).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let proxy_config = manual_proxy(&format!("https://{}", proxy.host), &[])?;
+    let roots = [authority.ca.clone(), proxy_pki.ca.clone()];
+    let mut channel =
+        ChannelClient::new(proxy_config, &roots, Settings::default())?.connect(identity.target(&authority.url))?;
+    authority.next_opening().await.accept().authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    let heads = proxy.heads();
+    assert_eq!(heads.len(), 1);
+    assert!(
+        heads[0].starts_with(&format!("CONNECT {} HTTP/1.1\r\n", authority_address(&authority))),
+        "{}",
+        heads[0]
+    );
+    assert_eq!(header(&heads[0], "proxy-authorization"), None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn connects_directly_to_a_host_the_proxy_excludes() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let proxy = TestProxy::start(None).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let proxy_config = manual_proxy(&format!("http://{}", proxy.host), &["127.0.0.1"])?;
+    let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
+    let mut channel = client.connect(identity.target(&authority.url))?;
+    authority.next_opening().await.accept().authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    assert!(proxy.heads().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_socks_proxy_is_an_outage_without_a_connection() -> anyhow::Result<()> {
+    let authority = TestAuthority::start(Mode::Grpc).await?;
+    let proxy = TestProxy::start(None).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let proxy_config = manual_proxy(&format!("socks5://{}", proxy.host), &[])?;
+    let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
+    let mut channel = client.connect(identity.target(&authority.url))?;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert!(proxy.heads().is_empty());
     Ok(())
 }
