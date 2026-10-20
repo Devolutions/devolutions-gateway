@@ -101,7 +101,7 @@ Not intended:
   The authority evaluates it from the token's friendly-name format, whose placeholders are `{<known metadata key>}` and `{token_name}`, the enrollment token's name.
   `{{` and `}}` escape braces, and a format with an unpaired brace or an unknown placeholder is rejected when the token is created.
   A missing metadata value evaluates to empty.
-  The result is trimmed and truncated to 255 Unicode scalar values, never splitting one, and an empty result falls back to the identity ID.
+  The result is trimmed, truncated to 255 Unicode scalar values without splitting one, and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`); an empty result falls back to the identity ID.
   The default format is `{hostname}`.
 
 ### Certificate renewal

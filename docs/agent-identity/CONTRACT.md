@@ -34,9 +34,11 @@ Unless stated otherwise, implementations must follow these conventions.
 - JSON bodies are UTF-8, `Content-Type: application/json`, snake_case keys; enum values are snake_case strings.
 - Optional fields are omitted when absent (never write `null`, but accept it).
 - Receivers ignore unknown JSON fields unless stated otherwise.
+- A JSON request body that repeats a member name at any depth, such as `csr` twice or one metadata key twice, → `invalid_request`, so that no proxy, log or second parser reads a different value than the authority.
 - Timestamps are RFC 3339 UTC strings ending in `Z` (e.g.: `2026-09-24T12:00:00Z`).
 - IDs are lowercase hyphenated UUIDs.
 - Certificates and CSRs are DER, encoded `base64` in JSON.
+- Senders use the canonical form of every `base64` and `base64url` value, so that each byte string has one encoding; a request body holding another form → `invalid_request`.
 - A certificate thumbprint is `base64url(SHA-256(certificate DER))`.
 
 <a id="agent-identity-enrollment-token"></a>
@@ -56,6 +58,7 @@ Unless stated otherwise, implementations must follow these conventions.
   Fields:
   - `u` (required): absolute `https` product base URL without a query or fragment, e.g. `https://host/dvls`.
 - `secret`: `base64url` of 32 random bytes; opaque to the agent beyond this format.
+  The authority matches the `secret` text exactly, so only the exact token string authenticates.
 - Total length ≤ 4096 bytes.
   The agent rejects malformed tokens locally without contacting the server and treats the failure as permanent.
 
@@ -116,7 +119,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - Chains are leaf-first, any length; the agent never assumes a tier count.
 - The root profile and the number of CA tiers are each authority's choice.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
-- The server ignores CSR subject and extensions; it only takes the public key (P-256 required, else `invalid_request`) and verifies the CSR self-signature (else `invalid_request`).
+- The server ignores CSR subject and extensions; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
 
 ## 5. Agent-facing HTTP API (product-neutral)
