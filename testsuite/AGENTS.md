@@ -14,7 +14,7 @@ When a behaviour cannot be reached from outside, add a small `__debug__` config 
 
 Listen and probe ports on `127.0.0.1`, never on `0.0.0.0` or `[::]`.
 On Windows, a wildcard listener makes the firewall ask for elevation once per executable path, and every worktree builds new paths.
-Only a test whose peer runs outside the host, such as a Docker container, may bind a wildcard address.
+Bind a wildcard address only when the behaviour under test needs it, such as a peer in a Docker container or the `*` listener host, and ignore such a test on Windows.
 
 ## Dependencies are a design signal
 

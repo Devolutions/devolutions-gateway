@@ -1898,6 +1898,7 @@ dependencies = [
  "serde_urlencoded",
  "sha2 0.10.9",
  "smol_str",
+ "socket2 0.5.10",
  "sysevent",
  "sysevent-codes",
  "sysevent-syslog",

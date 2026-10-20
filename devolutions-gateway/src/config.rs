@@ -571,7 +571,7 @@ impl WebAppConf {
 }
 
 fn detect_ipv6_support() -> bool {
-    use std::net::ToSocketAddrs as _;
+    use std::net::{Ipv6Addr, SocketAddr};
 
     use tokio::net::TcpSocket;
 
@@ -579,18 +579,9 @@ fn detect_ipv6_support() -> bool {
     // On Windows, a listener on a wildcard address makes the firewall ask for elevation once per executable path,
     // and every worktree builds new paths.
     // When changing this probe, keep it bind-only.
-    //
-    // UNTESTED: glibc does not resolve the bracketed `[::]`, so on Linux the probe fails and `*` binds IPv4 only.
-    // Probing `Ipv6Addr::UNSPECIFIED` instead would add an IPv6 listener on Linux.
-    ("[::]", 0).to_socket_addrs().into_iter().flatten().any(|addr| {
-        let socket = if addr.is_ipv4() {
-            TcpSocket::new_v4()
-        } else {
-            TcpSocket::new_v6()
-        };
-
-        socket.and_then(|socket| socket.bind(addr)).is_ok()
-    })
+    TcpSocket::new_v6()
+        .and_then(|socket| socket.bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))))
+        .is_ok()
 }
 
 /// Configuration Handle, source of truth for current configuration state
