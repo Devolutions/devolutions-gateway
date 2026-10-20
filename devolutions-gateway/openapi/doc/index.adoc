@@ -3990,9 +3990,9 @@ Params of an AI analysis Task: what was asked, without the API key and the base 
 | maxOutputTokens
 | 
 | X
-|   Integer  
+|   Long  
 | Upper bound of tokens in each AI answer; null when not asked.
-| int32    
+| int64    
 
 | model
 | X
@@ -4047,9 +4047,9 @@ Settings of an AI analysis
 | maxOutputTokens
 | 
 | X
-|   Integer  
+|   Long  
 | Upper bound of tokens in each AI answer.
-| int32    
+| int64    
 
 | model
 | X

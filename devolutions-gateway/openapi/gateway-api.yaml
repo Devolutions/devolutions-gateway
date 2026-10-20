@@ -1613,9 +1613,10 @@ components:
           nullable: true
         maxOutputTokens:
           type: integer
-          format: int32
+          format: int64
           description: Upper bound of tokens in each AI answer; null when not asked.
           nullable: true
+          maximum: 4294967295
           minimum: 0
         model:
           type: string
@@ -1647,9 +1648,10 @@ components:
           minLength: 1
         maxOutputTokens:
           type: integer
-          format: int32
+          format: int64
           description: Upper bound of tokens in each AI answer.
           nullable: true
+          maximum: 4294967295
           minimum: 0
         model:
           type: string

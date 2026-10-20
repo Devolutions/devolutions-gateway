@@ -54,7 +54,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="model">Model identifier, passed to the provider as is. (required).</param>
         /// <param name="provider">provider (required).</param>
         /// <param name="taskId">Task ID, chosen by the caller so it can send the same request again safely. (required).</param>
-        public AiAnalysisRequest(string apiKey = default(string), string baseUrl = default(string), string language = default(string), int? maxOutputTokens = default(int?), string model = default(string), AiProvider provider = default(AiProvider), Guid taskId = default(Guid))
+        public AiAnalysisRequest(string apiKey = default(string), string baseUrl = default(string), string language = default(string), long? maxOutputTokens = default(long?), string model = default(string), AiProvider provider = default(AiProvider), Guid taskId = default(Guid))
         {
             // to ensure "apiKey" is required (not null)
             if (apiKey == null)
@@ -101,7 +101,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <value>Upper bound of tokens in each AI answer.</value>
         [DataMember(Name = "maxOutputTokens", EmitDefaultValue = true)]
-        public int? MaxOutputTokens { get; set; }
+        public long? MaxOutputTokens { get; set; }
 
         /// <summary>
         /// Model identifier, passed to the provider as is.
@@ -125,7 +125,7 @@ namespace Devolutions.Gateway.Client.Model
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("class AiAnalysisRequest {\n");
-            sb.Append("  ApiKey: ").Append(ApiKey).Append("\n");
+            sb.Append("  ApiKey: ").Append("[redacted]").Append("\n");
             sb.Append("  BaseUrl: ").Append(BaseUrl).Append("\n");
             sb.Append("  Language: ").Append(Language).Append("\n");
             sb.Append("  MaxOutputTokens: ").Append(MaxOutputTokens).Append("\n");
@@ -164,8 +164,14 @@ namespace Devolutions.Gateway.Client.Model
                 yield return new ValidationResult("Invalid value for Language, length must be greater than 1.", new [] { "Language" });
             }
 
-            // MaxOutputTokens (int?) minimum
-            if (this.MaxOutputTokens < (int?)0)
+            // MaxOutputTokens (long?) maximum
+            if (this.MaxOutputTokens > (long?)4294967295)
+            {
+                yield return new ValidationResult("Invalid value for MaxOutputTokens, must be a value less than or equal to 4294967295.", new [] { "MaxOutputTokens" });
+            }
+
+            // MaxOutputTokens (long?) minimum
+            if (this.MaxOutputTokens < (long?)0)
             {
                 yield return new ValidationResult("Invalid value for MaxOutputTokens, must be a value greater than or equal to 0.", new [] { "MaxOutputTokens" });
             }
