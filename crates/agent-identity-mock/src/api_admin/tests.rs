@@ -284,6 +284,17 @@ async fn login_without_key_or_secret_is_400_without_body(#[case] credentials: Va
     Ok(())
 }
 
+/// `LoginParameters` sets `additionalProperties: false` in DVLS's public OpenAPI document, so a member it does not
+/// define is a `400` without a body, even beside valid credentials.
+#[tokio::test]
+async fn login_refuses_a_member_outside_login_parameters() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let credentials = json!({ "appKey": APP_KEY, "appSecret": APP_SECRET, "unexpected": true });
+    let response = post_login(&app, credentials).await?;
+    assert_eq!(response, (400, Bytes::new()));
+    Ok(())
+}
+
 #[rstest]
 #[case::app_key("admin", &[Permission::View, Permission::Manage, Permission::Revoke, Permission::RotateRoot])]
 #[case::unprivileged("admin-unprivileged", &[])]

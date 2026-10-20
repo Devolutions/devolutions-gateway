@@ -22,7 +22,7 @@ use tokio::sync::Mutex;
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use super::{ManagementError, Permissions, TOKEN_ID_HEADER, key_permissions};
+use super::{ManagementError, Permissions, TOKEN_ID_HEADER, key_permissions, parse_body};
 use crate::app::App;
 
 /// The application identity that logs in to the management API, and the sessions its logins open.
@@ -83,11 +83,13 @@ impl ManagementLogin {
 
 /// `LoginPublicApi_Login`: opens a session and returns its `tokenId` in a `LoginResult`.
 ///
-/// A missing or empty `appKey` or `appSecret` is `400` without a body, and a wrong key or secret is `401`.
+/// A body that is not a `LoginParameters` with a non-empty `appKey` and `appSecret` is `400` without a body, and a wrong
+/// key or secret is `401`.
 pub(super) async fn login(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
-    // A body that is not JSON holds neither member.
-    let body: Value = serde_json::from_slice(&body).unwrap_or_default();
-    let member = |name: &str| body[name].as_str().filter(|text| !text.is_empty());
+    let Ok(body) = parse_body(&body, &["appKey", "appSecret"]) else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    let member = |name: &str| body.get(name).and_then(Value::as_str).filter(|text| !text.is_empty());
     let (Some(app_key), Some(app_secret)) = (member("appKey"), member("appSecret")) else {
         return StatusCode::BAD_REQUEST.into_response();
     };

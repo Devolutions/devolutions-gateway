@@ -79,7 +79,7 @@ DVLS's login opens the sessions that authenticate the [management API](#manageme
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/api/v1/login` | Body `LoginParameters`, `{ appKey, appSecret }`; 200 → `LoginResult`, `{ tokenId }`. A missing or empty `appKey` or `appSecret` is 400 with no body, and a wrong key or secret is 401 with a `PublicApiError` body, `{ "message" }`. |
+| POST | `/api/v1/login` | Body `LoginParameters`, `{ appKey, appSecret }`; 200 → `LoginResult`, `{ tokenId }`. A missing or empty `appKey` or `appSecret`, or a member `LoginParameters` does not define, is 400 with no body, and a wrong key or secret is 401 with a `PublicApiError` body, `{ "message" }`. |
 | POST | `/api/v1/logout` | Closes the session the `tokenId` header names; 200 with no body. |
 
 Each login opens another session with a new random `tokenId`, and earlier sessions stay open.
