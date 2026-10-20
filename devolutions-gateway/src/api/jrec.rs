@@ -17,6 +17,7 @@ use axum::{Json, Router};
 use bytes::Bytes;
 use cadeau::xmf;
 use camino::{Utf8Path, Utf8PathBuf};
+use devolutions_gateway_ai::Language;
 use devolutions_gateway_task::ShutdownSignal;
 use futures::stream;
 use hyper::StatusCode;
@@ -452,6 +453,10 @@ pub(crate) struct AiAnalysisRequest {
     /// Upper bound of tokens in each AI answer.
     #[serde(default)]
     max_output_tokens: Option<u32>,
+    /// Language the AI writes in, any text of 1 to 10 characters such as `fr-CA` or `français`; English when absent.
+    #[cfg_attr(feature = "openapi", schema(min_length = 1, max_length = 10))]
+    #[serde(default)]
+    language: Option<String>,
     /// API key of the provider, kept in memory only until the Task ends.
     #[cfg_attr(feature = "openapi", schema(value_type = String, format = Password))]
     api_key: SecretString,
@@ -489,11 +494,13 @@ fn ai_analysis_conflict(code: AiAnalysisConflictCode, task_id: Option<Uuid>) -> 
 ///
 /// Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a
 /// new log, listed under `artifacts.ai-analysis` in its manifest.
+/// The answer is in the `language` of the request, English without one.
 /// The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
 /// which the `Location` header of a 202 answer names.
 ///
-/// Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from
-/// scratch: it removes the earlier AI analysis of the session, even a succeeded one, so a session holds at most one.
+/// Sending the same request again returns the same Task and starts nothing new.
+/// A new Task for the session starts from scratch: it removes the earlier AI analysis of the session, even a succeeded
+/// one, so a session holds at most one.
 /// The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
 /// Tasks.
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -510,7 +517,7 @@ fn ai_analysis_conflict(code: AiAnalysisConflictCode, task_id: Option<Uuid>) -> 
         (status = 202, description = "The AI analysis Task is created and runs in the background", body = TaskInfo, headers(
             ("Location" = String, description = "Path of the new Task, `/jet/jrec/{session_id}/ai-analysis/{task_id}`"),
         )),
-        (status = 400, description = "Invalid request body or AI settings"),
+        (status = 400, description = "Invalid request body, AI settings or language"),
         (status = 401, description = "Invalid or missing authorization token"),
         (status = 403, description = "Insufficient permissions"),
         (status = 404, description = "The session has no recording"),
@@ -542,8 +549,14 @@ pub(crate) async fn start_ai_analysis(
         model,
         base_url,
         max_output_tokens,
+        language,
         api_key,
     } = request;
+
+    let language = language
+        .map(Language::new)
+        .transpose()
+        .map_err(HttpError::bad_request().with_msg("invalid language").err())?;
 
     let outcome = recording_ai_analysis::start(
         &state,
@@ -556,6 +569,7 @@ pub(crate) async fn start_ai_analysis(
                 base_url,
                 max_output_tokens,
             },
+            language,
             api_key,
         },
     )

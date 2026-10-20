@@ -28,3 +28,5 @@ After a Gateway restart they are gone, and the Tasks that needed them fail; this
 Only a finished recording is analyzed.
 A session that mixes terminal and video recordings cannot be analyzed.
 Two analyses of the same session never run at the same time.
+A session keeps one AI analysis: a new Task removes the earlier one when it starts, and a Task that fails leaves nothing, so the session then has none. Keeping one analysis per language is a future extension that must stay possible.
+A transient failure such as a rate limit (429) is retried with the job, and each retry resumes where the last attempt stopped; only a new Task starts over. A Gateway restart loses the API key, so an unfinished Task fails as "key lost" at its next attempt, without a retry, and leaves nothing.
