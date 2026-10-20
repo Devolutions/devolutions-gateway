@@ -40,9 +40,14 @@ public sealed class AgentIdentityError
     public string Message { get; }
 
     /// <summary>
-    /// The error for a request body that is not valid JSON or does not have the expected shape:
+    /// The error for a request body that the host's framework cannot read or hand to the body parsers,
+    /// such as one that is not UTF-8 <c>application/json</c>, which CONTRACT.md §1 requires:
     /// <c>400 invalid_request</c>.
     /// </summary>
+    /// <remarks>
+    /// The body parsers, such as <see cref="EnrollRequestBody.Parse"/>, report their own <c>invalid_request</c>
+    /// with a failure detail, so a body that they reject needs no other error.
+    /// </remarks>
     public static AgentIdentityError MalformedBody { get; } =
         new(AgentIdentityErrorCode.InvalidRequest, 400, "The request body is malformed.");
 
