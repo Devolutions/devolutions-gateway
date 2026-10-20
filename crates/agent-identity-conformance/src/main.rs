@@ -7,6 +7,7 @@
 mod agent;
 mod channel;
 mod client;
+mod dvls;
 mod protocol;
 mod signer;
 #[cfg(windows)]
@@ -271,11 +272,6 @@ impl Options {
             self.ca_path.as_deref(),
             self.authority_id.as_deref(),
         )?;
-        let unprivileged_admin_token = if kind == TargetKind::Mock {
-            Some(format!("{}-unprivileged", target.admin_token))
-        } else {
-            self.unprivileged_admin_token
-        };
         let second = match (self.second_base_url, self.second_admin_token) {
             (Some(url), Some(token)) => Some(Target::new(
                 url,
@@ -313,7 +309,7 @@ impl Options {
             channel_available,
             key_name_prefix: format!("conformance-{}", uuid::Uuid::new_v4().simple()),
             agent_version: self.agent_version,
-            unprivileged_admin_token,
+            unprivileged_admin_token: self.unprivileged_admin_token,
             agent_bin: self.agent_bin.context("--agent-bin is required")?,
             key_backend: self.key_backend,
             work_dir: self.work_dir,
@@ -376,8 +372,8 @@ async fn run() -> anyhow::Result<()> {
             Outcome::NotApplicable("Windows software provider test")
         } else if test.name == "a_file_backend_permissions" && !cfg!(unix) {
             Outcome::NotApplicable("Unix file-backend test")
-        } else if test.mock_only && !context.mock() {
-            Outcome::Skip("requires the mock-only control API")
+        } else if let Some(reason) = dvls::unsupported(context.target_kind, test.mock_only) {
+            Outcome::NotApplicable(reason)
         } else if test.needs_channel && !context.expect_channel && !context.channel_available {
             Outcome::Skip("config.agent_channel_url absent and --expect-channel=false")
         } else if test.needs_no_channel && !context.mock() && context.channel_available {
@@ -389,8 +385,6 @@ async fn run() -> anyhow::Result<()> {
             Outcome::Skip("rotation requires --disposable-dvls-target")
         } else if test.name == "p_stream_closes_at_not_after" && !context.mock() && context.leaf_lifetime_secs > 30 {
             Outcome::Skip("real-target stream expiry requires --leaf-lifetime-secs <= 30")
-        } else if test.name == "p_admin_permission_denied" && context.unprivileged_admin_token.is_none() {
-            Outcome::Skip("requires --unprivileged-admin-token")
         } else if test.needs_second && context.second.is_none() {
             Outcome::Skip("requires a second authority (--second-base-url and --second-admin-token)")
         } else if test.name == "a_key_non_exportable" && context.key_backend != KeyBackend::WindowsSoftwareProvider {
@@ -561,6 +555,11 @@ const TESTS: &[Test] = &[
     p!(p_renew_certificate_key_reuse_rules),
     p!(p_metadata_limits),
     p!(p_friendly_name_format),
+    p!(p_friendly_name_white_space_and_truncation),
+    p!(p_duplicate_json_members_rejected),
+    p!(p_noncanonical_base64_csr_rejected),
+    p!(p_token_secret_must_match_exactly),
+    p!(p_compressed_point_csr_rejected),
     p!(p_identity_cannot_impersonate_another),
     p!(p_channel_hello_cannot_impersonate_another).channel(),
     p!(p_renew_digest_integrity),
@@ -643,10 +642,11 @@ const TESTS: &[Test] = &[
     p!(p_rotation_pending_only_old_root_receives_push, mock_only).channel(),
     p!(p_listing_pagination_stable_during_concurrent_enrollment),
     p!(p_listing_views_filters_and_bounds),
-    p!(p_admin_tokens_crud_and_states),
-    p!(p_admin_requires_auth),
-    p!(p_admin_permission_denied),
-    p!(p_rotation_admin_write_requires_auth),
+    p!(p_identity_statuses, mock_only),
+    p!(p_management_tokens_crud_and_states),
+    p!(p_management_requires_auth),
+    p!(p_management_permission_denied),
+    p!(p_rotation_start_requires_auth),
     p!(p_error_body_shape),
     p!(p_authentication_error_precedes_invalid_body),
     p!(p_oversized_body_precedes_authentication),

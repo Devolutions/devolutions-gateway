@@ -7,6 +7,7 @@ use http::Method;
 use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 
+use crate::dvls::Management;
 use crate::signer::{KeyPair, SignedHeaders};
 
 #[derive(Clone)]
@@ -61,6 +62,16 @@ impl Target {
         })
     }
 
+    pub(crate) fn management(&self) -> Management<'_> {
+        Management::new(self, Some(&self.admin_token))
+    }
+
+    /// The management API called with `credential`, or without one when it is `None`.
+    pub(crate) fn management_as<'a>(&'a self, credential: Option<&'a str>) -> Management<'a> {
+        Management::new(self, credential)
+    }
+
+    /// Sends a request whose response must have a JSON body unless it is empty.
     pub(crate) async fn send(
         &self,
         method: Method,
@@ -69,6 +80,24 @@ impl Target {
         bearer: Option<&str>,
         signed: Option<&SignedHeaders>,
     ) -> anyhow::Result<Reply> {
+        let (status, bytes) = self.exchange(method, path, body, bearer, signed).await?;
+        let body = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes).context("decode JSON response")?
+        };
+        Ok(Reply { status, body })
+    }
+
+    /// Sends a request and returns the response status and body bytes.
+    pub(crate) async fn exchange(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<&[u8]>,
+        bearer: Option<&str>,
+        signed: Option<&SignedHeaders>,
+    ) -> anyhow::Result<(u16, Vec<u8>)> {
         let mut request = self.http.request(method, format!("{}{path}", self.base_url));
         if let Some(bearer) = bearer {
             request = request.bearer_auth(bearer);
@@ -87,20 +116,7 @@ impl Target {
         let response = request.send().await.context("send HTTP request")?;
         let status = response.status().as_u16();
         let bytes = response.bytes().await.context("read HTTP response")?;
-        let body = decode_reply_body(path, status, &bytes)?;
-        Ok(Reply { status, body })
-    }
-
-    pub(crate) async fn admin(&self, method: Method, path: &str, body: Option<&Value>) -> anyhow::Result<Reply> {
-        let bytes = body.map(serde_json::to_vec).transpose()?;
-        self.send(
-            method,
-            &format!("/api/v3/agent-identity{path}"),
-            bytes.as_deref(),
-            Some(&self.admin_token),
-            None,
-        )
-        .await
+        Ok((status, bytes.to_vec()))
     }
 
     pub(crate) async fn agent(
@@ -140,23 +156,14 @@ impl Target {
     }
 
     pub(crate) async fn channel_available(&self) -> anyhow::Result<bool> {
-        let token = self.create_token(1, Duration::from_secs(3600), None).await?;
+        let management = self.management();
+        let token = management.create_token(1, Duration::from_secs(3600), None).await?;
         let key = KeyPair::generate()?;
         let reply = self.enroll(&token.text, &key, &json!({})).await?;
         let identity = Identity::from_enrollment(key, &reply)?;
-        self.revoke(&identity.identity_id).await?;
-        expect_status(
-            &self
-                .admin(Method::DELETE, &format!("/identities/{}", identity.identity_id), None)
-                .await?,
-            204,
-        )?;
-        expect_status(
-            &self
-                .admin(Method::DELETE, &format!("/enrollment-tokens/{}", token.id), None)
-                .await?,
-            204,
-        )?;
+        management.revoke(&identity.identity_id).await?;
+        management.delete_identity(&identity.identity_id).await?;
+        management.delete_token(&token.id).await?;
         Ok(identity.agent_channel_url.is_some())
     }
 
@@ -212,30 +219,6 @@ impl Target {
 
     pub(crate) async fn advance(&self, secs: i64) -> anyhow::Result<()> {
         expect_status(&self.control("time/advance", &json!({ "secs": secs })).await?, 200)
-    }
-
-    pub(crate) async fn create_token(
-        &self,
-        max_uses: u32,
-        lifetime: Duration,
-        friendly_name_format: Option<&str>,
-    ) -> anyhow::Result<Token> {
-        let expires = (time::OffsetDateTime::now_utc() + time::Duration::seconds(i64::try_from(lifetime.as_secs())?))
-            .format(&Rfc3339)?;
-        let mut body = json!({
-            "name": format!("conformance-{}", uuid::Uuid::new_v4()),
-            "maxUses": max_uses,
-            "expiresAt": expires,
-        });
-        if let Some(format) = friendly_name_format {
-            body["friendlyNameFormat"] = Value::String(format.to_owned());
-        }
-        let reply = self.admin(Method::POST, "/enrollment-tokens", Some(&body)).await?;
-        expect_status(&reply, 201)?;
-        Ok(Token {
-            text: field(&reply.body, "token")?.to_owned(),
-            id: field(&reply.body["record"], "id")?.to_owned(),
-        })
     }
 
     pub(crate) async fn enroll(&self, token: &str, key: &KeyPair, metadata: &Value) -> anyhow::Result<Reply> {
@@ -303,54 +286,11 @@ impl Target {
         .await
     }
 
-    pub(crate) async fn identity_record(&self, id: &str) -> anyhow::Result<Reply> {
-        self.admin(Method::GET, &format!("/identities/{id}"), None).await
-    }
-
-    pub(crate) async fn identities_for(&self, token: &Token, extra_query: &str) -> anyhow::Result<Reply> {
-        let page_size = if extra_query.contains("pageSize=") {
-            ""
-        } else {
-            "&pageSize=100"
-        };
-        self.admin(
-            Method::GET,
-            &format!("/identities?enrollmentTokenId={}{page_size}{extra_query}", token.id),
-            None,
-        )
-        .await
-    }
-
-    pub(crate) async fn token_record(&self, id: &str) -> anyhow::Result<Reply> {
-        self.admin(Method::GET, &format!("/enrollment-tokens/{id}"), None).await
-    }
-
-    pub(crate) async fn revoke(&self, id: &str) -> anyhow::Result<()> {
-        expect_status(
-            &self
-                .admin(Method::POST, &format!("/identities/{id}/revoke"), None)
-                .await?,
-            204,
-        )
-    }
-
-    pub(crate) async fn rotate(&self, deadline: Option<&str>) -> anyhow::Result<Reply> {
-        let body = deadline.map_or_else(|| json!({}), |value| json!({ "deadline": value }));
-        self.admin(Method::POST, "/ca/rotation", Some(&body)).await
-    }
-
     pub(crate) async fn trust_anchor(&self) -> anyhow::Result<Value> {
         let reply = self.agent(Method::GET, "/trust-anchor", None, None).await?;
         expect_status(&reply, 200)?;
         Ok(reply.body)
     }
-}
-
-fn decode_reply_body(path: &str, status: u16, bytes: &[u8]) -> anyhow::Result<Value> {
-    if bytes.is_empty() || (path.starts_with("/api/v3/agent-identity") && !(200..300).contains(&status)) {
-        return Ok(Value::Null);
-    }
-    serde_json::from_slice(bytes).context("decode JSON response")
 }
 
 pub(crate) struct Token {
@@ -469,20 +409,6 @@ pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn admin_denials_are_status_only_but_agent_errors_need_json() -> anyhow::Result<()> {
-        let opaque = b"<html>access denied</html>";
-        ensure!(
-            decode_reply_body("/api/v3/agent-identity/identities", 403, opaque)?.is_null(),
-            "admin denial required a JSON body"
-        );
-        ensure!(
-            decode_reply_body("/api/agent-identity/v1/renew", 401, opaque).is_err(),
-            "agent-facing error accepted a non-JSON body"
-        );
-        Ok(())
-    }
 
     #[test]
     fn error_body_server_time_must_end_in_z() -> anyhow::Result<()> {

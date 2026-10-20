@@ -15,7 +15,8 @@ Start two mocks as described in the [mock README] for the complete multi-authori
 
 Use `--filter p_` for protocol-only checks or `--list` to inspect test names.
 Use `--key-backend windows-software-provider|file` to select `Identity.KeyBackend` (`WindowsSoftwareProvider` or `File`); the default is Windows software provider on Windows and file elsewhere.
-On DVLS, supply `--disposable-dvls-target` only when rotation is safe, and provide `--unprivileged-admin-token` to check permission denials.
+On DVLS, supply `--disposable-dvls-target` only when rotation is safe, and provide `--unprivileged-admin-token`, a management API credential without any permission, to check permission denials.
+The runner reaches each authority's management API only through the module for that authority, `src/dvls.rs` for DVLS and the mock that replicates it.
 The disposable rotation checks require no other active identities on the published root; otherwise they report `SKIP` before rotating.
 `--dvls-rotation-window-secs` defaults to 60; `--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
@@ -25,8 +26,8 @@ The DVLS expiry-boundary test needs a configured leaf lifetime of roughly 10–3
 `--expect-channel` defaults to `true`; use `--expect-channel false` when the server intentionally omits `config.agent_channel_url`.
 When the URL is absent, gRPC-dependent checks report `SKIP`; HTTP confirm checks and channelless renewal still run.
 
-`PASS` and `FAIL` report assertions, and `N/A` marks a test that does not apply to the platform.
-`SKIP` means the target lacks a required fixture, mock control, privilege or channel, so mock-only tests report `SKIP` on DVLS.
+`PASS` and `FAIL` report assertions, and `N/A` marks a test that does not apply to the platform or that the authority's module declares unsupported, so mock-only tests report `N/A` on DVLS.
+`SKIP` means the target lacks a required fixture, privilege or channel.
 Any `SKIP` makes the run incomplete and exits nonzero unless `--allow-incomplete` is set.
 The final summary reports counts, per-category durations and the reason for every non-PASS test.
 

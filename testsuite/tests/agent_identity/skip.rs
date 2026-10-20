@@ -77,8 +77,8 @@ fn dvls_stale_hello_without_config_fixture_is_skip() -> anyhow::Result<()> {
 }
 
 #[test]
-fn mock_only_test_on_dvls_is_skip() -> anyhow::Result<()> {
-    assert_single_skip("p_token_expired")
+fn mock_only_test_on_dvls_is_not_applicable() -> anyhow::Result<()> {
+    assert_single_not_applicable("p_token_expired")
 }
 
 #[cfg(windows)]

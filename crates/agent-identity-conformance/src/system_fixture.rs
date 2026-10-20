@@ -9,7 +9,8 @@ use tokio::net::TcpListener;
 
 use super::{AgentCase, POLL, WAIT, new_token};
 use crate::Context;
-use crate::client::{Target, Token, count, expect_status, field};
+use crate::client::{Target, Token};
+use crate::dvls::IdentityQuery;
 use crate::system_probe::{Request, ResultFile};
 
 const TASK_TIMEOUT: Duration = Duration::from_secs(10);
@@ -381,23 +382,19 @@ try {{\r\n\
     async fn enrolled_identity(&self, target: &Target, token: &Token) -> anyhow::Result<String> {
         let started = Instant::now();
         loop {
-            let listing = target.identities_for(token, "&view=full").await?;
-            expect_status(&listing, 200)?;
-            let identities = count(&listing.body, "totalCount")?;
+            let listing = target
+                .management()
+                .identities(&IdentityQuery::enrolled_with(token).full())
+                .await?;
             ensure!(
-                identities <= 1,
+                listing.total_count <= 1,
                 "SYSTEM agent created multiple identities for a one-use token"
             );
-            if identities == 1 {
-                let row = &listing.body["data"][0];
-                let id = field(row, "id")?.to_owned();
+            if let Some(row) = listing.items.first() {
+                let id = row.id.clone();
                 self.case.observe_agent_metadata(row)?;
-                let record = target.token_record(&token.id).await?;
-                expect_status(&record, 200)?;
-                ensure!(
-                    count(&record.body, "usedCount")? == 1,
-                    "SYSTEM agent did not consume its one-use token"
-                );
+                let record = target.management().token(&token.id).await?;
+                ensure!(record.used_count == 1, "SYSTEM agent did not consume its one-use token");
                 return Ok(id);
             }
             ensure!(
@@ -419,11 +416,10 @@ try {{\r\n\
         }
         let started = Instant::now();
         loop {
-            let response = target.identity_record(id).await?;
-            expect_status(&response, 200)?;
-            self.case.observe_agent_metadata(&response.body)?;
-            if (check_channel && response.body["connected"] == true)
-                || (!check_channel && response.body["metadata"]["hostname"] == "system-acl-signing-probe")
+            let record = target.management().identity(id).await?;
+            self.case.observe_agent_metadata(&record)?;
+            if (check_channel && record.connected)
+                || (!check_channel && record.metadata_value("hostname") == Some("system-acl-signing-probe"))
             {
                 return Ok(());
             }

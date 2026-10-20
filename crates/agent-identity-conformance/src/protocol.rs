@@ -22,13 +22,20 @@ use x509_cert::ext::pkix::name::GeneralName;
 use x509_cert::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAltName};
 
 use crate::client::{Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field};
+use crate::dvls::{
+    self, CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal, RotationDeadline,
+    RotationStatus, TokenSpec, TokenState, refusal,
+};
 use crate::signer::{KeyPair, SignatureParameter, SignedHeaders, thumbprint};
 use crate::{Context, channel};
 
 const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
 
-async fn token(ctx: &Context, max_uses: u32) -> anyhow::Result<Token> {
-    ctx.target.create_token(max_uses, TOKEN_LIFETIME, None).await
+async fn token(ctx: &Context, max_uses: u64) -> anyhow::Result<Token> {
+    ctx.target
+        .management()
+        .create_token(max_uses, TOKEN_LIFETIME, None)
+        .await
 }
 
 async fn identity(target: &Target, token: &Token, hostname: &str) -> anyhow::Result<Identity> {
@@ -72,9 +79,7 @@ fn attach_content_digest(headers: &mut SignedHeaders, body: &[u8]) {
 pub(crate) async fn wait_rotation_idle(target: &Target, window_secs: u64) -> anyhow::Result<()> {
     let started = Instant::now();
     loop {
-        let status = target.admin(Method::GET, "/ca/rotation", None).await?;
-        expect_status(&status, 200)?;
-        if status.body["phase"] == "idle" {
+        if !target.management().rotation().await?.rotating() {
             return Ok(());
         }
         ensure!(
@@ -85,19 +90,18 @@ pub(crate) async fn wait_rotation_idle(target: &Target, window_secs: u64) -> any
     }
 }
 
-async fn begin_rotation(ctx: &Context) -> anyhow::Result<Reply> {
+async fn begin_rotation(ctx: &Context) -> anyhow::Result<RotationStatus> {
     if ctx.mock() {
-        return ctx.target.rotate(None).await;
+        return ctx.target.management().rotate(RotationDeadline::Default).await;
     }
     ensure!(
         ctx.disposable_dvls_target,
         "DVLS rotation requires --disposable-dvls-target"
     );
     wait_rotation_idle(&ctx.target, ctx.dvls_rotation_window_secs).await?;
-    let deadline = (time::OffsetDateTime::now_utc()
-        + time::Duration::seconds(i64::try_from(ctx.dvls_rotation_window_secs)?))
-    .format(&Rfc3339)?;
-    ctx.target.rotate(Some(&deadline)).await
+    let deadline =
+        time::OffsetDateTime::now_utc() + time::Duration::seconds(i64::try_from(ctx.dvls_rotation_window_secs)?);
+    ctx.target.management().rotate(RotationDeadline::At(deadline)).await
 }
 
 async fn finish_rotation(ctx: &Context) -> anyhow::Result<()> {
@@ -105,14 +109,6 @@ async fn finish_rotation(ctx: &Context) -> anyhow::Result<()> {
         wait_rotation_idle(&ctx.target, ctx.dvls_rotation_window_secs).await?;
     }
     Ok(())
-}
-
-pub(crate) fn has_certificate(record: &Value, thumbprint: &str, status: &str) -> bool {
-    record["certificates"].as_array().is_some_and(|certs| {
-        certs
-            .iter()
-            .any(|cert| cert["thumbprint"] == thumbprint && cert["status"] == status)
-    })
 }
 
 async fn next_config_update(
@@ -135,68 +131,43 @@ async fn check_in_config(target: &Target, identity: &Identity) -> anyhow::Result
     Ok(config)
 }
 
-async fn identity_record(target: &Target, id: &str) -> anyhow::Result<Value> {
-    let reply = target.identity_record(id).await?;
-    expect_status(&reply, 200)?;
-    Ok(reply.body)
+async fn identity_record(target: &Target, id: &str) -> anyhow::Result<IdentityRecord> {
+    target.management().identity(id).await
 }
 
 async fn assert_identity_metadata_and_certificates_unchanged(
     target: &Target,
     id: &str,
-    before: &Value,
+    before: &IdentityRecord,
 ) -> anyhow::Result<()> {
     let after = identity_record(target, id).await?;
     ensure!(
-        after["metadata"] == before["metadata"] && after["certificates"] == before["certificates"],
+        after.metadata == before.metadata && after.certificates == before.certificates,
         "rejected key reuse changed identity metadata or certificate identities/statuses"
     );
     Ok(())
 }
 
+/// The non-revoked identities that hold an unexpired current or pending certificate from `issuer`.
 async fn active_old_root_ids(ctx: &Context, issuer: &str) -> anyhow::Result<HashSet<String>> {
     let now = chain_evaluation_time(ctx).await?;
-    let mut page = 1;
-    let mut ids = HashSet::new();
-    let mut seen = HashSet::new();
-    loop {
-        let reply = ctx
-            .target
-            .admin(
-                Method::GET,
-                &format!("/identities?view=full&pageSize=100&pageNumber={page}"),
-                None,
-            )
-            .await?;
-        expect_status(&reply, 200)?;
-        let rows = reply.body["data"].as_array().context("old-root identity page")?;
-        for row in rows {
-            let id = field(row, "id")?.to_owned();
-            ensure!(seen.insert(id.clone()), "old-root listing repeated an identity ID");
-            if row["status"] != "revoked" {
-                let certificates = row["certificates"]
-                    .as_array()
-                    .context("full identity has no certificates")?;
-                for cert in certificates {
-                    if matches!(field(cert, "status")?, "current" | "pending")
-                        && field(cert, "issuer")? == issuer
-                        && time::OffsetDateTime::parse(field(cert, "notAfter")?, &Rfc3339)?.unix_timestamp() > now
-                    {
-                        ids.insert(id);
-                        break;
-                    }
-                }
-            }
-        }
-        if page >= count(&reply.body, "totalPages")? {
-            ensure!(
-                seen.len() as u64 == count(&reply.body, "totalCount")?,
-                "old-root listing count disagrees with all pages"
-            );
-            return Ok(ids);
-        }
-        page += 1;
-    }
+    let identities = ctx
+        .target
+        .management()
+        .all_identities(&IdentityQuery::default().full())
+        .await?;
+    Ok(identities
+        .into_iter()
+        .filter(|identity| {
+            identity.status != IdentityStatus::Revoked
+                && identity.certificates().iter().any(|cert| {
+                    matches!(cert.status, CertificateStatus::Current | CertificateStatus::Pending)
+                        && cert.issuer == issuer
+                        && cert.not_after.unix_timestamp() >= now
+                })
+        })
+        .map(|identity| identity.id)
+        .collect())
 }
 
 fn require_isolated_old_root_fixture(active: &HashSet<String>, expected: &[&str], mock: bool) -> anyhow::Result<()> {
@@ -364,7 +335,7 @@ fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()>
         let before = i64::try_from(validity.not_before.to_unix_duration().as_secs())?;
         let after = i64::try_from(validity.not_after.to_unix_duration().as_secs())?;
         ensure!(
-            before <= now && now < after,
+            before <= now && now <= after,
             "certificate chain element is not valid at evaluation time"
         );
     }
@@ -483,12 +454,8 @@ pub(crate) async fn p_token_n_uses_consumed_then_exhausted(ctx: Context) -> anyh
             ensure!(&enrolled.authority_id == id, "authority ID changed across enrollments");
         }
         authority_id = Some(enrolled.authority_id);
-        let record = ctx.target.token_record(&token.id).await?;
-        expect_status(&record, 200)?;
-        ensure!(
-            count(&record.body, "usedCount")? == n,
-            "enrollment did not consume exactly one use"
-        );
+        let record = ctx.target.management().token(&token.id).await?;
+        ensure!(record.used_count == n, "enrollment did not consume exactly one use");
     }
     let reply = ctx
         .target
@@ -540,14 +507,10 @@ pub(crate) async fn p_token_concurrent_enrollment_respects_max_uses(ctx: Context
         success == 5 && exhausted == 15,
         "concurrent uses were not atomic: {success} successes"
     );
-    let record = ctx.target.token_record(&token.id).await?;
+    let record = ctx.target.management().token(&token.id).await?;
+    ensure!(record.used_count == 5, "concurrent use count is incorrect");
     ensure!(
-        count(&record.body, "usedCount")? == 5,
-        "concurrent use count is incorrect"
-    );
-    let identities = ctx.target.identities_for(&token, "").await?;
-    ensure!(
-        count(&identities.body, "totalCount")? == 5,
+        ctx.target.management().identity_count(&token).await? == 5,
         "concurrent enrollment created unexpected identities"
     );
     Ok(())
@@ -580,8 +543,8 @@ pub(crate) async fn p_concurrent_same_key_enroll_replays_winner(ctx: Context) ->
         replies.len() == 2
             && replies[0].body["identity_id"] == replies[1].body["identity_id"]
             && replies[0].body["certificate_chain"] == replies[1].body["certificate_chain"]
-            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1
-            && count(&ctx.target.identities_for(&token, "").await?.body, "totalCount")? == 1,
+            && ctx.target.management().token(&token.id).await?.used_count == 1
+            && ctx.target.management().identity_count(&token).await? == 1,
         "concurrent same-key enrolls did not replay one winning identity and consume one use"
     );
     Ok(())
@@ -614,12 +577,12 @@ pub(crate) async fn p_concurrent_same_key_renew_replays_winner(ctx: Context) -> 
     ensure!(
         replies.len() == 2
             && replies[0].body["certificate_chain"] == replies[1].body["certificate_chain"]
-            && record["certificates"].as_array().is_some_and(|certs| certs
+            && record.certificates.as_ref().is_some_and(|certs| certs
                 .iter()
-                .filter(|cert| cert["status"] == "pending")
+                .filter(|cert| cert.status == CertificateStatus::Pending)
                 .count()
                 == 1)
-            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+            && ctx.target.management().token(&token.id).await?.used_count == 1,
         "concurrent same-CSR renews issued more than one pending certificate"
     );
     Ok(())
@@ -665,11 +628,8 @@ pub(crate) async fn p_failed_enrollment_consumes_nothing(ctx: Context) -> anyhow
         .enroll(&token.text, &KeyPair::generate()?, &json!({ "hostname": 3 }))
         .await?;
     expect_error(&invalid, 400, "invalid_request")?;
-    let record = ctx.target.token_record(&token.id).await?;
-    ensure!(
-        count(&record.body, "usedCount")? == 0,
-        "invalid enrollment consumed a use"
-    );
+    let record = ctx.target.management().token(&token.id).await?;
+    ensure!(record.used_count == 0, "invalid enrollment consumed a use");
     Ok(())
 }
 
@@ -692,12 +652,7 @@ pub(crate) async fn p_token_errors_distinct(ctx: Context) -> anyhow::Result<()> 
         .await?;
     expect_error(&exhausted, 403, "token_exhausted")?;
     let other = token(&ctx, 1).await?;
-    expect_status(
-        &ctx.target
-            .admin(Method::DELETE, &format!("/enrollment-tokens/{}", other.id), None)
-            .await?,
-        204,
-    )?;
+    ctx.target.management().delete_token(&other.id).await?;
     let deleted = ctx
         .target
         .enroll(&other.text, &KeyPair::generate()?, &json!({}))
@@ -707,16 +662,20 @@ pub(crate) async fn p_token_errors_distinct(ctx: Context) -> anyhow::Result<()> 
 }
 
 pub(crate) async fn p_token_expired(ctx: Context) -> anyhow::Result<()> {
-    let token = ctx.target.create_token(1, Duration::from_secs(3), None).await?;
+    let token = ctx
+        .target
+        .management()
+        .create_token(1, Duration::from_secs(3), None)
+        .await?;
     ctx.target.advance(5).await?;
     let expired = ctx
         .target
         .enroll(&token.text, &KeyPair::generate()?, &json!({}))
         .await?;
     expect_error(&expired, 401, "token_expired")?;
-    let record = ctx.target.token_record(&token.id).await?;
-    ensure!(record.body["state"] == "expired", "token not marked expired");
-    ensure!(count(&record.body, "usedCount")? == 0, "expired token consumed a use");
+    let record = ctx.target.management().token(&token.id).await?;
+    ensure!(record.state == TokenState::Expired, "token not marked expired");
+    ensure!(record.used_count == 0, "expired token consumed a use");
     Ok(())
 }
 
@@ -744,11 +703,8 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
             && first.body["certificate_chain"] == replay.body["certificate_chain"],
         "same-key replay was not idempotent"
     );
-    let record = ctx.target.token_record(&token.id).await?;
-    ensure!(
-        count(&record.body, "usedCount")? == 1,
-        "idempotent replay consumed a use"
-    );
+    let record = ctx.target.management().token(&token.id).await?;
+    ensure!(record.used_count == 1, "idempotent replay consumed a use");
     if ctx.mock() {
         ensure!(
             count(&ctx.target.requests(Some(&token)).await?, "enroll")? == 2,
@@ -757,7 +713,7 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
     }
     let replayed_record = identity_record(&ctx.target, field(&first.body, "identity_id")?).await?;
     ensure!(
-        replayed_record["metadata"] == before["metadata"] && replayed_record["lastSeenAt"] == before["lastSeenAt"],
+        replayed_record.metadata == before.metadata && replayed_record.last_seen_at == before.last_seen_at,
         "idempotent enrollment changed metadata or last_seen_at"
     );
     if ctx.mock() {
@@ -770,9 +726,11 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
         ensure!(
             expired_replay.body["identity_id"] == first.body["identity_id"]
                 && expired_replay.body["certificate_chain"] == first.body["certificate_chain"]
-                && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1
-                && identity_record(&ctx.target, field(&first.body, "identity_id")?).await?["metadata"]
-                    == before["metadata"],
+                && ctx.target.management().token(&token.id).await?.used_count == 1
+                && identity_record(&ctx.target, field(&first.body, "identity_id")?)
+                    .await?
+                    .metadata
+                    == before.metadata,
             "expired-token current-key replay created, consumed or changed an identity"
         );
     }
@@ -780,25 +738,9 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
 }
 
 pub(crate) async fn p_token_config_contributes_to_effective_config(ctx: Context) -> anyhow::Result<()> {
-    let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
-    let created = ctx
-        .target
-        .admin(
-            Method::POST,
-            "/enrollment-tokens",
-            Some(&json!({
-                "name": format!("conformance-{}", uuid::Uuid::new_v4()),
-                "maxUses": 1,
-                "expiresAt": expires,
-                "config": { "psu_channel_url": "https://psu.example" }
-            })),
-        )
-        .await?;
-    expect_status(&created, 201)?;
-    let token = Token {
-        text: field(&created.body, "token")?.to_owned(),
-        id: field(&created.body["record"], "id")?.to_owned(),
-    };
+    let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
+    spec.config = Some(json!({ "psu_channel_url": "https://psu.example" }));
+    let token = ctx.target.management().create_token_from(&spec).await?;
     let identity = identity(&ctx.target, &token, "token-config").await?;
     ensure!(
         identity.config["psu_channel_url"] == "https://psu.example",
@@ -823,13 +765,11 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
     let identity_id = field(&first.body, "identity_id")?;
     let before = identity_record(&ctx.target, identity_id).await?;
     let foreign = identity(&ctx.target, &foreign_token, "foreign").await?;
-    expect_status(
-        &ctx.target
-            .admin(Method::DELETE, &format!("/enrollment-tokens/{}", token.id), None)
-            .await?,
-        204,
-    )?;
-    expect_status(&ctx.target.token_record(&token.id).await?, 404)?;
+    ctx.target.management().delete_token(&token.id).await?;
+    ensure!(
+        refusal(ctx.target.management().token(&token.id).await)? == Refusal::NotFound,
+        "deleted token is still listed"
+    );
     let replay = ctx
         .target
         .enroll(&token.text, &key, &json!({ "hostname": "must-not-replace" }))
@@ -842,7 +782,7 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
     );
     let after = identity_record(&ctx.target, identity_id).await?;
     ensure!(
-        after["metadata"] == before["metadata"] && after["lastSeenAt"] == before["lastSeenAt"],
+        after.metadata == before.metadata && after.last_seen_at == before.last_seen_at,
         "deleted-token replay changed identity state"
     );
     expect_error(
@@ -857,18 +797,13 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
         401,
         "token_invalid",
     )?;
-    ctx.target.revoke(&foreign.identity_id).await?;
+    ctx.target.management().revoke(&foreign.identity_id).await?;
     expect_error(
         &ctx.target.enroll(&token.text, &foreign.key, &json!({})).await?,
         401,
         "token_invalid",
     )?;
-    expect_status(
-        &ctx.target
-            .admin(Method::DELETE, &format!("/identities/{}", foreign.identity_id), None)
-            .await?,
-        204,
-    )?;
+    ctx.target.management().delete_identity(&foreign.identity_id).await?;
     expect_error(
         &ctx.target.enroll(&token.text, &foreign.key, &json!({})).await?,
         401,
@@ -876,7 +811,7 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
     )?;
     expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)?;
     ensure!(
-        count(&ctx.target.identities_for(&token, "").await?.body, "totalCount")? == 1
+        ctx.target.management().identity_count(&token).await? == 1
             && identity_record(&ctx.target, identity_id).await? == before,
         "deleted token issued another identity or changed its own replayed identity"
     );
@@ -888,11 +823,11 @@ pub(crate) async fn p_enroll_revoked_same_key_rejected(ctx: Context) -> anyhow::
     let key = KeyPair::generate()?;
     let enrolled = ctx.target.enroll(&token.text, &key, &json!({})).await?;
     let identity = Identity::from_enrollment(key, &enrolled)?;
-    ctx.target.revoke(&identity.identity_id).await?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
     let refused = ctx.target.enroll(&token.text, &identity.key, &json!({})).await?;
     expect_error(&refused, 403, "identity_revoked")?;
-    let record = ctx.target.token_record(&token.id).await?;
-    ensure!(count(&record.body, "usedCount")? == 1, "revoked replay consumed a use");
+    let record = ctx.target.management().token(&token.id).await?;
+    ensure!(record.used_count == 1, "revoked replay consumed a use");
     Ok(())
 }
 
@@ -905,7 +840,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         .await?;
     let identity = Identity::from_enrollment(original_key, &first)?;
     let original_record = identity_record(&ctx.target, &identity.identity_id).await?;
-    let original_name = field(&original_record, "friendlyName")?.to_owned();
+    let original_name = original_record.friendly_name.as_str().to_owned();
     let other_token = token(&ctx, 1).await?;
     expect_error(
         &ctx.target
@@ -926,9 +861,9 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
     );
     let replayed_record = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        replayed_record["metadata"] == original_record["metadata"]
-            && replayed_record["lastSeenAt"] == original_record["lastSeenAt"]
-            && replayed_record["friendlyName"] == original_name,
+        replayed_record.metadata == original_record.metadata
+            && replayed_record.last_seen_at == original_record.last_seen_at
+            && replayed_record.friendly_name == original_name,
         "current-key replay changed identity metadata, last_seen_at or friendly name"
     );
     let first_pending = KeyPair::generate()?;
@@ -955,7 +890,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         }
     }
     assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &retired_before).await?;
-    ctx.target.revoke(&identity.identity_id).await?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
     for key in [&identity.key, &first_pending, &second_pending] {
         expect_error(
             &ctx.target.enroll(&other_token.text, key, &json!({})).await?,
@@ -963,12 +898,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
             "invalid_request",
         )?;
     }
-    expect_status(
-        &ctx.target
-            .admin(Method::DELETE, &format!("/identities/{}", identity.identity_id), None)
-            .await?,
-        204,
-    )?;
+    ctx.target.management().delete_identity(&identity.identity_id).await?;
     for key in [&identity.key, &first_pending, &second_pending] {
         expect_error(
             &ctx.target.enroll(&other_token.text, key, &json!({})).await?,
@@ -982,12 +912,9 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         )?;
     }
     ensure!(
-        count(&ctx.target.token_record(&other_token.id).await?.body, "usedCount")? == 0
-            && count(&ctx.target.token_record(&original_token.id).await?.body, "usedCount")? == 1
-            && count(
-                &ctx.target.identities_for(&original_token, "").await?.body,
-                "totalCount"
-            )? == 0,
+        ctx.target.management().token(&other_token.id).await?.used_count == 0
+            && ctx.target.management().token(&original_token.id).await?.used_count == 1
+            && ctx.target.management().identity_count(&original_token).await? == 0,
         "key-reuse attempts consumed a token use or recreated a deleted identity"
     );
     Ok(())
@@ -1035,13 +962,8 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
         )?;
         assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &renewed).await?;
     }
-    ctx.target.revoke(&other.identity_id).await?;
-    expect_status(
-        &ctx.target
-            .admin(Method::DELETE, &format!("/identities/{}", other.identity_id), None)
-            .await?,
-        204,
-    )?;
+    ctx.target.management().revoke(&other.identity_id).await?;
+    ctx.target.management().delete_identity(&other.identity_id).await?;
     for key in [&other.key, &other_pending, &other_replacement] {
         expect_error(
             &ctx.target.renew(&identity, key, &json!({})).await?,
@@ -1051,9 +973,12 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
         assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &renewed).await?;
     }
     ensure!(
-        renewed["certificates"].as_array().is_some_and(
-            |certs| certs.len() == 3 && certs.iter().filter(|cert| cert["status"] == "pending").count() == 1
-        ),
+        renewed.certificates.as_ref().is_some_and(|certs| certs.len() == 3
+            && certs
+                .iter()
+                .filter(|cert| cert.status == CertificateStatus::Pending)
+                .count()
+                == 1),
         "renewal fixture did not have exactly one pending certificate"
     );
     Ok(())
@@ -1105,9 +1030,9 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
         .enroll(&token.text, &KeyPair::generate()?, &Value::Object(within_limit))
         .await?;
     expect_status(&escaped, 200)?;
-    let record = ctx.target.token_record(&token.id).await?;
+    let record = ctx.target.management().token(&token.id).await?;
     ensure!(
-        count(&record.body, "usedCount")? == 1,
+        record.used_count == 1,
         "metadata validation used an incorrect size measure or consumed a failed request"
     );
     expect_status(
@@ -1124,72 +1049,51 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
     let identity = Identity::from_enrollment(key, &enrolled)?;
     let record = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        record["metadata"]["custom_key"] == "kept",
+        record.metadata_value("custom_key") == Some("kept"),
         "unknown metadata key was not retained"
     );
     Ok(())
 }
 
 pub(crate) async fn p_friendly_name_format(ctx: Context) -> anyhow::Result<()> {
-    let token = ctx
-        .target
+    let management = ctx.target.management();
+    let token = management
         .create_token(2, TOKEN_LIFETIME, Some("  {hostname}-{{ok}}-{token_name}-{fqdn}  "))
         .await?;
-    let record = ctx.target.token_record(&token.id).await?;
-    let name = field(&record.body, "name")?;
+    let name = management.token(&token.id).await?.name;
     let first_identity = identity(&ctx.target, &token, "hello").await?;
-    let first_name = field(
-        &identity_record(&ctx.target, &first_identity.identity_id).await?,
-        "friendlyName",
-    )?
-    .to_owned();
+    let first_name = identity_record(&ctx.target, &first_identity.identity_id)
+        .await?
+        .friendly_name;
     ensure!(
         first_name == format!("hello-{{ok}}-{name}-"),
         "friendly name formatting incorrect: {first_name}"
     );
-    let empty_token = ctx.target.create_token(1, TOKEN_LIFETIME, Some("{hostname}")).await?;
+    let empty_token = management.create_token(1, TOKEN_LIFETIME, Some("{hostname}")).await?;
     let empty = identity(&ctx.target, &empty_token, "").await?;
-    let empty_name = field(&identity_record(&ctx.target, &empty.identity_id).await?, "friendlyName")?.to_owned();
     ensure!(
-        empty_name == empty.identity_id,
+        identity_record(&ctx.target, &empty.identity_id).await?.friendly_name == empty.identity_id,
         "empty friendly name did not fall back to identity ID"
     );
-    let long_token = ctx.target.create_token(1, TOKEN_LIFETIME, Some("{hostname}")).await?;
+    let long_token = management.create_token(1, TOKEN_LIFETIME, Some("{hostname}")).await?;
     let long = identity(&ctx.target, &long_token, &"é".repeat(260)).await?;
-    let long_name = field(&identity_record(&ctx.target, &long.identity_id).await?, "friendlyName")?.to_owned();
     ensure!(
-        long_name.chars().count() == 255,
+        identity_record(&ctx.target, &long.identity_id)
+            .await?
+            .friendly_name
+            .chars()
+            .count()
+            == 255,
         "friendly name not limited to 255 characters"
     );
-    let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
-    let bad = ctx
-        .target
-        .admin(
-            Method::POST,
-            "/enrollment-tokens",
-            Some(&json!({
-                "name": "bad-format",
-                "maxUses": 1,
-                "expiresAt": expires,
-                "friendlyNameFormat": "{not_a_known_key}"
-            })),
-        )
-        .await?;
-    expect_status(&bad, 400)?;
-    let lone_brace = ctx
-        .target
-        .admin(
-            Method::POST,
-            "/enrollment-tokens",
-            Some(&json!({
-                "name": "bad-brace",
-                "maxUses": 1,
-                "expiresAt": expires,
-                "friendlyNameFormat": "prefix}"
-            })),
-        )
-        .await?;
-    expect_status(&lone_brace, 400)?;
+    for format in ["{not_a_known_key}", "prefix}"] {
+        let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
+        spec.friendly_name_format = Some(format.to_owned());
+        ensure!(
+            refusal(management.create_token_from(&spec).await)? == Refusal::Invalid,
+            "friendly-name format {format:?} was not rejected"
+        );
+    }
     Ok(())
 }
 
@@ -1225,12 +1129,15 @@ pub(crate) async fn p_identity_cannot_impersonate_another(ctx: Context) -> anyho
     let a_record = identity_record(&ctx.target, &a.identity_id).await?;
     let b_record = identity_record(&ctx.target, &b.identity_id).await?;
     ensure!(
-        a_record["metadata"]["hostname"] == "changed",
+        a_record.metadata_value("hostname") == Some("changed"),
         "A's renewal did not update A"
     );
-    ensure!(b_record["metadata"]["hostname"] == "bravo", "A modified B's metadata");
     ensure!(
-        b_record["certificates"] == b_before["certificates"],
+        b_record.metadata_value("hostname") == Some("bravo"),
+        "A modified B's metadata"
+    );
+    ensure!(
+        b_record.certificates == b_before.certificates,
         "A changed B's certificates"
     );
     Ok(())
@@ -1246,16 +1153,16 @@ pub(crate) async fn p_channel_hello_cannot_impersonate_another(ctx: Context) -> 
         .await?;
     let a_after_hello = identity_record(&ctx.target, &a.identity_id).await?;
     ensure!(
-        a_after_hello["metadata"]["hostname"] == "channel-a"
-            && a_after_hello["metadata"]["identity_id"] == b.identity_id,
+        a_after_hello.metadata_value("hostname") == Some("channel-a")
+            && a_after_hello.metadata_value("identity_id") == Some(&*b.identity_id),
         "A's Hello did not update A's metadata"
     );
     let b_after_hello = identity_record(&ctx.target, &b.identity_id).await?;
     ensure!(
-        b_after_hello["metadata"] == b_before["metadata"]
-            && b_after_hello["certificates"] == b_before["certificates"]
-            && b_after_hello["lastSeenAt"] == b_before["lastSeenAt"]
-            && b_after_hello["connected"] == b_before["connected"],
+        b_after_hello.metadata == b_before.metadata
+            && b_after_hello.certificates == b_before.certificates
+            && b_after_hello.last_seen_at == b_before.last_seen_at
+            && b_after_hello.connected == b_before.connected,
         "A's Hello modified B's identity"
     );
     Ok(())
@@ -1294,15 +1201,16 @@ pub(crate) async fn p_renew_digest_integrity(ctx: Context) -> anyhow::Result<()>
         .with_context(|| format!("{variant} tampering"))?;
         let after = identity_record(&ctx.target, &identity.identity_id).await?;
         ensure!(
-            after["metadata"] == before["metadata"]
-                && after["certificates"] == before["certificates"]
-                && after["lastSeenAt"] == before["lastSeenAt"],
+            after.metadata == before.metadata
+                && after.certificates == before.certificates
+                && after.last_seen_at == before.last_seen_at,
             "{variant} tampering changed identity state"
         );
         ensure!(
-            after["certificates"]
-                .as_array()
-                .is_some_and(|certs| certs.iter().all(|cert| cert["status"] != "pending")),
+            after
+                .certificates
+                .as_ref()
+                .is_some_and(|certs| certs.iter().all(|cert| cert.status != CertificateStatus::Pending)),
             "{variant} tampering created a pending certificate"
         );
     }
@@ -1329,8 +1237,8 @@ async fn renew_in_alternate_parameter_order(ctx: &Context) -> anyhow::Result<(Id
     identity.adopt_certificate(&reply.body["certificate_chain"], new_key)?;
     let renewed = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&renewed, &identity.thumbprint, "pending")
-            && renewed["metadata"]["hostname"] == "renewed-in-alternate-order",
+        renewed.has_certificate(&identity.thumbprint, CertificateStatus::Pending)
+            && renewed.metadata_value("hostname") == Some("renewed-in-alternate-order"),
         "alternate-order renew did not create a pending certificate and update metadata"
     );
     Ok((identity, renew_headers))
@@ -1376,11 +1284,12 @@ pub(crate) async fn p_renew_rejects_sha384_csr(ctx: Context) -> anyhow::Result<(
     )?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        before["metadata"] == after["metadata"]
-            && before["certificates"] == after["certificates"]
-            && after["certificates"]
-                .as_array()
-                .is_some_and(|certs| certs.iter().all(|cert| cert["status"] != "pending")),
+        before.metadata == after.metadata
+            && before.certificates == after.certificates
+            && after
+                .certificates
+                .as_ref()
+                .is_some_and(|certs| certs.iter().all(|cert| cert.status != CertificateStatus::Pending)),
         "SHA-384 CSR changed metadata or created a pending certificate"
     );
     Ok(())
@@ -1530,9 +1439,7 @@ pub(crate) async fn p_channel_duplicate_signature_metadata_rejected(ctx: Context
     }
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        after["connected"] == false
-            && after["metadata"] == before["metadata"]
-            && after["lastSeenAt"] == before["lastSeenAt"],
+        !after.connected && after.metadata == before.metadata && after.last_seen_at == before.last_seen_at,
         "duplicate signed channel metadata authenticated or changed identity state"
     );
     Ok(())
@@ -1570,8 +1477,8 @@ pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> any
     )?;
     let unchanged = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&unchanged, &old_thumb, "current")
-            && has_certificate(&unchanged, &identity.thumbprint, "pending"),
+        unchanged.has_certificate(&old_thumb, CertificateStatus::Current)
+            && unchanged.has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "cross-tag probes changed certificate statuses"
     );
     Ok(())
@@ -1595,11 +1502,9 @@ pub(crate) async fn p_confirm_signature_rejected_on_connect(ctx: Context) -> any
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], pending_key)?;
     ensure!(
-        has_certificate(
-            &identity_record(&ctx.target, &identity.identity_id).await?,
-            &identity.thumbprint,
-            "pending"
-        ),
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "confirm-to-Connect fixture did not issue a pending certificate"
     );
     let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
@@ -1614,9 +1519,9 @@ pub(crate) async fn p_confirm_signature_rejected_on_connect(ctx: Context) -> any
     )?;
     let unchanged = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        unchanged["connected"] == false
-            && has_certificate(&unchanged, &old_thumb, "current")
-            && has_certificate(&unchanged, &identity.thumbprint, "pending"),
+        !unchanged.connected
+            && unchanged.has_certificate(&old_thumb, CertificateStatus::Current)
+            && unchanged.has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "confirm-tagged channel probe changed certificate status or connected the identity"
     );
     Ok(())
@@ -1631,22 +1536,12 @@ async fn next_last_seen_second(ctx: &Context) -> anyhow::Result<()> {
     }
 }
 
-fn last_seen_at(record: &Value) -> anyhow::Result<Option<time::OffsetDateTime>> {
-    match record.get("lastSeenAt") {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::String(timestamp)) => Ok(Some(
-            time::OffsetDateTime::parse(timestamp, &Rfc3339).context("invalid lastSeenAt")?,
-        )),
-        Some(_) => anyhow::bail!("lastSeenAt must be an RFC 3339 string when present"),
-    }
-}
-
 pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Result<()> {
     let (_, mut identity) = issued(&ctx, "check-in").await?;
     let enrolled = identity.config.clone();
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let initial_seen = last_seen_at(&before)?.context("new identity has no lastSeenAt")?;
-    let created_at = time::OffsetDateTime::parse(field(&before, "createdAt")?, &Rfc3339)?;
+    let initial_seen = before.last_seen_at.context("new identity has no lastSeenAt")?;
+    let created_at = before.created_at.context("full identity omitted createdAt")?;
     ensure!(
         enrolled["revision"].as_u64().is_some() && created_at <= initial_seen,
         "enrollment omitted a config revision or the identity's initial lastSeenAt"
@@ -1658,24 +1553,15 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
         .await?;
     expect_status(&current, 200)?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
-    let current_seen = last_seen_at(&after)?.context("current check-in did not set lastSeenAt")?;
+    let current_seen = after.last_seen_at.context("current check-in did not set lastSeenAt")?;
     ensure!(
         current.body["config"] == enrolled
             && current.body["renewal_requested"] == false
-            && after["metadata"]["hostname"] == "current-check-in"
+            && after.metadata_value("hostname") == Some("current-check-in")
             && initial_seen < current_seen,
         "current-certificate check-in did not return config or refresh metadata and lastSeenAt"
     );
-    expect_status(
-        &ctx.target
-            .admin(
-                Method::POST,
-                &format!("/identities/{}/request-renewal", identity.identity_id),
-                None,
-            )
-            .await?,
-        202,
-    )?;
+    ctx.target.management().request_renewal(&identity.identity_id).await?;
     let key = KeyPair::generate()?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
@@ -1688,13 +1574,17 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
         .await?;
     expect_status(&pending, 200)?;
     let after_pending = identity_record(&ctx.target, &identity.identity_id).await?;
-    let pending_seen = last_seen_at(&after_pending)?.context("pending check-in did not set lastSeenAt")?;
+    let pending_seen = after_pending
+        .last_seen_at
+        .context("pending check-in did not set lastSeenAt")?;
     ensure!(
         pending.body["config"] == enrolled
             && pending.body["renewal_requested"] == true
-            && has_certificate(&after_pending, &identity.thumbprint, "pending")
-            && after_pending["metadata"]["hostname"] == "pending-check-in"
-            && last_seen_at(&before_pending)?.is_none_or(|previous| pending_seen > previous),
+            && after_pending.has_certificate(&identity.thumbprint, CertificateStatus::Pending)
+            && after_pending.metadata_value("hostname") == Some("pending-check-in")
+            && before_pending
+                .last_seen_at
+                .is_none_or(|previous| pending_seen > previous),
         "pending-certificate check-in did not return config or refresh metadata and lastSeenAt"
     );
     let before_invalid = after_pending;
@@ -1728,8 +1618,7 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
     )?;
     let after_invalid = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        after_invalid["metadata"] == before_invalid["metadata"]
-            && after_invalid["lastSeenAt"] == before_invalid["lastSeenAt"],
+        after_invalid.metadata == before_invalid.metadata && after_invalid.last_seen_at == before_invalid.last_seen_at,
         "invalid check-in changed metadata or lastSeenAt"
     );
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
@@ -1775,9 +1664,11 @@ pub(crate) async fn p_check_in_cross_tag_signatures_rejected(ctx: Context) -> an
         "signature_invalid",
     )?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["certificates"]
-            .as_array()
-            .is_some_and(|certs| certs.len() == 1 && certs[0]["status"] == "current"),
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .certificates
+            .as_ref()
+            .is_some_and(|certs| certs.len() == 1 && certs[0].status == CertificateStatus::Current),
         "cross-tag check-in probes changed certificate statuses"
     );
     Ok(())
@@ -2099,9 +1990,9 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
         .with_context(|| format!("wire-negative variant {variant}"))?;
         let after = identity_record(&ctx.target, &identity.identity_id).await?;
         ensure!(
-            after["metadata"] == original["metadata"]
-                && after["certificates"] == original["certificates"]
-                && after["lastSeenAt"] == original["lastSeenAt"],
+            after.metadata == original.metadata
+                && after.certificates == original.certificates
+                && after.last_seen_at == original.last_seen_at,
             "wire-negative variant {variant} changed identity state"
         );
     }
@@ -2380,11 +2271,7 @@ fn without_padding(value: &str) -> anyhow::Result<String> {
 
 pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
     let (_, mut identity) = issued(&ctx, "unchanged").await?;
-    let original_name = field(
-        &identity_record(&ctx.target, &identity.identity_id).await?,
-        "friendlyName",
-    )?
-    .to_owned();
+    let original_name = identity_record(&ctx.target, &identity.identity_id).await?.friendly_name;
     let new_key = KeyPair::generate()?;
     let reply = signed_renew(&ctx.target, &identity, &new_key, &json!({ "hostname": "updated" })).await?;
     expect_status(&reply, 200)?;
@@ -2410,15 +2297,15 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
     identity.adopt_certificate(&reply.body["certificate_chain"], new_key)?;
     let pending = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&pending, &identity.thumbprint, "pending"),
+        pending.has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "new certificate not pending"
     );
     ensure!(
-        pending["friendlyName"] == original_name,
+        pending.friendly_name == original_name,
         "friendly name changed on renewal"
     );
     ensure!(
-        pending["metadata"]["hostname"] == "updated",
+        pending.metadata_value("hostname") == Some("updated"),
         "renewal metadata not updated"
     );
     let replay_key = KeyPair {
@@ -2436,27 +2323,25 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
     )?;
     let replayed = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&replayed, &identity.thumbprint, "pending")
-            && replayed["metadata"]["hostname"] == "pending-replay",
+        replayed.has_certificate(&identity.thumbprint, CertificateStatus::Pending)
+            && replayed.metadata_value("hostname") == Some("pending-replay"),
         "replayed renew did not update metadata or promoted the pending certificate"
     );
     if ctx.mock() {
         ensure!(
-            last_seen_at(&replayed)? > last_seen_at(&pending)?,
+            replayed.last_seen_at > pending.last_seen_at,
             "replayed renew did not refresh lastSeenAt"
         );
     }
     ensure!(
-        replayed["friendlyName"] == original_name,
+        replayed.friendly_name == original_name,
         "replayed renew changed friendly name"
     );
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     ensure!(
-        has_certificate(
-            &identity_record(&ctx.target, &identity.identity_id).await?,
-            &identity.thumbprint,
-            "current"
-        ),
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .has_certificate(&identity.thumbprint, CertificateStatus::Current),
         "confirm did not promote the pending certificate"
     );
     Ok(())
@@ -2466,7 +2351,7 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     let (_, mut identity) = issued(&ctx, "confirm-idempotent").await?;
     let old_thumb = identity.thumbprint.clone();
     let original = identity_record(&ctx.target, &identity.identity_id).await?;
-    let initial_seen = last_seen_at(&original)?.context("new identity has no lastSeenAt")?;
+    let initial_seen = original.last_seen_at.context("new identity has no lastSeenAt")?;
     let original_events = if ctx.mock() {
         Some(ctx.target.events(&identity.identity_id).await?)
     } else {
@@ -2476,8 +2361,11 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let already_current = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        already_current["certificates"] == original["certificates"]
-            && initial_seen < last_seen_at(&already_current)?.context("current confirm omitted lastSeenAt")?,
+        already_current.certificates == original.certificates
+            && initial_seen
+                < already_current
+                    .last_seen_at
+                    .context("current confirm omitted lastSeenAt")?,
         "confirm with an already current certificate changed status or did not refresh lastSeenAt"
     );
     if let Some(events) = &original_events {
@@ -2496,10 +2384,10 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let promoted = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&promoted, &old_thumb, "retired")
-            && has_certificate(&promoted, &identity.thumbprint, "current")
-            && last_seen_at(&before_promotion)?.context("renew omitted lastSeenAt")?
-                < last_seen_at(&promoted)?.context("pending confirm omitted lastSeenAt")?,
+        promoted.has_certificate(&old_thumb, CertificateStatus::Retired)
+            && promoted.has_certificate(&identity.thumbprint, CertificateStatus::Current)
+            && before_promotion.last_seen_at.context("renew omitted lastSeenAt")?
+                < promoted.last_seen_at.context("pending confirm omitted lastSeenAt")?,
         "confirm did not promote pending, retire current or refresh lastSeenAt"
     );
     let events = if ctx.mock() {
@@ -2511,9 +2399,9 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let replayed = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        replayed["certificates"] == promoted["certificates"]
-            && last_seen_at(&promoted)?.context("confirmed identity omitted lastSeenAt")?
-                < last_seen_at(&replayed)?.context("confirm retry omitted lastSeenAt")?,
+        replayed.certificates == promoted.certificates
+            && promoted.last_seen_at.context("confirmed identity omitted lastSeenAt")?
+                < replayed.last_seen_at.context("confirm retry omitted lastSeenAt")?,
         "idempotent confirm retry changed certificate statuses or failed to refresh lastSeenAt"
     );
     if let Some(events) = events {
@@ -2539,7 +2427,7 @@ pub(crate) async fn p_confirm_retired_certificate_rejected(ctx: Context) -> anyh
     expect_status(&second, 200)?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&before, &first_thumb, "retired"),
+        before.has_certificate(&first_thumb, CertificateStatus::Retired),
         "replacement did not retire the first pending certificate"
     );
     let signed = first_key.sign_now(&first_thumb, "confirm", None);
@@ -2589,11 +2477,11 @@ pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context)
     )?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        after["certificates"] == before["certificates"]
-            && after["metadata"] == before["metadata"]
-            && after["lastSeenAt"] == before["lastSeenAt"]
-            && has_certificate(&after, &old_thumb, "current")
-            && has_certificate(&after, &identity.thumbprint, "pending"),
+        after.certificates == before.certificates
+            && after.metadata == before.metadata
+            && after.last_seen_at == before.last_seen_at
+            && after.has_certificate(&old_thumb, CertificateStatus::Current)
+            && after.has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "expired current or pending check-in/confirm changed identity state"
     );
     Ok(())
@@ -2651,15 +2539,15 @@ pub(crate) async fn p_confirm_faults_do_not_duplicate_promotion(ctx: Context) ->
     );
     let promoted = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&promoted, &old_thumb, "retired")
-            && has_certificate(&promoted, &identity.thumbprint, "current"),
+        promoted.has_certificate(&old_thumb, CertificateStatus::Retired)
+            && promoted.has_certificate(&identity.thumbprint, CertificateStatus::Current),
         "dropped confirm did not commit the promotion"
     );
     let events = ctx.target.events(&identity.identity_id).await?;
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let requests = ctx.target.requests(None).await?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["certificates"] == promoted["certificates"]
+        identity_record(&ctx.target, &identity.identity_id).await?.certificates == promoted.certificates
             && ctx.target.events(&identity.identity_id).await? == events
             && count(&requests, "confirm")? == 4
             && count(&requests, "confirm_retry_503")? == 1
@@ -2686,11 +2574,12 @@ pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Re
     let first = ctx.target.renew(&identity, &new_key, &json!({})).await;
     ensure!(first.is_err(), "fault did not drop the renew response");
     let pending = identity_record(&ctx.target, &identity.identity_id).await?;
-    let pending_certs = pending["certificates"]
-        .as_array()
+    let pending_certs = pending
+        .certificates
+        .as_ref()
         .context("missing certificates")?
         .iter()
-        .filter(|cert| cert["status"] == "pending")
+        .filter(|cert| cert.status == CertificateStatus::Pending)
         .collect::<Vec<_>>();
     ensure!(
         pending_certs.len() == 1,
@@ -2711,7 +2600,7 @@ pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Re
     expect_status(&retry, 200)?;
     let retry_thumbprint = thumbprint(retry.body["certificate_chain"][0].as_str().context("retry leaf")?)?;
     ensure!(
-        pending_certs[0]["thumbprint"] == retry_thumbprint,
+        pending_certs[0].thumbprint == retry_thumbprint,
         "renew retry issued a second certificate"
     );
     Ok(())
@@ -2731,11 +2620,13 @@ pub(crate) async fn p_mock_enroll_retry_barrier(ctx: Context) -> anyhow::Result<
         ctx.target.enroll(&token.text, &key, &json!({})).await.is_err(),
         "fault did not drop the enrollment response"
     );
-    let listing = ctx.target.identities_for(&token, "").await?;
-    expect_status(&listing, 200)?;
+    let listing = ctx
+        .target
+        .management()
+        .identities(&IdentityQuery::enrolled_with(&token))
+        .await?;
     ensure!(
-        count(&listing.body, "totalCount")? == 1
-            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+        listing.total_count == 1 && ctx.target.management().token(&token.id).await?.used_count == 1,
         "dropped enrollment did not commit once"
     );
     expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 503)?;
@@ -2752,11 +2643,14 @@ pub(crate) async fn p_mock_enroll_retry_barrier(ctx: Context) -> anyhow::Result<
     let replay = ctx.target.enroll(&token.text, &key, &json!({})).await?;
     expect_status(&replay, 200)?;
     ensure!(
-        replay.body["identity_id"] == listing.body["data"][0]["id"]
-            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+        replay.body["identity_id"] == listing.items[0].id
+            && ctx.target.management().token(&token.id).await?.used_count == 1,
         "replay created a second identity or consumed another use"
     );
-    ctx.target.revoke(field(&replay.body, "identity_id")?).await?;
+    ctx.target
+        .management()
+        .revoke(field(&replay.body, "identity_id")?)
+        .await?;
     expect_error(
         &ctx.target.enroll(&token.text, &key, &json!({})).await?,
         403,
@@ -2781,11 +2675,11 @@ pub(crate) async fn p_renew_second_pending_retires_first(ctx: Context) -> anyhow
     let second_thumb = thumbprint(second.body["certificate_chain"][0].as_str().context("second leaf")?)?;
     let current = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&current, &first_thumb, "retired"),
+        current.has_certificate(&first_thumb, CertificateStatus::Retired),
         "first pending certificate was not retired"
     );
     ensure!(
-        has_certificate(&current, &second_thumb, "pending"),
+        current.has_certificate(&second_thumb, CertificateStatus::Pending),
         "second pending certificate missing"
     );
     let old = Identity {
@@ -2877,7 +2771,7 @@ pub(crate) async fn p_renew_beyond_grace(ctx: Context) -> anyhow::Result<()> {
 
 pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "revoke").await?;
-    ctx.target.revoke(&identity.identity_id).await?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let reply = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
     expect_error(&reply, 403, "identity_revoked")?;
@@ -2913,7 +2807,7 @@ pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyho
 
 pub(crate) async fn p_revocation_blocks_connect(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "revoked-connect").await?;
-    ctx.target.revoke(&identity.identity_id).await?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
     let status = channel::open(&ctx.target, &identity)
         .await
         .err()
@@ -2930,10 +2824,13 @@ pub(crate) async fn p_revocation_blocks_connect(ctx: Context) -> anyhow::Result<
 
 pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> anyhow::Result<()> {
     let (token, identity) = issued(&ctx, "delete").await?;
-    let path = format!("/identities/{}", identity.identity_id);
-    expect_status(&ctx.target.admin(Method::DELETE, &path, None).await?, 409)?;
-    ctx.target.revoke(&identity.identity_id).await?;
-    expect_status(&ctx.target.admin(Method::DELETE, &path, None).await?, 204)?;
+    let management = ctx.target.management();
+    ensure!(
+        refusal(management.delete_identity(&identity.identity_id).await)? == Refusal::Conflict,
+        "an identity that is not revoked was deleted"
+    );
+    management.revoke(&identity.identity_id).await?;
+    management.delete_identity(&identity.identity_id).await?;
     let reply = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
     expect_error(&reply, 401, "identity_unknown")?;
     expect_error(&ctx.target.confirm(&identity).await?, 401, "identity_unknown")?;
@@ -2960,9 +2857,13 @@ pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> any
         "identity_unknown",
     )?;
     ensure!(
-        ctx.target.identity_record(&identity.identity_id).await?.status == 404
-            && count(&ctx.target.identities_for(&token, "").await?.body, "totalCount")? == 0
-            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 1,
+        ctx.target
+            .management()
+            .find_identity(&identity.identity_id)
+            .await?
+            .is_none()
+            && ctx.target.management().identity_count(&token).await? == 0
+            && ctx.target.management().token(&token.id).await?.used_count == 1,
         "deleted key was reintroduced by renew, confirm or check-in"
     );
     Ok(())
@@ -2970,13 +2871,8 @@ pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> any
 
 pub(crate) async fn p_deleted_certificate_cannot_connect(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "deleted-connect").await?;
-    ctx.target.revoke(&identity.identity_id).await?;
-    expect_status(
-        &ctx.target
-            .admin(Method::DELETE, &format!("/identities/{}", identity.identity_id), None)
-            .await?,
-        204,
-    )?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
+    ctx.target.management().delete_identity(&identity.identity_id).await?;
     let status = channel::open(&ctx.target, &identity)
         .await
         .err()
@@ -2996,9 +2892,9 @@ pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context)
     let mut stream = channel::open(&ctx.target, &identity).await?;
     let challenge = stream.challenge().await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    ensure!(before["connected"] == false, "identity connected before Hello");
+    ensure!(!before.connected, "identity connected before Hello");
     ensure!(
-        before["metadata"]["hostname"] == "initial",
+        before.metadata_value("hostname") == Some("initial"),
         "metadata updated before Hello"
     );
     if ctx.mock() {
@@ -3024,15 +2920,18 @@ pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context)
     );
     let server_time = payload.server_time.context("Welcome omitted server_time")?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
-    ensure!(after["connected"] == true, "identity not connected after Hello");
+    ensure!(after.connected, "identity not connected after Hello");
     ensure!(
-        after["metadata"]["hostname"] == "channel" && after["metadata"]["arch"] == "x86_64",
+        after.metadata_value("hostname") == Some("channel") && after.metadata_value("arch") == Some("x86_64"),
         "Hello metadata not stored"
     );
-    let after_time = time::OffsetDateTime::parse(field(&after, "lastSeenAt")?, &Rfc3339)?.unix_timestamp();
-    if let Some(before_time) = before["lastSeenAt"].as_str() {
+    let after_time = after
+        .last_seen_at
+        .context("Hello did not set lastSeenAt")?
+        .unix_timestamp();
+    if let Some(before_time) = before.last_seen_at {
         ensure!(
-            after_time > time::OffsetDateTime::parse(before_time, &Rfc3339)?.unix_timestamp(),
+            after_time > before_time.unix_timestamp(),
             "Hello did not advance lastSeenAt"
         );
     }
@@ -3048,18 +2947,9 @@ pub(crate) async fn p_channel_agent_message_refreshes_last_seen(ctx: Context) ->
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let seen_before = last_seen_at(&before)?.context("authenticated Hello omitted lastSeenAt")?;
+    let seen_before = before.last_seen_at.context("authenticated Hello omitted lastSeenAt")?;
     next_last_seen_second(&ctx).await?;
-    expect_status(
-        &ctx.target
-            .admin(
-                Method::POST,
-                &format!("/identities/{}/request-renewal", identity.identity_id),
-                None,
-            )
-            .await?,
-        202,
-    )?;
+    ctx.target.management().request_renewal(&identity.identity_id).await?;
     let request = stream.next().await?;
     ensure!(
         matches!(
@@ -3069,16 +2959,18 @@ pub(crate) async fn p_channel_agent_message_refreshes_last_seen(ctx: Context) ->
         "authenticated stream did not receive RenewRequested"
     );
     ensure!(
-        last_seen_at(&identity_record(&ctx.target, &identity.identity_id).await?)?
-            .context("admin request omitted lastSeenAt")?
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .last_seen_at
+            .context("management API request omitted lastSeenAt")?
             == seen_before,
-        "admin request or server push refreshed lastSeenAt before AgentMessage"
+        "management API request or server push refreshed lastSeenAt before AgentMessage"
     );
     stream.ack(&request).await?;
     let started = Instant::now();
     loop {
         let after = identity_record(&ctx.target, &identity.identity_id).await?;
-        if seen_before < last_seen_at(&after)?.context("AgentMessage omitted lastSeenAt")? {
+        if seen_before < after.last_seen_at.context("AgentMessage omitted lastSeenAt")? {
             break;
         }
         ensure!(
@@ -3123,9 +3015,9 @@ pub(crate) async fn p_handshake_barrier_holds_authentication(ctx: Context) -> an
     );
     let waiting = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        waiting["connected"] == false
-            && waiting["metadata"] == before["metadata"]
-            && waiting["lastSeenAt"] == before["lastSeenAt"]
+        !waiting.connected
+            && waiting.metadata == before.metadata
+            && waiting.last_seen_at == before.last_seen_at
             && ctx
                 .target
                 .events(&identity.identity_id)
@@ -3144,7 +3036,10 @@ pub(crate) async fn p_handshake_barrier_holds_authentication(ctx: Context) -> an
         "released Hello did not receive its Welcome"
     );
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["metadata"]["hostname"] == "after-pause"
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .metadata_value("hostname")
+            == Some("after-pause")
             && ctx.target.paused_stream_ids().await?.is_empty(),
         "handshake release did not authenticate and clear the barrier"
     );
@@ -3228,12 +3123,12 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
         channel::expect_status(&rejection, Code::Unauthenticated, "signature_invalid")
             .with_context(|| format!("variant {variant}"))?;
         let record = identity_record(&ctx.target, &identity.identity_id).await?;
-        ensure!(record["connected"] == false, "{variant} connected the identity");
+        ensure!(!record.connected, "{variant} connected the identity");
         ensure!(
-            record["lastSeenAt"] == initial["lastSeenAt"],
+            record.last_seen_at == initial.last_seen_at,
             "{variant} updated lastSeenAt"
         );
-        ensure!(record["metadata"] == initial["metadata"], "{variant} changed metadata");
+        ensure!(record.metadata == initial.metadata, "{variant} changed metadata");
         replay_headers = Some(stream.headers);
     }
     let replayed = channel::open_with_headers(&ctx.target, &identity, replay_headers.context("no opening headers")?)
@@ -3255,13 +3150,13 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
     let mut stream = channel::open(&ctx.target, &identity).await?;
     let challenge = stream.challenge().await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    ensure!(before["connected"] == false, "identity connected before Hello");
+    ensure!(!before.connected, "identity connected before Hello");
     let authenticated = if ctx.mock() {
         Some(count(&ctx.target.requests(None).await?, "authenticated_connects")?)
     } else {
         None
     };
-    ctx.target.revoke(&identity.identity_id).await?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
     let revoked = identity_record(&ctx.target, &identity.identity_id).await?;
     stream
         .send_hello(&identity, &challenge, &[("hostname", "after-revocation")], None)
@@ -3270,10 +3165,10 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
     channel::expect_status(&rejected, Code::PermissionDenied, "identity_revoked")?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        after["connected"] == false
-            && after["metadata"] == revoked["metadata"]
-            && after["certificates"] == revoked["certificates"]
-            && after["lastSeenAt"] == before["lastSeenAt"],
+        !after.connected
+            && after.metadata == revoked.metadata
+            && after.certificates == revoked.certificates
+            && after.last_seen_at == before.last_seen_at,
         "revoked stream changed identity state before Welcome"
     );
     if let Some(authenticated) = authenticated {
@@ -3298,9 +3193,9 @@ pub(crate) async fn p_channel_no_hello_timeout(ctx: Context) -> anyhow::Result<(
         "channel exceeded the ten-second Hello deadline"
     );
     let record = identity_record(&ctx.target, &identity.identity_id).await?;
-    ensure!(record["connected"] == false, "identity connected without Hello");
+    ensure!(!record.connected, "identity connected without Hello");
     ensure!(
-        record["lastSeenAt"] == initial["lastSeenAt"],
+        record.last_seen_at == initial.last_seen_at,
         "lastSeenAt updated without Hello"
     );
     Ok(())
@@ -3710,16 +3605,7 @@ pub(crate) async fn p_request_renewal_connected_and_on_connect(ctx: Context) -> 
     let (_, identity) = issued(&ctx, "push").await?;
     let mut connected = channel::open(&ctx.target, &identity).await?;
     connected.hello(&identity, &[("hostname", "push")]).await?;
-    expect_status(
-        &ctx.target
-            .admin(
-                Method::POST,
-                &format!("/identities/{}/request-renewal", identity.identity_id),
-                None,
-            )
-            .await?,
-        202,
-    )?;
+    ctx.target.management().request_renewal(&identity.identity_id).await?;
     let pushed = connected.next().await?;
     ensure!(
         matches!(
@@ -3756,7 +3642,9 @@ pub(crate) async fn p_request_renewal_connected_and_on_connect(ctx: Context) -> 
     );
     reconnect.ack(&repeated).await?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "request flag cleared too early"
     );
     Ok(())
@@ -3819,7 +3707,7 @@ pub(crate) async fn p_reconnect_push_and_handoff(ctx: Context) -> anyhow::Result
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["connected"] == true,
+        identity_record(&ctx.target, &identity.identity_id).await?.connected,
         "replacement did not preserve connection"
     );
     let events = ctx.target.events(&identity.identity_id).await?;
@@ -3844,18 +3732,11 @@ pub(crate) async fn p_reconnect_push_and_handoff(ctx: Context) -> anyhow::Result
 
 pub(crate) async fn p_request_renewal_flag_cleared_only_on_confirm(ctx: Context) -> anyhow::Result<()> {
     let (_, mut identity) = issued(&ctx, "offline-flag").await?;
-    expect_status(
-        &ctx.target
-            .admin(
-                Method::POST,
-                &format!("/identities/{}/request-renewal", identity.identity_id),
-                None,
-            )
-            .await?,
-        202,
-    )?;
+    ctx.target.management().request_renewal(&identity.identity_id).await?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "offline renewal request flag was not set"
     );
     let next_key = KeyPair::generate()?;
@@ -3863,7 +3744,9 @@ pub(crate) async fn p_request_renewal_flag_cleared_only_on_confirm(ctx: Context)
     expect_status(&pending, 200)?;
     identity.adopt_certificate(&pending.body["certificate_chain"], next_key)?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "flag cleared when pending certificate was merely issued"
     );
     let replay_key = KeyPair {
@@ -3872,13 +3755,15 @@ pub(crate) async fn p_request_renewal_flag_cleared_only_on_confirm(ctx: Context)
     };
     expect_status(&ctx.target.renew(&identity, &replay_key, &json!({})).await?, 200)?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "pending-signed renew cleared the request flag"
     );
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let current = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        current["renewalRequested"] == false && has_certificate(&current, &identity.thumbprint, "current"),
+        !current.renewal_requested && current.has_certificate(&identity.thumbprint, CertificateStatus::Current),
         "confirm did not clear the request flag"
     );
     Ok(())
@@ -3888,16 +3773,7 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
     let (_, mut identity) = issued(&ctx, "clear-flag").await?;
     let mut old = channel::open(&ctx.target, &identity).await?;
     old.hello(&identity, &[]).await?;
-    expect_status(
-        &ctx.target
-            .admin(
-                Method::POST,
-                &format!("/identities/{}/request-renewal", identity.identity_id),
-                None,
-            )
-            .await?,
-        202,
-    )?;
+    ctx.target.management().request_renewal(&identity.identity_id).await?;
     let request = old.next().await?;
     old.ack(&request).await?;
     let next_key = KeyPair::generate()?;
@@ -3906,13 +3782,15 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
     identity.adopt_certificate(&renewed.body["certificate_chain"], next_key)?;
     let pending = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        pending["renewalRequested"] == true && has_certificate(&pending, &identity.thumbprint, "pending"),
+        pending.renewal_requested && pending.has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "renewal request cleared before confirmation"
     );
     let mut new_stream = channel::open(&ctx.target, &identity).await?;
     let challenge = new_stream.challenge().await?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "opening headers cleared the renewal request"
     );
     let hello_id = new_stream.send_hello(&identity, &challenge, &[], None).await?;
@@ -3925,7 +3803,9 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
         "new certificate did not receive its correlated Welcome"
     );
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "pending certificate's Hello cleared the renewal request"
     );
     let still_requested = new_stream.next().await?;
@@ -3940,7 +3820,9 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
     new_stream.ack(&still_requested).await?;
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == false,
+        !identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "confirm did not clear the renewal request"
     );
     let mut additional = channel::open(&ctx.target, &identity).await?;
@@ -3958,11 +3840,11 @@ pub(crate) async fn p_revocation_closes_stream(ctx: Context) -> anyhow::Result<(
     let (_, identity) = issued(&ctx, "live-revoke").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
-    ctx.target.revoke(&identity.identity_id).await?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
     let status = stream.closing_status(Duration::from_secs(3)).await?;
     channel::expect_status(&status, Code::PermissionDenied, "identity_revoked")?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["connected"] == false,
+        !identity_record(&ctx.target, &identity.identity_id).await?.connected,
         "revoked stream still connected"
     );
     Ok(())
@@ -3973,14 +3855,11 @@ pub(crate) async fn p_stream_closes_at_not_after(ctx: Context) -> anyhow::Result
         ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     }
     let (_, identity) = issued(&ctx, "expires").await?;
-    let not_after = time::OffsetDateTime::parse(
-        field(
-            &identity_record(&ctx.target, &identity.identity_id).await?["certificate"],
-            "notAfter",
-        )?,
-        &Rfc3339,
-    )?
-    .unix_timestamp();
+    let not_after = identity_record(&ctx.target, &identity.identity_id)
+        .await?
+        .not_after()
+        .context("identity has no current certificate")?
+        .unix_timestamp();
     let mut stream = if ctx.mock() {
         let mut authenticated = None;
         for _ in 0..3 {
@@ -4040,7 +3919,7 @@ pub(crate) async fn p_stream_closes_at_not_after(ctx: Context) -> anyhow::Result
         let mut opened = channel::open(&ctx.target, &identity).await?;
         opened.hello(&identity, &[]).await?;
         ensure!(
-            identity_record(&ctx.target, &identity.identity_id).await?["connected"] == true,
+            identity_record(&ctx.target, &identity.identity_id).await?.connected,
             "stream was not authenticated just before expiry"
         );
         opened
@@ -4069,7 +3948,7 @@ pub(crate) async fn p_stream_closes_at_not_after(ctx: Context) -> anyhow::Result
         );
     }
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["connected"] == false,
+        !identity_record(&ctx.target, &identity.identity_id).await?.connected,
         "expired stream still connected"
     );
     Ok(())
@@ -4079,10 +3958,28 @@ pub(crate) async fn p_expired_certificate_refused_at_stream_open(ctx: Context) -
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     let (_, identity) = issued(&ctx, "expired-open").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let not_after = time::OffsetDateTime::parse(field(&before["certificate"], "notAfter")?, &Rfc3339)?.unix_timestamp();
-    ctx.target
-        .advance(not_after - chain_evaluation_time(&ctx).await?)
-        .await?;
+    let not_after = before
+        .not_after()
+        .context("identity has no current certificate")?
+        .unix_timestamp();
+    // CONTRACT.md §6 accepts a connect while `now <= notAfter`, and §7.4 closes a stream no later than `notAfter`, so an opening at `notAfter` gets its Challenge and then closes.
+    expect_status(
+        &ctx.target.control("time/freeze", &json!({ "now": not_after })).await?,
+        200,
+    )?;
+    let mut at_expiry = channel::open(&ctx.target, &identity).await?;
+    let _ = at_expiry.challenge().await?;
+    channel::expect_status(
+        &at_expiry.closing_status(Duration::from_millis(900)).await?,
+        Code::Unauthenticated,
+        "certificate_expired",
+    )?;
+    expect_status(
+        &ctx.target
+            .control("time/freeze", &json!({ "now": not_after + 1 }))
+            .await?,
+        200,
+    )?;
     let failure = channel::open(&ctx.target, &identity)
         .await
         .err()
@@ -4094,9 +3991,9 @@ pub(crate) async fn p_expired_certificate_refused_at_stream_open(ctx: Context) -
     )?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        after["connected"] == false
-            && after["metadata"] == before["metadata"]
-            && after["lastSeenAt"] == before["lastSeenAt"]
+        !after.connected
+            && after.metadata == before.metadata
+            && after.last_seen_at == before.last_seen_at
             && ctx
                 .target
                 .events(&identity.identity_id)
@@ -4112,11 +4009,14 @@ pub(crate) async fn p_challenged_stream_expires_on_advance(ctx: Context) -> anyh
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     let (_, identity) = issued(&ctx, "challenge-expiry").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let not_after = time::OffsetDateTime::parse(field(&before["certificate"], "notAfter")?, &Rfc3339)?.unix_timestamp();
+    let not_after = before
+        .not_after()
+        .context("identity has no current certificate")?
+        .unix_timestamp();
     let mut stream = channel::open(&ctx.target, &identity).await?;
     let _ = stream.challenge().await?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["connected"] == false,
+        !identity_record(&ctx.target, &identity.identity_id).await?.connected,
         "Challenge alone authenticated an identity"
     );
     let now = ctx.target.control("time/advance", &json!({ "secs": 0 })).await?.body["now"]
@@ -4127,9 +4027,7 @@ pub(crate) async fn p_challenged_stream_expires_on_advance(ctx: Context) -> anyh
     channel::expect_status(&status, Code::Unauthenticated, "certificate_expired")?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        after["connected"] == false
-            && after["metadata"] == before["metadata"]
-            && after["lastSeenAt"] == before["lastSeenAt"],
+        !after.connected && after.metadata == before.metadata && after.last_seen_at == before.last_seen_at,
         "expired unproven stream changed identity state"
     );
     let events = ctx.target.events(&identity.identity_id).await?;
@@ -4182,16 +4080,17 @@ pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow
     }
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&before, &old_thumb, "current")
-            && has_certificate(&before, &identity.thumbprint, "pending")
-            && before["connected"] == true,
+        before.has_certificate(&old_thumb, CertificateStatus::Current)
+            && before.has_certificate(&identity.thumbprint, CertificateStatus::Pending)
+            && before.connected,
         "renewal promoted the pending certificate before confirmation"
     );
     let mut unauthenticated = channel::open(&ctx.target, &identity).await?;
     let challenge = unauthenticated.challenge().await?;
     let opened = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&opened, &old_thumb, "current") && has_certificate(&opened, &identity.thumbprint, "pending"),
+        opened.has_certificate(&old_thumb, CertificateStatus::Current)
+            && opened.has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "opening headers promoted the pending certificate"
     );
     ensure!(
@@ -4212,13 +4111,13 @@ pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow
     channel::expect_status(&status, Code::Unauthenticated, "signature_invalid")?;
     let rejected = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&rejected, &old_thumb, "current")
-            && has_certificate(&rejected, &identity.thumbprint, "pending")
-            && rejected["connected"] == true,
+        rejected.has_certificate(&old_thumb, CertificateStatus::Current)
+            && rejected.has_certificate(&identity.thumbprint, CertificateStatus::Pending)
+            && rejected.connected,
         "bad proof promoted the pending certificate"
     );
     ensure!(
-        rejected["metadata"] == before["metadata"],
+        rejected.metadata == before.metadata,
         "bad proof changed identity metadata"
     );
     ensure!(
@@ -4231,9 +4130,9 @@ pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow
     pending_stream.hello(&identity, &[]).await?;
     let after_hello = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&after_hello, &old_thumb, "current")
-            && has_certificate(&after_hello, &identity.thumbprint, "pending")
-            && after_hello["connected"] == true,
+        after_hello.has_certificate(&old_thumb, CertificateStatus::Current)
+            && after_hello.has_certificate(&identity.thumbprint, CertificateStatus::Pending)
+            && after_hello.connected,
         "authenticated pending certificate promoted before confirm"
     );
     ensure!(
@@ -4258,8 +4157,8 @@ pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let confirmed = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&confirmed, &old_thumb, "retired")
-            && has_certificate(&confirmed, &identity.thumbprint, "current"),
+        confirmed.has_certificate(&old_thumb, CertificateStatus::Retired)
+            && confirmed.has_certificate(&identity.thumbprint, CertificateStatus::Current),
         "confirm did not promote pending and retire old current"
     );
     Ok(())
@@ -4291,9 +4190,9 @@ pub(crate) async fn p_confirm_reconnects_and_closes_retired_stream_at_grace(ctx:
     );
     let record = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        has_certificate(&record, &old_thumb, "retired")
-            && has_certificate(&record, &identity.thumbprint, "current")
-            && record["connected"] == true,
+        record.has_certificate(&old_thumb, CertificateStatus::Retired)
+            && record.has_certificate(&identity.thumbprint, CertificateStatus::Current)
+            && record.connected,
         "confirm did not promote while keeping the replacement stream connected"
     );
     let events = ctx.target.events(&identity.identity_id).await?;
@@ -4361,7 +4260,7 @@ pub(crate) async fn p_confirm_reconnects_and_closes_retired_stream_at_grace(ctx:
     ensure!(
         count(closed, "seq")? > count(reconnect, "seq")?
             && count(closed, "seq")? > count(new_auth, "seq")?
-            && identity_record(&ctx.target, &identity.identity_id).await?["connected"] == true,
+            && identity_record(&ctx.target, &identity.identity_id).await?.connected,
         "retired stream closed before reconnect or replacement authentication"
     );
     Ok(())
@@ -4376,7 +4275,7 @@ pub(crate) async fn p_rotation_publishes_both_roots_and_issues_from_new(ctx: Con
     ensure!(old.len() == 1, "expected exactly one root before rotation");
     let old_thumb = field(&old[0], "thumbprint")?.to_owned();
     let _ = issued(&ctx, "old-root").await?;
-    expect_status(&begin_rotation(&ctx).await?, 202)?;
+    begin_rotation(&ctx).await?;
     let roots = ctx.target.trust_anchor().await?;
     let published = roots["roots"].as_array().context("rotation roots")?;
     ensure!(published.len() == 2, "rotation did not publish exactly two roots");
@@ -4393,7 +4292,7 @@ pub(crate) async fn p_rotation_publishes_both_roots_and_issues_from_new(ctx: Con
     ensure!(new_root != old_thumb, "rotation issued from the old root");
     let record = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        record["certificate"]["issuer"] == new_root,
+        record.issuer() == Some(&*new_root),
         "identity issuer did not switch to new root"
     );
     finish_rotation(&ctx).await?;
@@ -4403,26 +4302,25 @@ pub(crate) async fn p_rotation_publishes_both_roots_and_issues_from_new(ctx: Con
 pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()> {
     let (_, mut a) = issued(&ctx, "old-a").await?;
     let (_, b) = issued(&ctx, "old-b").await?;
-    let old_root = field(
-        &identity_record(&ctx.target, &a.identity_id).await?["certificate"],
-        "issuer",
-    )?
-    .to_owned();
+    let old_root = identity_record(&ctx.target, &a.identity_id)
+        .await?
+        .issuer()
+        .context("identity has no current certificate")?
+        .to_owned();
     let expected = active_old_root_ids(&ctx, &old_root).await?;
     ensure!(
         expected.contains(&a.identity_id) && expected.contains(&b.identity_id),
         "new identities are missing from the full old-root listing"
     );
     let started = begin_rotation(&ctx).await?;
-    expect_status(&started, 202)?;
-    ensure!(started.body["phase"] == "rotating", "rotation not in progress");
+    ensure!(started.rotating(), "rotation not in progress");
     ensure!(
-        count(&started.body, "activeIdentitiesOnOldRoot")? == expected.len() as u64,
+        started.active_identities_on_old_root == expected.len() as u64,
         "rotation did not count all active old-root identities"
     );
     ensure!(
-        identity_record(&ctx.target, &a.identity_id).await?["renewalRequested"] == true
-            && identity_record(&ctx.target, &b.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &a.identity_id).await?.renewal_requested
+            && identity_record(&ctx.target, &b.identity_id).await?.renewal_requested,
         "rotation did not flag offline old-root identities"
     );
     let new_key = KeyPair::generate()?;
@@ -4431,18 +4329,18 @@ pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()>
     a.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
     expect_status(&ctx.target.confirm(&a).await?, 204)?;
     ensure!(
-        identity_record(&ctx.target, &a.identity_id).await?["renewalRequested"] == false,
+        !identity_record(&ctx.target, &a.identity_id).await?.renewal_requested,
         "confirm did not clear the rotation flag"
     );
-    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    let status = ctx.target.management().rotation().await?;
     ensure!(
-        count(&status.body, "activeIdentitiesOnOldRoot")? == active_old_root_ids(&ctx, &old_root).await?.len() as u64,
+        status.active_identities_on_old_root == active_old_root_ids(&ctx, &old_root).await?.len() as u64,
         "migration old-root count disagrees with all listing pages"
     );
-    ctx.target.revoke(&b.identity_id).await?;
-    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    ctx.target.management().revoke(&b.identity_id).await?;
+    let status = ctx.target.management().rotation().await?;
     ensure!(
-        count(&status.body, "activeIdentitiesOnOldRoot")? == active_old_root_ids(&ctx, &old_root).await?.len() as u64,
+        status.active_identities_on_old_root == active_old_root_ids(&ctx, &old_root).await?.len() as u64,
         "revoked identity remained in the old-root count"
     );
     finish_rotation(&ctx).await?;
@@ -4451,8 +4349,11 @@ pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()>
 
 pub(crate) async fn p_rotation_conflict_409(ctx: Context) -> anyhow::Result<()> {
     let _ = issued(&ctx, "rotation").await?;
-    expect_status(&begin_rotation(&ctx).await?, 202)?;
-    expect_status(&ctx.target.rotate(None).await?, 409)?;
+    begin_rotation(&ctx).await?;
+    ensure!(
+        refusal(ctx.target.management().rotate(RotationDeadline::Default).await)? == Refusal::Conflict,
+        "a second rotation started while one was running"
+    );
     finish_rotation(&ctx).await?;
     Ok(())
 }
@@ -4466,18 +4367,17 @@ pub(crate) async fn p_rotation_completes_early_when_last_identity_migrates(ctx: 
         "identities were not enrolled under the same old root"
     );
 
-    let started = ctx.target.rotate(None).await?;
-    expect_status(&started, 202)?;
+    let started = ctx.target.management().rotate(RotationDeadline::Default).await?;
     ensure!(
-        started.body["phase"] == "rotating" && count(&started.body, "activeIdentitiesOnOldRoot")? == 2,
+        started.rotating() && started.active_identities_on_old_root == 2,
         "rotation did not start with both old-root identities"
     );
-    let deadline = time::OffsetDateTime::parse(field(&started.body, "deadline")?, &Rfc3339)?.unix_timestamp();
+    let deadline = started.deadline()?.unix_timestamp();
     ensure!(
         deadline - chain_evaluation_time(&ctx).await? > 60,
         "rotation deadline is not far enough away to test early completion"
     );
-    let new_root = field(&started.body["newRoot"], "thumbprint")?.to_owned();
+    let new_root = started.new_root()?.to_owned();
     ensure!(new_root != old_root, "rotation did not create a new root");
 
     for (remaining, identity) in [(1, &mut first), (0, &mut last)] {
@@ -4487,40 +4387,40 @@ pub(crate) async fn p_rotation_completes_early_when_last_identity_migrates(ctx: 
         identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
         let pending = identity_record(&ctx.target, &identity.identity_id).await?;
         ensure!(
-            has_certificate(&pending, &identity.thumbprint, "pending") && pending["certificate"]["issuer"] == old_root,
+            pending.has_certificate(&identity.thumbprint, CertificateStatus::Pending)
+                && pending.issuer() == Some(&*old_root),
             "renewal migrated the identity before confirmation"
         );
-        let before_auth = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+        let before_auth = ctx.target.management().rotation().await?;
         ensure!(
-            before_auth.body["phase"] == "rotating"
-                && count(&before_auth.body, "activeIdentitiesOnOldRoot")? == remaining + 1,
+            before_auth.rotating() && before_auth.active_identities_on_old_root == remaining + 1,
             "rotation completed before the old-root certificate was replaced"
         );
 
         expect_status(&ctx.target.confirm(identity).await?, 204)?;
         let migrated = identity_record(&ctx.target, &identity.identity_id).await?;
         ensure!(
-            has_certificate(&migrated, &identity.thumbprint, "current")
-                && migrated["certificate"]["issuer"] == new_root,
+            migrated.has_certificate(&identity.thumbprint, CertificateStatus::Current)
+                && migrated.issuer() == Some(&*new_root),
             "confirm did not migrate the identity to the new root"
         );
-        let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+        let status = ctx.target.management().rotation().await?;
         let roots = ctx.target.trust_anchor().await?;
         let published = roots["roots"].as_array().context("published roots")?;
         ensure!(
-            count(&status.body, "activeIdentitiesOnOldRoot")? == remaining,
+            status.active_identities_on_old_root == remaining,
             "migration did not update the old-root identity count"
         );
         if remaining == 1 {
             ensure!(
-                status.body["phase"] == "rotating"
+                status.rotating()
                     && published.len() == 2
                     && published.iter().any(|root| root["thumbprint"] == old_root),
                 "rotation stopped while an old-root identity was still active"
             );
         } else {
             ensure!(
-                status.body["phase"] == "idle"
+                !status.rotating()
                     && published.len() == 1
                     && published[0]["thumbprint"] == new_root
                     && chain_evaluation_time(&ctx).await? < deadline - 30,
@@ -4537,22 +4437,17 @@ pub(crate) async fn p_rotation_completes_immediately_without_old_root_identities
     ensure!(original_roots.len() == 1, "expected one root before rotation");
     let old_root = field(&original_roots[0], "thumbprint")?;
 
-    let started = ctx.target.rotate(None).await?;
-    expect_status(&started, 202)?;
+    let started = ctx.target.management().rotate(RotationDeadline::Default).await?;
     ensure!(
-        started.body["phase"] == "idle"
-            && count(&started.body, "activeIdentitiesOnOldRoot")? == 0
-            && started.body.get("deadline").is_none()
-            && started.body.get("oldRoot").is_none()
-            && started.body.get("newRoot").is_none(),
+        !started.rotating()
+            && started.active_identities_on_old_root == 0
+            && started.deadline.is_none()
+            && started.old_root.is_none()
+            && started.new_root.is_none(),
         "rotation without old-root identities did not complete in the POST response"
     );
-    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
-    expect_status(&status, 200)?;
-    ensure!(
-        rotation_snapshot(&status.body)? == rotation_snapshot(&started.body)?,
-        "completed rotation did not remain idle"
-    );
+    let status = ctx.target.management().rotation().await?;
+    ensure!(status == started, "completed rotation did not remain idle");
     let roots = ctx.target.trust_anchor().await?;
     let published = roots["roots"].as_array().context("published roots")?;
     ensure!(
@@ -4569,7 +4464,7 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
     let (_, active) = issued(&ctx, "active-old-root").await?;
     let (_, revoked) = issued(&ctx, "revoked-old-root").await?;
-    ctx.target.revoke(&revoked.identity_id).await?;
+    ctx.target.management().revoke(&revoked.identity_id).await?;
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
     let (_, pending_only) = issued(&ctx, "expired-current-pending-old-root").await?;
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 240 })).await?;
@@ -4587,60 +4482,68 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
 
     let expired_record = identity_record(&ctx.target, &expired.identity_id).await?;
     ensure!(
-        expired_record["status"] == "expired",
+        expired_record.status == IdentityStatus::Expired,
         "fixture certificate did not expire"
     );
     let pending_record = identity_record(&ctx.target, &pending_only.identity_id).await?;
+    let current_expiry = pending_record
+        .not_after()
+        .context("identity has no current certificate")?;
     ensure!(
-        pending_record["status"] == "expired"
-            && pending_record["certificates"]
-                .as_array()
-                .is_some_and(|certs| certs.iter().any(|cert| cert["status"] == "pending")),
+        current_expiry.unix_timestamp() < chain_evaluation_time(&ctx).await?
+            && pending_record
+                .certificates
+                .as_ref()
+                .is_some_and(|certs| certs.iter().any(|cert| cert.status == CertificateStatus::Pending)),
         "fixture lacks a live pending old-root certificate with an expired current certificate"
+    );
+    // DVLS's intent, "Terminology": `active` holds "an unexpired current or pending certificate".
+    ensure!(
+        pending_record.status == IdentityStatus::Active,
+        "an identity with only an unexpired pending certificate is not active"
     );
     let both_record = identity_record(&ctx.target, &both.identity_id).await?;
     ensure!(
-        both_record["status"] == "active"
-            && both_record["certificates"]
-                .as_array()
-                .is_some_and(|certs| certs.iter().any(|cert| cert["status"] == "pending")),
+        both_record.status == IdentityStatus::Active
+            && both_record
+                .certificates
+                .as_ref()
+                .is_some_and(|certs| certs.iter().any(|cert| cert.status == CertificateStatus::Pending)),
         "fixture lacks both current and pending old-root certificates"
     );
-    let pending_cert = pending_record["certificates"]
-        .as_array()
+    let pending_cert = pending_record
+        .certificates
+        .as_ref()
         .context("pending identity certificates")?
         .iter()
-        .find(|cert| cert["status"] == "pending")
+        .find(|cert| cert.status == CertificateStatus::Pending)
         .context("pending old-root certificate")?;
-    let maximum = time::OffsetDateTime::parse(field(pending_cert, "notAfter")?, &Rfc3339)?;
+    let maximum = pending_cert.not_after;
     ensure!(
-        time::OffsetDateTime::parse(
-            field(
-                &identity_record(&ctx.target, &active.identity_id).await?["certificate"],
-                "notAfter"
-            )?,
-            &Rfc3339
-        )? < maximum,
+        identity_record(&ctx.target, &active.identity_id)
+            .await?
+            .not_after()
+            .context("identity has no current certificate")?
+            < maximum,
         "pending certificate does not determine the rotation maximum"
     );
-    let too_late = (maximum + time::Duration::seconds(1)).format(&Rfc3339)?;
-    expect_status(&ctx.target.rotate(Some(&too_late)).await?, 400)?;
+    let too_late = RotationDeadline::At(maximum + time::Duration::seconds(1));
     ensure!(
-        ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body["phase"] == "idle"
+        refusal(ctx.target.management().rotate(too_late).await)? == Refusal::Invalid,
+        "a deadline after the rotation maximum was accepted"
+    );
+    ensure!(
+        !ctx.target.management().rotation().await?.rotating()
             && ctx.target.trust_anchor().await?["roots"]
                 .as_array()
                 .is_some_and(|roots| roots.len() == 1),
         "rejected late deadline started a rotation"
     );
-    let started = ctx.target.rotate(None).await?;
-    expect_status(&started, 202)?;
+    let started = ctx.target.management().rotate(RotationDeadline::Default).await?;
     ensure!(
-        started.body["deadline"] == maximum.format(&Rfc3339)?
-            && count(&started.body, "activeIdentitiesOnOldRoot")? == 3
-            && active_old_root_ids(&ctx, field(&started.body["oldRoot"], "thumbprint")?)
-                .await?
-                .len()
-                == 3,
+        started.deadline == Some(maximum)
+            && started.active_identities_on_old_root == 3
+            && active_old_root_ids(&ctx, started.old_root()?).await?.len() == 3,
         "rotation maximum or identity count excluded a pending certificate or counted one identity twice"
     );
     Ok(())
@@ -4664,7 +4567,7 @@ pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: C
         isolated_old_root_fixture(&ctx, &original_root, &[&first.identity_id, &second.identity_id]).await
     {
         for id in [&first.identity_id, &second.identity_id] {
-            let _ = ctx.target.revoke(id).await;
+            let _ = ctx.target.management().revoke(id).await;
         }
         return Err(error);
     }
@@ -4672,14 +4575,11 @@ pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: C
     let mut candidate_dates = Vec::new();
     for id in [&first.identity_id, &second.identity_id] {
         let record = identity_record(&ctx.target, id).await?;
-        for cert in record["certificates"]
-            .as_array()
-            .context("own certificates are missing")?
-        {
-            let not_after = time::OffsetDateTime::parse(field(cert, "notAfter")?, &Rfc3339)?;
-            if matches!(field(cert, "status")?, "current" | "pending")
-                && field(cert, "issuer")? == original_root
-                && not_after.unix_timestamp() > now
+        for cert in record.certificates.as_ref().context("own certificates are missing")? {
+            let not_after = cert.not_after;
+            if matches!(cert.status, CertificateStatus::Current | CertificateStatus::Pending)
+                && cert.issuer == original_root
+                && not_after.unix_timestamp() >= now
             {
                 candidate_dates.push(not_after);
             }
@@ -4693,19 +4593,21 @@ pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: C
         .into_iter()
         .max()
         .context("own old-root maximum is missing")?;
-    let too_late = (maximum + time::Duration::days(1)).format(&Rfc3339)?;
-    expect_status(&ctx.target.rotate(Some(&too_late)).await?, 400)?;
-    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
-    expect_status(&status, 200)?;
+    let too_late = RotationDeadline::At(maximum + time::Duration::days(1));
     ensure!(
-        status.body["phase"] == "idle"
+        refusal(ctx.target.management().rotate(too_late).await)? == Refusal::Invalid,
+        "a deadline after the rotation maximum was accepted"
+    );
+    let status = ctx.target.management().rotation().await?;
+    ensure!(
+        !status.rotating()
             && ctx.target.trust_anchor().await?["roots"]
                 .as_array()
                 .is_some_and(|roots| roots.len() == 1 && roots[0]["thumbprint"] == original_root),
         "deadline above the maximum of own enrolled certificates started a rotation"
     );
     for id in [&first.identity_id, &second.identity_id] {
-        ctx.target.revoke(id).await?;
+        ctx.target.management().revoke(id).await?;
     }
     Ok(())
 }
@@ -4721,14 +4623,14 @@ pub(crate) async fn p_rotation_disposable_completes_before_future_deadline(ctx: 
     let (_, mut identity) = issued(&ctx, "disposable-early-completion").await?;
     let original = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        field(&original["certificate"], "issuer")? == old_root,
+        original.issuer().context("identity has no current certificate")? == old_root,
         "disposable fixture enrolled under a different root"
     );
     if let Err(error) = isolated_old_root_fixture(&ctx, &old_root, &[&identity.identity_id]).await {
-        let _ = ctx.target.revoke(&identity.identity_id).await;
+        let _ = ctx.target.management().revoke(&identity.identity_id).await;
         return Err(error);
     }
-    let maximum = time::OffsetDateTime::parse(field(&original["certificate"], "notAfter")?, &Rfc3339)?;
+    let maximum = original.not_after().context("identity has no current certificate")?;
     let now = chain_evaluation_time(&ctx).await?;
     let deadline = maximum.min(time::OffsetDateTime::from_unix_timestamp(
         now + i64::try_from(ctx.dvls_rotation_window_secs)?,
@@ -4737,33 +4639,31 @@ pub(crate) async fn p_rotation_disposable_completes_before_future_deadline(ctx: 
         deadline.unix_timestamp() > now + 2,
         "own certificate expires before an early-completion probe"
     );
-    let started = ctx.target.rotate(Some(&deadline.format(&Rfc3339)?)).await?;
-    expect_status(&started, 202)?;
+    let started = ctx.target.management().rotate(RotationDeadline::At(deadline)).await?;
     ensure!(
-        started.body["phase"] == "rotating" && count(&started.body, "activeIdentitiesOnOldRoot")? == 1,
+        started.rotating() && started.active_identities_on_old_root == 1,
         "disposable target does not have exactly one active old-root identity"
     );
-    let new_root = field(&started.body["newRoot"], "thumbprint")?.to_owned();
+    let new_root = started.new_root()?.to_owned();
     let new_key = KeyPair::generate()?;
     let renewed = ctx.target.renew(&identity, &new_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
-    let status = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
-    expect_status(&status, 200)?;
+    let status = ctx.target.management().rotation().await?;
     let published = ctx.target.trust_anchor().await?;
     ensure!(
         old_root != new_root
-            && status.body["phase"] == "idle"
-            && count(&status.body, "activeIdentitiesOnOldRoot")? == 0
+            && !status.rotating()
+            && status.active_identities_on_old_root == 0
             && chain_evaluation_time(&ctx).await? < deadline.unix_timestamp()
             && published["roots"]
                 .as_array()
                 .is_some_and(|roots| roots.len() == 1 && roots[0]["thumbprint"] == new_root)
-            && identity_record(&ctx.target, &identity.identity_id).await?["certificate"]["issuer"] == new_root,
+            && identity_record(&ctx.target, &identity.identity_id).await?.issuer() == Some(&*new_root),
         "rotation did not complete when the last old-root identity migrated before its deadline"
     );
-    ctx.target.revoke(&identity.identity_id).await?;
+    ctx.target.management().revoke(&identity.identity_id).await?;
     Ok(())
 }
 
@@ -4771,30 +4671,26 @@ pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
     let (_, expired) = issued(&ctx, "grace-old-root").await?;
     let old_root = thumbprint(expired.certificate_chain.last().context("missing old root")?)?;
-    let expiry = time::OffsetDateTime::parse(
-        field(
-            &identity_record(&ctx.target, &expired.identity_id).await?["certificate"],
-            "notAfter",
-        )?,
-        &Rfc3339,
-    )?
-    .unix_timestamp();
+    let expiry = identity_record(&ctx.target, &expired.identity_id)
+        .await?
+        .not_after()
+        .context("identity has no current certificate")?
+        .unix_timestamp();
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 600 })).await?;
     let (_, revoked) = issued(&ctx, "long-lived-old-root").await?;
 
-    let started = ctx.target.rotate(None).await?;
-    expect_status(&started, 202)?;
+    let started = ctx.target.management().rotate(RotationDeadline::Default).await?;
     ensure!(
-        started.body["phase"] == "rotating" && count(&started.body, "activeIdentitiesOnOldRoot")? == 2,
+        started.rotating() && started.active_identities_on_old_root == 2,
         "rotation did not count both old-root identities"
     );
-    let deadline = time::OffsetDateTime::parse(field(&started.body, "deadline")?, &Rfc3339)?.unix_timestamp();
-    let new_root = field(&started.body["newRoot"], "thumbprint")?;
-    ctx.target.revoke(&revoked.identity_id).await?;
-    let remaining = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    let deadline = started.deadline()?.unix_timestamp();
+    let new_root = started.new_root()?;
+    ctx.target.management().revoke(&revoked.identity_id).await?;
+    let remaining = ctx.target.management().rotation().await?;
     ensure!(
-        remaining.body["phase"] == "rotating"
-            && count(&remaining.body, "activeIdentitiesOnOldRoot")? == 1
+        remaining.rotating()
+            && remaining.active_identities_on_old_root == 1
             && ctx.target.trust_anchor().await?["roots"]
                 .as_array()
                 .is_some_and(|roots| roots.len() == 2),
@@ -4806,25 +4702,27 @@ pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context
         until_expiry > 0,
         "old-root certificate expired before the boundary test"
     );
-    ctx.target.advance(until_expiry).await?;
+    // A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), so it expires one second after `notAfter`.
+    ctx.target.advance(until_expiry + 1).await?;
     let now = chain_evaluation_time(&ctx).await?;
     ensure!(
-        now >= expiry && now < expiry + 60 && now < deadline - 60,
+        now > expiry && now < expiry + 60 && now < deadline - 60,
         "certificate is not expired within grace and before the rotation deadline"
     );
-    let completed = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
+    let completed = ctx.target.management().rotation().await?;
     let roots = ctx.target.trust_anchor().await?;
     ensure!(
-        completed.body["phase"] == "idle"
-            && count(&completed.body, "activeIdentitiesOnOldRoot")? == 0
+        !completed.rotating()
+            && completed.active_identities_on_old_root == 0
             && roots["roots"]
                 .as_array()
                 .is_some_and(|entries| entries.len() == 1 && entries[0]["thumbprint"] == new_root),
         "expiry of the last active old-root certificate did not finish the rotation early"
     );
+    // DVLS's intent, "Terminology": `grace` holds "no unexpired certificate but one within renewal grace".
     ensure!(
-        identity_record(&ctx.target, &expired.identity_id).await?["status"] == "expired",
-        "old-root certificate was not expired before grace renewal"
+        identity_record(&ctx.target, &expired.identity_id).await?.status == IdentityStatus::Grace,
+        "an identity whose only certificate expired within renewal grace is not in grace"
     );
 
     let new_key = KeyPair::generate()?;
@@ -4840,7 +4738,7 @@ pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context
     ensure!(
         thumbprint(chain.last().context("new root")?)? == new_root
             && new_root != old_root
-            && ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body["phase"] == "idle",
+            && !ctx.target.management().rotation().await?.rotating(),
         "expired old-root certificate did not renew onto the new root after early completion"
     );
     Ok(())
@@ -4849,44 +4747,41 @@ pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context
 pub(crate) async fn p_rotation_completes_early_at_certificate_expiry_via_freeze(ctx: Context) -> anyhow::Result<()> {
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
     let (_, short) = issued(&ctx, "freeze-short-old-root").await?;
-    let expiry = time::OffsetDateTime::parse(
-        field(
-            &identity_record(&ctx.target, &short.identity_id).await?["certificate"],
-            "notAfter",
-        )?,
-        &Rfc3339,
-    )?
-    .unix_timestamp();
+    let expiry = identity_record(&ctx.target, &short.identity_id)
+        .await?
+        .not_after()
+        .context("identity has no current certificate")?
+        .unix_timestamp();
     let old_root = thumbprint(short.certificate_chain.last().context("missing old root")?)?;
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 180 })).await?;
     let (_, long) = issued(&ctx, "freeze-long-old-root").await?;
-    let started = ctx.target.rotate(None).await?;
-    expect_status(&started, 202)?;
+    let started = ctx.target.management().rotate(RotationDeadline::Default).await?;
     ensure!(
-        started.body["phase"] == "rotating" && count(&started.body, "activeIdentitiesOnOldRoot")? == 2,
+        started.rotating() && started.active_identities_on_old_root == 2,
         "rotation did not start with two active old-root certificates"
     );
-    let deadline = time::OffsetDateTime::parse(field(&started.body, "deadline")?, &Rfc3339)?.unix_timestamp();
-    ctx.target.revoke(&long.identity_id).await?;
+    let deadline = started.deadline()?.unix_timestamp();
+    ctx.target.management().revoke(&long.identity_id).await?;
 
-    let before = ctx.target.control("time/freeze", &json!({ "now": expiry - 1 })).await?;
-    expect_status(&before, 200)?;
-    ensure!(
-        before.body["published_roots"]
-            .as_array()
-            .is_some_and(|roots| roots.len() == 2)
-            && ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body["activeIdentitiesOnOldRoot"] == 1,
-        "old root was removed before the last certificate expired"
-    );
+    // A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), so the rotation completes one second after `notAfter`.
     let at_expiry = ctx.target.control("time/freeze", &json!({ "now": expiry })).await?;
     expect_status(&at_expiry, 200)?;
     ensure!(
-        expiry < deadline
-            && at_expiry.body["published_roots"]
+        at_expiry.body["published_roots"]
+            .as_array()
+            .is_some_and(|roots| roots.len() == 2)
+            && ctx.target.management().rotation().await?.active_identities_on_old_root == 1,
+        "old root was removed while the last certificate was unexpired at its notAfter"
+    );
+    let expired = ctx.target.control("time/freeze", &json!({ "now": expiry + 1 })).await?;
+    expect_status(&expired, 200)?;
+    ensure!(
+        expiry + 1 < deadline
+            && expired.body["published_roots"]
                 .as_array()
                 .is_some_and(|roots| roots.len() == 1 && roots[0] != old_root)
-            && ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body["phase"] == "idle",
-        "freezing the clock at certificate expiry did not complete the rotation immediately"
+            && !ctx.target.management().rotation().await?.rotating(),
+        "freezing the clock just after certificate expiry did not complete the rotation immediately"
     );
     Ok(())
 }
@@ -4914,7 +4809,7 @@ pub(crate) async fn p_rotation_push_rate_survives_deadline(ctx: Context) -> anyh
         });
     }
     let start = Instant::now();
-    expect_status(&ctx.target.rotate(Some("now")).await?, 202)?;
+    ctx.target.management().rotate(RotationDeadline::Now).await?;
     let first = tokio::time::timeout(Duration::from_millis(500), pushes.join_next())
         .await?
         .context("first rotation push missing")???;
@@ -4960,13 +4855,12 @@ pub(crate) async fn p_rotation_deadline_removes_old_root(ctx: Context) -> anyhow
         let now = ctx.target.control("time/advance", &json!({ "secs": 0 })).await?.body["now"]
             .as_i64()
             .context("mock clock is missing")?;
-        let deadline = time::OffsetDateTime::from_unix_timestamp(now + 20)?.format(&Rfc3339)?;
-        ctx.target.rotate(Some(&deadline)).await?
+        let deadline = time::OffsetDateTime::from_unix_timestamp(now + 20)?;
+        ctx.target.management().rotate(RotationDeadline::At(deadline)).await?
     } else {
         begin_rotation(&ctx).await?
     };
-    expect_status(&started, 202)?;
-    let deadline = time::OffsetDateTime::parse(field(&started.body, "deadline")?, &Rfc3339)?.unix_timestamp();
+    let deadline = started.deadline()?.unix_timestamp();
     ensure!(
         ctx.target.trust_anchor().await?["roots"]
             .as_array()
@@ -5046,7 +4940,7 @@ pub(crate) async fn p_rotation_deadline_removes_old_root(ctx: Context) -> anyhow
 pub(crate) async fn p_rotation_old_root_cert_renewable_after_deadline(ctx: Context) -> anyhow::Result<()> {
     let (_, old) = issued(&ctx, "still-allowed").await?;
     let original_root = thumbprint(old.certificate_chain.last().context("missing old root")?)?;
-    expect_status(&ctx.target.rotate(Some("now")).await?, 202)?;
+    ctx.target.management().rotate(RotationDeadline::Now).await?;
     ctx.target.advance(1).await?;
     let roots = ctx.target.trust_anchor().await?;
     ensure!(
@@ -5092,13 +4986,13 @@ pub(crate) async fn p_rotation_emergency_deadline(ctx: Context) -> anyhow::Resul
     let old_thumb = field(&roots[0], "thumbprint")?.to_owned();
     let old_record = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        old_record["status"] == "active"
-            && old_record["connected"] == false
-            && old_record["certificate"]["issuer"] == old_thumb
-            && has_certificate(&old_record, &identity.thumbprint, "current"),
+        old_record.status == IdentityStatus::Active
+            && !old_record.connected
+            && old_record.issuer() == Some(&*old_thumb)
+            && old_record.has_certificate(&identity.thumbprint, CertificateStatus::Current),
         "emergency rotation fixture lacks an active, unconnected old-root identity"
     );
-    expect_status(&ctx.target.rotate(Some("now")).await?, 202)?;
+    ctx.target.management().rotate(RotationDeadline::Now).await?;
     let started = Instant::now();
     loop {
         let after = ctx.target.trust_anchor().await?;
@@ -5114,10 +5008,10 @@ pub(crate) async fn p_rotation_emergency_deadline(ctx: Context) -> anyhow::Resul
     }
     let remaining = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        remaining["status"] == "active"
-            && remaining["connected"] == false
-            && remaining["certificate"]["issuer"] == old_thumb
-            && has_certificate(&remaining, &identity.thumbprint, "current"),
+        remaining.status == IdentityStatus::Active
+            && !remaining.connected
+            && remaining.issuer() == Some(&*old_thumb)
+            && remaining.has_certificate(&identity.thumbprint, CertificateStatus::Current),
         "emergency rotation changed the old-root identity rather than only publishing the new root"
     );
     Ok(())
@@ -5127,7 +5021,7 @@ pub(crate) async fn p_rotation_request_renewal_pushed(ctx: Context) -> anyhow::R
     let (_, identity) = issued(&ctx, "rotation-push").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
-    expect_status(&begin_rotation(&ctx).await?, 202)?;
+    begin_rotation(&ctx).await?;
     let push = stream
         .next_with_timeout(if ctx.mock() {
             Duration::from_secs(5)
@@ -5152,14 +5046,11 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
     let (_, mut identity) = issued(&ctx, "pending-only-old-root").await?;
     let old_root = thumbprint(identity.certificate_chain.last().context("missing old root")?)?;
-    let current_expiry = time::OffsetDateTime::parse(
-        field(
-            &identity_record(&ctx.target, &identity.identity_id).await?["certificate"],
-            "notAfter",
-        )?,
-        &Rfc3339,
-    )?
-    .unix_timestamp();
+    let current_expiry = identity_record(&ctx.target, &identity.identity_id)
+        .await?
+        .not_after()
+        .context("identity has no current certificate")?
+        .unix_timestamp();
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
     let key = KeyPair::generate()?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
@@ -5173,19 +5064,22 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
     stream.hello(&identity, &[]).await?;
     let until_expiry = current_expiry - chain_evaluation_time(&ctx).await?;
     ensure!(until_expiry > 0, "current certificate expired before the boundary test");
-    ctx.target.advance(until_expiry).await?;
+    // A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), so the current certificate expires one second after `notAfter`.
+    ctx.target.advance(until_expiry + 1).await?;
     let record = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
-        record["status"] == "expired"
-            && record["connected"] == true
-            && has_certificate(&record, &identity.thumbprint, "pending"),
+        record.connected && record.has_certificate(&identity.thumbprint, CertificateStatus::Pending),
         "pending-only old-root stream was not connected after current expiry"
     );
-    let started = ctx.target.rotate(None).await?;
-    expect_status(&started, 202)?;
+    // DVLS's intent, "Terminology": `active` holds "an unexpired current or pending certificate".
     ensure!(
-        started.body["phase"] == "rotating"
-            && count(&started.body, "activeIdentitiesOnOldRoot")? == 1
+        record.status == IdentityStatus::Active,
+        "an identity with only an unexpired pending certificate is not active"
+    );
+    let started = ctx.target.management().rotate(RotationDeadline::Default).await?;
+    ensure!(
+        started.rotating()
+            && started.active_identities_on_old_root == 1
             && ctx.target.trust_anchor().await?["roots"]
                 .as_array()
                 .is_some_and(|roots| roots.len() == 2),
@@ -5202,7 +5096,9 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
     );
     stream.ack(&push).await?;
     ensure!(
-        identity_record(&ctx.target, &identity.identity_id).await?["renewalRequested"] == true,
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .renewal_requested,
         "rotation did not persist the request-renewal flag for the pending-only identity"
     );
     Ok(())
@@ -5266,7 +5162,7 @@ pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx
         );
         for (id, created_at) in rows {
             walked.push(id);
-            timestamps.push(time::OffsetDateTime::parse(&created_at, &Rfc3339)?);
+            timestamps.push(created_at);
         }
     }
     ensure!(
@@ -5285,21 +5181,25 @@ pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx
 }
 
 /// Reads one two-row page of the token's identities as `(id, createdAt)` pairs, with the reported total.
-async fn listing_page(target: &Target, token: &Token, page: u64) -> anyhow::Result<(Vec<(String, String)>, u64)> {
-    let reply = target
-        .identities_for(token, &format!("&pageSize=2&pageNumber={page}&view=full"))
+async fn listing_page(
+    target: &Target,
+    token: &Token,
+    page: u64,
+) -> anyhow::Result<(Vec<(String, time::OffsetDateTime)>, u64)> {
+    let listing = target
+        .management()
+        .identities(&IdentityQuery::enrolled_with(token).full().page(page, 2))
         .await?;
-    expect_status(&reply, 200)?;
-    let rows = reply.body["data"]
-        .as_array()
-        .context("listing page has no data array")?
-        .iter()
-        .map(|row| Ok((field(row, "id")?.to_owned(), field(row, "createdAt")?.to_owned())))
+    let rows = listing
+        .items
+        .into_iter()
+        .map(|row| Ok((row.id, row.created_at.context("full listing omitted createdAt")?)))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    Ok((rows, count(&reply.body, "totalCount")?))
+    Ok((rows, listing.total_count))
 }
 
 pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::Result<()> {
+    let management = ctx.target.management();
     let decoy_token = token(&ctx, 1).await?;
     let token = token(&ctx, 5).await?;
     let active_key = KeyPair::generate()?;
@@ -5315,132 +5215,114 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
     let revoked = identity(&ctx.target, &token, "other-host").await?;
     let decoy = identity(&ctx.target, &decoy_token, "decoy-host").await?;
     ensure!(
-        count(&ctx.target.identities_for(&decoy_token, "").await?.body, "totalCount")? == 1,
+        management.identity_count(&decoy_token).await? == 1,
         "decoy token identity not listed"
     );
     ensure!(
-        identity_record(&ctx.target, &decoy.identity_id).await?["id"] == decoy.identity_id,
+        identity_record(&ctx.target, &decoy.identity_id).await?.id == decoy.identity_id,
         "decoy identity missing"
     );
-    ctx.target.revoke(&revoked.identity_id).await?;
-    let path = format!("/identities/{}", active.identity_id);
-    let renamed = ctx
-        .target
-        .admin(
-            Method::PATCH,
-            &path,
-            Some(&json!({ "friendlyName": "Filter-Host-Renamed" })),
-        )
-        .await?;
-    expect_status(&renamed, 200)?;
+    management.revoke(&revoked.identity_id).await?;
+    let renamed = management.rename(&active.identity_id, "Filter-Host-Renamed").await?;
     ensure!(
-        renamed.body["friendlyName"] == "Filter-Host-Renamed",
+        renamed.friendly_name == "Filter-Host-Renamed",
         "identity rename was not persisted"
     );
     for invalid in ["".to_owned(), "x".repeat(256)] {
-        expect_status(
-            &ctx.target
-                .admin(Method::PATCH, &path, Some(&json!({ "friendlyName": invalid })))
-                .await?,
-            400,
-        )?;
+        ensure!(
+            refusal(management.rename(&active.identity_id, &invalid).await)? == Refusal::Invalid,
+            "friendly name of {} characters was accepted",
+            invalid.chars().count()
+        );
     }
-    let summary = ctx
-        .target
-        .identities_for(&token, "&view=summary&metadata=hostname,arch&status=active")
+    let of_token = || IdentityQuery::enrolled_with(&token);
+    let summary = management
+        .identities(
+            &of_token()
+                .summary()
+                .metadata(&["hostname", "arch"])
+                .status(IdentityStatus::Active),
+        )
         .await?;
-    expect_status(&summary, 200)?;
+    let [row] = summary.items.as_slice() else {
+        anyhow::bail!("active filter returned {} identities", summary.items.len());
+    };
     ensure!(
-        count(&summary.body, "totalCount")? == 1,
-        "active filter returned wrong count"
+        summary.total_count == 1 && row.id == active.identity_id,
+        "active filter selected wrong identity"
     );
-    let row = &summary.body["data"][0];
-    ensure!(row["id"] == active.identity_id, "active filter selected wrong identity");
     ensure!(
-        row["friendlyName"] == "Filter-Host-Renamed",
+        row.friendly_name == "Filter-Host-Renamed",
         "summary did not reflect renamed identity"
     );
     ensure!(
-        row["metadata"]["hostname"] == "filter-host",
+        row.metadata_value("hostname") == Some("filter-host"),
         "metadata subset missing hostname"
     );
     ensure!(
-        row["metadata"]["arch"].is_null(),
-        "metadata subset included an absent key"
+        row.metadata_value("arch").is_none() && row.metadata_value("os_name").is_none(),
+        "metadata subset included a key outside the subset"
     );
-    ensure!(row["certificates"].is_null(), "summary included full certificates");
-    let full = ctx.target.identities_for(&token, "&view=full&status=revoked").await?;
-    expect_status(&full, 200)?;
+    ensure!(row.certificates.is_none(), "summary included full certificates");
+    let full = management
+        .identities(&of_token().full().status(IdentityStatus::Revoked))
+        .await?;
     ensure!(
-        count(&full.body, "totalCount")? == 1,
-        "revoked filter returned wrong count"
+        full.total_count == 1
+            && full.items.len() == 1
+            && full.items[0].id == revoked.identity_id
+            && full.items[0].status == IdentityStatus::Revoked,
+        "revoked filter selected wrong identity or status"
     );
+    ensure!(full.items[0].certificates.is_some(), "full view has no certificates");
+    let by_name = management.identities(&of_token().name_contains("FILTER-HOST")).await?;
     ensure!(
-        full.body["data"][0]["id"] == revoked.identity_id,
-        "revoked filter selected wrong identity"
-    );
-    ensure!(
-        full.body["data"][0]["status"] == "revoked",
-        "revoked filter reported the wrong status"
-    );
-    ensure!(
-        full.body["data"][0]["certificates"].is_array(),
-        "full view has no certificates"
-    );
-    let by_name = ctx.target.identities_for(&token, "&q=FILTER-HOST").await?;
-    expect_status(&by_name, 200)?;
-    ensure!(
-        count(&by_name.body, "totalCount")? == 1 && by_name.body["data"][0]["id"] == active.identity_id,
+        by_name.total_count == 1 && by_name.items.first().is_some_and(|row| row.id == active.identity_id),
         "friendly-name substring filter failed"
     );
-    let all_metadata = ctx
-        .target
-        .identities_for(&token, "&view=full&metadata=hostname&status=active")
+    let all_metadata = management
+        .identities(&of_token().full().metadata(&["hostname"]).status(IdentityStatus::Active))
         .await?;
-    expect_status(&all_metadata, 200)?;
     ensure!(
-        all_metadata.body["data"][0]["metadata"]["os_name"] == "Linux",
+        all_metadata
+            .items
+            .first()
+            .is_some_and(|row| row.metadata_value("os_name") == Some("Linux")),
         "full view filtered metadata despite requesting all fields"
     );
-    let issuer = field(&summary.body["data"][0]["certificate"], "issuer")?;
-    let by_issuer = ctx.target.identities_for(&token, &format!("&issuer={issuer}")).await?;
-    expect_status(&by_issuer, 200)?;
+    let issuer = row.issuer().context("summary omitted the current certificate")?;
+    let by_issuer = management.identities(&of_token().issuer(issuer)).await?;
     ensure!(
-        count(&by_issuer.body, "totalCount")? == 2
-            && by_issuer.body["data"].as_array().is_some_and(|rows| {
-                rows.iter().map(|row| row["id"].as_str()).collect::<Vec<_>>()
-                    == [Some(active.identity_id.as_str()), Some(revoked.identity_id.as_str())]
-            }),
+        by_issuer.total_count == 2
+            && by_issuer.items.iter().map(|row| row.id.as_str()).collect::<Vec<_>>()
+                == [active.identity_id.as_str(), revoked.identity_id.as_str()],
         "issuer filter returned incorrect identity IDs"
     );
-    let paged = ctx.target.identities_for(&token, "&pageSize=1&pageNumber=2").await?;
-    expect_status(&paged, 200)?;
+    let paged = management.identities(&of_token().page(2, 1)).await?;
     ensure!(
-        count(&paged.body, "pageSize")? == 1
-            && count(&paged.body, "currentPage")? == 2
-            && count(&paged.body, "totalCount")? == 2
-            && count(&paged.body, "totalPages")? == 2
-            && paged.body["data"][0]["id"] == revoked.identity_id,
-        "DVLS page fields incorrect"
+        paged.size == 1
+            && paged.number == 2
+            && paged.total_count == 2
+            && paged.total_pages == 2
+            && paged.items.len() == 1
+            && paged.items[0].id == revoked.identity_id,
+        "page fields incorrect"
     );
-    let beyond = ctx.target.identities_for(&token, "&pageSize=1&pageNumber=3").await?;
-    expect_status(&beyond, 200)?;
-    ensure!(
-        beyond.body["data"].as_array().is_some_and(Vec::is_empty),
-        "page beyond the last page was not empty"
-    );
-    for query in ["&pageSize=0", "&pageSize=101", "&pageNumber=0"] {
-        expect_status(&ctx.target.identities_for(&token, query).await?, 400)?;
+    let beyond = management.identities(&of_token().page(3, 1)).await?;
+    ensure!(beyond.items.is_empty(), "page beyond the last page was not empty");
+    for (number, size) in [(1, 0), (1, dvls::MAX_PAGE_SIZE + 1), (0, 1)] {
+        ensure!(
+            refusal(management.identities(&of_token().page(number, size)).await)? == Refusal::Invalid,
+            "page {number} of size {size} was accepted"
+        );
     }
     if ctx.mock() {
-        let huge = ctx
-            .target
-            .identities_for(&token, "&pageSize=100&pageNumber=18446744073709551615")
+        let huge = management
+            .identities(&of_token().page(u64::MAX, dvls::MAX_PAGE_SIZE))
             .await?;
-        expect_status(&huge, 200)?;
         ensure!(
-            huge.body["data"].as_array().is_some_and(Vec::is_empty),
-            "huge pageNumber overflowed instead of returning an empty page"
+            huge.items.is_empty(),
+            "huge page number overflowed instead of returning an empty page"
         );
     }
     expect_status(
@@ -5457,181 +5339,106 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
         200,
     )?;
     let observed = identity_record(&ctx.target, &active.identity_id).await?;
-    let instant = last_seen_at(&observed)?.context("check-in did not set lastSeenAt for filtering")?;
-    let after = (instant - time::Duration::seconds(1)).format(&Rfc3339)?;
-    let before = (instant + time::Duration::seconds(1)).format(&Rfc3339)?;
+    let instant = observed
+        .last_seen_at
+        .context("check-in did not set lastSeenAt for filtering")?;
+    let after = instant - time::Duration::seconds(1);
+    let before = instant + time::Duration::seconds(1);
     for (query, expected) in [
-        (format!("&status=active&lastSeenAfter={after}"), true),
-        (format!("&status=active&lastSeenBefore={before}"), true),
-        (format!("&status=active&lastSeenAfter={before}"), false),
+        (of_token().status(IdentityStatus::Active).last_seen_after(after), true),
+        (of_token().status(IdentityStatus::Active).last_seen_before(before), true),
+        (of_token().status(IdentityStatus::Active).last_seen_after(before), false),
     ] {
-        let result = ctx.target.identities_for(&token, &query).await?;
-        expect_status(&result, 200)?;
-        let rows = result.body["data"].as_array().context("lastSeen filter page")?;
+        let result = management.identities(&query).await?;
         ensure!(
-            count(&result.body, "totalCount")? == u64::from(expected)
+            result.total_count == u64::from(expected)
                 && if expected {
-                    rows.len() == 1 && rows[0]["id"] == active.identity_id && rows[0]["status"] == "active"
+                    result.items.len() == 1
+                        && result.items[0].id == active.identity_id
+                        && result.items[0].status == IdentityStatus::Active
                 } else {
-                    rows.is_empty()
+                    result.items.is_empty()
                 },
-            "lastSeen filter returned the wrong identity IDs or statuses for {query}"
+            "last-seen filter returned the wrong identity IDs or statuses"
         );
     }
     if ctx.mock() {
-        ctx.target.advance(91 * 24 * 3600).await?;
-        let expired = ctx.target.identities_for(&token, "&status=expired").await?;
-        expect_status(&expired, 200)?;
-        ensure!(
-            count(&expired.body, "totalCount")? == 1
-                && expired.body["data"][0]["id"] == active.identity_id
-                && expired.body["data"][0]["status"] == "expired",
-            "expired status filter selected wrong identity ID or status"
-        );
+        // The active identity's current and pending certificates both last 90 days, so its renewal grace lasts 90 more.
+        for (days, status) in [(91, IdentityStatus::Grace), (90, IdentityStatus::Expired)] {
+            ctx.target.advance(days * 24 * 3600).await?;
+            let filtered = management.identities(&of_token().status(status)).await?;
+            ensure!(
+                filtered.total_count == 1
+                    && filtered.items.len() == 1
+                    && filtered.items[0].id == active.identity_id
+                    && filtered.items[0].status == status,
+                "{status:?} status filter selected wrong identity ID or status"
+            );
+        }
     }
     Ok(())
 }
 
-pub(crate) async fn p_admin_tokens_crud_and_states(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow::Result<()> {
+    let management = ctx.target.management();
     let token = token(&ctx, 1).await?;
-    let record = ctx.target.token_record(&token.id).await?;
-    expect_status(&record, 200)?;
+    let record = management.token(&token.id).await?;
     ensure!(
-        record.body["state"] == "active" && count(&record.body, "usedCount")? == 0,
+        record.state == TokenState::Active && record.used_count == 0,
         "new token not active"
     );
     ensure!(
-        record.body["token"].is_null(),
-        "token secret leaked in its admin record"
+        !record.exposes_token,
+        "token secret leaked in its management API record"
     );
-    let first_page = ctx
-        .target
-        .admin(Method::GET, "/enrollment-tokens?pageNumber=1&pageSize=100", None)
-        .await?;
-    expect_status(&first_page, 200)?;
-    let pages = count(&first_page.body, "totalPages")?;
-    let mut found = first_page.body["data"]
-        .as_array()
-        .context("token page")?
-        .iter()
-        .any(|record| record["id"] == token.id);
-    for page in 2..=pages {
-        if found {
-            break;
-        }
-        let listed = ctx
-            .target
-            .admin(
-                Method::GET,
-                &format!("/enrollment-tokens?pageNumber={page}&pageSize=100"),
-                None,
-            )
-            .await?;
-        expect_status(&listed, 200)?;
-        found = listed.body["data"]
-            .as_array()
-            .context("token page")?
-            .iter()
-            .any(|record| record["id"] == token.id);
-    }
-    ensure!(found, "created token not listed");
-    let _ = identity(&ctx.target, &token, "exhaust").await?;
-    let record = ctx.target.token_record(&token.id).await?;
     ensure!(
-        record.body["state"] == "exhausted" && count(&record.body, "usedCount")? == 1,
+        management
+            .all_tokens()
+            .await?
+            .iter()
+            .any(|record| record.id == token.id),
+        "created token not listed"
+    );
+    let _ = identity(&ctx.target, &token, "exhaust").await?;
+    let record = management.token(&token.id).await?;
+    ensure!(
+        record.state == TokenState::Exhausted && record.used_count == 1,
         "exhausted state incorrect"
     );
     if ctx.mock() {
-        let expiring = ctx.target.create_token(1, Duration::from_secs(2), None).await?;
+        let expiring = management.create_token(1, Duration::from_secs(2), None).await?;
         ctx.target.advance(4).await?;
         ensure!(
-            ctx.target.token_record(&expiring.id).await?.body["state"] == "expired",
+            management.token(&expiring.id).await?.state == TokenState::Expired,
             "expired token did not enter expired state"
         );
     }
-    expect_status(
-        &ctx.target
-            .admin(Method::DELETE, &format!("/enrollment-tokens/{}", token.id), None)
-            .await?,
-        204,
-    )?;
-    expect_status(&ctx.target.token_record(&token.id).await?, 404)?;
-    let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
+    management.delete_token(&token.id).await?;
+    ensure!(
+        refusal(management.token(&token.id).await)? == Refusal::NotFound,
+        "deleted token is still readable"
+    );
+    // DVLS's intent, "Enrollment tokens": a token allows from 1 to 1,000,000 uses and expires at most 365 days ahead.
     for uses in [0, 1_000_001] {
-        let invalid = ctx
-            .target
-            .admin(
-                Method::POST,
-                "/enrollment-tokens",
-                Some(&json!({ "name": "invalid", "maxUses": uses, "expiresAt": expires })),
-            )
-            .await?;
-        expect_status(&invalid, 400)?;
-    }
-    let too_late = (time::OffsetDateTime::now_utc() + time::Duration::days(366)).format(&Rfc3339)?;
-    expect_status(
-        &ctx.target
-            .admin(
-                Method::POST,
-                "/enrollment-tokens",
-                Some(&json!({ "name": "too-late", "maxUses": 1, "expiresAt": too_late })),
-            )
-            .await?,
-        400,
-    )?;
-    Ok(())
-}
-
-pub(crate) async fn p_admin_requires_auth(ctx: Context) -> anyhow::Result<()> {
-    assert_admin_routes_denied(&ctx, None, 401).await?;
-    let invalid = format!("invalid-admin-{}", uuid::Uuid::new_v4());
-    assert_admin_routes_denied(&ctx, Some(&invalid), 401).await?;
-    Ok(())
-}
-
-async fn assert_token_name_absent(target: &Target, name: &str) -> anyhow::Result<()> {
-    let mut page = 1;
-    loop {
-        let listing = target
-            .admin(
-                Method::GET,
-                &format!("/enrollment-tokens?pageNumber={page}&pageSize=100"),
-                None,
-            )
-            .await?;
-        expect_status(&listing, 200)?;
+        let spec = TokenSpec::new(uses, TOKEN_LIFETIME)?;
         ensure!(
-            listing.body["data"]
-                .as_array()
-                .context("token listing is missing data")?
-                .iter()
-                .all(|record| record["name"] != name),
-            "unauthorized token creation changed server state"
+            refusal(management.create_token_from(&spec).await)? == Refusal::Invalid,
+            "token with {uses} uses was accepted"
         );
-        if page >= count(&listing.body, "totalPages")? {
-            break;
-        }
-        page += 1;
     }
+    let spec = TokenSpec::new(1, Duration::from_secs(366 * 24 * 3600))?;
+    ensure!(
+        refusal(management.create_token_from(&spec).await)? == Refusal::Invalid,
+        "token expiring after 365 days was accepted"
+    );
     Ok(())
 }
 
-fn known_response_fields(value: &Value, required: &[&str], optional: &[&str]) -> anyhow::Result<Value> {
-    let object = value.as_object().context("response is not a JSON object")?;
-    let mut fields = serde_json::Map::new();
-    for &name in required {
-        let field = object
-            .get(name)
-            .with_context(|| format!("response omitted required {name}"))?;
-        ensure!(!field.is_null(), "required response field {name} is null");
-        fields.insert(name.to_owned(), field.clone());
-    }
-    for &name in optional {
-        if let Some(field) = object.get(name).filter(|field| !field.is_null()) {
-            fields.insert(name.to_owned(), field.clone());
-        }
-    }
-    Ok(Value::Object(fields))
+pub(crate) async fn p_management_requires_auth(ctx: Context) -> anyhow::Result<()> {
+    assert_management_routes_denied(&ctx, None, |_| true, Refusal::Unauthenticated).await?;
+    let invalid = format!("invalid-management-{}", uuid::Uuid::new_v4());
+    assert_management_routes_denied(&ctx, Some(&invalid), |_| true, Refusal::Unauthenticated).await?;
+    Ok(())
 }
 
 fn trust_anchor_snapshot(value: &Value) -> anyhow::Result<Vec<Value>> {
@@ -5641,99 +5448,24 @@ fn trust_anchor_snapshot(value: &Value) -> anyhow::Result<Vec<Value>> {
     let mut known = roots
         .iter()
         .map(|root| {
+            let mut known = serde_json::Map::new();
             for name in ["certificate", "thumbprint", "not_before", "not_after"] {
-                let _ = field(root, name)?;
+                known.insert(name.to_owned(), json!(field(root, name)?));
             }
-            known_response_fields(root, &["certificate", "thumbprint", "not_before", "not_after"], &[])
+            Ok(Value::Object(known))
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     known.sort_by(|left, right| left["thumbprint"].as_str().cmp(&right["thumbprint"].as_str()));
     Ok(known)
 }
 
-fn rotation_snapshot(value: &Value) -> anyhow::Result<Value> {
-    let _ = field(value, "phase")?;
-    let _ = count(value, "activeIdentitiesOnOldRoot")?;
-    let mut known = known_response_fields(value, &["phase", "activeIdentitiesOnOldRoot"], &["deadline"])?;
-    if known.get("deadline").is_some() {
-        let _ = field(&known, "deadline")?;
-    }
-    for name in ["oldRoot", "newRoot"] {
-        if let Some(root) = value.get(name).filter(|root| !root.is_null()) {
-            let _ = field(root, "thumbprint")?;
-            let _ = field(root, "notAfter")?;
-            known[name] = known_response_fields(root, &["thumbprint", "notAfter"], &[])?;
-        }
-    }
-    Ok(known)
-}
-
-fn token_record_snapshot(value: &Value) -> anyhow::Result<Value> {
-    known_response_fields(
-        value,
-        &[
-            "id",
-            "name",
-            "maxUses",
-            "usedCount",
-            "expiresAt",
-            "state",
-            "createdAt",
-            "createdBy",
-        ],
-        &["friendlyNameFormat", "config"],
-    )
-}
-
-fn identity_snapshot(value: &Value) -> anyhow::Result<Value> {
-    let mut known = known_response_fields(
-        value,
-        &[
-            "id",
-            "friendlyName",
-            "status",
-            "connected",
-            "metadata",
-            "certificates",
-            "enrollmentToken",
-            "createdAt",
-            "renewalRequested",
-        ],
-        &["lastSeenAt", "certificate", "revokedAt"],
-    )?;
-    if let Some(certificate) = value.get("certificate").filter(|certificate| !certificate.is_null()) {
-        known["certificate"] = known_response_fields(certificate, &["notAfter", "issuer"], &[])?;
-    }
-    if let Some(certificates) = value.get("certificates") {
-        known["certificates"] = Value::Array(
-            certificates
-                .as_array()
-                .context("identity certificates are not an array")?
-                .iter()
-                .map(|certificate| {
-                    known_response_fields(
-                        certificate,
-                        &[
-                            "thumbprint",
-                            "serialNumber",
-                            "notBefore",
-                            "notAfter",
-                            "issuer",
-                            "status",
-                        ],
-                        &[],
-                    )
-                })
-                .collect::<anyhow::Result<Vec<_>>>()?,
-        );
-    }
-    if let Some(token) = value.get("enrollmentToken") {
-        known["enrollmentToken"] = known_response_fields(token, &["id", "name"], &[])?;
-    }
-    Ok(known)
-}
-
-async fn assert_admin_routes_denied(ctx: &Context, bearer: Option<&str>, expected: u16) -> anyhow::Result<()> {
+/// Checks that `credential` gets `expected` from every management API route that `selected` keeps, without any state change.
+async fn assert_management_routes_denied(
+    ctx: &Context,
+    credential: Option<&str>,
+    selected: impl Fn(Permission) -> bool,
+    expected: Refusal,
+) -> anyhow::Result<()> {
     let token = token(ctx, 1).await?;
     let identity = identity(&ctx.target, &token, "untouched").await?;
     let mut stream = if ctx.mock() && ctx.channel_available {
@@ -5743,83 +5475,51 @@ async fn assert_admin_routes_denied(ctx: &Context, bearer: Option<&str>, expecte
     } else {
         None
     };
-    let before = identity_snapshot(&identity_record(&ctx.target, &identity.identity_id).await?)?;
-    let token_record_before = ctx.target.token_record(&token.id).await?;
-    expect_status(&token_record_before, 200)?;
-    let token_record_before = token_record_snapshot(&token_record_before.body)?;
+    let management = ctx.target.management();
+    let identity_before = identity_record(&ctx.target, &identity.identity_id).await?;
+    let token_before = management.token(&token.id).await?;
     let roots_before = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
-    let rotation_before = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
-    expect_status(&rotation_before, 200)?;
-    let rotation_before = rotation_snapshot(&rotation_before.body)?;
+    let rotation_before = management.rotation().await?;
     let events_before = if ctx.mock() {
         Some(ctx.target.events(&identity.identity_id).await?)
     } else {
         None
     };
-    let expires = (time::OffsetDateTime::now_utc() + time::Duration::hours(1)).format(&Rfc3339)?;
-    let unauthorized_name = format!("unauthorized-{}", uuid::Uuid::new_v4());
-    let create = serde_json::to_vec(&json!({
-        "name": &unauthorized_name,
-        "maxUses": 1,
-        "expiresAt": expires,
-    }))?;
-    let rename_payload = serde_json::to_vec(&json!({ "friendlyName": "unauthorized" }))?;
-    let rotation = if ctx.mock() {
-        serde_json::to_vec(&json!({ "deadline": "now" }))?
-    } else {
-        // A malformed request cannot rotate a non-disposable DVLS target even if authorization is broken.
-        b"{".to_vec()
-    };
-    let token_path = format!("/enrollment-tokens/{}", token.id);
-    let identity_path = format!("/identities/{}", identity.identity_id);
-    let routes = [
-        (Method::POST, "/enrollment-tokens".to_owned(), Some(create.as_slice())),
-        (Method::GET, "/enrollment-tokens".to_owned(), None),
-        (Method::GET, token_path.clone(), None),
-        (Method::DELETE, token_path, None),
-        (Method::GET, format!("/identities?enrollmentTokenId={}", token.id), None),
-        (Method::GET, identity_path.clone(), None),
-        (Method::PATCH, identity_path.clone(), Some(rename_payload.as_slice())),
-        (Method::DELETE, identity_path.clone(), None),
-        (Method::POST, format!("{identity_path}/revoke"), None),
-        (Method::POST, format!("{identity_path}/request-renewal"), None),
-        (Method::GET, "/ca/rotation".to_owned(), None),
-        (Method::POST, "/ca/rotation".to_owned(), Some(rotation.as_slice())),
-    ];
-    for (method, route, body) in routes {
-        let route_path = format!("/api/v3/agent-identity{route}");
+    let mut create = TokenSpec::new(1, TOKEN_LIFETIME)?;
+    create.name = format!("unauthorized-{}", uuid::Uuid::new_v4());
+    // On a non-disposable DVLS target, the rotation request is malformed so that it cannot rotate even if authorization is broken.
+    let routes = dvls::routes(&token.id, &identity.identity_id, &create, "unauthorized", !ctx.mock())?;
+    let denied = ctx.target.management_as(credential);
+    for route in routes.iter().filter(|route| selected(route.permission)) {
         ensure!(
-            ctx.target
-                .send(method.clone(), &route_path, body, bearer, None)
+            refusal(denied.call(route).await)? == expected,
+            "unauthorized {route} was not refused as {expected:?}"
+        );
+        ensure!(
+            management.token(&token.id).await? == token_before,
+            "unauthorized {route} changed the enrollment token"
+        );
+        ensure!(
+            management
+                .all_tokens()
                 .await?
-                .status
-                == expected,
-            "unauthorized {method} {route} was not denied with HTTP {expected}"
+                .iter()
+                .all(|record| record.name != create.name),
+            "unauthorized {route} created a token"
         );
-        let after_token = ctx.target.token_record(&token.id).await?;
-        expect_status(&after_token, 200)?;
         ensure!(
-            token_record_snapshot(&after_token.body)? == token_record_before,
-            "unauthorized {method} {route} changed the enrollment token"
+            identity_record(&ctx.target, &identity.identity_id).await? == identity_before,
+            "unauthorized {route} changed the identity"
         );
-        if method == Method::POST && route == "/enrollment-tokens" {
-            assert_token_name_absent(&ctx.target, &unauthorized_name).await?;
-        }
         ensure!(
-            identity_snapshot(&identity_record(&ctx.target, &identity.identity_id).await?)? == before,
-            "unauthorized {method} {route} changed the identity"
-        );
-        let after_rotation = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
-        expect_status(&after_rotation, 200)?;
-        ensure!(
-            rotation_snapshot(&after_rotation.body)? == rotation_before
+            management.rotation().await? == rotation_before
                 && trust_anchor_snapshot(&ctx.target.trust_anchor().await?)? == roots_before,
-            "unauthorized {method} {route} changed CA rotation state"
+            "unauthorized {route} changed CA rotation state"
         );
         if let Some(events) = &events_before {
             ensure!(
                 ctx.target.events(&identity.identity_id).await? == *events,
-                "unauthorized {method} {route} changed the channel or certificate events"
+                "unauthorized {route} changed the channel or certificate events"
             );
         }
     }
@@ -5828,58 +5528,58 @@ async fn assert_admin_routes_denied(ctx: &Context, bearer: Option<&str>, expecte
             tokio::time::timeout(Duration::from_millis(100), stream.stream.message())
                 .await
                 .is_err(),
-            "unauthorized admin route pushed a channel message"
+            "unauthorized management API request pushed a channel message"
         );
     }
     Ok(())
 }
 
-pub(crate) async fn p_admin_permission_denied(ctx: Context) -> anyhow::Result<()> {
-    let unprivileged = ctx
-        .unprivileged_admin_token
-        .as_deref()
-        .context("unprivileged admin fixture missing")?;
-    assert_admin_routes_denied(&ctx, Some(unprivileged), 403).await?;
+/// DVLS's intent, "Management API": "A request without the required permission is refused with `403`."
+///
+/// Each route group is called with a credential lacking that group's permission; on the mock it holds every other permission, so none stands in for the missing one.
+pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Result<()> {
+    for permission in Permission::ALL {
+        let credential = dvls::credential_lacking(&ctx, permission)
+            .ok_or(crate::Incomplete("requires --unprivileged-admin-token"))?;
+        assert_management_routes_denied(
+            &ctx,
+            Some(&credential),
+            |required| required == permission,
+            Refusal::Forbidden,
+        )
+        .await
+        .with_context(|| format!("credential lacking {permission:?}"))?;
+    }
     Ok(())
 }
 
-pub(crate) async fn p_rotation_admin_write_requires_auth(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Result<()> {
     ensure!(
         ctx.mock() || ctx.disposable_dvls_target,
         "rotation authorization requires a disposable DVLS target"
     );
     let before = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
-    let rotation = ctx.target.admin(Method::GET, "/ca/rotation", None).await?;
-    expect_status(&rotation, 200)?;
-    let rotation = rotation_snapshot(&rotation.body)?;
-    let body = serde_json::to_vec(&json!({ "deadline": "now" }))?;
-    let invalid = format!("invalid-admin-{}", uuid::Uuid::new_v4());
-    for (bearer, expected) in [
-        (None, 401),
-        (Some(invalid.as_str()), 401),
-        (ctx.unprivileged_admin_token.as_deref(), 403),
+    let rotation = ctx.target.management().rotation().await?;
+    let invalid = format!("invalid-management-{}", uuid::Uuid::new_v4());
+    let lacking = dvls::credential_lacking(&ctx, Permission::RotateRoot);
+    for (credential, expected) in [
+        (None, Refusal::Unauthenticated),
+        (Some(invalid.as_str()), Refusal::Unauthenticated),
+        (lacking.as_deref(), Refusal::Forbidden),
     ] {
-        if expected == 403 && bearer.is_none() {
+        if expected == Refusal::Forbidden && credential.is_none() {
             continue;
         }
-        expect_status(
-            &ctx.target
-                .send(
-                    Method::POST,
-                    "/api/v3/agent-identity/ca/rotation",
-                    Some(&body),
-                    bearer,
-                    None,
-                )
-                .await?,
-            expected,
-        )?;
+        ensure!(
+            refusal(ctx.target.management_as(credential).rotate(RotationDeadline::Now).await)? == expected,
+            "unauthorized rotation was not refused as {expected:?}"
+        );
         ensure!(
             trust_anchor_snapshot(&ctx.target.trust_anchor().await?)? == before,
             "unauthorized rotation changed published roots"
         );
         ensure!(
-            rotation_snapshot(&ctx.target.admin(Method::GET, "/ca/rotation", None).await?.body)? == rotation,
+            ctx.target.management().rotation().await? == rotation,
             "unauthorized rotation changed state"
         );
     }
@@ -5985,8 +5685,8 @@ pub(crate) async fn p_enroll_malformed_authorization_rejected(ctx: Context) -> a
         .with_context(|| format!("{variant} Authorization header"))?;
     }
     ensure!(
-        count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 0
-            && count(&ctx.target.identities_for(&token, "").await?.body, "totalCount")? == 0,
+        ctx.target.management().token(&token.id).await?.used_count == 0
+            && ctx.target.management().identity_count(&token).await? == 0,
         "malformed Authorization header consumed a token use or created an identity"
     );
     expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)
@@ -6024,7 +5724,7 @@ pub(crate) async fn p_authentication_error_precedes_invalid_body(ctx: Context) -
         .with_context(|| format!("enroll body with {variant}"))?;
     }
     ensure!(
-        count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 0,
+        ctx.target.management().token(&token.id).await?.used_count == 0,
         "rejected enrollments consumed a token use"
     );
 
@@ -6074,7 +5774,7 @@ pub(crate) async fn p_authentication_error_precedes_invalid_body(ctx: Context) -
         "rejected renewals changed identity state"
     );
 
-    ctx.target.revoke(&revoked.identity_id).await?;
+    ctx.target.management().revoke(&revoked.identity_id).await?;
     let invalid_check_in = serde_json::to_vec(&json!({ "metadata": "not an object" }))?;
     let headers = revoked
         .key
@@ -6169,8 +5869,8 @@ pub(crate) async fn p_mock_fault_response_not_processed(ctx: Context) -> anyhow:
     ensure!(failed.body.is_null(), "fault without an error code returned a body");
     ensure!(
         count(&ctx.target.requests(Some(&token)).await?, "enroll")? == 1
-            && count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 0
-            && count(&ctx.target.identities_for(&token, "").await?.body, "totalCount")? == 0,
+            && ctx.target.management().token(&token.id).await?.used_count == 0
+            && ctx.target.management().identity_count(&token).await? == 0,
         "failed enrollment was processed or not counted"
     );
     ctx.target
@@ -6183,7 +5883,7 @@ pub(crate) async fn p_mock_fault_response_not_processed(ctx: Context) -> anyhow:
         "injected empty 400 gained a framework error body"
     );
     ensure!(
-        count(&ctx.target.token_record(&token.id).await?.body, "usedCount")? == 0,
+        ctx.target.management().token(&token.id).await?.used_count == 0,
         "injected empty 400 processed an enrollment"
     );
     let enrolled = ctx.target.enroll(&token.text, &key, &json!({})).await?;
@@ -6226,29 +5926,357 @@ pub(crate) async fn p_mock_fault_response_not_processed(ctx: Context) -> anyhow:
     Ok(())
 }
 
+/// Sends `body` to `enroll` exactly as given.
+async fn enroll_raw(target: &Target, token: &Token, body: &[u8]) -> anyhow::Result<Reply> {
+    target
+        .send(
+            Method::POST,
+            "/api/agent-identity/v1/enroll",
+            Some(body),
+            Some(&token.text),
+            None,
+        )
+        .await
+}
+
+/// Signs `body` with `identity`'s current key and sends it to `endpoint` (`renew` or `check-in`) exactly as given.
+async fn signed_raw(target: &Target, identity: &Identity, endpoint: &str, body: &[u8]) -> anyhow::Result<Reply> {
+    let headers = identity.key.sign_now(&identity.thumbprint, endpoint, Some(body));
+    match endpoint {
+        "renew" => target.signed_renew(body, &headers, None).await,
+        "check-in" => target.signed_check_in(body, &headers).await,
+        _ => anyhow::bail!("{endpoint} takes no body"),
+    }
+}
+
+/// CONTRACT.md §1: "A JSON request body that repeats a member name at any depth, such as `csr` twice or one metadata key twice, → `invalid_request`".
+///
+/// Every repeated member holds a valid value, so a parser that keeps either occurrence would accept the request.
+pub(crate) async fn p_duplicate_json_members_rejected(ctx: Context) -> anyhow::Result<()> {
+    let token = token(&ctx, 2).await?;
+    let (first, second) = (KeyPair::generate()?, KeyPair::generate()?);
+    let (a, b) = (&first.csr, &second.csr);
+    for (variant, body) in [
+        ("csr", format!(r#"{{"csr":"{a}","csr":"{b}","metadata":{{}}}}"#)),
+        (
+            "metadata",
+            format!(r#"{{"csr":"{a}","metadata":{{}},"metadata":{{}}}}"#),
+        ),
+        (
+            "metadata key",
+            format!(r#"{{"csr":"{a}","metadata":{{"hostname":"one","hostname":"two"}}}}"#),
+        ),
+        (
+            "unknown member",
+            format!(r#"{{"csr":"{a}","metadata":{{}},"extra":1,"extra":2}}"#),
+        ),
+        (
+            "nested unknown member",
+            format!(r#"{{"csr":"{a}","metadata":{{}},"extra":{{"inner":1,"inner":2}}}}"#),
+        ),
+    ] {
+        expect_error(
+            &enroll_raw(&ctx.target, &token, body.as_bytes()).await?,
+            400,
+            "invalid_request",
+        )
+        .with_context(|| format!("enroll body repeating {variant}"))?;
+    }
+    let management = ctx.target.management();
+    ensure!(
+        management.token(&token.id).await?.used_count == 0 && management.identity_count(&token).await? == 0,
+        "an enrollment body with a repeated member created an identity"
+    );
+    let identity = identity(&ctx.target, &token, "duplicates").await?;
+    let before = identity_record(&ctx.target, &identity.identity_id).await?;
+    for (endpoint, variant, body) in [
+        (
+            "renew",
+            "csr",
+            format!(r#"{{"csr":"{a}","csr":"{b}","metadata":{{}}}}"#),
+        ),
+        (
+            "renew",
+            "metadata key",
+            format!(r#"{{"csr":"{a}","metadata":{{"hostname":"one","hostname":"two"}}}}"#),
+        ),
+        ("check-in", "metadata", r#"{"metadata":{},"metadata":{}}"#.to_owned()),
+        (
+            "check-in",
+            "metadata key",
+            r#"{"metadata":{"hostname":"one","hostname":"two"}}"#.to_owned(),
+        ),
+    ] {
+        expect_error(
+            &signed_raw(&ctx.target, &identity, endpoint, body.as_bytes()).await?,
+            400,
+            "invalid_request",
+        )
+        .with_context(|| format!("{endpoint} body repeating {variant}"))?;
+    }
+    assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &before).await?;
+    expect_status(&ctx.target.enroll(&token.text, &first, &json!({})).await?, 200)
+        .context("the repeated members' values were not themselves valid")
+}
+
+/// A CSR whose canonical `base64` encoding has padding and uses both `+` or `/` characters, so that every non-canonical rewrite applies.
+fn key_with_rewritable_csr() -> anyhow::Result<KeyPair> {
+    for _ in 0..64 {
+        let key = KeyPair::generate()?;
+        if key.csr.ends_with('=') && key.csr.contains(['+', '/']) {
+            return Ok(key);
+        }
+    }
+    anyhow::bail!("no generated CSR had a padded encoding with '+' or '/'")
+}
+
+/// Other encodings of the bytes `canonical` encodes, each of which a lenient decoder accepts.
+fn noncanonical_base64(canonical: &str) -> anyhow::Result<Vec<(&'static str, String)>> {
+    let wrapped = format!("csr:{canonical}:");
+    let unwrap = |value: String| -> anyhow::Result<String> { Ok(split_byte_sequence(&value)?.1.to_owned()) };
+    let (head, tail) = canonical.split_at(canonical.len() / 2);
+    Ok(vec![
+        ("non-zero padding bits", unwrap(with_nonzero_pad_bits(&wrapped)?)?),
+        ("missing padding", unwrap(without_padding(&wrapped)?)?),
+        ("line break", format!("{head}\n{tail}")),
+        ("URL-safe alphabet", canonical.replace('+', "-").replace('/', "_")),
+    ])
+}
+
+/// CONTRACT.md §1: "Senders use the canonical form of every `base64` and `base64url` value, so that each byte string has one encoding; a request body holding another form → `invalid_request`."
+pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (token, identity) = issued(&ctx, "noncanonical-csr").await?;
+    let before = identity_record(&ctx.target, &identity.identity_id).await?;
+    let key = key_with_rewritable_csr()?;
+    for (variant, csr) in noncanonical_base64(&key.csr)? {
+        let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
+        expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
+            .with_context(|| format!("enroll CSR with {variant}"))?;
+        expect_error(
+            &signed_raw(&ctx.target, &identity, "renew", &body).await?,
+            400,
+            "invalid_request",
+        )
+        .with_context(|| format!("renew CSR with {variant}"))?;
+    }
+    assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &before).await?;
+    ensure!(
+        ctx.target.management().token(&token.id).await?.used_count == 1,
+        "a non-canonical CSR consumed a token use"
+    );
+    expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)
+        .context("the canonical CSR of the same key was not accepted")
+}
+
+/// CONTRACT.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`, which carries only routing data."
+///
+/// The rewritten secrets decode to the same 32 bytes, so only a comparison of the exact text refuses them.
+pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::Result<()> {
+    const URL_SAFE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let token = token(&ctx, 2).await?;
+    let (prefix_and_bag, secret) = token.text.rsplit_once('.').context("token secret")?;
+    let (prefix, bag) = prefix_and_bag.split_once('.').context("token bag")?;
+    // 32 bytes leave two unused low bits in the last of the 43 secret characters.
+    let (secret_head, last) = secret.split_at(secret.len() - 1);
+    let index = URL_SAFE
+        .iter()
+        .position(|symbol| last.as_bytes() == [*symbol])
+        .context("token secret is not base64url")?;
+    ensure!(index & 3 == 0, "token secret is not canonical base64url");
+    let noisy_secret = format!("{secret_head}{}", char::from(URL_SAFE[index | 1]));
+    for (variant, text) in [
+        (
+            "non-zero unused secret bits",
+            format!("{prefix_and_bag}.{noisy_secret}"),
+        ),
+        ("padded secret", format!("{prefix_and_bag}.{secret}=")),
+    ] {
+        expect_error(
+            &ctx.target.enroll(&text, &KeyPair::generate()?, &json!({})).await?,
+            401,
+            "token_invalid",
+        )
+        .with_context(|| format!("token with {variant}"))?;
+    }
+    let management = ctx.target.management();
+    ensure!(
+        management.token(&token.id).await?.used_count == 0 && management.identity_count(&token).await? == 0,
+        "a token whose secret text differs from the issued one created an identity"
+    );
+    let route: Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(bag)
+            .context("decode token bag")?,
+    )?;
+    let reencoded_bag = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec_pretty(&route)?);
+    ensure!(reencoded_bag != bag, "re-encoding the token bag did not change it");
+    expect_status(
+        &ctx.target
+            .enroll(
+                &format!("{prefix}.{reencoded_bag}.{secret}"),
+                &KeyPair::generate()?,
+                &json!({}),
+            )
+            .await?,
+        200,
+    )
+    .context("a token with another bag and the exact secret text was not accepted")?;
+    expect_status(
+        &ctx.target
+            .enroll(&token.text, &KeyPair::generate()?, &json!({}))
+            .await?,
+        200,
+    )
+    .context("the issued token string was not accepted")?;
+    ensure!(
+        management.token(&token.id).await?.used_count == 2,
+        "the exact secret text did not authenticate the token's uses"
+    );
+    Ok(())
+}
+
+/// A CSR for `key` whose public key is the compressed form of its point, validly self-signed.
+fn compressed_point_csr(key: &KeyPair) -> anyhow::Result<String> {
+    let mut request = x509_cert::request::CertReq::from_der(&decoded_certificate(&key.csr)?)?;
+    let point = request.info.public_key.subject_public_key.raw_bytes();
+    ensure!(
+        point.len() == 65 && point[0] == 4,
+        "generated CSR does not hold an uncompressed P-256 point"
+    );
+    let mut compressed = vec![2 | (point[64] & 1)];
+    compressed.extend_from_slice(&point[1..33]);
+    request.info.public_key.subject_public_key = der::asn1::BitString::from_bytes(&compressed)?;
+    let signature: p256::ecdsa::DerSignature = key.key.try_sign(&request.info.to_der()?)?;
+    request.signature = der::asn1::BitString::from_bytes(signature.as_bytes())?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(request.to_der()?))
+}
+
+/// CONTRACT.md §4: the server "only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256)".
+pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (token, identity) = issued(&ctx, "compressed-point").await?;
+    let before = identity_record(&ctx.target, &identity.identity_id).await?;
+    let key = KeyPair::generate()?;
+    let body = serde_json::to_vec(&json!({ "csr": compressed_point_csr(&key)?, "metadata": {} }))?;
+    expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
+        .context("enroll CSR with a compressed point")?;
+    expect_error(
+        &signed_raw(&ctx.target, &identity, "renew", &body).await?,
+        400,
+        "invalid_request",
+    )
+    .context("renew CSR with a compressed point")?;
+    assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &before).await?;
+    expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)
+        .context("the uncompressed CSR of the same key was not accepted")
+}
+
+/// Shared intent, "Enrollment": "The result is trimmed, truncated to 255 Unicode scalar values without splitting one, and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`)".
+pub(crate) async fn p_friendly_name_white_space_and_truncation(ctx: Context) -> anyhow::Result<()> {
+    let cases = [
+        ("\u{3000}\u{a0}name\u{2003}\u{1680}", "name".to_owned()),
+        // U+200B ZERO WIDTH SPACE is not `White_Space`.
+        ("\u{200b}name\u{200b}", "\u{200b}name\u{200b}".to_owned()),
+        (&*format!("{}{}", " ".repeat(10), "x".repeat(300)), "x".repeat(255)),
+        (
+            &*format!("{}\u{3000}{}", "a".repeat(254), "b".repeat(10)),
+            "a".repeat(254),
+        ),
+        (
+            &*format!("{}{}", "a".repeat(200), "\u{1f600}".repeat(60)),
+            format!("{}{}", "a".repeat(200), "\u{1f600}".repeat(55)),
+        ),
+    ];
+    let token = ctx
+        .target
+        .management()
+        .create_token(cases.len() as u64, TOKEN_LIFETIME, Some("{hostname}"))
+        .await?;
+    for (hostname, expected) in cases {
+        let enrolled = identity(&ctx.target, &token, hostname).await?;
+        let name = identity_record(&ctx.target, &enrolled.identity_id).await?.friendly_name;
+        ensure!(
+            name == expected,
+            "hostname {hostname:?} produced friendly name {name:?} instead of {expected:?}"
+        );
+    }
+    Ok(())
+}
+
+/// DVLS's intent, "Terminology": an identity is `active` while it "holds an unexpired current or pending certificate", in `grace` while it "holds no unexpired certificate but one within renewal grace", `expired` "beyond renewal grace", or `revoked`.
+///
+/// A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), and renewal grace lasts while `now < notAfter + (notAfter − notBefore)`.
+pub(crate) async fn p_identity_statuses(ctx: Context) -> anyhow::Result<()> {
+    let management = ctx.target.management();
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
+    let (_, pending_only) = issued(&ctx, "pending-only").await?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 600 })).await?;
+    expect_status(
+        &ctx.target
+            .renew(&pending_only, &KeyPair::generate()?, &json!({}))
+            .await?,
+        200,
+    )?;
+    ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
+    let (token, current_only) = issued(&ctx, "current-only").await?;
+    let pending_only_expiry = identity_record(&ctx.target, &pending_only.identity_id)
+        .await?
+        .not_after()
+        .context("pending-only identity has no current certificate")?
+        .unix_timestamp();
+    let current = identity_record(&ctx.target, &current_only.identity_id)
+        .await?
+        .certificate_with(CertificateStatus::Current)
+        .context("identity has no current certificate")?
+        .clone();
+    let not_after = current.not_after.unix_timestamp();
+    let lifetime = not_after - current.not_before.unix_timestamp();
+    ensure!(
+        pending_only_expiry <= not_after && lifetime > 1,
+        "status fixture certificates have unexpected validity"
+    );
+    for (now, status) in [
+        (not_after, IdentityStatus::Active),
+        (not_after + 1, IdentityStatus::Grace),
+        (not_after + lifetime - 1, IdentityStatus::Grace),
+        (not_after + lifetime, IdentityStatus::Expired),
+    ] {
+        expect_status(&ctx.target.control("time/freeze", &json!({ "now": now })).await?, 200)?;
+        let record = identity_record(&ctx.target, &current_only.identity_id).await?;
+        let listed = management
+            .identities(&IdentityQuery::enrolled_with(&token).status(status))
+            .await?;
+        ensure!(
+            record.status == status && listed.items.iter().any(|row| row.id == current_only.identity_id),
+            "{}s after notAfter, the identity is {:?} instead of {status:?}",
+            now - not_after,
+            record.status
+        );
+        if now == not_after + 1 {
+            ensure!(
+                identity_record(&ctx.target, &pending_only.identity_id).await?.status == IdentityStatus::Active,
+                "an identity with an expired current certificate and an unexpired pending one is not active"
+            );
+        }
+    }
+    management.revoke(&current_only.identity_id).await?;
+    ensure!(
+        identity_record(&ctx.target, &current_only.identity_id).await?.status == IdentityStatus::Revoked
+            && management
+                .identities(&IdentityQuery::enrolled_with(&token).status(IdentityStatus::Expired))
+                .await?
+                .items
+                .iter()
+                .all(|row| row.id != current_only.identity_id),
+        "a revoked identity is not reported as revoked only"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use base64::engine::general_purpose::STANDARD;
 
     use super::*;
-
-    #[test]
-    fn last_seen_may_be_missing_before_check_in() -> anyhow::Result<()> {
-        ensure!(
-            last_seen_at(&json!({}))?.is_none() && last_seen_at(&json!({ "lastSeenAt": null }))?.is_none(),
-            "missing and null admin lastSeenAt must both mean unseen"
-        );
-        ensure!(
-            last_seen_at(&json!({ "lastSeenAt": "2026-09-25T12:00:00Z" }))?.is_some(),
-            "check-in timestamp was not parsed"
-        );
-        ensure!(
-            last_seen_at(&json!({ "lastSeenAt": 123 })).is_err()
-                && last_seen_at(&json!({ "lastSeenAt": "invalid" })).is_err(),
-            "invalid admin lastSeenAt was accepted"
-        );
-        Ok(())
-    }
 
     #[test]
     fn byte_sequence_rewrites_keep_lenient_bytes_but_lose_canonical_form() -> anyhow::Result<()> {
@@ -6293,7 +6321,7 @@ mod tests {
     }
 
     #[test]
-    fn authorization_snapshots_ignore_unknown_fields() -> anyhow::Result<()> {
+    fn trust_anchor_snapshot_ignores_unknown_fields() -> anyhow::Result<()> {
         let roots = json!({
             "roots": [{
                 "certificate": "root",
@@ -6318,82 +6346,6 @@ mod tests {
         ensure!(
             trust_anchor_snapshot(&noisy_roots).is_err(),
             "explicit null root thumbprint was accepted"
-        );
-
-        let rotation = json!({ "phase": "idle", "activeIdentitiesOnOldRoot": 0 });
-        let mut noisy_rotation = rotation.clone();
-        noisy_rotation["request_id"] = json!("different");
-        noisy_rotation["deadline"] = Value::Null;
-        noisy_rotation["oldRoot"] = Value::Null;
-        noisy_rotation["newRoot"] = Value::Null;
-        ensure!(
-            rotation_snapshot(&rotation)? == rotation_snapshot(&noisy_rotation)?,
-            "unknown or null optional rotation fields changed the no-state-change snapshot"
-        );
-        noisy_rotation["phase"] = Value::Null;
-        ensure!(
-            rotation_snapshot(&noisy_rotation).is_err(),
-            "explicit null required rotation phase was accepted"
-        );
-        let token = json!({
-            "id": "token-id",
-            "name": "test",
-            "maxUses": 1,
-            "usedCount": 1,
-            "expiresAt": "future",
-            "state": "exhausted",
-            "createdAt": "now",
-            "createdBy": "admin"
-        });
-        let mut noisy_token = token.clone();
-        noisy_token["request_id"] = json!("different");
-        noisy_token["friendlyNameFormat"] = Value::Null;
-        noisy_token["config"] = Value::Null;
-        ensure!(
-            token_record_snapshot(&token)? == token_record_snapshot(&noisy_token)?,
-            "unknown or null optional token fields changed the no-state-change snapshot"
-        );
-        noisy_token["usedCount"] = Value::Null;
-        ensure!(
-            token_record_snapshot(&noisy_token).is_err(),
-            "explicit null required token use count was accepted"
-        );
-        let record = json!({
-            "id": "identity-id",
-            "friendlyName": "test",
-            "status": "active",
-            "connected": false,
-            "metadata": {},
-            "certificates": [],
-            "enrollmentToken": { "id": "token-id", "name": "test" },
-            "createdAt": "now",
-            "renewalRequested": false,
-            "certificate": { "issuer": "root-id", "notAfter": "end" }
-        });
-        let mut noisy_record = record.clone();
-        noisy_record["request_id"] = json!("different");
-        noisy_record["certificate"]["request_id"] = json!("different");
-        noisy_record["lastSeenAt"] = Value::Null;
-        noisy_record["revokedAt"] = Value::Null;
-        ensure!(
-            identity_snapshot(&record)? == identity_snapshot(&noisy_record)?,
-            "unknown or null optional identity fields changed the no-state-change snapshot"
-        );
-        let mut no_certificate = record;
-        no_certificate
-            .as_object_mut()
-            .context("identity fixture must be an object")?
-            .remove("certificate");
-        let mut null_certificate = no_certificate.clone();
-        null_certificate["certificate"] = Value::Null;
-        ensure!(
-            identity_snapshot(&no_certificate)? == identity_snapshot(&null_certificate)?,
-            "null optional identity certificate was not treated as absent"
-        );
-        noisy_record["metadata"] = Value::Null;
-        ensure!(
-            identity_snapshot(&noisy_record).is_err(),
-            "explicit null required identity metadata was accepted"
         );
         Ok(())
     }
