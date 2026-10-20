@@ -548,7 +548,7 @@ impl RecordingMessageSender {
 
     /// Removes every artifact of `kind` from the session, both its file and its manifest entry.
     ///
-    /// Fails when the session has no recording.
+    /// A session without recording has nothing to remove.
     pub(crate) async fn clear_artifacts(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.channel
@@ -959,7 +959,7 @@ impl RecordingManagerTask {
         let manifest_path = recording_path.join("recording.json");
 
         if !manifest_path.exists() {
-            anyhow::bail!("session {id} has no recording");
+            return Ok(());
         }
 
         let mut manifest = JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
