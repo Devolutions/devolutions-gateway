@@ -119,7 +119,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - Chains are leaf-first, any length; the agent never assumes a tier count.
 - The root profile and the number of CA tiers are each authority's choice.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
-- The server ignores CSR subject and extensions; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
+- The server ignores the CSR's subject and attributes, including an `extensionRequest` with an empty `Extensions` list, which common CSR builders emit; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
 - The agent's CSR carries an empty attribute set: the `[0]` field RFC 2986 requires is present and empty (`A0 00`), so that a strict PKCS#10 parser accepts it; an empty `extensionRequest` breaks RFC 5280's `SIZE (1..MAX)`.
 
