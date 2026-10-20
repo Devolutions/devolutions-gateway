@@ -53,6 +53,7 @@ tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
 x509-parser = "0.16"
 uuid = { version = "1.23", features = ["v4", "serde"] }
+zeroize = "1.8"
 
 [dependencies.ironrdp]
 version = "0.17"
@@ -93,6 +94,7 @@ win-api-wrappers = { path = "../crates/win-api-wrappers" }
 version = "0.61"
 features = [
     "Win32_Foundation",
+    "Win32_Globalization",
     "Win32_Storage_FileSystem",
     "Win32_Security",
     "Win32_System_SystemInformation",

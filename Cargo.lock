@@ -1795,6 +1795,7 @@ dependencies = [
  "win-api-wrappers",
  "windows 0.61.3",
  "x509-parser",
+ "zeroize",
 ]
 
 [[package]]
