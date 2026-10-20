@@ -190,6 +190,7 @@ jobs:
         uses: docker/login-action@v4
         env:
           DOCKERHUB_OIDC_CONNECTIONID: fe2a4bf0-b166-46fb-a364-65e624fadbc0
+          DOCKERHUB_OIDC_EXPIREIN: 3600
         with:
           username: devolutions
 
