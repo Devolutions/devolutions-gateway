@@ -181,8 +181,11 @@ const CREATION_BOUNDARY: &str = "device-key";
 ///
 /// The lock is a mutex in a private namespace whose boundary holds the caller's SID.
 /// Only a process running as the caller's account is within that boundary and can create the namespace, and the namespace's DACL lets only that account and SYSTEM open it.
-/// Another account therefore can't hold the lock to block creation.
+/// Another account therefore can't hold the lock to block creation, as the [device-key intent][intent] ("Operations") requires:
+/// "With the Windows software provider, only the caller's account and SYSTEM can block the creation of a key."
 /// Creators running as the same account share the namespace, so they still serialize, and any of them can hold the lock.
+///
+/// [intent]: ../INTENT.md#operations
 struct CreationLock {
     mutex: Handle,
     // The mutex's handle closes before the namespace's, as fields drop in declaration order.

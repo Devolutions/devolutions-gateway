@@ -1,7 +1,7 @@
 # agent-identity-mock
 
 Mock server for the [Agent Identity V1 contract][contract], used as the conformance oracle.
-It implements the agent-facing protocol, the [DVLS admin API][dvls-admin] and the [mock controls][mock-control] in memory.
+It implements the agent-facing protocol, the [DVLS management API][dvls-management] and the [mock controls][mock-control] in memory.
 It shares only `crates/agent-channel-proto` (the generated gRPC types) with the agent.
 
 ## Usage
@@ -14,7 +14,7 @@ agent-identity-mock --listen 127.0.0.1:0 --path-prefix /mock --admin-token <secr
 |---|---|
 | `--listen <addr:port>` | TCP bind address; it must be a loopback address because the mock control surface is unauthenticated, and port `0` picks a free port. |
 | `--path-prefix <prefix>` | Every route lives under this prefix (e.g. `/mock`); requests outside it get a bare 404. Must start with `/` and not end with `/`. |
-| `--admin-token <secret>` | Bearer token required by the admin API. |
+| `--admin-token <secret>` | Secret from which the [management API](#management-api) credentials derive. |
 | `--state-dir <dir>` | Where `ready.json` and the TLS CA PEM are written; created if missing. |
 
 On startup the server generates a TLS CA and a server certificate for `localhost`/`127.0.0.1` and serves HTTPS on a single port with ALPN `h2` and `http/1.1` (REST and gRPC share the port).
@@ -39,7 +39,7 @@ Advancing or freezing the clock immediately closes expired streams and re-evalua
 
 All paths below are relative to `base_url` (i.e. they include the path prefix).
 
-### Agent-facing (CONTRACT.md §5), no admin auth
+### Agent-facing (CONTRACT.md §5), no management API credential
 
 | Method | Path | Notes |
 |---|---|---|
@@ -54,7 +54,7 @@ Enrollment, renewal and check-in require a `metadata` object, which may be empty
 Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are limited to 64 KiB.
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.
-Friendly names are stored server-side and appear only in the admin identity API.
+Friendly names are stored server-side and appear only in the management API.
 Config revisions start at 1 and increase only on effective changes; `ConfigUpdate` follows `Welcome` for stale Hellos and is pushed to live streams after a change.
 A token's optional `config` object supplies product-specific fields to its enrolled identities; it cannot set `version`, `revision` or `agent_channel_url`.
 The mock uses a test-only unbounded push queue so config bursts cannot silently detach authenticated streams or discard termination messages.
@@ -62,25 +62,36 @@ The mock uses a test-only unbounded push queue so config bursts cannot silently 
 Only confirm promotes a pending certificate: old streams receive `Reconnect{reason:"certificate_rotated"}` and close with `OK` after 60 mock-clock seconds if still open.
 The channel gRPC method is `POST <prefix>/devolutions.agent.channel.v1.AgentChannel/Connect` with `signature-input`/`signature` metadata (`tag="connect"`); open failures are gRPC statuses with `error-code` and `server-time` trailers (§7.4).
 
-### Admin ([DVLS admin API][dvls-admin]), `Authorization: Bearer <admin-token>`
+### Management API
 
-Missing or invalid admin auth returns 401 `{ "error", "message" }`; all admin errors use that shape with the matching HTTP status.
-For permission tests, `<admin-token>-unprivileged` is authenticated without Agent identity management permission and returns 403.
+The [DVLS management API][dvls-management] takes `Authorization: Bearer <credential>`.
+Missing or invalid credentials return 401 `{ "error", "message" }`; all management API errors use that shape with the matching HTTP status.
+Each route requires the permission the table lists, and a credential without it gets 403 `forbidden` before the request is processed.
+The mock derives its credentials from `--admin-token`, so a test can hold any subset of the four permissions without setup:
 
-| Method | Path | Notes |
-|---|---|---|
-| POST | `/api/v3/agent-identity/enrollment-tokens` | Body `{ name, maxUses (1..1_000_000), expiresAt (RFC 3339, ≤ now+365 d), friendlyNameFormat?, config? }`; 201 → `{ "token": "<full dvaet1 token>", "record": TokenRecord }`; the full token is returned only here. Unknown `friendlyNameFormat` placeholders → 400. |
-| GET | `/api/v3/agent-identity/enrollment-tokens` | `pageNumber` (≥ 1, default 1), `pageSize` (1..100, default 25); DVLS page shape `{ data, currentPage, pageSize, totalCount, totalPages }`. |
-| GET | `/api/v3/agent-identity/enrollment-tokens/{id}` | `TokenRecord`; 404 when unknown or deleted. |
-| DELETE | `/api/v3/agent-identity/enrollment-tokens/{id}` | 204; the token is hidden but can replay its own existing current key without side effects, while a new key gets `token_invalid`. |
-| GET | `/api/v3/agent-identity/identities` | Query: `pageNumber`, `pageSize`, `view=summary\|full`, `metadata=k1,k2`, `status=active\|revoked\|expired`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (case-insensitive friendly-name substring); ordered by creation. |
-| GET | `/api/v3/agent-identity/identities/{id}` | Full view. |
-| PATCH | `/api/v3/agent-identity/identities/{id}` | `{ "friendlyName" }` (1..255 chars) → full view. |
-| POST | `/api/v3/agent-identity/identities/{id}/revoke` | 204, idempotent; closes live streams PERMISSION_DENIED + `identity_revoked`. |
-| DELETE | `/api/v3/agent-identity/identities/{id}` | 204, or 409 unless the identity is revoked. |
-| POST | `/api/v3/agent-identity/identities/{id}/request-renewal` | 202; sets the flag and pushes `RenewRequested{reason:"admin"}` to live streams. |
-| POST | `/api/v3/agent-identity/ca/rotation` | Body `{ "deadline"?: "<RFC 3339>" \| "now" }`; 202 → `Rotation`; 400 if the deadline exceeds the latest unexpired current or pending old-root certificate; 409 while rotating. |
-| GET | `/api/v3/agent-identity/ca/rotation` | `{ phase: "idle"\|"rotating", oldRoot?, newRoot?, deadline?, activeIdentitiesOnOldRoot }`; the count includes each non-revoked identity with an unexpired current or pending old-root certificate. |
+| Credential | Permissions |
+|---|---|
+| `<admin-token>` | All four, like a DVLS built-in administrator. |
+| `<admin-token>.<scope>` | Those in `<scope>`: `none`, or a `+`-separated list of `view`, `manage`, `revoke` and `rotate-root`, such as `view+revoke`. |
+| `<admin-token>-unprivileged` | None, like `<admin-token>.none`. |
+
+Any other credential, including a scope with an empty or unknown permission name, is invalid.
+Each identity's `status` is `active` (an unexpired current or pending certificate), `grace` (no unexpired certificate, but one within renewal grace), `expired` (beyond renewal grace) or `revoked`, as the DVLS intent's "Terminology" defines.
+
+| Method | Path | Permission | Notes |
+|---|---|---|---|
+| POST | `/api/v3/agent-identity/enrollment-tokens` | Manage | Body `{ name, maxUses (1..1_000_000), expiresAt (RFC 3339, ≤ now+365 d), friendlyNameFormat?, config? }`; 201 → `{ "token": "<full dvaet1 token>", "record": TokenRecord }`; the full token is returned only here. Unknown `friendlyNameFormat` placeholders → 400. |
+| GET | `/api/v3/agent-identity/enrollment-tokens` | View | `pageNumber` (≥ 1, default 1), `pageSize` (1..100, default 25); DVLS page shape `{ data, currentPage, pageSize, totalCount, totalPages }`. |
+| GET | `/api/v3/agent-identity/enrollment-tokens/{id}` | View | `TokenRecord`; 404 when unknown or deleted. |
+| DELETE | `/api/v3/agent-identity/enrollment-tokens/{id}` | Manage | 204; the token is hidden but can replay its own existing current key without side effects, while a new key gets `token_invalid`. |
+| GET | `/api/v3/agent-identity/identities` | View | Query: `pageNumber`, `pageSize`, `view=summary\|full`, `metadata=k1,k2`, `status=active\|grace\|expired\|revoked`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (case-insensitive friendly-name substring); ordered by creation. |
+| GET | `/api/v3/agent-identity/identities/{id}` | View | Full view. |
+| PATCH | `/api/v3/agent-identity/identities/{id}` | Manage | `{ "friendlyName" }` (1..255 chars) → full view. |
+| POST | `/api/v3/agent-identity/identities/{id}/revoke` | Revoke | 204, idempotent; closes live streams PERMISSION_DENIED + `identity_revoked`. |
+| DELETE | `/api/v3/agent-identity/identities/{id}` | Manage | 204, or 409 unless the identity is revoked. |
+| POST | `/api/v3/agent-identity/identities/{id}/request-renewal` | Manage | 202; sets the flag and pushes `RenewRequested{reason:"admin"}` to live streams. |
+| POST | `/api/v3/agent-identity/ca/rotation` | Rotate root | Body `{ "deadline"?: "<RFC 3339>" \| "now" }`; 202 → `Rotation`; 400 if the deadline exceeds the latest unexpired current or pending old-root certificate; 409 while rotating. |
+| GET | `/api/v3/agent-identity/ca/rotation` | View | `{ phase: "idle"\|"rotating", oldRoot?, newRoot?, deadline?, activeIdentitiesOnOldRoot }`; the count includes each non-revoked identity with an unexpired current or pending old-root certificate. |
 
 A rotation completes immediately when no active old-root identity remains, including at rotation start, and publishes only the new root.
 Certificate issuance and token-use consumption share the state lock; issued key hashes stay reserved, and original issuance times remain stored after identity deletion.
@@ -129,5 +140,5 @@ X.509 and DER supply CSR structure types; P-256 performs signature verification.
 `cargo test -p agent-identity-mock` replays every signature, proof and CSR vector through the verifier and validators used by the server.
 
 [contract]: ../../docs/agent-identity/CONTRACT.md
-[dvls-admin]: ../../docs/agent-identity/INTENT.DVLS.md#admin-http-api
+[dvls-management]: ../../docs/agent-identity/INTENT.DVLS.md#management-api
 [mock-control]: INTENT.md#mock-only-control

@@ -15,8 +15,8 @@ pub struct App {
     pub base_url: String,
     /// e.g. `/mock`.
     pub prefix: String,
+    /// The management API secret; see the README for the credentials derived from it.
     pub admin_token: String,
-    pub unprivileged_token: String,
     pub clock: MockClock,
     /// Mock-only barrier for proving that a key survives until Hello authenticates.
     pub handshake_gate: watch::Sender<bool>,
@@ -24,6 +24,22 @@ pub struct App {
 }
 
 impl App {
+    /// Builds an app with admin token `admin` under the `/mock` prefix, for handler tests.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> anyhow::Result<Arc<Self>> {
+        let clock = MockClock::new();
+        let state = State::new(clock.now())?;
+        Ok(Arc::new(App {
+            authority_id: Uuid::new_v4(),
+            base_url: "https://127.0.0.1:1/mock".to_owned(),
+            prefix: "/mock".to_owned(),
+            admin_token: "admin".to_owned(),
+            clock,
+            handshake_gate: watch::channel(true).0,
+            state: Mutex::new(state),
+        }))
+    }
+
     pub fn now(&self) -> i64 {
         self.clock.now()
     }

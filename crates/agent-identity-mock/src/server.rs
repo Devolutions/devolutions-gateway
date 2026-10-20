@@ -215,31 +215,12 @@ mod tests {
     use http_body_util::{BodyExt as _, Full};
     use rstest::rstest;
     use serde_json::Value;
-    use tokio::sync::{Mutex, watch};
-    use uuid::Uuid;
 
     use super::Dispatcher;
     use crate::app::App;
-    use crate::clock::MockClock;
-    use crate::state::State;
 
     /// CONTRACT.md §5.4: servers accept agent-facing request bodies up to 64 KiB.
     const BODY_LIMIT: usize = 64 * 1024;
-
-    fn app() -> anyhow::Result<Arc<App>> {
-        let clock = MockClock::new();
-        let state = State::new(clock.now())?;
-        Ok(Arc::new(App {
-            authority_id: Uuid::new_v4(),
-            base_url: "https://127.0.0.1:1/mock".to_owned(),
-            prefix: "/mock".to_owned(),
-            admin_token: "admin".to_owned(),
-            unprivileged_token: "admin-unprivileged".to_owned(),
-            clock,
-            handshake_gate: watch::channel(true).0,
-            state: Mutex::new(state),
-        }))
-    }
 
     /// Posts to an agent-facing endpoint and returns the status and the §5.4 error code.
     async fn post(app: &Arc<App>, endpoint: &str, authorization: &[&str], body: Vec<u8>) -> (u16, String) {
@@ -265,14 +246,14 @@ mod tests {
     #[case::check_in("check-in")]
     #[tokio::test]
     async fn oversized_body_is_413_before_authentication(#[case] endpoint: &str) -> anyhow::Result<()> {
-        let response = post(&app()?, endpoint, &[], vec![b' '; BODY_LIMIT + 1]).await;
+        let response = post(&App::for_test()?, endpoint, &[], vec![b' '; BODY_LIMIT + 1]).await;
         assert_eq!(response, (413, "invalid_request".to_owned()));
         Ok(())
     }
 
     #[tokio::test]
     async fn body_at_the_limit_reaches_authentication() -> anyhow::Result<()> {
-        let response = post(&app()?, "enroll", &[], vec![b' '; BODY_LIMIT]).await;
+        let response = post(&App::for_test()?, "enroll", &[], vec![b' '; BODY_LIMIT]).await;
         assert_eq!(response, (401, "token_invalid".to_owned()));
         Ok(())
     }
@@ -287,7 +268,7 @@ mod tests {
         #[case] endpoint: &str,
         #[case] code: &str,
     ) -> anyhow::Result<()> {
-        let response = post(&app()?, endpoint, &[], b"not json".to_vec()).await;
+        let response = post(&App::for_test()?, endpoint, &[], b"not json".to_vec()).await;
         assert_eq!(response, (401, code.to_owned()));
         Ok(())
     }
@@ -300,7 +281,7 @@ mod tests {
         #[case] header_count: usize,
         #[case] expected: (u16, &str),
     ) -> anyhow::Result<()> {
-        let app = app()?;
+        let app = App::for_test()?;
         let now = app.now();
         let (_, secret) = app
             .state

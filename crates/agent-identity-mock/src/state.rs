@@ -1,8 +1,8 @@
-//! This module holds in-memory state for the [agent contract][contract], [DVLS admin API][dvls] and [mock control][mock].
+//! This module holds in-memory state for the [agent contract][contract], [DVLS management API][dvls] and [mock control][mock].
 //! One mutex around `State` serializes enrollment and rotation.
 //!
 //! [contract]: ../../../docs/agent-identity/CONTRACT.md
-//! [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#admin-http-api
+//! [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#management-api
 //! [mock]: ../INTENT.md#mock-only-control
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -237,16 +237,66 @@ impl Identity {
         self.revoked_at.is_some()
     }
 
-    /// Returns the DVLS identity-status filter value.
-    pub(crate) fn status(&self, now: i64) -> &'static str {
-        if self.revoked() {
-            "revoked"
-        } else if self.current_cert().is_some_and(|c| now < c.not_after) {
-            "active"
-        } else {
-            "expired"
+    pub(crate) fn status(&self, now: i64) -> IdentityStatus {
+        identity_status(
+            self.revoked(),
+            self.certs.iter().map(|c| (c.status, c.not_before, c.not_after)),
+            now,
+        )
+    }
+}
+
+/// Identity status as the [DVLS intent][dvls] defines it ("Terminology"), distinct from the certificate statuses.
+///
+/// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#terminology
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IdentityStatus {
+    Active,
+    Grace,
+    Expired,
+    Revoked,
+}
+
+impl IdentityStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            IdentityStatus::Active => "active",
+            IdentityStatus::Grace => "grace",
+            IdentityStatus::Expired => "expired",
+            IdentityStatus::Revoked => "revoked",
         }
     }
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        match value {
+            "active" => Some(IdentityStatus::Active),
+            "grace" => Some(IdentityStatus::Grace),
+            "expired" => Some(IdentityStatus::Expired),
+            "revoked" => Some(IdentityStatus::Revoked),
+            _ => None,
+        }
+    }
+}
+
+/// Derives an identity's status from its revocation and its certificates' `(status, notBefore, notAfter)`.
+fn identity_status(revoked: bool, certs: impl IntoIterator<Item = (CertStatus, i64, i64)>, now: i64) -> IdentityStatus {
+    if revoked {
+        return IdentityStatus::Revoked;
+    }
+    let mut status = IdentityStatus::Expired;
+    for (cert_status, not_before, not_after) in certs {
+        if cert_status == CertStatus::Retired {
+            continue;
+        }
+        if now < not_after {
+            return IdentityStatus::Active;
+        }
+        // CONTRACT.md §6 and §8.2: renewal grace lasts the certificate's own lifetime.
+        if now < not_after + (not_after - not_before) {
+            status = IdentityStatus::Grace;
+        }
+    }
+    status
 }
 
 /// Pushed into a live channel stream's task.
@@ -627,8 +677,8 @@ impl State {
             .position(|cert| cert.thumbprint == thumbprint)
             .expect("authenticated certificate exists");
         // UNTESTED: both promotion and an already-current retry refresh `last_seen_at`.
-        // Confirm proves current key possession, and admin last-seen filters depend on this timestamp.
-        // When changing this branch, check admin `lastSeenAt` after both confirm paths.
+        // Confirm proves current key possession, and the management API's last-seen filters depend on this timestamp.
+        // When changing this branch, check the management API's `lastSeenAt` after both confirm paths.
         identity.last_seen_at = Some(now);
         if identity.certs[idx].status == CertStatus::Current {
             return;
@@ -1321,8 +1371,39 @@ impl PushKind {
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
+    use rstest::rstest;
 
     use super::*;
+
+    // Certificates live 100 s, so CONTRACT.md §6 grants each one 100 s of renewal grace after `notAfter`.
+    const CURRENT: (CertStatus, i64, i64) = (CertStatus::Current, 900, 1000);
+    const PENDING: (CertStatus, i64, i64) = (CertStatus::Pending, 1000, 1100);
+
+    #[rstest]
+    #[case::current_unexpired(&[CURRENT], 999, IdentityStatus::Active)]
+    #[case::current_at_not_after(&[CURRENT], 1000, IdentityStatus::Grace)]
+    #[case::current_last_grace_second(&[CURRENT], 1099, IdentityStatus::Grace)]
+    #[case::current_beyond_grace(&[CURRENT], 1100, IdentityStatus::Expired)]
+    #[case::pending_unexpired_current_in_grace(&[CURRENT, PENDING], 1050, IdentityStatus::Active)]
+    #[case::pending_unexpired_current_beyond_grace(&[CURRENT, (CertStatus::Pending, 1050, 1150)], 1100, IdentityStatus::Active)]
+    #[case::pending_in_grace_current_beyond_grace(&[CURRENT, PENDING], 1100, IdentityStatus::Grace)]
+    #[case::pending_beyond_grace(&[CURRENT, PENDING], 1200, IdentityStatus::Expired)]
+    #[case::retired_unexpired(&[(CertStatus::Retired, 1000, 2000), CURRENT], 1100, IdentityStatus::Expired)]
+    fn identity_status_follows_certificate_validity_and_grace(
+        #[case] certs: &[(CertStatus, i64, i64)],
+        #[case] now: i64,
+        #[case] expected: IdentityStatus,
+    ) {
+        assert_eq!(identity_status(false, certs.iter().copied(), now), expected);
+    }
+
+    #[rstest]
+    #[case::unexpired(999)]
+    #[case::in_grace(1050)]
+    #[case::beyond_grace(1100)]
+    fn revocation_wins_over_certificate_validity(#[case] now: i64) {
+        assert_eq!(identity_status(true, [CURRENT], now), IdentityStatus::Revoked);
+    }
 
     #[test]
     fn rotation_destroys_the_old_signing_key() -> anyhow::Result<()> {

@@ -477,7 +477,7 @@ async fn run_stream(
                         let now = app.now();
                         let mut state = app.state.lock().await;
                         // UNTESTED: any authenticated message, even an unknown payload, refreshes `last_seen_at`.
-                        // The timestamp tracks key possession and drives admin last-seen filters.
+                        // The timestamp tracks key possession and drives the management API's last-seen filters.
                         // When changing this branch, check `lastSeenAt` after an `Ack` and an unknown payload.
                         if let Some(identity) = state.identities.get_mut(&identity_id) {
                             identity.last_seen_at = Some(now);
