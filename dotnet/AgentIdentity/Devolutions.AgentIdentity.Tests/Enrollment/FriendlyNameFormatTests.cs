@@ -45,13 +45,7 @@ public class FriendlyNameFormatTests
     [InlineData("{agent_version}", "2026.3.0")]
     [InlineData("{machine_id}", "4c4c4544-0042-3510-8052-b4c04f4a4e32")]
     [InlineData("{token_name}", "Fleet")]
-    public void EvaluatesEachPlaceholderToItsValue(string format, string expected)
-    {
-        Assert.Equal(expected, Evaluate(format));
-    }
-
     // INTENT.agent-identity.md, "Enrollment": `{{` and `}}` escape braces, and other text is literal.
-    [Theory]
     [InlineData("{{", "{")]
     [InlineData("}}", "}")]
     [InlineData("}}{{", "}{")]
@@ -59,7 +53,7 @@ public class FriendlyNameFormatTests
     [InlineData("{{{hostname}}}", "{pc-042}")]
     [InlineData("Laptop {hostname} ({os_name}, {arch})", "Laptop pc-042 (Windows, x86_64)")]
     [InlineData("{token_name}/{hostname}{hostname}", "Fleet/pc-042pc-042")]
-    public void EvaluatesLiteralTextAndEscapedBraces(string format, string expected)
+    public void EvaluatesThePlaceholdersAndTheLiteralText(string format, string expected)
     {
         Assert.Equal(expected, Evaluate(format));
     }
@@ -128,19 +122,14 @@ public class FriendlyNameFormatTests
     // INTENT.agent-identity.md, security invariant 9: tokens never appear in logs, not even partially.
     // A format is administrator input that may hold a pasted token, and a host may log why a format was refused.
     // Each row holds the token in an unknown placeholder, or as literal text before each kind of error.
-    public static TheoryData<string> FormatsHoldingAToken => new()
-    {
-        "{" + Token + "}",
-        "{hostname} " + Token + " {Hostname}",
-        "{hostname} " + Token + " {",
-        Token + "}",
-    };
-
     [Theory]
-    [MemberData(nameof(FormatsHoldingAToken))]
-    public void TryParseErrorRevealsNoPartOfTheFormat(string format)
+    [InlineData("in an unknown placeholder", "{" + Token + "}")]
+    [InlineData("before an unknown placeholder", "{hostname} " + Token + " {Hostname}")]
+    [InlineData("before an unpaired opening brace", "{hostname} " + Token + " {")]
+    [InlineData("before an unpaired closing brace", Token + "}")]
+    public void TryParseErrorRevealsNoPartOfTheFormat(string name, string format)
     {
-        Assert.False(FriendlyNameFormat.TryParse(format, out _, out string? error));
+        Assert.False(FriendlyNameFormat.TryParse(format, out _, out string? error), name);
         EnrollmentTokenAssert.RevealsNoPart(error, Bag, Secret);
     }
 
@@ -230,44 +219,33 @@ public class FriendlyNameFormatTests
         Assert.Empty(trimmed);
     }
 
-    // INTENT.agent-identity.md, "Enrollment": the result is truncated to 255 Unicode scalar values
-    // without splitting one.
+    // INTENT.agent-identity.md, "Enrollment": the result is trimmed, truncated to 255 Unicode scalar values
+    // without splitting one, and trimmed again, so a stored name never starts or ends with white space.
     // U+1F600 is one scalar value that UTF-16 writes as a surrogate pair, so a cut by UTF-16 code unit would split it,
     // and U+0301 COMBINING ACUTE ACCENT is a scalar value of its own.
-    public static TheoryData<string, string> TruncationRows => new()
+    // Leading white space is trimmed before truncation, so it never takes the place of a kept scalar value.
+    private static Dictionary<string, (string Value, string Expected)> TokenNamesToTruncate => new()
     {
-        { new string('a', 255), new string('a', 255) },
-        { new string('a', 256), new string('a', 255) },
-        { new string('a', 254) + "\U0001F600b", new string('a', 254) + "\U0001F600" },
-        { new string('a', 255) + "\U0001F600", new string('a', 255) },
-        { Repeat("\U0001F600", 300), Repeat("\U0001F600", 255) },
-        { Repeat("e\u0301", 200), Repeat("e\u0301", 127) + "e" },
+        ["255 letters"] = (new string('a', 255), new string('a', 255)),
+        ["256 letters"] = (new string('a', 256), new string('a', 255)),
+        ["an emoji at the cut"] = (new string('a', 254) + "\U0001F600b", new string('a', 254) + "\U0001F600"),
+        ["an emoji after the cut"] = (new string('a', 255) + "\U0001F600", new string('a', 255)),
+        ["300 emoji"] = (Repeat("\U0001F600", 300), Repeat("\U0001F600", 255)),
+        ["200 accented letters"] = (Repeat("e\u0301", 200), Repeat("e\u0301", 127) + "e"),
+        ["white space at the cut"] = (new string('a', 250) + new string(' ', 10) + "bbbbb", new string('a', 250)),
+        ["white space before 255 letters"] =
+            ("\u3000" + new string(' ', 9) + new string('a', 255), new string('a', 255)),
     };
 
+    public static TheoryData<string> TokenNamesToTruncateNames => new(TokenNamesToTruncate.Keys);
+
     [Theory]
-    [MemberData(nameof(TruncationRows))]
-    public void TruncatesTo255ScalarValues(string tokenName, string expected)
+    [MemberData(nameof(TokenNamesToTruncateNames))]
+    public void TruncatesTo255ScalarValuesBetweenTwoTrims(string tokenName)
     {
-        Assert.Equal(expected, Evaluate("{token_name}", tokenName: tokenName));
-    }
+        (string value, string expected) = TokenNamesToTruncate[tokenName];
 
-    // INTENT.agent-identity.md, "Enrollment": the result is trimmed, truncated and trimmed again,
-    // so a stored name never starts or ends with white space.
-    [Fact]
-    public void TrimsTheWhiteSpaceThatTruncationLeavesAtTheEnd()
-    {
-        string tokenName = new string('a', 250) + new string(' ', 10) + "bbbbb";
-
-        Assert.Equal(new string('a', 250), Evaluate("{token_name}", tokenName: tokenName));
-    }
-
-    // Leading white space is trimmed before truncation, so it never takes the place of a kept scalar value.
-    [Fact]
-    public void TrimsBeforeTruncating()
-    {
-        string tokenName = "\u3000" + new string(' ', 9) + new string('a', 255);
-
-        Assert.Equal(new string('a', 255), Evaluate("{token_name}", tokenName: tokenName));
+        Assert.Equal(expected, Evaluate("{token_name}", tokenName: value));
     }
 
     // INTENT.agent-identity.md, "Enrollment": an empty result falls back to the identity ID,
@@ -317,23 +295,23 @@ public class FriendlyNameFormatTests
         Assert.Equal("format", exception.ParamName);
     }
 
-    [Fact]
-    public void EvaluateRejectsNullMetadata()
+    [Theory]
+    [InlineData("metadata")]
+    [InlineData("tokenName")]
+    public void EvaluateRejectsANullArgument(string parameter)
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => FriendlyNameFormat.Default.Evaluate(null!, TokenName, IdentityId));
+        ArgumentNullException exception =
+            Assert.Throws<ArgumentNullException>(EvaluationsWithANullArgument[parameter]);
 
-        Assert.Equal("metadata", exception.ParamName);
+        Assert.Equal(parameter, exception.ParamName);
     }
 
-    [Fact]
-    public void EvaluateRejectsANullTokenName()
+    // An evaluation with one null argument, by the name of the parameter that receives it.
+    private static Dictionary<string, Action> EvaluationsWithANullArgument => new()
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => FriendlyNameFormat.Default.Evaluate(Metadata, null!, IdentityId));
-
-        Assert.Equal("tokenName", exception.ParamName);
-    }
+        ["metadata"] = () => FriendlyNameFormat.Default.Evaluate(null!, TokenName, IdentityId),
+        ["tokenName"] = () => FriendlyNameFormat.Default.Evaluate(Metadata, null!, IdentityId),
+    };
 
     private static string Evaluate(string format, AgentMetadata? metadata = null, string tokenName = TokenName)
     {

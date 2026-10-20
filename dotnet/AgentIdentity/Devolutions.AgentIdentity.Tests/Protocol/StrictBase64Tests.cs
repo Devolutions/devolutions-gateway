@@ -1,154 +1,134 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace Devolutions.AgentIdentity.Tests;
 
 public class StrictBase64Tests
 {
-    // RFC 4648 §10 test vectors.
-    [Theory]
-    [InlineData("", "")]
-    [InlineData("Zg==", "f")]
-    [InlineData("Zm8=", "fo")]
-    [InlineData("Zm9v", "foo")]
-    [InlineData("Zm9vYg==", "foob")]
-    [InlineData("Zm9vYmE=", "fooba")]
-    [InlineData("Zm9vYmFy", "foobar")]
-    public void Base64DecodesRfc4648Vector(string encoded, string expected)
+    // RFC 4648 Table 1 and Table 2.
+    private const string Base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    private const string Base64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+    // CONTRACT.md: base64 is RFC 4648 §4 with padding, and base64url is RFC 4648 §5 without padding.
+    private static readonly Dictionary<string, Codec> Codecs = new()
     {
-        Assert.True(StrictBase64.TryDecodeBase64(encoded, out byte[]? bytes));
-        Assert.Equal(Encoding.ASCII.GetBytes(expected), bytes);
+        ["base64"] = new(StrictBase64.TryDecodeBase64, Base64Alphabet, "==", "=", base64 => base64),
+        ["base64url"] = new(StrictBase64.TryDecodeBase64Url, Base64UrlAlphabet, "", "", ToBase64Url),
+    };
+
+    private delegate bool Decoder(ReadOnlySpan<char> text, [NotNullWhen(true)] out byte[]? bytes, int? exactLength);
+
+    // RFC 4648 §10 test vectors, which base64url writes without padding, as RFC 4648 §3.2 lets an encoding do.
+    // In the last row of each encoding, the sextets 62, 63 and 60 carry the bytes FB FF and two zero pad bits;
+    // RFC 4648 Table 1 writes them "+/8" and Table 2 writes them "-_8".
+    public static TheoryData<string, string, byte[]> CanonicalForms => new()
+    {
+        { "base64", "", Ascii("") },
+        { "base64", "Zg==", Ascii("f") },
+        { "base64", "Zm8=", Ascii("fo") },
+        { "base64", "Zm9v", Ascii("foo") },
+        { "base64", "Zm9vYg==", Ascii("foob") },
+        { "base64", "Zm9vYmE=", Ascii("fooba") },
+        { "base64", "Zm9vYmFy", Ascii("foobar") },
+        { "base64", "+/8=", [0xFB, 0xFF] },
+        { "base64url", "", Ascii("") },
+        { "base64url", "Zg", Ascii("f") },
+        { "base64url", "Zm8", Ascii("fo") },
+        { "base64url", "Zm9v", Ascii("foo") },
+        { "base64url", "Zm9vYg", Ascii("foob") },
+        { "base64url", "Zm9vYmE", Ascii("fooba") },
+        { "base64url", "Zm9vYmFy", Ascii("foobar") },
+        { "base64url", "-_8", [0xFB, 0xFF] },
+    };
+
+    // The base64url rows of CanonicalForms, which the encoder writes from their bytes.
+    public static TheoryData<string, byte[]> Base64UrlForms => new()
+    {
+        { "", Ascii("") },
+        { "Zg", Ascii("f") },
+        { "Zm8", Ascii("fo") },
+        { "Zm9v", Ascii("foo") },
+        { "Zm9vYg", Ascii("foob") },
+        { "Zm9vYmE", Ascii("fooba") },
+        { "Zm9vYmFy", Ascii("foobar") },
+        { "-_8", [0xFB, 0xFF] },
+    };
+
+    [Theory]
+    [MemberData(nameof(CanonicalForms))]
+    public void DecodesTheCanonicalForm(string encoding, string encoded, byte[] expected)
+    {
+        Assert.True(Codecs[encoding].TryDecode(encoded, out byte[]? bytes, null));
+        Assert.Equal(expected, bytes);
     }
 
-    // Each row is a form that RFC 4648 §4 does not produce for any byte string,
+    // Each row is a form that RFC 4648 §4, or §5 without padding, does not produce for any byte string,
     // so accepting it would give one value two encodings.
     [Theory]
-    [InlineData("missing padding", "Zg")]
-    [InlineData("missing one padding character", "Zm9vYg=")]
-    [InlineData("padding after a complete quantum", "Zm9v====")]
-    [InlineData("padding inside the text", "Zg==Zm9v")]
-    [InlineData("padding only", "====")]
-    [InlineData("line break between quanta", "Zm9v\r\nYmFy")]
-    [InlineData("trailing space", "Zm9vYmFy ")]
-    [InlineData("non-zero pad bits after one byte", "Zh==")]
-    [InlineData("non-zero pad bits after two bytes", "Zm9=")]
-    [InlineData("base64url alphabet", "-_8=")]
-    [InlineData("character outside ASCII whose low byte is 'v'", "Zm9\u0176")]
-    public void Base64RejectsNonCanonicalForm(string form, string encoded)
+    [InlineData("base64", "missing padding", "Zg")]
+    [InlineData("base64", "missing one padding character", "Zm9vYg=")]
+    [InlineData("base64", "padding after a complete quantum", "Zm9v====")]
+    [InlineData("base64", "padding inside the text", "Zg==Zm9v")]
+    [InlineData("base64", "padding only", "====")]
+    [InlineData("base64", "line break between quanta", "Zm9v\r\nYmFy")]
+    [InlineData("base64", "trailing space", "Zm9vYmFy ")]
+    [InlineData("base64", "non-zero pad bits after one byte", "Zh==")]
+    [InlineData("base64", "non-zero pad bits after two bytes", "Zm9=")]
+    [InlineData("base64", "base64url alphabet", "-_8=")]
+    [InlineData("base64", "character outside ASCII whose low byte is 'v'", "Zm9\u0176")]
+    [InlineData("base64url", "padding after one byte", "Zg==")]
+    [InlineData("base64url", "padding after two bytes", "Zm8=")]
+    [InlineData("base64url", "impossible length", "Zm9vY")]
+    [InlineData("base64url", "line break between quanta", "Zm9v\r\nYmFy")]
+    [InlineData("base64url", "trailing space", "Zm9vYmFy ")]
+    [InlineData("base64url", "non-zero pad bits after one byte", "Zh")]
+    [InlineData("base64url", "non-zero pad bits after two bytes", "Zm9")]
+    [InlineData("base64url", "base64 alphabet", "+/8")]
+    [InlineData("base64url", "character outside ASCII whose low byte is 'v'", "Zm9\u0176")]
+    public void RejectsANonCanonicalForm(string encoding, string form, string encoded)
     {
-        Assert.False(StrictBase64.TryDecodeBase64(encoded, out _), form);
-    }
-
-    // RFC 4648 §10 test vectors without padding, which RFC 4648 §3.2 lets an encoding omit.
-    [Theory]
-    [InlineData("", "")]
-    [InlineData("Zg", "f")]
-    [InlineData("Zm8", "fo")]
-    [InlineData("Zm9v", "foo")]
-    [InlineData("Zm9vYg", "foob")]
-    [InlineData("Zm9vYmE", "fooba")]
-    [InlineData("Zm9vYmFy", "foobar")]
-    public void Base64UrlDecodesRfc4648Vector(string encoded, string expected)
-    {
-        Assert.True(StrictBase64.TryDecodeBase64Url(encoded, out byte[]? bytes));
-        Assert.Equal(Encoding.ASCII.GetBytes(expected), bytes);
-    }
-
-    // The sextets 62, 63 and 60 carry the bytes FB FF and two zero pad bits;
-    // RFC 4648 Table 1 writes them "+/8" and Table 2 writes them "-_8".
-    [Fact]
-    public void Base64DecodesTheLastTwoAlphabetCharacters()
-    {
-        Assert.True(StrictBase64.TryDecodeBase64("+/8=", out byte[]? bytes));
-        Assert.Equal([0xFB, 0xFF], bytes);
-    }
-
-    [Fact]
-    public void Base64UrlDecodesTheLastTwoAlphabetCharacters()
-    {
-        Assert.True(StrictBase64.TryDecodeBase64Url("-_8", out byte[]? bytes));
-        Assert.Equal([0xFB, 0xFF], bytes);
-    }
-
-    // Each row is a form that RFC 4648 §5 without padding does not produce for any byte string.
-    [Theory]
-    [InlineData("padding after one byte", "Zg==")]
-    [InlineData("padding after two bytes", "Zm8=")]
-    [InlineData("impossible length", "Zm9vY")]
-    [InlineData("line break between quanta", "Zm9v\r\nYmFy")]
-    [InlineData("trailing space", "Zm9vYmFy ")]
-    [InlineData("non-zero pad bits after one byte", "Zh")]
-    [InlineData("non-zero pad bits after two bytes", "Zm9")]
-    [InlineData("base64 alphabet", "+/8")]
-    [InlineData("character outside ASCII whose low byte is 'v'", "Zm9\u0176")]
-    public void Base64UrlRejectsNonCanonicalForm(string form, string encoded)
-    {
-        Assert.False(StrictBase64.TryDecodeBase64Url(encoded, out _), form);
+        Assert.False(Codecs[encoding].TryDecode(encoded, out _, null), form);
     }
 
     // RFC 4648 §10 vectors with the number of bytes they encode; padding characters encode none.
     [Theory]
-    [InlineData("", 0)]
-    [InlineData("Zg==", 1)]
-    [InlineData("Zm8=", 2)]
-    [InlineData("Zm9v", 3)]
-    public void Base64AcceptsTheExactDecodedLength(string encoded, int length)
+    [InlineData("base64", "", 0)]
+    [InlineData("base64", "Zg==", 1)]
+    [InlineData("base64", "Zm8=", 2)]
+    [InlineData("base64", "Zm9v", 3)]
+    [InlineData("base64url", "", 0)]
+    [InlineData("base64url", "Zg", 1)]
+    [InlineData("base64url", "Zm8", 2)]
+    [InlineData("base64url", "Zm9v", 3)]
+    public void AcceptsTheExactDecodedLength(string encoding, string encoded, int length)
     {
-        Assert.True(StrictBase64.TryDecodeBase64(encoded, out byte[]? bytes, exactLength: length));
+        Assert.True(Codecs[encoding].TryDecode(encoded, out byte[]? bytes, length));
         Assert.Equal(length, bytes.Length);
     }
 
     [Theory]
-    [InlineData("", 1)]
-    [InlineData("Zg==", 0)]
-    [InlineData("Zg==", 3)]
-    [InlineData("Zm8=", 3)]
-    [InlineData("Zm9v", 2)]
-    [InlineData("Zm9v", 4)]
-    public void Base64RejectsAnotherDecodedLength(string encoded, int length)
+    [InlineData("base64", "", 1)]
+    [InlineData("base64", "Zg==", 0)]
+    [InlineData("base64", "Zg==", 3)]
+    [InlineData("base64", "Zm8=", 3)]
+    [InlineData("base64", "Zm9v", 2)]
+    [InlineData("base64", "Zm9v", 4)]
+    [InlineData("base64url", "", 1)]
+    [InlineData("base64url", "Zg", 0)]
+    [InlineData("base64url", "Zg", 2)]
+    [InlineData("base64url", "Zm8", 3)]
+    [InlineData("base64url", "Zm9v", 2)]
+    [InlineData("base64url", "Zm9v", 4)]
+    public void RejectsAnotherDecodedLength(string encoding, string encoded, int length)
     {
-        Assert.False(StrictBase64.TryDecodeBase64(encoded, out _, exactLength: length));
+        Assert.False(Codecs[encoding].TryDecode(encoded, out _, length));
     }
 
     [Theory]
-    [InlineData("", 0)]
-    [InlineData("Zg", 1)]
-    [InlineData("Zm8", 2)]
-    [InlineData("Zm9v", 3)]
-    public void Base64UrlAcceptsTheExactDecodedLength(string encoded, int length)
+    [MemberData(nameof(Base64UrlForms))]
+    public void Base64UrlEncodesWithoutPadding(string expected, byte[] value)
     {
-        Assert.True(StrictBase64.TryDecodeBase64Url(encoded, out byte[]? bytes, exactLength: length));
-        Assert.Equal(length, bytes.Length);
-    }
-
-    [Theory]
-    [InlineData("", 1)]
-    [InlineData("Zg", 0)]
-    [InlineData("Zg", 2)]
-    [InlineData("Zm8", 3)]
-    [InlineData("Zm9v", 2)]
-    [InlineData("Zm9v", 4)]
-    public void Base64UrlRejectsAnotherDecodedLength(string encoded, int length)
-    {
-        Assert.False(StrictBase64.TryDecodeBase64Url(encoded, out _, exactLength: length));
-    }
-
-    [Theory]
-    [InlineData("", "")]
-    [InlineData("f", "Zg")]
-    [InlineData("fo", "Zm8")]
-    [InlineData("foo", "Zm9v")]
-    [InlineData("foob", "Zm9vYg")]
-    [InlineData("fooba", "Zm9vYmE")]
-    [InlineData("foobar", "Zm9vYmFy")]
-    public void Base64UrlEncodesRfc4648VectorWithoutPadding(string decoded, string expected)
-    {
-        Assert.Equal(expected, StrictBase64.EncodeBase64Url(Encoding.ASCII.GetBytes(decoded)));
-    }
-
-    [Fact]
-    public void Base64UrlEncodesTheLastTwoAlphabetCharacters()
-    {
-        Assert.Equal("-_8", StrictBase64.EncodeBase64Url([0xFB, 0xFF]));
+        Assert.Equal(expected, StrictBase64.EncodeBase64Url(value));
     }
 
     // The BCL encoder writes canonical base64,
@@ -176,32 +156,26 @@ public class StrictBase64Tests
 
     // Only the final quantum has pad bits,
     // so trying every final quantum of one or two bytes checks that each value has exactly one accepted encoding.
-    [Fact]
-    public void Base64AcceptsOneEncodingOfEachOneOrTwoByteValue()
+    [Theory]
+    [InlineData("base64")]
+    [InlineData("base64url")]
+    public void AcceptsOneEncodingOfEachOneOrTwoByteValue(string encoding)
     {
-        IEnumerable<string> finalQuanta = Strings(Base64Alphabet, 2).Select(s => s + "==")
-            .Concat(Strings(Base64Alphabet, 3).Select(s => s + "="));
-        IEnumerable<string> canonical = OneOrTwoByteValues().Select(Convert.ToBase64String);
+        Codec codec = Codecs[encoding];
+        IEnumerable<string> finalQuanta = Strings(codec.Alphabet, 2).Select(s => s + codec.OneBytePadding)
+            .Concat(Strings(codec.Alphabet, 3).Select(s => s + codec.TwoBytePadding));
+        IEnumerable<string> canonical = OneOrTwoByteValues()
+            .Select(value => codec.FromBase64(Convert.ToBase64String(value)));
 
-        IEnumerable<string> accepted = finalQuanta.Where(s => StrictBase64.TryDecodeBase64(s, out _));
+        IEnumerable<string> accepted = finalQuanta.Where(s => codec.TryDecode(s, out _, null));
 
         Assert.Equal(canonical.Order(StringComparer.Ordinal), accepted.Order(StringComparer.Ordinal));
     }
 
-    [Fact]
-    public void Base64UrlAcceptsOneEncodingOfEachOneOrTwoByteValue()
+    private static byte[] Ascii(string text)
     {
-        IEnumerable<string> finalQuanta = Strings(Base64UrlAlphabet, 2).Concat(Strings(Base64UrlAlphabet, 3));
-        IEnumerable<string> canonical = OneOrTwoByteValues().Select(value => ToBase64Url(Convert.ToBase64String(value)));
-
-        IEnumerable<string> accepted = finalQuanta.Where(s => StrictBase64.TryDecodeBase64Url(s, out _));
-
-        Assert.Equal(canonical.Order(StringComparer.Ordinal), accepted.Order(StringComparer.Ordinal));
+        return Encoding.ASCII.GetBytes(text);
     }
-
-    // RFC 4648 Table 1 and Table 2.
-    private const string Base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    private const string Base64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
     private static string ToBase64Url(string base64)
     {
@@ -220,4 +194,15 @@ public class StrictBase64Tests
         return Enumerable.Range(0, 1 << 8).Select(v => new[] { (byte)v })
             .Concat(Enumerable.Range(0, 1 << 16).Select(v => new[] { (byte)(v >> 8), (byte)v }));
     }
+
+    /// <summary>
+    /// An encoding with its decoder under test, its alphabet, and the padding of a final quantum.
+    /// </summary>
+    /// <param name="FromBase64">Converts canonical base64 to the canonical form of this encoding.</param>
+    private sealed record Codec(
+        Decoder TryDecode,
+        string Alphabet,
+        string OneBytePadding,
+        string TwoBytePadding,
+        Func<string, string> FromBase64);
 }

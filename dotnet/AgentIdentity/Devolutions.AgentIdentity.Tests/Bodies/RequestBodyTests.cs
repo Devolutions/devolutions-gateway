@@ -68,16 +68,12 @@ public abstract class RequestBodyTests
     }
 
     // CONTRACT.md §3: metadata is required, and §1 reads a null member as an absent one.
-    [Fact]
-    public void RejectsMissingMetadata()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("null")]
+    public void RejectsMissingMetadata(string? metadata)
     {
-        AssertInvalid(ParseText(Body(null, "")));
-    }
-
-    [Fact]
-    public void RejectsNullMetadata()
-    {
-        AssertInvalid(ParseText(Body("null", "")));
+        AssertInvalid(ParseText(Body(metadata, "")));
     }
 
     // CONTRACT.md §3: metadata is a JSON object of string to string.
@@ -122,23 +118,18 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(metadata, "")), form);
     }
 
-    // CONTRACT.md §1: a body that repeats a member name at any depth is invalid,
+    // CONTRACT.md §1: a body that repeats a member name at any depth, such as one metadata key twice, is invalid,
     // whether the names are written alike or only unescape alike.
     [Theory]
-    [InlineData("metadata", """ "metadata": {}""")]
-    [InlineData("metadata with an escaped letter", """ "m\u0065tadata": {}""")]
-    [InlineData("unknown member", """ "extra": 1, "extra": 2""")]
-    [InlineData("member of an unknown member", """ "extra": {"a": 1, "a": 2}""")]
-    [InlineData("member of an object in nested arrays", """ "extra": [[{"x": {"a": null, "a": null}}]]""")]
-    public void RejectsRepeatedMemberName(string form, string extraMembers)
+    [InlineData("metadata", ValidMetadata, """ "metadata": {}""")]
+    [InlineData("metadata with an escaped letter", ValidMetadata, """ "m\u0065tadata": {}""")]
+    [InlineData("metadata key", """{"hostname": "a", "hostname": "a"}""", "")]
+    [InlineData("unknown member", ValidMetadata, """ "extra": 1, "extra": 2""")]
+    [InlineData("member of an unknown member", ValidMetadata, """ "extra": {"a": 1, "a": 2}""")]
+    [InlineData("member of an object in nested arrays", ValidMetadata, """ "extra": [[{"x": {"a": null, "a": null}}]]""")]
+    public void RejectsRepeatedMemberName(string form, string metadata, string extraMembers)
     {
-        AssertInvalid(ParseText(Body(ValidMetadata, extraMembers)), form);
-    }
-
-    [Fact]
-    public void RejectsRepeatedMetadataKey()
-    {
-        AssertInvalid(ParseText(Body("""{"hostname": "a", "hostname": "a"}""", "")));
+        AssertInvalid(ParseText(Body(metadata, extraMembers)), form);
     }
 
     // RFC 8259 §2: a JSON text is one value; RFC 8259 §8.1 lets a parser reject a byte order mark.
@@ -300,16 +291,12 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     }
 
     // CONTRACT.md §5.2 and §5.3: csr is required, and §1 reads a null member as an absent one.
-    [Fact]
-    public void RejectsMissingCsr()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("null")]
+    public void RejectsMissingCsr(string? csr)
     {
-        AssertInvalid(ParseText(BodyWithCsr(null, ValidMetadata)));
-    }
-
-    [Fact]
-    public void RejectsNullCsr()
-    {
-        AssertInvalid(ParseText(BodyWithCsr("null", ValidMetadata)));
+        AssertInvalid(ParseText(BodyWithCsr(csr, ValidMetadata)));
     }
 
     // CONTRACT.md §1: a CSR is DER encoded base64 in a JSON string.

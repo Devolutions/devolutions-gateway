@@ -19,6 +19,13 @@ public class ChannelMessagesTests
         ["Reconnect"] = () => ChannelMessages.Reconnect(ReconnectReason.CertificateRotated),
     };
 
+    // The messages that carry a reason, built with the reason given as its integer value.
+    private static readonly Dictionary<string, Func<int, ServerMessage>> MessagesWithAReason = new()
+    {
+        ["RenewRequested"] = reason => ChannelMessages.RenewRequested((RenewalRequestReason)reason),
+        ["Reconnect"] = reason => ChannelMessages.Reconnect((ReconnectReason)reason),
+    };
+
     public static TheoryData<string> MessageNames => new(Messages.Keys);
 
     // CONTRACT.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
@@ -83,23 +90,14 @@ public class ChannelMessagesTests
     // Reasons start at 1, so a reason that the host never set is not a valid one,
     // and a value after the last reason is not one either.
     [Theory]
-    [InlineData(0)]
-    [InlineData(3)]
-    public void RenewRequestedRejectsAnUndefinedReason(int reason)
+    [InlineData("RenewRequested", 0)]
+    [InlineData("RenewRequested", 3)]
+    [InlineData("Reconnect", 0)]
+    [InlineData("Reconnect", 2)]
+    public void MessageRejectsAnUndefinedReason(string message, int reason)
     {
-        ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(
-            () => ChannelMessages.RenewRequested((RenewalRequestReason)reason));
-
-        Assert.Equal("reason", exception.ParamName);
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(2)]
-    public void ReconnectRejectsAnUndefinedReason(int reason)
-    {
-        ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(
-            () => ChannelMessages.Reconnect((ReconnectReason)reason));
+        ArgumentOutOfRangeException exception =
+            Assert.Throws<ArgumentOutOfRangeException>(() => MessagesWithAReason[message](reason));
 
         Assert.Equal("reason", exception.ParamName);
     }

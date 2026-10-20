@@ -209,19 +209,15 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(NowInSeconds.UtcDateTime, leaf.NotBefore.ToUniversalTime());
     }
 
-    [Fact]
-    public void NotAfterIsNotBeforePlusTheLifetime()
+    // A certificate holds whole seconds, so a fraction of a second in the lifetime is dropped.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(500)]
+    public void NotAfterIsNotBeforePlusTheWholeSecondsOfTheLifetime(int lifetimeMilliseconds)
     {
-        using X509Certificate2 leaf = Issue(lifetime: TimeSpan.FromDays(30));
+        TimeSpan lifetime = TimeSpan.FromDays(30) + TimeSpan.FromMilliseconds(lifetimeMilliseconds);
 
-        Assert.Equal(NowInSeconds.AddDays(30).UtcDateTime, leaf.NotAfter.ToUniversalTime());
-    }
-
-    // A certificate holds whole seconds.
-    [Fact]
-    public void NotAfterDropsTheFractionOfASecondOfTheLifetime()
-    {
-        using X509Certificate2 leaf = Issue(lifetime: TimeSpan.FromDays(30) + TimeSpan.FromMilliseconds(500));
+        using X509Certificate2 leaf = Issue(lifetime: lifetime);
 
         Assert.Equal(NowInSeconds.AddDays(30).UtcDateTime, leaf.NotAfter.ToUniversalTime());
     }
@@ -335,27 +331,43 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(_agentKey.ExportSubjectPublicKeyInfo(), leaf.PublicKey.ExportSubjectPublicKeyInfo());
     }
 
+    // INTENT.md: code that acts for an identity takes the identity that the signature check produced,
+    // and only a renew request proves the identity that a renewal acts for.
     // An identity that proved its key for another operation never had a renew request accepted for it.
     [Theory]
-    [InlineData(AgentOperation.Confirm)]
-    [InlineData(AgentOperation.CheckIn)]
-    [InlineData(AgentOperation.Connect)]
-    public async Task RenewalThrowsForAnIdentityAuthenticatedForAnotherOperation(AgentOperation operation)
+    [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.Confirm)]
+    [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.CheckIn)]
+    [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.Connect)]
+    [InlineData(nameof(RenewalRules), AgentOperation.Confirm)]
+    [InlineData(nameof(RenewalRules), AgentOperation.CheckIn)]
+    [InlineData(nameof(RenewalRules), AgentOperation.Connect)]
+    public async Task RenewalThrowsForAnIdentityAuthenticatedForAnotherOperation(
+        string renewal,
+        AgentOperation operation)
     {
         AuthenticatedIdentity identity = await TestIdentity.AuthenticateAsync(operation);
 
-        ArgumentException exception = Assert.Throws<ArgumentException>(() => IssueForRenewal(identity));
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => Renewals[renewal](identity));
 
         Assert.Equal("renewing", exception.ParamName);
     }
 
-    [Fact]
-    public void RenewalThrowsForANullIdentity()
+    [Theory]
+    [InlineData(nameof(IdentityCertificateIssuer))]
+    [InlineData(nameof(RenewalRules))]
+    public void RenewalThrowsForANullIdentity(string renewal)
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => IssueForRenewal(null!));
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => Renewals[renewal](null!));
 
         Assert.Equal("renewing", exception.ParamName);
     }
+
+    // The two calls that act for a renewing identity, named by the class of each.
+    private Dictionary<string, Action<AuthenticatedIdentity>> Renewals => new()
+    {
+        [nameof(IdentityCertificateIssuer)] = renewing => IssueForRenewal(renewing).Dispose(),
+        [nameof(RenewalRules)] = renewing => RenewalRules.Decide(renewing, null),
+    };
 
     private X509Certificate2 IssueForRenewal(AuthenticatedIdentity renewing)
     {
