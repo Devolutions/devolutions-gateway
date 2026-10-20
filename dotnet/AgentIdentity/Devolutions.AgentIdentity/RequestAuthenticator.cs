@@ -128,6 +128,7 @@ public sealed class RequestAuthenticator
     /// A verified opening does not authenticate the stream:
     /// the agent must still sign <see cref="ChannelOpening.Challenge"/>,
     /// which <see cref="ChannelOpening.VerifyHello"/> checks.
+    /// The agent has <see cref="ChannelHandshake.HelloTimeout"/> to do so, counted from the end of this verification.
     /// </remarks>
     /// <param name="method">The request method, as received.</param>
     /// <param name="signatureInput">The <c>signature-input</c> metadata entries in received order.</param>
@@ -166,8 +167,18 @@ public sealed class RequestAuthenticator
         byte[] challenge = new byte[ChallengeLength];
         _randomNumberGenerator.GetBytes(challenge);
 
+        // The Hello timeout runs from the end of verification rather than from the reading that judged the request,
+        // so that time spent in the registry and the nonce store does not shorten the agent's time to answer.
+        DateTimeOffset openedAt = _timeProvider.GetUtcNow();
+
         return ChannelOpeningResult.Success(
-            new ChannelOpening(verification.Certificate, verification.Nonce, Guid.NewGuid(), challenge, _timeProvider));
+            new ChannelOpening(
+                verification.Certificate,
+                verification.Nonce,
+                Guid.NewGuid(),
+                challenge,
+                openedAt,
+                _timeProvider));
     }
 
     private async ValueTask<Verification> VerifyAsync(

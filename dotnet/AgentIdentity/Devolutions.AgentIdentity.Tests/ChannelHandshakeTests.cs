@@ -53,6 +53,16 @@ public class ChannelHandshakeTests
         ["invalid metadata"] = message => message.Hello.Metadata.Add("Hostname", "device-a"),
     };
 
+    // The times at which VerifyHello runs on the vector stream, each breaking a rule that it checks on its clock
+    // reading before it reads the message.
+    // The certificate of device-a expires 70 days after the vector opening, so a reading after its notAfter is also
+    // after the Hello timeout.
+    private static readonly Dictionary<string, Func<DateTimeOffset>> ClockFailures = new()
+    {
+        ["after the certificate's notAfter"] = () => DeviceANotAfter.AddTicks(1),
+        ["after the Hello timeout"] = () => VectorChannel.OpeningTime.AddSeconds(10).AddTicks(1),
+    };
+
     // Calls that end the handshake of an opening, one per outcome.
     private static readonly Dictionary<string, Func<ChannelOpening, ChannelHandshakeResult>> HandshakeEnds = new()
     {
@@ -65,6 +75,23 @@ public class ChannelHandshakeTests
     };
 
     public static TheoryData<string> SignatureFailureNames => new(SignatureFailures.Keys);
+
+    // Each clock failure with each message failure, and the error of the clock failure.
+    public static TheoryData<string, string, AgentIdentityErrorCode> ClockAndMessageFailures
+    {
+        get
+        {
+            TheoryData<string, string, AgentIdentityErrorCode> cases = new();
+
+            foreach (string message in MessageFailures.Keys)
+            {
+                cases.Add("after the certificate's notAfter", message, AgentIdentityErrorCode.CertificateExpired);
+                cases.Add("after the Hello timeout", message, AgentIdentityErrorCode.SignatureInvalid);
+            }
+
+            return cases;
+        }
+    }
 
     // Every way to end a handshake, followed by each of the two calls a host makes.
     public static TheoryData<string, string> HandshakeEndsThenAnotherCall
@@ -97,8 +124,23 @@ public class ChannelHandshakeTests
 
     private static byte[] ValidProof => TestVectors.Instance.ChannelProof.Case("valid").Proof;
 
+    // Every message that breaks one rule of §7.3 step 4: SignatureFailures, and invalid metadata in a valid Hello.
+    private static Dictionary<string, Func<ChannelOpening, AgentMessage>> MessageFailures =>
+        new(SignatureFailures)
+        {
+            ["a Hello with invalid metadata"] = opening =>
+                Altered(VectorChannel.ValidHelloMessage(opening), LaterFailures["invalid metadata"]),
+        };
+
     // A raw 64-byte signature over the right bytes, by the key of device-b.
     private static byte[] OtherKeyProof => TestVectors.Instance.ChannelProof.Case("wrong_key").Proof;
+
+    private static KeyVector DeviceA => TestVectors.Instance.Key("device-a");
+
+    // The notAfter of the certificate of device-a, which opens every stream of these tests,
+    // as the vector file states it in Unix seconds, independently of any time zone.
+    private static DateTimeOffset DeviceANotAfter =>
+        TestVectors.Instance.HttpSignature.RegisteredCertificate("device-a").NotAfter;
 
     // CONTRACT.md §7.3 step 4 and §7.4: UNAUTHENTICATED with error-code signature_invalid.
     [Theory]
@@ -141,6 +183,28 @@ public class ChannelHandshakeTests
         Assert.NotEqual(laterAlone.FailureDetail, earlierAlone.FailureDetail);
         AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
         Assert.Equal(earlierAlone.FailureDetail, result.FailureDetail);
+    }
+
+    // CONTRACT.md §7.4 and §7.3 step 4: a stream closes at its certificate's notAfter and after the Hello timeout,
+    // so a Hello that comes later fails for that reason, whatever it holds.
+    // The certificate comes first: a reading after its notAfter is also after the timeout here.
+    // The timeout is signature_invalid like the message failures, and comes before all of them, metadata included.
+    [Theory]
+    [MemberData(nameof(ClockAndMessageFailures))]
+    public async Task ClockFailureWinsOverMessageFailure(
+        string clock,
+        string message,
+        AgentIdentityErrorCode expectedCode)
+    {
+        ChannelHandshakeResult clockAlone =
+            await VerifyAtAsync(ClockFailures[clock](), VectorChannel.ValidHelloMessage);
+        ChannelHandshakeResult messageAlone = await VerifyAsync(MessageFailures[message]);
+
+        ChannelHandshakeResult result = await VerifyAtAsync(ClockFailures[clock](), MessageFailures[message]);
+
+        Assert.NotEqual(messageAlone.FailureDetail, clockAlone.FailureDetail);
+        AssertFailed(result, expectedCode, StatusCode.Unauthenticated);
+        Assert.Equal(clockAlone.FailureDetail, result.FailureDetail);
     }
 
     // CONTRACT.md §7.3 step 4: the server verifies the proof with the key of the certificate that authenticated the
@@ -229,7 +293,8 @@ public class ChannelHandshakeTests
         Assert.Equal(hello.Id, welcome.CorrelationId);
     }
 
-    // The clock returns the time of the opening, then the time of the handshake, then a later time.
+    // The clock reads the time of the opening twice, to judge the request and to start the Hello timeout,
+    // then the time of the handshake, then a later time.
     // The Welcome carries the time at which the server answers, from that one reading.
     [Fact]
     public async Task WelcomeCarriesTheServerTimeOfTheHandshake()
@@ -237,7 +302,7 @@ public class ChannelHandshakeTests
         DateTimeOffset opened = VectorChannel.OpeningTime;
         DateTimeOffset answered = opened.AddMilliseconds(3_250);
         ChannelOpening opening = await VectorChannel.OpenAsync(
-            new SteppingTimeProvider(opened, answered, answered.AddDays(1).AddMilliseconds(500)));
+            new SteppingTimeProvider(opened, opened, answered, answered.AddDays(1).AddMilliseconds(500)));
 
         ChannelHandshakeResult result = opening.VerifyHello(VectorChannel.ValidHelloMessage(opening));
 
@@ -262,6 +327,31 @@ public class ChannelHandshakeTests
         Assert.True(result.Succeeded, result.FailureDetail);
     }
 
+    // CONTRACT.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
+    // The Welcome shows that the clock reading that judged the certificate is the one at notAfter.
+    [Fact]
+    public async Task HandshakeSucceedsAtTheCertificateNotAfter()
+    {
+        (ChannelOpening opening, AgentMessage hello) = await OpenBeforeNotAfterAsync(DeviceANotAfter);
+
+        ChannelHandshakeResult result = opening.VerifyHello(hello);
+
+        Assert.True(result.Succeeded, result.FailureDetail);
+        Assert.Equal(Timestamp.FromDateTimeOffset(DeviceANotAfter), result.Welcome.Welcome.ServerTime);
+    }
+
+    // CONTRACT.md §7.4 and the shared intent, security invariant 8: a stream closes no later than the notAfter of the
+    // certificate that opened it, with UNAUTHENTICATED and error-code certificate_expired.
+    [Fact]
+    public async Task HandshakeOneTickAfterTheCertificateNotAfterIsCertificateExpired()
+    {
+        (ChannelOpening opening, AgentMessage hello) = await OpenBeforeNotAfterAsync(DeviceANotAfter.AddTicks(1));
+
+        ChannelHandshakeResult result = opening.VerifyHello(hello);
+
+        AssertFailed(result, AgentIdentityErrorCode.CertificateExpired, StatusCode.Unauthenticated);
+    }
+
     // CONTRACT.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
     [Fact]
     public async Task NoHelloInTimeIsSignatureInvalid()
@@ -273,11 +363,72 @@ public class ChannelHandshakeTests
         AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
+    // CONTRACT.md §7.4: a stream still waiting for its Hello after its certificate's notAfter closes with
+    // certificate_expired rather than as a timeout.
+    [Theory]
+    [InlineData(0, AgentIdentityErrorCode.SignatureInvalid)]
+    [InlineData(1, AgentIdentityErrorCode.CertificateExpired)]
+    public async Task TimeoutIsCertificateExpiredOnlyAfterTheNotAfter(
+        long ticksAfterNotAfter,
+        AgentIdentityErrorCode expectedCode)
+    {
+        (ChannelOpening opening, _) = await OpenBeforeNotAfterAsync(DeviceANotAfter.AddTicks(ticksAfterNotAfter));
+
+        ChannelHandshakeResult result = opening.HelloTimedOut();
+
+        AssertFailed(result, expectedCode, StatusCode.Unauthenticated);
+    }
+
     // CONTRACT.md §7.3 step 4: the server waits 10 s for the Hello.
     [Fact]
     public void HelloTimeoutIs10Seconds()
     {
         Assert.Equal(TimeSpan.FromSeconds(10), ChannelHandshake.HelloTimeout);
+    }
+
+    // CONTRACT.md §7.3 step 4: the Hello must arrive within 10 s of the opening, 10 s included.
+    // The Welcome shows that the clock reading that judged the timeout is the one at 10 s.
+    [Fact]
+    public async Task HelloExactlyAtTheTimeoutSucceeds()
+    {
+        DateTimeOffset opened = VectorChannel.OpeningTime;
+        DateTimeOffset answered = opened.AddSeconds(10);
+        ChannelOpening opening = await VectorChannel.OpenAsync(
+            new SteppingTimeProvider(opened, opened, answered, answered.AddTicks(1)));
+
+        ChannelHandshakeResult result = opening.VerifyHello(VectorChannel.ValidHelloMessage(opening));
+
+        Assert.True(result.Succeeded, result.FailureDetail);
+        Assert.Equal(Timestamp.FromDateTimeOffset(answered), result.Welcome.Welcome.ServerTime);
+    }
+
+    // A Hello that the host passes on after the timeout fails, so a late host timer cannot let it through.
+    [Fact]
+    public async Task HelloOneTickAfterTheTimeoutIsSignatureInvalid()
+    {
+        DateTimeOffset opened = VectorChannel.OpeningTime;
+        ChannelOpening opening = await VectorChannel.OpenAsync(
+            new SteppingTimeProvider(opened, opened, opened.AddSeconds(10).AddTicks(1)));
+
+        ChannelHandshakeResult result = opening.VerifyHello(VectorChannel.ValidHelloMessage(opening));
+
+        AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
+    }
+
+    // The agent can answer only once the opening is verified and its challenge sent,
+    // so the 10 s run from the end of verification, not from the earlier reading that judged the request.
+    // Here the registry and the nonce store take 5 s, and the Hello comes 10 s after them.
+    [Fact]
+    public async Task HelloTimeoutRunsFromTheEndOfTheOpening()
+    {
+        DateTimeOffset judged = VectorChannel.OpeningTime;
+        DateTimeOffset verified = judged.AddSeconds(5);
+        ChannelOpening opening = await VectorChannel.OpenAsync(
+            new SteppingTimeProvider(judged, verified, verified.AddSeconds(10)));
+
+        ChannelHandshakeResult result = opening.VerifyHello(VectorChannel.ValidHelloMessage(opening));
+
+        Assert.True(result.Succeeded, result.FailureDetail);
     }
 
     // The first agent message decides the stream: a second one could retry a failed proof,
@@ -341,6 +492,41 @@ public class ChannelHandshakeTests
     {
         ChannelOpening opening = await VectorChannel.OpenAsync();
         return opening.VerifyHello(firstMessage(opening));
+    }
+
+    // The same, with the clock reading handshakeTime for the handshake.
+    private static async Task<ChannelHandshakeResult> VerifyAtAsync(
+        DateTimeOffset handshakeTime,
+        Func<ChannelOpening, AgentMessage> firstMessage)
+    {
+        DateTimeOffset opened = VectorChannel.OpeningTime;
+        ChannelOpening opening = await VectorChannel.OpenAsync(new SteppingTimeProvider(opened, opened, handshakeTime));
+        return opening.VerifyHello(firstMessage(opening));
+    }
+
+    // Opens a stream five seconds before the certificate of device-a expires, with a valid Hello signed for it,
+    // so that the handshake can reach notAfter within the Hello timeout.
+    // The clock reads the opening's time to judge the request and to start the timeout, then handshakeTime.
+    private static async Task<(ChannelOpening Opening, AgentMessage Hello)> OpenBeforeNotAfterAsync(
+        DateTimeOffset handshakeTime)
+    {
+        DateTimeOffset opened = DeviceANotAfter.AddSeconds(-5);
+        TestAuthority authority = new(opened, clock: new SteppingTimeProvider(opened, opened, handshakeTime));
+        SignedHttpRequest request = authority.Valid(AgentOperation.Connect).ToHttpRequest();
+
+        ChannelOpeningResult result = await authority.Authenticator.AuthenticateChannelOpeningAsync(
+            request.Method,
+            request.SignatureInput,
+            request.Signature);
+
+        Assert.True(result.Succeeded, result.FailureDetail);
+        ChannelOpening opening = result.Opening;
+        byte[] proof = TestChannelProof.Sign(
+            DeviceA,
+            opening.Challenge.Challenge.Challenge_.Span,
+            TestRequest.DefaultNonce);
+
+        return (opening, VectorChannel.HelloMessage(opening, proof));
     }
 
     private static string NewId()
