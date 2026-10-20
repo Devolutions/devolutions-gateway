@@ -101,14 +101,15 @@ Replace the identity's metadata, and answer with `ResponseBodies.CheckIn`, given
 1. Pass the request method and the values of the `signature-input` and `signature` request headers, in received order, to `RequestAuthenticator.AuthenticateChannelOpeningAsync`.
 2. Send the result's `Opening.Challenge` as the first message on the stream.
 3. Pass the first agent message to `Opening.VerifyHelloAsync`.
-   Call `Opening.HelloTimedOut` instead when no message arrives within `ChannelHandshake.HelloTimeout`, when `Opening.CertificateNotAfter` passes first, or when the agent ends the stream without a message.
+   Call `Opening.HelloTimedOutAsync` instead when no message arrives within `ChannelHandshake.HelloTimeout`, when `Opening.CertificateNotAfter` passes first, or when the agent ends the stream without a message.
    The first of these calls ends the handshake, and a second one throws `InvalidOperationException`.
 4. On success, replace the identity's metadata with `Metadata`, send `Welcome`, and only then treat the stream as authenticated for `Identity`.
 5. Send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.md [§7.3] steps 5 and 7).
 6. If `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: also send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)`, and close the stream with `OK` 60 s later, as for `confirm` (CONTRACT.md [§7.4]).
 7. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.md [§7.4]).
 
-A channel opening has no body: `VerifyHelloAsync` reads the registry again and checks the certificate's expiry and the deadline before the message and its proof, and the metadata of the `Hello` last, in the order of CONTRACT.md [§7.4] and [§7.3] step 4.
+`VerifyHelloAsync` and `HelloTimedOutAsync` read the registry again, so a deletion, a revocation or the certificate's expiry since the opening closes the stream with its own error, ahead of the handshake failures (CONTRACT.md [§7.4]).
+A channel opening has no body: `VerifyHelloAsync` then checks the deadline, the message and its proof, and the metadata of the `Hello` last (CONTRACT.md [§7.3] step 4).
 
 When an identity's config changes, create its `IdentityConfig` again with a higher `Revision`, and send `ChannelMessages.ConfigUpdate` on each authenticated stream of the identity.
 `ChannelMessages.RenewRequested` takes `RenewalRequestReason.Rotation` for the notifications of a root rotation (CONTRACT.md [§8.3]), and `RenewalRequestReason.Admin` for an administrator's request.
