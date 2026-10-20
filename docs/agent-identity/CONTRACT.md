@@ -216,7 +216,7 @@ Body for every non-2xx response:
 ```
 
 `server_time` is always present; agents use it only for `clock_skew`.
-This body is present on every non-2xx response under `{u}/api/agent-identity/v1/`, including framework-level failures: malformed JSON or body → `400 invalid_request`; unknown route → `404 invalid_request`; wrong method → `405 invalid_request`; body too large → `413 invalid_request`.
+This body is present on every non-2xx response under `{u}/api/agent-identity/v1/`, including framework-level failures: malformed JSON or body → `400 invalid_request`; unknown route → `404 invalid_request`; wrong method → `405 invalid_request`; body too large → `413 invalid_request`; an unexpected server failure → `500 unavailable`.
 
 | Code                  | HTTP | Meaning                                                                      | Agent class                                       |
 | --------------------- | ---- | ---------------------------------------------------------------------------- | ------------------------------------------------- |
@@ -229,6 +229,7 @@ This body is present on every non-2xx response under `{u}/api/agent-identity/v1/
 | `signature_invalid`   | 401  | Bad signature, wrong `tag`, bad digest, replayed nonce, malformed params     | transient                                         |
 | `clock_skew`          | 401  | `created`/`expires` outside tolerance                                        | transient, adjust clock                           |
 | `invalid_request`     | 400  | Malformed body, CSR or metadata                                              | transient (agent bug; keep retrying with backoff) |
+| `unavailable`         | 5xx  | The server can't serve the request now: overloaded, or a part it needs fails | transient                                         |
 
 `token_*` codes are permanent: the agent never retries that token.
 

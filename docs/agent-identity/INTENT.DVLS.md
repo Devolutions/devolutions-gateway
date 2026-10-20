@@ -13,7 +13,7 @@ The rules every authority applies the same way live in the `Devolutions.AgentIde
 - **Management API**: the HTTP API that administrators and tools use to manage enrollment tokens, identities and root rotation.
   It is product-specific: DVLS's management API is a model that PSU may follow, with no obligation.
   Avoid "admin API".
-- **Identity status**: one of four values, distinct from the certificate statuses `pending`, `current` and `retired` that `CONTRACT.md` defines:
+- **Identity status**: one of four values, distinct from the certificate statuses `pending`, `current` and `retired` that `CONTRACT.md` defines; their wire spelling follows DVLS's public API contract:
   - `active`: not revoked, and holds an unexpired current or pending certificate, so it can authenticate;
   - `grace`: not revoked, and holds no unexpired certificate but one within renewal grace, so it can only renew;
   - `expired`: not revoked, and beyond renewal grace; only a new enrollment brings the device back;
@@ -41,7 +41,7 @@ The rules every authority applies the same way live in the `Devolutions.AgentIde
 ## Load
 
 - Rotation notifications are sent to connected identities at a configurable rate, 10 identities per second by default.
-- DVLS answers renewals beyond its capacity with a transient error and `Retry-After`.
+- DVLS answers renewals beyond its capacity with `503 unavailable` and `Retry-After`.
 
 ## Later
 
@@ -51,19 +51,17 @@ The rules every authority applies the same way live in the `Devolutions.AgentIde
 
 ## Management API
 
-DVLS's OpenAPI document is the exact reference for routes, fields and status codes; this section holds the decisions behind them.
+The management API is part of DVLS's public API, so that administrators and tools script it like any other DVLS operation.
+It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONTRACT.md`) for routes, models, paging, errors, enum spelling and authentication, and DVLS's public OpenAPI document is its exact reference; this section holds the decisions behind it.
 
-- The base path is `{u}/api/v3/agent-identity`.
-  The API uses camelCase JSON keys and DVLS's `pageNumber`/`pageSize` pagination; the protocol conventions of `CONTRACT.md` §1 otherwise apply.
-- Callers authenticate with a DVLS session token from a user or application-identity login.
 - Four permissions follow DVLS's View and Manage convention for Agent Tunnel agents, with revocation and root rotation separate:
-  - View: read enrollment tokens, identities and the rotation status;
-  - Manage: create and delete enrollment tokens; rename identities, request their renewal, and delete revoked identities;
+  - View: read enrollment tokens, identities, the rotation status and Agent Identity's settings;
+  - Manage: create and delete enrollment tokens; rename identities, request their renewal, and delete revoked identities; change Agent Identity's settings;
   - Revoke: revoke identities;
   - Rotate root: start a root rotation.
 
   Roles grant them to users and application identities; built-in administrators hold all four.
-  A request without the required permission is refused with `403`.
+- Agent Identity's settings are "Agent channel enabled", the certificate lifetime in days and the rotation notification rate.
 
 ### Enrollment tokens
 
@@ -79,7 +77,7 @@ DVLS's OpenAPI document is the exact reference for routes, fields and status cod
 ### Identities
 
 - The management API names each record an identity (`/identities`), like the wire names; `/devices` stays free for a later view that groups identities by machine.
-- Each identity receives a strictly increasing creation key when inserted, and listings sort by that key; `createdAt` is non-decreasing in this order.
+- Each identity receives a strictly increasing creation key when inserted, and listings sort by that key; the creation time is non-decreasing in this order.
   A page walk returns every identity that existed when the walk started at least once, and exactly once when no enrollment overlaps the walk; only a deletion during the walk can make it miss one.
   An identity whose enrollment overlaps the walk may be missing from it or make the next page repeat one entry; clients deduplicate by `id`.
   Identity IDs remain UUIDs and are not used as the listing sort key.
