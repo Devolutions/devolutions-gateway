@@ -16,17 +16,18 @@ Start two mocks as described in the [mock README] for the complete multi-authori
 Use `--filter p_` for protocol-only checks or `--list` to inspect test names.
 Use `--key-backend windows-software-provider|file` to select `Identity.KeyBackend` (`WindowsSoftwareProvider` or `File`); the default is Windows software provider on Windows and file elsewhere.
 On DVLS, supply `--disposable-dvls-target` only when rotation is safe, and provide `--unprivileged-admin-token` to check permission denials.
-The disposable rotation checks require no other active devices on the published root; otherwise they report `SKIP` before rotating.
+The disposable rotation checks require no other active identities on the published root; otherwise they report `SKIP` before rotating.
 `--dvls-rotation-window-secs` defaults to 60; `--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
 Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
 The DVLS expiry-boundary test needs a configured leaf lifetime of roughly 10–30 seconds.
 `--expect-channel` defaults to `true`; use `--expect-channel false` when the server intentionally omits `config.agent_channel_url`.
-When the URL is absent, only gRPC-dependent checks become N/A; HTTP confirm checks and channelless renewal still run.
+When the URL is absent, gRPC-dependent checks report `SKIP`; HTTP confirm checks and channelless renewal still run.
 
-`PASS` and `FAIL` report assertions, while `N/A` marks platform-inapplicable or explicitly unavailable-channel tests.
-`SKIP` means a required fixture is missing; any `SKIP` makes the run incomplete and exits nonzero unless `--allow-incomplete` is set.
+`PASS` and `FAIL` report assertions, and `N/A` marks a test that does not apply to the platform.
+`SKIP` means the target lacks a required fixture, mock control, privilege or channel, so mock-only tests report `SKIP` on DVLS.
+Any `SKIP` makes the run incomplete and exits nonzero unless `--allow-incomplete` is set.
 The final summary reports counts, per-category durations and the reason for every non-PASS test.
 
 The runner reports a unique `KEY NAME PREFIX` of `conformance-<32 lowercase hex digits>` for each run and writes it to `__debug__.identity.key_name_prefix` in every generated `agent.json`.

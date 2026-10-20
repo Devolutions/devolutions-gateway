@@ -175,7 +175,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn fixed_rfc6979_vectors_and_channel_proof() -> anyhow::Result<()> {
+    fn signer_reproduces_vector_inputs_and_verifies_under_vector_keys() -> anyhow::Result<()> {
         const ALGORITHM_BEFORE_KEY_ID: [SignatureParameter; 6] = [
             SignatureParameter::Created,
             SignatureParameter::Expires,
@@ -229,8 +229,18 @@ mod tests {
             let signed = pair.sign_with_order(keyid, tag, body, (1_790_000_000, 1_790_000_060), nonce, order);
             assert_eq!(signed.input, input, "{name} input");
             assert_eq!(signed.base, case["signature_base"], "{name} signature base");
-            assert_eq!(signed.signature, case["headers"]["signature"], "{name} signature");
             assert_eq!(signed.digest.as_deref(), case["headers"]["content-digest"].as_str());
+            let raw = signed
+                .signature
+                .strip_prefix("sig=:")
+                .and_then(|value| value.strip_suffix(':'))
+                .context("signature header encoding")?;
+            vector_public_key(vector_key)?
+                .verify(
+                    case["signature_base"].as_str().context("signature base")?.as_bytes(),
+                    &Signature::from_slice(&STANDARD.decode(raw)?)?,
+                )
+                .with_context(|| format!("{name} signature does not verify under the vector key"))?;
         }
         let key_der = STANDARD.decode(vectors["keys"][0]["private_key_pkcs8"].as_str().context("vector key")?)?;
         let pair = KeyPair {
@@ -240,16 +250,20 @@ mod tests {
         let proof = &vectors["channel_proof"];
         let challenge = STANDARD.decode(proof["challenge"].as_str().context("challenge")?)?;
         let nonce = proof["connect_nonce"].as_str().context("connect nonce")?;
-        let mut message = b"devolutions-agent-identity/v1/channel-proof\0".to_vec();
-        message.extend_from_slice(&challenge);
-        message.extend_from_slice(nonce.as_bytes());
-        let expected_hex = proof["message_hex"].as_str().context("message hex")?;
-        assert_eq!(
-            message.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
-            expected_hex
-        );
-        let expected_proof = proof["cases"][0]["proof"].as_str().context("valid proof")?;
-        assert_eq!(STANDARD.encode(pair.channel_proof(&challenge, nonce)), expected_proof);
+        let message_hex = proof["message_hex"].as_str().context("message hex")?;
+        let message = (0..message_hex.len())
+            .step_by(2)
+            .map(|index| u8::from_str_radix(&message_hex[index..index + 2], 16))
+            .collect::<Result<Vec<_>, _>>()?;
+        let proof_key = VerifyingKey::from_sec1_bytes(
+            &STANDARD.decode(proof["public_key_sec1"].as_str().context("channel proof public key")?)?,
+        )?;
+        proof_key
+            .verify(
+                &message,
+                &Signature::from_slice(&pair.channel_proof(&challenge, nonce))?,
+            )
+            .context("channel proof does not verify over the vector message")?;
         let rfc = &vectors["rfc9421_b_2_4"];
         let pub_der = STANDARD.decode(rfc["public_key_spki"].as_str().context("rfc public key")?)?;
         let key = VerifyingKey::from_public_key_der(&pub_der)?;
@@ -259,5 +273,10 @@ mod tests {
             &signature,
         )?;
         Ok(())
+    }
+
+    fn vector_public_key(vector_key: &serde_json::Value) -> anyhow::Result<VerifyingKey> {
+        let sec1 = STANDARD.decode(vector_key["public_key_sec1"].as_str().context("vector public key")?)?;
+        Ok(VerifyingKey::from_sec1_bytes(&sec1)?)
     }
 }

@@ -220,7 +220,7 @@ impl SystemFixture {
             case_dir: case.path().to_path_buf(),
             agent_bin: system_agent_bin,
             key_name_prefix: case.ctx.key_name_prefix.clone(),
-            device_id: None,
+            identity_id: None,
             token_port: None,
             token_nonce: None,
             cleanup_only: true,
@@ -378,20 +378,20 @@ try {{\r\n\
         }
     }
 
-    async fn enrolled_device(&self, target: &Target, token: &Token) -> anyhow::Result<String> {
+    async fn enrolled_identity(&self, target: &Target, token: &Token) -> anyhow::Result<String> {
         let started = Instant::now();
         loop {
-            let listing = target.devices_for(token, "&view=full").await?;
+            let listing = target.identities_for(token, "&view=full").await?;
             expect_status(&listing, 200)?;
-            let devices = count(&listing.body, "totalCount")?;
+            let identities = count(&listing.body, "totalCount")?;
             ensure!(
-                devices <= 1,
-                "SYSTEM agent created multiple devices for a one-use token"
+                identities <= 1,
+                "SYSTEM agent created multiple identities for a one-use token"
             );
-            if devices == 1 {
-                let device = &listing.body["data"][0];
-                let id = field(device, "id")?.to_owned();
-                self.case.observe_agent_metadata(device)?;
+            if identities == 1 {
+                let row = &listing.body["data"][0];
+                let id = field(row, "id")?.to_owned();
+                self.case.observe_agent_metadata(row)?;
                 let record = target.token_record(&token.id).await?;
                 expect_status(&record, 200)?;
                 ensure!(
@@ -419,7 +419,7 @@ try {{\r\n\
         }
         let started = Instant::now();
         loop {
-            let response = target.device(id).await?;
+            let response = target.identity_record(id).await?;
             expect_status(&response, 200)?;
             self.case.observe_agent_metadata(&response.body)?;
             if (check_channel && response.body["connected"] == true)
@@ -527,9 +527,9 @@ try {{\r\n\
         self.register().await?;
         self.wait_for_agent().await?;
         self.submit_token(&token.text).await?;
-        let id = self.enrolled_device(&target, &token).await?;
+        let id = self.enrolled_identity(&target, &token).await?;
         self.signed_traffic(&target, &id).await?;
-        self.request.device_id = Some(id);
+        self.request.identity_id = Some(id);
         self.probe(false).await
     }
 
@@ -543,7 +543,7 @@ try {{\r\n\
         }
         if self.agent_may_have_started {
             if self.probe_registered {
-                if self.request.device_id.is_some() {
+                if self.request.identity_id.is_some() {
                     let _ = end_task(&self.probe_task).await;
                 }
                 for attempt in 1..=2 {
@@ -766,7 +766,7 @@ mod tests {
             case_dir: PathBuf::new(),
             agent_bin: PathBuf::new(),
             key_name_prefix: String::new(),
-            device_id: None,
+            identity_id: None,
             token_port: Some(address.port()),
             token_nonce: Some(nonce),
             cleanup_only: false,

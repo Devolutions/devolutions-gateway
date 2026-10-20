@@ -19,7 +19,7 @@ pub(crate) struct Request {
     pub(crate) case_dir: PathBuf,
     pub(crate) agent_bin: PathBuf,
     pub(crate) key_name_prefix: String,
-    pub(crate) device_id: Option<String>,
+    pub(crate) identity_id: Option<String>,
     pub(crate) token_port: Option<u16>,
     pub(crate) token_nonce: Option<uuid::Uuid>,
     pub(crate) cleanup_only: bool,
@@ -35,8 +35,8 @@ fn validate_run_key(name: &str, prefix: &str) -> anyhow::Result<()> {
     crate::agent::validate_key_name(prefix, name).context("SYSTEM key name does not belong to this fixture")
 }
 
-fn matching_key(identity: &Value, device_id: &str, prefix: &str) -> anyhow::Result<Option<String>> {
-    if identity["device_id"] != device_id {
+fn matching_key(identity: &Value, identity_id: &str, prefix: &str) -> anyhow::Result<Option<String>> {
+    if identity["identity_id"] != identity_id {
         return Ok(None);
     }
     let name = identity["keys"]["current"]["key_name"]
@@ -48,9 +48,9 @@ fn matching_key(identity: &Value, device_id: &str, prefix: &str) -> anyhow::Resu
 
 fn stored_keys(request: &Request) -> anyhow::Result<(Value, HashSet<String>)> {
     let id = request
-        .device_id
+        .identity_id
         .as_deref()
-        .context("SYSTEM probe has no enrolled device ID")?;
+        .context("SYSTEM probe has no enrolled identity ID")?;
     let authorities = request.case_dir.join("identity").join("authorities");
     let mut identities = Vec::new();
     let mut recorded = HashSet::new();
@@ -90,7 +90,7 @@ fn stored_keys(request: &Request) -> anyhow::Result<(Value, HashSet<String>)> {
     }
     ensure!(
         identities.len() == 1,
-        "expected exactly one SYSTEM stored identity for enrolled device"
+        "expected exactly one SYSTEM stored identity for enrolled identity"
     );
     Ok((identities.remove(0), recorded))
 }
@@ -332,17 +332,17 @@ mod tests {
     use super::{Request, audit_identity_tree, matching_key, wait_for_pending_cleanup};
 
     #[test]
-    fn current_key_is_selected_only_from_the_matching_device_and_run() -> anyhow::Result<()> {
+    fn current_key_is_selected_only_from_the_matching_identity_and_run() -> anyhow::Result<()> {
         let prefix = "conformance-4321";
         let name = format!("{prefix}_479e1d51-4038-4d09-b7f8-5bdff4489cad");
-        let identity = json!({ "device_id": "device-a", "keys": { "current": { "key_name": name } } });
-        assert_eq!(matching_key(&identity, "device-a", prefix)?, Some(name));
-        assert_eq!(matching_key(&identity, "device-b", prefix)?, None);
-        assert!(matching_key(&identity, "device-a", "conformance-432").is_err());
+        let identity = json!({ "identity_id": "identity-a", "keys": { "current": { "key_name": name } } });
+        assert_eq!(matching_key(&identity, "identity-a", prefix)?, Some(name));
+        assert_eq!(matching_key(&identity, "identity-b", prefix)?, None);
+        assert!(matching_key(&identity, "identity-a", "conformance-432").is_err());
         assert!(
             matching_key(
-                &json!({ "device_id": "device-a", "keys": { "current": { "key_name": format!("{prefix}bad") } } }),
-                "device-a",
+                &json!({ "identity_id": "identity-a", "keys": { "current": { "key_name": format!("{prefix}bad") } } }),
+                "identity-a",
                 prefix
             )
             .is_err()
@@ -369,7 +369,7 @@ mod tests {
             case_dir: dir.path().to_path_buf(),
             agent_bin: PathBuf::new(),
             key_name_prefix: "conformance-unit".to_owned(),
-            device_id: None,
+            identity_id: None,
             token_port: None,
             token_nonce: None,
             cleanup_only: true,
@@ -402,7 +402,7 @@ mod tests {
             case_dir: dir.path().to_path_buf(),
             agent_bin: PathBuf::new(),
             key_name_prefix: String::new(),
-            device_id: None,
+            identity_id: None,
             token_port: None,
             token_nonce: None,
             cleanup_only: false,

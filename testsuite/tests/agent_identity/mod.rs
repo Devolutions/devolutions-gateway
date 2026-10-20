@@ -1,11 +1,46 @@
+mod skip;
+
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{Context as _, ensure};
 use serde_json::Value;
 use testsuite::cli;
 use tokio::process::{Child, Command};
+
+static MOCK_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
+    escargot::CargoBuild::new()
+        .manifest_path("../crates/agent-identity-mock/Cargo.toml")
+        .bin("agent-identity-mock")
+        .current_release()
+        .current_target()
+        .run()
+        .expect("build Agent Identity mock")
+        .path()
+        .to_path_buf()
+});
+
+static CONFORMANCE_BIN_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
+    escargot::CargoBuild::new()
+        .manifest_path("../crates/agent-identity-conformance/Cargo.toml")
+        .bin("agent-identity-conformance")
+        .current_release()
+        .current_target()
+        .run()
+        .expect("build Agent Identity conformance tester")
+        .path()
+        .to_path_buf()
+});
+
+fn agent_identity_mock_path() -> &'static Path {
+    &MOCK_BIN_PATH
+}
+
+fn agent_identity_conformance_path() -> &'static Path {
+    &CONFORMANCE_BIN_PATH
+}
 
 struct Mock {
     child: Child,
@@ -233,7 +268,7 @@ impl Drop for RunnerProcess {
 
 async fn start_mock(state_dir: &Path) -> anyhow::Result<Mock> {
     let token = format!("conformance-admin-{}", uuid::Uuid::new_v4());
-    let mut child = Command::new(cli::agent_identity_mock_path())
+    let mut child = Command::new(agent_identity_mock_path())
         .args(["--listen", "127.0.0.1:0", "--path-prefix", "/mock", "--admin-token"])
         .arg(&token)
         .arg("--state-dir")
@@ -280,7 +315,7 @@ async fn conformance() -> anyhow::Result<()> {
     let second = start_mock(second_dir.path()).await?;
     let stdout_path = first_dir.path().join("runner-stdout.log");
     let stderr_path = first_dir.path().join("runner-stderr.log");
-    let mut cmd = Command::new(cli::agent_identity_conformance_path());
+    let mut cmd = Command::new(agent_identity_conformance_path());
     cmd.args(["--target", "mock", "--base-url"])
         .arg(&first.base_url)
         .arg("--admin-token")

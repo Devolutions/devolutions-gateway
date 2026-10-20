@@ -370,18 +370,18 @@ async fn run() -> anyhow::Result<()> {
     let mut deadline_exceeded = false;
     for test in selected {
         let test_start = Instant::now();
-        let outcome = if test.mock_only && !context.mock() {
-            Outcome::NotApplicable("requires the mock-only control API")
-        } else if test.name == "a_unavailable_key_backend_stops_identity" && cfg!(windows) {
+        let outcome = if test.name == "a_unavailable_key_backend_stops_identity" && cfg!(windows) {
             Outcome::NotApplicable("Windows software provider is available on Windows")
         } else if test.name == "a_key_non_exportable" && !cfg!(windows) {
             Outcome::NotApplicable("Windows software provider test")
         } else if test.name == "a_file_backend_permissions" && !cfg!(unix) {
             Outcome::NotApplicable("Unix file-backend test")
+        } else if test.mock_only && !context.mock() {
+            Outcome::Skip("requires the mock-only control API")
         } else if test.needs_channel && !context.expect_channel && !context.channel_available {
-            Outcome::NotApplicable("config.agent_channel_url absent and --expect-channel=false")
+            Outcome::Skip("config.agent_channel_url absent and --expect-channel=false")
         } else if test.needs_no_channel && !context.mock() && context.channel_available {
-            Outcome::NotApplicable("requires a naturally channelless DVLS target")
+            Outcome::Skip("requires a naturally channelless DVLS target")
         } else if context.target_kind == TargetKind::Dvls
             && !context.disposable_dvls_target
             && (test.name.starts_with("p_rotation_") || test.name.starts_with("a_rotation_"))
@@ -551,6 +551,7 @@ const TESTS: &[Test] = &[
     p!(p_concurrent_same_key_renew_replays_winner),
     p!(p_failed_enrollment_consumes_nothing),
     p!(p_token_errors_distinct),
+    p!(p_enroll_malformed_authorization_rejected),
     p!(p_token_expired, mock_only),
     p!(p_enroll_idempotent_same_key),
     p!(p_token_config_contributes_to_effective_config),
@@ -560,7 +561,7 @@ const TESTS: &[Test] = &[
     p!(p_renew_certificate_key_reuse_rules),
     p!(p_metadata_limits),
     p!(p_friendly_name_format),
-    p!(p_device_cannot_impersonate_another),
+    p!(p_identity_cannot_impersonate_another),
     p!(p_channel_hello_cannot_impersonate_another).channel(),
     p!(p_renew_digest_integrity),
     p!(p_signature_parameter_order_accepted_renew),
@@ -571,6 +572,9 @@ const TESTS: &[Test] = &[
     p!(p_extra_signature_parameters_rejected_renew),
     p!(p_extra_signature_parameters_rejected_connect).channel(),
     p!(p_signature_parser_wire_negatives),
+    p!(p_signature_noncanonical_base64_rejected),
+    p!(p_signature_repeated_parameter_rejected),
+    p!(p_connect_signature_noncanonical_or_repeated_rejected).channel(),
     p!(p_replay_nonce_rejected),
     p!(p_replay_window_rejected),
     p!(p_connect_signature_replayed_to_renew),
@@ -603,6 +607,9 @@ const TESTS: &[Test] = &[
     p!(p_channel_proof_replay_fails).channel(),
     p!(p_channel_revoked_before_hello).channel(),
     p!(p_channel_no_hello_timeout).channel(),
+    p!(p_channel_hello_invalid_metadata_rejected).channel(),
+    p!(p_channel_clock_skew_refusal_carries_server_time).channel(),
+    p!(p_channel_server_time_corrects_skew, mock_only).channel(),
     p!(p_channel_unavailable_no_channel_url, mock_only),
     p!(p_mock_malformed_https_channel_urls, mock_only),
     p!(p_config_revision_monotonic_changes, mock_only).channel(),
@@ -621,8 +628,8 @@ const TESTS: &[Test] = &[
     p!(p_rotation_publishes_both_roots_and_issues_from_new),
     p!(p_rotation_status_counts),
     p!(p_rotation_conflict_409),
-    p!(p_rotation_completes_early_when_last_device_migrates, mock_only),
-    p!(p_rotation_completes_immediately_without_old_root_devices, mock_only),
+    p!(p_rotation_completes_early_when_last_identity_migrates, mock_only),
+    p!(p_rotation_completes_immediately_without_old_root_identities, mock_only),
     p!(p_rotation_deadline_bound, mock_only),
     p!(p_rotation_disposable_deadline_above_own_max_rejected),
     p!(p_rotation_disposable_completes_before_future_deadline),
@@ -641,6 +648,8 @@ const TESTS: &[Test] = &[
     p!(p_admin_permission_denied),
     p!(p_rotation_admin_write_requires_auth),
     p!(p_error_body_shape),
+    p!(p_authentication_error_precedes_invalid_body),
+    p!(p_oversized_body_precedes_authentication),
     p!(p_mock_fault_response_not_processed, mock_only),
     a!(a_pending_file_enroll_success),
     a!(a_bad_pending_files_do_not_reject_valid_tokens),
@@ -664,7 +673,7 @@ const TESTS: &[Test] = &[
     a!(a_same_token_after_token_exhausted_no_enrollment),
     a!(a_same_token_after_token_invalid_no_enrollment),
     a!(a_same_token_after_token_malformed_no_enrollment),
-    a!(a_same_token_after_device_revoked_no_enrollment, mock_only),
+    a!(a_same_token_after_identity_revoked_no_enrollment, mock_only),
     a!(a_same_token_rejected_identity_no_enrollment).channel(),
     a!(a_different_token_replaces_identity),
     a!(a_rejected_identity_replaced).channel(),
@@ -685,7 +694,7 @@ const TESTS: &[Test] = &[
     a!(a_request_renewal_without_channel).without_channel(),
     a!(a_reconnect_make_before_break, mock_only).channel(),
     a!(a_revocation_stops_agent).channel(),
-    a!(a_device_unknown_recorded, mock_only).channel(),
+    a!(a_identity_unknown_recorded, mock_only).channel(),
     a!(a_signed_rejection_without_live_stream, mock_only),
     a!(a_no_channel_when_absent, mock_only),
     a!(a_no_channel_url_with_query, mock_only),

@@ -144,10 +144,10 @@ impl Target {
         let key = KeyPair::generate()?;
         let reply = self.enroll(&token.text, &key, &json!({})).await?;
         let identity = Identity::from_enrollment(key, &reply)?;
-        self.revoke(&identity.device_id).await?;
+        self.revoke(&identity.identity_id).await?;
         expect_status(
             &self
-                .admin(Method::DELETE, &format!("/devices/{}", identity.device_id), None)
+                .admin(Method::DELETE, &format!("/identities/{}", identity.identity_id), None)
                 .await?,
             204,
         )?;
@@ -170,11 +170,11 @@ impl Target {
         Ok(reply.body)
     }
 
-    pub(crate) async fn events(&self, device_id: &str) -> anyhow::Result<Vec<Value>> {
+    pub(crate) async fn events(&self, identity_id: &str) -> anyhow::Result<Vec<Value>> {
         let reply = self
             .send(
                 Method::GET,
-                &format!("/__mock__/events?device_id={device_id}"),
+                &format!("/__mock__/events?identity_id={identity_id}"),
                 None,
                 None,
                 None,
@@ -185,8 +185,8 @@ impl Target {
         let mut previous = 0;
         for event in events {
             ensure!(
-                event["device_id"] == device_id,
-                "mock event belongs to the wrong device"
+                event["identity_id"] == identity_id,
+                "mock event belongs to the wrong identity"
             );
             let seq = count(event, "seq")?;
             ensure!(seq > previous, "mock event sequences are not strictly increasing");
@@ -303,11 +303,11 @@ impl Target {
         .await
     }
 
-    pub(crate) async fn device(&self, id: &str) -> anyhow::Result<Reply> {
-        self.admin(Method::GET, &format!("/devices/{id}"), None).await
+    pub(crate) async fn identity_record(&self, id: &str) -> anyhow::Result<Reply> {
+        self.admin(Method::GET, &format!("/identities/{id}"), None).await
     }
 
-    pub(crate) async fn devices_for(&self, token: &Token, extra_query: &str) -> anyhow::Result<Reply> {
+    pub(crate) async fn identities_for(&self, token: &Token, extra_query: &str) -> anyhow::Result<Reply> {
         let page_size = if extra_query.contains("pageSize=") {
             ""
         } else {
@@ -315,7 +315,7 @@ impl Target {
         };
         self.admin(
             Method::GET,
-            &format!("/devices?enrollmentTokenId={}{page_size}{extra_query}", token.id),
+            &format!("/identities?enrollmentTokenId={}{page_size}{extra_query}", token.id),
             None,
         )
         .await
@@ -327,7 +327,9 @@ impl Target {
 
     pub(crate) async fn revoke(&self, id: &str) -> anyhow::Result<()> {
         expect_status(
-            &self.admin(Method::POST, &format!("/devices/{id}/revoke"), None).await?,
+            &self
+                .admin(Method::POST, &format!("/identities/{id}/revoke"), None)
+                .await?,
             204,
         )
     }
@@ -357,7 +359,7 @@ pub(crate) struct Token {
 }
 
 pub(crate) struct Identity {
-    pub(crate) device_id: String,
+    pub(crate) identity_id: String,
     pub(crate) authority_id: String,
     pub(crate) thumbprint: String,
     pub(crate) certificate_chain: Vec<String>,
@@ -391,7 +393,7 @@ impl Identity {
             Some(_) => anyhow::bail!("enrollment config.agent_channel_url must be a string when present"),
         };
         Ok(Self {
-            device_id: field(&reply.body, "device_id")?.to_owned(),
+            identity_id: field(&reply.body, "identity_id")?.to_owned(),
             authority_id: field(&reply.body, "authority_id")?.to_owned(),
             thumbprint: crate::signer::thumbprint(&chain[0])?,
             certificate_chain: chain,
@@ -438,6 +440,10 @@ pub(crate) fn expect_error(reply: &Reply, status: u16, code: &str) -> anyhow::Re
         "missing error message"
     );
     let server_time = field(&reply.body, "server_time")?;
+    ensure!(
+        server_time.ends_with('Z'),
+        "error body server_time {server_time:?} does not end in Z"
+    );
     time::OffsetDateTime::parse(server_time, &Rfc3339).context("invalid server_time")?;
     Ok(())
 }
@@ -468,12 +474,26 @@ mod tests {
     fn admin_denials_are_status_only_but_agent_errors_need_json() -> anyhow::Result<()> {
         let opaque = b"<html>access denied</html>";
         ensure!(
-            decode_reply_body("/api/v3/agent-identity/devices", 403, opaque)?.is_null(),
+            decode_reply_body("/api/v3/agent-identity/identities", 403, opaque)?.is_null(),
             "admin denial required a JSON body"
         );
         ensure!(
             decode_reply_body("/api/agent-identity/v1/renew", 401, opaque).is_err(),
             "agent-facing error accepted a non-JSON body"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn error_body_server_time_must_end_in_z() -> anyhow::Result<()> {
+        let reply = |server_time: &str| Reply {
+            status: 401,
+            body: json!({ "error": "clock_skew", "message": "skewed", "server_time": server_time }),
+        };
+        expect_error(&reply("2026-09-24T12:00:00Z"), 401, "clock_skew")?;
+        ensure!(
+            expect_error(&reply("2026-09-24T12:00:00+00:00"), 401, "clock_skew").is_err(),
+            "server_time with a numeric offset was accepted"
         );
         Ok(())
     }
@@ -486,7 +506,7 @@ mod tests {
             status: 200,
             body: json!({
                 "authority_id": uuid::Uuid::new_v4(),
-                "device_id": uuid::Uuid::new_v4(),
+                "identity_id": uuid::Uuid::new_v4(),
                 "certificate_chain": [certificate],
                 "config": { "version": 1, "revision": 1 },
             }),
@@ -512,7 +532,7 @@ mod tests {
                 == Some("https://host/mock"),
             "unknown top-level channel_url overrode config.agent_channel_url"
         );
-        for name in ["authority_id", "device_id", "certificate_chain", "config"] {
+        for name in ["authority_id", "identity_id", "certificate_chain", "config"] {
             let mut invalid = reply.clone();
             invalid.body[name] = Value::Null;
             ensure!(

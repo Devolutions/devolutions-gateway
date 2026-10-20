@@ -4,6 +4,7 @@ use agent_channel_proto::agent_channel_client::AgentChannelClient;
 use agent_channel_proto::{Ack, AgentMessage, Hello, ServerMessage, agent_message, server_message};
 use anyhow::{Context as _, ensure};
 use http::Request as HttpRequest;
+use time::format_description::well_known::Rfc3339;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::body::BoxBody;
@@ -149,6 +150,27 @@ pub(crate) fn expect_status(status: &Status, grpc_code: Code, error_code: &str) 
     Ok(())
 }
 
+/// Checks a channel opening refused before `Challenge`, whose trailers carry the §5.4 code and the authority's time.
+///
+/// See [CONTRACT.md] §7.4 "Termination" and §1 "Protocol conventions".
+///
+/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+pub(crate) fn expect_refused_opening(status: &Status, grpc_code: Code, error_code: &str) -> anyhow::Result<()> {
+    expect_status(status, grpc_code, error_code)?;
+    let server_time = status
+        .metadata()
+        .get("server-time")
+        .context("refused channel opening has no server-time trailer")?
+        .to_str()
+        .context("server-time trailer is not ASCII")?;
+    ensure!(
+        server_time.ends_with('Z'),
+        "server-time trailer {server_time:?} does not end in Z"
+    );
+    time::OffsetDateTime::parse(server_time, &Rfc3339).context("server-time trailer is not RFC 3339")?;
+    Ok(())
+}
+
 pub(crate) async fn open(target: &Target, identity: &Identity) -> anyhow::Result<ChannelStream> {
     let headers = identity.key.sign_now(&identity.thumbprint, "connect", None);
     open_with_headers(target, identity, headers).await
@@ -251,4 +273,36 @@ async fn open_at_url(
         stream,
         headers,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use tonic::metadata::MetadataMap;
+
+    use super::*;
+
+    fn refusal(server_time: Option<&str>) -> anyhow::Result<Status> {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("error-code", "clock_skew".parse()?);
+        if let Some(server_time) = server_time {
+            metadata.insert("server-time", server_time.parse()?);
+        }
+        Ok(Status::with_metadata(Code::Unauthenticated, "skewed", metadata))
+    }
+
+    #[test]
+    fn refused_opening_requires_a_z_server_time_trailer() -> anyhow::Result<()> {
+        expect_refused_opening(
+            &refusal(Some("2026-09-24T12:00:00Z"))?,
+            Code::Unauthenticated,
+            "clock_skew",
+        )?;
+        for server_time in [None, Some("2026-09-24T12:00:00+00:00"), Some("not a time")] {
+            ensure!(
+                expect_refused_opening(&refusal(server_time)?, Code::Unauthenticated, "clock_skew").is_err(),
+                "refused opening with server-time {server_time:?} was accepted"
+            );
+        }
+        Ok(())
+    }
 }
