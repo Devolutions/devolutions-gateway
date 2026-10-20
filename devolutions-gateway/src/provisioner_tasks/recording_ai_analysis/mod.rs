@@ -1,10 +1,12 @@
 //! AI analysis (`recording-ai-analysis`): describes what the user did in one recorded session, and adds the result to
 //! the session as a new log.
 //!
-//! [`start`] checks the request and records the Task through the [`ProvisionerTaskRunner`](super::runner::ProvisionerTaskRunner). Each attempt runs the analysis of the AI
-//! crate, [`AiClient::analyze_recording`](devolutions_gateway_ai::AiClient::analyze_recording), which keeps its working
-//! files next to the session manifest so that a retry resumes where the last attempt stopped, then adds the log to the
-//! session. The API key and the working files go away when the Task ends.
+//! [`start`] checks the request and records the Task through the
+//! [`ProvisionerTaskRunner`](super::runner::ProvisionerTaskRunner).
+//! Each attempt runs the analysis of the AI crate,
+//! [`AiClient::analyze_recording`](devolutions_gateway_ai::AiClient::analyze_recording), which keeps its working files
+//! next to the session manifest so that a retry resumes where the last attempt stopped, then adds the log to the session.
+//! The API key and the working files go away when the Task ends.
 
 #[cfg(test)]
 mod tests;
@@ -15,7 +17,7 @@ use std::sync::{Arc, LazyLock, Weak};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use devolutions_gateway_ai::Usage;
+use devolutions_gateway_ai::{Language, Usage};
 use devolutions_gateway_ai::recording_analysis::{
     self, Progress, RecordingAnalysisEvent, RecordingFile, RecordingManifest, Recordings, RecordingsError,
 };
@@ -74,6 +76,8 @@ pub struct StartRequest {
     pub task_id: Uuid,
     pub session_id: Uuid,
     pub settings: AiSettings,
+    /// Language of the analysis; English when absent.
+    pub language: Option<Language>,
     pub api_key: SecretString,
 }
 
@@ -103,13 +107,16 @@ pub enum StartError {
     Internal(anyhow::Error),
 }
 
-/// What an AI analysis Task records as its parameters: the AI settings without the API key and the base URL.
+/// What an AI analysis Task records as its parameters: the AI settings without the API key and the base URL, and the
+/// language.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Params {
     provider: AiProvider,
     model: String,
     max_output_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
 }
 
 /// Result payload of a successful AI analysis.
@@ -125,7 +132,8 @@ pub struct Analysis {
     /// Absent when the provider did not report them for every request.
     #[serde(skip_serializing_if = "Option::is_none")]
     usage: Option<TokenUsage>,
-    /// Versions of the prompts that wrote the log, such as `session-actions-3`.
+    /// Versions of the prompts that wrote the log, such as
+    /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
     prompt_version: String,
 }
 
@@ -138,6 +146,7 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         task_id,
         session_id,
         settings,
+        language,
         api_key,
     } = request;
 
@@ -160,6 +169,7 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         provider: settings.provider,
         model: settings.model,
         max_output_tokens: settings.max_output_tokens,
+        language: language.map(|language| language.to_string()),
     };
     let target = session_id.to_string();
 
@@ -213,7 +223,7 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
 
     Ok(match outcome {
         CreateOutcome::Created(task) => {
-            info!(task.id = %task_id, session.id = %session_id, "AI analysis queued");
+            debug!(task.id = %task_id, session.id = %session_id, "AI analysis queued");
             StartOutcome::Created(task)
         }
         CreateOutcome::Existing(task) => StartOutcome::Existing(task),
@@ -299,6 +309,15 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
         let access = AiAccess::from_secret(&secret).map_err(|error| AttemptError::Permanent(format!("{error:#}")))?;
 
+        let language = params
+            .language
+            .map(Language::new)
+            .transpose()
+            .map_err(|error| AttemptError::Failed {
+                reason: "invalid task",
+                details: format!("invalid language: {error}"),
+            })?;
+
         let settings = AiSettings {
             provider: params.provider,
             model: params.model,
@@ -306,7 +325,7 @@ impl ProvisionerTask for RecordingAiAnalysis {
             max_output_tokens: params.max_output_tokens,
         };
 
-        self.analyze(attempt, session_id, settings, access.api_key).await
+        self.analyze(attempt, session_id, settings, language, access.api_key).await
     }
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) {
@@ -331,6 +350,7 @@ impl RecordingAiAnalysis {
         attempt: &Attempt,
         session_id: Uuid,
         settings: AiSettings,
+        language: Option<Language>,
         api_key: SecretString,
     ) -> Result<Analysis, AttemptError> {
         let conf = self.conf_handle.get_conf();
@@ -379,6 +399,10 @@ impl RecordingAiAnalysis {
 
         if let Some(max_output_tokens) = settings.max_output_tokens {
             request = request.max_output_tokens(max_output_tokens);
+        }
+
+        if let Some(language) = language {
+            request = request.language(language);
         }
 
         let mut events = request.start();

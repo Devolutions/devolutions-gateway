@@ -359,6 +359,12 @@ async fn invalid_bodies_and_settings_return_400() {
     let mut unknown_provider = request(task_id, "gpt-test");
     unknown_provider["provider"] = json!("skynet");
 
+    let mut long_language = request(task_id, "gpt-test");
+    long_language["language"] = json!("zh-Hant-TW-x");
+
+    let mut empty_language = request(task_id, "gpt-test");
+    empty_language["language"] = json!("");
+
     for (case, body) in [
         ("missing API key", no_key.to_string()),
         ("empty API key", empty_key.to_string()),
@@ -366,6 +372,8 @@ async fn invalid_bodies_and_settings_return_400() {
         ("missing base URL", no_base_url.to_string()),
         ("unsupported base URL", bad_base_url.to_string()),
         ("unknown provider", unknown_provider.to_string()),
+        ("language longer than 10 characters", long_language.to_string()),
+        ("empty language", empty_language.to_string()),
         ("not JSON", "{".to_owned()),
     ] {
         let (status, _) = harness
@@ -517,7 +525,8 @@ async fn analysis_succeeds_without_leaking_the_key_or_the_base_url() {
     assert_eq!(task["payload"]["model"], "gpt-test-2026-09-30");
     assert_eq!(
         task["payload"]["usage"],
-        json!({ "inputTokens": 10, "outputTokens": 20 })
+        json!({ "inputTokens": 20, "outputTokens": 40 }),
+        "one request for the actions, one for the summary"
     );
     assert_rfc3339(&task["startedAt"]);
     assert_rfc3339(&task["finishedAt"]);
