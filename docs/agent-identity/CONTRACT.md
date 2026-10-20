@@ -294,6 +294,7 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 - Signature: ECDSA P-256 over SHA-256 of the signature base, raw 64-byte `r‖s`.
 - Agent sets `expires = created + 60`.
 - A certificate is unexpired while `now ≤ notAfter`, as in RFC 5280 §4.1.2.5.
+  `notBefore` is not checked: the authority issued the certificate itself, so a future `notBefore` only reflects its own clock, and rejecting it would lock devices out over an authority-side fault.
 - Each signed operation has exactly one tag, one component list, and one rule for the certificate it accepts:
 
 | Operation       | `tag`      | Covered components             | Accepted certificate                                                                                                   |
