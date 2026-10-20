@@ -605,7 +605,7 @@ const TESTS: &[Test] = &[
     p!(p_handshake_barrier_holds_authentication, mock_only).channel(),
     p!(p_channel_proof_replay_fails).channel(),
     p!(p_channel_revoked_before_hello).channel(),
-    p!(p_channel_deleted_before_hello, mock_only).channel(),
+    p!(p_channel_deleted_before_hello).channel(),
     p!(p_channel_no_hello_timeout).channel(),
     p!(p_channel_hello_invalid_metadata_rejected).channel(),
     p!(p_channel_clock_skew_refusal_carries_server_time).channel(),

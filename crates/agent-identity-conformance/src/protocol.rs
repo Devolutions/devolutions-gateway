@@ -3193,7 +3193,7 @@ async fn close_awaiting_hello(
         AwaitedHello::BadProof => Some(vec![0; 64]),
         AwaitedHello::Missing => return stream.closing_status(Duration::from_secs(11)).await,
     };
-    // An authority may close the stream before `Hello` arrives, so a failed send is not a failure.
+    // The closing status decides the outcome, and it also explains a stream that closed before this send.
     let _ = stream
         .send_hello(identity, challenge, &[("hostname", "awaiting-hello")], proof)
         .await;
@@ -3240,15 +3240,19 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
     Ok(())
 }
 
-/// A stream awaiting `Hello` whose identity is revoked and then deleted during that wait closes as `identity_unknown` ([CONTRACT.md] §7.4).
+/// A stream awaiting `Hello` whose identity is revoked and then deleted closes as `identity_unknown` ([CONTRACT.md] §7.4).
 ///
-/// An authority may close a waiting stream as soon as the identity is revoked, so only the mock, which applies revocation and deletion to a waiting stream when its `Hello` arrives, guarantees that the deletion happens during the wait.
+/// The authority checks revocation and deletion when `Hello` arrives, so both changes precede the check when the test sends `Hello` after them.
 ///
 /// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
 pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "before-deletion").await?;
     let streams = streams_awaiting_hello(&ctx, &identity, &[AwaitedHello::Valid, AwaitedHello::BadProof]).await?;
-    let authenticated = count(&ctx.target.requests(None).await?, "authenticated_connects")?;
+    let authenticated = if ctx.mock() {
+        Some(count(&ctx.target.requests(None).await?, "authenticated_connects")?)
+    } else {
+        None
+    };
     ctx.target.management().revoke(&identity.identity_id).await?;
     ctx.target.management().delete_identity(&identity.identity_id).await?;
     for (variant, mut stream, challenge) in streams {
@@ -3265,10 +3269,12 @@ pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Resu
             .is_none(),
         "a Hello for a deleted identity restored it"
     );
-    ensure!(
-        count(&ctx.target.requests(None).await?, "authenticated_connects")? == authenticated,
-        "deleted stream was registered as authenticated"
-    );
+    if let Some(authenticated) = authenticated {
+        ensure!(
+            count(&ctx.target.requests(None).await?, "authenticated_connects")? == authenticated,
+            "deleted stream was registered as authenticated"
+        );
+    }
     Ok(())
 }
 
