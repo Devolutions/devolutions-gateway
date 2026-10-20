@@ -1,3 +1,4 @@
+mod ai_analysis;
 mod benign_disconnect;
 mod cli_args;
 mod heartbeat;
