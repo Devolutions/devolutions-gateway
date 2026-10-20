@@ -67,6 +67,14 @@
   },
   "csr": {
     "valid": {
+      "description": "P-256 key, CN=ignored, no attributes (empty attributes set), ecdsa-with-SHA256, valid self-signature: the CSR an agent sends (§4)",
+      "private_key_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg3IyMw/htez8sGZcyMHpXIxUUilP9u5ATsoSPkKgblfqhRANCAATPU2QVG/IfB24ZEvTcKpKiTmtPaB4dQWRHNv/e441hs4CoKchVc1njS2fbgRLbwZ//M6pfywT8AsPDPEf1dh3I",
+      "csr": "MIHMMHQCAQAwEjEQMA4GA1UEAwwHaWdub3JlZDBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABM9TZBUb8h8HbhkS9NwqkqJOa09oHh1BZEc2/97jjWGzgKgpyFVzWeNLZ9uBEtvBn/8zql/LBPwCw8M8R/V2HcigADAKBggqhkjOPQQDAgNIADBFAiB1OJfCjANhHuDlQtsnCsiW+tAhvJW40nnPOR4q23U6+AIhAI5jjCElimLmgl/qqRwVkG4nORLD46BFw2QG5Vi7ocvp",
+      "public_key_sec1": "BM9TZBUb8h8HbhkS9NwqkqJOa09oHh1BZEc2/97jjWGzgKgpyFVzWeNLZ9uBEtvBn/8zql/LBPwCw8M8R/V2Hcg=",
+      "expected": "ok"
+    },
+    "valid_with_empty_extension_request": {
+      "description": "P-256 key, CN=ignored, an extensionRequest attribute holding an empty Extensions sequence, ecdsa-with-SHA256, valid self-signature. An agent never sends it (§4), but the server takes only the public key and the self-signature from a CSR (§4), so an attribute, even one that breaks RFC 5280's SIZE (1..MAX), must not make it refuse the CSR",
       "csr": "MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==",
       "public_key_sec1": "BAx9iYH3S9n41UwYJdImc0dvjlz2pmth71G1nCTH4Khd1FYLvlVkZ8ELdbTBG75K7g6V4Pif3couTFArTl3M64A=",
       "expected": "ok"
