@@ -129,23 +129,31 @@ pub(crate) fn refusal<T>(result: anyhow::Result<T>) -> anyhow::Result<Refusal> {
 ///
 /// A 400 carries a `PublicApiValidationError`, and every other documented refusal a `PublicApiError`.
 fn refusal_from(status: u16, body: &[u8]) -> anyhow::Result<Refusal> {
+    // The document's error bodies admit only their own members, each a string or null, except the required `errors` array.
+    let conforms = |value: &Value, members: &[&str]| {
+        value.as_object().is_some_and(|object| {
+            object.iter().all(|(name, member)| {
+                members.contains(&name.as_str()) && (member.is_null() || name == "errors" || member.is_string())
+            })
+        })
+    };
     let refusal = Refusal::from_status(status);
     let body = || serde_json::from_slice::<Value>(body).ok();
     let (documented, schema) = match refusal {
         Refusal::Other(_) => return Ok(refusal),
         Refusal::Invalid => (
             body().is_some_and(|body| {
-                body["errors"].as_array().is_some_and(|errors| {
-                    errors.iter().all(|error| {
-                        error.is_object()
-                            && (error["field"].is_null() || error["field"].is_string())
-                            && error["message"].is_string()
-                    })
-                })
+                conforms(&body, &["errors"])
+                    && body["errors"]
+                        .as_array()
+                        .is_some_and(|errors| errors.iter().all(|error| conforms(error, &["field", "message"])))
             }),
             "PublicApiValidationError",
         ),
-        _ => (body().is_some_and(|body| body["message"].is_string()), "PublicApiError"),
+        _ => (
+            body().is_some_and(|body| conforms(&body, &["message"])),
+            "PublicApiError",
+        ),
     };
     ensure!(documented, "HTTP {status} body is not a {schema}");
     Ok(refusal)
@@ -1087,6 +1095,7 @@ mod tests {
     #[test]
     fn refusals_require_the_documented_error_body() {
         // The document: 400 carries a PublicApiValidationError, and 401, 403, 404, 409 and 422 a PublicApiError.
+        // Each schema declares its messages and fields nullable and admits no other member.
         for (status, body, expected) in [
             (
                 400,
@@ -1098,9 +1107,22 @@ mod tests {
                 r#"{"errors":[{"field":null,"message":"malformed"}]}"#,
                 Some(Refusal::Invalid),
             ),
+            (
+                400,
+                r#"{"errors":[{"field":"expiresOn","message":null}]}"#,
+                Some(Refusal::Invalid),
+            ),
+            (400, r#"{"errors":[{}]}"#, Some(Refusal::Invalid)),
             (400, r#"{"message":"invalid"}"#, None),
+            (400, r#"{"errors":null}"#, None),
+            (400, r#"{"errors":[{"field":1,"message":"wrong type"}]}"#, None),
+            (400, r#"{"errors":["not an object"]}"#, None),
             (409, r#"{"message":"rotation in progress"}"#, Some(Refusal::Conflict)),
+            (409, r#"{"message":null}"#, Some(Refusal::Conflict)),
+            (404, "{}", Some(Refusal::NotFound)),
             (422, r#"{"message":"deadline too late"}"#, Some(Refusal::Unprocessable)),
+            (409, r#"{"message":42}"#, None),
+            (409, r#"["not an object"]"#, None),
             (403, r#"{"errors":[{"field":null,"message":"forbidden"}]}"#, None),
             (401, "", None),
         ] {
