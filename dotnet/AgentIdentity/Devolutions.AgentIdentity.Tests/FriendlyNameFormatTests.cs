@@ -21,7 +21,7 @@ public class FriendlyNameFormatTests
     ];
 
     // A value for each known metadata key of CONTRACT.md §3.
-    private static readonly Dictionary<string, string> Metadata = new()
+    private static readonly AgentMetadata Metadata = Validated(new Dictionary<string, string>
     {
         ["hostname"] = "pc-042",
         ["fqdn"] = "pc-042.corp.example",
@@ -31,7 +31,7 @@ public class FriendlyNameFormatTests
         ["arch"] = "x86_64",
         ["agent_version"] = "2026.3.0",
         ["machine_id"] = "4c4c4544-0042-3510-8052-b4c04f4a4e32",
-    };
+    });
 
     // INTENT.agent-identity.md, "Enrollment": the placeholders are `{<known metadata key>}` and `{token_name}`,
     // the enrollment token's name; CONTRACT.md §3 lists the known metadata keys.
@@ -159,7 +159,8 @@ public class FriendlyNameFormatTests
     [Fact]
     public void EvaluatesAMissingMetadataValueToEmpty()
     {
-        Dictionary<string, string> metadata = new() { ["hostname"] = "pc-042", ["arch"] = "x86_64" };
+        AgentMetadata metadata =
+            Validated(new Dictionary<string, string> { ["hostname"] = "pc-042", ["arch"] = "x86_64" });
 
         Assert.Equal("pc-042..x86_64", Evaluate("{hostname}.{domain}.{arch}", metadata));
     }
@@ -169,7 +170,7 @@ public class FriendlyNameFormatTests
     [Fact]
     public void EvaluatesTokenNameToTheTokenNameRatherThanAReportedValue()
     {
-        Dictionary<string, string> metadata = new(Metadata) { ["token_name"] = "Reported" };
+        AgentMetadata metadata = Validated(new Dictionary<string, string>(Metadata) { ["token_name"] = "Reported" });
 
         Assert.Equal("Fleet", Evaluate("{token_name}", metadata));
     }
@@ -178,7 +179,7 @@ public class FriendlyNameFormatTests
     [Fact]
     public void EvaluatesBracesInAValueAsText()
     {
-        Dictionary<string, string> metadata = new() { ["hostname"] = "{token_name}}}" };
+        AgentMetadata metadata = Validated(new Dictionary<string, string> { ["hostname"] = "{token_name}}}" });
 
         Assert.Equal("{token_name}}}", Evaluate("{hostname}", metadata));
     }
@@ -278,13 +279,14 @@ public class FriendlyNameFormatTests
     [InlineData("{token_name}", "\u2028\u3000")]
     public void FallsBackToTheIdentityIdForAnEmptyName(string format, string tokenName)
     {
-        Dictionary<string, string> metadata = new() { ["hostname"] = "pc-042" };
+        AgentMetadata metadata = Validated(new Dictionary<string, string> { ["hostname"] = "pc-042" });
 
         Assert.Equal("0f8fad5b-d9cb-469f-a165-70867728950e", Evaluate(format, metadata, tokenName));
     }
 
     // A lone surrogate is no Unicode scalar value, so it counts as one U+FFFD REPLACEMENT CHARACTER,
     // which Unicode §3.9 recommends for an ill-formed code unit, and the name stays well-formed UTF-16.
+    // Validated metadata holds no lone surrogate, but a token name or the format text can.
     [Fact]
     public void ReplacesALoneSurrogateWithTheReplacementCharacter()
     {
@@ -298,7 +300,7 @@ public class FriendlyNameFormatTests
     [Fact]
     public void DefaultFormatIsTheHostname()
     {
-        Dictionary<string, string> withoutHostname = new() { ["fqdn"] = "pc-042.corp.example" };
+        AgentMetadata withoutHostname = Validated(new Dictionary<string, string> { ["fqdn"] = "pc-042.corp.example" });
 
         Assert.Equal("pc-042", FriendlyNameFormat.Default.Evaluate(Metadata, TokenName, IdentityId));
         Assert.Equal(
@@ -333,14 +335,20 @@ public class FriendlyNameFormatTests
         Assert.Equal("tokenName", exception.ParamName);
     }
 
-    private static string Evaluate(
-        string format,
-        IReadOnlyDictionary<string, string>? metadata = null,
-        string tokenName = TokenName)
+    private static string Evaluate(string format, AgentMetadata? metadata = null, string tokenName = TokenName)
     {
         Assert.True(FriendlyNameFormat.TryParse(format, out FriendlyNameFormat? parsed, out string? error), error);
 
         return parsed.Evaluate(metadata ?? Metadata, tokenName, IdentityId);
+    }
+
+    // Evaluate takes only validated metadata, as the request body parsers produce it.
+    private static AgentMetadata Validated(IEnumerable<KeyValuePair<string, string>> entries)
+    {
+        MetadataValidationResult result = AgentMetadata.Validate(entries);
+        Assert.True(result.Succeeded, result.FailureDetail);
+
+        return result.Metadata;
     }
 
     private static string Repeat(string text, int count)
