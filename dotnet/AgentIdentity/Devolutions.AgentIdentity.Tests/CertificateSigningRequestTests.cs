@@ -8,7 +8,7 @@ public class CertificateSigningRequestTests
 {
     // RFC 5480 §2: the DER SubjectPublicKeyInfo of a P-256 key up to its uncompressed point,
     // SEQUENCE { SEQUENCE { id-ecPublicKey, secp256r1 }, BIT STRING of 66 octets with no unused bits }.
-    private static readonly byte[] P256SubjectPublicKeyInfoPrefix =
+    internal static readonly byte[] P256SubjectPublicKeyInfoPrefix =
         Convert.FromHexString("3059301306072A8648CE3D020106082A8648CE3D030107034200");
 
     [Theory]
