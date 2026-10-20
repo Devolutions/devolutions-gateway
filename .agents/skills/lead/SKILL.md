@@ -32,6 +32,7 @@ The reviewer gets the range, the acceptance criteria, the applicable intent, con
 Blocking findings go back to the worker; non-blocking ones are fixed or the reason not to is recorded in the plan.
 Set the round cap in the plan before the first round; at the cap, outstanding fixes go to a fresh reviewer rather than out unreviewed, because post-cap fixes are exactly where unreviewed defects land.
 A round that reintroduces an earlier finding ends the loop: escalate with both findings.
+Once the loop closes, a worker runs `test-pruner` on the diff where the repository provides it, and its commits are reviewed like any other; a kill matrix is only as current as the last test edit, so the run after that edit is the one that counts.
 
 ## Your verification
 

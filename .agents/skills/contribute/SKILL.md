@@ -24,7 +24,7 @@ A second party or a `CONTRACT.md` change promotes to Effort: the contract is its
 - `intent-files`: read every applicable intent file before the first edit, in every flow.
 - `contract-authoring` and `contract-review`: when two independently built parties must agree; the contract precedes its first implementation.
 - `blind-testsuite`: when a wrong expected value would be invisible to the implementer, as in cryptography, codecs, and wire protocols; written from the contract before any implementation.
-- `test-writer` for every test, `test-reviewer` and `test-oracle-reviewer` through `code-review`, and `test-pruner` once tests have outgrown their value, where the repository provides them.
+- `test-writer` for every test, `test-reviewer` and `test-oracle-reviewer` through `code-review`, and `test-pruner` on the change's diff once its tests are complete and before the pull request opens, where the repository provides them; a kill matrix is only as current as the last test edit, so the pruner runs once per change, after that edit.
 - `intent-drift-audit`: once a realisation is claimed complete, in the lead's final check or the reviewer's pass, never mid-implementation.
 - `variants`: when a named design choice needs implementation evidence rather than a paper answer.
 - `review-feedback-loop`: once a pull request has findings.
