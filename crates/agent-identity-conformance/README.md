@@ -6,17 +6,23 @@ Start two mocks as described in the [mock README] for the complete multi-authori
 
 ```powershell
 .\target\debug\agent-identity-conformance.exe `
-  --target mock --base-url <first-url> --admin-token <first-admin-token> `
+  --target mock --base-url <first-url> --app-key <first-app-key> --app-secret <first-app-secret> `
   --authority-id <first-authority-id> --extra-trusted-root <first-ca.pem> `
-  --second-base-url <second-url> --second-admin-token <second-admin-token> `
+  --second-base-url <second-url> --second-app-key <second-app-key> --second-app-secret <second-app-secret> `
   --second-authority-id <second-authority-id> --second-extra-trusted-root <second-ca.pem> `
   --agent-bin <devolutions-agent.exe> --work-dir <workspace-dir>
 ```
 
 Use `--filter p_` for protocol-only checks or `--list` to inspect test names.
 Use `--key-backend windows-software-provider|file` to select `Identity.KeyBackend` (`WindowsSoftwareProvider` or `File`); the default is Windows software provider on Windows and file elsewhere.
-`--admin-token` is the management API credential: on DVLS, a session token, which the runner sends in the `tokenId` header; on the mock, the mock's own `--admin-token`.
-On DVLS, supply `--disposable-dvls-target` only when rotation and settings changes are safe, and provide `--unprivileged-admin-token`, a session token without any Agent Identity permission, to check permission denials.
+The runner calls each authority's management API as an application identity, with its key and secret: `--app-key` and `--app-secret` name one holding every Agent Identity permission, and `--second-app-key` and `--second-app-secret` one on the second authority; on the mock, they are the mock's own `--app-key` and `--app-secret`.
+A key requires its secret, which the `AGENT_IDENTITY_CONFORMANCE_APP_SECRET`, `AGENT_IDENTITY_CONFORMANCE_SECOND_APP_SECRET` and `AGENT_IDENTITY_CONFORMANCE_UNPRIVILEGED_APP_SECRET` environment variables can supply instead, to keep secrets off the command line.
+The runner logs in with `POST /api/v1/login` on first use and sends the `tokenId` it returns.
+It logs in again before the `tokenId` lifetime elapses, assuming DVLS's 7 minutes until the API refuses a younger `tokenId`, and when the API refuses a `tokenId` it logs in once more and retries that request once.
+Each re-login is logged at info level, without the `tokenId`, key or secret, and the run ends with `POST /api/v1/logout`.
+On DVLS, the harness provisions the application identities, which DVLS's public API cannot create.
+Supply `--disposable-dvls-target` only when rotation and settings changes are safe, and provide `--unprivileged-app-key` and `--unprivileged-app-secret`, an application identity without any Agent Identity permission, to check permission denials.
+On the mock, the runner derives the keys of application identities with fewer permissions from `--app-key`, as the [mock README] describes.
 Settings tests restore the original settings when they finish.
 The runner reaches each authority's management API only through the module for that authority: `src/dvls.rs` speaks DVLS's management API, as DVLS's OpenAPI document defines it and the mock replicates it.
 The disposable rotation checks require no other active identities on the published root; otherwise they report `SKIP` before rotating.

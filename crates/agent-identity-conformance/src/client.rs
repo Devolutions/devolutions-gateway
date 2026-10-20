@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, ensure};
@@ -7,13 +8,14 @@ use http::Method;
 use serde_json::{Value, json};
 use time::format_description::well_known::Rfc3339;
 
-use crate::dvls::Management;
+use crate::dvls::{AppCredential, Credential, Management, Session};
 use crate::signer::{KeyPair, SignedHeaders};
 
 #[derive(Clone)]
 pub(crate) struct Target {
     pub(crate) base_url: String,
-    pub(crate) admin_token: String,
+    /// The privileged session of the management API.
+    pub(crate) session: Arc<Session>,
     pub(crate) ca_path: Option<PathBuf>,
     pub(crate) authority_id: Option<uuid::Uuid>,
     pub(crate) http: reqwest::Client,
@@ -28,7 +30,7 @@ pub(crate) struct Reply {
 impl Target {
     pub(crate) fn new(
         base_url: String,
-        admin_token: String,
+        credential: AppCredential,
         ca_path: Option<&Path>,
         authority_id: Option<&str>,
     ) -> anyhow::Result<Self> {
@@ -55,7 +57,7 @@ impl Target {
             .transpose()?;
         Ok(Self {
             base_url: base_url.trim_end_matches('/').to_owned(),
-            admin_token,
+            session: Arc::new(Session::new(credential)),
             ca_path: ca_path.map(Path::to_path_buf),
             authority_id,
             http: builder.build()?,
@@ -63,11 +65,11 @@ impl Target {
     }
 
     pub(crate) fn management(&self) -> Management<'_> {
-        Management::new(self, Some(&self.admin_token))
+        Management::new(self, Credential::Session(&self.session))
     }
 
-    /// The management API called with `credential`, or without one when it is `None`.
-    pub(crate) fn management_as<'a>(&'a self, credential: Option<&'a str>) -> Management<'a> {
+    /// The management API called with `credential`.
+    pub(crate) fn management_as<'a>(&'a self, credential: Credential<'a>) -> Management<'a> {
         Management::new(self, credential)
     }
 

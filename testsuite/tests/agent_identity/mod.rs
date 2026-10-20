@@ -47,7 +47,8 @@ struct Mock {
     base_url: String,
     ca_path: PathBuf,
     authority_id: String,
-    admin_token: String,
+    app_key: String,
+    app_secret: String,
 }
 
 impl Drop for Mock {
@@ -267,10 +268,14 @@ impl Drop for RunnerProcess {
 }
 
 async fn start_mock(state_dir: &Path) -> anyhow::Result<Mock> {
-    let token = format!("conformance-admin-{}", uuid::Uuid::new_v4());
+    let app_key = format!("conformance-{}", uuid::Uuid::new_v4());
+    let app_secret = uuid::Uuid::new_v4().to_string();
+    // The default lifetime of the mock's tokens is DVLS's, so a full run outlasts at least one of them.
     let mut child = Command::new(agent_identity_mock_path())
-        .args(["--listen", "127.0.0.1:0", "--path-prefix", "/mock", "--admin-token"])
-        .arg(&token)
+        .args(["--listen", "127.0.0.1:0", "--path-prefix", "/mock", "--app-key"])
+        .arg(&app_key)
+        .arg("--app-secret")
+        .arg(&app_secret)
         .arg("--state-dir")
         .arg(state_dir)
         .stdout(Stdio::from(std::fs::File::create(state_dir.join("mock-stdout.log"))?))
@@ -295,7 +300,8 @@ async fn start_mock(state_dir: &Path) -> anyhow::Result<Mock> {
         base_url: ready["base_url"].as_str().context("mock base_url")?.to_owned(),
         ca_path: PathBuf::from(ready["tls_ca_pem"].as_str().context("mock tls_ca_pem")?),
         authority_id: ready["authority_id"].as_str().context("mock authority_id")?.to_owned(),
-        admin_token: token,
+        app_key,
+        app_secret,
     })
 }
 
@@ -316,18 +322,21 @@ async fn conformance() -> anyhow::Result<()> {
     let stdout_path = first_dir.path().join("runner-stdout.log");
     let stderr_path = first_dir.path().join("runner-stderr.log");
     let mut cmd = Command::new(agent_identity_conformance_path());
+    // The secrets go through the environment, which keeps them off the runner's command line.
     cmd.args(["--target", "mock", "--base-url"])
         .arg(&first.base_url)
-        .arg("--admin-token")
-        .arg(&first.admin_token)
+        .arg("--app-key")
+        .arg(&first.app_key)
+        .env("AGENT_IDENTITY_CONFORMANCE_APP_SECRET", &first.app_secret)
         .arg("--authority-id")
         .arg(&first.authority_id)
         .arg("--extra-trusted-root")
         .arg(&first.ca_path)
         .arg("--second-base-url")
         .arg(&second.base_url)
-        .arg("--second-admin-token")
-        .arg(&second.admin_token)
+        .arg("--second-app-key")
+        .arg(&second.app_key)
+        .env("AGENT_IDENTITY_CONFORMANCE_SECOND_APP_SECRET", &second.app_secret)
         .arg("--second-authority-id")
         .arg(&second.authority_id)
         .arg("--second-extra-trusted-root")

@@ -5737,7 +5737,12 @@ mod tests {
             .join("agent-identity-conformance-tests");
         std::fs::create_dir_all(&work_dir)?;
         let prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
-        let target = Target::new("https://localhost/mock".to_owned(), "test".to_owned(), None, None)?;
+        let target = Target::new(
+            "https://localhost/mock".to_owned(),
+            crate::dvls::AppCredential::new("test".to_owned(), "test".to_owned()),
+            None,
+            None,
+        )?;
         let mut case = AgentCase::new(
             Context {
                 target,
@@ -5750,7 +5755,7 @@ mod tests {
                 channel_available: true,
                 key_name_prefix: prefix.clone(),
                 agent_version: None,
-                unprivileged_admin_token: None,
+                unprivileged: None,
                 agent_bin: PathBuf::new(),
                 key_backend: KeyBackend::File,
                 work_dir,

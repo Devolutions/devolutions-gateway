@@ -23,8 +23,8 @@ use x509_cert::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage, Subject
 
 use crate::client::{Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field};
 use crate::dvls::{
-    self, CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal, RotationDeadline,
-    RotationStatus, Settings, SettingsChange, TokenSpec, TokenState, refusal,
+    self, CertificateStatus, Credential, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal,
+    RotationDeadline, RotationStatus, Settings, SettingsChange, TokenSpec, TokenState, refusal,
 };
 use crate::signer::{KeyPair, SignatureParameter, SignedHeaders, thumbprint};
 use crate::{Context, channel};
@@ -5621,9 +5621,9 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_management_requires_auth(ctx: Context) -> anyhow::Result<()> {
-    assert_management_routes_denied(&ctx, None, |_| true, Refusal::Unauthenticated).await?;
+    assert_management_routes_denied(&ctx, Credential::Absent, |_| true, Refusal::Unauthenticated).await?;
     let invalid = format!("invalid-management-{}", uuid::Uuid::new_v4());
-    assert_management_routes_denied(&ctx, Some(&invalid), |_| true, Refusal::Unauthenticated).await?;
+    assert_management_routes_denied(&ctx, Credential::TokenId(&invalid), |_| true, Refusal::Unauthenticated).await?;
     Ok(())
 }
 
@@ -5648,7 +5648,7 @@ fn trust_anchor_snapshot(value: &Value) -> anyhow::Result<Vec<Value>> {
 /// Checks that `credential` gets `expected` from every management API route that `selected` keeps, without any state change.
 async fn assert_management_routes_denied(
     ctx: &Context,
-    credential: Option<&str>,
+    credential: Credential<'_>,
     selected: impl Fn(Permission) -> bool,
     expected: Refusal,
 ) -> anyhow::Result<()> {
@@ -5730,11 +5730,11 @@ async fn assert_management_routes_denied(
 /// Each route group, the settings included, is called with a credential lacking that group's permission; on the mock it holds every other permission, so none stands in for the missing one.
 pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Result<()> {
     for permission in Permission::ALL {
-        let credential = dvls::credential_lacking(&ctx, permission)
-            .ok_or(crate::Incomplete("requires --unprivileged-admin-token"))?;
+        let session =
+            dvls::session_lacking(&ctx, permission).ok_or(crate::Incomplete("requires --unprivileged-app-key"))?;
         assert_management_routes_denied(
             &ctx,
-            Some(&credential),
+            Credential::Session(&session),
             |required| required == permission,
             Refusal::Forbidden,
         )
@@ -5752,15 +5752,17 @@ pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Resu
     let before = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
     let rotation = ctx.target.management().rotation().await?;
     let invalid = format!("invalid-management-{}", uuid::Uuid::new_v4());
-    let lacking = dvls::credential_lacking(&ctx, Permission::RotateRoot);
-    for (credential, expected) in [
-        (None, Refusal::Unauthenticated),
-        (Some(invalid.as_str()), Refusal::Unauthenticated),
-        (lacking.as_deref(), Refusal::Forbidden),
-    ] {
-        if expected == Refusal::Forbidden && credential.is_none() {
-            continue;
-        }
+    let lacking = dvls::session_lacking(&ctx, Permission::RotateRoot);
+    let mut credentials = vec![
+        (Credential::Absent, Refusal::Unauthenticated),
+        (Credential::TokenId(&invalid), Refusal::Unauthenticated),
+    ];
+    credentials.extend(
+        lacking
+            .as_deref()
+            .map(|session| (Credential::Session(session), Refusal::Forbidden)),
+    );
+    for (credential, expected) in credentials {
         ensure!(
             refusal(ctx.target.management_as(credential).rotate(RotationDeadline::Now).await)? == expected,
             "unauthorized rotation was not refused as {expected:?}"

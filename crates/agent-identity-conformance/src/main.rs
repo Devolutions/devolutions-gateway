@@ -19,11 +19,13 @@ use std::env;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, ensure};
 
 use crate::client::Target;
+use crate::dvls::AppCredential;
 
 type TestFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 type TestFn = fn(Context) -> TestFuture;
@@ -119,7 +121,8 @@ struct Context {
     channel_available: bool,
     key_name_prefix: String,
     agent_version: Option<String>,
-    unprivileged_admin_token: Option<String>,
+    /// On DVLS, a session of an application identity without any Agent Identity permission.
+    unprivileged: Option<Arc<dvls::Session>>,
     agent_bin: PathBuf,
     key_backend: KeyBackend,
     work_dir: PathBuf,
@@ -134,15 +137,18 @@ impl Context {
 struct Options {
     target: Option<TargetKind>,
     base_url: Option<String>,
-    admin_token: Option<String>,
+    app_key: Option<String>,
+    app_secret: Option<String>,
     authority_id: Option<String>,
     agent_bin: Option<PathBuf>,
     ca_path: Option<PathBuf>,
     second_base_url: Option<String>,
-    second_admin_token: Option<String>,
+    second_app_key: Option<String>,
+    second_app_secret: Option<String>,
     second_authority_id: Option<String>,
     second_ca_path: Option<PathBuf>,
-    unprivileged_admin_token: Option<String>,
+    unprivileged_app_key: Option<String>,
+    unprivileged_app_secret: Option<String>,
     key_backend: KeyBackend,
     work_dir: PathBuf,
     filter: String,
@@ -160,15 +166,18 @@ impl Default for Options {
         Self {
             target: None,
             base_url: None,
-            admin_token: None,
+            app_key: None,
+            app_secret: None,
             authority_id: None,
             agent_bin: None,
             ca_path: None,
             second_base_url: None,
-            second_admin_token: None,
+            second_app_key: None,
+            second_app_secret: None,
             second_authority_id: None,
             second_ca_path: None,
-            unprivileged_admin_token: None,
+            unprivileged_app_key: None,
+            unprivileged_app_secret: None,
             key_backend: if cfg!(windows) {
                 KeyBackend::WindowsSoftwareProvider
             } else {
@@ -218,7 +227,8 @@ impl Options {
                     });
                 }
                 "--base-url" => options.base_url = Some(value),
-                "--admin-token" => options.admin_token = Some(value),
+                "--app-key" => options.app_key = Some(value),
+                "--app-secret" => options.app_secret = Some(value),
                 "--authority-id" => options.authority_id = Some(value),
                 "--agent-bin" => options.agent_bin = Some(value.into()),
                 "--agent-version" => {
@@ -227,10 +237,12 @@ impl Options {
                 }
                 "--extra-trusted-root" => options.ca_path = Some(value.into()),
                 "--second-base-url" => options.second_base_url = Some(value),
-                "--second-admin-token" => options.second_admin_token = Some(value),
+                "--second-app-key" => options.second_app_key = Some(value),
+                "--second-app-secret" => options.second_app_secret = Some(value),
                 "--second-authority-id" => options.second_authority_id = Some(value),
                 "--second-extra-trusted-root" => options.second_ca_path = Some(value.into()),
-                "--unprivileged-admin-token" => options.unprivileged_admin_token = Some(value),
+                "--unprivileged-app-key" => options.unprivileged_app_key = Some(value),
+                "--unprivileged-app-secret" => options.unprivileged_app_secret = Some(value),
                 "--expect-channel" => {
                     options.expect_channel = value.parse().context("--expect-channel must be true or false")?
                 }
@@ -266,26 +278,50 @@ impl Options {
 
     async fn context(self) -> anyhow::Result<Context> {
         let kind = self.target.context("--target is required")?;
+        let credential = app_credential(
+            self.app_key,
+            self.app_secret,
+            ["--app-key", "--app-secret", "AGENT_IDENTITY_CONFORMANCE_APP_SECRET"],
+        )?
+        .context("--app-key is required")?;
         let target = Target::new(
             self.base_url.context("--base-url is required")?,
-            self.admin_token.context("--admin-token is required")?,
+            credential,
             self.ca_path.as_deref(),
             self.authority_id.as_deref(),
         )?;
-        let second = match (self.second_base_url, self.second_admin_token) {
-            (Some(url), Some(token)) => Some(Target::new(
+        let second_credential = app_credential(
+            self.second_app_key,
+            self.second_app_secret,
+            [
+                "--second-app-key",
+                "--second-app-secret",
+                "AGENT_IDENTITY_CONFORMANCE_SECOND_APP_SECRET",
+            ],
+        )?;
+        let second = match (self.second_base_url, second_credential) {
+            (Some(url), Some(credential)) => Some(Target::new(
                 url,
-                token,
+                credential,
                 self.second_ca_path.as_deref(),
                 self.second_authority_id.as_deref(),
             )?),
             (None, None) => None,
-            _ => anyhow::bail!("second base URL and admin token must be supplied together"),
+            _ => anyhow::bail!("--second-base-url and --second-app-key must be supplied together"),
         };
         ensure!(
             second.is_some() || self.second_authority_id.is_none(),
             "--second-authority-id requires a second target"
         );
+        let unprivileged = app_credential(
+            self.unprivileged_app_key,
+            self.unprivileged_app_secret,
+            [
+                "--unprivileged-app-key",
+                "--unprivileged-app-secret",
+                "AGENT_IDENTITY_CONFORMANCE_UNPRIVILEGED_APP_SECRET",
+            ],
+        )?;
         if kind == TargetKind::Mock {
             target.reset().await?;
             if let Some(other) = &second {
@@ -309,12 +345,30 @@ impl Options {
             channel_available,
             key_name_prefix: format!("conformance-{}", uuid::Uuid::new_v4().simple()),
             agent_version: self.agent_version,
-            unprivileged_admin_token: self.unprivileged_admin_token,
+            unprivileged: unprivileged.map(|credential| Arc::new(dvls::Session::new(credential))),
             agent_bin: self.agent_bin.context("--agent-bin is required")?,
             key_backend: self.key_backend,
             work_dir: self.work_dir,
         })
     }
+}
+
+/// The application identity a key flag names, with its secret from the secret flag or else from the environment variable.
+///
+/// A key without a secret, or a secret flag without a key, is a usage error.
+fn app_credential(
+    key: Option<String>,
+    secret: Option<String>,
+    [key_flag, secret_flag, secret_variable]: [&str; 3],
+) -> anyhow::Result<Option<AppCredential>> {
+    let Some(key) = key else {
+        ensure!(secret.is_none(), "{secret_flag} requires {key_flag}");
+        return Ok(None);
+    };
+    let secret = secret
+        .or_else(|| env::var(secret_variable).ok().filter(|secret| !secret.is_empty()))
+        .with_context(|| format!("{key_flag} requires {secret_flag} or {secret_variable}"))?;
+    Ok(Some(AppCredential::new(key, secret)))
 }
 
 #[tokio::main]
@@ -386,7 +440,7 @@ async fn run() -> anyhow::Result<()> {
         } else if test.name == "p_stream_closes_at_not_after" && !context.mock() && context.leaf_lifetime_secs > 30 {
             Outcome::Skip("real-target stream expiry requires --leaf-lifetime-secs <= 30")
         } else if test.needs_second && context.second.is_none() {
-            Outcome::Skip("requires a second authority (--second-base-url and --second-admin-token)")
+            Outcome::Skip("requires a second authority (--second-base-url and --second-app-key)")
         } else if test.name == "a_key_non_exportable" && context.key_backend != KeyBackend::WindowsSoftwareProvider {
             Outcome::Skip("requires --key-backend windows-software-provider")
         } else if test.name == "a_file_backend_permissions" && context.key_backend != KeyBackend::File {
@@ -477,6 +531,13 @@ async fn run() -> anyhow::Result<()> {
     for (label, name, reason) in non_pass {
         println!("NON-PASS {label} {name}: {reason}");
     }
+    // Logging out only closes sessions that would expire anyway, so its failure never fails the run.
+    if tokio::time::timeout(Duration::from_secs(5), log_out(&context))
+        .await
+        .is_err()
+    {
+        eprintln!("WARN Logging out of the management API timed out");
+    }
     if totals[1] != 0 || (totals[2] != 0 && !allow_incomplete) {
         anyhow::bail!(
             "conformance failed: {} failures, {} incomplete skips{}",
@@ -486,6 +547,24 @@ async fn run() -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+/// Closes the run's management API sessions on every target.
+async fn log_out(context: &Context) {
+    let unprivileged = context
+        .unprivileged
+        .as_deref()
+        .map(|session| context.target.management_as(dvls::Credential::Session(session)));
+    let managements = [
+        Some(context.target.management()),
+        context.second.as_ref().map(Target::management),
+        unprivileged,
+    ];
+    for management in managements.into_iter().flatten() {
+        if let Err(error) = management.log_out().await {
+            eprintln!("WARN Failed to log out of the management API: {error:#}");
+        }
+    }
 }
 
 enum Outcome {

@@ -3,9 +3,11 @@
 //! Management APIs are product-specific, so tests reach an authority's only through the module for that authority.
 //! Every route, header, field name, paging rule, enum spelling, status code and error body of DVLS's management API lives here, so tests depend only on the operations and records below.
 //! DVLS's OpenAPI document for Agent Identity is the reference for all of them; `docs/agent-identity/INTENT.DVLS.md`, "Management API", holds the decisions behind them.
+//! The sessions that authenticate it come from the login and logout of DVLS's public OpenAPI document.
 
 use std::collections::BTreeMap;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, ensure};
 use http::Method;
@@ -20,8 +22,15 @@ use crate::{Context, TargetKind};
 
 const BASE_PATH: &str = "/api/v1/agent-identity";
 
-/// The request header that carries the management API credential, a DVLS session token.
+const LOGIN_PATH: &str = "/api/v1/login";
+
+const LOGOUT_PATH: &str = "/api/v1/logout";
+
+/// The request header that carries the management API credential, a session's token.
 const CREDENTIAL_HEADER: &str = "tokenId";
+
+/// How long DVLS keeps a session after its login, however often it is used.
+const SESSION_LIFETIME: Duration = Duration::from_secs(7 * 60);
 
 /// The largest page of identities a listing returns.
 pub(crate) const MAX_PAGE_SIZE: u64 = 100;
@@ -48,7 +57,7 @@ pub(crate) enum Permission {
 impl Permission {
     pub(crate) const ALL: [Self; 4] = [Self::View, Self::Manage, Self::Revoke, Self::RotateRoot];
 
-    /// The name of this permission in a mock credential scope (`<admin-token>.<scope>`).
+    /// The name of this permission in a mock key's scope (`<app-key>.<scope>`).
     const fn mock_scope(self) -> &'static str {
         match self {
             Self::View => "view",
@@ -59,13 +68,13 @@ impl Permission {
     }
 }
 
-/// A valid credential without `missing`, or `None` when the run lacks that fixture.
+/// A session of an application identity without `missing`, or `None` when the run lacks that fixture.
 ///
-/// The mock derives one holding every other permission from its admin token.
-/// On DVLS, the `--unprivileged-admin-token` fixture lacks every permission, so it lacks `missing` too.
-pub(crate) fn credential_lacking(ctx: &Context, missing: Permission) -> Option<String> {
+/// The mock derives the key of one holding every other permission from the privileged key, with the same secret.
+/// On DVLS, the unprivileged application identity lacks every permission, so it lacks `missing` too.
+pub(crate) fn session_lacking(ctx: &Context, missing: Permission) -> Option<Arc<Session>> {
     if !ctx.mock() {
-        return ctx.unprivileged_admin_token.clone();
+        return ctx.unprivileged.clone();
     }
     let scope = Permission::ALL
         .into_iter()
@@ -73,7 +82,150 @@ pub(crate) fn credential_lacking(ctx: &Context, missing: Permission) -> Option<S
         .map(Permission::mock_scope)
         .collect::<Vec<_>>()
         .join("+");
-    Some(format!("{}.{scope}", ctx.target.admin_token))
+    let privileged = &ctx.target.session.credential;
+    Some(Arc::new(Session::new(AppCredential::new(
+        format!("{}.{scope}", privileged.key),
+        privileged.secret.clone(),
+    ))))
+}
+
+/// An application identity's key and secret, which open management API sessions.
+#[derive(Clone)]
+pub(crate) struct AppCredential {
+    key: String,
+    secret: String,
+}
+
+impl AppCredential {
+    pub(crate) fn new(key: String, secret: String) -> Self {
+        Self { key, secret }
+    }
+}
+
+/// An application identity's management API session on one target.
+///
+/// A session's token expires a fixed time after its login, however often it is used, and the login reports no expiry.
+/// The session logs in on first use and logs in again before the lifetime it assumes elapses.
+/// It assumes DVLS's lifetime until the target refuses a younger token, whose age then bounds the lifetime.
+pub(crate) struct Session {
+    credential: AppCredential,
+    state: tokio::sync::Mutex<SessionState>,
+}
+
+struct SessionState {
+    login: Option<Login>,
+    lifetime: Duration,
+}
+
+struct Login {
+    token_id: String,
+    /// Taken before the login request is sent, so the token is never older than its age from here.
+    at: Instant,
+}
+
+// UNTESTED: no log line or error carries a token, key or secret.
+// The run's output ends up in CI logs and reports, where a token would open the management API until it expires.
+// When changing a message here, report only the target's URL, ages, lifetimes and HTTP statuses.
+impl Session {
+    pub(crate) fn new(credential: AppCredential) -> Self {
+        Self {
+            credential,
+            state: tokio::sync::Mutex::new(SessionState {
+                login: None,
+                lifetime: SESSION_LIFETIME,
+            }),
+        }
+    }
+
+    /// The token to send to `target`, after logging in when the session has none, when its token is about to expire, or when `refused` is the token the target just refused.
+    async fn token_id(&self, target: &Target, refused: Option<&str>) -> anyhow::Result<String> {
+        let mut state = self.state.lock().await;
+        if let Some(login) = &state.login {
+            let age = login.at.elapsed();
+            // A tenth of the lifetime leaves a request time to arrive before its token expires: 42 s of DVLS's 7 minutes, beyond the HTTP client's 8 s timeout.
+            let fresh = age < state.lifetime - state.lifetime / 10;
+            if refused == Some(login.token_id.as_str()) {
+                // The refused token lived no longer than its age.
+                state.lifetime = state.lifetime.min(age);
+                eprintln!(
+                    "INFO Logging in to the management API at {} again: it refused a token {} s old",
+                    target.base_url,
+                    age.as_secs()
+                );
+            } else if fresh {
+                return Ok(login.token_id.clone());
+            } else {
+                eprintln!(
+                    "INFO Logging in to the management API at {} again: its token is {} s old, and a token lasts {} s",
+                    target.base_url,
+                    age.as_secs(),
+                    state.lifetime.as_secs()
+                );
+            }
+        }
+        let login = self.log_in(target).await?;
+        let token_id = login.token_id.clone();
+        state.login = Some(login);
+        Ok(token_id)
+    }
+
+    async fn log_in(&self, target: &Target) -> anyhow::Result<Login> {
+        #[derive(Deserialize)]
+        struct LoginResult {
+            #[serde(rename = "tokenId")]
+            token_id: Option<String>,
+        }
+        let at = Instant::now();
+        let response = target
+            .http
+            .post(format!("{}{LOGIN_PATH}", target.base_url))
+            .json(&json!({ "appKey": self.credential.key, "appSecret": self.credential.secret }))
+            .send()
+            .await
+            .context("send the management API login")?;
+        let status = response.status().as_u16();
+        ensure!(status == 200, "the management API refused the login with HTTP {status}");
+        let result: LoginResult = response
+            .json()
+            .await
+            .context("decode the management API login response")?;
+        let token_id = result
+            .token_id
+            .filter(|token_id| !token_id.is_empty())
+            .context("the management API login returned no token")?;
+        Ok(Login { token_id, at })
+    }
+
+    /// Closes the session's token, if it has one; the next request logs in again.
+    async fn log_out(&self, target: &Target) -> anyhow::Result<()> {
+        let Some(login) = self.state.lock().await.login.take() else {
+            return Ok(());
+        };
+        let response = target
+            .http
+            .post(format!("{}{LOGOUT_PATH}", target.base_url))
+            .header(CREDENTIAL_HEADER, login.token_id)
+            .send()
+            .await
+            .context("send the management API logout")?;
+        let status = response.status().as_u16();
+        ensure!(
+            status == 200,
+            "the management API refused the logout with HTTP {status}"
+        );
+        Ok(())
+    }
+}
+
+/// What a management API request presents as its credential.
+#[derive(Clone, Copy)]
+pub(crate) enum Credential<'a> {
+    /// No credential.
+    Absent,
+    /// This token, as is, whatever the target answers.
+    TokenId(&'a str),
+    /// The session's token, logging in again when the session requires.
+    Session(&'a Session),
 }
 
 /// How the management API refused a request.
@@ -128,6 +280,7 @@ pub(crate) fn refusal<T>(result: anyhow::Result<T>) -> anyhow::Result<Refusal> {
 /// The refusal an unsuccessful `status` stands for, once its body is the error body the status documents.
 ///
 /// A 400 carries a `PublicApiValidationError`, and every other documented refusal a `PublicApiError`.
+/// DVLS answers a request without a `tokenId` with a 401 and no body, so a 401 may have none.
 fn refusal_from(status: u16, body: &[u8]) -> anyhow::Result<Refusal> {
     // The document's error bodies are objects whose members are all optional and limited to the schema's own:
     // `errors` is an array of field errors, and every other member is a string or null.
@@ -145,6 +298,9 @@ fn refusal_from(status: u16, body: &[u8]) -> anyhow::Result<Refusal> {
         })
     }
     let refusal = Refusal::from_status(status);
+    if refusal == Refusal::Unauthenticated && body.is_empty() {
+        return Ok(refusal);
+    }
     let body = || serde_json::from_slice::<Value>(body).ok();
     let (documented, schema) = match refusal {
         Refusal::Other(_) => return Ok(refusal),
@@ -710,34 +866,32 @@ pub(crate) fn routes(
 /// The management API of one target, called with one credential.
 pub(crate) struct Management<'a> {
     target: &'a Target,
-    credential: Option<&'a str>,
+    credential: Credential<'a>,
 }
 
 impl<'a> Management<'a> {
-    pub(crate) fn new(target: &'a Target, credential: Option<&'a str>) -> Self {
+    pub(crate) fn new(target: &'a Target, credential: Credential<'a>) -> Self {
         Self { target, credential }
     }
 
     /// Sends a request and returns its JSON body, or the refusal when the status is not `success`.
+    ///
+    /// When the target refuses a session's token, the session logs in again and the request is sent once more.
     async fn request(&self, method: Method, path: &str, body: Option<&[u8]>, success: u16) -> anyhow::Result<Value> {
-        let mut request = self
-            .target
-            .http
-            .request(method.clone(), format!("{}{BASE_PATH}{path}", self.target.base_url));
-        if let Some(credential) = self.credential {
-            request = request.header(CREDENTIAL_HEADER, credential);
-        }
-        if let Some(body) = body {
-            request = request
-                .header(http::header::CONTENT_TYPE, "application/json")
-                .body(body.to_vec());
-        }
-        let response = request.send().await.with_context(|| format!("send {method} {path}"))?;
-        let status = response.status().as_u16();
-        let bytes = response
-            .bytes()
-            .await
-            .with_context(|| format!("read the {method} {path} response"))?;
+        let (status, bytes) = match self.credential {
+            Credential::Absent => self.send(&method, path, body, None).await?,
+            Credential::TokenId(token_id) => self.send(&method, path, body, Some(token_id)).await?,
+            Credential::Session(session) => {
+                let token_id = session.token_id(self.target, None).await?;
+                let (status, bytes) = self.send(&method, path, body, Some(&token_id)).await?;
+                if status == 401 {
+                    let token_id = session.token_id(self.target, Some(&token_id)).await?;
+                    self.send(&method, path, body, Some(&token_id)).await?
+                } else {
+                    (status, bytes)
+                }
+            }
+        };
         if status != success {
             ensure!(
                 !(200..300).contains(&status),
@@ -750,6 +904,43 @@ impl<'a> Management<'a> {
             return Ok(Value::Null);
         }
         serde_json::from_slice(&bytes).with_context(|| format!("decode the {method} {path} response"))
+    }
+
+    /// Sends a request and returns its status and body.
+    async fn send(
+        &self,
+        method: &Method,
+        path: &str,
+        body: Option<&[u8]>,
+        token_id: Option<&str>,
+    ) -> anyhow::Result<(u16, Vec<u8>)> {
+        let mut request = self
+            .target
+            .http
+            .request(method.clone(), format!("{}{BASE_PATH}{path}", self.target.base_url));
+        if let Some(token_id) = token_id {
+            request = request.header(CREDENTIAL_HEADER, token_id);
+        }
+        if let Some(body) = body {
+            request = request
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .body(body.to_vec());
+        }
+        let response = request.send().await.with_context(|| format!("send {method} {path}"))?;
+        let status = response.status().as_u16();
+        let bytes = response
+            .bytes()
+            .await
+            .with_context(|| format!("read the {method} {path} response"))?;
+        Ok((status, bytes.to_vec()))
+    }
+
+    /// Closes the session this management API is called with, if any.
+    pub(crate) async fn log_out(&self) -> anyhow::Result<()> {
+        match self.credential {
+            Credential::Session(session) => session.log_out(self.target).await,
+            Credential::Absent | Credential::TokenId(_) => Ok(()),
+        }
     }
 
     async fn fetch<T: DeserializeOwned>(
@@ -1127,7 +1318,14 @@ mod tests {
             (409, r#"{"message":42}"#, None),
             (409, r#"["not an object"]"#, None),
             (403, r#"{"errors":[{"field":null,"message":"forbidden"}]}"#, None),
-            (401, "", None),
+            (
+                401,
+                r#"{"message":"Missing or invalid token"}"#,
+                Some(Refusal::Unauthenticated),
+            ),
+            // DVLS answers a request without a `tokenId` with a 401 and no body, which only a 401 may have.
+            (401, "", Some(Refusal::Unauthenticated)),
+            (403, "", None),
         ] {
             assert_eq!(
                 refusal_from(status, body.as_bytes()).ok(),
@@ -1145,5 +1343,214 @@ mod tests {
             .query_string()?;
         assert!(query.contains("metadataKey=hostname&metadataKey=os_name"), "{query}");
         Ok(())
+    }
+
+    /// DVLS refuses an expired or unknown token with 401, so a refused session logs in once more and the request is sent once more.
+    #[tokio::test]
+    async fn refused_session_logs_in_again_and_retries_once() -> anyhow::Result<()> {
+        let stub = Stub::default();
+        let target = stub.start().await?;
+        let management = target.management();
+        management.settings().await?;
+        stub.expire_tokens();
+        management.settings().await?;
+        assert_eq!(
+            stub.counts(),
+            Counts {
+                logins: 2,
+                reads: 3,
+                refused: 1
+            }
+        );
+        Ok(())
+    }
+
+    /// A token from a fresh login that is refused too will not be accepted by waiting, so the request is not sent a third time.
+    #[tokio::test]
+    async fn session_refused_after_logging_in_again_is_unauthenticated() -> anyhow::Result<()> {
+        let stub = Stub::default();
+        stub.refuse_every_token();
+        let target = stub.start().await?;
+        assert_eq!(refusal(target.management().settings().await)?, Refusal::Unauthenticated);
+        assert_eq!(
+            stub.counts(),
+            Counts {
+                logins: 2,
+                reads: 2,
+                refused: 2
+            }
+        );
+        Ok(())
+    }
+
+    /// DVLS's login reports no expiry, so a refused token's age is the lifetime a session observes, and it logs in again before a token reaches that age.
+    #[tokio::test]
+    async fn session_logs_in_again_before_reaching_the_age_of_a_refused_token() -> anyhow::Result<()> {
+        let stub = Stub::default();
+        let target = stub.start().await?;
+        let management = target.management();
+        management.settings().await?;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        stub.expire_tokens();
+        management.settings().await?;
+        management.settings().await?;
+        assert_eq!(
+            stub.counts(),
+            Counts {
+                logins: 2,
+                reads: 4,
+                refused: 1
+            },
+            "a fresh token was not reused"
+        );
+        // The stub never expires this token, so only the session's own lifetime makes it log in again.
+        tokio::time::sleep(Duration::from_millis(800)).await;
+        management.settings().await?;
+        assert_eq!(
+            stub.counts(),
+            Counts {
+                logins: 3,
+                reads: 5,
+                refused: 1
+            },
+            "a token older than the refused one was not replaced before use"
+        );
+        Ok(())
+    }
+
+    /// A loopback stand-in for DVLS's login and settings read, which opens a token per login and accepts only open tokens.
+    #[derive(Clone, Default)]
+    struct Stub(Arc<std::sync::Mutex<StubState>>);
+
+    #[derive(Default)]
+    struct StubState {
+        counts: Counts,
+        open: Vec<String>,
+        refuse_every_token: bool,
+    }
+
+    #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+    struct Counts {
+        logins: u32,
+        /// Settings reads, accepted or refused.
+        reads: u32,
+        refused: u32,
+    }
+
+    impl Stub {
+        const KEY: &str = "stub-key";
+        const SECRET: &str = "stub-secret";
+
+        /// Serves on a loopback port, and returns a target whose session logs in with the stub's key and secret.
+        async fn start(&self) -> anyhow::Result<Target> {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let base_url = format!("http://{}", listener.local_addr()?);
+            let stub = self.clone();
+            tokio::spawn(async move {
+                while let Ok((stream, _)) = listener.accept().await {
+                    tokio::spawn(stub.clone().serve(stream));
+                }
+            });
+            Ok(Target {
+                base_url,
+                session: Arc::new(Session::new(AppCredential::new(
+                    Self::KEY.to_owned(),
+                    Self::SECRET.to_owned(),
+                ))),
+                ca_path: None,
+                authority_id: None,
+                http: reqwest::Client::builder().no_proxy().build()?,
+            })
+        }
+
+        /// Closes every open token, as their expiry would.
+        fn expire_tokens(&self) {
+            self.state().open.clear();
+        }
+
+        fn refuse_every_token(&self) {
+            self.state().refuse_every_token = true;
+        }
+
+        fn counts(&self) -> Counts {
+            self.state().counts
+        }
+
+        fn state(&self) -> std::sync::MutexGuard<'_, StubState> {
+            self.0.lock().expect("stub state lock poisoned")
+        }
+
+        /// Answers one HTTP/1.1 request, then closes the connection.
+        async fn serve(self, mut stream: tokio::net::TcpStream) -> anyhow::Result<()> {
+            use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+            let mut request = Vec::new();
+            let mut chunk = [0; 4096];
+            let head_length = loop {
+                if let Some(end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                    break end + 4;
+                }
+                let read = stream.read(&mut chunk).await?;
+                ensure!(read != 0, "the connection closed before the request head");
+                request.extend_from_slice(&chunk[..read]);
+            };
+            let head = String::from_utf8(request[..head_length].to_vec())?;
+            let header = |name: &str| {
+                head.lines().find_map(|line| {
+                    let (header, value) = line.split_once(':')?;
+                    header.eq_ignore_ascii_case(name).then(|| value.trim().to_owned())
+                })
+            };
+            let body_length: usize = header("content-length").map_or(Ok(0), |length| length.parse())?;
+            while request.len() < head_length + body_length {
+                let read = stream.read(&mut chunk).await?;
+                ensure!(read != 0, "the connection closed before the request body");
+                request.extend_from_slice(&chunk[..read]);
+            }
+            let request_line = head.lines().next().unwrap_or_default();
+            let (status, body) = self.respond(
+                request_line,
+                header(CREDENTIAL_HEADER),
+                &request[head_length..head_length + body_length],
+            );
+            let response = format!(
+                "HTTP/1.1 {status} Stub\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).await?;
+            stream.shutdown().await?;
+            Ok(())
+        }
+
+        fn respond(&self, request_line: &str, token_id: Option<String>, body: &[u8]) -> (u16, String) {
+            let mut state = self.state();
+            if request_line.starts_with(&format!("POST {LOGIN_PATH} ")) {
+                let parameters = serde_json::from_slice::<Value>(body).unwrap_or_default();
+                if parameters != json!({ "appKey": Self::KEY, "appSecret": Self::SECRET }) {
+                    return (401, json!({ "message": "wrong key or secret" }).to_string());
+                }
+                state.counts.logins += 1;
+                let token_id = format!("token-{}", state.counts.logins);
+                state.open.push(token_id.clone());
+                return (200, json!({ "tokenId": token_id }).to_string());
+            }
+            if request_line.starts_with(&format!("GET {BASE_PATH}/settings ")) {
+                state.counts.reads += 1;
+                let open = token_id.is_some_and(|token_id| state.open.contains(&token_id));
+                if !open || state.refuse_every_token {
+                    state.counts.refused += 1;
+                    return (401, json!({ "message": "Missing or invalid token" }).to_string());
+                }
+                let settings = json!({
+                    "authorityId": "stub-authority",
+                    "isAgentChannelEnabled": true,
+                    "isAgentChannelAvailable": true,
+                    "certificateLifetimeDays": 90,
+                    "rotationNotificationsPerSecond": 10
+                });
+                return (200, settings.to_string());
+            }
+            (404, json!({ "message": "unknown route" }).to_string())
+        }
     }
 }
