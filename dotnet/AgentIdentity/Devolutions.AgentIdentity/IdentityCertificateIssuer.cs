@@ -20,7 +20,8 @@ public static class IdentityCertificateIssuer
     public static TimeSpan DefaultLifetime { get; } = TimeSpan.FromDays(90);
 
     /// <summary>
-    /// Issues the identity certificate for the key of a validated CSR.
+    /// Issues the certificate of a new identity, whose ID the authority mints at enrollment,
+    /// for the key of a validated CSR.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -36,8 +37,12 @@ public static class IdentityCertificateIssuer
     /// Its serial number is 16 octets from <paramref name="random"/>, positive and never zero,
     /// and <paramref name="issuer"/> signs it with SHA-256.
     /// </para>
+    /// <para>
+    /// A renewal certifies a key for an existing identity,
+    /// so it uses the overload that takes the identity that the renew request proved.
+    /// </para>
     /// </remarks>
-    /// <param name="identityId">The identity that the certificate belongs to.</param>
+    /// <param name="identityId">The ID that the authority minted for the new identity.</param>
     /// <param name="csr">The validated CSR whose key the certificate is for.</param>
     /// <param name="issuer">The root that signs the certificate.</param>
     /// <param name="lifetime">The certificate lifetime, usually <see cref="DefaultLifetime"/>.</param>
@@ -115,6 +120,49 @@ public static class IdentityCertificateIssuer
             notBefore,
             notAfter,
             NewSerialNumber(random));
+    }
+
+    /// <summary>
+    /// Issues the pending certificate of a renewal, for the identity that signed the renew request.
+    /// </summary>
+    /// <remarks>
+    /// The certificate is the one that the other overload issues for <see cref="AuthenticatedIdentity.IdentityId"/>.
+    /// Taking the identity that the signature check produced, rather than an ID,
+    /// keeps a renewal from certifying a key for an identity that a request only named.
+    /// </remarks>
+    /// <param name="renewing">
+    /// The identity that a <c>renew</c> request proved, as <see cref="RequestAuthenticator.AuthenticateAsync"/>
+    /// returns it for <see cref="AgentOperation.Renew"/>.
+    /// </param>
+    /// <param name="csr">The validated CSR whose key the certificate is for.</param>
+    /// <param name="issuer">The root that signs the certificate.</param>
+    /// <param name="lifetime">The certificate lifetime, usually <see cref="DefaultLifetime"/>.</param>
+    /// <param name="timeProvider">The clock, read once.</param>
+    /// <param name="random">The source of the serial number.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="renewing"/> was authenticated for another operation than <c>renew</c>;
+    /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second.
+    /// </exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="lifetime"/> is shorter than one second.
+    /// </exception>
+    public static X509Certificate2 Issue(
+        AuthenticatedIdentity renewing,
+        CertificateSigningRequest csr,
+        IRootSigner issuer,
+        TimeSpan lifetime,
+        TimeProvider timeProvider,
+        RandomNumberGenerator random)
+    {
+        ArgumentNullException.ThrowIfNull(renewing);
+
+        if (renewing.Operation != AgentOperation.Renew)
+        {
+            throw new ArgumentException("The identity was not authenticated by a renew request.", nameof(renewing));
+        }
+
+        return Issue(renewing.IdentityId, csr, issuer, lifetime, timeProvider, random);
     }
 
     private static DateTimeOffset TruncateToSecond(DateTimeOffset value)
