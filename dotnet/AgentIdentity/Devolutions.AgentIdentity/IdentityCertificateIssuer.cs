@@ -1,0 +1,141 @@
+using System.Collections.ObjectModel;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+
+namespace Devolutions.AgentIdentity;
+
+/// <summary>
+/// Issues identity certificates, the leaf certificates through which agents authenticate.
+/// </summary>
+public static class IdentityCertificateIssuer
+{
+    // RFC 5280 §4.2.1.12: id-kp-clientAuth.
+    private const string ClientAuthentication = "1.3.6.1.5.5.7.3.2";
+
+    private const string SubjectKeyIdentifierOid = "2.5.29.14";
+
+    /// <summary>
+    /// The lifetime of an identity certificate when the host sets no other: 90 days.
+    /// </summary>
+    public static TimeSpan DefaultLifetime { get; } = TimeSpan.FromDays(90);
+
+    /// <summary>
+    /// Issues the identity certificate for the key of a validated CSR.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The certificate has the CSR's key, the subject <c>CN=&lt;identity ID&gt;</c>,
+    /// the subject alternative name URI <c>urn:uuid:&lt;identity ID&gt;</c>, the extended key usage clientAuth,
+    /// the critical key usage digitalSignature, a subject key identifier,
+    /// an authority key identifier equal to the issuer's subject key identifier, and no basic constraints.
+    /// The identity ID is written lowercase and hyphenated, and nothing else from the CSR reaches the certificate.
+    /// </para>
+    /// <para>
+    /// It is valid from the current time, truncated to the second, for <paramref name="lifetime"/>,
+    /// or until the issuer's <c>notAfter</c> if that comes first; a fraction of a second in the lifetime is dropped.
+    /// Its serial number is 16 octets from <paramref name="random"/>, positive and never zero,
+    /// and <paramref name="issuer"/> signs it with SHA-256.
+    /// </para>
+    /// </remarks>
+    /// <param name="identityId">The identity that the certificate belongs to.</param>
+    /// <param name="csr">The validated CSR whose key the certificate is for.</param>
+    /// <param name="issuer">The root that signs the certificate.</param>
+    /// <param name="lifetime">The certificate lifetime, usually <see cref="DefaultLifetime"/>.</param>
+    /// <param name="timeProvider">The clock, read once.</param>
+    /// <param name="random">The source of the serial number.</param>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="lifetime"/> is shorter than one second.
+    /// </exception>
+    /// <exception cref="ArgumentException">
+    /// The issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second.
+    /// </exception>
+    public static X509Certificate2 Issue(
+        Guid identityId,
+        CertificateSigningRequest csr,
+        IRootSigner issuer,
+        TimeSpan lifetime,
+        TimeProvider timeProvider,
+        RandomNumberGenerator random)
+    {
+        ArgumentNullException.ThrowIfNull(csr);
+        ArgumentNullException.ThrowIfNull(issuer);
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(random);
+
+        // A certificate holds whole seconds, so a shorter lifetime would end in the second it begins.
+        ArgumentOutOfRangeException.ThrowIfLessThan(lifetime, TimeSpan.FromSeconds(1));
+
+        X509Certificate2 issuerCertificate = issuer.Certificate;
+
+        // RFC 5280 §4.2.1.1: the authority key identifier repeats the issuer's subject key identifier.
+        if (issuerCertificate.Extensions[SubjectKeyIdentifierOid] is not X509SubjectKeyIdentifierExtension issuerKeyId)
+        {
+            throw new ArgumentException("The issuer certificate has no subject key identifier.", nameof(issuer));
+        }
+
+        DateTimeOffset notBefore = TruncateToSecond(timeProvider.GetUtcNow());
+        DateTimeOffset issuerNotAfter = new(issuerCertificate.NotAfter.ToUniversalTime(), TimeSpan.Zero);
+
+        if (issuerNotAfter <= notBefore)
+        {
+            throw new ArgumentException(
+                "The issuer certificate expires before the new certificate begins.",
+                nameof(issuer));
+        }
+
+        // Comparing the lifetime with the time left avoids adding a lifetime too long for DateTimeOffset.
+        DateTimeOffset notAfter = lifetime < issuerNotAfter - notBefore
+            ? TruncateToSecond(notBefore + lifetime)
+            : issuerNotAfter;
+
+        string id = identityId.ToString("D");
+        PublicKey publicKey = PublicKey.CreateFromSubjectPublicKeyInfo(csr.SubjectPublicKeyInfo.Span, out _);
+
+        X500DistinguishedNameBuilder subject = new();
+        subject.AddCommonName(id);
+
+        SubjectAlternativeNameBuilder alternativeName = new();
+        alternativeName.AddUri(new Uri($"urn:uuid:{id}"));
+
+        CertificateRequest request = new(subject.Build(), publicKey, HashAlgorithmName.SHA256);
+        OidCollection usages = [new Oid(ClientAuthentication)];
+
+        // RFC 5280 §4.2.1.2, method (1): the SHA-1 hash of the subjectPublicKey bits.
+        X509SubjectKeyIdentifierHashAlgorithm keyIdMethod = X509SubjectKeyIdentifierHashAlgorithm.Sha1;
+        Collection<X509Extension> extensions = request.CertificateExtensions;
+        extensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, critical: true));
+        extensions.Add(new X509EnhancedKeyUsageExtension(usages, critical: false));
+        extensions.Add(alternativeName.Build(critical: false));
+        extensions.Add(new X509SubjectKeyIdentifierExtension(publicKey, keyIdMethod, critical: false));
+        extensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromSubjectKeyIdentifier(issuerKeyId));
+
+        return request.Create(
+            issuerCertificate.SubjectName,
+            issuer.SignatureGenerator,
+            notBefore,
+            notAfter,
+            NewSerialNumber(random));
+    }
+
+    private static DateTimeOffset TruncateToSecond(DateTimeOffset value)
+    {
+        return new DateTimeOffset(value.UtcTicks - (value.UtcTicks % TimeSpan.TicksPerSecond), TimeSpan.Zero);
+    }
+
+    // RFC 5280 §4.1.2.2: a positive INTEGER of at most 20 octets.
+    private static byte[] NewSerialNumber(RandomNumberGenerator random)
+    {
+        byte[] serialNumber = new byte[16];
+
+        do
+        {
+            random.GetBytes(serialNumber);
+
+            // A clear top bit keeps the INTEGER positive without a leading zero octet.
+            serialNumber[0] &= 0x7F;
+        }
+        while (!serialNumber.AsSpan().ContainsAnyExcept((byte)0));
+
+        return serialNumber;
+    }
+}
