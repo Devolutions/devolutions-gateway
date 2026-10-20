@@ -3,7 +3,7 @@ using System.Reflection;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The types that only request authentication creates.
+/// The types that only request authentication and the channel handshake create.
 /// </summary>
 /// <remarks>
 /// INTENT.md: code that acts for an identity takes it as a type only the signature check can create,
@@ -17,6 +17,7 @@ public class AuthenticationTypeTests
         typeof(ChannelOpening),
         typeof(AuthenticationResult),
         typeof(ChannelOpeningResult),
+        typeof(ChannelHandshakeResult),
     ];
 
     public static TheoryData<Type> AuthenticationTypeData => new(AuthenticationTypes);
@@ -55,6 +56,9 @@ public class AuthenticationTypeTests
         Assert.Equal(
             [
                 "AuthenticationResult.get_Identity",
+                "ChannelHandshakeResult.get_Identity",
+                "ChannelOpening.HelloTimedOut",
+                "ChannelOpening.VerifyHello",
                 "ChannelOpeningResult.get_Opening",
                 "RequestAuthenticator.AuthenticateAsync",
                 "RequestAuthenticator.AuthenticateChannelOpeningAsync",
