@@ -3872,6 +3872,49 @@ Payload of a &#x60;failed&#x60; AI analysis Task: why it failed
 
 
 
+[#AiAnalysisParams]
+=== _AiAnalysisParams_ 
+
+Params of an AI analysis Task: what was asked, without the API key and the base URL
+
+
+[.fields-AiAnalysisParams]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| language
+| 
+| X
+|   String  
+| Language the AI writes in; absent when not asked, so the AI writes in English.
+|     
+
+| maxOutputTokens
+| 
+| X
+|   Integer  
+| Upper bound of tokens in each AI answer; null when not asked.
+| int32    
+
+| model
+| X
+| 
+|   String  
+| Model identifier, passed to the provider as is.
+|     
+
+| provider
+| X
+| 
+|  <<AiProvider>>  
+| 
+|    openai, anthropic, mistral, gemini, openai-compatible,  
+
+|===
+
+
+
 [#AiAnalysisRequest]
 === _AiAnalysisRequest_ 
 
@@ -6093,8 +6136,8 @@ A Task: the permanent record of one piece of work the provisioner asked Gateway 
 
 The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes.
 The shape of &#x60;params&#x60; and &#x60;payload&#x60; belongs to the kind.
-For &#x60;recording-ai-analysis&#x60;, &#x60;payload&#x60; is an &#x60;AiAnalysisRunningPayload&#x60; while &#x60;running&#x60;, an
-&#x60;AiAnalysisSucceededPayload&#x60; once &#x60;succeeded&#x60;, and an &#x60;AiAnalysisFailedPayload&#x60; once &#x60;failed&#x60;.
+For &#x60;recording-ai-analysis&#x60;, &#x60;params&#x60; is an &#x60;AiAnalysisParams&#x60;, and &#x60;payload&#x60; is an &#x60;AiAnalysisRunningPayload&#x60; while
+&#x60;running&#x60;, an &#x60;AiAnalysisSucceededPayload&#x60; once &#x60;succeeded&#x60;, and an &#x60;AiAnalysisFailedPayload&#x60; once &#x60;failed&#x60;.
 
 
 [.fields-TaskInfo]

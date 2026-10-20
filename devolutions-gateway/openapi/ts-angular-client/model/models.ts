@@ -8,6 +8,7 @@ export * from './agentStatus';
 export * from './aiAnalysisConflict';
 export * from './aiAnalysisConflictCode';
 export * from './aiAnalysisFailedPayload';
+export * from './aiAnalysisParams';
 export * from './aiAnalysisRequest';
 export * from './aiAnalysisRunningPayload';
 export * from './aiAnalysisSucceededPayload';

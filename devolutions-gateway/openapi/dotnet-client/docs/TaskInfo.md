@@ -1,5 +1,5 @@
 # Devolutions.Gateway.Client.Model.TaskInfo
-A Task: the permanent record of one piece of work the provisioner asked Gateway to do  The work runs in the background; `state` and `payload` tell how it goes. The shape of `params` and `payload` belongs to the kind. For `recording-ai-analysis`, `payload` is an `AiAnalysisRunningPayload` while `running`, an `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
+A Task: the permanent record of one piece of work the provisioner asked Gateway to do  The work runs in the background; `state` and `payload` tell how it goes. The shape of `params` and `payload` belongs to the kind. For `recording-ai-analysis`, `params` is an `AiAnalysisParams`, and `payload` is an `AiAnalysisRunningPayload` while `running`, an `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
 
 ## Properties
 

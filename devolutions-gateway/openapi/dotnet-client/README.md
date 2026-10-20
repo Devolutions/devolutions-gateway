@@ -191,6 +191,7 @@ Class | Method | HTTP request | Description
  - [Model.AiAnalysisConflict](docs/AiAnalysisConflict.md)
  - [Model.AiAnalysisConflictCode](docs/AiAnalysisConflictCode.md)
  - [Model.AiAnalysisFailedPayload](docs/AiAnalysisFailedPayload.md)
+ - [Model.AiAnalysisParams](docs/AiAnalysisParams.md)
  - [Model.AiAnalysisRequest](docs/AiAnalysisRequest.md)
  - [Model.AiAnalysisRunningPayload](docs/AiAnalysisRunningPayload.md)
  - [Model.AiAnalysisSucceededPayload](docs/AiAnalysisSucceededPayload.md)
