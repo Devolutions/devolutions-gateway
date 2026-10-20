@@ -5,7 +5,7 @@ description: Red-green loop for one behaviour at an agreed seam - failing test f
 
 # Test-driven development
 
-`test-writer`, where the repository provides it, decides what a good test is and `test-oracle-reviewer` where its expected value may come from; this skill is the loop around them.
+`test-writer` decides what a good test is and `test-oracle-reviewer` where its expected value may come from; this skill is the loop around them.
 
 ## Seam
 

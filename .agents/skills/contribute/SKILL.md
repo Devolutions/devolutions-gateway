@@ -11,7 +11,7 @@ Every flow is the same loop at a different scale: decide what must hold, write t
 
 | Flow | When | Run |
 |---|---|---|
-| Fix | One behaviour at one seam; every decision it needs is already in the intent, the contract, or the bug report | `tdd` here, then the repository's review skill (`code-review` where provided) |
+| Fix | One behaviour at one seam; every decision it needs is already in the intent, the contract, or the bug report | `tdd` here, then `code-review` |
 | Change | One pull request; may raise a design decision or need more than one pair of hands | `grill-intent` for any decision none of those states, then `lead` |
 | Effort | Several pull requests, a second party that must agree on an interface, or a suite written blind | `orchestrate-effort` |
 
@@ -24,7 +24,7 @@ A second party or a `CONTRACT.md` change promotes to Effort: the contract is its
 - `intent-files`: read every applicable intent file before the first edit, in every flow.
 - `contract-authoring` and `contract-review`: when two independently built parties must agree; the contract precedes its first implementation.
 - `blind-testsuite`: when a wrong expected value would be invisible to the implementer, as in cryptography, codecs, and wire protocols; written from the contract before any implementation.
-- `test-writer` for every test, `test-reviewer` and `test-oracle-reviewer` through `code-review`, and `test-pruner` in its editing mode on the change's diff once its tests are complete and before the pull request opens, its evidence posted as a comment once it does, where the repository provides them; a kill matrix is only as current as the last test edit, so the pruner runs once per change, after that edit.
+- `test-writer` for every test, `test-reviewer` and `test-oracle-reviewer` through `code-review`, and `test-pruner` on the diff once the tests are complete and before the pull request opens.
 - `intent-drift-audit`: once a realisation is claimed complete, in the lead's final check or the reviewer's pass, never mid-implementation.
 - `variants`: when a named design choice needs implementation evidence rather than a paper answer.
 - `review-feedback-loop`: once a pull request has findings.

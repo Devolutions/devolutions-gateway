@@ -23,16 +23,16 @@ A change to an intent file, `CONTRACT.md`, or blind suite that this pull request
 ## Sub-agents
 
 One task per sub-agent, briefed from an artifact per `references/templates.md`, pointing at paths rather than copying them so the sub-agent reads current text, and listing what it must not read as well as what it must, because isolation is only what the brief denies.
-Workers write code and tests in your worktree or branch, each behaviour through `tdd` or against the blind suite's failing checks where one exists, and never push or open the pull request; testers follow `test-writer` where provided, suite authors `blind-testsuite`.
+Workers write code and tests in your worktree or branch, each behaviour through `tdd` or against the blind suite's failing checks where one exists, and never push or open the pull request; testers follow `test-writer`, suite authors `blind-testsuite`.
 
 ## Review loop
 
 Review a commit, not a working tree: the worker commits, hands over the range, and stops editing until the verdict, since a change during review means the reviewer judged something that no longer exists.
-The reviewer gets the range, the acceptance criteria, the applicable intent, contract, and `AGENTS.md` paths, and an instruction to run the repository's review skill (`code-review` where provided); never the worker's transcript or reasoning, because the writer's framing anchors a reviewer before it reads the evidence.
+The reviewer gets the range, the acceptance criteria, the applicable intent, contract, and `AGENTS.md` paths, and an instruction to run `code-review`; never the worker's transcript or reasoning, because the writer's framing anchors a reviewer before it reads the evidence.
 Blocking findings go back to the worker; non-blocking ones are fixed or the reason not to is recorded in the plan.
 Set the round cap in the plan before the first round; at the cap, outstanding fixes go to a fresh reviewer rather than out unreviewed, because post-cap fixes are exactly where unreviewed defects land.
 A round that reintroduces an earlier finding ends the loop: escalate with both findings.
-Once the loop closes, a worker runs `test-pruner` in its editing mode on the diff where the repository provides it, committing the deletions, consolidations, and strengthenings for review like any other work and handing you its evidence tables for the pull request comment once it opens; a kill matrix is only as current as the last test edit, so the run after that edit is the one that counts.
+Once the loop closes, a worker runs `test-pruner` in its editing mode on the diff; you review its commits and post its evidence once the pull request exists, since a kill matrix is only as current as the last test edit.
 
 ## Your verification
 
