@@ -459,9 +459,9 @@ mod tests {
     ) -> anyhow::Result<()> {
         let app = App::for_test()?;
         let expires_at = crate::app::rfc3339(app.now() + 3600);
-        let created = json!({ "name": "t", "maxUses": 1, "expiresAt": expires_at }).to_string();
-        let admin = [(http::header::AUTHORIZATION.as_str(), "Bearer admin")];
-        let (status, created) = post_json(&app, "/api/v3/agent-identity/enrollment-tokens", &admin, created).await;
+        let created = json!({ "name": "t", "maxUses": 1, "expiresOn": expires_at }).to_string();
+        let admin = [("tokenId", "admin")];
+        let (status, created) = post_json(&app, "/api/v1/agent-identity/enrollment-token", &admin, created).await;
         assert_eq!(status, 201);
         let token = alter(created["token"].as_str().expect("issued token"));
 
@@ -483,6 +483,43 @@ mod tests {
         let app = App::for_test()?;
         let (status, body) = post_json(&app, FAULTS, &[], json!({ "config_version": value }).to_string()).await;
         assert_eq!((status, &body["error"]), (400, &json!("invalid_request")));
+        Ok(())
+    }
+
+    /// A reset `without_root` stands for a DVLS that never created a token: no root is published until the first
+    /// enrollment token creates one ([DVLS intent][dvls], "Root CA").
+    ///
+    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    #[tokio::test]
+    async fn reset_without_root_publishes_a_root_only_after_the_first_token() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let published_roots = || async {
+            let request = http::Request::get("/mock/api/agent-identity/v1/trust-anchor")
+                .body(Full::new(Bytes::new()))
+                .expect("valid request");
+            let response = Dispatcher::new(Arc::clone(&app))
+                .handle(request)
+                .await
+                .expect("the mock answers");
+            let body = response.into_body().collect().await.expect("readable body").to_bytes();
+            let body: Value = serde_json::from_slice(&body).expect("JSON body");
+            body["roots"].as_array().expect("roots").len()
+        };
+        let (status, _) = post_json(
+            &app,
+            "/__mock__/reset",
+            &[],
+            json!({ "without_root": true }).to_string(),
+        )
+        .await;
+        assert_eq!(status, 200);
+        assert_eq!(published_roots().await, 0);
+
+        let token = json!({ "name": "t", "maxUses": 1 }).to_string();
+        let admin = [("tokenId", "admin")];
+        let (status, _) = post_json(&app, "/api/v1/agent-identity/enrollment-token", &admin, token).await;
+        assert_eq!(status, 201);
+        assert_eq!(published_roots().await, 1);
         Ok(())
     }
 }

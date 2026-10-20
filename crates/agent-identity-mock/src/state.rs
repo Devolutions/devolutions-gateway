@@ -14,7 +14,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::ca::{self, DEFAULT_LEAF_LIFETIME_SECS, RootCa};
+use crate::ca::{self, RootCa};
 use crate::name_eval;
 use crate::oracle::{
     AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, check_csr, unexpired, within_renewal_grace,
@@ -71,8 +71,40 @@ impl ApiError {
         Self::new(403, "identity_revoked", "identity is revoked")
     }
 
+    pub(crate) fn unprocessable(message: impl Into<String>) -> Self {
+        Self::new(422, "unprocessable", message)
+    }
+
     pub(crate) fn internal(message: impl Into<String>) -> Self {
         Self::new(500, "internal_error", message)
+    }
+}
+
+const SECS_PER_DAY: i64 = 24 * 3600;
+
+/// DVLS's Agent Identity settings ([DVLS intent][dvls], "Management API").
+///
+/// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#management-api
+#[derive(Debug, Clone)]
+pub(crate) struct Settings {
+    /// "Agent channel enabled"; the channel is offered only while the hosting also supports it.
+    pub(crate) agent_channel_enabled: bool,
+    pub(crate) certificate_lifetime_days: u32,
+    pub(crate) rotation_notifications_per_second: u32,
+}
+
+impl Default for Settings {
+    /// The channel is on, certificates last the contract's default 90 days ([CONTRACT.md][contract], "4. Certificates"),
+    /// and rotation notifies 10 identities per second ([DVLS intent][dvls], "Load").
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#4-certificates
+    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#load
+    fn default() -> Self {
+        Self {
+            agent_channel_enabled: true,
+            certificate_lifetime_days: 90,
+            rotation_notifications_per_second: 10,
+        }
     }
 }
 
@@ -106,13 +138,18 @@ pub(crate) struct Faults {
     pub(crate) drop_next_response: Option<DropTarget>,
     pub(crate) fail_next_response: Option<FailNextResponse>,
     pub(crate) clock_skew_secs: Option<i64>,
+    /// Overrides the `certificateLifetimeDays` setting with a lifetime in seconds.
     pub(crate) leaf_lifetime_secs: Option<i64>,
+    /// Whether the hosting supports the agent channel.
     pub(crate) channel_available: bool,
     pub(crate) channel_broken: bool,
     pub(crate) malformed_channel_url: Option<MalformedChannelUrl>,
+    /// Overrides the `rotationNotificationsPerSecond` setting without its bounds.
     pub(crate) rotation_rate_limit_per_sec: Option<u32>,
     /// Replaces `config.version` in every delivered config, so tests can deliver an unsupported version.
     pub(crate) config_version: Option<u64>,
+    /// Makes the root key undecryptable, as when DVLS's data encryption key is unavailable.
+    pub(crate) root_key_unavailable: bool,
 }
 
 impl Default for Faults {
@@ -127,6 +164,7 @@ impl Default for Faults {
             malformed_channel_url: None,
             rotation_rate_limit_per_sec: None,
             config_version: None,
+            root_key_unavailable: false,
         }
     }
 }
@@ -160,20 +198,22 @@ pub(crate) struct Token {
     pub(crate) config: Option<Value>,
     /// Unix seconds.
     pub(crate) created_at: i64,
+    /// Strictly increasing creation order, even for tokens created in the same second.
+    pub(crate) created_seq: u64,
     pub(crate) created_by: String,
     /// Deletion keeps the secret hash for same-token idempotent recovery.
     pub(crate) deleted_at: Option<i64>,
 }
 
 impl Token {
-    /// Returns the DVLS token state, where `expired` wins over `exhausted`.
+    /// Returns the DVLS token state, where `Expired` wins over `Exhausted`.
     pub(crate) fn state(&self, now: i64) -> &'static str {
         if now >= self.expires_at {
-            "expired"
+            "Expired"
         } else if self.used_count >= self.max_uses {
-            "exhausted"
+            "Exhausted"
         } else {
-            "active"
+            "Active"
         }
     }
 }
@@ -284,21 +324,22 @@ pub(crate) enum IdentityStatus {
 }
 
 impl IdentityStatus {
+    /// Returns the `AgentIdentityStatus` value of DVLS's OpenAPI document.
     pub(crate) fn as_str(self) -> &'static str {
         match self {
-            IdentityStatus::Active => "active",
-            IdentityStatus::Grace => "grace",
-            IdentityStatus::Expired => "expired",
-            IdentityStatus::Revoked => "revoked",
+            IdentityStatus::Active => "Active",
+            IdentityStatus::Grace => "Grace",
+            IdentityStatus::Expired => "Expired",
+            IdentityStatus::Revoked => "Revoked",
         }
     }
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
-            "active" => Some(IdentityStatus::Active),
-            "grace" => Some(IdentityStatus::Grace),
-            "expired" => Some(IdentityStatus::Expired),
-            "revoked" => Some(IdentityStatus::Revoked),
+            "Active" => Some(IdentityStatus::Active),
+            "Grace" => Some(IdentityStatus::Grace),
+            "Expired" => Some(IdentityStatus::Expired),
+            "Revoked" => Some(IdentityStatus::Revoked),
             _ => None,
         }
     }
@@ -371,6 +412,8 @@ pub(crate) struct Rotation {
     pub(crate) old_root: String,
     pub(crate) new_root: String,
     /// Unix seconds.
+    pub(crate) started_at: i64,
+    /// Unix seconds.
     pub(crate) deadline: i64,
 }
 
@@ -419,10 +462,12 @@ pub struct State {
     issued_keys: HashMap<[u8; 32], IssuedKey>,
     /// All known roots; the issuing root is the last one, `published` gates
     /// `trust-anchor` listing.
+    /// Empty only after a reset without a root, until the first enrollment token creates one.
     pub(crate) roots: Vec<RootCa>,
     pub(crate) rotation: Option<Rotation>,
     pub(crate) nonces: NonceStore,
     pub(crate) faults: Faults,
+    pub(crate) settings: Settings,
     pub(crate) requests: RequestCounts,
     /// Mock-only barrier: retries receive 503 after a dropped response or injected confirm failure.
     pub(crate) retry_barrier: Option<DropTarget>,
@@ -443,6 +488,7 @@ pub struct State {
     pub(crate) root_seq: u32,
     pub(crate) serial_seq: u64,
     pub(crate) next_identity_seq: u64,
+    pub(crate) next_token_seq: u64,
     pub(crate) last_created_at: i64,
 }
 
@@ -459,6 +505,7 @@ impl State {
             rotation: None,
             nonces: NonceStore::default(),
             faults: Faults::default(),
+            settings: Settings::default(),
             requests: RequestCounts::default(),
             retry_barrier: None,
             barrier_triggered: None,
@@ -473,6 +520,7 @@ impl State {
             root_seq: 1,
             serial_seq: 100,
             next_identity_seq: 1,
+            next_token_seq: 1,
             last_created_at: now,
         })
     }
@@ -489,13 +537,31 @@ impl State {
         self.next_event_seq += 1;
     }
 
+    /// Whether the agent channel is offered: the `isAgentChannelEnabled` setting is on and the hosting supports it.
+    pub(crate) fn channel_offered(&self) -> bool {
+        self.settings.agent_channel_enabled && self.faults.channel_available
+    }
+
+    /// Sets whether the hosting supports the agent channel.
     pub(crate) fn update_channel_available(&mut self, available: bool, base_url: &str) {
-        if self.faults.channel_available == available {
+        self.update_channel_offer(base_url, |state| state.faults.channel_available = available);
+    }
+
+    /// Sets the `isAgentChannelEnabled` setting.
+    pub(crate) fn update_agent_channel_enabled(&mut self, enabled: bool, base_url: &str) {
+        self.update_channel_offer(base_url, |state| state.settings.agent_channel_enabled = enabled);
+    }
+
+    /// Applies `change`, then adds or removes `agent_channel_url` in every config when the channel offer changed.
+    fn update_channel_offer(&mut self, base_url: &str, change: impl FnOnce(&mut Self)) {
+        let offered = self.channel_offered();
+        change(self);
+        let now_offered = self.channel_offered();
+        if offered == now_offered {
             return;
         }
-        self.faults.channel_available = available;
         self.change_every_config(|config| {
-            if available {
+            if now_offered {
                 config.insert("agent_channel_url".to_owned(), json!(base_url));
             } else {
                 config.remove("agent_channel_url");
@@ -729,7 +795,7 @@ impl State {
             .expect("authenticated certificate exists");
         // UNTESTED: both promotion and an already-current retry refresh `last_seen_at`.
         // Confirm proves current key possession, and the management API's last-seen filters depend on this timestamp.
-        // When changing this branch, check the management API's `lastSeenAt` after both confirm paths.
+        // When changing this branch, check the management API's `lastSeenOn` after both confirm paths.
         identity.last_seen_at = Some(now);
         if identity.certs[idx].status == CertStatus::Current {
             return;
@@ -888,7 +954,7 @@ impl State {
         );
         config.insert("revision".to_owned(), json!(1));
         config.remove("agent_channel_url");
-        if self.faults.channel_available {
+        if self.channel_offered() {
             let url = match self.faults.malformed_channel_url {
                 Some(MalformedChannelUrl::Http) => base_url.replacen("https://", "http://", 1),
                 Some(MalformedChannelUrl::Query) => format!("{base_url}?identity_probe=1"),
@@ -946,7 +1012,13 @@ impl State {
     }
 
     fn issue_leaf(&mut self, identity_id: Uuid, public_key: &VerifyingKey, now: i64) -> Result<ca::Leaf, ApiError> {
-        let lifetime = self.faults.leaf_lifetime_secs.unwrap_or(DEFAULT_LEAF_LIFETIME_SECS);
+        if self.faults.root_key_unavailable {
+            return Err(ApiError::internal("root key is unavailable"));
+        }
+        let lifetime = self
+            .faults
+            .leaf_lifetime_secs
+            .unwrap_or_else(|| i64::from(self.settings.certificate_lifetime_days) * SECS_PER_DAY);
         let serial = self.serial_seq;
         self.serial_seq += 1;
         let root = self.issuing_root();
@@ -1102,13 +1174,16 @@ impl State {
         Ok(())
     }
 
-    /// DVLS request-renewal sets the flag (reason `admin`) and pushes to live streams.
+    /// DVLS request-renewal sets the flag (reason `admin`) and pushes to live streams; a revoked identity is a conflict.
     pub(crate) fn request_renewal(&mut self, identity_id: Uuid) -> Result<(), ApiError> {
         let min_issued_seq = self.serial_seq;
         let identity = self
             .identities
             .get_mut(&identity_id)
             .ok_or_else(|| ApiError::not_found("unknown identity"))?;
+        if identity.revoked() {
+            return Err(ApiError::conflict("identity is revoked"));
+        }
         identity.renewal_requested = Some(RenewalFlag {
             reason: RenewReason::Admin,
             min_issued_seq,
@@ -1120,9 +1195,17 @@ impl State {
     /// Starts a DVLS rotation with the supplied deadline or the active old-root certificate maximum.
     /// The maximum is the latest `notAfter` of an unexpired current or pending old-root certificate of a non-revoked
     /// identity, or `now` if none exist.
+    /// A rotation in progress, no root yet and an unavailable root key are conflicts, and a deadline after the maximum
+    /// is unprocessable.
     pub(crate) fn start_rotation(&mut self, deadline: Option<i64>, now: i64) -> Result<(), ApiError> {
+        if self.roots.is_empty() {
+            return Err(ApiError::conflict("no root exists yet"));
+        }
         if self.rotation.is_some() {
             return Err(ApiError::conflict("a rotation is already in progress"));
+        }
+        if self.faults.root_key_unavailable {
+            return Err(ApiError::conflict("root key is unavailable"));
         }
         let old_root = self.issuing_root().thumbprint.clone();
         let maximum = self
@@ -1136,7 +1219,7 @@ impl State {
             .unwrap_or(now);
         let deadline = deadline.unwrap_or(maximum);
         if deadline > maximum {
-            return Err(ApiError::invalid_request(
+            return Err(ApiError::unprocessable(
                 "rotation deadline exceeds the latest active old-root certificate",
             ));
         }
@@ -1169,6 +1252,7 @@ impl State {
         self.rotation = Some(Rotation {
             old_root,
             new_root: new_root_thumbprint,
+            started_at: now,
             deadline,
         });
         self.drain_rotation_pushes(now);
@@ -1190,7 +1274,10 @@ impl State {
         {
             self.rotation_push_times.pop_front();
         }
-        let limit = self.faults.rotation_rate_limit_per_sec.unwrap_or(10) as usize;
+        let limit = self
+            .faults
+            .rotation_rate_limit_per_sec
+            .unwrap_or(self.settings.rotation_notifications_per_second) as usize;
         while self.rotation_push_times.len() < limit {
             let Some((identity_id, old_root)) = self.rotation_push_queue.pop_front() else {
                 break;
@@ -1299,9 +1386,9 @@ impl State {
         self.drain_rotation_pushes(now);
     }
 
-    /// Mock reset clears tokens, identities, nonces, faults, rotation and the clock offset.
-    /// It creates a fresh root and closes live streams with `identity_unknown`.
-    pub(crate) fn reset(&mut self, now: i64) -> anyhow::Result<()> {
+    /// Mock reset clears tokens, identities, nonces, faults, settings, rotation and the clock offset.
+    /// It creates a fresh root, unless `with_root` is false, and closes live streams with `identity_unknown`.
+    pub(crate) fn reset(&mut self, now: i64, with_root: bool) -> anyhow::Result<()> {
         let stream_ids: Vec<Uuid> = self.streams.keys().copied().collect();
         for id in &stream_ids {
             if let Some(handle) = self.streams.get(id) {
@@ -1322,6 +1409,7 @@ impl State {
         self.issued_keys.clear();
         self.nonces = NonceStore::default();
         self.faults = Faults::default();
+        self.settings = Settings::default();
         self.requests = RequestCounts::default();
         self.retry_barrier = None;
         self.barrier_triggered = None;
@@ -1331,9 +1419,33 @@ impl State {
         self.events.clear();
         self.next_event_seq = 1;
         self.next_identity_seq = 1;
+        self.next_token_seq = 1;
         self.last_created_at = now;
+        self.roots.clear();
+        if with_root {
+            self.root_seq += 1;
+            self.roots.push(RootCa::generate(self.root_seq, now)?);
+        }
+        Ok(())
+    }
+
+    /// Creates the first root, as DVLS does with the first enrollment token ([DVLS intent][dvls], "Root CA").
+    /// Without the root key's encryption key, the root cannot be created and the token is a conflict.
+    ///
+    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    pub(crate) fn ensure_root(&mut self, now: i64) -> Result<(), ApiError> {
+        if !self.roots.is_empty() {
+            return Ok(());
+        }
+        if self.faults.root_key_unavailable {
+            return Err(ApiError::conflict(
+                "the first root cannot be created because the data encryption key is unavailable",
+            ));
+        }
+        let root = RootCa::generate(self.root_seq + 1, now)
+            .map_err(|e| ApiError::internal(format!("failed to generate root: {e:#}")))?;
         self.root_seq += 1;
-        self.roots = vec![RootCa::generate(self.root_seq, now)?];
+        self.roots.push(root);
         Ok(())
     }
 
@@ -1359,9 +1471,11 @@ impl State {
             friendly_name_format,
             config,
             created_at: now,
+            created_seq: self.next_token_seq,
             created_by: "mock-admin".to_owned(),
             deleted_at: None,
         };
+        self.next_token_seq += 1;
         use sha2::Digest as _;
         let hash: [u8; 32] = sha2::Sha256::digest(secret).into();
         let id = token.id;
@@ -1419,6 +1533,78 @@ impl PushKind {
             PushKind::CloseExpired => StreamPush::CloseExpired,
         };
         tx.send(push).map_err(|_| ())
+    }
+}
+
+#[cfg(test)]
+impl State {
+    /// Inserts a connected identity: a current certificate from the issuing root, valid from `now` for `lifetime_secs`,
+    /// and one live stream, whose receiver is returned.
+    /// The certificate has no DER, because only its metadata is read.
+    pub(crate) fn insert_connected_identity(
+        &mut self,
+        now: i64,
+        lifetime_secs: i64,
+    ) -> (Uuid, mpsc::UnboundedReceiver<StreamPush>) {
+        use p256::elliptic_curve::Generate as _;
+
+        let public_key = *p256::ecdsa::SigningKey::generate_from_rng(&mut rand::rng()).verifying_key();
+        let issuer = self.issuing_root().thumbprint.clone();
+        let identity_id = Uuid::new_v4();
+        let token_id = Uuid::new_v4();
+        let thumbprint = format!("test-{identity_id}");
+        let created_seq = self.next_identity_seq;
+        self.next_identity_seq += 1;
+        self.issued_keys.insert(
+            issued_key_hash(&public_key),
+            IssuedKey {
+                identity_id,
+                token_id,
+                thumbprint: thumbprint.clone(),
+                issued_at: now,
+            },
+        );
+        let cert = Cert {
+            thumbprint: thumbprint.clone(),
+            der: Vec::new(),
+            public_key,
+            serial: format!("{:x}", self.serial_seq),
+            not_before: now,
+            not_after: now + lifetime_secs,
+            issuer,
+            status: CertStatus::Current,
+            issued_seq: self.serial_seq,
+        };
+        self.serial_seq += 1;
+        self.identities.insert(
+            identity_id,
+            Identity {
+                id: identity_id,
+                friendly_name: format!("test-{created_seq}"),
+                metadata: Map::new(),
+                created_seq,
+                created_at: now,
+                last_seen_at: Some(now),
+                revoked_at: None,
+                renewal_requested: None,
+                config: json!({ "version": CONFIG_VERSION, "revision": 1 }),
+                token_id,
+                token_name: "test".to_owned(),
+                certs: vec![cert],
+            },
+        );
+        self.cert_index.insert(thumbprint.clone(), identity_id);
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.streams.insert(
+            Uuid::new_v4(),
+            StreamHandle {
+                identity_id,
+                cert_thumbprint: thumbprint,
+                tx,
+                retire_at: None,
+            },
+        );
+        (identity_id, rx)
     }
 }
 
@@ -1608,6 +1794,28 @@ mod tests {
         );
         assert_eq!(state.tokens[&token_id].used_count, 0);
         assert!(state.identities.is_empty());
+        Ok(())
+    }
+
+    /// [DVLS intent][dvls] ("Root CA"): "When the root key cannot be decrypted, only the operations that need it fail:
+    /// enrollment, renewal and root rotation"; CONTRACT.md §5.4 maps such a failure to `500 unavailable`.
+    ///
+    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    #[test]
+    fn unavailable_root_key_fails_enrollment() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::new(now)?;
+        state.faults.root_key_unavailable = true;
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, now + 60, None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let error = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .err()
+            .expect("enrollment fails");
+        assert_eq!(error.status, 500);
+        assert_eq!(state.tokens[&token_id].used_count, 0);
         Ok(())
     }
 

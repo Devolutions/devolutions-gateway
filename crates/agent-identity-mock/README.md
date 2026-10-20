@@ -31,7 +31,7 @@ It then writes `<state-dir>/ready.json` atomically (temp file + rename):
 
 All time in the mock is the mock clock: real time plus an offset.
 `POST __mock__/time/advance` adds to the offset and `faults.clock_skew_secs` adds a skew on top.
-Signature windows, certificate validity, token expiry, renewal grace, rotation deadlines, `server_time` and `last_seen_at` all use it.
+Signature windows, certificate validity, token expiry, renewal grace, rotation deadlines, `server_time` and `lastSeenOn` all use it.
 A certificate is unexpired while `now ≤ notAfter`, and `notBefore` is never checked (§6).
 A stream closes with `certificate_expired` once the clock reaches the certificate's `notAfter`, because §7.4 closes a stream no later than then; a stream opened at `notAfter` therefore closes right after its `Challenge`.
 Advancing or freezing the clock immediately closes expired streams and re-evaluates rotation deadlines and early completion.
@@ -69,36 +69,51 @@ The channel gRPC method is `POST <prefix>/devolutions.agent.channel.v1.AgentChan
 
 ### Management API
 
-The [DVLS management API][dvls-management] takes `Authorization: Bearer <credential>`.
-Missing or invalid credentials return 401 `{ "error", "message" }`; all management API errors use that shape with the matching HTTP status.
-Request bodies follow CONTRACT.md §1, so a member name repeated at any depth is 400 `invalid_request`.
-Each route requires the permission the table lists, and a credential without it gets 403 `forbidden` before the request is processed.
+The [DVLS management API][dvls-management] has the operations, models, enums, paging and errors of DVLS's OpenAPI document for Agent Identity (`v1`, 14 operations), under `/api/v1/agent-identity`.
+A request carries its credential in the `tokenId` header; a missing, repeated or invalid credential is 401.
+Invalid parameters are 400 with a `PublicApiValidationError` body, `{ "errors": [ { "field", "message" } ] }`, where `field` names the camelCase member or query parameter, `config.<key>` for a token config entry, or is `null` for a malformed body or query string.
+Every other error is 401, 403, 404, 409 or 422 with a `PublicApiError` body, `{ "message" }`.
+A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth, as CONTRACT.md §1 requires of agent-facing bodies.
+Each operation requires the permission the table lists, and a credential without it gets 403 before the request is processed.
 The mock derives its credentials from `--admin-token`, so a test can hold any subset of the four permissions without setup:
 
 | Credential | Permissions |
 |---|---|
-| `<admin-token>` | All four, like a DVLS built-in administrator. |
+| `<admin-token>` | All four, like a DVLS built-in administrator's session. |
 | `<admin-token>.<scope>` | Those in `<scope>`: `none`, or a `+`-separated list of `view`, `manage`, `revoke` and `rotate-root`, such as `view+revoke`. |
 | `<admin-token>-unprivileged` | None, like `<admin-token>.none`. |
 
 Any other credential, including a scope with an empty or unknown permission name, is invalid.
-Each identity's `status` is `active` (an unexpired current or pending certificate), `grace` (no unexpired certificate, but one within renewal grace), `expired` (beyond renewal grace) or `revoked`, as the DVLS intent's "Terminology" defines.
+
+Enums are PascalCase.
+An identity's `status` is `Active` (an unexpired current or pending certificate), `Grace` (no unexpired certificate, but one within renewal grace), `Expired` (beyond renewal grace) or `Revoked`, as the DVLS intent's "Terminology" defines.
+A certificate's `status` is `Pending`, `Current` or `Retired`, a token's `state` is `Active`, `Exhausted` or `Expired` (which wins), and the rotation's `phase` is `Idle` or `Rotating`.
+Timestamps are RFC 3339 UTC with `Z` and named `*On`; certificate and root validity is `validFrom` and `validUntil`.
+A date-time parameter is UTC unless it carries an offset.
+List operations take `pageNumber` (default 1), `pageSize` (default 25, at most 100 identities or 500 tokens), `sortOrder` (`1` ascending by default, `0` descending) and `sortField`, and return `{ currentPage, data, pageSize, totalCount, totalPage }`.
+A page past the last is 400, and page 1 of an empty list is its last page.
+An ID that is not a GUID is 404, like an unknown one.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| POST | `/api/v3/agent-identity/enrollment-tokens` | Manage | Body `{ name, maxUses (1..1_000_000), expiresAt (RFC 3339, ≤ now+365 d), friendlyNameFormat?, config? }`; 201 → `{ "token": "<full dvaet1 token>", "record": TokenRecord }`; the full token is returned only here. Unknown `friendlyNameFormat` placeholders → 400. |
-| GET | `/api/v3/agent-identity/enrollment-tokens` | View | `pageNumber` (≥ 1, default 1), `pageSize` (1..100, default 25); DVLS page shape `{ data, currentPage, pageSize, totalCount, totalPages }`. |
-| GET | `/api/v3/agent-identity/enrollment-tokens/{id}` | View | `TokenRecord`; 404 when unknown or deleted. |
-| DELETE | `/api/v3/agent-identity/enrollment-tokens/{id}` | Manage | 204; the token is hidden but can replay its own existing current key without side effects, while a new key gets `token_invalid`. |
-| GET | `/api/v3/agent-identity/identities` | View | Query: `pageNumber`, `pageSize`, `view=summary\|full`, `metadata=k1,k2`, `status=active\|grace\|expired\|revoked`, `enrollmentTokenId`, `issuer=<root thumbprint>`, `lastSeenBefore`, `lastSeenAfter`, `q` (case-insensitive friendly-name substring); ordered by creation. |
-| GET | `/api/v3/agent-identity/identities/{id}` | View | Full view. |
-| PATCH | `/api/v3/agent-identity/identities/{id}` | Manage | `{ "friendlyName" }` (1..255 chars) → full view. |
-| POST | `/api/v3/agent-identity/identities/{id}/revoke` | Revoke | 204, idempotent; closes live streams PERMISSION_DENIED + `identity_revoked`. |
-| DELETE | `/api/v3/agent-identity/identities/{id}` | Manage | 204, or 409 unless the identity is revoked. |
-| POST | `/api/v3/agent-identity/identities/{id}/request-renewal` | Manage | 202; sets the flag and pushes `RenewRequested{reason:"admin"}` to live streams. |
-| POST | `/api/v3/agent-identity/ca/rotation` | Rotate root | Body `{ "deadline"?: "<RFC 3339>" \| "now" }`; 202 → `Rotation`; 400 if the deadline exceeds the latest unexpired current or pending old-root certificate; 409 while rotating. |
-| GET | `/api/v3/agent-identity/ca/rotation` | View | `{ phase: "idle"\|"rotating", oldRoot?, newRoot?, deadline?, activeIdentitiesOnOldRoot }`; the count includes each non-revoked identity with an unexpired current or pending old-root certificate. |
+| POST | `/api/v1/agent-identity/enrollment-token` | Manage | Body `{ name (1..255 scalar values, not blank), maxUses (1..1_000_000), expiresOn? (future, ≤ now + 365 d, default now + 90 d), friendlyNameFormat? (≤ 1024 scalar values), config? }`; 201 → `{ enrollmentToken, token }`, the only response with the full `dvaet1` token. A friendly-name format with an unpaired brace or an unknown placeholder is 400. `config` holds at most 32 string entries, each key matching `^[a-z][a-z0-9_]{0,63}$` other than `version`, `revision` and `agent_channel_url`, each value at most 1024 bytes without control characters. The first token creates the root, and is 409 when it cannot (`root_key_unavailable`). |
+| GET | `/api/v1/agent-identity/enrollment-token` | View | Page of the tokens that are not deleted; `sortField` is `createdOn` (default), `name` or `expiresOn`. |
+| GET | `/api/v1/agent-identity/enrollment-token/{id}` | View | `AgentIdentityEnrollmentToken`, without the full token; 404 when unknown or deleted. |
+| DELETE | `/api/v1/agent-identity/enrollment-token/{id}` | Manage | 204, or 404 when unknown or already deleted; the token can still replay its own existing current key without side effects, while a new key gets `token_invalid`. |
+| GET | `/api/v1/agent-identity` | View | Page of identities in creation order (`sortField` is `createdOn` only). Query: `view=Summary\|Full`, repeated `metadataKey`, repeated `status`, repeated `enrollmentTokenId`, `issuerThumbprint` (the current certificate's issuer), `lastSeenFrom` and `lastSeenTo` (inclusive), and `search` (case-insensitive friendly-name substring); filters combine with AND. The Summary view carries `id`, `friendlyName`, `status`, `isConnected`, `lastSeenOn`, `certificate { issuerThumbprint, validUntil }` while the identity has a current certificate, and the requested `metadata` keys, omitted when none match. |
+| GET | `/api/v1/agent-identity/{id}` | View | Full view: the Summary members, all `metadata`, `certificates` (newest first), `createdOn`, `enrollmentTokenId`, `enrollmentTokenName`, `isRenewalRequested`, and `revokedOn` once revoked. |
+| PATCH | `/api/v1/agent-identity/{id}` | Manage | `{ friendlyName? }` (1..255 scalar values without leading or trailing white space); absent or `null` changes nothing; 200 → Full view. |
+| POST | `/api/v1/agent-identity/{id}/revoke` | Revoke | 204, idempotent; closes live streams PERMISSION_DENIED + `identity_revoked`. |
+| DELETE | `/api/v1/agent-identity/{id}` | Manage | 204, or 409 unless the identity is revoked. |
+| POST | `/api/v1/agent-identity/{id}/request-renewal` | Manage | 202; sets the flag and pushes `RenewRequested{reason:"admin"}` to live streams; 409 when the identity is revoked. |
+| POST | `/api/v1/agent-identity/rotation` | Rotate root | Body `{ deadlineOn? }`, `{}` for the rotation maximum: the latest `notAfter` among the old root's unexpired current or pending certificates of non-revoked identities, or now when there are none. A deadline at or before now is an emergency rotation. 202 → `AgentIdentityRotation`; 409 while rotating, without a root, or with `root_key_unavailable`; 422 for a deadline after the rotation maximum. |
+| GET | `/api/v1/agent-identity/rotation` | View | `{ phase, startedOn?, deadlineOn?, oldRoot?, newRoot?, oldRootActiveIdentityCount }`, each root `{ thumbprint, validFrom, validUntil }`; the count includes each non-revoked identity with an unexpired current or pending old-root certificate, and is 0 while `Idle`. |
+| GET | `/api/v1/agent-identity/settings` | View | `{ authorityId, isAgentChannelEnabled, isAgentChannelAvailable, certificateLifetimeDays, rotationNotificationsPerSecond }`, by default `true`, `true`, `90` and `10`. |
+| PATCH | `/api/v1/agent-identity/settings` | Manage | `{ isAgentChannelEnabled?, certificateLifetimeDays? (1..365), rotationNotificationsPerSecond? (1..1000) }` → settings. |
 
+The channel is offered (`isAgentChannelAvailable`) while `isAgentChannelEnabled` is on and the `channel_available` fault, which stands for the hosting, is on.
+A change of the offer adds or removes `agent_channel_url` in every config, bumps revisions and pushes `ConfigUpdate`, and channel openings are refused while the channel is not offered.
+`certificateLifetimeDays` applies to certificates issued afterwards, and `rotationNotificationsPerSecond` to rotation notifications; the `leaf_lifetime_secs` and `rotation_rate_limit_per_sec` faults override them.
 A rotation completes immediately when no active old-root identity remains, including at rotation start, and publishes only the new root.
 Certificate issuance and token-use consumption share the state lock; issued key hashes stay reserved, and original issuance times remain stored after identity deletion.
 
@@ -106,10 +121,10 @@ Certificate issuance and token-use consumption share the state lock; issued key 
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/__mock__/faults` | Merges `drop_next_response`, `fail_next_response`, `clock_skew_secs`, `leaf_lifetime_secs`, `channel_available`, `channel_broken`, `malformed_channel_url`, `rotation_rate_limit_per_sec` and `config_version`; absent keys retain their value, and `null` clears optional fields. Toggling `channel_available` bumps every identity's config revision; `config_version` (an unsigned integer) replaces `config.version` in every config the mock delivers, and setting it to a different version or clearing it bumps every identity's config revision and pushes `ConfigUpdate`; `channel_broken` only rejects new streams. Set `malformed_channel_url` to `true` for an HTTP URL, `"query"` for an HTTPS URL with a query, or `"fragment"` for an HTTPS URL with a fragment in new enrollments; `false` or `null` clears it. |
+| POST | `/__mock__/faults` | Merges `drop_next_response`, `fail_next_response`, `clock_skew_secs`, `leaf_lifetime_secs`, `channel_available`, `channel_broken`, `malformed_channel_url`, `rotation_rate_limit_per_sec`, `config_version` and `root_key_unavailable`; absent keys retain their value, and `null` clears optional fields. `leaf_lifetime_secs` (seconds) overrides the `certificateLifetimeDays` setting and `rotation_rate_limit_per_sec` the `rotationNotificationsPerSecond` setting, without the settings' bounds. `channel_available` is whether the hosting supports the channel; toggling it changes the channel offer as the [management API](#management-api) describes. `config_version` (an unsigned integer) replaces `config.version` in every config the mock delivers, and setting it to a different version or clearing it bumps every identity's config revision and pushes `ConfigUpdate`; `channel_broken` only rejects new streams. Set `malformed_channel_url` to `true` for an HTTP URL, `"query"` for an HTTPS URL with a query, or `"fragment"` for an HTTPS URL with a fragment in new enrollments; `false` or `null` clears it. `root_key_unavailable` (a boolean) makes the root key undecryptable: enrollment and renewal fail with `500 unavailable`, root rotation and the creation of a first root with 409. |
 | POST | `/__mock__/config` | `{ "fields": {...} }` merges non-reserved fields into each identity's config; effective changes bump revisions and push `ConfigUpdate`. |
 | POST | `/__mock__/config/stale` | `{ "identity_id": "<uuid>", "revision": <lower integer> }` sends a stale `ConfigUpdate` with `mock_stale_marker` without changing server config; returns `{ "sent": <count> }`. |
-| POST | `/__mock__/reset` | Clears tokens, identities, nonces, faults, rotation and the clock offset, and creates a fresh root; keeps `authority_id`, the TLS certificate and the admin token; live streams close with `identity_unknown`. Responds `{ "authority_id" }`. |
+| POST | `/__mock__/reset` | Clears tokens, identities, nonces, faults, settings, rotation and the clock offset, and creates a fresh root; keeps `authority_id`, the TLS certificate and the admin token; live streams close with `identity_unknown`. The body is empty or `{ "without_root"?: <bool> }`; `true` leaves no root, like a DVLS that never created a token, until the first token creates one; `trust-anchor` then lists no root. Responds `{ "authority_id" }`. |
 | POST | `/__mock__/time/advance` | `{ "secs": <int> }` moves the mock clock and immediately applies stream expiry, rotation deadlines and early completion; responds `{ "now": <unix>, "server_time": "<RFC 3339>" }`. |
 | POST | `/__mock__/time/freeze` | `{ "now": <unix second> }` pins time and returns `{ "now", "published_roots": ["<thumbprint>", ...] }` after applying expiry and rotation deadlines at that exact second. |
 | GET | `/__mock__/events?identity_id=<uuid>` | Returns `{ "events": [...] }` in increasing `seq` order: `stream_opened`, `stream_authenticated` (with `applied_config_revision`), `stream_closed` (with `status` and optional `error_code`), `cert_status_changed`, `reconnect_sent`, `renew_received`, `config_changed`, `config_update_sent`, `stale_config_update_sent`, and `check_in_received` (with `renewal_requested`). |
@@ -125,7 +140,7 @@ A `3xx` fault redirects to `__mock__/redirect-target`, and `retry_after_secs` se
 Without `error`, the injected response body is deliberately empty and nonconforming so tests can verify transient agent handling.
 Arm the retry barrier before `drop_next_response` to prevent a fast retry from succeeding before the tester stops or revokes the agent.
 `enroll_identity_revoked` counts enroll rejections for a previously issued key of a revoked or deleted identity, including retries after a lost response.
-Rotation pushes default to 10 per rolling second and continue after an emergency deadline until the queue drains.
+Rotation pushes follow `rotationNotificationsPerSecond` (10 by default) per rolling second and continue after an emergency deadline until the queue drains.
 The old root's signing key is discarded when rotation starts.
 
 ## Signature oracle
@@ -144,6 +159,7 @@ X.509 and DER supply CSR structure types; P-256 performs signature verification.
 ## Tests
 
 `cargo test -p agent-identity-mock` replays every signature, proof and CSR vector through the verifier and validators used by the server.
+It also pins each management API operation, error class, paging bound, permission and setting effect to DVLS's OpenAPI document.
 
 [contract]: ../../docs/agent-identity/CONTRACT.md
 [dvls-management]: ../../docs/agent-identity/INTENT.DVLS.md#management-api

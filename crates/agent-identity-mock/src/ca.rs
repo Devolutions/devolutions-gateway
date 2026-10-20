@@ -25,7 +25,6 @@ use x509_cert::time::{Time, Validity};
 const ID_KP_CLIENT_AUTH: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.2");
 
 const ROOT_LIFETIME_SECS: i64 = 10 * 365 * 24 * 3600;
-pub(crate) const DEFAULT_LEAF_LIFETIME_SECS: i64 = 90 * 24 * 3600;
 
 /// `base64url(SHA-256(certificate DER))` (§1).
 pub(crate) fn thumbprint(der: &[u8]) -> String {

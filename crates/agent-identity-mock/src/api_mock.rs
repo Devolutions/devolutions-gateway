@@ -238,6 +238,7 @@ fn faults_view(faults: &Faults) -> Value {
         },
         "rotation_rate_limit_per_sec": faults.rotation_rate_limit_per_sec,
         "config_version": faults.config_version,
+        "root_key_unavailable": faults.root_key_unavailable,
     })
 }
 
@@ -370,6 +371,10 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                 },
                 _ => return invalid("config_version must be an unsigned integer or null"),
             },
+            "root_key_unavailable" => match value {
+                Value::Bool(b) => state.faults.root_key_unavailable = *b,
+                _ => return invalid("root_key_unavailable must be a boolean"),
+            },
             _ => return invalid("unknown fault field"),
         }
     }
@@ -378,13 +383,29 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     Json(faults_view(&state.faults)).into_response()
 }
 
-/// `POST reset` clears tokens, identities, nonces, faults, rotation and the clock offset.
-/// It creates a fresh root but keeps `authority_id`, the TLS certificate and the admin token.
-async fn reset(AxumState(app): AxumState<Arc<App>>) -> Response {
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct ResetRequest {
+    #[serde(default)]
+    without_root: bool,
+}
+
+/// `POST reset` clears tokens, identities, nonces, faults, settings, rotation and the clock offset.
+/// It creates a fresh root, unless `without_root` asks for a DVLS that has never created one, and keeps
+/// `authority_id`, the TLS certificate and the admin token.
+async fn reset(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
+    let request = if body.is_empty() {
+        ResetRequest::default()
+    } else {
+        match serde_json::from_slice::<ResetRequest>(&body) {
+            Ok(request) => request,
+            Err(_) => return control_error(&ApiError::invalid_request("body allows only a boolean without_root")),
+        }
+    };
     let mut state = app.state.lock().await;
     app.clock.reset();
     app.handshake_gate.send_replace(true);
-    match state.reset(app.now()) {
+    match state.reset(app.now(), !request.without_root) {
         Ok(()) => Json(json!({ "authority_id": app.authority_id })).into_response(),
         Err(err) => control_error(&ApiError::internal(format!("reset failed: {err:#}"))),
     }

@@ -60,10 +60,16 @@ pub(crate) fn rfc3339(unix_secs: i64) -> String {
     }
 }
 
-/// Parses an RFC 3339 timestamp to Unix seconds.
-pub(crate) fn parse_rfc3339(value: &str) -> Option<i64> {
-    use time::format_description::well_known::Rfc3339;
+/// Parses a management API date-time to Unix seconds: RFC 3339, or ISO 8601 without an offset, which is UTC.
+/// DVLS's OpenAPI document reads every date-time "UTC unless an offset is given".
+pub(crate) fn parse_date_time(value: &str) -> Option<i64> {
+    use time::format_description::well_known::{Iso8601, Rfc3339};
     time::OffsetDateTime::parse(value, &Rfc3339)
         .ok()
+        .or_else(|| {
+            time::PrimitiveDateTime::parse(value, &Iso8601::DEFAULT)
+                .ok()
+                .map(time::PrimitiveDateTime::assume_utc)
+        })
         .map(time::OffsetDateTime::unix_timestamp)
 }

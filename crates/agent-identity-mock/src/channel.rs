@@ -78,8 +78,9 @@ impl AgentChannel for ChannelService {
             state.tick(now);
             state.requests.connect += 1;
             state.requests.request_sequence.push("connect");
-            if !state.faults.channel_available || state.faults.channel_broken {
-                // The mock control can make the channel unavailable or broken.
+            if !state.channel_offered() || state.faults.channel_broken {
+                // The mock control and the `isAgentChannelEnabled` setting can make the channel unavailable, and the
+                // mock control can break it.
                 return Err(Status::unavailable("channel not available"));
             }
             let result = if duplicate_signature {
@@ -478,7 +479,7 @@ async fn run_stream(
                         let mut state = app.state.lock().await;
                         // UNTESTED: any authenticated message, even an unknown payload, refreshes `last_seen_at`.
                         // The timestamp tracks key possession and drives the management API's last-seen filters.
-                        // When changing this branch, check `lastSeenAt` after an `Ack` and an unknown payload.
+                        // When changing this branch, check `lastSeenOn` after an `Ack` and an unknown payload.
                         if let Some(identity) = state.identities.get_mut(&identity_id) {
                             identity.last_seen_at = Some(now);
                         }
