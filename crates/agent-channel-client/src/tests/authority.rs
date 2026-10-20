@@ -41,7 +41,7 @@ pub(super) enum Mode {
     Http1Alpn,
 }
 
-/// A TLS server CA and a `localhost` certificate it issued.
+/// A TLS server CA and a certificate it issued for `127.0.0.1`.
 pub(super) struct Pki {
     pub(super) ca: CertificateDer<'static>,
     chain: Vec<CertificateDer<'static>>,
@@ -58,7 +58,7 @@ impl Pki {
             .push(rcgen::DnType::CommonName, "agent-channel-client test CA");
         let ca = ca_params.self_signed(&ca_key)?;
         let leaf_key = rcgen::KeyPair::generate()?;
-        let leaf = rcgen::CertificateParams::new(vec!["localhost".to_owned()])?.signed_by(&leaf_key, &ca, &ca_key)?;
+        let leaf = rcgen::CertificateParams::new(vec!["127.0.0.1".to_owned()])?.signed_by(&leaf_key, &ca, &ca_key)?;
         Ok(Self {
             ca: ca.der().clone(),
             chain: vec![leaf.der().clone()],
@@ -124,7 +124,7 @@ impl TestAuthority {
             }
         });
         Ok(Self {
-            url: Url::parse(&format!("https://localhost:{port}{URL_PATH}"))?,
+            url: Url::parse(&format!("https://127.0.0.1:{port}{URL_PATH}"))?,
             ca: pki.ca,
             openings,
             pings,

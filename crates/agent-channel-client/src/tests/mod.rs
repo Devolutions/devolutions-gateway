@@ -503,7 +503,7 @@ async fn stops_after_a_terminal_or_expired_certificate_closure(
 async fn a_refused_connection_is_an_outage() -> anyhow::Result<()> {
     let authority = TestAuthority::start(Mode::Grpc).await?;
     let unused = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-    let url = Url::parse(&format!("https://localhost:{}/dvls", unused.local_addr()?.port()))?;
+    let url = Url::parse(&format!("https://127.0.0.1:{}/dvls", unused.local_addr()?.port()))?;
     drop(unused);
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&url))?;
@@ -675,5 +675,24 @@ async fn reopens_after_each_transient_closure_once_its_growing_delay_has_passed(
     let (_, reopen_after) = next_closure(&mut channel).await;
     assert_eq!(reopen_after, Some(Duration::from_micros(15_625)));
     authority.next_opening().await;
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_opening_without_welcome_in_time_is_an_outage() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let settings = Settings {
+        opening_timeout: Duration::from_millis(300),
+        ..Settings::default()
+    };
+    let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.challenge(&[1; 32]).await;
+    stream.receive().await;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(closure.grpc_code, None);
     Ok(())
 }

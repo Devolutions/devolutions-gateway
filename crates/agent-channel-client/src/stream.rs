@@ -56,13 +56,10 @@ async fn stream_once(
     acks: &mut mpsc::UnboundedReceiver<String>,
     backoff: &mut BackoffState,
 ) -> Option<Closure> {
-    let mut opened = match open_at_authority_time(shared, target).await {
+    let mut opened = match authenticated_stream(shared, target).await {
         Ok(opened) => opened,
         Err(closure) => return Some(closure),
     };
-    if let Err(closure) = authenticate(target, &mut opened).await {
-        return Some(closure);
-    }
     backoff.reset();
     // UNTESTED: acknowledgements the caller sent before this stream authenticated are dropped.
     // They answer messages of an earlier stream, so sending them here would mix two streams.
@@ -184,18 +181,30 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
     })
 }
 
-/// Opens a stream, and retries once at the authority's time when it refuses the opening with `clock_skew`
-/// ([CONTRACT.md] §6).
+/// Opens and authenticates a stream, and retries once at the authority's time when it refuses the opening with
+/// `clock_skew` ([CONTRACT.md] §6).
 ///
 /// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
-async fn open_at_authority_time(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
-    match open(shared, target, 0).await {
+async fn authenticated_stream(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
+    match authenticated_stream_at(shared, target, 0).await {
         Err(closure) => match clock_offset(&closure) {
-            Some(offset) => open(shared, target, offset).await,
+            Some(offset) => authenticated_stream_at(shared, target, offset).await,
             None => Err(closure),
         },
         opened => opened,
     }
+}
+
+/// Opens and authenticates a stream whose signature is offset by `clock_offset` seconds, within the opening timeout.
+async fn authenticated_stream_at(shared: &Shared, target: &Target, clock_offset: i64) -> Result<Opened, Closure> {
+    let opening = async {
+        let mut opened = open(shared, target, clock_offset).await?;
+        authenticate(target, &mut opened).await?;
+        Ok(opened)
+    };
+    tokio::time::timeout(shared.settings.opening_timeout, opening)
+        .await
+        .unwrap_or_else(|_| Err(Closure::outage("no Welcome within the opening timeout")))
 }
 
 /// Returns `server_time − local_time` in seconds for a `clock_skew` refusal with a `server-time` trailer.
