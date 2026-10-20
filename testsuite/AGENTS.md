@@ -10,6 +10,12 @@ Start Gateway, Agent, or jetsocat through `testsuite::cli` with a `DgwConfig::bu
 Use `disable_token_validation(true)` with an unsigned JWT instead of signing real tokens, except in tests of token validation itself, which the flag bypasses entirely.
 When a behaviour cannot be reached from outside, add a small `__debug__` config knob or environment variable to the binary rather than linking the implementation.
 
+## Bind on loopback
+
+Listen and probe ports on `127.0.0.1`, never on `0.0.0.0` or `[::]`.
+On Windows, a wildcard listener makes the firewall ask for elevation once per executable path, and every worktree builds new paths.
+Only a test whose peer runs outside the host, such as a Docker container, may bind a wildcard address.
+
 ## Dependencies are a design signal
 
 A library crate under `crates/` is a contract and may be a dev-dependency when its public API is what the test checks.

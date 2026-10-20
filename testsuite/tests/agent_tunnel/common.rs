@@ -81,7 +81,7 @@ async fn connect_quinn_client(
     let client_config = quinn::ClientConfig::new(Arc::new(
         quinn::crypto::rustls::QuicClientConfig::try_from(client_crypto).expect("configure quic client"),
     ));
-    let mut endpoint = quinn::Endpoint::client("0.0.0.0:0".parse().expect("parse client bind address"))
+    let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().expect("parse client bind address"))
         .expect("create client endpoint");
     endpoint.set_default_client_config(client_config);
 
