@@ -122,7 +122,63 @@ pub struct DgwConfigHandle {
     http_port: u16,
 }
 
+/// A Gateway process that borrows its temporary configuration until dropped.
+///
+/// Dropping the guard requests process termination without waiting for exit.
+/// Use [`Self::start_kill`] and [`Self::wait`] to terminate and reap it explicitly.
+///
+/// The configuration cannot be dropped while the guard is alive:
+///
+/// ```compile_fail,E0505
+/// use testsuite::dgw_config::DgwConfig;
+///
+/// async fn drop_config_before_process() -> anyhow::Result<()> {
+///     let config = DgwConfig::builder().build().init()?;
+///     let _process = config.start().await?;
+///     drop(config);
+///     Ok(())
+/// }
+/// ```
+pub struct DgwProcess<'a> {
+    child: tokio::process::Child,
+    _config: &'a DgwConfigHandle,
+}
+
+impl DgwProcess<'_> {
+    pub fn start_kill(&mut self) -> std::io::Result<()> {
+        self.child.start_kill()
+    }
+
+    pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
+        self.child.wait().await
+    }
+}
+
+#[expect(clippy::empty_drop, reason = "keep the config borrowed until the child is dropped")]
+impl Drop for DgwProcess<'_> {
+    fn drop(&mut self) {}
+}
+
 impl DgwConfigHandle {
+    /// Starts Devolutions Gateway and waits for its HTTP listener.
+    pub async fn start(&self) -> anyhow::Result<DgwProcess<'_>> {
+        let mut child = crate::cli::dgw_tokio_cmd()
+            .env("DGATEWAY_CONFIG_PATH", self.config_dir())
+            .kill_on_drop(true)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .context("start Devolutions Gateway")?;
+
+        if let Err(error) = crate::cli::wait_for_tcp_port(self.http_port()).await {
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+            return Err(error).context("wait for Devolutions Gateway HTTP listener");
+        }
+
+        Ok(DgwProcess { child, _config: self })
+    }
+
     pub fn init(config: DgwConfig) -> anyhow::Result<Self> {
         let DgwConfig {
             hostname,
