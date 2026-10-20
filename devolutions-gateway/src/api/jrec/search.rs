@@ -21,11 +21,8 @@ use crate::token::RecordingFileType;
 /// Most hits returned by one search.
 const MAX_HITS: usize = 1_000;
 
-/// Most bytes of matching entries returned by one search.
-const MAX_HIT_BYTES: usize = 16 * 1024 * 1024;
-
 /// Most log bytes read by one search, so that searching every recording stays bounded.
-const MAX_SCANNED_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_SCANNED_BYTES: u64 = 16 * 1024 * 1024;
 
 // The log viewers read a `.slog` file through the log parser, which drops or truncates some entries.
 // The search applies the same limits, so that it finds what the viewers show and nothing else.
@@ -210,7 +207,6 @@ impl SearchText {
 struct Search {
     text: SearchText,
     hits: Vec<RecordingSearchHit>,
-    hit_bytes: usize,
     scanned_bytes: u64,
     limit_reached: bool,
 }
@@ -220,7 +216,6 @@ impl Search {
         Self {
             text,
             hits: Vec::new(),
-            hit_bytes: 0,
             scanned_bytes: 0,
             limit_reached: false,
         }
@@ -243,7 +238,7 @@ impl Search {
 
         while let Some(read) = read_line(&mut reader, &mut line).await? {
             // UNTESTED: the scanned-bytes budget stops the search and reports `limitReached`.
-            // It keeps a search of every recording from reading an unbounded amount of logs.
+            // It bounds the logs one search reads, and the response too, since every hit is a line it read.
             // When changing it, keep `limit_reached` set whenever logs are left unread.
             self.scanned_bytes += read.bytes;
             if MAX_SCANNED_BYTES < self.scanned_bytes {
@@ -288,12 +283,9 @@ impl Search {
         Ok(())
     }
 
-    /// Returns `false` when the hit limits are reached.
+    /// Returns `false` when the hit limit is reached.
     fn push(&mut self, recording_id: Uuid, file_name: &str, line: &[u8]) -> bool {
-        // UNTESTED: the hit-bytes budget stops the search and reports `limitReached`.
-        // It bounds the response size, which the hit count alone does not, because a line can be large.
-        // When changing it, keep both the hit count and the hit bytes bounded.
-        if MAX_HITS <= self.hits.len() || MAX_HIT_BYTES < self.hit_bytes + line.len() {
+        if MAX_HITS <= self.hits.len() {
             self.limit_reached = true;
             return false;
         }
@@ -303,7 +295,6 @@ impl Search {
             return true;
         };
 
-        self.hit_bytes += line.len();
         self.hits.push(RecordingSearchHit {
             recording_id,
             file_name: file_name.to_owned(),
