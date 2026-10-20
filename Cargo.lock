@@ -1775,6 +1775,7 @@ dependencies = [
  "rustls 0.23.43",
  "rustls-pemfile 2.2.0",
  "rustls-pki-types",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2 0.10.9",
