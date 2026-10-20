@@ -11,9 +11,9 @@ public class IdentityConfigTests
     {
         IdentityConfig config = IdentityConfig.Create(3, "https://host/dvls");
 
-        Dictionary<string, JsonElement> members = Members(config.ToUtf8Json());
+        Dictionary<string, JsonElement> members = TestJson.Members(config.ToUtf8Json());
 
-        Assert.Equal(["agent_channel_url", "revision", "version"], members.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["agent_channel_url", "revision", "version"], TestJson.Names(members));
         Assert.Equal(JsonValueKind.Number, members["version"].ValueKind);
         Assert.Equal("1", members["version"].GetRawText());
         Assert.Equal(JsonValueKind.Number, members["revision"].ValueKind);
@@ -29,9 +29,9 @@ public class IdentityConfigTests
     {
         IdentityConfig config = IdentityConfig.Create(3);
 
-        Dictionary<string, JsonElement> members = Members(config.ToUtf8Json());
+        Dictionary<string, JsonElement> members = TestJson.Members(config.ToUtf8Json());
 
-        Assert.Equal(["revision", "version"], members.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(["revision", "version"], TestJson.Names(members));
         Assert.Null(config.AgentChannelUrl);
     }
 
@@ -45,7 +45,7 @@ public class IdentityConfigTests
     {
         IdentityConfig config = IdentityConfig.Create(revision);
 
-        Dictionary<string, JsonElement> members = Members(config.ToUtf8Json());
+        Dictionary<string, JsonElement> members = TestJson.Members(config.ToUtf8Json());
 
         Assert.Equal(expected, members["revision"].GetRawText());
         Assert.Equal(revision, config.Revision);
@@ -85,7 +85,7 @@ public class IdentityConfigTests
     {
         IdentityConfig config = IdentityConfig.Create(1, agentChannelUrl);
 
-        Assert.Equal(expected, Members(config.ToUtf8Json())["agent_channel_url"].GetString());
+        Assert.Equal(expected, TestJson.Members(config.ToUtf8Json())["agent_channel_url"].GetString());
         Assert.Equal(expected, config.AgentChannelUrl);
     }
 
@@ -99,14 +99,14 @@ public class IdentityConfigTests
         IdentityConfig config = IdentityConfig.Create(
             3,
             "https://host/dvls",
-            [new("psu_channel_url", Json(ChannelUrl)), new("policy_limits", Json(Limits))]);
+            [new("psu_channel_url", TestJson.Parse(ChannelUrl)), new("policy_limits", TestJson.Parse(Limits))]);
 
-        Dictionary<string, JsonElement> members = Members(config.ToUtf8Json());
+        Dictionary<string, JsonElement> members = TestJson.Members(config.ToUtf8Json());
         Assert.Equal(
             ["agent_channel_url", "policy_limits", "psu_channel_url", "revision", "version"],
-            members.Keys.Order(StringComparer.Ordinal));
-        Assert.True(JsonElement.DeepEquals(Json(ChannelUrl), members["psu_channel_url"]));
-        Assert.True(JsonElement.DeepEquals(Json(Limits), members["policy_limits"]));
+            TestJson.Names(members));
+        Assert.True(JsonElement.DeepEquals(TestJson.Parse(ChannelUrl), members["psu_channel_url"]));
+        Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), members["policy_limits"]));
     }
 
     // CONTRACT.md §1: JSON keys are snake_case, lowercase words of letters and digits joined by single underscores.
@@ -117,9 +117,9 @@ public class IdentityConfigTests
     [InlineData("tier_2")]
     public void CreateAcceptsASnakeCaseProductFieldName(string name)
     {
-        IdentityConfig config = IdentityConfig.Create(1, null, [new(name, Json("true"))]);
+        IdentityConfig config = IdentityConfig.Create(1, null, [new(name, TestJson.Parse("true"))]);
 
-        Assert.Equal(JsonValueKind.True, Members(config.ToUtf8Json())[name].ValueKind);
+        Assert.Equal(JsonValueKind.True, TestJson.Members(config.ToUtf8Json())[name].ValueKind);
     }
 
     [Theory]
@@ -136,7 +136,7 @@ public class IdentityConfigTests
     [InlineData("caf\u00E9")]
     public void CreateRejectsAProductFieldNameThatIsNotSnakeCase(string name)
     {
-        AssertRejectsProductFields([new(name, Json("true"))]);
+        AssertRejectsProductFields([new(name, TestJson.Parse("true"))]);
     }
 
     // CONTRACT.md §5.2 defines these members, so a product field of one of these names would repeat it.
@@ -146,21 +146,22 @@ public class IdentityConfigTests
     [InlineData("agent_channel_url")]
     public void CreateRejectsAProductFieldNamedAfterAContractMember(string name)
     {
-        AssertRejectsProductFields([new(name, Json("2"))]);
+        AssertRejectsProductFields([new(name, TestJson.Parse("2"))]);
     }
 
     // RFC 8259 §4: with a repeated name, receivers disagree on the value, as CONTRACT.md §1 notes of request bodies.
     [Fact]
     public void CreateRejectsARepeatedProductFieldName()
     {
-        AssertRejectsProductFields([new("psu_channel_url", Json("\"a\"")), new("psu_channel_url", Json("\"b\""))]);
+        AssertRejectsProductFields(
+            [new("psu_channel_url", TestJson.Parse("\"a\"")), new("psu_channel_url", TestJson.Parse("\"b\""))]);
     }
 
     // CONTRACT.md §1: an absent field is omitted, never written as null.
     [Fact]
     public void CreateRejectsANullProductFieldValue()
     {
-        AssertRejectsProductFields([new("psu_channel_url", Json("null"))]);
+        AssertRejectsProductFields([new("psu_channel_url", TestJson.Parse("null"))]);
     }
 
     // The default JsonElement holds no JSON value at all.
@@ -173,7 +174,7 @@ public class IdentityConfigTests
     [Fact]
     public void CreateRejectsAProductFieldWithoutAName()
     {
-        AssertRejectsProductFields([new(null!, Json("true"))]);
+        AssertRejectsProductFields([new(null!, TestJson.Parse("true"))]);
     }
 
     // RFC 8259 §8.1: JSON text exchanged between systems is UTF-8, which cannot encode an unpaired surrogate.
@@ -181,7 +182,7 @@ public class IdentityConfigTests
     [Fact]
     public void CreateRejectsAProductFieldValueThatIsNotUnicodeText()
     {
-        AssertRejectsProductFields([new("label", Json("""["ok", "\ud800"]"""))]);
+        AssertRejectsProductFields([new("label", TestJson.Parse("""["ok", "\ud800"]"""))]);
     }
 
     // A JsonElement reads from its JsonDocument, which the host may dispose once the config exists.
@@ -196,25 +197,8 @@ public class IdentityConfigTests
             config = IdentityConfig.Create(1, null, [new("policy_limits", document.RootElement)]);
         }
 
-        Assert.True(JsonElement.DeepEquals(Json(Limits), Members(config.ToUtf8Json())["policy_limits"]));
-    }
-
-    // Parses a JSON object with the BCL, never with the library, and fails on a repeated member name.
-    internal static Dictionary<string, JsonElement> Members(byte[] utf8Json)
-    {
-        using JsonDocument document = JsonDocument.Parse(utf8Json);
-        Assert.Equal(JsonValueKind.Object, document.RootElement.ValueKind);
-
-        return document.RootElement
-            .EnumerateObject()
-            .ToDictionary(member => member.Name, member => member.Value.Clone(), StringComparer.Ordinal);
-    }
-
-    internal static JsonElement Json(string text)
-    {
-        using JsonDocument document = JsonDocument.Parse(text);
-
-        return document.RootElement.Clone();
+        JsonElement written = TestJson.Members(config.ToUtf8Json())["policy_limits"];
+        Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), written));
     }
 
     private static void AssertRejectsProductFields(KeyValuePair<string, JsonElement>[] productFields)
