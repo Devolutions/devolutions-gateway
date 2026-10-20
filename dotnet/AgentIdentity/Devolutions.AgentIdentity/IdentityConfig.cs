@@ -59,7 +59,9 @@ public sealed class IdentityConfig
     /// <c>agent_channel_url</c>.
     /// Each value is any JSON value but <c>null</c>,
     /// since an absent field is omitted rather than written as <c>null</c>.
-    /// The library looks inside a value only to check that UTF-8 JSON can carry it.
+    /// The members of every object inside a value follow the same rules:
+    /// each has a snake_case name, which no other member of its object has, and a value other than <c>null</c>.
+    /// An array element is no member, so it may be <c>null</c>.
     /// </remarks>
     /// <param name="revision">The revision of the config.</param>
     /// <param name="agentChannelUrl">
@@ -72,7 +74,9 @@ public sealed class IdentityConfig
     /// <paramref name="agentChannelUrl"/> is not an absolute <c>https</c> URL,
     /// or has user information, a query or a fragment;
     /// or a product-specific field has no name, a name that is not snake_case or that the contract gives a member,
-    /// no value, the value <c>null</c>, or a value that UTF-8 JSON cannot carry, such as a lone surrogate.
+    /// no value, the value <c>null</c>, or a value that UTF-8 JSON cannot carry, such as a lone surrogate;
+    /// or a member inside a value has a name that is not snake_case or that its object repeats, or the value
+    /// <c>null</c>.
     /// </exception>
     public static IdentityConfig Create(
         ulong revision,
@@ -165,10 +169,17 @@ public sealed class IdentityConfig
                     nameof(productFields));
             }
 
-            writer.WritePropertyName(name);
-
             try
             {
+                // CONTRACT.md §1 governs every member of an agent-facing body, so it governs those inside the value.
+                if (CheckMembers(value) is { } problem)
+                {
+                    throw new ArgumentException(
+                        $"The value of the product field '{name}' {problem}.",
+                        nameof(productFields));
+                }
+
+                writer.WritePropertyName(name);
                 value.WriteTo(writer);
             }
             catch (InvalidOperationException exception)
@@ -179,6 +190,56 @@ public sealed class IdentityConfig
                     exception);
             }
         }
+    }
+
+    // Returns how a member inside the value breaks the conventions of CONTRACT.md §1, or null.
+    // The walk keeps its own stack, so that a deeply nested value cannot exhaust the thread's stack.
+    // Reading a name decodes its escapes, and throws InvalidOperationException for a lone surrogate.
+    private static string? CheckMembers(JsonElement value)
+    {
+        Stack<JsonElement> pending = new();
+        pending.Push(value);
+
+        while (pending.TryPop(out JsonElement element))
+        {
+            if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    pending.Push(item);
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.Object)
+            {
+                HashSet<string> names = new(StringComparer.Ordinal);
+
+                foreach (JsonProperty member in element.EnumerateObject())
+                {
+                    string memberName = member.Name;
+
+                    // The name is quoted only once it is valid, so that a message never repeats arbitrary text.
+                    if (!IsSnakeCase(memberName))
+                    {
+                        return "has a member whose name is not snake_case";
+                    }
+
+                    // RFC 8259 §4: receivers disagree on the value of a repeated name.
+                    if (!names.Add(memberName))
+                    {
+                        return $"repeats the member name '{memberName}' in one object";
+                    }
+
+                    if (member.Value.ValueKind == JsonValueKind.Null)
+                    {
+                        return $"gives the member '{memberName}' the value null; an absent field is omitted";
+                    }
+
+                    pending.Push(member.Value);
+                }
+            }
+        }
+
+        return null;
     }
 
     // Checks the name character by character:

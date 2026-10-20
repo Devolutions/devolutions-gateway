@@ -179,10 +179,61 @@ public class IdentityConfigTests
 
     // RFC 8259 §8.1: JSON text exchanged between systems is UTF-8, which cannot encode an unpaired surrogate.
     // Failing here keeps every later serialization of the config from failing.
-    [Fact]
-    public void CreateRejectsAProductFieldValueThatIsNotUnicodeText()
+    [Theory]
+    [InlineData("""["ok", "\ud800"]""")]
+    [InlineData("""{"\ud800": 1}""")]
+    public void CreateRejectsAProductFieldValueThatIsNotUnicodeText(string value)
     {
-        AssertRejectsProductFields([new("label", TestJson.Parse("""["ok", "\ud800"]"""))]);
+        AssertRejectsProductFields([new("label", TestJson.Parse(value))]);
+    }
+
+    // CONTRACT.md §1: JSON keys are snake_case, so the members inside a product field's value are too.
+    [Theory]
+    [InlineData("""{"maxSessions": 4}""")]
+    [InlineData("""{"limits": {"max_sessions": 4, "Max_paths": 2}}""")]
+    public void CreateRejectsAMemberNameThatIsNotSnakeCaseInANestedObject(string value)
+    {
+        AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
+    }
+
+    [Theory]
+    [InlineData("""[{"Path": "a"}]""")]
+    [InlineData("""{"paths": [["a"], [{"pathName": "b"}]]}""")]
+    public void CreateRejectsAMemberNameThatIsNotSnakeCaseInAnObjectInAnArray(string value)
+    {
+        AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
+    }
+
+    // RFC 8259 §4: with a repeated name, receivers disagree on the value, as CONTRACT.md §1 notes of request bodies.
+    // A name and its escaped spelling are the same name.
+    [Theory]
+    [InlineData("""{"max_sessions": 4, "max_sessions": 5}""")]
+    [InlineData("""{"limits": [{"max_sessions": 4, "max_sessions": 5}]}""")]
+    [InlineData("""{"max_sessions": 4, "max\u005Fsessions": 5}""")]
+    public void CreateRejectsAMemberNameRepeatedInOneObjectOfAValue(string value)
+    {
+        AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
+    }
+
+    // CONTRACT.md §1: an absent field is omitted, never written as null, at any depth.
+    [Theory]
+    [InlineData("""{"proxy": null}""")]
+    [InlineData("""[{"proxy": null}]""")]
+    public void CreateRejectsANullMemberInAValue(string value)
+    {
+        AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
+    }
+
+    // A name repeats only within one object, and an array element is no field, so it may be null.
+    [Fact]
+    public void CreateAcceptsAValueWhoseMembersFollowTheConventions()
+    {
+        const string Limits = """{"a": {"b": 1}, "c": {"b": [1, {"b": 2}]}, "d": [{"b": 1}, {"b": 1}, null]}""";
+
+        IdentityConfig config = IdentityConfig.Create(1, null, [new("policy_limits", TestJson.Parse(Limits))]);
+
+        JsonElement written = TestJson.Members(config.ToUtf8Json())["policy_limits"];
+        Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), written));
     }
 
     // A JsonElement reads from its JsonDocument, which the host may dispose once the config exists.
