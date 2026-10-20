@@ -2,6 +2,7 @@
 
 pub mod cli;
 pub mod config;
+mod runner;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -25,6 +26,7 @@ use sysevent::SystemEventSink;
 use tokio::time::sleep;
 
 use self::config::{IdentityDebugConf, IdentityKeyBackend};
+use self::runner::{Runners, Shared};
 use crate::config::{Conf, ConfHandle};
 
 pub struct IdentityTask {
@@ -137,8 +139,26 @@ async fn run_identity(
             }
         };
 
-        // A per-authority runner can share this reconciled store and client with pending enrollment.
-        return run_pending_enrollments(&store, &client, &data_dir, &settings, poll_interval, &mut shutdown).await;
+        let shared = Arc::new(Shared {
+            store,
+            client,
+            settings: settings.clone(),
+        });
+        let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
+        match shared.store.list_identities() {
+            Ok(identities) => {
+                for identity in &identities {
+                    runners.start(identity);
+                }
+            }
+            Err(error) => {
+                error!(
+                    error = format!("{error:#}"),
+                    "Cannot list stored Agent Identities; check the identity directory ownership and ACL"
+                );
+            }
+        }
+        return run_pending_enrollments(&shared, &mut runners, &data_dir, poll_interval, &mut shutdown).await;
     }
 }
 
@@ -160,6 +180,7 @@ async fn wait_or_stop(shutdown: &mut ShutdownSignal, duration: Duration) -> bool
 
 enum PendingOutcome {
     Completed,
+    Enrolled(Box<StoredIdentity>),
     Retry { retry_after: Option<Duration> },
 }
 
@@ -172,6 +193,10 @@ struct RetryState {
 impl RetryState {
     fn is_due(&self) -> bool {
         self.next_attempt.is_none_or(|next| Instant::now() >= next)
+    }
+
+    fn succeeded(&mut self) {
+        *self = Self::default();
     }
 
     fn failed(&mut self, settings: &IdentityDebugConf, retry_after: Option<Duration>) {
@@ -196,13 +221,17 @@ fn retry_delay(maximum: Duration, backoff: Duration, retry_after: Option<Duratio
 }
 
 async fn run_pending_enrollments(
-    store: &Store,
-    client: &Client,
+    shared: &Shared,
+    runners: &mut Runners,
     data_dir: &Utf8Path,
-    settings: &IdentityDebugConf,
     poll_interval: Duration,
     shutdown: &mut ShutdownSignal,
 ) -> anyhow::Result<()> {
+    let Shared {
+        store,
+        client,
+        settings,
+    } = shared;
     let mut retries: HashMap<Utf8PathBuf, RetryState> = HashMap::new();
     let mut last_list_error = None;
     loop {
@@ -221,6 +250,10 @@ async fn run_pending_enrollments(
                     match outcome {
                         Ok(PendingOutcome::Completed) => {
                             retries.remove(&path);
+                        }
+                        Ok(PendingOutcome::Enrolled(identity)) => {
+                            retries.remove(&path);
+                            runners.start(&identity);
                         }
                         Ok(PendingOutcome::Retry { retry_after }) => {
                             retries.entry(path).or_default().failed(settings, retry_after);
@@ -321,7 +354,7 @@ async fn enroll_pending(
             }
             store.finish_enrollment(&hash, identity.authority_id)?;
             info!(authority_id = %identity.authority_id, identity_id = %identity.identity_id, "Agent Identity enrolled");
-            Ok(PendingOutcome::Completed)
+            Ok(PendingOutcome::Enrolled(Box::new(identity)))
         }
         Err(ClientError::Permanent(code)) => {
             let reason = match code {
