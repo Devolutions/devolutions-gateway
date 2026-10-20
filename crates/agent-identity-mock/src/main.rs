@@ -22,7 +22,8 @@ struct Args {
 
 /// Parses the command-line arguments, without the program name.
 ///
-/// The listen address must be a loopback address because the control surface is unauthenticated ([mock intent][mock-intent], "Mock-only control").
+/// The listen address must be a loopback address because the control surface is unauthenticated
+/// ([mock intent][mock-intent], "Mock-only control").
 ///
 /// [mock-intent]: ../INTENT.md#mock-only-control
 fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Args> {
@@ -146,8 +147,9 @@ async fn main() -> anyhow::Result<()> {
     });
     write_ready_file(&args.state_dir, &ready.to_string())?;
 
-    // DVLS rotation deadlines and rate-limited pushes follow INTENT.DVLS.md, "Rotation".
-    // Requests are the primary path; the ticker covers idle servers with live streams.
+    // Rotation deadlines (CONTRACT.md §8.3) and the rotation notification rate
+    // (INTENT.DVLS.md, "DVLS as an authority") are applied on each request.
+    // The ticker covers idle servers with live streams.
     let ticker_app = Arc::clone(&app);
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));

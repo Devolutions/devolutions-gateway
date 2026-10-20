@@ -1014,7 +1014,8 @@ impl State {
     }
 
     /// Starts a DVLS rotation with the supplied deadline or the active old-root certificate maximum.
-    /// The maximum is the latest `notAfter` of an unexpired current or pending old-root certificate of a non-revoked identity, or `now` if none exist.
+    /// The maximum is the latest `notAfter` of an unexpired current or pending old-root certificate of a non-revoked
+    /// identity, or `now` if none exist.
     pub(crate) fn start_rotation(&mut self, deadline: Option<i64>, now: i64) -> Result<(), ApiError> {
         if self.rotation.is_some() {
             return Err(ApiError::conflict("a rotation is already in progress"));

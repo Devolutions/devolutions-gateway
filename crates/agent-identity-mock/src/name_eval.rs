@@ -1,7 +1,8 @@
-//! Metadata limits ([CONTRACT.md][contract], "3. Metadata") and DVLS friendly-name format evaluation ([DVLS intent][dvls-intent], "Enrollment tokens").
+//! Metadata limits ([CONTRACT.md][contract], "3. Metadata") and friendly-name format evaluation
+//! ([shared intent][intent], "Enrollment").
 //!
 //! [contract]: ../../../docs/agent-identity/CONTRACT.md#3-metadata
-//! [dvls-intent]: ../../../docs/agent-identity/INTENT.DVLS.md#enrollment-tokens
+//! [intent]: ../../../docs/agent-identity/INTENT.agent-identity.md#enrollment
 
 use serde_json::{Map, Value};
 

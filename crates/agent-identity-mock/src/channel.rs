@@ -33,7 +33,8 @@ pub(crate) struct ChannelService {
     pub(crate) app: Arc<App>,
 }
 
-/// Builds a stream failure status with the `error-code` and `server-time` trailers ([CONTRACT.md][contract], "7.4 Termination").
+/// Builds a stream failure status with the `error-code` and `server-time` trailers
+/// ([CONTRACT.md][contract], "7.4 Termination").
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
 fn error_status(code: Code, error_code: &'static str, now: i64) -> Status {
