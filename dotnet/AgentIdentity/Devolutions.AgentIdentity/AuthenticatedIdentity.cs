@@ -1,11 +1,11 @@
 namespace Devolutions.AgentIdentity;
 
 /// <summary>
-/// An identity that a signed request proved.
+/// An identity that a signed request, or the proof that authenticates an agent channel stream, proved.
 /// </summary>
 /// <remarks>
-/// Only request authentication creates one, so code that takes this type acts for an identity that a signature check
-/// established, never for one taken from a value that the agent or a caller sent.
+/// Only request authentication and the channel handshake create one, so code that takes this type acts for an
+/// identity that a signature check established, never for one taken from a value that the agent or a caller sent.
 /// </remarks>
 public sealed class AuthenticatedIdentity
 {

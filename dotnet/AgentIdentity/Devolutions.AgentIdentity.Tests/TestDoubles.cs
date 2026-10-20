@@ -103,3 +103,28 @@ internal sealed class CountingRandomNumberGenerator : RandomNumberGenerator
         }
     }
 }
+
+/// <summary>
+/// A generator that returns the given bytes in order and fails when asked for more,
+/// so that a test controls every random byte the library draws.
+/// </summary>
+internal sealed class ScriptedRandomNumberGenerator(byte[] bytes) : RandomNumberGenerator
+{
+    private int _next;
+
+    public override void GetBytes(byte[] data)
+    {
+        GetBytes(data.AsSpan());
+    }
+
+    public override void GetBytes(Span<byte> data)
+    {
+        if (data.Length > bytes.Length - _next)
+        {
+            throw new InvalidOperationException("The test supplied fewer random bytes than the library drew.");
+        }
+
+        bytes.AsSpan(_next, data.Length).CopyTo(data);
+        _next += data.Length;
+    }
+}

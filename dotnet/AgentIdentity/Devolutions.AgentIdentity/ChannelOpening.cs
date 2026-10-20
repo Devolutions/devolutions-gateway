@@ -1,7 +1,9 @@
 using Devolutions.Agent.Channel.V1;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 
 using ChallengePayload = Devolutions.Agent.Channel.V1.Challenge;
+using WelcomePayload = Devolutions.Agent.Channel.V1.Welcome;
 
 namespace Devolutions.AgentIdentity;
 
@@ -14,10 +16,25 @@ namespace Devolutions.AgentIdentity;
 /// The host sends <see cref="Challenge"/> as the first message on the stream,
 /// and the stream is authenticated only once the agent signs that challenge.
 /// The identity stays hidden until then, so that nothing acts for it on the strength of the headers alone.
+/// The host passes the first agent message to <see cref="VerifyHello"/>,
+/// or calls <see cref="HelloTimedOut"/> when none arrives within <see cref="ChannelHandshake.HelloTimeout"/>.
 /// </remarks>
 public sealed class ChannelOpening
 {
-    internal ChannelOpening(VerifiedCertificate certificate, string connectNonce, Guid challengeId, byte[] challenge)
+    private static readonly AgentIdentityError SignatureInvalid =
+        AgentIdentityError.From(AgentIdentityErrorCode.SignatureInvalid);
+
+    private readonly TimeProvider _timeProvider;
+
+    // Set by the first call to VerifyHello or HelloTimedOut.
+    private int _handshakeEnded;
+
+    internal ChannelOpening(
+        VerifiedCertificate certificate,
+        string connectNonce,
+        Guid challengeId,
+        byte[] challenge,
+        TimeProvider timeProvider)
     {
         Certificate = certificate;
         ConnectNonce = connectNonce;
@@ -28,6 +45,7 @@ public sealed class ChannelOpening
             Id = ChallengeId,
             Challenge = new ChallengePayload { Challenge_ = ByteString.CopyFrom(challenge) },
         };
+        _timeProvider = timeProvider;
     }
 
     /// <summary>
@@ -63,4 +81,95 @@ public sealed class ChannelOpening
     /// so that a change to the message object cannot change what the agent must sign.
     /// </remarks>
     internal ReadOnlyMemory<byte> ChallengeBytes { get; }
+
+    /// <summary>
+    /// Verifies the first message that the agent sent on the stream, as CONTRACT.md §7.3 step 4 specifies.
+    /// </summary>
+    /// <remarks>
+    /// The message must be a <c>Hello</c> whose <c>correlation_id</c> is the <c>id</c> of <see cref="Challenge"/>,
+    /// and whose <c>proof</c> verifies with the key of the certificate that signed the opening request;
+    /// otherwise the handshake fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
+    /// Only then is the metadata checked, and metadata that CONTRACT.md §3 rejects fails the handshake with
+    /// <see cref="AgentIdentityErrorCode.InvalidRequest"/>.
+    /// The first call to this method or to <see cref="HelloTimedOut"/> ends the handshake, whatever its outcome.
+    /// </remarks>
+    /// <param name="firstMessage">The first message that the agent sent on the stream.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="firstMessage"/> is null.</exception>
+    /// <exception cref="InvalidOperationException">The handshake has already ended.</exception>
+    public ChannelHandshakeResult VerifyHello(AgentMessage firstMessage)
+    {
+        ArgumentNullException.ThrowIfNull(firstMessage);
+        EndHandshake();
+
+        if (firstMessage.PayloadCase != AgentMessage.PayloadOneofCase.Hello)
+        {
+            return ChannelHandshakeResult.Failure(SignatureInvalid, "The first message on the stream is not a Hello.");
+        }
+
+        if (!firstMessage.HasCorrelationId)
+        {
+            return ChannelHandshakeResult.Failure(SignatureInvalid, "The Hello has no correlation_id.");
+        }
+
+        if (!string.Equals(firstMessage.CorrelationId, ChallengeId, StringComparison.Ordinal))
+        {
+            return ChannelHandshakeResult.Failure(
+                SignatureInvalid,
+                "The correlation_id of the Hello is not the id of the Challenge.");
+        }
+
+        Hello hello = firstMessage.Hello;
+
+        if (!ChannelProof.Verify(Certificate.SubjectPublicKeyInfo, ChallengeBytes.Span, ConnectNonce, hello.Proof.Span))
+        {
+            return ChannelHandshakeResult.Failure(
+                SignatureInvalid,
+                "The proof of the Hello does not verify with the key of the certificate that opened the stream.");
+        }
+
+        MetadataValidationResult metadata = AgentMetadata.Validate(hello.Metadata);
+        if (!metadata.Succeeded)
+        {
+            return ChannelHandshakeResult.Failure(metadata.Error, metadata.FailureDetail);
+        }
+
+        ServerMessage welcome = new()
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            CorrelationId = firstMessage.Id,
+            Welcome = new WelcomePayload { ServerTime = Timestamp.FromDateTimeOffset(_timeProvider.GetUtcNow()) },
+        };
+
+        return ChannelHandshakeResult.Success(
+            Certificate.ToIdentity(AgentOperation.Connect),
+            metadata.Metadata,
+            welcome);
+    }
+
+    /// <summary>
+    /// Ends the handshake of a stream on which no agent message arrived within
+    /// <see cref="ChannelHandshake.HelloTimeout"/>, with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
+    /// </summary>
+    /// <remarks>
+    /// The host also calls it when the agent ends the stream without sending a message.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The handshake has already ended.</exception>
+    public ChannelHandshakeResult HelloTimedOut()
+    {
+        EndHandshake();
+
+        return ChannelHandshakeResult.Failure(SignatureInvalid, "No Hello arrived before the timeout.");
+    }
+
+    private void EndHandshake()
+    {
+        // UNTESTED: of two calls racing on two threads, exactly one ends the handshake and the other throws.
+        // A host can receive the first message just as its Hello timer fires,
+        // and both calls deciding the stream could authenticate a stream that is being closed.
+        // When changing this guard, keep the read and the write of the flag in one atomic operation.
+        if (Interlocked.Exchange(ref _handshakeEnded, 1) != 0)
+        {
+            throw new InvalidOperationException("The handshake of this channel opening has already ended.");
+        }
+    }
 }

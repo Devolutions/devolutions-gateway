@@ -1,0 +1,103 @@
+using Devolutions.Agent.Channel.V1;
+
+using Google.Protobuf;
+
+namespace Devolutions.AgentIdentity.Tests;
+
+/// <summary>
+/// The agent channel stream that <c>channel_proof</c> describes:
+/// its <c>connect_case</c> opened at that case's <c>now</c>, with the vector challenge.
+/// </summary>
+internal static class VectorChannel
+{
+    private static ChannelProofVectors Vectors => TestVectors.Instance.ChannelProof;
+
+    private static HttpSignatureCaseVector ConnectCase => TestVectors.Instance.HttpSignature.Case(Vectors.ConnectCase);
+
+    /// <summary>
+    /// The <c>now</c> of the opening request, at which the stream opens unless a test passes another clock.
+    /// </summary>
+    public static DateTimeOffset OpeningTime => ConnectCase.Now;
+
+    /// <summary>
+    /// Metadata that CONTRACT.md §3 accepts, with the keys that §3.1 says the agent always sends.
+    /// </summary>
+    public static IReadOnlyList<KeyValuePair<string, string>> ValidMetadata { get; } =
+    [
+        new("hostname", "device-a"),
+        new("os_name", "Windows"),
+        new("os_version", "10.0.26100"),
+        new("arch", "x86_64"),
+        new("agent_version", "2026.3.0"),
+    ];
+
+    /// <summary>
+    /// Opens the stream through the public API.
+    /// </summary>
+    /// <param name="clock">The authority's clock, which reads <see cref="OpeningTime"/> when null.</param>
+    /// <param name="status">
+    /// The status to register the device's certificate with, instead of the status that the vector file gives it.
+    /// </param>
+    public static async Task<ChannelOpening> OpenAsync(TimeProvider? clock = null, CertificateStatus? status = null)
+    {
+        VectorAuthority authority = new();
+
+        if (status is { } registeredStatus)
+        {
+            RegisteredCertificateVector device =
+                TestVectors.Instance.HttpSignature.RegisteredCertificate(Vectors.Device);
+            authority.Registry.Register(
+                device.KeyId,
+                new RegisteredCertificate(
+                    device.IdentityId,
+                    device.Certificate,
+                    registeredStatus,
+                    device.IdentityRevoked));
+        }
+
+        RequestAuthenticator authenticator = new(
+            authority.Registry,
+            authority.Nonces,
+            clock ?? new FixedTimeProvider(OpeningTime),
+            new ScriptedRandomNumberGenerator(Vectors.Challenge));
+
+        ChannelOpeningResult result = await authenticator.AuthenticateChannelOpeningAsync(
+            ConnectCase.Method,
+            VectorAuthority.Lines(ConnectCase.Headers.SignatureInput),
+            VectorAuthority.Lines(ConnectCase.Headers.Signature));
+
+        Assert.True(result.Succeeded, result.FailureDetail);
+        Assert.Equal(Vectors.Challenge, result.Opening.Challenge.Challenge.Challenge_.ToByteArray());
+        return result.Opening;
+    }
+
+    /// <summary>
+    /// A <c>Hello</c> that answers the Challenge of <paramref name="opening"/> with <paramref name="proof"/>
+    /// and <see cref="ValidMetadata"/>.
+    /// </summary>
+    public static AgentMessage HelloMessage(ChannelOpening opening, byte[] proof)
+    {
+        AgentMessage message = new()
+        {
+            Id = Guid.NewGuid().ToString("D"),
+            CorrelationId = opening.Challenge.Id,
+            Hello = new Hello { Proof = ByteString.CopyFrom(proof) },
+        };
+
+        foreach ((string key, string value) in ValidMetadata)
+        {
+            message.Hello.Metadata.Add(key, value);
+        }
+
+        return message;
+    }
+
+    /// <summary>
+    /// A <c>Hello</c> that the stream accepts:
+    /// <see cref="HelloMessage"/> with the proof of the vector case <c>valid</c>.
+    /// </summary>
+    public static AgentMessage ValidHelloMessage(ChannelOpening opening)
+    {
+        return HelloMessage(opening, Vectors.Case("valid").Proof);
+    }
+}

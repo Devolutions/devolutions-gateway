@@ -126,7 +126,8 @@ public sealed class RequestAuthenticator
     /// The opening request goes through the steps of CONTRACT.md §6 with tag <c>connect</c>,
     /// and its nonce is recorded only once every other step has passed.
     /// A verified opening does not authenticate the stream:
-    /// the agent must still sign <see cref="ChannelOpening.Challenge"/>.
+    /// the agent must still sign <see cref="ChannelOpening.Challenge"/>,
+    /// which <see cref="ChannelOpening.VerifyHello"/> checks.
     /// </remarks>
     /// <param name="method">The request method, as received.</param>
     /// <param name="signatureInput">The <c>signature-input</c> metadata entries in received order.</param>
@@ -166,7 +167,7 @@ public sealed class RequestAuthenticator
         _randomNumberGenerator.GetBytes(challenge);
 
         return ChannelOpeningResult.Success(
-            new ChannelOpening(verification.Certificate, verification.Nonce, Guid.NewGuid(), challenge));
+            new ChannelOpening(verification.Certificate, verification.Nonce, Guid.NewGuid(), challenge, _timeProvider));
     }
 
     private async ValueTask<Verification> VerifyAsync(
