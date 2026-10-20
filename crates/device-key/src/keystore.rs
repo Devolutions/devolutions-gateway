@@ -785,7 +785,8 @@ mod tests {
             format!("{error:#}").contains("timed out waiting for machine-key creation lock"),
             "{error:#}"
         );
-        assert!(started.elapsed() >= std::time::Duration::from_secs(5));
+        // Wait time-outs advance in system clock ticks, so a five-second wait can end slightly early.
+        assert!(started.elapsed() >= std::time::Duration::from_millis(4_900));
         Ok(())
     }
 
