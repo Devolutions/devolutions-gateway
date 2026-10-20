@@ -210,10 +210,8 @@ where
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
 
-        let end = match res {
-            Ok(PushOutcome::Done) => push_end(),
-            Ok(PushOutcome::StorageFull) | Err(_) => PushEnd::MayReconnect,
-        };
+        // A producer that said its recording is over is not coming back, even if writing its last bytes failed.
+        let end = push_end();
 
         info!(?res, ?end, "Recording finished");
 
