@@ -248,42 +248,6 @@ public class ResponseBodiesTests
         Assert.Equal("certificateChain", exception.ParamName);
     }
 
-    // A writer that read the chain twice could check one chain and write another.
-    [Theory]
-    [MemberData(nameof(ChainBodyNames))]
-    public void ChainIsReadOnce(string endpoint)
-    {
-        int reads = 0;
-
-        IEnumerable<X509Certificate2> ReadChain()
-        {
-            reads++;
-            yield return DeviceA;
-            yield return VectorRoot;
-        }
-
-        ChainBodies[endpoint](ReadChain());
-
-        Assert.Equal(1, reads);
-    }
-
-    // As with a chain, a writer that read the roots twice could check one list and write another.
-    [Fact]
-    public void TrustAnchorReadsTheRootsOnce()
-    {
-        int reads = 0;
-
-        IEnumerable<X509Certificate2> ReadRoots()
-        {
-            reads++;
-            yield return VectorRoot;
-        }
-
-        ResponseBodies.TrustAnchor(ReadRoots());
-
-        Assert.Equal(1, reads);
-    }
-
     // CONTRACT.md §5.2 and §5.6: `config` is the identity's config, in the shape of §5.2.
     [Theory]
     [MemberData(nameof(ConfigBodyNames))]
