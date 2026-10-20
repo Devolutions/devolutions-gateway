@@ -201,6 +201,19 @@ public class IdentityConfigTests
         Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), written));
     }
 
+    // A config is immutable, and the response bodies and ConfigUpdate messages write its JSON as it was created.
+    [Fact]
+    public void ChangingTheReturnedJsonLeavesTheConfigUnchanged()
+    {
+        IdentityConfig config = IdentityConfig.Create(3, "https://host/dvls");
+        byte[] first = config.ToUtf8Json();
+        byte[] original = [.. first];
+
+        first.AsSpan().Fill((byte)' ');
+
+        Assert.Equal(original, config.ToUtf8Json());
+    }
+
     private static void AssertRejectsProductFields(KeyValuePair<string, JsonElement>[] productFields)
     {
         ArgumentException exception = Assert.Throws<ArgumentException>(
