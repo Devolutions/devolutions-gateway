@@ -47,9 +47,8 @@ Of a party's own realisation (`intent-files`), only the parts a named second par
 Write each rule with one condition and one response ("when …", "while …", "if … then …") and one meaning per verb: declarative present for a requirement, `should` a recommendation, `may` a permission, `can` a capability.
 Each rule maps to a conformance case, worded as an observable with a bound: "encode writes exactly `size()` bytes", never "handles" or "supports", which name no outcome a test could check and so let divergent implementations all comply.
 "The backend supports RSA-PSS" is met by signing, by returning `Unsupported`, or by producing bytes nobody verifies; "signing with RSA-PSS returns a signature that verifies under the public key, or `Unsupported` before any key material is read" is one outcome and one test.
-Where the parties share test vectors, they cover positive and negative cases, are deterministic, and an independent script recomputes them.
 The contract's rules define conformance, and it has no conformance section, because defining conformance as passing a suite makes the evidence the rule, so a party that follows the contract stops conforming when the suite has a bug.
-Shared test vectors the parties must reproduce are a rule in the section they test; the mapping of rules to tests, the review-only claims, and the known gaps live with the suite and change with it, since neither party agrees to which test checks which rule.
+Test vectors and suites are evidence for the rules, so their role, their pass conditions, the mapping of rules to tests, the review-only claims, and the known gaps belong to the suite and the intent that governs it, never to the contract.
 
 Beyond that, shape is free: order sections so a reader finds all of an operation's rules in one place.
 `references/patterns.md` lists what review kept and what it fixed in two agent-written contracts; read it when revising one or checking a draft.

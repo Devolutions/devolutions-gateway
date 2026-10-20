@@ -19,7 +19,7 @@ When an implementation exists, the author is a fresh context in a worktree at a 
 From a published source cited in the test, a property the contract states, or a derivation whose method the contract or cited standard fixes, recorded beside the vector so a reviewer can redo it; never from a computation only an implementation of the contract could perform, because checking such a value means implementing the contract again.
 A derived vector accounts for every coupled field the change touches - length, checksum, signature - or its outcome is not what the derivation claims.
 Where no published answer exists, compare outputs across implementations; a differential check never stands alone, because a bug shared by both passes it.
-A hand-written negative input differs from an independently valid control in the targeted dimension only, so the test can fail only for the reason it names.
+A hand-written negative input differs from an independently valid control in the targeted dimension only, so the test can fail only for the reason it names; every rule gets both a passing and a rejected input, since a rule tested only by acceptance is met by accepting everything.
 Vendored sources keep origin, version, and checksum recorded, are taken whole or cut at their own section boundaries, and are never edited, because an edited or sliced vector loses the provenance that makes it an oracle.
 Keep a coverage record beside the suite: which test checks each clause, which clauses are verified by review only, and the boundaries deliberately left unchecked, so silence is not taken for coverage.
 
