@@ -3,7 +3,6 @@
 use std::error::Error;
 use std::fmt;
 use std::future::{Future, poll_fn};
-use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -171,12 +170,11 @@ impl Transport {
                 Ok(Box::new(tunnel.into_inner()))
             }
             "socks4" | "socks4a" => {
-                // UNTESTED: `socks4` and `socks4a` proxies go through hyper-util's `SocksV4`, as the agent's identity
-                // requests do through reqwest.
-                // `SocksV4` ends the empty user ID with two NUL bytes instead of one, so a proxy that reads the
-                // request as SOCKS4 defines it tunnels the second byte to the authority, or reads it as an empty
-                // SOCKS4a name; the tests therefore cover SOCKS5 only.
-                // When changing this, check a `socks4` and a `socks4a` proxy, for the channel and the identity requests.
+                // Known limitation: hyper-util 0.1.20's `SocksV4` (`proxy/socks/v4/messages.rs`) sends an extra NUL
+                // after the empty user ID, so a proxy that follows SOCKS4 tunnels it to the authority, or reads an
+                // empty SOCKS4a name.
+                // The agent's identity requests go through the same `SocksV4` in reqwest, and upgrading hyper-util
+                // past its fix repairs both.
                 let target = if scheme == "socks4" {
                     resolve_locally(target).await?
                 } else {
@@ -248,14 +246,10 @@ async fn resolve_locally(target: Uri) -> Result<Uri, Closure> {
     let (Some(host), Some(port)) = (target.host(), target.port_u16()) else {
         return Err(Closure::outage("channel origin without host"));
     };
-    let addresses: Vec<SocketAddr> = tokio::net::lookup_host((host.trim_matches(['[', ']']), port))
+    let address = tokio::net::lookup_host((host.trim_matches(['[', ']']), port))
         .await
         .map_err(outage("resolve the authority"))?
-        .collect();
-    let address = addresses
-        .iter()
-        .find(|address| address.is_ipv4())
-        .or_else(|| addresses.first())
+        .min_by_key(|address| !address.is_ipv4())
         .ok_or_else(|| Closure::outage("resolve the authority: no address"))?;
     format!("https://{address}")
         .parse()
