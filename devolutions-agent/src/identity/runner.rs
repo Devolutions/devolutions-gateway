@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use agent_identity::client::{self, Client, ClientError, RequestSigner, TerminalCode};
 use agent_identity::schedule::{self, ChannelUrl};
-use agent_identity::state::{KeyRecord, Store, StoredIdentity};
+use agent_identity::state::{KEY_LOST, KeyRecord, Store, StoredIdentity};
 use agent_identity::{csr, metadata};
 use anyhow::Context as _;
 use device_key::DeviceKey;
@@ -79,6 +79,8 @@ struct Runner {
     /// Backoff after a local failure, such as a busy state lock.
     local_retry: RetryState,
     renewal_requested: bool,
+    /// A terminal outcome the authority returned, recorded before any other action.
+    terminal: Option<&'static str>,
     /// Whether pending-key recovery signs with the current key after the expired pending key drew `identity_unknown`.
     recovery_signs_with_current: bool,
     /// The renewal schedule inputs of the current key, fixed when this run first holds it.
@@ -100,6 +102,7 @@ impl Runner {
             check_in_retry: RetryState::default(),
             local_retry: RetryState::default(),
             renewal_requested: false,
+            terminal: None,
             recovery_signs_with_current: false,
             renewal_basis: None,
             next_check_in: None,
@@ -157,6 +160,21 @@ impl Runner {
         if identity.identity_id != self.identity_id || identity.rejected.is_some() {
             return Ok(None);
         }
+        if let Some(code) = self.terminal {
+            // UNTESTED: a latched terminal outcome sends no further signed request while its record fails to persist.
+            // A local write failure must not let the runner retry the operation that drew the terminal outcome.
+            // When changing this, keep the latch checked before any request and set before any persistence.
+            // `CONTRACT.md` §5.4: a terminal outcome ends the identity when it is received, so nothing else is sent
+            // while its record is retried.
+            store.reject_identity(&mut identity, code)?;
+            warn!(
+                authority_id = %self.authority_id,
+                identity_id = %self.identity_id,
+                code,
+                "The Agent Identity is rejected; it stops renewing and checking in"
+            );
+            return Ok(None);
+        }
         let now = Instant::now();
         // `crates/agent-identity/INTENT.md` ("Stored identities"): `previous` alongside `pending` holds the expired
         // pending key of a pending-key recovery; alone, it holds the old key of a confirmed renewal.
@@ -169,22 +187,27 @@ impl Runner {
             .pending
             .as_ref()
             .is_some_and(|pending| pending.certificate_chain.is_some());
-        if confirming || recovering {
+        if identity.keys.pending.is_some() {
+            // UNTESTED: no check-in is sent while any pending slot exists, including after an unusable pending key
+            // was replaced and after a restart.
+            // A check-in signed with a current key that an unconfirmed `confirm` retired draws a terminal
+            // `identity_unknown`; when changing this, keep check-in behind every pending slot.
             // `CONTRACT.md` §8.1: while the outcome of a `confirm` is unknown, the agent sends no other signed request.
-            // During pending-key recovery, it is still unknown whether an earlier `confirm` retired the current key.
+            // Any pending slot holds this barrier until a `confirm` succeeds: during pending-key recovery, and after an
+            // unusable pending key was replaced, an earlier `confirm` may have retired the current key.
             if !self.renewal_retry.is_due() {
                 return Ok(self.renewal_retry.next_attempt);
             }
             if confirming {
                 self.confirm(&mut identity, recovering).await?;
             } else {
-                self.renew(&mut identity, true).await?;
+                self.renew(&mut identity, recovering).await?;
             }
             return Ok(Some(Instant::now()));
         }
 
         self.follow_channel_url(&identity, now);
-        let renewal_at = if identity.keys.pending.is_some() || self.renewal_requested {
+        let renewal_at = if self.renewal_requested {
             now
         } else {
             self.renewal_at(&identity, now)?
@@ -235,7 +258,10 @@ impl Runner {
             };
             client::request_signer(Arc::from(key), certificate_chain(&expired)?)?
         } else {
-            self.signer(&identity.keys.current)?
+            let Some(signer) = self.current_signer(identity)? else {
+                return Ok(());
+            };
+            signer
         };
         let csr = csr::create(new_key.as_ref()).context("create renewal CSR")?;
         let result = self
@@ -268,8 +294,8 @@ impl Runner {
                 self.recovery_signs_with_current = true;
             }
             // `CONTRACT.md` §5.4 and §8.1: on renew, `certificate_expired` means beyond grace, which is terminal.
-            Err(ClientError::CertificateExpired) => self.reject(identity, "certificate_expired")?,
-            Err(ClientError::Terminal(code)) => self.reject(identity, code.as_str())?,
+            Err(ClientError::CertificateExpired) => self.reject("certificate_expired"),
+            Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
             Err(error) => {
                 warn!(authority_id = %self.authority_id, reason = %error, "Agent Identity renewal will retry");
                 self.renewal_retry.failed(&self.shared.settings, error.retry_after());
@@ -321,7 +347,7 @@ impl Runner {
                 self.renewal_retry.succeeded();
                 self.recovery_signs_with_current = false;
             }
-            Err(ClientError::Terminal(code)) => self.reject(identity, code.as_str())?,
+            Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
             Err(error) => {
                 warn!(authority_id = %self.authority_id, reason = %error, "Agent Identity confirmation will retry");
                 self.renewal_retry.failed(&self.shared.settings, error.retry_after());
@@ -331,7 +357,9 @@ impl Runner {
     }
 
     async fn check_in(&mut self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        let signer = self.signer(&identity.keys.current)?;
+        let Some(signer) = self.current_signer(identity)? else {
+            return Ok(());
+        };
         let result = self
             .shared
             .client
@@ -339,14 +367,16 @@ impl Runner {
             .await;
         match result {
             Ok(response) => {
-                self.check_in_retry.succeeded();
-                self.next_check_in = Some(Instant::now() + self.check_in_interval());
-                if self.shared.store.update_config(identity, response.config)? {
-                    info!(authority_id = %self.authority_id, "Agent Identity config updated");
-                }
                 if response.renewal_requested {
                     self.renewal_requested = true;
                 }
+                // UNTESTED: a config that can't be stored leaves the check-in due, so that its retry delivers the
+                // config and renewal request again; when changing this, advance the schedule only after storing.
+                if self.shared.store.update_config(identity, response.config)? {
+                    info!(authority_id = %self.authority_id, "Agent Identity config updated");
+                }
+                self.check_in_retry.succeeded();
+                self.next_check_in = Some(Instant::now() + self.check_in_interval());
             }
             Err(ClientError::CertificateExpired) => {
                 // `CONTRACT.md` §5.4: renew at once, and check in again only after `confirm`.
@@ -354,7 +384,7 @@ impl Runner {
                 self.check_in_after_confirm = true;
                 self.next_check_in = None;
             }
-            Err(ClientError::Terminal(code)) => self.reject(identity, code.as_str())?,
+            Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
             Err(error) => {
                 warn!(authority_id = %self.authority_id, reason = %error, "Agent Identity check-in will retry");
                 self.check_in_retry.failed(&self.shared.settings, error.retry_after());
@@ -363,24 +393,27 @@ impl Runner {
         Ok(())
     }
 
-    /// Records a terminal outcome, which stops this runner for good.
+    /// Latches a terminal outcome; the next step records it and stops this runner for good.
     ///
     /// `crates/agent-identity/INTENT.md` ("Identities"): the identity keeps its keys and slots until it is replaced.
-    fn reject(&self, identity: &mut StoredIdentity, code: &str) -> anyhow::Result<()> {
-        self.shared.store.reject_identity(identity, code)?;
-        warn!(
-            authority_id = %self.authority_id,
-            identity_id = %self.identity_id,
-            code,
-            "The authority rejected the Agent Identity; it stops renewing and checking in"
-        );
-        Ok(())
+    fn reject(&mut self, code: &'static str) {
+        self.terminal = Some(code);
     }
 
-    fn signer(&self, record: &KeyRecord) -> anyhow::Result<RequestSigner> {
-        let key: Box<dyn DeviceKey> = device_key::open(self.shared.store.key_backend(), &record.key_name)?
-            .context("identity key is missing from its key store")?;
-        client::request_signer(Arc::from(key), certificate_chain(record)?)
+    /// Returns a signer for the current key, or latches `key_lost` and returns `None` when the key no longer exists.
+    ///
+    /// `crates/agent-identity/INTENT.md` ("Identities"): an identity whose current key no longer exists in its key store
+    /// is rejected with the code `key_lost`.
+    fn current_signer(&mut self, identity: &StoredIdentity) -> anyhow::Result<Option<RequestSigner>> {
+        let current = &identity.keys.current;
+        // UNTESTED: a current key missing at run time rejects the identity as `key_lost` instead of retrying forever.
+        // Start-up reconciliation has a test; this path doesn't. When changing it, keep `None` distinct from an
+        // open error, which stays a retried local failure.
+        let Some(key) = device_key::open(self.shared.store.key_backend(), &current.key_name)? else {
+            self.reject(KEY_LOST);
+            return Ok(None);
+        };
+        client::request_signer(Arc::from(key), certificate_chain(current)?).map(Some)
     }
 
     /// Opens a pending key, or returns `None` when it is unusable.
