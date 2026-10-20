@@ -17,10 +17,10 @@ use std::sync::{Arc, LazyLock, Weak};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use devolutions_gateway_ai::{Language, Usage};
 use devolutions_gateway_ai::recording_analysis::{
     self, Progress, RecordingAnalysisEvent, RecordingFile, RecordingManifest, Recordings, RecordingsError,
 };
+use devolutions_gateway_ai::{Language, Usage};
 use provisioner_task::{CreateOutcome, ProvisionerTaskRecord};
 use secrecy::SecretString;
 use serde_json::json;
@@ -115,8 +115,8 @@ pub struct Params {
     provider: AiProvider,
     model: String,
     max_output_tokens: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language: Option<Language>,
 }
 
 /// Result payload of a successful AI analysis.
@@ -169,7 +169,7 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         provider: settings.provider,
         model: settings.model,
         max_output_tokens: settings.max_output_tokens,
-        language: language.map(|language| language.to_string()),
+        language,
     };
     let target = session_id.to_string();
 
@@ -294,6 +294,16 @@ impl ProvisionerTask for RecordingAiAnalysis {
             details: format!("invalid session ID: {error}"),
         })?;
 
+        // Waiting for an earlier analysis of the session counts in the attempt time, so a timeout cancels it too.
+        let _session = tokio::select! {
+            session = lock_session(session_id) => session,
+            () = attempt.cancel.cancelled() => return Err(AttemptError::Cancelled),
+        };
+
+        // A new Task is a hard restart, so the session loses its earlier analysis even when the Task then fails, such as
+        // on a lost key. Every attempt clears, since an earlier one may have ended before it could.
+        self.clear_earlier_analysis(attempt, session_id).await?;
+
         let secret = self
             .provisioning
             .task_secret(attempt.task_id)
@@ -309,15 +319,6 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
         let access = AiAccess::from_secret(&secret).map_err(|error| AttemptError::Permanent(format!("{error:#}")))?;
 
-        let language = params
-            .language
-            .map(Language::new)
-            .transpose()
-            .map_err(|error| AttemptError::Failed {
-                reason: "invalid task",
-                details: format!("invalid language: {error}"),
-            })?;
-
         let settings = AiSettings {
             provider: params.provider,
             model: params.model,
@@ -325,7 +326,8 @@ impl ProvisionerTask for RecordingAiAnalysis {
             max_output_tokens: params.max_output_tokens,
         };
 
-        self.analyze(attempt, session_id, settings, language, access.api_key).await
+        self.analyze(attempt, session_id, settings, params.language, access.api_key)
+            .await
     }
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) {
@@ -345,6 +347,27 @@ impl ProvisionerTask for RecordingAiAnalysis {
 }
 
 impl RecordingAiAnalysis {
+    /// Removes the analysis an earlier Task added to the session, and on the first attempt the working files any
+    /// analysis left; later attempts are job retries, which resume from their own working files.
+    async fn clear_earlier_analysis(&self, attempt: &Attempt, session_id: Uuid) -> Result<(), AttemptError> {
+        let cleared = async {
+            self.recordings
+                .clear_artifacts(session_id, ArtifactKind::AiAnalysis)
+                .await?;
+
+            if attempt.attempts == 1 {
+                recording_analysis::discard(&self.manifest_path(session_id), None).await?;
+            }
+
+            anyhow::Ok(())
+        };
+
+        cleared
+            .await
+            .map_err(|error| AttemptError::Permanent(format!("failed to remove the earlier AI analysis: {error:#}")))
+    }
+
+    /// Runs the analysis while the caller holds the lock of the session.
     async fn analyze(
         &self,
         attempt: &Attempt,
@@ -359,12 +382,6 @@ impl RecordingAiAnalysis {
             .client(&conf, &api_key)
             .map_err(|error| AttemptError::Permanent(error.to_string()))?;
 
-        // Waiting for an earlier analysis of the session counts in the attempt time, so a timeout cancels it too.
-        let _session = tokio::select! {
-            session = lock_session(session_id) => session,
-            () = attempt.cancel.cancelled() => return Err(AttemptError::Cancelled),
-        };
-
         let recording = self
             .recordings
             .get_finished(session_id)
@@ -374,21 +391,6 @@ impl RecordingAiAnalysis {
         let manifest =
             analysis_manifest(&recording.manifest).map_err(|error| AttemptError::Permanent(error.to_string()))?;
         let manifest_path = recording.manifest_path();
-
-        // A new Task is a hard restart: nothing an earlier analysis of the session left stays, not even its result.
-        // Its later attempts are job retries, which resume from the working files.
-        if attempt.attempts == 1 {
-            let cleared = async {
-                self.recordings
-                    .clear_artifacts(session_id, ArtifactKind::AiAnalysis)
-                    .await?;
-                recording_analysis::discard(&manifest_path, None).await?;
-                anyhow::Ok(())
-            };
-            cleared.await.map_err(|error| {
-                AttemptError::Permanent(format!("failed to remove the earlier AI analysis: {error:#}"))
-            })?;
-        }
 
         self.wait_for_remux(attempt, &recording.dir).await?;
 
