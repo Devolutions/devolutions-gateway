@@ -33,8 +33,8 @@ public sealed class ChannelHandshakeResult
     }
 
     /// <summary>
-    /// Whether the agent proved that it holds the key of the certificate that opened the stream,
-    /// and sent valid metadata.
+    /// Whether the stream authenticated: the certificate that opened it is still registered, unexpired and of an
+    /// unrevoked identity, and the agent proved in time that it holds its key and sent valid metadata.
     /// </summary>
     [MemberNotNullWhen(true, nameof(Identity), nameof(Metadata), nameof(Welcome))]
     [MemberNotNullWhen(false, nameof(Error), nameof(FailureDetail))]
@@ -47,6 +47,11 @@ public sealed class ChannelHandshakeResult
     /// <remarks>
     /// The stream stays bound to the certificate that opened it,
     /// so the host closes the stream no later than <see cref="AuthenticatedIdentity.CertificateNotAfter"/>.
+    /// When a confirm retired that certificate during the handshake,
+    /// <see cref="AuthenticatedIdentity.CertificateStatus"/> is <see cref="CertificateStatus.Retired"/>,
+    /// and the host treats the stream as every stream of a retired certificate (CONTRACT.md §7.4):
+    /// it sends <c>Reconnect</c> with reason <c>certificate_rotated</c>,
+    /// and closes the stream with <c>OK</c> 60 s later.
     /// </remarks>
     public AuthenticatedIdentity? Identity { get; }
 
@@ -65,15 +70,17 @@ public sealed class ChannelHandshakeResult
     /// The error to close the stream with, when the handshake failed.
     /// </summary>
     /// <remarks>
-    /// It is <see cref="AgentIdentityErrorCode.CertificateExpired"/> when the certificate that opened the stream
-    /// expired during the handshake, and <see cref="AgentIdentityErrorCode.InvalidRequest"/> when the agent proved the
-    /// key in time but sent invalid metadata.
+    /// It is <see cref="AgentIdentityErrorCode.IdentityUnknown"/> when the certificate that opened the stream is no
+    /// longer registered or its identity was deleted, <see cref="AgentIdentityErrorCode.IdentityRevoked"/> when the
+    /// identity was revoked, <see cref="AgentIdentityErrorCode.CertificateExpired"/> when the certificate expired
+    /// during the handshake, and <see cref="AgentIdentityErrorCode.InvalidRequest"/> when the agent proved the key in
+    /// time but sent invalid metadata.
     /// Every other failure is <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
     /// </remarks>
     public AgentIdentityError? Error { get; }
 
     /// <summary>
-    /// The rule that the first agent message broke, for host logs, when the handshake failed.
+    /// The rule that the handshake failed on, for host logs, when the handshake failed.
     /// </summary>
     /// <remarks>
     /// It never repeats a value from the message, and quotes a metadata key only when the key itself is valid.

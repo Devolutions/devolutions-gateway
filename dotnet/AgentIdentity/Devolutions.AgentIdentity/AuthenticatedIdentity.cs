@@ -36,9 +36,14 @@ public sealed class AuthenticatedIdentity
     public string CertificateThumbprint { get; }
 
     /// <summary>
-    /// The status of the certificate whose key signed the request:
-    /// <see cref="CertificateStatus.Pending"/> or <see cref="CertificateStatus.Current"/>.
+    /// The status of the certificate whose key signed the request, as the registry held it when the request
+    /// authenticated.
     /// </summary>
+    /// <remarks>
+    /// It is <see cref="CertificateStatus.Pending"/> or <see cref="CertificateStatus.Current"/>,
+    /// or <see cref="CertificateStatus.Retired"/> for an agent channel stream whose certificate a confirm retired
+    /// during the handshake.
+    /// </remarks>
     public CertificateStatus CertificateStatus { get; }
 
     /// <summary>

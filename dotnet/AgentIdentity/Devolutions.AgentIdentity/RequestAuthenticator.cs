@@ -127,7 +127,7 @@ public sealed class RequestAuthenticator
     /// and its nonce is recorded only once every other step has passed.
     /// A verified opening does not authenticate the stream:
     /// the agent must still sign <see cref="ChannelOpening.Challenge"/>,
-    /// which <see cref="ChannelOpening.VerifyHello"/> checks.
+    /// which <see cref="ChannelOpening.VerifyHelloAsync"/> checks.
     /// The agent has <see cref="ChannelHandshake.HelloTimeout"/> to do so, counted from the end of this verification.
     /// </remarks>
     /// <param name="method">The request method, as received.</param>
@@ -178,7 +178,8 @@ public sealed class RequestAuthenticator
                 Guid.NewGuid(),
                 challenge,
                 openedAt,
-                _timeProvider));
+                _timeProvider,
+                _certificateRegistry));
     }
 
     private async ValueTask<Verification> VerifyAsync(
