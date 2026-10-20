@@ -16,7 +16,9 @@ use uuid::Uuid;
 
 use crate::ca::{self, DEFAULT_LEAF_LIFETIME_SECS, RootCa};
 use crate::name_eval;
-use crate::oracle::{AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, check_csr};
+use crate::oracle::{
+    AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, check_csr, unexpired, within_renewal_grace,
+};
 
 /// The only config schema version the contract defines ([CONTRACT.md][contract], "5.2 `POST enroll`").
 ///
@@ -195,7 +197,9 @@ pub(crate) struct Cert {
 
 impl Cert {
     fn active_on_root(&self, root: &str, now: i64) -> bool {
-        matches!(self.status, CertStatus::Current | CertStatus::Pending) && self.issuer == root && now < self.not_after
+        matches!(self.status, CertStatus::Current | CertStatus::Pending)
+            && self.issuer == root
+            && unexpired(self.not_after, now)
     }
 }
 
@@ -310,11 +314,11 @@ fn identity_status(revoked: bool, certs: impl IntoIterator<Item = (CertStatus, i
         if cert_status == CertStatus::Retired {
             continue;
         }
-        if now < not_after {
+        if unexpired(not_after, now) {
             return IdentityStatus::Active;
         }
         // CONTRACT.md §6 and §8.2: renewal grace lasts the certificate's own lifetime.
-        if now < not_after + (not_after - not_before) {
+        if within_renewal_grace(not_before, not_after, now) {
             status = IdentityStatus::Grace;
         }
     }
@@ -344,10 +348,17 @@ pub(crate) struct StreamHandle {
     pub(crate) retire_at: Option<i64>,
 }
 
+/// A stream closes no later than its certificate's `notAfter` ([CONTRACT.md][contract], "7.4 Termination"),
+/// so it closes at `notAfter` even though §6 still accepts the certificate then.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
+pub(crate) fn stream_expired(not_after: i64, now: i64) -> bool {
+    now >= not_after
+}
+
 fn has_live_old_root_stream(identity: &Identity, streams: &HashMap<Uuid, StreamHandle>, root: &str, now: i64) -> bool {
     identity.certs.iter().any(|cert| {
         cert.active_on_root(root, now)
-            && cert.not_before <= now
             && streams
                 .values()
                 .any(|stream| stream.identity_id == identity.id && stream.cert_thumbprint == cert.thumbprint)
@@ -1227,7 +1238,7 @@ impl State {
             .iter()
             .filter(|(_, stream)| {
                 self.lookup_cert(&stream.cert_thumbprint)
-                    .is_some_and(|cert| now >= cert.not_after)
+                    .is_some_and(|cert| stream_expired(cert.not_after, now))
             })
             .map(|(id, _)| *id)
             .collect::<Vec<_>>();
@@ -1252,7 +1263,7 @@ impl State {
                     Some(cert) if cert.revoked => {
                         Some(("PERMISSION_DENIED", "identity_revoked", PushKind::CloseRevoked))
                     }
-                    Some(cert) if now >= cert.not_after => {
+                    Some(cert) if stream_expired(cert.not_after, now) => {
                         Some(("UNAUTHENTICATED", "certificate_expired", PushKind::CloseExpired))
                     }
                     Some(_) => None,
@@ -1419,17 +1430,20 @@ mod tests {
     use super::*;
 
     // Certificates live 100 s, so CONTRACT.md §6 grants each one 100 s of renewal grace after `notAfter`.
+    // CONTRACT.md §6: "A certificate is unexpired while `now ≤ notAfter`"; `notBefore` is not checked.
     const CURRENT: (CertStatus, i64, i64) = (CertStatus::Current, 900, 1000);
     const PENDING: (CertStatus, i64, i64) = (CertStatus::Pending, 1000, 1100);
 
     #[rstest]
     #[case::current_unexpired(&[CURRENT], 999, IdentityStatus::Active)]
-    #[case::current_at_not_after(&[CURRENT], 1000, IdentityStatus::Grace)]
+    #[case::current_at_not_after(&[CURRENT], 1000, IdentityStatus::Active)]
+    #[case::current_first_expired_second(&[CURRENT], 1001, IdentityStatus::Grace)]
+    #[case::current_before_not_before(&[CURRENT], 899, IdentityStatus::Active)]
     #[case::current_last_grace_second(&[CURRENT], 1099, IdentityStatus::Grace)]
     #[case::current_beyond_grace(&[CURRENT], 1100, IdentityStatus::Expired)]
     #[case::pending_unexpired_current_in_grace(&[CURRENT, PENDING], 1050, IdentityStatus::Active)]
     #[case::pending_unexpired_current_beyond_grace(&[CURRENT, (CertStatus::Pending, 1050, 1150)], 1100, IdentityStatus::Active)]
-    #[case::pending_in_grace_current_beyond_grace(&[CURRENT, PENDING], 1100, IdentityStatus::Grace)]
+    #[case::pending_in_grace_current_beyond_grace(&[CURRENT, PENDING], 1101, IdentityStatus::Grace)]
     #[case::pending_beyond_grace(&[CURRENT, PENDING], 1200, IdentityStatus::Expired)]
     #[case::retired_unexpired(&[(CertStatus::Retired, 1000, 2000), CURRENT], 1100, IdentityStatus::Expired)]
     fn identity_status_follows_certificate_validity_and_grace(
@@ -1491,6 +1505,35 @@ mod tests {
         assert!(state.rotation.is_none());
         assert_eq!(state.roots.iter().filter(|root| root.published).count(), 1);
         assert!(state.issuing_root().published);
+        Ok(())
+    }
+
+    /// The rotation status counts identities that still hold an unexpired old-root certificate ([DVLS intent][dvls], "Rotation"),
+    /// and CONTRACT.md §6 keeps a certificate unexpired while `now ≤ notAfter`.
+    ///
+    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#rotation
+    #[test]
+    fn old_root_certificate_counts_as_active_through_its_not_after() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::new(now)?;
+        let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let identity_id = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .expect("enrollment succeeds")
+            .identity_id;
+        let not_after = state.identities[&identity_id]
+            .current_cert()
+            .expect("current certificate")
+            .not_after;
+        state
+            .start_rotation(None, now)
+            .expect("rotation starts with one active old-root identity");
+
+        assert_eq!(state.active_identities_on_old_root(not_after), 1);
+        assert_eq!(state.active_identities_on_old_root(not_after + 1), 0);
         Ok(())
     }
 

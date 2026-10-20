@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::app::{App, rfc3339};
 use crate::name_eval;
 use crate::oracle::{CertStatus, Endpoint, Rejection, verify_channel_proof, verify_request};
-use crate::state::{StreamHandle, StreamPush};
+use crate::state::{StreamHandle, StreamPush, stream_expired};
 
 /// §7.3: the agent must answer the challenge within 10 s (real time).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
@@ -104,6 +104,11 @@ impl AgentChannel for ChannelService {
                     nonces,
                 )
             };
+            // An opening at `notAfter` would have to close at once, so it is refused like an expired one.
+            let result = result.and_then(|auth| match state.lookup_cert(auth.cert_thumbprint()) {
+                Some(cert) if stream_expired(cert.not_after, now) => Err(Rejection::CertificateExpired),
+                _ => Ok(auth),
+            });
             if let Ok(auth) = &result {
                 state.challenged_streams.insert(
                     stream_id,
@@ -344,7 +349,7 @@ async fn run_stream(
             {
                 if cert.revoked {
                     Some(Rejection::IdentityRevoked)
-                } else if cert.not_before > now || now >= cert.not_after {
+                } else if stream_expired(cert.not_after, now) {
                     Some(Rejection::CertificateExpired)
                 } else {
                     None
@@ -556,7 +561,7 @@ async fn run_stream(
                     match state.lookup_cert(&cert_thumbprint) {
                         None => Some(Rejection::IdentityUnknown),
                         Some(cert) if cert.revoked => Some(Rejection::IdentityRevoked),
-                        Some(cert) if now >= cert.not_after => Some(Rejection::CertificateExpired),
+                        Some(cert) if stream_expired(cert.not_after, now) => Some(Rejection::CertificateExpired),
                         Some(_) => None,
                     }
                 };

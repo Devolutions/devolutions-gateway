@@ -269,8 +269,8 @@ pub(crate) fn verify_request(
         return Err(Rejection::IdentityRevoked);
     }
     let valid = match endpoint {
-        Endpoint::Connect | Endpoint::Confirm | Endpoint::CheckIn => cert.not_before <= now && now < cert.not_after,
-        Endpoint::Renew => now < cert.not_after + (cert.not_after - cert.not_before),
+        Endpoint::Connect | Endpoint::Confirm | Endpoint::CheckIn => unexpired(cert.not_after, now),
+        Endpoint::Renew => within_renewal_grace(cert.not_before, cert.not_after, now),
     };
     if !valid {
         return Err(Rejection::CertificateExpired);
@@ -300,6 +300,16 @@ pub(crate) fn verify_request(
         nonce: nonce.to_owned(),
         public_key: cert.public_key,
     })
+}
+
+/// §6: a certificate is unexpired while `now ≤ notAfter`, whatever its `notBefore`.
+pub(crate) fn unexpired(not_after: i64, now: i64) -> bool {
+    now <= not_after
+}
+
+/// §6 `renew` rule: unexpired, or expired by less than the certificate's own lifetime.
+pub(crate) fn within_renewal_grace(not_before: i64, not_after: i64, now: i64) -> bool {
+    now < not_after + (not_after - not_before)
 }
 
 fn header_str(value: Option<&[u8]>) -> Result<&str, Rejection> {
@@ -370,8 +380,71 @@ mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use rstest::rstest;
+    use uuid::Uuid;
 
-    use super::{Endpoint, NonceStore, Rejection, verify_request};
+    use super::{CertStatus, Endpoint, NonceStore, RegisteredCert, Rejection, content_digest_header, verify_request};
+
+    /// Verifies a request for `endpoint` at `now = 1000`, signed by a certificate valid over `validity` with a signature that never verifies.
+    /// `SignatureInvalid` therefore means that step 4 accepted the certificate.
+    fn step_4_outcome(endpoint: Endpoint, status: CertStatus, validity: (i64, i64)) -> Option<Rejection> {
+        let key = p256::ecdsa::SigningKey::from_slice(&[1; 32]).expect("valid P-256 scalar");
+        let cert = RegisteredCert {
+            identity_id: Uuid::nil(),
+            revoked: false,
+            status,
+            not_before: validity.0,
+            not_after: validity.1,
+            public_key: *key.verifying_key(),
+        };
+        let components = endpoint
+            .components()
+            .iter()
+            .map(|component| format!("\"{component}\""))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let signature_input = format!(
+            "sig=({components});created=1000;expires=1060;nonce=\"{}\";keyid=\"{}\";alg=\"ecdsa-p256-sha256\";tag=\"{}\"",
+            URL_SAFE_NO_PAD.encode([0u8; 16]),
+            URL_SAFE_NO_PAD.encode([0u8; 32]),
+            endpoint.tag()
+        );
+        verify_request(
+            endpoint,
+            "POST",
+            Some(signature_input.as_bytes()),
+            Some(format!("sig=:{}==:", "A".repeat(86)).as_bytes()),
+            Some(content_digest_header(&[]).as_bytes()),
+            &[],
+            1000,
+            &mut |_| Some(cert.clone()),
+            &mut NonceStore::default(),
+        )
+        .err()
+    }
+
+    /// CONTRACT.md §6: "A certificate is unexpired while `now ≤ notAfter`" and "`notBefore` is not checked".
+    #[rstest]
+    #[case::connect_at_not_after(Endpoint::Connect, (900, 1000), Rejection::SignatureInvalid)]
+    #[case::connect_after_not_after(Endpoint::Connect, (899, 999), Rejection::CertificateExpired)]
+    #[case::connect_before_not_before(Endpoint::Connect, (1001, 2000), Rejection::SignatureInvalid)]
+    #[case::confirm_at_not_after(Endpoint::Confirm, (900, 1000), Rejection::SignatureInvalid)]
+    #[case::confirm_after_not_after(Endpoint::Confirm, (899, 999), Rejection::CertificateExpired)]
+    #[case::confirm_before_not_before(Endpoint::Confirm, (1001, 2000), Rejection::SignatureInvalid)]
+    #[case::check_in_at_not_after(Endpoint::CheckIn, (900, 1000), Rejection::SignatureInvalid)]
+    #[case::check_in_after_not_after(Endpoint::CheckIn, (899, 999), Rejection::CertificateExpired)]
+    #[case::check_in_before_not_before(Endpoint::CheckIn, (1001, 2000), Rejection::SignatureInvalid)]
+    // CONTRACT.md §6 table: renew accepts a certificate while `now < notAfter + (notAfter − notBefore)`.
+    #[case::renew_last_grace_second(Endpoint::Renew, (899, 950), Rejection::SignatureInvalid)]
+    #[case::renew_grace_end(Endpoint::Renew, (900, 950), Rejection::CertificateExpired)]
+    #[case::renew_before_not_before(Endpoint::Renew, (1001, 2000), Rejection::SignatureInvalid)]
+    fn certificate_validity_follows_the_operation_rule(
+        #[case] endpoint: Endpoint,
+        #[case] validity: (i64, i64),
+        #[case] expected: Rejection,
+        #[values(CertStatus::Current, CertStatus::Pending)] status: CertStatus,
+    ) {
+        assert_eq!(step_4_outcome(endpoint, status, validity), Some(expected));
+    }
 
     #[test]
     fn nonce_conflict_keeps_original_expiry_through_boundary() {
