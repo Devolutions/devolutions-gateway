@@ -1,6 +1,6 @@
 ---
 name: test-writer
-description: Design Rust tests that catch bugs, choosing between an example test, `rstest` cases, an `expect-test` snapshot, a `proptest` property, and a fuzz target. Use whenever adding or changing Rust unit, integration, snapshot, or property tests.
+description: Design tests that catch bugs, choosing between an example test, parametrized cases, a snapshot, a property, and a fuzz target; Rust forms (`rstest`, `expect-test`, `proptest`) in the body, C# forms (xUnit `[Theory]`, CsCheck) in `references/csharp.md`. Use whenever adding or changing unit, integration, snapshot, or property tests in Rust or C#.
 ---
 
 # Test writer
@@ -8,6 +8,7 @@ description: Design Rust tests that catch bugs, choosing between an example test
 First name the bug the test catches that existing tests miss; without one it costs runtime and maintenance and guards nothing.
 Take the expected value from a source independent of the code under test, as `test-oracle-reviewer` defines; a value derived from the implementation detects change, not bugs.
 Reach nothing beyond loopback, because an external host makes a failure unreproducible.
+The rules below name the Rust forms; for a C# test, read `references/csharp.md` for the form each rule takes there.
 
 ## Properties
 

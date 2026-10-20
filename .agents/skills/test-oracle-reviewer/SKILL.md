@@ -23,4 +23,4 @@ Unknown is an outcome, not a guess in either direction.
 
 In a pull request review, comment on each self-derived test with the independent source to use and leave the fix to the author.
 When that source needs a small non-test change, such as an injectable deadline the test can choose, request the change.
-For mutation evidence on the same pull request, use `test-pruner` in pull request mode.
+For mutation evidence on the same pull request, use `test-pruner` in review mode.
