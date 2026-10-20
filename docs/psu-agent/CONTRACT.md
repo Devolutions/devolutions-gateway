@@ -1,7 +1,6 @@
 # PSU Agent Run As
 
-PowerShell Universal (PSU) sends Windows process credentials only to a Devolutions Agent on a device-authenticated connection with verified TLS and the exact Run As capability.
-This contract defines that exchange over `devolutions.psu.agent.poc.v1.AgentControl.Connect`.
+This contract defines credentialed Windows job execution between PowerShell Universal (PSU) and Devolutions Agent over `devolutions.psu.agent.poc.v1.AgentControl.Connect`.
 It does not define enrollment, administrative interfaces, or the credential-free process protocol.
 Declarative statements in this document are requirements.
 
@@ -13,7 +12,7 @@ A replacement stream is a different connection, even when it represents the same
 **Device-authenticated connection**: a connection for which PSU accepted the enrolled device's certificate-backed authentication and bound the registered Agent identity to that authenticated device.
 An app-token-authenticated connection is not device-authenticated, even if enrollment is enabled or an enrollment record exists for the reported Agent.
 
-**Run As request**: a PSU job with a selected credential, represented on the wire by a present `StartProcess.credential` message.
+**Run As request**: a PSU job with a selected credential, represented on the wire by a present `StartProcess.credential` message on the launch that hosts the job's PowerShell remoting (PSRP) runspace.
 An empty credential message is present, not omitted.
 
 ## Credential message
@@ -36,12 +35,11 @@ Run As eligibility checks do not become prerequisites for credential-free execut
 A present `credential` requests the supplied Windows identity.
 The username is nonempty and not whitespace-only, the password is nonempty, and none of the three strings contains a NUL character.
 An omitted string has its protobuf default, the empty string.
-Passwordless credentials and managed service account credentials marked `PasswordNotRequired` are not supported.
 
 PSU maps a selected `DOMAIN\user` name to `username=user` and `domain=DOMAIN`.
 It maps `.\user` to `username=user` and `domain=.`.
 It preserves a UPN in `username` with an empty `domain`.
-An unqualified username with an empty `domain` identifies an account local to the Agent.
+With an empty `domain`, the Agent treats a `username` containing `@` as a UPN and any other `username` as an account local to the Agent.
 The password is transmitted without trimming or other transformation.
 
 ## Connection eligibility
@@ -53,10 +51,14 @@ The Agent advertises this capability in the connection's `RegisterAgent.capabili
 PSU uses the capability from that connection's registration, not a stored capability tag.
 Capability advertisement alone does not establish authentication or transport security.
 
+A Windows Agent sets `RegisterAgent.os` to `windows`.
+PSU's Windows registration check is an ordinal, case-insensitive substring match for `Windows` in `RegisterAgent.os`.
+This registration value is a platform claim, not operating-system attestation; the Agent also enforces its actual platform as required below.
+
 Before retrieving a selected credential from its secret vault, PSU requires all of the following for the connection selected to execute the job:
 
 - It is live and device-authenticated.
-- Its registration identifies Windows.
+- Its registration passes the Windows registration check.
 - Its registration contains the exact Run As capability.
 - Its actual incoming gRPC transport uses TLS 1.2 or TLS 1.3.
 
@@ -80,27 +82,29 @@ If an explicitly selected job credential is invalid, PSU does not substitute the
 After connection eligibility is established, PSU looks up the selected variable by name, case-insensitively.
 Before retrieving its secret, PSU requires that the variable exists, allows Run As, is a secret of type `PSCredential` with a nonblank vault, and is not marked `PasswordNotRequired`.
 The `PSCredential` type comparison is case-insensitive.
-When the variable restricts roles, at least one of its nonblank role names matches a complete execution-role name on the job, case-insensitively.
+When the variable's role list is not empty, at least one of its nonblank role names matches a complete execution-role name on the job, case-insensitively.
 Job execution-role names are comma-separated, with surrounding whitespace and empty entries ignored.
 Substring role matches do not grant access.
 PSU retrieves the secret only after these checks succeed.
 An unavailable secret or a secret without a nonblank username and nonempty password fails the request.
-PSU encodes the retrieved credential only for the job's process launch.
+PSU encodes the retrieved credential only for the launch that hosts the job's PSRP runspace.
+The existing credential-free launches for virtual-environment import, connection-time repository initialization, and standalone remote commands remain credential-free.
+They are not substitutes for a failed Run As request.
 
 ## Launch and failure behavior
 
 For an eligible Run As request, the Agent uses Windows batch logon and native process creation under the supplied identity.
 The job's PowerShell runspace, startup scripts, and script execute under that identity.
 The Agent does not load the user's Windows profile, create an interactive desktop or UAC prompt, or grant rights beyond that identity's Windows permissions.
-The target account requires batch-logon rights and access to the executable, working directory, scripts, and repository used by the job.
-The executable is a native Windows program, not a `.cmd` or `.bat` launcher.
+If the target account lacks batch-logon rights or access to the executable or working directory, the launch fails as described below.
+Launching a `.cmd` or `.bat` file instead of a native Windows program also fails.
 The process receives the target user's base environment plus the requested environment overrides.
 
 A PSU-side refusal or credential-resolution failure produces an unsuccessful job result with an explanatory error and no credential-bearing launch.
 A requested Run As job does not become a credential-free job after any failure.
 Neither endpoint retries it under the service identity or silently ignores a present credential.
 
-For a credential-bearing `StartProcess` with otherwise valid, unused process and stream identifiers, the Agent treats ineligible connection or platform, invalid credential fields, failed Windows logon, and failed process creation as launch failures.
+For a credential-bearing `StartProcess` with a `correlation_id` and `stream_id` not already in use, the Agent treats ineligible connection or platform, invalid credential fields, failed Windows logon, and failed process creation as launch failures.
 It starts no job under a substitute identity and sends no `ProcessStarted` for a failed launch.
 While the connection remains writable, it sends these existing responses in order:
 
@@ -108,7 +112,7 @@ While the connection remains writable, it sends these existing responses in orde
 2. `ProcessCompleted` with the request's `correlation_id`, `exit_code=-1`, `canceled=false`, and the same explanation in `error_message`.
 
 The diagnostic text is not a machine-readable error code and its wording is not fixed.
-PSU reports the launch failure as an unsuccessful job rather than waiting for the failed process to acknowledge runspace closure.
+On receiving these responses, PSU completes the job as unsuccessful without waiting for further messages for that `correlation_id`.
 Loss of the connection is not evidence that a process did or did not start and does not authorize a credential-free retry.
 This contract does not add retry or deduplication semantics to `StartProcess`.
 
