@@ -80,6 +80,13 @@ pub(crate) fn validate_key_name(prefix: &str, name: &str) -> anyhow::Result<()> 
     Ok(())
 }
 
+/// The run's key name that a file name embeds, such as the name of a key-store file holding a copy of that key.
+fn embedded_key_name<'a>(file_name: &'a str, prefix: &str) -> Option<&'a str> {
+    let start = file_name.find(&format!("{prefix}_"))?;
+    let name = file_name.get(start..start + prefix.len() + 1 + uuid::fmt::Hyphenated::LENGTH)?;
+    validate_key_name(prefix, name).is_ok().then_some(name)
+}
+
 fn canonical_authority_dir(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
@@ -408,6 +415,22 @@ impl AgentCase {
         let path = self.path().join("agent.json");
         let mut config: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
         config["__debug__"]["identity"]["backoff_max_secs"] = json!(secs);
+        std::fs::write(path, serde_json::to_vec_pretty(&config)?)?;
+        Ok(())
+    }
+
+    /// Removes the renewal schedule override, so the agent renews at its scheduled time again.
+    fn clear_renewal_after_secs(&mut self) -> anyhow::Result<()> {
+        ensure!(
+            self.child.is_none(),
+            "the renewal schedule must be set before starting the agent"
+        );
+        let path = self.path().join("agent.json");
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        config["__debug__"]["identity"]
+            .as_object_mut()
+            .context("agent configuration has no identity debug settings")?
+            .remove("renewal_after_secs");
         std::fs::write(path, serde_json::to_vec_pretty(&config)?)?;
         Ok(())
     }
@@ -743,6 +766,20 @@ impl AgentCase {
         }
     }
 
+    /// Waits until `done` holds for the agent's files, which the agent may still be changing after the authority answered.
+    async fn until_files(&mut self, what: &str, done: impl Fn() -> bool) -> anyhow::Result<()> {
+        let start = Instant::now();
+        while !done() {
+            self.check_running()?;
+            ensure!(
+                start.elapsed() < WAIT,
+                "agent did not complete {what} within 20 seconds"
+            );
+            tokio::time::sleep(POLL).await;
+        }
+        Ok(())
+    }
+
     async fn finish(&mut self) -> anyhow::Result<()> {
         let stopped = self.stop().await;
         let layout = self.audit_identity_tree();
@@ -828,6 +865,16 @@ impl AgentCase {
                     "unrecorded private key file {}",
                     path.display()
                 );
+                let file_name = entry.file_name();
+                let file_name = file_name.to_string_lossy();
+                if path.parent() == Some(keys.as_path())
+                    && let Some(key) = embedded_key_name(&file_name, &self.ctx.key_name_prefix)
+                    && !recorded_keys.contains(key)
+                {
+                    // A leftover copy of a deleted key survives only until a later operation in its key store (`crates/device-key/INTENT.md`, "Operations"), and the agent's last operation may have left it.
+                    eprintln!("WARN leftover copy of deleted key {key}: {}", path.display());
+                    continue;
+                }
                 ensure!(
                     !is_temporary_sibling(&path, &documented, &self.ctx.key_name_prefix),
                     "leftover identity temporary file {}",
@@ -1373,6 +1420,47 @@ fn key_name<'a>(state: &'a Value, slot: &str) -> anyhow::Result<&'a str> {
     field(&state["keys"][slot], "key_name")
 }
 
+/// The thumbprint of the leaf stored on a key slot, or `None` while the slot holds no chain.
+fn stored_leaf_thumbprint(state: &Value, slot: &str) -> anyhow::Result<Option<String>> {
+    state["keys"][slot]["certificate_chain"][0]
+        .as_str()
+        .map(crate::signer::thumbprint)
+        .transpose()
+}
+
+fn request_sequence(requests: &Value) -> anyhow::Result<&[Value]> {
+    requests["request_sequence"]
+        .as_array()
+        .map(Vec::as_slice)
+        .context("mock request sequence missing")
+}
+
+/// The renew and confirm attempts, with the mock's `confirm_204` markers, recorded after `earlier`.
+///
+/// Check-ins are left out: once a `confirm` has been answered, the contract does not order them against a renewal.
+fn renew_and_confirm_steps_since<'a>(requests: &'a Value, earlier: &Value) -> anyhow::Result<Vec<&'a str>> {
+    Ok(request_sequence(requests)?
+        .iter()
+        .skip(request_sequence(earlier)?.len())
+        .filter_map(Value::as_str)
+        .filter(|step| matches!(*step, "renew" | "confirm" | "confirm_204"))
+        .collect())
+}
+
+fn renew_keyids(requests: &Value) -> anyhow::Result<&[Value]> {
+    requests["renew_attempt_keyids"]
+        .as_array()
+        .map(Vec::as_slice)
+        .context("mock renew signing-key trace missing")
+}
+
+/// The thumbprints that signed the renew attempts recorded after `earlier`, in order.
+fn renew_keyids_since<'a>(requests: &'a Value, earlier: &Value) -> anyhow::Result<&'a [Value]> {
+    Ok(renew_keyids(requests)?
+        .get(renew_keyids(earlier)?.len()..)
+        .unwrap_or_default())
+}
+
 fn key_exists(case: &AgentCase, name: &str) -> anyhow::Result<bool> {
     validate_key_name(&case.ctx.key_name_prefix, name)?;
     #[cfg(windows)]
@@ -1409,6 +1497,46 @@ async fn wait_key_deleted(case: &mut AgentCase, name: &str) -> anyhow::Result<()
             "old key survived successful identity replacement"
         );
         tokio::time::sleep(POLL).await;
+    }
+    Ok(())
+}
+
+/// Waits until the agent has stored a renewal that replaced `old_key`, holds no pending or previous key, and has deleted `old_key`.
+///
+/// The authority answers `confirm` before the agent stores its outcome and deletes the old key (`crates/agent-identity/INTENT.md`, "Stored identities"), so stopping the agent right after the `204` could interrupt those writes.
+async fn until_renewal_settled(
+    case: &mut AgentCase,
+    target: &Target,
+    authority: &str,
+    identity_id: &str,
+    old_key: &str,
+) -> anyhow::Result<Value> {
+    let state = case
+        .until_state(target, authority, identity_id, "a settled renewal", |state| {
+            key_name(state, "current").is_ok_and(|name| name != old_key)
+                && state["keys"].get("pending").is_none()
+                && state["keys"].get("previous").is_none()
+        })
+        .await?;
+    wait_key_deleted(case, old_key).await?;
+    Ok(state)
+}
+
+/// Fails if a file in the key store still holds a copy of the deleted key `name`.
+///
+/// No leftover copy of a private key survives a later operation in the same key store (`crates/device-key/INTENT.md`, "Operations"), so call this only after one.
+fn assert_no_copy_of_deleted_key(case: &AgentCase, name: &str) -> anyhow::Result<()> {
+    let keys = case.path().join("identity").join("keys");
+    if !keys.exists() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(keys)? {
+        let file_name = entry?.file_name();
+        ensure!(
+            embedded_key_name(&file_name.to_string_lossy(), &case.ctx.key_name_prefix) != Some(name),
+            "{} still holds a copy of deleted key {name} after a later key-store operation",
+            file_name.to_string_lossy()
+        );
     }
     Ok(())
 }
@@ -1762,16 +1890,24 @@ pub(crate) async fn a_two_pending_tokens_same_authority_last_wins(ctx: Context) 
                 "last completing token did not become the stored identity for its authority"
             );
             wait_key_deleted(case, &replacement_key).await?;
+            // Deleting the pending files and in-progress records may finish after the identity is stored.
+            let consumed = [&original_token, &replacement].map(|token| {
+                [
+                    case.pending_path_for(&token.text),
+                    case.in_progress_path_for(&token.text),
+                ]
+            });
+            case.until_files(
+                "the deletion of both tokens' pending files and in-progress records",
+                || consumed.iter().flatten().all(|path| !path.exists()),
+            )
+            .await?;
             ensure!(
                 target.management().identity_count(&original_token).await? == 1
                     && target.management().identity_count(&replacement).await? == 1
                     && target.management().token(&original_token.id).await?.used_count == 1
-                    && target.management().token(&replacement.id).await?.used_count == 1
-                    && !case.pending_path_for(&original_token.text).exists()
-                    && !case.pending_path_for(&replacement.text).exists()
-                    && !case.in_progress_path_for(&original_token.text).exists()
-                    && !case.in_progress_path_for(&replacement.text).exists(),
-                "independent pending tokens were not both consumed and cleaned up"
+                    && target.management().token(&replacement.id).await?.used_count == 1,
+                "independent pending tokens were not both consumed"
             );
             let record = case.identity_record(&target, &original_id).await?;
             assert_stored_identity(case, &original_token, &state, &record)?;
@@ -2108,9 +2244,30 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
     Ok(())
 }
 
+/// Removes the ANSI escape sequences that colour the agent's console log, which it writes even when its output is a file.
+#[cfg(unix)]
+fn without_ansi_escapes(line: &str) -> String {
+    let mut plain = String::with_capacity(line.len());
+    let mut characters = line.chars();
+    while let Some(character) = characters.next() {
+        if character != '\u{1b}' {
+            plain.push(character);
+            continue;
+        }
+        // A control sequence ends at its first byte in `@`..=`~` (ECMA-48 §5.4).
+        if characters.next() == Some('[') {
+            characters
+                .by_ref()
+                .find(|final_character| ('@'..='~').contains(final_character));
+        }
+    }
+    plain
+}
+
 #[cfg(unix)]
 fn is_error_level_log_line(line: &str) -> bool {
-    if let Ok(entry) = serde_json::from_str::<Value>(line) {
+    let line = without_ansi_escapes(line);
+    if let Ok(entry) = serde_json::from_str::<Value>(&line) {
         return entry["level"]
             .as_str()
             .is_some_and(|level| level.eq_ignore_ascii_case("error"));
@@ -2283,16 +2440,12 @@ pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: C
                         current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb) && record.connected
                     })
                     .await?;
-                case.until_state(&target, &authority, &id, "renew retry persisted", |state| {
-                    key_name(state, "current").is_ok_and(|name| name != old_key)
-                        && state["keys"].get("pending").is_none()
-                        && state.get("rejected").is_none()
-                })
-                .await?;
+                let settled = until_renewal_settled(case, &target, &authority, &id, &old_key).await?;
                 ensure!(
                     count(&target.requests(None).await?, "renew")? >= attempts + 2
                         && count(&target.requests(None).await?, "redirect_hits")? == count(&before, "redirect_hits")?
-                        && !renewed.renewal_requested,
+                        && !renewed.renewal_requested
+                        && settled.get("rejected").is_none(),
                     "renew {status} was followed as a redirect or not retried to completion"
                 );
             }
@@ -3064,6 +3217,8 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
                 !record.connected
             })
             .await?;
+            // The restarted agent would renew at once, since its certificate is older than `renewal_after_secs`.
+            case.clear_renewal_after_secs()?;
             case.start().await?;
             let resumed = case
                 .until_identity(&target, &id, "reconnected with persisted key", |record| {
@@ -3088,6 +3243,7 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
             let authority = field(&state, "authority_id")?.to_owned();
+            let old_key = key_name(&state, "current")?.to_owned();
             let before = case.identity_record(&target, &id).await?;
             let old_thumb = current_thumbprint(&before)?.to_owned();
             case.until_identity(&target, &id, "channel before requested renewal", |record| {
@@ -3173,11 +3329,20 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
                 count(&target.requests(None).await?, "confirm")? > confirmed_before,
                 "retried renewal was not confirmed with the new key"
             );
-            let state = case.state(&authority)?;
-            ensure!(
-                key_name(&state, "current")? == pending_key,
-                "agent did not reuse its persisted CSR key after restart"
-            );
+            let state = case
+                .until_state(
+                    &target,
+                    &authority,
+                    &id,
+                    "the retried renewal's key as current",
+                    |state| {
+                        key_name(state, "current").is_ok_and(|name| name == pending_key)
+                            && state["keys"].get("pending").is_none()
+                            && state["keys"].get("previous").is_none()
+                    },
+                )
+                .await?;
+            wait_key_deleted(case, &old_key).await?;
             case.check_key_protection(&authority, &state)?;
             Ok(())
         })
@@ -3393,10 +3558,11 @@ pub(crate) async fn a_confirm_barrier_blocks_channelless_traffic(ctx: Context) -
                 current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb) && !record.renewal_requested
             })
             .await?;
-            case.until_state(&target, &authority, &id, "confirmed key stored", |state| {
-                state["keys"].get("pending").is_none() && state.get("rejected").is_none()
-            })
-            .await?;
+            let settled = until_renewal_settled(case, &target, &authority, &id, key_name(&initial, "current")?).await?;
+            ensure!(
+                settled.get("rejected").is_none(),
+                "an unknown confirm outcome rejected the identity"
+            );
             Ok(())
         })
     })
@@ -3433,11 +3599,11 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
                 let record = case.identity_record(&target, &id).await?;
                 let stored = case.state(&authority)?;
                 let requests = target.requests(None).await?;
-                if count(&requests, "confirm")? > count(&before, "confirm")?
-                    && count(&requests, "confirm_retry_503")? >= 1
+                if count(&requests, "confirm_retry_503")? > count(&before, "confirm_retry_503")?
                     && let Ok(thumb) = current_thumbprint(&record)
                     && thumb != old_thumb
                     && let Ok(pending_key) = key_name(&stored, "pending")
+                    && stored_leaf_thumbprint(&stored, "pending")?.as_deref() == Some(thumb)
                 {
                     ensure!(
                         key_exists(case, &old_key)? && key_name(&stored, "current")? == old_key,
@@ -3482,6 +3648,7 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
                     .await?,
                 200,
             )?;
+            let restart = target.requests(None).await?;
             case.start().await?;
             let confirmed_record = case
                 .until_identity(&target, &id, "fresh-key renewal after rejected confirm", |record| {
@@ -3504,11 +3671,17 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
             );
             wait_key_deleted(case, &first_key).await?;
             wait_key_deleted(case, &old_key).await?;
+            // `renewal_after_secs` starts the next renewal three seconds after this one, so stop at the settled state.
+            case.stop().await?;
             let requests = target.requests(None).await?;
             ensure!(
-                count(&requests, "renew")? >= count(&before, "renew")? + 2
-                    && count(&requests, "confirm")? >= count(&before, "confirm")? + 4,
-                "agent did not renew with the expired pending key and confirm a fresh CSR"
+                renew_and_confirm_steps_since(&requests, &restart)?.starts_with(&[
+                    "confirm",
+                    "renew",
+                    "confirm",
+                    "confirm_204"
+                ]) && renew_keyids_since(&requests, &restart)?.starts_with(&[json!(first_thumb)]),
+                "agent did not retry confirm, renew signed with the expired pending key, then confirm a fresh CSR"
             );
             let events = target.events(&id).await?;
             ensure!(
@@ -3564,12 +3737,13 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
                 let record = case.identity_record(&target, &id).await?;
                 let stored = case.state(&authority)?;
                 let requests = target.requests(None).await?;
-                if count(&requests, "confirm_retry_503")? >= 1
+                if count(&requests, "confirm_retry_503")? > count(&before, "confirm_retry_503")?
                     && let Some(pending) = record
                         .certificates
                         .as_ref()
                         .and_then(|certs| certs.iter().find(|cert| cert.status == CertificateStatus::Pending))
                     && let Ok(key) = key_name(&stored, "pending")
+                    && stored_leaf_thumbprint(&stored, "pending")?.as_deref() == Some(pending.thumbprint.as_str())
                 {
                     ensure!(
                         current_thumbprint(&record)? == old_thumb,
@@ -3603,7 +3777,6 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
                 "pending key did not approach expiry before retry"
             );
             target.advance(secs).await?;
-            let renew_before_restart = count(&target.requests(None).await?, "renew")?;
             target
                 .faults(&json!({
                     "fail_next_response": {
@@ -3619,6 +3792,7 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
                     .await?,
                 200,
             )?;
+            let restart = target.requests(None).await?;
             case.start().await?;
             let renewed = case
                 .until_identity(
@@ -3635,29 +3809,27 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
                 .until_state(&target, &authority, &id, "confirmed fallback key", |state| {
                     key_name(state, "current").is_ok_and(|name| name != old_key && name != first_key)
                         && state["keys"].get("pending").is_none()
+                        && state["keys"].get("previous").is_none()
                         && state.get("rejected").is_none()
                 })
                 .await?;
             ensure!(
-                crate::signer::thumbprint(
-                    settled["keys"]["current"]["certificate_chain"][0]
-                        .as_str()
-                        .context("fallback certificate missing")?
-                )? == current_thumbprint(&renewed)?,
+                stored_leaf_thumbprint(&settled, "current")?.as_deref() == Some(current_thumbprint(&renewed)?),
                 "agent did not persist the fallback-renewed certificate"
             );
             wait_key_deleted(case, &first_key).await?;
             wait_key_deleted(case, &old_key).await?;
+            // `renewal_after_secs` starts the next renewal three seconds after this one, so stop at the settled state.
+            case.stop().await?;
             let requests = target.requests(None).await?;
-            let keyids = requests["renew_attempt_keyids"]
-                .as_array()
-                .context("mock renew signing-key trace missing")?;
-            let index = usize::try_from(renew_before_restart)?;
             ensure!(
-                keyids.get(index) == Some(&json!(first_thumb))
-                    && keyids.get(index + 1) == Some(&json!(old_thumb))
-                    && count(&requests, "renew")? >= count(&before, "renew")? + 3
-                    && count(&requests, "confirm")? >= count(&before, "confirm")? + 4
+                renew_and_confirm_steps_since(&requests, &restart)?.starts_with(&[
+                    "confirm",
+                    "renew",
+                    "renew",
+                    "confirm",
+                    "confirm_204"
+                ]) && renew_keyids_since(&requests, &restart)?.starts_with(&[json!(first_thumb), json!(old_thumb)])
                     && target
                         .events(&id)
                         .await?
@@ -3760,6 +3932,7 @@ pub(crate) async fn a_expired_current_renews_in_grace_or_rejects_beyond(ctx: Con
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
             let authority = field(&state, "authority_id")?.to_owned();
+            let old_key = key_name(&state, "current")?.to_owned();
             let original = case
                 .until_identity(&target, &id, "old certificate channel", |record| record.connected)
                 .await?;
@@ -3796,6 +3969,7 @@ pub(crate) async fn a_expired_current_renews_in_grace_or_rejects_beyond(ctx: Con
                     && case.state(&authority)?["rejected"].is_null(),
                 "expired-within-grace certificate did not sign renew and confirm before reconnecting"
             );
+            until_renewal_settled(case, &target, &authority, &id, &old_key).await?;
             Ok(())
         })
     })
@@ -3916,7 +4090,9 @@ pub(crate) async fn a_make_before_break_on_renewal(ctx: Context) -> anyhow::Resu
             let target = case.ctx.target.clone();
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
-            let (id, _) = case.enrolled(&target, &token).await?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            let old_key = key_name(&state, "current")?.to_owned();
             let connected = case
                 .until_identity(&target, &id, "first connection", |record| record.connected)
                 .await?;
@@ -3943,6 +4119,9 @@ pub(crate) async fn a_make_before_break_on_renewal(ctx: Context) -> anyhow::Resu
             if case.ctx.mock() {
                 assert_new_auth_precedes_old_close(&target, &id, &old_thumb, &new_thumb).await?;
             }
+            until_renewal_settled(case, &target, &authority, &id, &old_key).await?;
+            // `renewal_after_secs` starts the next renewal two seconds after this one, so stop at the settled state.
+            case.stop().await?;
             Ok(())
         })
     })
@@ -4057,7 +4236,7 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
             let target = case.ctx.target.clone();
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
-            let (id, _) = case.enrolled(&target, &token).await?;
+            let (id, state) = case.enrolled(&target, &token).await?;
             let record = case
                 .until_identity(&target, &id, "connected channel", |record| record.connected)
                 .await?;
@@ -4087,6 +4266,14 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
                     tokio::time::sleep(POLL).await;
                 }
             }
+            until_renewal_settled(
+                case,
+                &target,
+                field(&state, "authority_id")?,
+                &id,
+                key_name(&state, "current")?,
+            )
+            .await?;
             Ok(())
         })
     })
@@ -4099,7 +4286,7 @@ pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Res
             let target = case.ctx.target.clone();
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
-            let (id, _) = case.enrolled(&target, &token).await?;
+            let (id, state) = case.enrolled(&target, &token).await?;
             let first = case
                 .until_identity(&target, &id, "initial connection", |record| record.connected)
                 .await?;
@@ -4120,6 +4307,14 @@ pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Res
                 })
                 .await?;
             ensure!(renewed.connected, "agent did not reconnect after offline request");
+            until_renewal_settled(
+                case,
+                &target,
+                field(&state, "authority_id")?,
+                &id,
+                key_name(&state, "current")?,
+            )
+            .await?;
             Ok(())
         })
     })
@@ -4178,6 +4373,22 @@ pub(crate) async fn a_request_renewal_without_channel(ctx: Context) -> anyhow::R
                     "channelless renewal did not start at check-in and finish with confirm"
                 );
                 assert_check_in_triggers_renewal(&requests, sequence_start)?;
+            }
+            let authority = field(&state, "authority_id")?;
+            let old_key = key_name(&state, "current")?;
+            until_renewal_settled(case, &target, authority, &id, old_key).await?;
+            if case.ctx.mock() {
+                let check_ins = count(&target.requests(None).await?, "check_in")?;
+                case.stop().await?;
+                case.start().await?;
+                // Signing the check-in opens the current key, an operation in the key store later than the old key's deletion.
+                let started = Instant::now();
+                while count(&target.requests(None).await?, "check_in")? == check_ins {
+                    case.check_running()?;
+                    ensure!(started.elapsed() < WAIT, "restarted agent did not check in");
+                    tokio::time::sleep(POLL).await;
+                }
+                assert_no_copy_of_deleted_key(case, old_key)?;
             }
             Ok(())
         })
@@ -5161,6 +5372,8 @@ pub(crate) async fn a_rotation_migrates_connected_agent(ctx: Context) -> anyhow:
                         .and_then(Value::as_str)
                         .and_then(|root| crate::signer::thumbprint(root).ok())
                         .is_some_and(|issuer| issuer == new_root)
+                        && state["keys"].get("pending").is_none()
+                        && state["keys"].get("previous").is_none()
                 })
                 .await?;
             ensure!(
@@ -5329,16 +5542,23 @@ pub(crate) async fn a_rotation_migrates_through_check_in(ctx: Context) -> anyhow
                 "agent did not retry confirm first with its persisted pending key"
             );
             assert_check_in_triggers_renewal(&requests, rotation_sequence_start)?;
-            let final_state = case.state(&authority)?;
-            ensure!(
-                key_name(&final_state, "current")? == pending_key
-                    && final_state["keys"]["current"]["certificate_chain"]
-                        .as_array()
-                        .and_then(|chain| chain.last())
-                        .and_then(Value::as_str)
-                        .is_some_and(|root| crate::signer::thumbprint(root).is_ok_and(|issuer| issuer == new_root)),
-                "restarted agent did not keep the confirmed new-root chain"
-            );
+            case.until_state(
+                &target,
+                &authority,
+                &id,
+                "the confirmed new-root chain after restart",
+                |state| {
+                    key_name(state, "current").is_ok_and(|name| name == pending_key)
+                        && state["keys"]["current"]["certificate_chain"]
+                            .as_array()
+                            .and_then(|chain| chain.last())
+                            .and_then(Value::as_str)
+                            .is_some_and(|root| crate::signer::thumbprint(root).is_ok_and(|issuer| issuer == new_root))
+                        && state["keys"].get("pending").is_none()
+                        && state["keys"].get("previous").is_none()
+                },
+            )
+            .await?;
             Ok(())
         })
     })
@@ -5499,6 +5719,12 @@ mod tests {
         ));
         assert!(!is_error_level_log_line(
             "2026-10-19T00:00:00Z INFO devolutions_agent: ERROR was returned"
+        ));
+        assert!(is_error_level_log_line(
+            "\u{1b}[2m2026-10-19T00:00:00Z\u{1b}[0m \u{1b}[31mERROR\u{1b}[0m \u{1b}[2mdevolutions_agent\u{1b}[0m\u{1b}[2m:\u{1b}[0m unavailable backend"
+        ));
+        assert!(!is_error_level_log_line(
+            "\u{1b}[2m2026-10-19T00:00:00Z\u{1b}[0m \u{1b}[32m INFO\u{1b}[0m \u{1b}[2mdevolutions_agent\u{1b}[0m\u{1b}[2m:\u{1b}[0m ERROR was returned"
         ));
     }
 
@@ -5723,19 +5949,30 @@ mod tests {
             case.recorded_key_names()?.is_empty(),
             "the removed key is still recorded"
         );
-        for leftover in [
+        let untracked_pending = case
+            .path()
+            .join("identity")
+            .join("pending")
+            .join(format!("{}.json.tmp", token_file_id("untracked-token")));
+        std::fs::write(&untracked_pending, b"partial temporary file")?;
+        ensure!(
+            case.audit_identity_tree().is_err(),
+            "temporary sibling survived after its record was removed"
+        );
+        std::fs::remove_file(untracked_pending)?;
+        for copy in [
             case.key_file_path(&name).with_extension("p8.tmp"),
-            case.path()
-                .join("identity")
-                .join("pending")
-                .join(format!("{}.json.tmp", token_file_id("untracked-token"))),
+            case.key_file_path(&name)
+                .with_file_name(format!(".{name}-{}.deleted", uuid::Uuid::new_v4())),
         ] {
-            std::fs::write(&leftover, b"partial temporary file")?;
+            std::fs::write(&copy, pkcs8.as_bytes())?;
+            case.audit_identity_tree()
+                .context("a leftover copy of a deleted key before a later key-store operation was rejected")?;
             ensure!(
-                case.audit_identity_tree().is_err(),
-                "temporary sibling survived after its record was removed"
+                assert_no_copy_of_deleted_key(&case, &name).is_err(),
+                "a leftover copy of a deleted key was not reported"
             );
-            std::fs::remove_file(leftover)?;
+            std::fs::remove_file(copy)?;
         }
         case.audit_identity_tree()?;
         let unknown_authority = case

@@ -157,10 +157,19 @@ pub(crate) fn expect_status(status: &Status, grpc_code: Code, error_code: &str) 
 /// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
 pub(crate) fn expect_refused_opening(status: &Status, grpc_code: Code, error_code: &str) -> anyhow::Result<()> {
     expect_status(status, grpc_code, error_code)?;
+    expect_server_time(status)
+}
+
+/// Checks that an authentication failure, at opening or while the stream awaits `Hello`, carries the authority's time.
+///
+/// See [CONTRACT.md] §7.4 "Termination" and §1 "Protocol conventions".
+///
+/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+pub(crate) fn expect_server_time(status: &Status) -> anyhow::Result<()> {
     let server_time = status
         .metadata()
         .get("server-time")
-        .context("refused channel opening has no server-time trailer")?
+        .context("authentication failure has no server-time trailer")?
         .to_str()
         .context("server-time trailer is not ASCII")?;
     ensure!(

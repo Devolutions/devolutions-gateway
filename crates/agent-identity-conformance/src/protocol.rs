@@ -2121,10 +2121,6 @@ pub(crate) async fn p_signature_repeated_raw_items_rejected(ctx: Context) -> any
             "Content-Digest member signed over the received field",
             resigned(&identity.key, with_repeated_digest_member(sign())?)?,
         ),
-        (
-            "Content-Digest member signed over the member a last-wins parser keeps",
-            with_repeated_digest_member(sign())?,
-        ),
     ] {
         expect_error(
             &ctx.target.signed_renew(&body, &headers, None).await?,
@@ -2230,7 +2226,7 @@ fn with_repeated_signature_label(mut headers: SignedHeaders) -> SignedHeaders {
 
 /// Repeats the `sha-256` member in one `Content-Digest` value without re-signing.
 ///
-/// The signature still covers the member that an RFC 8941 parser keeps, since it retains only the last occurrence.
+/// A covered header's signature-base value is its raw field value (RFC 9421 §2.1), so only a signature over the repeated value isolates the duplicate rule.
 fn with_repeated_digest_member(mut headers: SignedHeaders) -> anyhow::Result<SignedHeaders> {
     let digest = headers.digest.as_deref().context("signed content digest")?;
     headers.digest = Some(format!("{digest}, {digest}"));
@@ -3157,10 +3153,61 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
     Ok(())
 }
 
+/// What a test sends on a stream that awaits `Hello`, to check that a closure of [CONTRACT.md] §7.4 comes ahead of every §7.3 step 4 failure.
+///
+/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+#[derive(Clone, Copy, Debug)]
+enum AwaitedHello {
+    /// A `Hello` whose proof verifies.
+    Valid,
+    /// A `Hello` whose proof does not verify.
+    BadProof,
+    /// Nothing, so the 10-second `Hello` deadline passes.
+    Missing,
+}
+
+/// Opens one stream per variant and reads its `Challenge`, so that every stream awaits `Hello`.
+async fn streams_awaiting_hello(
+    ctx: &Context,
+    identity: &Identity,
+    variants: &[AwaitedHello],
+) -> anyhow::Result<Vec<(AwaitedHello, channel::ChannelStream, agent_channel_proto::ServerMessage)>> {
+    let mut streams = Vec::new();
+    for &variant in variants {
+        let mut stream = channel::open(&ctx.target, identity).await?;
+        let challenge = stream.challenge().await?;
+        streams.push((variant, stream, challenge));
+    }
+    Ok(streams)
+}
+
+/// Sends the variant's `Hello`, if any, and returns the status that closes the stream.
+async fn close_awaiting_hello(
+    identity: &Identity,
+    stream: &mut channel::ChannelStream,
+    challenge: &agent_channel_proto::ServerMessage,
+    variant: AwaitedHello,
+) -> anyhow::Result<tonic::Status> {
+    let proof = match variant {
+        AwaitedHello::Valid => None,
+        AwaitedHello::BadProof => Some(vec![0; 64]),
+        AwaitedHello::Missing => return stream.closing_status(Duration::from_secs(11)).await,
+    };
+    // An authority may close the stream before `Hello` arrives, so a failed send is not a failure.
+    let _ = stream
+        .send_hello(identity, challenge, &[("hostname", "awaiting-hello")], proof)
+        .await;
+    stream.closing_status(Duration::from_secs(3)).await
+}
+
 pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "before-revocation").await?;
-    let mut stream = channel::open(&ctx.target, &identity).await?;
-    let challenge = stream.challenge().await?;
+    let streams = streams_awaiting_hello(
+        &ctx,
+        &identity,
+        &[AwaitedHello::Valid, AwaitedHello::BadProof, AwaitedHello::Missing],
+    )
+    .await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(!before.connected, "identity connected before Hello");
     let authenticated = if ctx.mock() {
@@ -3170,11 +3217,12 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
     };
     ctx.target.management().revoke(&identity.identity_id).await?;
     let revoked = identity_record(&ctx.target, &identity.identity_id).await?;
-    stream
-        .send_hello(&identity, &challenge, &[("hostname", "after-revocation")], None)
-        .await?;
-    let rejected = stream.closing_status(Duration::from_secs(3)).await?;
-    channel::expect_status(&rejected, Code::PermissionDenied, "identity_revoked")?;
+    for (variant, mut stream, challenge) in streams {
+        let rejected = close_awaiting_hello(&identity, &mut stream, &challenge, variant).await?;
+        channel::expect_status(&rejected, Code::PermissionDenied, "identity_revoked")
+            .and_then(|()| channel::expect_server_time(&rejected))
+            .with_context(|| format!("revoked stream awaiting Hello, {variant:?} Hello"))?;
+    }
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
         !after.connected
@@ -3187,6 +3235,39 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
         ensure!(
             count(&ctx.target.requests(None).await?, "authenticated_connects")? == authenticated,
             "revoked stream was registered as authenticated"
+        );
+    }
+    Ok(())
+}
+
+pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "before-deletion").await?;
+    let streams = streams_awaiting_hello(&ctx, &identity, &[AwaitedHello::Valid, AwaitedHello::BadProof]).await?;
+    let authenticated = if ctx.mock() {
+        Some(count(&ctx.target.requests(None).await?, "authenticated_connects")?)
+    } else {
+        None
+    };
+    ctx.target.management().revoke(&identity.identity_id).await?;
+    ctx.target.management().delete_identity(&identity.identity_id).await?;
+    for (variant, mut stream, challenge) in streams {
+        let rejected = close_awaiting_hello(&identity, &mut stream, &challenge, variant).await?;
+        channel::expect_status(&rejected, Code::Unauthenticated, "identity_unknown")
+            .and_then(|()| channel::expect_server_time(&rejected))
+            .with_context(|| format!("deleted stream awaiting Hello, {variant:?} Hello"))?;
+    }
+    ensure!(
+        ctx.target
+            .management()
+            .find_identity(&identity.identity_id)
+            .await?
+            .is_none(),
+        "a Hello for a deleted identity restored it"
+    );
+    if let Some(authenticated) = authenticated {
+        ensure!(
+            count(&ctx.target.requests(None).await?, "authenticated_connects")? == authenticated,
+            "deleted stream was registered as authenticated"
         );
     }
     Ok(())
@@ -4037,6 +4118,7 @@ pub(crate) async fn p_challenged_stream_expires_on_advance(ctx: Context) -> anyh
     ctx.target.advance(not_after - now).await?;
     let status = stream.closing_status(Duration::from_millis(900)).await?;
     channel::expect_status(&status, Code::Unauthenticated, "certificate_expired")?;
+    channel::expect_server_time(&status)?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
         !after.connected && after.metadata == before.metadata && after.last_seen_at == before.last_seen_at,
@@ -4274,6 +4356,76 @@ pub(crate) async fn p_confirm_reconnects_and_closes_retired_stream_at_grace(ctx:
             && count(closed, "seq")? > count(new_auth, "seq")?
             && identity_record(&ctx.target, &identity.identity_id).await?.connected,
         "retired stream closed before reconnect or replacement authentication"
+    );
+    Ok(())
+}
+
+pub(crate) async fn p_channel_retired_before_hello_completes_then_reconnects(ctx: Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(&ctx, "retired-before-hello").await?;
+    let old_thumb = identity.thumbprint.clone();
+    let mut stream = channel::open(&ctx.target, &identity).await?;
+    let challenge = stream.challenge().await?;
+    let Some(agent_channel_proto::server_message::Payload::Challenge(payload)) = challenge.payload.as_ref() else {
+        anyhow::bail!("stream missing challenge");
+    };
+    let old_proof = identity.key.channel_proof(&payload.challenge, &stream.headers.nonce);
+    let key = KeyPair::generate()?;
+    let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
+    expect_status(&renewed, 200)?;
+    identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
+    let now = chain_evaluation_time(&ctx).await?;
+    expect_status(&ctx.target.control("time/freeze", &json!({ "now": now })).await?, 200)?;
+    expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    ensure!(
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .has_certificate(&old_thumb, CertificateStatus::Retired),
+        "confirm did not retire the certificate that opened the stream"
+    );
+
+    let hello_id = stream.send_hello(&identity, &challenge, &[], Some(old_proof)).await?;
+    let welcome = stream.next().await?;
+    ensure!(
+        matches!(
+            welcome.payload,
+            Some(agent_channel_proto::server_message::Payload::Welcome(_))
+        ) && welcome.correlation_id.as_deref() == Some(hello_id.as_str()),
+        "stream retired while awaiting Hello did not complete its handshake"
+    );
+    let pushed = stream.next().await?;
+    ensure!(
+        matches!(
+            pushed.payload,
+            Some(agent_channel_proto::server_message::Payload::Reconnect(ref message))
+                if message.reason == "certificate_rotated"
+        ),
+        "stream retired while awaiting Hello did not receive Reconnect(certificate_rotated) after Welcome"
+    );
+    ensure!(
+        identity_record(&ctx.target, &identity.identity_id).await?.connected,
+        "stream retired while awaiting Hello did not authenticate"
+    );
+
+    expect_status(
+        &ctx.target.control("time/freeze", &json!({ "now": now + 59 })).await?,
+        200,
+    )?;
+    ensure!(
+        tokio::time::timeout(Duration::from_millis(150), stream.stream.message())
+            .await
+            .is_err(),
+        "stream retired while awaiting Hello closed before the 60-second boundary"
+    );
+    expect_status(
+        &ctx.target.control("time/freeze", &json!({ "now": now + 60 })).await?,
+        200,
+    )?;
+    ensure!(
+        tokio::time::timeout(Duration::from_secs(3), stream.stream.message())
+            .await
+            .context("stream retired while awaiting Hello did not close at 60 seconds")??
+            .is_none(),
+        "stream retired while awaiting Hello did not close with OK at 60 seconds"
     );
     Ok(())
 }
