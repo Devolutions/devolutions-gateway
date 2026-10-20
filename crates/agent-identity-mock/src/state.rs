@@ -18,6 +18,11 @@ use crate::ca::{self, DEFAULT_LEAF_LIFETIME_SECS, RootCa};
 use crate::name_eval;
 use crate::oracle::{AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, check_csr};
 
+/// The only config schema version the contract defines ([CONTRACT.md][contract], "5.2 `POST enroll`").
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#52-post-enroll
+const CONFIG_VERSION: u64 = 1;
+
 /// Error with an HTTP status and a machine-readable code, mapped to the right body
 /// shape by the handlers.
 #[derive(Debug)]
@@ -104,6 +109,8 @@ pub(crate) struct Faults {
     pub(crate) channel_broken: bool,
     pub(crate) malformed_channel_url: Option<MalformedChannelUrl>,
     pub(crate) rotation_rate_limit_per_sec: Option<u32>,
+    /// Replaces `config.version` in every delivered config, so tests can deliver an unsupported version.
+    pub(crate) config_version: Option<u64>,
 }
 
 impl Default for Faults {
@@ -117,6 +124,7 @@ impl Default for Faults {
             channel_broken: false,
             malformed_channel_url: None,
             rotation_rate_limit_per_sec: None,
+            config_version: None,
         }
     }
 }
@@ -227,6 +235,20 @@ impl Identity {
         self.config["revision"]
             .as_u64()
             .expect("identity config has a revision")
+    }
+
+    /// Returns the serialized config and its revision when a Hello reports an older applied revision.
+    /// The channel sends it as the `ConfigUpdate` that follows `Welcome` ([CONTRACT.md][contract], "7.3 Sequence", step 7).
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+    pub(crate) fn config_update_after(&self, applied_revision: u64) -> Option<(String, u64)> {
+        let revision = self.config_revision();
+        (applied_revision < revision).then(|| {
+            (
+                serde_json::to_string(&self.config).expect("identity config is serializable"),
+                revision,
+            )
+        })
     }
 
     pub(crate) fn current_cert(&self) -> Option<&Cert> {
@@ -461,22 +483,40 @@ impl State {
             return;
         }
         self.faults.channel_available = available;
+        self.change_every_config(|config| {
+            if available {
+                config.insert("agent_channel_url".to_owned(), json!(base_url));
+            } else {
+                config.remove("agent_channel_url");
+            }
+        });
+    }
+
+    /// Sets or clears the `config.version` override.
+    /// A change bumps every identity's revision so agents treat the delivered config as newer than their stored one.
+    pub(crate) fn update_config_version(&mut self, version: Option<u64>) {
+        let previous = self.faults.config_version.unwrap_or(CONFIG_VERSION);
+        self.faults.config_version = version;
+        let version = version.unwrap_or(CONFIG_VERSION);
+        if version == previous {
+            return;
+        }
+        self.change_every_config(|config| {
+            config.insert("version".to_owned(), json!(version));
+        });
+    }
+
+    /// Applies `change` to every identity's config, bumps its revision and pushes it to live streams.
+    fn change_every_config(&mut self, change: impl Fn(&mut Map<String, Value>)) {
         let mut changed = Vec::new();
         for identity in self.identities.values_mut() {
             let revision = identity
                 .config_revision()
                 .checked_add(1)
                 .expect("config revision fits u64");
-            if available {
-                identity.config["agent_channel_url"] = json!(base_url);
-            } else {
-                identity
-                    .config
-                    .as_object_mut()
-                    .expect("identity config is an object")
-                    .remove("agent_channel_url");
-            }
-            identity.config["revision"] = json!(revision);
+            let config = identity.config.as_object_mut().expect("identity config is an object");
+            change(config);
+            config.insert("revision".to_owned(), json!(revision));
             changed.push(identity.id);
         }
         for identity_id in changed {
@@ -831,7 +871,10 @@ impl State {
             .as_ref()
             .map(|config| config.as_object().expect("token config is an object").clone())
             .unwrap_or_default();
-        config.insert("version".to_owned(), json!(1));
+        config.insert(
+            "version".to_owned(),
+            json!(self.faults.config_version.unwrap_or(CONFIG_VERSION)),
+        );
         config.insert("revision".to_owned(), json!(1));
         config.remove("agent_channel_url");
         if self.faults.channel_available {
@@ -1607,6 +1650,67 @@ mod tests {
         state.update_channel_available(false, "https://localhost/mock");
         assert_eq!(state.identities[&identity_id].config_revision(), 2);
         assert!(state.identities[&identity_id].config.get("agent_channel_url").is_none());
+        Ok(())
+    }
+
+    /// An override that skipped the revision bump would leave the agent's stored config at the same revision,
+    /// so neither a live push nor the reconciliation after Welcome would deliver the unsupported version.
+    #[test]
+    fn config_version_override_reaches_live_and_reconnecting_streams() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::new(now)?;
+        let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let identity_id = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .expect("enrollment succeeds")
+            .identity_id;
+        let thumbprint = state.identities[&identity_id]
+            .current_cert()
+            .expect("current certificate")
+            .thumbprint
+            .clone();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        state.streams.insert(
+            Uuid::new_v4(),
+            StreamHandle {
+                identity_id,
+                cert_thumbprint: thumbprint,
+                tx,
+                retire_at: None,
+            },
+        );
+        let mut stored_revision = state.identities[&identity_id].config_revision();
+
+        for (control, expected_version) in [(Some(2), 2), (Some(0), 0), (None, 1)] {
+            state.update_config_version(control);
+
+            let StreamPush::ConfigUpdate(pushed) = rx.try_recv()? else {
+                panic!("expected a config update for {control:?}");
+            };
+            let pushed: Value = serde_json::from_str(&pushed)?;
+            assert_eq!(pushed["version"], expected_version, "pushed for {control:?}");
+            let pushed_revision = pushed["revision"].as_u64().expect("revision is an unsigned integer");
+            assert!(
+                stored_revision < pushed_revision,
+                "pushed revision increases for {control:?}"
+            );
+
+            // A Hello still carrying the agent's stored revision is answered with the new config after Welcome.
+            let (reconciled, reconciled_revision) = state.identities[&identity_id]
+                .config_update_after(stored_revision)
+                .expect("a stale Hello receives a config update");
+            let reconciled: Value = serde_json::from_str(&reconciled)?;
+            assert_eq!(reconciled["version"], expected_version, "reconciled for {control:?}");
+            assert!(
+                stored_revision < reconciled_revision,
+                "reconciled revision increases for {control:?}"
+            );
+
+            stored_revision = pushed_revision;
+        }
         Ok(())
     }
 }

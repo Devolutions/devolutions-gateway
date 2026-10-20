@@ -211,16 +211,21 @@ mod tests {
     use axum::body::Bytes;
     use axum::http;
     use base64::Engine as _;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
     use http_body_util::{BodyExt as _, Full};
+    use p256::ecdsa::VerifyingKey;
     use rstest::rstest;
-    use serde_json::Value;
+    use serde_json::{Map, Value, json};
 
     use super::Dispatcher;
     use crate::app::App;
+    use crate::oracle::NonceStore;
+    use crate::state::State;
 
     /// CONTRACT.md §5.4: servers accept agent-facing request bodies up to 64 KiB.
     const BODY_LIMIT: usize = 64 * 1024;
+
+    const FAULTS: &str = "/__mock__/faults";
 
     /// Posts to an agent-facing endpoint and returns the status and the §5.4 error code.
     async fn post(app: &Arc<App>, endpoint: &str, authorization: &[&str], body: Vec<u8>) -> (u16, String) {
@@ -292,6 +297,119 @@ mod tests {
         let headers = vec![authorization.as_str(); header_count];
         let response = post(&app, "enroll", &headers, b"not json".to_vec()).await;
         assert_eq!(response, (expected.0, expected.1.to_owned()));
+        Ok(())
+    }
+
+    async fn post_json(app: &Arc<App>, path: &str, headers: &[(&str, &str)], body: impl Into<Bytes>) -> (u16, Value) {
+        let mut request = http::Request::post(format!("/mock{path}"));
+        for (name, value) in headers {
+            request = request.header(*name, *value);
+        }
+        let request = request.body(Full::new(body.into())).expect("valid request");
+        let response = Dispatcher::new(Arc::clone(app))
+            .handle(request)
+            .await
+            .expect("the mock answers");
+        let status = response.status().as_u16();
+        let body = response.into_body().collect().await.expect("readable body").to_bytes();
+        (status, serde_json::from_slice(&body).expect("JSON body"))
+    }
+
+    /// The control must reach the enrollment response, not only configs stored before it was set.
+    #[tokio::test]
+    async fn config_version_fault_overrides_the_enrollment_config() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let now = app.now();
+        let (_, secret) = app
+            .state
+            .lock()
+            .await
+            .create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+
+        let (status, faults) = post_json(&app, FAULTS, &[], json!({ "config_version": 7 }).to_string()).await;
+        assert_eq!((status, &faults["config_version"]), (200, &json!(7)));
+
+        let authorization = format!("Bearer dvaet1.e30.{}", URL_SAFE_NO_PAD.encode(secret));
+        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
+        let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
+        assert_eq!((status, &enrolled["config"]["version"]), (200, &json!(7)));
+
+        let (status, faults) = post_json(&app, FAULTS, &[], json!({ "config_version": null }).to_string()).await;
+        assert_eq!((status, &faults["config_version"]), (200, &Value::Null));
+        Ok(())
+    }
+
+    /// Check-in must deliver the override, and clearing it must deliver version 1 at a higher revision.
+    #[tokio::test]
+    async fn config_version_fault_reaches_the_check_in_response() -> anyhow::Result<()> {
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let case = vectors["http_signature"]["cases"]
+            .as_array()
+            .and_then(|cases| cases.iter().find(|case| case["name"] == "valid_check_in"))
+            .expect("valid check-in vector");
+        let device = vectors["keys"]
+            .as_array()
+            .and_then(|keys| keys.iter().find(|key| key["name"] == "device-a"))
+            .expect("device A key");
+        let now = case["now"].as_i64().expect("vector time");
+        let app = App::for_test()?;
+        app.clock.freeze_at(now);
+        let mut stored_revision = {
+            let mut state = app.state.lock().await;
+            *state = State::new(now)?;
+            let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+            let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+            let identity_id = state
+                .enroll(&secret, &csr, Map::new(), now, &app.base_url)
+                .expect("enrollment succeeds")
+                .identity_id;
+            // The vector is signed by device A, so its key replaces the enrolled one.
+            let keyid = device["thumbprint"].as_str().expect("device A thumbprint").to_owned();
+            let public_key = STANDARD.decode(device["public_key_sec1"].as_str().expect("device A public key"))?;
+            let identity = state.identities.get_mut(&identity_id).expect("enrolled identity");
+            let cert = identity.certs.first_mut().expect("issued certificate");
+            let enrolled_keyid = std::mem::replace(&mut cert.thumbprint, keyid.clone());
+            cert.public_key = VerifyingKey::from_sec1_bytes(&public_key)?;
+            let revision = identity.config_revision();
+            state.cert_index.remove(&enrolled_keyid);
+            state.cert_index.insert(keyid, identity_id);
+            revision
+        };
+        let headers = ["content-digest", "signature-input", "signature"]
+            .map(|name| (name, case["headers"][name].as_str().expect("vector header")));
+        let body = case["body"].as_str().expect("vector body").to_owned();
+
+        for (control, expected_version) in [(json!(7), 7), (Value::Null, 1)] {
+            let (status, _) = post_json(&app, FAULTS, &[], json!({ "config_version": control }).to_string()).await;
+            assert_eq!(status, 200);
+            // The vector request is replayed, so its nonce must be accepted again.
+            app.state.lock().await.nonces = NonceStore::default();
+
+            let (status, checked_in) = post_json(&app, "/api/agent-identity/v1/check-in", &headers, body.clone()).await;
+            assert_eq!(
+                (status, &checked_in["config"]["version"]),
+                (200, &json!(expected_version))
+            );
+            let revision = checked_in["config"]["revision"]
+                .as_u64()
+                .expect("revision is an unsigned integer");
+            assert!(stored_revision < revision, "revision increases for {control}");
+            stored_revision = revision;
+        }
+        Ok(())
+    }
+
+    #[rstest]
+    #[case::negative(json!(-1))]
+    #[case::fractional(json!(1.5))]
+    #[case::string(json!("2"))]
+    #[tokio::test]
+    async fn config_version_fault_rejects_a_non_unsigned_integer(#[case] value: Value) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let (status, body) = post_json(&app, FAULTS, &[], json!({ "config_version": value }).to_string()).await;
+        assert_eq!((status, &body["error"]), (400, &json!("invalid_request")));
         Ok(())
     }
 }

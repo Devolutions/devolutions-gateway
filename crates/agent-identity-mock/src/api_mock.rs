@@ -237,6 +237,7 @@ fn faults_view(faults: &Faults) -> Value {
             Some(crate::state::MalformedChannelUrl::Fragment) => json!("fragment"),
         },
         "rotation_rate_limit_per_sec": faults.rotation_rate_limit_per_sec,
+        "config_version": faults.config_version,
     })
 }
 
@@ -359,6 +360,14 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                     _ => return invalid("rotation_rate_limit_per_sec must be a positive integer or null"),
                 },
                 _ => return invalid("rotation_rate_limit_per_sec must be a positive integer or null"),
+            },
+            "config_version" => match value {
+                Value::Null => state.update_config_version(None),
+                Value::Number(n) => match n.as_u64() {
+                    Some(version) => state.update_config_version(Some(version)),
+                    None => return invalid("config_version must be an unsigned integer or null"),
+                },
+                _ => return invalid("config_version must be an unsigned integer or null"),
             },
             _ => return invalid("unknown fault field"),
         }

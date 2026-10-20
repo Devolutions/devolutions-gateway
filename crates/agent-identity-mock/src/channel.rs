@@ -374,13 +374,7 @@ async fn run_stream(
                 .map(|identity| {
                     identity.metadata = metadata;
                     identity.last_seen_at = Some(now);
-                    let revision = identity.config_revision();
-                    let update = (applied_config_revision < revision).then(|| {
-                        (
-                            serde_json::to_string(&identity.config).expect("identity config is serializable"),
-                            revision,
-                        )
-                    });
+                    let update = identity.config_update_after(applied_config_revision);
                     (identity.renewal_requested.as_ref().map(|f| f.reason.as_str()), update)
                 })
                 .expect("authenticated identity exists");
