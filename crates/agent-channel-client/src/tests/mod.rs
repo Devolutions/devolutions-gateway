@@ -829,3 +829,27 @@ async fn a_socks_proxy_is_an_outage_without_a_connection() -> anyhow::Result<()>
     assert!(proxy.heads().is_empty());
     Ok(())
 }
+
+#[tokio::test]
+async fn refuses_a_channel_url_without_tls() -> anyhow::Result<()> {
+    let authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut url = authority.url.clone();
+    url.set_scheme("http").expect("http is a valid scheme");
+
+    // The channel runs over HTTP/2 and TLS only.
+    assert!(
+        client(&authority, Settings::default())?
+            .connect(identity.target(&url))
+            .is_err()
+    );
+    Ok(())
+}
+#[test]
+fn the_default_timings_are_the_documented_ones() {
+    let settings = Settings::default();
+    // crates/agent-channel-client/INTENT.md: an HTTP/2 keepalive every 30 s.
+    assert_eq!(settings.keepalive_interval, Duration::from_secs(30));
+    // 30 s from the TCP connection to `Welcome`, like the identity HTTP client's request timeout.
+    assert_eq!(settings.opening_timeout, Duration::from_secs(30));
+}

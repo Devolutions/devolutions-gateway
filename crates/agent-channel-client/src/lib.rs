@@ -127,7 +127,11 @@ impl ChannelClient {
     }
 
     /// Starts a channel to `target`; it must be called within a Tokio runtime.
+    ///
+    /// The channel runs over HTTP/2 and TLS, so `target.url` must be an `https` URL with a host.
     pub fn connect(&self, target: Target) -> anyhow::Result<Channel> {
+        anyhow::ensure!(target.url.scheme() == "https", "channel URL is not https");
+        transport::endpoint(&target.url)?;
         let (event_sender, events) = mpsc::channel(16);
         let (acks, ack_receiver) = mpsc::unbounded_channel();
         let task = tokio::spawn(stream::run(
