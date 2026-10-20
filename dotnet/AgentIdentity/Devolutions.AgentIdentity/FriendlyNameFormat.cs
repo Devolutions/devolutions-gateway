@@ -17,7 +17,8 @@ namespace Devolutions.AgentIdentity;
 /// </para>
 /// <para>
 /// A format is administrator input that may hold a pasted token, which never appears in logs,
-/// so no member returns any part of the format text.
+/// so a parse error and <see cref="ToString"/> never hold any part of the format text.
+/// Only <see cref="Evaluate"/> returns its literal text, by design, as part of the friendly name.
 /// The host stores the text that it parsed with the token.
 /// </para>
 /// </remarks>
