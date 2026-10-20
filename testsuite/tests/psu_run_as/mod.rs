@@ -3,15 +3,14 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::Context as _;
+use protocol::agent_control_server::{AgentControl, AgentControlServer};
+use protocol::agent_message::Payload;
+use protocol::{AgentMessage, ProcessCredential, RegisterAgent, ServerMessage, StartProcess};
 use rstest::rstest;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::{ReceiverStream, TcpListenerStream};
 use tokio_util::task::AbortOnDropHandle;
 use tonic::{Request, Response, Status, Streaming};
-
-use protocol::agent_control_server::{AgentControl, AgentControlServer};
-use protocol::agent_message::Payload;
-use protocol::{AgentMessage, ProcessCredential, RegisterAgent, ServerMessage, StartProcess};
 
 #[expect(
     unused_qualifications,
