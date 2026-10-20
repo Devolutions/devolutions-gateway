@@ -20,7 +20,7 @@ pub const IDENTITY_KEY_PREFIX: &str = "devolutions-agent-identity";
 pub struct StoredIdentity {
     pub version: u8,
     pub authority_id: Uuid,
-    pub device_id: Uuid,
+    pub identity_id: Uuid,
     pub base_url: Url,
     pub config: Value,
     pub token_sha256: String,
@@ -53,7 +53,7 @@ pub struct KeyRecord {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EnrollmentDiscardReason {
-    DeviceRevoked,
+    IdentityRevoked,
     TokenInvalid,
     TokenExhausted,
     TokenExpired,
@@ -71,7 +71,7 @@ pub enum PendingDiscard {
 impl EnrollmentDiscardReason {
     fn code(self) -> &'static str {
         match self {
-            Self::DeviceRevoked => "device_revoked",
+            Self::IdentityRevoked => "identity_revoked",
             Self::TokenInvalid => "token_invalid",
             Self::TokenExhausted => "token_exhausted",
             Self::TokenExpired => "token_expired",
@@ -241,7 +241,7 @@ impl Store {
             "stored identity changed; reload before updating"
         );
         if let Some(existing) = &existing
-            && (existing.device_id == identity.device_id || existing.token_sha256 == identity.token_sha256)
+            && (existing.identity_id == identity.identity_id || existing.token_sha256 == identity.token_sha256)
         {
             let previous_revision = config_revision(&existing.config)?;
             let incoming_revision = config_revision(&identity.config)?;
@@ -289,7 +289,7 @@ impl Store {
             .read_identity(identity.authority_id)?
             .context("stored identity is missing")?;
         ensure!(
-            latest.device_id == identity.device_id && latest.token_sha256 == identity.token_sha256,
+            latest.identity_id == identity.identity_id && latest.token_sha256 == identity.token_sha256,
             "stored identity was replaced"
         );
         let revision = config_revision(&config)?;
@@ -784,7 +784,7 @@ mod tests {
         let identity = StoredIdentity {
             version: 1,
             authority_id: Uuid::new_v4(),
-            device_id: Uuid::new_v4(),
+            identity_id: Uuid::new_v4(),
             base_url: token.base_url().clone(),
             config: json!({"version": 1, "revision": 7}),
             token_sha256: token.sha256_hex(),
@@ -810,7 +810,7 @@ mod tests {
         let json = json!({
             "version": 1,
             "authority_id": "a54f680c-9612-4b5e-a84f-2e1f79615067",
-            "device_id": "28a70de9-724e-4ffb-8e8d-09f56971765d",
+            "identity_id": "28a70de9-724e-4ffb-8e8d-09f56971765d",
             "base_url": "https://example.test/dvls",
             "config": {"version": 1, "revision": 7, "future": {"nested": [1, null, true]}},
             "token_sha256": hex::encode([1u8; 32]),
@@ -881,7 +881,7 @@ mod tests {
         let (record, _key) = store
             .begin_enrollment(&token)?
             .context("new token was already processed")?;
-        store.discard_enrollment(&hash_hex, EnrollmentDiscardReason::DeviceRevoked)?;
+        store.discard_enrollment(&hash_hex, EnrollmentDiscardReason::IdentityRevoked)?;
         assert!(!path.exists());
         assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
         assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
@@ -892,7 +892,7 @@ mod tests {
             .join(format!("{hash_hex}.json"));
         let marker = fs::read_to_string(marker_path)?;
         assert!(!marker.contains(token.as_str()));
-        assert_eq!(serde_json::from_str::<Value>(&marker)?["code"], "device_revoked");
+        assert_eq!(serde_json::from_str::<Value>(&marker)?["code"], "identity_revoked");
         assert_eq!(pending::write(&directory.0, &token, true)?, path);
 
         let body = serde_json::to_vec(&json!({"version": 1, "token": token.as_str()}))?;
@@ -1082,7 +1082,7 @@ mod tests {
             serde_json::to_vec(&json!({
                 "version": 1,
                 "token_sha256": token.sha256_hex(),
-                "code": "device_revoked",
+                "code": "identity_revoked",
                 "at": "2026-09-24T12:00:00Z"
             }))?,
         )?;
@@ -1131,7 +1131,7 @@ mod tests {
         let replacement = StoredIdentity {
             version: 1,
             authority_id,
-            device_id: Uuid::new_v4(),
+            identity_id: Uuid::new_v4(),
             base_url: token.base_url().clone(),
             config: json!({"version": 1, "revision": 1}),
             token_sha256: token.sha256_hex(),

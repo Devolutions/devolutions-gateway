@@ -257,7 +257,7 @@ async fn enroll_pending(
             let identity = StoredIdentity {
                 version: 1,
                 authority_id: response.authority_id,
-                device_id: response.device_id,
+                identity_id: response.identity_id,
                 base_url: token.base_url().clone(),
                 config: response.config,
                 token_sha256: hash.clone(),
@@ -277,7 +277,7 @@ async fn enroll_pending(
                 store.write_identity(&identity)?;
             }
             store.finish_enrollment(&hash, identity.authority_id)?;
-            info!(authority_id = %identity.authority_id, device_id = %identity.device_id, "Agent Identity enrolled");
+            info!(authority_id = %identity.authority_id, identity_id = %identity.identity_id, "Agent Identity enrolled");
             Ok(PendingOutcome::Completed)
         }
         Err(ClientError::Permanent(code)) => {
@@ -293,8 +293,8 @@ async fn enroll_pending(
             );
             Ok(PendingOutcome::Completed)
         }
-        Err(ClientError::Terminal(TerminalCode::DeviceRevoked)) => {
-            store.discard_enrollment(&hash, EnrollmentDiscardReason::DeviceRevoked)?;
+        Err(ClientError::Terminal(TerminalCode::IdentityRevoked)) => {
+            store.discard_enrollment(&hash, EnrollmentDiscardReason::IdentityRevoked)?;
             warn!("Discarded revoked Agent Identity enrollment");
             Ok(PendingOutcome::Completed)
         }
@@ -313,7 +313,8 @@ mod tests {
 
     #[test]
     fn retry_after_is_capped_by_maximum_backoff() {
-        // `CONTRACT.md` §5.4 and `identity.intent.md` ("Configuration") cap `Retry-After` at the maximum backoff.
+        // `CONTRACT.md` §5.4 and `crates/agent-identity/INTENT.md` ("Schedules") cap `Retry-After` at the maximum delay.
+        // `devolutions-agent/src/identity/INTENT.md` ("Configuration") lets `backoff_max_secs` lower that maximum.
         let maximum = Duration::from_secs(17);
         assert_eq!(
             retry_delay(maximum, Duration::from_secs(5), Some(Duration::from_secs(3600))),

@@ -18,7 +18,7 @@ struct Rejection {
 }
 
 const PERMANENT_CODES: [&str; 5] = [
-    "device_revoked",
+    "identity_revoked",
     "token_invalid",
     "token_exhausted",
     "token_expired",

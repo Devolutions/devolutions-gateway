@@ -40,8 +40,8 @@ pub enum PermanentCode {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalCode {
-    DeviceRevoked,
-    DeviceUnknown,
+    IdentityRevoked,
+    IdentityUnknown,
 }
 
 impl PermanentCode {
@@ -57,8 +57,8 @@ impl PermanentCode {
 impl TerminalCode {
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::DeviceRevoked => "device_revoked",
-            Self::DeviceUnknown => "device_unknown",
+            Self::IdentityRevoked => "identity_revoked",
+            Self::IdentityUnknown => "identity_unknown",
         }
     }
 }
@@ -146,7 +146,7 @@ pub struct EnrollResponse {
     #[serde(deserialize_with = "canonical_uuid")]
     pub authority_id: Uuid,
     #[serde(deserialize_with = "canonical_uuid")]
-    pub device_id: Uuid,
+    pub identity_id: Uuid,
     pub certificate_chain: Vec<String>,
     pub config: Value,
 }
@@ -472,8 +472,8 @@ fn classify_error(status: StatusCode, body: &[u8], retry_after: Option<Duration>
         (StatusCode::UNAUTHORIZED, "token_invalid") => ClientError::Permanent(PermanentCode::TokenInvalid),
         (StatusCode::FORBIDDEN, "token_exhausted") => ClientError::Permanent(PermanentCode::TokenExhausted),
         (StatusCode::UNAUTHORIZED, "token_expired") => ClientError::Permanent(PermanentCode::TokenExpired),
-        (StatusCode::FORBIDDEN, "device_revoked") => ClientError::Terminal(TerminalCode::DeviceRevoked),
-        (StatusCode::UNAUTHORIZED, "device_unknown") => ClientError::Terminal(TerminalCode::DeviceUnknown),
+        (StatusCode::FORBIDDEN, "identity_revoked") => ClientError::Terminal(TerminalCode::IdentityRevoked),
+        (StatusCode::UNAUTHORIZED, "identity_unknown") => ClientError::Terminal(TerminalCode::IdentityUnknown),
         (StatusCode::UNAUTHORIZED, "certificate_expired") => ClientError::CertificateExpired,
         (StatusCode::UNAUTHORIZED, "clock_skew") => ClientError::ClockSkew { server_time },
         _ => ClientError::Transient {
@@ -641,8 +641,8 @@ mod tests {
             ClientError::Permanent(PermanentCode::TokenExpired)
         );
         assert_eq!(
-            classify_error(StatusCode::FORBIDDEN, body("device_revoked").as_bytes(), None),
-            ClientError::Terminal(TerminalCode::DeviceRevoked)
+            classify_error(StatusCode::FORBIDDEN, body("identity_revoked").as_bytes(), None),
+            ClientError::Terminal(TerminalCode::IdentityRevoked)
         );
         for (status, code, reason) in [
             (
@@ -719,13 +719,13 @@ mod tests {
             ),
             (
                 StatusCode::FORBIDDEN,
-                "device_revoked",
-                ClientError::Terminal(TerminalCode::DeviceRevoked),
+                "identity_revoked",
+                ClientError::Terminal(TerminalCode::IdentityRevoked),
             ),
             (
                 StatusCode::UNAUTHORIZED,
-                "device_unknown",
-                ClientError::Terminal(TerminalCode::DeviceUnknown),
+                "identity_unknown",
+                ClientError::Terminal(TerminalCode::IdentityUnknown),
             ),
             (
                 StatusCode::UNAUTHORIZED,
@@ -767,7 +767,7 @@ mod tests {
     #[test]
     fn accepts_null_optional_config_fields_without_losing_unknown_values() {
         let response: EnrollResponse = parse_response(
-            br#"{"authority_id":"00000000-0000-4000-8000-000000000001","device_id":"00000000-0000-4000-8000-000000000002","certificate_chain":[],"config":{"version":1,"revision":4,"agent_channel_url":null,"extra":true}}"#,
+            br#"{"authority_id":"00000000-0000-4000-8000-000000000001","identity_id":"00000000-0000-4000-8000-000000000002","certificate_chain":[],"config":{"version":1,"revision":4,"agent_channel_url":null,"extra":true}}"#,
         )
         .expect("parse response");
         assert!(response.config["agent_channel_url"].is_null());
