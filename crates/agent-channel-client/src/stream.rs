@@ -15,7 +15,8 @@ use tonic::{Status, Streaming};
 use tower::Layer as _;
 use uuid::Uuid;
 
-use crate::closure::Closure;
+use crate::backoff::BackoffState;
+use crate::closure::{Closure, ClosureClass};
 use crate::transport::endpoint;
 use crate::{Event, Shared, Target};
 
@@ -28,15 +29,23 @@ pub(crate) async fn run(
     events: mpsc::Sender<Event>,
     mut acks: mpsc::UnboundedReceiver<String>,
 ) {
-    let Some(closure) = stream_once(&shared, &target, &events, &mut acks).await else {
-        return;
-    };
-    let _ = events
-        .send(Event::Closed {
-            closure,
-            reopen_after: None,
-        })
-        .await;
+    let mut backoff = BackoffState::default();
+    loop {
+        let Some(closure) = stream_once(&shared, &target, &events, &mut acks, &mut backoff).await else {
+            return;
+        };
+        let reopen_after = match closure.class {
+            ClosureClass::Transient(kind) => Some(backoff.next_delay(&shared.settings.backoff, kind)),
+            ClosureClass::Terminal(_) | ClosureClass::CertificateExpired => None,
+        };
+        if events.send(Event::Closed { closure, reopen_after }).await.is_err() {
+            return;
+        }
+        let Some(delay) = reopen_after else {
+            return;
+        };
+        tokio::time::sleep(delay).await;
+    }
 }
 
 /// Runs one stream until it closes, or returns `None` once the caller has dropped the channel.
@@ -45,6 +54,7 @@ async fn stream_once(
     target: &Target,
     events: &mpsc::Sender<Event>,
     acks: &mut mpsc::UnboundedReceiver<String>,
+    backoff: &mut BackoffState,
 ) -> Option<Closure> {
     let mut opened = match open_at_authority_time(shared, target).await {
         Ok(opened) => opened,
@@ -53,6 +63,11 @@ async fn stream_once(
     if let Err(closure) = authenticate(target, &mut opened).await {
         return Some(closure);
     }
+    backoff.reset();
+    // UNTESTED: acknowledgements the caller sent before this stream authenticated are dropped.
+    // They answer messages of an earlier stream, so sending them here would mix two streams.
+    // When changing how acknowledgements reach the stream, keep them on the stream whose messages they answer.
+    while acks.try_recv().is_ok() {}
     events.send(Event::Authenticated).await.ok()?;
     loop {
         tokio::select! {

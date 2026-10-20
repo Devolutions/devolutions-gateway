@@ -19,10 +19,12 @@ use url::Url;
 
 use crate::transport::Transport;
 
+mod backoff;
 mod closure;
 mod stream;
 mod transport;
 
+pub use crate::backoff::{Backoff, uniform_jitter};
 pub use crate::closure::{Closure, ClosureClass, TerminalCode, TransientKind};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
@@ -44,6 +46,8 @@ pub struct Settings {
     pub keepalive_interval: Duration,
     /// Time allowed from the TCP connection to `Welcome`.
     pub opening_timeout: Duration,
+    /// When a closed stream is opened again.
+    pub backoff: Backoff,
 }
 
 impl Default for Settings {
@@ -51,6 +55,7 @@ impl Default for Settings {
         Self {
             keepalive_interval: KEEPALIVE_INTERVAL,
             opening_timeout: OPENING_TIMEOUT,
+            backoff: Backoff::default(),
         }
     }
 }

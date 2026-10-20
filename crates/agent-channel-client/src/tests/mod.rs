@@ -640,3 +640,40 @@ async fn a_second_clock_skew_refusal_is_transient() -> anyhow::Result<()> {
     assert_eq!(closure.error_code.as_deref(), Some("clock_skew"));
     Ok(())
 }
+
+#[tokio::test]
+async fn reopens_after_each_transient_closure_once_its_growing_delay_has_passed() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    // A jitter of 1/64 keeps the delays short and exact: 1 s becomes 15.625 ms.
+    let settings = Settings {
+        backoff: Backoff {
+            jitter: Arc::new(|| 1.0 / 64.0),
+            ..Backoff::default()
+        },
+        ..Settings::default()
+    };
+    let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
+
+    let mut opening = authority.next_opening().await;
+    for delay in [15_625, 31_250, 62_500].map(Duration::from_micros) {
+        let refused = tokio::time::Instant::now();
+        opening.refuse(closing_status(Code::Unavailable, Some("unavailable")));
+        let (_, reopen_after) = next_closure(&mut channel).await;
+        assert_eq!(reopen_after, Some(delay));
+        opening = authority.next_opening().await;
+        assert!(delay <= refused.elapsed());
+    }
+
+    // An authenticated stream starts the backoff from 1 s again.
+    let mut stream = opening.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    stream
+        .close(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+    let (_, reopen_after) = next_closure(&mut channel).await;
+    assert_eq!(reopen_after, Some(Duration::from_micros(15_625)));
+    authority.next_opening().await;
+    Ok(())
+}
