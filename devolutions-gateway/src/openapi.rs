@@ -164,6 +164,7 @@ struct AiAnalysisParams {
     /// Model identifier, passed to the provider as is.
     model: String,
     /// Upper bound of tokens in each AI answer; null when not asked.
+    #[schema(value_type = Option<i64>, minimum = 0, maximum = 4_294_967_295_u64)]
     max_output_tokens: Option<u32>,
     /// Language the AI writes in; absent when not asked, so the AI writes in English.
     #[serde(skip_serializing_if = "Option::is_none")]
