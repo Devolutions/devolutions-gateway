@@ -1,26 +1,41 @@
 //! Tests for listeners whose internal URL uses the `*` host.
+//!
+//! The README states that `*` in an internal URL creates a listener on `0.0.0.0` for any IPv4 address
+//! and one on `[::]` for any IPv6 address.
+//! Both listeners share a port, which Linux rejects unless the IPv6 listener is IPv6-only.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use anyhow::Context as _;
-use rstest::rstest;
 use testsuite::cli::start_dgw;
 use testsuite::dgw_config::DgwConfig;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 
-/// The README states that `*` in an internal URL creates a listener on `0.0.0.0` for any IPv4 address
-/// and one on `[::]` for any IPv6 address.
-///
-/// Both listeners share a port, which Linux rejects unless the IPv6 listener is IPv6-only.
-#[rstest]
-#[case::ipv4(IpAddr::V4(Ipv4Addr::LOCALHOST))]
-#[case::ipv6(IpAddr::V6(Ipv6Addr::LOCALHOST))]
 #[cfg_attr(
     windows,
     ignore = "a wildcard listener makes Windows Firewall ask for elevation once per executable path"
 )]
 #[tokio::test]
-async fn wildcard_host_listens_on_ipv4_and_ipv6(#[case] loopback: IpAddr) -> anyhow::Result<()> {
+async fn wildcard_host_listens_on_ipv4() -> anyhow::Result<()> {
+    assert_wildcard_host_answers_on(IpAddr::V4(Ipv4Addr::LOCALHOST)).await
+}
+
+#[cfg_attr(
+    windows,
+    ignore = "a wildcard listener makes Windows Firewall ask for elevation once per executable path"
+)]
+#[tokio::test]
+async fn wildcard_host_listens_on_ipv6() -> anyhow::Result<()> {
+    // Without IPv6, Gateway serves `*` on IPv4 only, which is the documented fallback.
+    if std::net::TcpListener::bind((Ipv6Addr::LOCALHOST, 0)).is_err() {
+        eprintln!("skipped: the host has no IPv6 loopback");
+        return Ok(());
+    }
+
+    assert_wildcard_host_answers_on(IpAddr::V6(Ipv6Addr::LOCALHOST)).await
+}
+
+async fn assert_wildcard_host_answers_on(loopback: IpAddr) -> anyhow::Result<()> {
     let config_handle = DgwConfig::builder()
         .listener_host("*")
         .build()
