@@ -127,14 +127,20 @@ impl AgentChannel for ChannelService {
                     }),
                 );
             }
-            result
+            result.map(|auth| {
+                let not_after = state
+                    .lookup_cert(auth.cert_thumbprint())
+                    .expect("the opening certificate is registered")
+                    .not_after;
+                Opening { auth, not_after }
+            })
         };
-        let auth = auth.map_err(|rejection| rejection_status(rejection, now))?;
+        let opening = auth.map_err(|rejection| rejection_status(rejection, now))?;
 
         tokio::spawn(run_stream(
             app,
             stream_id,
-            auth,
+            opening,
             request.into_inner(),
             push_tx,
             push_rx,
@@ -142,6 +148,14 @@ impl AgentChannel for ChannelService {
         ));
         Ok(Response::new(ReceiverStream::new(out_rx)))
     }
+}
+
+/// A channel stream whose opening request passed §6.
+struct Opening {
+    auth: crate::oracle::AuthenticatedIdentity,
+    /// The `notAfter` of the certificate that signed the opening request.
+    /// It bounds the stream (§7.4) even after deletion removes that certificate's record.
+    not_after: i64,
 }
 
 fn server_message(id: String, correlation_id: Option<String>, payload: server_message::Payload) -> ServerMessage {
@@ -224,19 +238,15 @@ fn awaiting_closure(
     Ok(cert.status)
 }
 
-/// The §7.4 closure due to a stream awaiting `Hello` once the clock reaches its certificate's `notAfter`.
+/// The §7.4 closure due to a stream awaiting `Hello` once the clock reaches `not_after`, its [`Opening`] deadline.
 /// Revocation and deletion still win over expiry then, as [`awaiting_closure`] orders them.
-async fn expiry_closure(app: &App, identity_id: Uuid, cert_thumbprint: &str) -> Option<Rejection> {
+async fn expiry_closure(app: &App, identity_id: Uuid, cert_thumbprint: &str, not_after: i64) -> Option<Rejection> {
     let now = app.now();
-    let state = app.state.lock().await;
-    let expired = state
-        .lookup_cert(cert_thumbprint)
-        .is_some_and(|cert| stream_expired(cert.not_after, now));
-    if expired {
-        awaiting_closure(&state, identity_id, cert_thumbprint, now).err()
-    } else {
-        None
+    if !stream_expired(not_after, now) {
+        return None;
     }
+    let closure = awaiting_closure(&*app.state.lock().await, identity_id, cert_thumbprint, now);
+    Some(closure.err().unwrap_or(Rejection::CertificateExpired))
 }
 
 async fn close_opening_push(
@@ -276,12 +286,13 @@ async fn close_opening_push(
 async fn run_stream(
     app: Arc<App>,
     stream_id: Uuid,
-    auth: crate::oracle::AuthenticatedIdentity,
+    opening: Opening,
     mut client: Streaming<AgentMessage>,
     push_tx: mpsc::UnboundedSender<StreamPush>,
     mut push_rx: mpsc::UnboundedReceiver<StreamPush>,
     out: mpsc::Sender<Result<ServerMessage, Status>>,
 ) {
+    let Opening { auth, not_after } = opening;
     let identity_id = auth.identity_id();
     let cert_thumbprint = auth.cert_thumbprint().to_owned();
 
@@ -325,7 +336,7 @@ async fn run_stream(
                     return;
                 }
                 _ = expiry_check.tick() => {
-                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint).await {
+                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint, not_after).await {
                         close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
                         return;
                     }
@@ -418,7 +429,7 @@ async fn run_stream(
                     }
                 }
                 _ = expiry_check.tick() => {
-                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint).await {
+                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint, not_after).await {
                         close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
                         return;
                     }
@@ -1130,6 +1141,49 @@ mod tests {
             closed.map(|event| &event.body["error_code"]),
             Some(&Value::from("identity_revoked"))
         );
+        Ok(())
+    }
+
+    /// Revokes and deletes the identity of `channel`'s stream, then moves the mock clock to its certificate's
+    /// `notAfter`, and returns what the stream shows within the next two seconds, well within the 10 s `Hello` timeout.
+    async fn delete_then_reach_not_after(enrolled: &Enrolled, channel: &mut Channel) -> anyhow::Result<Vec<Seen>> {
+        revoke_then_delete(enrolled, &mut *enrolled.app.state.lock().await);
+        enrolled.advance_to(enrolled.not_after).await;
+        channel.drain(Duration::from_secs(2)).await
+    }
+
+    /// CONTRACT.md §7.4: a stream awaiting `Hello` closes "no later than its certificate's `notAfter`", and "an
+    /// identity revoked and then deleted during that wait gets `UNAUTHENTICATED` + `error-code: identity_unknown`".
+    #[tokio::test(start_paused = true)]
+    async fn deleted_identity_closes_a_stream_awaiting_hello_at_not_after() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        enrolled.app.clock.freeze_at(enrolled.not_after - 1);
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        let closure = Seen::Closed("16".to_owned(), "identity_unknown".to_owned());
+        assert_eq!(delete_then_reach_not_after(&enrolled, &mut channel).await?, [closure]);
+        Ok(())
+    }
+
+    /// As above, for a valid `Hello` that the `__mock__/handshake` pause holds, which no `Hello` timeout ends.
+    #[tokio::test(start_paused = true)]
+    async fn deleted_identity_closes_a_held_hello_at_not_after() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        enrolled.app.clock.freeze_at(enrolled.not_after - 1);
+        enrolled.app.handshake_gate.send_replace(false);
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+        channel.send(channel.hello(&enrolled.key)?).await?;
+        let held = async {
+            while enrolled.app.state.lock().await.paused_hellos.is_empty() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        };
+        tokio::time::timeout(Duration::from_secs(1), held).await?;
+
+        let closure = Seen::Closed("16".to_owned(), "identity_unknown".to_owned());
+        assert_eq!(delete_then_reach_not_after(&enrolled, &mut channel).await?, [closure]);
         Ok(())
     }
 
