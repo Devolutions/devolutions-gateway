@@ -510,9 +510,12 @@ impl Run {
                         .await
                         .map_err(|error| files_error(&error))?;
 
+                    let describe =
+                        describe_transcript(&self.client, self.max_output_tokens, &self.language, &transcript);
+
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                        described = describe_transcript(&self.client, self.max_output_tokens, &self.language, &transcript) => described?,
+                        described = describe => described?,
                     }
                 }
                 Chunk::Screenshots { frames, context } => {
@@ -522,9 +525,17 @@ impl Run {
                         None => None,
                     };
 
+                    let describe = describe_screenshots(
+                        &self.client,
+                        self.max_output_tokens,
+                        &self.language,
+                        &frames,
+                        context.as_ref(),
+                    );
+
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                        described = describe_screenshots(&self.client, self.max_output_tokens, &self.language, &frames, context.as_ref()) => described?,
+                        described = describe => described?,
                     }
                 }
             };

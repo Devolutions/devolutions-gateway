@@ -60,7 +60,7 @@ pub(super) struct LogHeader<'a> {
     pub(super) language: &'a str,
 }
 
-/// Writes the log of a session entry by entry, so the actions never have to be all in memory.
+/// Writes the log of a session entry by entry.
 pub(super) struct SlogWriter<W> {
     out: W,
     start_time: i64,
@@ -183,7 +183,7 @@ mod tests {
     // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
     // oracle: reference webapp/packages/session-recording-log/src/fixtures/sample-complete.slog
     #[test]
-    fn writes_the_shipped_schema_with_the_analysis_on_session_start() {
+    fn writes_the_shipped_schema_with_the_analysis_and_the_summary() {
         let actions = [
             action(1500, "Listed files", Some("/var/log"), &[("Command", "ls /var/log")]),
             action(62_250, "Closed the shell", None, &[]),

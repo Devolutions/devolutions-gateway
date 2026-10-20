@@ -50,5 +50,5 @@ pub use secrecy;
 
 pub use self::client::{AiClient, AiClientBuilder, BuildError, DEFAULT_REQUEST_TIMEOUT, Provider};
 pub use self::error::Error;
-pub use self::language::{InvalidLanguage, Language, MAX_LANGUAGE_CHARS};
+pub use self::language::{InvalidLanguage, Language};
 pub use self::response::{Response, Usage};

@@ -248,6 +248,7 @@ pub(crate) const fn fnv1a(texts: &[&str]) -> u64 {
         let bytes = texts[text].as_bytes();
         let mut byte = 0;
         while byte < bytes.len() {
+            // `u64::from` cannot be called in a const fn.
             hash = (hash ^ bytes[byte] as u64).wrapping_mul(PRIME);
             byte += 1;
         }

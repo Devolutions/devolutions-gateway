@@ -92,18 +92,23 @@ impl SummarizeSession<'_> {
             max_output_tokens: self.max_output_tokens,
         };
 
-        self.client.complete(&prompt).await?.try_map(|answer| {
-            let summary = answer.trim();
-
-            if summary.is_empty() {
-                return Err(Error::InvalidOutput {
-                    reason: "empty summary".to_owned(),
-                });
-            }
-
-            Ok(summary.to_owned())
-        })
+        self.client
+            .complete(&prompt)
+            .await?
+            .try_map(|answer| read_summary(&answer))
     }
+}
+
+fn read_summary(answer: &str) -> Result<String, Error> {
+    let summary = answer.trim();
+
+    if summary.is_empty() {
+        return Err(Error::InvalidOutput {
+            reason: "empty summary".to_owned(),
+        });
+    }
+
+    Ok(summary.to_owned())
 }
 
 #[derive(Serialize)]
@@ -167,6 +172,16 @@ mod tests {
                 "{\"elapsedSeconds\":62.0,\"description\":\"Closed the shell\"}\n",
             )
         );
+    }
+
+    #[test]
+    fn the_summary_is_trimmed_and_never_empty() {
+        let summary = read_summary("\n L'utilisateur a listé les journaux. \n").expect("a summary with text");
+        assert_eq!(summary, "L'utilisateur a listé les journaux.");
+
+        let error = read_summary(" \n").expect_err("a blank summary");
+        assert!(matches!(error, Error::InvalidOutput { .. }), "{error:?}");
+        assert!(!error.is_transient());
     }
 
     #[test]
