@@ -3240,14 +3240,15 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
     Ok(())
 }
 
+/// A stream awaiting `Hello` whose identity is revoked and then deleted during that wait closes as `identity_unknown` ([CONTRACT.md] §7.4).
+///
+/// An authority may close a waiting stream as soon as the identity is revoked, so only the mock, which applies revocation and deletion to a waiting stream when its `Hello` arrives, guarantees that the deletion happens during the wait.
+///
+/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
 pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "before-deletion").await?;
     let streams = streams_awaiting_hello(&ctx, &identity, &[AwaitedHello::Valid, AwaitedHello::BadProof]).await?;
-    let authenticated = if ctx.mock() {
-        Some(count(&ctx.target.requests(None).await?, "authenticated_connects")?)
-    } else {
-        None
-    };
+    let authenticated = count(&ctx.target.requests(None).await?, "authenticated_connects")?;
     ctx.target.management().revoke(&identity.identity_id).await?;
     ctx.target.management().delete_identity(&identity.identity_id).await?;
     for (variant, mut stream, challenge) in streams {
@@ -3264,12 +3265,10 @@ pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Resu
             .is_none(),
         "a Hello for a deleted identity restored it"
     );
-    if let Some(authenticated) = authenticated {
-        ensure!(
-            count(&ctx.target.requests(None).await?, "authenticated_connects")? == authenticated,
-            "deleted stream was registered as authenticated"
-        );
-    }
+    ensure!(
+        count(&ctx.target.requests(None).await?, "authenticated_connects")? == authenticated,
+        "deleted stream was registered as authenticated"
+    );
     Ok(())
 }
 

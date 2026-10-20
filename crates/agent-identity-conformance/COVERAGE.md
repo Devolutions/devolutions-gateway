@@ -44,8 +44,10 @@ The suite's tests of each party's own intent:
 - Friendly names (shared intent, "Enrollment"): `p_friendly_name_format`, `p_friendly_name_white_space_and_truncation`.
 - The agent's local behaviour (`crates/agent-identity/INTENT.md`):
   - "Identities", an unavailable key backend logs an error and stops the identity feature: `a_unavailable_key_backend_stops_identity`.
+    The harness test `error_log_level_is_distinct_from_message_text` pins how it finds an error-level line, with and without colour codes.
   - "Pending-enrollment files", the last of two tokens for one authority to complete wins, and each success deletes its pending file and in-progress record: `a_two_pending_tokens_same_authority_last_wins`.
   - "Stored identities", a renewal ends with the new key current, no pending or previous key, and the old key deleted; these tests wait for that state before they stop the agent: `a_renew_transient_failures_retry_without_state_change`, `a_renewal_lost_response_retried`, `a_confirm_barrier_blocks_channelless_traffic`, `a_confirm_expired_pending_renews_with_fresh_key`, `a_expired_current_renews_in_grace_or_rejects_beyond`, `a_make_before_break_on_renewal`, `a_request_renewal_connected`, `a_request_renewal_while_offline`, `a_request_renewal_without_channel`, `a_rotation_migrates_connected_agent`, `a_rotation_migrates_through_check_in`.
     `a_renewal_happy_path` restarts the agent without `renewal_after_secs`, so that the restarted agent keeps its renewed key.
 - Device keys (`crates/device-key/INTENT.md`, "Operations"), no leftover copy of a private key survives a later operation in the same key store: `a_request_renewal_without_channel` checks it after a restart.
   The audit after each agent test tolerates a leftover copy of a deleted key, because stopping the agent can follow its last key-store operation.
+  The harness test `orphan_audit_accepts_both_records_and_cleanup_is_prefix_scoped` pins that the audit tolerates such a copy, still rejects a leftover copy of a recorded key, and that the post-operation check reports it.
