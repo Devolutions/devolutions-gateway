@@ -252,15 +252,7 @@ impl Client {
         }
         let response: EnrollResponse = parse_response(&body)?;
         validate_certificate_chain(&response.certificate_chain, &key.public_key())?;
-        if response
-            .config
-            .as_object()
-            .and_then(|config| config.get("revision"))
-            .and_then(Value::as_u64)
-            .is_none()
-        {
-            return Err(ClientError::invalid_response("missing config revision"));
-        }
+        validate_config(&response.config)?;
         Ok(response)
     }
 
@@ -318,7 +310,9 @@ impl Client {
         if status != StatusCode::OK {
             return Err(ClientError::invalid_response("unexpected check-in status"));
         }
-        parse_response(&response)
+        let response: CheckInResponse = parse_response(&response)?;
+        validate_config(&response.config)?;
+        Ok(response)
     }
 
     async fn signed_post(
@@ -436,6 +430,19 @@ fn operation_url(base_url: &Url, operation: &str) -> ClientResult<Url> {
 
 fn parse_response<T: DeserializeOwned>(body: &[u8]) -> ClientResult<T> {
     serde_json::from_slice(body).map_err(|_| ClientError::invalid_response("invalid JSON response"))
+}
+
+fn validate_config(config: &Value) -> ClientResult<()> {
+    let Some(config) = config.as_object() else {
+        return Err(ClientError::invalid_response("config is not an object"));
+    };
+    if config.get("version").and_then(Value::as_u64) != Some(1) {
+        return Err(ClientError::invalid_response("unsupported config version"));
+    }
+    if config.get("revision").and_then(Value::as_u64).is_none() {
+        return Err(ClientError::invalid_response("missing config revision"));
+    }
+    Ok(())
 }
 
 fn canonical_uuid<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Uuid, D::Error> {
@@ -773,5 +780,25 @@ mod tests {
         assert!(response.config["agent_channel_url"].is_null());
         assert_eq!(response.config["extra"], true);
         assert_eq!(response.config["revision"], 4);
+    }
+
+    #[test]
+    fn config_with_a_version_other_than_1_is_transient() {
+        // `CONTRACT.md` §5.2: a config whose `version` is not 1 is a transient failure.
+        assert_eq!(
+            validate_config(&serde_json::json!({"version": 1, "revision": 1})),
+            Ok(())
+        );
+        for config in [
+            serde_json::json!({"version": 2, "revision": 1}),
+            serde_json::json!({"version": 0, "revision": 1}),
+            serde_json::json!({"version": "1", "revision": 1}),
+            serde_json::json!({"revision": 1}),
+        ] {
+            assert!(
+                matches!(validate_config(&config), Err(ClientError::Transient { .. })),
+                "{config}"
+            );
+        }
     }
 }

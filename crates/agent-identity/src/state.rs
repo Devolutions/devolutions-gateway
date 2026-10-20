@@ -288,6 +288,10 @@ impl Store {
     }
 
     pub fn update_config(&self, identity: &mut StoredIdentity, config: Value) -> anyhow::Result<bool> {
+        ensure!(
+            config.get("version").and_then(Value::as_u64) == Some(1),
+            "unsupported config version"
+        );
         let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
         let latest = self
             .read_identity(identity.authority_id)?
@@ -1374,6 +1378,27 @@ mod tests {
         let token = test_token()?;
         pending::write(&directory.0, &token, true)?;
         assert!(store.begin_enrollment(&token)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn config_with_a_version_other_than_1_keeps_the_stored_config() -> anyhow::Result<()> {
+        // `CONTRACT.md` §5.2: the agent keeps its stored config when it receives a config whose `version` is not 1.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let stored = identity.clone();
+
+        assert!(
+            store
+                .update_config(&mut identity, json!({"version": 2, "revision": 99}))
+                .is_err()
+        );
+
+        assert_eq!(store.read_identity(stored.authority_id)?, Some(stored));
         Ok(())
     }
 }
