@@ -30,7 +30,8 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<VerifyingKey> {
         })
         .ok()?;
 
-    if algorithm.oid != ECDSA_WITH_SHA_256 {
+    // RFC 5758 §3.2: the ecdsa-with-SHA256 encoding "MUST omit the parameters field".
+    if !(algorithm.oid == ECDSA_WITH_SHA_256 && algorithm.parameters.is_none()) {
         return None;
     }
 
@@ -50,7 +51,8 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<VerifyingKey> {
     let key = VerifyingKey::from_sec1_bytes(point).ok()?;
 
     // The signature covers `info` as received, never a re-encoding, which could differ in the subject or attributes.
-    let signature = Signature::from_der(signature.raw_bytes()).ok()?;
+    // `as_bytes` rejects unused bits, since the BIT STRING holds the DER `Ecdsa-Sig-Value` (RFC 3279 §2.2.3), a whole number of octets.
+    let signature = Signature::from_der(signature.as_bytes()?).ok()?;
     key.verify(info, &signature).ok()?;
 
     return Some(key);
@@ -138,8 +140,10 @@ mod tests {
         subject: Vec<u8>,
         public_key: Vec<u8>,
         attributes: Vec<u8>,
-        signature_algorithm: ObjectIdentifier,
+        signature_algorithm: Vec<u8>,
         signer: SigningKey,
+        /// Unused-bit count of the signature BIT STRING.
+        signature_unused_bits: u8,
         trailing: Vec<u8>,
     }
 
@@ -151,8 +155,9 @@ mod tests {
                 subject: vec![0x30, 0x00],
                 public_key: public_key(ID_EC_PUBLIC_KEY, SECP256R1, false),
                 attributes: vec![0xA0, 0x00],
-                signature_algorithm: ECDSA_WITH_SHA_256,
+                signature_algorithm: algorithm(ECDSA_WITH_SHA_256, &[]),
                 signer: signer(),
+                signature_unused_bits: 0,
                 trailing: Vec::new(),
             }
         }
@@ -175,15 +180,9 @@ mod tests {
         }
 
         fn encode_with(&self, signature: &DerSignature) -> Vec<u8> {
-            let algorithm = AlgorithmIdentifierOwned {
-                oid: self.signature_algorithm,
-                parameters: None,
-            }
-            .to_der()
-            .expect("encodable algorithm identifier");
-            let signature = tlv(0x03, &[&[0x00], signature.as_bytes()]);
+            let signature = tlv(0x03, &[&[self.signature_unused_bits], signature.as_bytes()]);
             [
-                tlv(0x30, &[&self.info(), &algorithm, &signature]),
+                tlv(0x30, &[&self.info(), &self.signature_algorithm, &signature]),
                 self.trailing.clone(),
             ]
             .concat()
@@ -192,6 +191,11 @@ mod tests {
 
     fn signer() -> SigningKey {
         SigningKey::from_slice(&[1; 32]).expect("valid P-256 scalar")
+    }
+
+    /// `AlgorithmIdentifier` with the encoded `parameters`, absent when empty.
+    fn algorithm(oid: ObjectIdentifier, parameters: &[u8]) -> Vec<u8> {
+        tlv(0x30, &[&oid.to_der().expect("encodable OID"), parameters])
     }
 
     /// `SubjectPublicKeyInfo` holding `signer()`'s point.
@@ -266,7 +270,11 @@ mod tests {
     #[case::wrong_key_algorithm(Csr { public_key: public_key(ID_EC_DH, SECP256R1, false), ..Csr::valid() })]
     #[case::bad_self_signature(Csr { signer: SigningKey::from_slice(&[2; 32]).expect("valid P-256 scalar"), ..Csr::valid() })]
     // Signed with SHA-256, so that only the algorithm identifier is wrong.
-    #[case::signature_algorithm_not_ecdsa_with_sha256(Csr { signature_algorithm: ECDSA_WITH_SHA_384, ..Csr::valid() })]
+    #[case::signature_algorithm_not_ecdsa_with_sha256(Csr { signature_algorithm: algorithm(ECDSA_WITH_SHA_384, &[]), ..Csr::valid() })]
+    // RFC 5758 §3.2: the ecdsa-with-SHA256 encoding "MUST omit the parameters field"; here they are NULL.
+    #[case::signature_algorithm_with_parameters(Csr { signature_algorithm: algorithm(ECDSA_WITH_SHA_256, &[0x05, 0x00]), ..Csr::valid() })]
+    // RFC 3279 §2.2.3: the BIT STRING holds the DER `Ecdsa-Sig-Value`, a whole number of octets.
+    #[case::signature_not_octet_aligned(Csr { signature_unused_bits: 1, ..Csr::valid() })]
     #[case::version_2(Csr { version: vec![0x02, 0x01, 0x01], ..Csr::valid() })]
     #[case::non_minimal_length_in_public_key(Csr { public_key: with_long_form_length(&public_key(ID_EC_PUBLIC_KEY, SECP256R1, false)), ..Csr::valid() })]
     #[case::subject_not_a_name(Csr { subject: vec![0x31, 0x00], ..Csr::valid() })]
