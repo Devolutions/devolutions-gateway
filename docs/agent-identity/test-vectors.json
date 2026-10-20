@@ -1,7 +1,7 @@
 {
   "version": 1,
   "description": "Shared test vectors for docs/agent-identity/CONTRACT.md. Timestamps are Unix seconds. Signatures are ECDSA P-256 / SHA-256, raw r||s, generated with RFC 6979 deterministic nonces. Keys are test-only.",
-  "evaluation": "For http_signature.cases, a verifier holding the `registered` certificates, an empty nonce store and clock `now` returns `expected` (`ok` or a §5.4 error code) for a request to `endpoint` (renew, connect, confirm or check-in) with the case's `method`. `sequences` run their steps in order against one nonce store. Certificate validity follows §5.3 (renew grace), §5.5 and §5.6 (confirm and check-in: pending or current, unexpired, no grace) and §6 step 4. In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request. Key-reuse rules depend on server state and are covered by the conformance suite, not by these vectors.",
+  "evaluation": "For http_signature.cases, a verifier holding the `registered` certificates, an empty nonce store and clock `now` returns `expected` (`ok` or a §5.4 error code) for a request to `endpoint` (renew, connect, confirm or check-in) with the case's `method`. `sequences` run their steps in order against one nonce store. Certificate validity follows the §6 table and §8.2 (renew grace), §5.5 and §5.6 (confirm and check-in: pending or current, unexpired, no grace) and §6 step 4; a certificate is unexpired while `now ≤ notAfter` (§6). In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request. Key-reuse rules depend on server state and are covered by the conformance suite, not by these vectors.",
   "keys": [
     {
       "name": "device-a",
@@ -226,7 +226,7 @@
       },
       {
         "name": "expired_within_grace_renew",
-        "description": "Certificate expired, renew within grace (§5.3)",
+        "description": "Certificate expired, renew within grace (§6 table, §8.2)",
         "endpoint": "renew",
         "method": "POST",
         "now": 1790000000,
@@ -241,7 +241,7 @@
       },
       {
         "name": "connect_signature_to_renew",
-        "description": "connect-tagged signature sent to renew (step 2)",
+        "description": "connect-tagged signature sent to renew with a correct digest (step 1/2)",
         "endpoint": "renew",
         "method": "POST",
         "now": 1790000000,
@@ -256,13 +256,14 @@
       },
       {
         "name": "renew_signature_to_connect",
-        "description": "renew-tagged signature sent to connect (step 2)",
+        "description": "renew-tagged signature sent to connect with its original content-digest header (step 1/2)",
         "endpoint": "connect",
         "method": "POST",
         "now": 1790000000,
         "headers": {
           "signature": "sig=:cGMk9X7jzDRJyd1979ubUGnBAc1bUTqHfT5BQcmOukwoxibgZYFrHVARt31VXJqqMryUriq8AibtccRN7Qhu1w==:",
-          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\""
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:"
         },
         "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
         "expected": "signature_invalid"
@@ -718,13 +719,14 @@
       },
       {
         "name": "renew_signature_to_confirm",
-        "description": "renew-tagged signature sent to confirm (step 1/2)",
+        "description": "renew-tagged signature sent to confirm with its original content-digest header (step 1/2)",
         "endpoint": "confirm",
         "method": "POST",
         "now": 1790000000,
         "headers": {
           "signature": "sig=:cGMk9X7jzDRJyd1979ubUGnBAc1bUTqHfT5BQcmOukwoxibgZYFrHVARt31VXJqqMryUriq8AibtccRN7Qhu1w==:",
-          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\""
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:"
         },
         "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
         "expected": "signature_invalid"
@@ -806,13 +808,14 @@
       },
       {
         "name": "check_in_signature_to_connect",
-        "description": "check-in-tagged signature sent to connect (step 1/2)",
+        "description": "check-in-tagged signature sent to connect with its original content-digest header (step 1/2)",
         "endpoint": "connect",
         "method": "POST",
         "now": 1790000000,
         "headers": {
           "signature": "sig=:p5TVxLZujsvVTwVibnwDcgITcaiIZLzZwznns+WJgui8m5BWhd6kr+ZsxYufz9B/+oLNtlGn6spAiWFh2nDfjQ==:",
-          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"cHFyc3R1dnd4eXp7fH1-fw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\""
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"cHFyc3R1dnd4eXp7fH1-fw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+          "content-digest": "sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:"
         },
         "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"cHFyc3R1dnd4eXp7fH1-fw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
         "expected": "signature_invalid"
@@ -834,13 +837,14 @@
       },
       {
         "name": "check_in_signature_to_confirm",
-        "description": "check-in-tagged signature sent to confirm (step 1/2)",
+        "description": "check-in-tagged signature sent to confirm with its original content-digest header (step 1/2)",
         "endpoint": "confirm",
         "method": "POST",
         "now": 1790000000,
         "headers": {
           "signature": "sig=:p5TVxLZujsvVTwVibnwDcgITcaiIZLzZwznns+WJgui8m5BWhd6kr+ZsxYufz9B/+oLNtlGn6spAiWFh2nDfjQ==:",
-          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"cHFyc3R1dnd4eXp7fH1-fw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\""
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"cHFyc3R1dnd4eXp7fH1-fw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+          "content-digest": "sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:"
         },
         "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"cHFyc3R1dnd4eXp7fH1-fw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
         "expected": "signature_invalid"
@@ -892,16 +896,17 @@
       },
       {
         "name": "renew_over_covered_components",
-        "description": "renew with the correct tag but over_covered covered components, correctly signed (step 1)",
+        "description": "renew with the correct tag but also covering its content-type header, correctly signed (step 1)",
         "endpoint": "renew",
         "method": "POST",
         "now": 1790000000,
         "headers": {
           "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
-          "signature-input": "sig=(\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"sLGys7S1tre4ubq7vL2-vw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
-          "signature": "sig=:vB3wcnXwwyviZeza9ErP2AYe4n6drVNK/HJYe1zaoZIlM/FdPiZGACW8PKLNpZdhENpudPRFBD3kiHLby+suew==:"
+          "content-type": "application/json",
+          "signature-input": "sig=(\"@method\" \"content-digest\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"sLGys7S1tre4ubq7vL2-vw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:v7vnAlqGIw/SgdVhRH7aACOrQS4a2CLjHJvevLayblu3fpWWjdQ56w/g+2JehM19tKRTQ6YaBnRNN2AubJ2EpQ==:"
         },
-        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"sLGys7S1tre4ubq7vL2-vw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"content-digest\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"sLGys7S1tre4ubq7vL2-vw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
         "expected": "signature_invalid",
         "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
       },
@@ -937,15 +942,16 @@
       },
       {
         "name": "connect_over_covered_components",
-        "description": "connect with the correct tag but over_covered covered components, correctly signed (step 1)",
+        "description": "connect with the correct tag but also covering its content-type header, correctly signed (step 1)",
         "endpoint": "connect",
         "method": "POST",
         "now": 1790000000,
         "headers": {
-          "signature-input": "sig=(\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"4OHi4-Tl5ufo6err7O3u7w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
-          "signature": "sig=:8tIuMrX2vDeMbTF9qXj8wqDDVLmMzWg0c6V8LoLrFqdhvKMSoLTrMKnwtg2JS/NJsDNxY6+iFS1qsskKF2ftvw==:"
+          "content-type": "application/grpc",
+          "signature-input": "sig=(\"@method\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"4OHi4-Tl5ufo6err7O3u7w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+          "signature": "sig=:5OR6KUREU7CrjOjyR5JaG99vRUE0Tgq1VZdUAryjidSqHWp3X6uvrzxQww+0uwPCMY6TmCEnW11/QeO0AYUtJw==:"
         },
-        "signature_base": "\"@method\": POST\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"4OHi4-Tl5ufo6err7O3u7w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+        "signature_base": "\"@method\": POST\n\"content-type\": application/grpc\n\"@signature-params\": (\"@method\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"4OHi4-Tl5ufo6err7O3u7w\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
         "expected": "signature_invalid"
       },
       {
@@ -963,15 +969,16 @@
       },
       {
         "name": "confirm_over_covered_components",
-        "description": "confirm with the correct tag but over_covered covered components, correctly signed (step 1)",
+        "description": "confirm with the correct tag but also covering its content-type header, correctly signed (step 1)",
         "endpoint": "confirm",
         "method": "POST",
         "now": 1790000000,
         "headers": {
-          "signature-input": "sig=(\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
-          "signature": "sig=:Zk7AUPh6OCW1cC4CtQRu4QF97m/0vwTVGdYr+aCWEe0LxGNVWHnQH2wjGxZqmFiePuRJtHcfh+USmYNXeCDmXg==:"
+          "content-type": "application/json",
+          "signature-input": "sig=(\"@method\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+          "signature": "sig=:zv6ZfW61Toz7zAbmhkao0FNp+BtQCr/M4xU1MhgzNRF8/Qg1JNLC5gIDfvl/TdUvd/R9rqR+7QTgmFIsp+vmAg==:"
         },
-        "signature_base": "\"@method\": POST\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"@path\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+        "signature_base": "\"@method\": POST\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
         "expected": "signature_invalid"
       },
       {
@@ -989,16 +996,17 @@
       },
       {
         "name": "check_in_over_covered_components",
-        "description": "check-in with the correct tag but over_covered covered components, correctly signed (step 1)",
+        "description": "check-in with the correct tag but also covering its content-type header, correctly signed (step 1)",
         "endpoint": "check-in",
         "method": "POST",
         "now": 1790000000,
         "headers": {
           "content-digest": "sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:",
-          "signature-input": "sig=(\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
-          "signature": "sig=:fKaB+fNuqoJB0Zls/aghYbDuyNLMslGOMFhQZ7jpYQeVSYpLX8GZwg/8KgAjbZlP5lUJ6NkqVWpzwNppigCj4A==:"
+          "content-type": "application/json",
+          "signature-input": "sig=(\"@method\" \"content-digest\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+          "signature": "sig=:hItLpWx4+WgtLYAioYAGoCYfDzUL87k+qsHieyDPui1go3X8Zn31LY02EkbN/9tpyysvMz0/DNQYMm+R6Ji9kg==:"
         },
-        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:\n\"@path\": /api/agent-identity/v1/endpoint\n\"@signature-params\": (\"@method\" \"content-digest\" \"@path\");created=1790000000;expires=1790000060;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:kl+4Vcn1P5OJadPamXF+AMYoCSKTJREAYekeflnDfZw=:\n\"content-type\": application/json\n\"@signature-params\": (\"@method\" \"content-digest\" \"content-type\");created=1790000000;expires=1790000060;nonce=\"ICEiIyQlJicoKSorLC0uLw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"check-in\"",
         "expected": "signature_invalid",
         "body": "{\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
       },
@@ -1250,17 +1258,17 @@
         "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
       },
       {
-        "name": "repeated_parameter_raw_base",
-        "description": "tag parameter repeated on the raw Signature-Input field, signed over the received member (step 1)",
+        "name": "repeated_parameter_first_position_base",
+        "description": "tag parameter repeated on the raw Signature-Input field, before created and again last, signed over the member an RFC 8941 parser keeps: the last value at the first occurrence's position (step 1)",
         "endpoint": "renew",
         "method": "POST",
         "now": 1790000000,
         "headers": {
           "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
-          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"BMEn-VKI1AB-8vUwNziRdA\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\";tag=\"renew\"",
-          "signature": "sig=:Mv1WwyfeAftkOdrngsYlEfEXFTuVsGYHBKuGIhcpFIca/QFbEOJGqUXmM0eflu0SUNZbe7/6G7ucBlWVzQZL7Q==:"
+          "signature-input": "sig=(\"@method\" \"content-digest\");tag=\"renew\";created=1790000000;expires=1790000060;nonce=\"BMEn-VKI1AB-8vUwNziRdA\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:yk1uilq8sWw2nn7mptIIAJQwP6CIM3yP367b0sbMCOyQCjaA5pTWGWGFTAoZMMLBDZSGwqwoLuytxh+bsvlzHA==:"
         },
-        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"BMEn-VKI1AB-8vUwNziRdA\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\";tag=\"renew\"",
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");tag=\"renew\";created=1790000000;expires=1790000060;nonce=\"BMEn-VKI1AB-8vUwNziRdA\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\"",
         "expected": "signature_invalid",
         "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
       },
@@ -1338,6 +1346,153 @@
         "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"AAECAwQFBgcICQoLDA0ODw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
         "expected": "signature_invalid",
         "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "renew_reusing_connect_nonce",
+        "description": "Valid renew whose (keyid, nonce) is the one valid_connect uses; alone it is accepted (step 6 in connect_replayed_to_renew)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"EBESExQVFhcYGRobHB0eHw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:n7bfi+ABKtC62ZmHpBBcn88YI6IRj0KqtiYsIl+HjFNpmNi61+gCRWtBCxE4Su6X28pF6jNkiU3JnDkQUc+p+g==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"EBESExQVFhcYGRobHB0eHw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "ok",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "malformed_keyid",
+        "description": "keyid is device A's thumbprint with base64url padding, correctly signed by device A: not its only canonical encoding, so step 1 rather than identity_unknown at step 4 (§6 step 1)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"SElKS0xNTk9QUVJTVFVWVw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w=\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:/fnoIw0V1JYT/BaRDvmI2aia1q8uabHOYHLfTVRQPNDMT4m5ACYO0d7orV95H6jujByvwXa60gVzVkXeop7Nog==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"SElKS0xNTk9QUVJTVFVWVw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w=\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "malformed_nonce",
+        "description": "nonce is base64url of 16 bytes with non-zero pad bits, which decodes leniently to a valid nonce, correctly signed: not its only canonical encoding (§6 step 1)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"WFlaW1xdXl9gYWJjZGVmZx\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:Fg2ud7rfvE1u91Wyx8gQrvM0eOZVgr7SEGqvHsP/5o7+a39lcTb0gyhhWhcunfxQTOJRa6HdbP7SoJz/r7BIjQ==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"WFlaW1xdXl9gYWJjZGVmZx\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "wrong_parameter_type",
+        "description": "created is a string instead of an integer, correctly signed over the received member (§6 step 1)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=\"1790000000\";expires=1790000060;nonce=\"aGlqa2xtbm9wcXJzdHV2dw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:QH2PU0d8TBBJD6X8KF4L/9z7aI7B4VFI81DBYqC7Ku7u9+lPH9g7qNJstiQJDNUPFcsC4KVGD4wwANrpjm5EDQ==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=\"1790000000\";expires=1790000060;nonce=\"aGlqa2xtbm9wcXJzdHV2dw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "signature_member_parameter",
+        "description": "Signature member carries a parameter, signature otherwise valid (§6 step 1)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"eHl6e3x9fn-AgYKDhIWGhw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:AaWyHCWnqejbgoPcYrvY03o84Hyv36G5bCBtq4cB3WbOJB7j5e5ekizCxY98xx21d6abGdlWjMwN9AmqWrZaug==:;x=1"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"eHl6e3x9fn-AgYKDhIWGhw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "covered_component_parameter",
+        "description": "content-digest covered with the sf parameter, correctly signed over the RFC 9421 base for it (§6 step 1)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\";sf);created=1790000000;expires=1790000060;nonce=\"iImKi4yNjo-QkZKTlJWWlw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:mihb2H8mQ9nUTl/BCHSvgY2iQgJnJzOXQURrhsF6yKYke3LYr7uA7WHZl7RD0daueD4XK6Fk1gOLE25nFFnWww==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\";sf: sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\";sf);created=1790000000;expires=1790000060;nonce=\"iImKi4yNjo-QkZKTlJWWlw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "content_digest_member_parameter",
+        "description": "Content-Digest sha-256 member carries a parameter, correctly signed over the received field value (§6 step 1)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:;x=1",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"mJmam5ydnp-goaKjpKWmpw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:AfUwfIWdMEoaPkXC8T+1uLcOsy1xyVxADA2MwYaqrt/eV2XqYmbw+BSf1sWdC03es/W/JXNDL2PCfdr4HCZebA==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:;x=1\n\"@signature-params\": (\"@method\" \"content-digest\");created=1790000000;expires=1790000060;nonce=\"mJmam5ydnp-goaKjpKWmpw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "signature_invalid",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "connect_at_not_after",
+        "description": "Connect at now = notAfter: the certificate is still unexpired (§6)",
+        "endpoint": "connect",
+        "method": "POST",
+        "now": 1796048000,
+        "headers": {
+          "signature-input": "sig=(\"@method\");created=1796048000;expires=1796048060;nonce=\"qKmqq6ytrq-wsbKztLW2tw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+          "signature": "sig=:U4prJj2/IIekgCKPfNX7L6caWYFnD9qvHSgSFShB3ZJ9FLGnObEBVRBkVousbA7Gs9+mA+LQal7PxTRV+WDo0w==:"
+        },
+        "signature_base": "\"@method\": POST\n\"@signature-params\": (\"@method\");created=1796048000;expires=1796048060;nonce=\"qKmqq6ytrq-wsbKztLW2tw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
+        "expected": "ok"
+      },
+      {
+        "name": "renew_at_grace_end",
+        "description": "Renew at now = notAfter + lifetime: the grace has ended (§6 table, step 4)",
+        "endpoint": "renew",
+        "method": "POST",
+        "now": 1803824000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\" \"content-digest\");created=1803824000;expires=1803824060;nonce=\"uLm6u7y9vr_AwcLDxMXGxw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+          "signature": "sig=:BYjh3ZHNe5dddy0WHTpgvI90WymiBcmmc/h6/bNQlTlkh48BfOFpGOvBI4EwHrLMSuQILvKlyuePInCC9f1G/w==:"
+        },
+        "signature_base": "\"@method\": POST\n\"content-digest\": sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:\n\"@signature-params\": (\"@method\" \"content-digest\");created=1803824000;expires=1803824060;nonce=\"uLm6u7y9vr_AwcLDxMXGxw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+        "expected": "certificate_expired",
+        "body": "{\"csr\":\"MIHfMIGFAgEAMBIxEDAOBgNVBAMMB2lnbm9yZWQwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAAQMfYmB90vZ+NVMGCXSJnNHb45c9qZrYe9RtZwkx+CoXdRWC75VZGfBC3W0wRu+Su4OleD4n93KLkxQK05dzOuAoBEwDwYJKoZIhvcNAQkOMQIwADAKBggqhkjOPQQDAgNJADBGAiEA/mDZJ3ugLLcHaXitniCg905D9UCc6shVRU4YDmKjHKwCIQDPPn+Vsg/uVTjiUBV4Gyj+80VSeYVtd6D8u6jNY62PIA==\",\"metadata\":{\"hostname\":\"vector-host\",\"os_name\":\"Linux\"}}"
+      },
+      {
+        "name": "confirm_uncovered_content_digest",
+        "description": "Valid confirm carrying a Content-Digest header it does not cover, whose value does not match the empty body: the header is ignored (§6)",
+        "endpoint": "confirm",
+        "method": "POST",
+        "now": 1790000000,
+        "headers": {
+          "content-digest": "sha-256=:DC/MNJTsu2bxiEStT5faa+8yXJVSrvzyqP5UaP81wjc=:",
+          "signature-input": "sig=(\"@method\");created=1790000000;expires=1790000060;nonce=\"yMnKy8zNzs_Q0dLT1NXW1w\";keyid=\"R468scLJTyf44OH7BKa13G529qJwHf-eApp7RDFqvLQ\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+          "signature": "sig=:DpDAk+0VLTWVEh9YNhbcpwVEXvneauVc26xvfBDbwAvZqWodGUu7vBCCQEdzFcwdfW2RkxBeQc7xXqgYW0OouA==:"
+        },
+        "signature_base": "\"@method\": POST\n\"@signature-params\": (\"@method\");created=1790000000;expires=1790000060;nonce=\"yMnKy8zNzs_Q0dLT1NXW1w\";keyid=\"R468scLJTyf44OH7BKa13G529qJwHf-eApp7RDFqvLQ\";alg=\"ecdsa-p256-sha256\";tag=\"confirm\"",
+        "expected": "ok"
       }
     ],
     "sequences": [
@@ -1367,10 +1522,10 @@
       },
       {
         "name": "connect_replayed_to_renew",
-        "description": "A valid connect, then its headers replayed to renew",
+        "description": "A valid connect, then a correctly signed renew reusing its (keyid, nonce): the pair is accepted once across operations (step 6)",
         "steps": [
           "valid_connect",
-          "connect_signature_to_renew"
+          "renew_reusing_connect_nonce"
         ],
         "expected": [
           "ok",
