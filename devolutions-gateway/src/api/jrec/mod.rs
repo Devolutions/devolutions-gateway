@@ -33,7 +33,7 @@ use crate::api::heartbeat::recording_storage_health;
 use crate::artifacts::JrecArtifacts;
 use crate::extract::{JrecToken, RecordingDeleteScope, RecordingsReadScope};
 use crate::http::{HttpError, HttpErrorBuilder};
-use crate::recording::{PushOutcome, RecordingMessageSender};
+use crate::recording::{PushEnd, PushOutcome, RecordingMessageSender};
 use crate::token::{JrecTokenClaims, RecordingFileType, RecordingOperation};
 
 /// Read chunk size when streaming a finished session ZIP from the temp file.
@@ -162,7 +162,11 @@ async fn handle_jrec_push(
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
 ) {
-    let (stream, close_handle, received_close) = crate::ws::handle_with_received_close(
+    let crate::ws::HandledWebSocket {
+        stream,
+        close_handle,
+        received_close,
+    } = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal.clone()),
         keep_alive_interval,
@@ -170,7 +174,10 @@ async fn handle_jrec_push(
 
     let result = crate::recording::ClientPush::builder()
         .client_stream(stream)
-        .received_close(received_close)
+        .push_end(move || match received_close.code() {
+            Some(RECORDING_ENDED_CLOSE_CODE) => PushEnd::RecordingEnded,
+            _ => PushEnd::MayReconnect,
+        })
         .recordings(recordings)
         .claims(claims)
         .file_type(file_type)
@@ -200,6 +207,13 @@ async fn handle_jrec_push(
 /// Codes in 4000-4999 are reserved for private application use per
 /// <https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code>.
 const STORAGE_FULL_CLOSE_CODE: u16 = 4010;
+
+/// WebSocket close code a producer sends on `/jrec/push/{id}` when its recording is over, not interrupted.
+///
+/// Any other close, or no close frame, keeps the recording open until its reconnection window passes.
+/// Codes in 4000-4999 are reserved for private application use per
+/// <https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent/code>.
+const RECORDING_ENDED_CLOSE_CODE: u16 = 4011;
 
 /// Deletes a recording stored on this instance
 #[cfg_attr(feature = "openapi", utoipa::path(

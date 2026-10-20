@@ -16,18 +16,29 @@ impl transport::KeepAliveShutdown for KeepAliveShutdownSignal {
     }
 }
 
+/// A WebSocket wrapped by [`handle`].
+pub struct HandledWebSocket<S> {
+    /// The WebSocket as a byte stream.
+    pub stream: S,
+    pub close_handle: transport::CloseWebSocketHandle,
+    /// The close code the client sends, known once `stream` has returned end of file for its close frame.
+    pub received_close: ReceivedClose,
+}
+
 /// Spawns a keep-alive task and wraps the WebSocket into a type implementing AsyncRead and AsyncWrite.
 pub fn handle(
     ws: WebSocket,
     shutdown_signal: impl transport::KeepAliveShutdown,
     keep_alive_interval: time::Duration,
-) -> (
-    impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    transport::CloseWebSocketHandle,
-) {
+) -> HandledWebSocket<impl AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     let (ws, close_handle) = with_sentinel(ws, shutdown_signal, keep_alive_interval);
+    let received_close = ReceivedClose::default();
 
-    (websocket_compat(ws, ReceivedClose::default()), close_handle)
+    HandledWebSocket {
+        stream: websocket_compat(ws, received_close.clone()),
+        close_handle,
+        received_close,
+    }
 }
 
 /// The close code a client sent when it closed the WebSocket.
@@ -39,28 +50,6 @@ impl ReceivedClose {
     pub fn code(&self) -> Option<u16> {
         self.0.get().copied()
     }
-}
-
-/// Like [`handle`], and also reports the close code the client sends.
-///
-/// The code is known once the stream has returned end of file for the client's close frame.
-pub fn handle_with_received_close(
-    ws: WebSocket,
-    shutdown_signal: impl transport::KeepAliveShutdown,
-    keep_alive_interval: time::Duration,
-) -> (
-    impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    transport::CloseWebSocketHandle,
-    ReceivedClose,
-) {
-    let (ws, close_handle) = with_sentinel(ws, shutdown_signal, keep_alive_interval);
-    let received_close = ReceivedClose::default();
-
-    (
-        websocket_compat(ws, received_close.clone()),
-        close_handle,
-        received_close,
-    )
 }
 
 pub fn handle_messages(
