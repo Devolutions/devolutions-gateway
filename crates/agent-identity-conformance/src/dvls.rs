@@ -842,7 +842,9 @@ fn contains_text(value: &Value, text: &str) -> bool {
     match value {
         Value::String(value) => value.contains(text),
         Value::Array(items) => items.iter().any(|item| contains_text(item, text)),
-        Value::Object(members) => members.values().any(|member| contains_text(member, text)),
+        Value::Object(members) => members
+            .iter()
+            .any(|(name, member)| name.contains(text) || contains_text(member, text)),
         _ => false,
     }
 }
@@ -903,6 +905,25 @@ mod tests {
             "null optional rotation fields were not treated as absent"
         );
         Ok(())
+    }
+
+    #[test]
+    fn secret_disclosure_is_found_in_member_names_and_values_but_not_in_redactions() {
+        let secret = "s3cr3t-text";
+        let record = |extra: Value| {
+            let mut record = json!({ "id": "token-id", "name": "test", "hint": "s3c…" });
+            record["nested"] = extra;
+            record
+        };
+        assert!(contains_text(
+            &record(json!([{ "value": "dvaet1.bag.s3cr3t-text" }])),
+            secret
+        ));
+        assert!(contains_text(
+            &record(json!({ "dvaet1.bag.s3cr3t-text": null })),
+            secret
+        ));
+        assert!(!contains_text(&record(json!({ "token": "dvaet1.bag.****" })), secret));
     }
 
     #[test]
