@@ -51,14 +51,15 @@ $report.files.PSObject.Properties | Where-Object Name -like '*<Module>*' | ForEa
 
 A unique kill is a mutant whose `killedBy` has one entry.
 Read kills only from `killedBy`; `coveredBy` lists the tests that ran against a mutant, not those that failed.
-The script lists `Killed` mutants only; attribute a `Timeout` by rerunning its `coveredBy` tests one at a time before counting it caught.
+The script lists `Killed` mutants only; attribute a `Timeout` by applying it by hand, as below, and running its `coveredBy` tests one at a time before counting it caught.
 One row with an argument xUnit cannot serialize makes the whole theory one test id, so the matrix cannot tell its rows apart; `test-writer`'s C# forms avoid this.
 Stryker keeps no per-test output, so for assertion-level evidence apply the mutant by hand from `location` and `replacement`, run the killing test with `dotnet test --filter "FullyQualifiedName~<Class>.<Method>"`, and read the failing assertion from the stack trace.
 Mutant ids are assigned in order over the whole project, so an edit anywhere can renumber them, and lines shift with edits above; across runs match mutants by file, `mutatorName`, `replacement`, and the text of the mutated line in `files[<path>].source`.
 
 ## Rerun
 
-Refresh the clean run and its TRX before each rerun, and compare only runs scoped by `--mutate` over the files a `--since` run mutated: a test edit changes which mutants `--since` selects, so a lost kill drops out instead of surviving.
+Refresh the clean run and its TRX before each rerun.
+For a change's diff, measure and rerun with `--mutate` over the files a `--since` run mutated, never comparing `--since` runs: a test edit changes which mutants `--since` selects, so a lost kill drops out instead of surviving.
 Do not use `--with-baseline`; it reuses results for mutants it considers unchanged, the opposite of a rerun.
 Identical settings include `mutation-level` and any `test-case-filter`, since either changes the mutant population or the tests that can kill it.
 

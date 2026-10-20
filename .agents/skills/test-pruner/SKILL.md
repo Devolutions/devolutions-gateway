@@ -10,7 +10,7 @@ Decide from two independent measurements: whether the expected value is justifie
 Mutation testing alone cannot tell a test that matches itself from a correct one, and oracle review alone cannot tell which tests are the sole guard for a fault.
 Tool mechanics: `references/cargo-mutants.md` for Rust, `references/stryker.md` for C#; load only the language in scope.
 
-Editing mode is for tests you own, such as a change's diff before its pull request opens: commit the changes yourself and hand the evidence tables to whoever posts the pull request comment.
+Editing mode is for tests you own, such as a change's diff before its pull request opens: commit the changes yourself and hand the evidence tables (oracle table, kill matrix, challenge results, survivors, and found bugs) to whoever posts them as a pull request comment.
 Review mode is for another's pull request: post a review and edit nothing.
 Run mutants in a clone of their own and address its files by absolute path, since a relative path resolves against whichever checkout the shell starts in, and an applied mutant left in a shared checkout corrupts every other run there.
 
@@ -18,7 +18,7 @@ Run mutants in a clone of their own and address its files by absolute path, sinc
 
 Invoke `test-oracle-reviewer` on every test in scope and record independent, self-derived, or unknown with evidence.
 Run the mutation tool as the reference describes, adding domain mutants from `references/domain-mutants.md` because generic mutants miss most domain faults.
-Build the kill matrix of mutant by test from the tool's outputs; it needs no per-test reruns.
+Build the kill matrix of mutant by test from the tool's outputs; only the cases the reference names need per-test reruns.
 For tests with several assertions, record which assertion fails for each kill.
 Run the scoped suite repeatedly on the clean tree, for example 15 times, to find flaky tests before trusting any kill.
 
@@ -27,7 +27,7 @@ Run the scoped suite repeatedly on the clean tree, for example 15 times, to find
 Keep independent tests; merge them into cases of one parametrized test only when they check the same property and differ only in data.
 Never delete an independent test on mutant evidence: the mutant sample is tiny next to the real fault space, and a spec vector costs nothing to keep.
 Strengthen a self-derived test with unique kills by replacing its expected value with an independent one; if none exists, keep it and mark it `// oracle: self-derived; sole guard for <faults>`, naming each fault in words, since mutant ids and line numbers change between runs.
-A strengthened test that fails is a finding, never a task to make it pass: report the test, the independent expected value and its source, and the code's actual output to whoever owns the decision, and change neither test nor code meanwhile, as `test-oracle-reviewer` requires.
+A strengthened or gap test that fails is a finding, never a task to make it pass: report the test, the independent expected value and its source, and the code's actual output to whoever owns the decision, and change neither test nor code meanwhile, since whichever is edited first becomes the specification.
 Delete a self-derived test with no unique kills.
 A test of unknown oracle with unique kills has already passed the challenge; strengthen it.
 Challenge a test of unknown oracle without unique kills, unless it is protected below, since its fate does not depend on the answer.
@@ -37,7 +37,7 @@ Two tests that both catch mutant M each have zero unique kills, and deleting bot
 Choose the deletion set so the caught mutants afterward equal the caught mutants before.
 The same rule applies to assertions: a self-derived one that never fails across its test's kills is a deletion candidate.
 
-Protected tests are never proposed for deletion, only strengthened or merged: a regression test tied to an issue or fuzz crash, a test of untrusted-input parsing or bounds checks, and a doctest.
+Protected tests are never proposed for deletion: a regression test tied to an issue or fuzz crash, a test of untrusted-input parsing or bounds checks, and a doctest.
 Treat a suite that deliberately uses snapshots as a change detector: dedupe it, do not delete it.
 Report flaky tests separately; deleting one hides a bug.
 
@@ -65,7 +65,6 @@ Close each coverage gap with a test whose expected value is independent, written
 A suite of independent tests yields few deletions, so expect most of a pass's change to be consolidations and gap tests.
 
 In editing mode, commit deletions, consolidations, strengthenings, and gap tests separately, each as soon as it is verified, so an interrupted run loses little; they are different reviews.
-The evidence tables are the oracle table, kill matrix, challenge results, survivors, and found bugs; they go in a pull request comment, since the pull request body is the squash commit.
 Change only tests and source comments; never modify non-test source otherwise.
 
 In review mode, post one review: inline comments on the affected tests, with the tables in `<details>` blocks.
