@@ -288,10 +288,12 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 - Signature parameters may appear in any order; each parameter listed above appears exactly once, and no other parameter is allowed.
   A verifier builds `@signature-params` from the received member (RFC 9421 §2.3); the line above shows one order.
 - Components: `renew` and `check-in` → `("@method" "content-digest")`; `connect` and `confirm` → `("@method")`.
+  A header the operation does not cover, such as `Content-Digest` on `confirm`, is ignored.
 - `Content-Digest: sha-256=:<base64>:` (RFC 9530).
-- Byte sequences in `Signature` and `Content-Digest` use `base64` with padding, in its canonical form; any other encoding → `signature_invalid`.
+- Byte sequences in `Signature` and `Content-Digest` use `base64` with padding, in its canonical form; any other encoding fails step 1 below.
 - Signature: ECDSA P-256 over SHA-256 of the signature base, raw 64-byte `r‖s`.
 - Agent sets `expires = created + 60`.
+- A certificate is unexpired while `now ≤ notAfter`, as in RFC 5280 §4.1.2.5.
 - Each signed operation has exactly one tag, one component list, and one rule for the certificate it accepts:
 
 | Operation       | `tag`      | Covered components             | Accepted certificate                                                                                                   |
@@ -302,9 +304,10 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 | channel opening | `connect`  | `("@method")`                  | `current` or `pending`, unexpired                                                                                      |
 
 - Server checks; when several fail, the error of the earliest failing step is returned, and step 6 runs only after steps 1–5 pass:
-  1. Parse; exactly one signature labelled `sig`; exactly the listed parameters, each once; `alg` matches; the covered components are **exactly** the operation's list in the table, in that order, each once → else `signature_invalid`.
+  1. Parse: `Signature-Input` and `Signature` each hold exactly one member, labelled `sig`; exactly the listed parameters, each once, `created` and `expires` as integers and the others as strings; no parameter on the `Signature` member or on a covered component; `keyid` is a thumbprint and `nonce` is `base64url` of 16 bytes; canonical `base64`; `alg` matches; the covered components are **exactly** the operation's list in the table, in that order, each once → else `signature_invalid`.
+     A malformed `keyid` fails here rather than at step 4, so that an agent bug never draws a terminal `identity_unknown`.
      A verifier never relies on the client-declared list alone: an under-covered request, such as `renew` covering only `@method`, must fail here.
-     For `renew` and `check-in`, exactly one `Content-Digest` member using `sha-256` is required.
+     For `renew` and `check-in`, `Content-Digest` holds exactly one member, `sha-256`, without parameters.
      The verifier detects a repeated parameter, dictionary member or label on the raw field value, since an RFC 8941 parser keeps only the last occurrence.
   2. `tag` matches the operation → else `signature_invalid`.
   3. `0 < expires − created ≤ 300`; `created ≤ now + 60`; `expires ≥ now − 60` → else `clock_skew`.
