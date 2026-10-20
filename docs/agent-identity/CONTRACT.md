@@ -121,6 +121,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
 - The server ignores CSR subject and extensions; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
+- The agent's CSR carries no attributes, so that a strict PKCS#10 parser accepts it; an empty `extensionRequest` breaks RFC 5280's `SIZE (1..MAX)`.
 
 ## 5. Agent-facing HTTP API (product-neutral)
 
