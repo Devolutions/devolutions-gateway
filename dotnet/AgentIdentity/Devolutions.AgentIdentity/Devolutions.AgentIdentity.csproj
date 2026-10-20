@@ -16,6 +16,7 @@
     <RootNamespace>Devolutions.AgentIdentity</RootNamespace>
     <Version>2026.10.20</Version>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <IncludeSymbols>true</IncludeSymbols>
@@ -24,6 +25,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Devolutions.AgentIdentity.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 
   <ItemGroup>
