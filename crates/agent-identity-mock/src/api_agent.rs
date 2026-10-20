@@ -103,11 +103,11 @@ async fn trust_anchor(AxumState(app): AxumState<Arc<App>>) -> Response {
 /// Parses `Authorization: Bearer <token>`; the token must be well-formed
 /// (`dvaet1.<bag>.<secret>` with a 32-byte secret) to even reach the lookup, and a repeated header is `token_invalid`
 /// ([CONTRACT.md][contract], "2.1 Authority behavior").
-/// Only the exact token string this mock issues authenticates (§2), so a token with another bag or another encoding of
-/// the same secret is `token_invalid`.
+/// The token authenticates by its exact `secret` text alone and the `bag` is never checked (§2); the engine decodes only
+/// the canonical encoding (§1), so another encoding of the same secret bytes is `token_invalid`.
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.md#21-authority-behavior
-fn parse_bearer(headers: &HeaderMap, base_url: &str) -> Result<[u8; 32], ApiError> {
+fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
     if headers.get_all(AUTHORIZATION).iter().count() != 1 {
         return Err(ApiError::token_invalid());
     }
@@ -116,15 +116,12 @@ fn parse_bearer(headers: &HeaderMap, base_url: &str) -> Result<[u8; 32], ApiErro
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(ApiError::token_invalid)?;
-    let secret = token
-        .rsplit_once('.')
-        .and_then(|(_, secret)| URL_SAFE_NO_PAD.decode(secret).ok())
+    token
+        .strip_prefix("dvaet1.")
+        .and_then(|rest| rest.rsplit_once('.'))
+        .and_then(|(_bag, secret)| URL_SAFE_NO_PAD.decode(secret).ok())
         .and_then(|secret| <[u8; 32]>::try_from(secret).ok())
-        .ok_or_else(ApiError::token_invalid)?;
-    if token != enrollment_token(base_url, &secret) {
-        return Err(ApiError::token_invalid());
-    }
-    Ok(secret)
+        .ok_or_else(ApiError::token_invalid)
 }
 
 /// Returns the enrollment token the mock issues for `secret`: `dvaet1.<bag>.<secret>` ([CONTRACT.md][contract], "2. Enrollment token").
@@ -165,7 +162,7 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
         state.requests.enroll_total += 1;
         state.requests.request_sequence.push("enroll");
     }
-    let secret = match parse_bearer(&headers, &app.base_url) {
+    let secret = match parse_bearer(&headers) {
         Ok(secret) => secret,
         Err(err) => return api_error_response(&app, &err),
     };
@@ -515,23 +512,25 @@ mod tests {
         format!("{prefix}.{bag}.{secret}")
     }
 
-    /// CONTRACT.md §2: "only the exact token string authenticates", and the secret must be canonical `base64url` (§1).
+    /// CONTRACT.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
+    #[rstest]
+    #[case::issued_token(|token: &str| token.to_owned())]
+    #[case::other_json_bag(|token: &str| with_bag(token, "e30"))]
+    #[case::undecodable_bag(|token: &str| with_bag(token, "A"))]
+    #[case::empty_bag(|token: &str| with_bag(token, ""))]
+    fn token_authenticates_by_its_secret_text_alone(#[case] alter: fn(&str) -> String) {
+        let token = alter(&enrollment_token(BASE_URL, &[0; 32]));
+        assert_eq!(parse_bearer(&bearer(&token)).ok(), Some([0; 32]));
+    }
+
+    /// Any other secret text is another token, even a non-canonical `base64url` encoding of the same bytes (CONTRACT.md §1, §2).
     #[rstest]
     #[case::padded_secret(|token: &str| format!("{token}="))]
     #[case::nonzero_pad_bits(|token: &str| format!("{}B", &token[..token.len() - 1]))]
     #[case::standard_alphabet(|token: &str| format!("{}+", &token[..token.len() - 1]))]
-    #[case::other_json_bag(|token: &str| with_bag(token, "e30"))]
-    #[case::undecodable_bag(|token: &str| with_bag(token, "A"))]
-    #[case::empty_bag(|token: &str| with_bag(token, ""))]
     #[case::other_prefix(|token: &str| token.replacen("dvaet1", "dvaet2", 1))]
-    fn only_the_exact_token_string_authenticates(#[case] alter: fn(&str) -> String) {
+    fn token_with_other_secret_text_is_invalid(#[case] alter: fn(&str) -> String) {
         let token = alter(&enrollment_token(BASE_URL, &[0; 32]));
-        assert_eq!(code(parse_bearer(&bearer(&token), BASE_URL)), Err("token_invalid"));
-    }
-
-    #[test]
-    fn issued_token_yields_its_secret() {
-        let token = enrollment_token(BASE_URL, &[0; 32]);
-        assert_eq!(parse_bearer(&bearer(&token), BASE_URL).ok(), Some([0; 32]));
+        assert_eq!(code(parse_bearer(&bearer(&token))), Err("token_invalid"));
     }
 }

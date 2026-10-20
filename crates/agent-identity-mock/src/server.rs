@@ -439,14 +439,21 @@ mod tests {
         Ok(())
     }
 
-    /// CONTRACT.md §2: "only the exact token string authenticates", so an issued token with another bag is `token_invalid`.
+    fn with_bag(token: &str, bag: &str) -> String {
+        let (prefix, rest) = token.split_once('.').expect("token prefix");
+        let (_, secret) = rest.split_once('.').expect("token secret");
+        format!("{prefix}.{bag}.{secret}")
+    }
+
+    /// CONTRACT.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
     #[rstest]
-    #[case::issued_token(None, 200, Value::Null)]
-    #[case::other_json_bag(Some("e30"), 401, json!("token_invalid"))]
-    #[case::undecodable_bag(Some("A"), 401, json!("token_invalid"))]
+    #[case::issued_token(|token: &str| token.to_owned(), 200, Value::Null)]
+    #[case::other_json_bag(|token: &str| with_bag(token, "e30"), 200, Value::Null)]
+    #[case::undecodable_bag(|token: &str| with_bag(token, "A"), 200, Value::Null)]
+    #[case::padded_secret(|token: &str| format!("{token}="), 401, json!("token_invalid"))]
     #[tokio::test]
-    async fn only_the_issued_token_string_enrolls(
-        #[case] bag: Option<&str>,
+    async fn enrollment_authenticates_the_token_by_its_secret_text(
+        #[case] alter: fn(&str) -> String,
         #[case] expected_status: u16,
         #[case] expected_error: Value,
     ) -> anyhow::Result<()> {
@@ -456,14 +463,7 @@ mod tests {
         let admin = [(http::header::AUTHORIZATION.as_str(), "Bearer admin")];
         let (status, created) = post_json(&app, "/api/v3/agent-identity/enrollment-tokens", &admin, created).await;
         assert_eq!(status, 201);
-        let token = created["token"].as_str().expect("issued token");
-        let token = match bag {
-            Some(bag) => {
-                let (_, secret) = token.rsplit_once('.').expect("token secret");
-                format!("dvaet1.{bag}.{secret}")
-            }
-            None => token.to_owned(),
-        };
+        let token = alter(created["token"].as_str().expect("issued token"));
 
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let authorization = format!("Bearer {token}");
