@@ -10,8 +10,10 @@
 //! model never writes times.
 //!
 //! The input is cut into chunks small enough for one request, and the actions found in every chunk are merged into a
-//! Session Recording Log (`.slog`). The work keeps its files next to the manifest, in `.ai-analysis/`:
-//! 1. `analysis.json`: the model, the prompt versions and the chunk sizes the other files were made with;
+//! Session Recording Log (`.slog`), whose `session.end` carries a summary of them, see
+//! [`session_summary`](crate::session_summary).
+//! The work keeps its files next to the manifest, in `.ai-analysis/`:
+//! 1. `analysis.json`: the model, the prompt versions, the language and the chunk sizes the other files were made with;
 //! 2. the transcript chunks `transcript-NNNN.txt` and the screenshots `FNNNNN.png`, then `plan.json`, the list of
 //!    chunks, once they are all written;
 //! 3. what the AI answered for each chunk, `chunk-NNNN.json`, see [`checkpoint`], so that analysing the recording again
@@ -47,7 +49,9 @@ pub use self::recordings::{
 };
 use self::transcript::TranscriptError;
 use self::video::VideoError;
+use crate::client::is_language_tag;
 use crate::screen_actions::Screenshot;
+use crate::session_actions::Action;
 use crate::{AiClient, Error, Usage};
 
 /// Input tokens sent in one AI request, estimated at 4 characters per token.
@@ -194,9 +198,9 @@ pub struct RecordingAnalysis {
     pub log_path: Utf8PathBuf,
     /// Actions in the log.
     pub actions: usize,
-    /// Model the log names: the first one the provider reported, or the requested one when it reported none.
+    /// Model that wrote the log: the first one the provider reported, or the requested one when it reported none.
     pub model: String,
-    /// Version of the prompt used, such as `session-actions-3`; the log names it too.
+    /// Versions of the prompts that wrote the log, such as `session-actions-4+session-summary-1`.
     pub prompt_version: String,
     /// Tokens the provider counted for the whole analysis, answers cut and asked again included.
     ///
@@ -273,8 +277,8 @@ impl AiClient {
     /// `manifest_path` is the path of the session manifest, `recording.json`, and `manifest` what it holds.
     /// The recordings are read from the folder of the manifest, and the working files are kept there too.
     /// Video recordings need XMF, loaded with `cadeau::xmf::init`.
-    /// Analysing a recording again after a failure resumes from the chunks already described, as long as the model and
-    /// the prompts are the same; otherwise it starts over.
+    /// Analysing a recording again after a failure resumes from the chunks already described, as long as the model, the
+    /// prompts and the language are the same; otherwise it starts over.
     /// Only one analysis of a recording may run at a time.
     pub fn analyze_recording<'a>(
         &'a self,
@@ -286,6 +290,7 @@ impl AiClient {
             manifest,
             manifest_path,
             owner: None,
+            language: None,
             max_output_tokens: None,
             cancel: CancellationToken::new(),
         }
@@ -299,6 +304,7 @@ pub struct AnalyzeRecording<'a> {
     manifest: &'a RecordingManifest,
     manifest_path: &'a Utf8Path,
     owner: Option<String>,
+    language: Option<String>,
     max_output_tokens: Option<u32>,
     cancel: CancellationToken,
 }
@@ -309,6 +315,7 @@ impl fmt::Debug for AnalyzeRecording<'_> {
             .field("client", self.client)
             .field("manifest_path", &self.manifest_path)
             .field("owner", &self.owner)
+            .field("language", &self.language)
             .field("max_output_tokens", &self.max_output_tokens)
             .finish_non_exhaustive()
     }
@@ -319,6 +326,24 @@ impl AnalyzeRecording<'_> {
     /// another owner starts fresh.
     pub fn owner(mut self, owner: impl Into<String>) -> Self {
         self.owner = Some(owner.into());
+        self
+    }
+
+    /// The language of the session, as a BCP 47 tag such as `fr-CA`: the descriptions and the summary are written in it.
+    ///
+    /// A value that is not a tag is ignored with a warning.
+    pub fn language(mut self, language: impl Into<String>) -> Self {
+        let language = language.into();
+
+        if is_language_tag(&language) {
+            self.language = Some(language);
+        } else {
+            warn!(
+                language_len = language.len(),
+                "Ignored a language that is not a BCP 47 tag"
+            );
+        }
+
         self
     }
 
@@ -369,6 +394,7 @@ impl AnalyzeRecording<'_> {
             manifest: self.manifest.clone(),
             manifest_path: self.manifest_path.to_owned(),
             owner: self.owner,
+            language: self.language,
             max_output_tokens: self.max_output_tokens,
             cancel,
             events,
@@ -409,6 +435,7 @@ struct Run {
     manifest: RecordingManifest,
     manifest_path: Utf8PathBuf,
     owner: Option<String>,
+    language: Option<String>,
     max_output_tokens: Option<u32>,
     cancel: CancellationToken,
     events: mpsc::Sender<RecordingAnalysisEvent>,
@@ -424,6 +451,7 @@ impl Run {
             owner: self.owner.clone(),
             prompt_version: self.manifest.recordings.prompt_version().to_owned(),
             model: self.client.model().to_owned(),
+            language: self.language.clone(),
             chunk_len: MAX_CHUNK_LEN,
         };
 
@@ -496,7 +524,7 @@ impl Run {
 
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                        described = describe_transcript(&self.client, self.max_output_tokens, &transcript) => described?,
+                        described = describe_transcript(&self.client, self.max_output_tokens, self.language.as_deref(), &transcript) => described?,
                     }
                 }
                 Chunk::Screenshots { frames, context } => {
@@ -508,7 +536,7 @@ impl Run {
 
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                        described = describe_screenshots(&self.client, self.max_output_tokens, &frames, context.as_ref()) => described?,
+                        described = describe_screenshots(&self.client, self.max_output_tokens, self.language.as_deref(), &frames, context.as_ref()) => described?,
                     }
                 }
             };
@@ -528,25 +556,71 @@ impl Run {
             described_chunks: total,
             total_chunks: total,
         });
+
+        let DescribedChunk { actions, model, usage } = blocking({
+            let workspace = workspace.clone();
+            let cancel = cancel.clone();
+            move || read_checkpoints(&workspace, total, &cancel)
+        })
+        .await?;
+
+        let summary = if actions.is_empty() {
+            None
+        } else {
+            let mut request = self.client.summarize_session(&actions);
+
+            if let Some(language) = &self.language {
+                request = request.language(language);
+            }
+
+            if let Some(max_output_tokens) = self.max_output_tokens {
+                request = request.max_output_tokens(max_output_tokens);
+            }
+
+            let summary = tokio::select! {
+                () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
+                summary = request.send() => summary,
+            };
+
+            match summary {
+                Ok(summary) => Some(summary),
+                // The actions are paid for, and a retry resumes right here, so only a summary worth asking again fails.
+                Err(error) if error.is_transient() => return Err(error.into()),
+                Err(error) => {
+                    warn!(%error, "Writing the session log without a summary");
+                    None
+                }
+            }
+        };
+
+        let (model, usage) = match &summary {
+            Some(summary) => (model.or_else(|| summary.model.clone()), add_usage(usage, summary.usage)),
+            None => (model, usage),
+        };
+        let model = model.unwrap_or_else(|| self.client.model().to_owned());
+        let prompt_version = match &summary {
+            Some(_) => format!(
+                "{}+{}",
+                self.manifest.recordings.prompt_version(),
+                crate::session_summary::PROMPT_VERSION
+            ),
+            None => self.manifest.recordings.prompt_version().to_owned(),
+        };
+        let action_count = actions.len();
+
         self.report(Progress::Writing);
 
-        let prompt_version = self.manifest.recordings.prompt_version().to_owned();
-        let merged = blocking({
+        blocking({
             let workspace = workspace.clone();
             let start_time = self.manifest.start_time;
             let duration = self.manifest.duration;
-            let requested_model = self.client.model().to_owned();
-            let prompt_version = prompt_version.clone();
-            let cancel = cancel.clone();
             move || {
-                merge_checkpoints(
+                write_log(
                     &workspace,
-                    total,
                     start_time,
                     duration,
-                    &requested_model,
-                    &prompt_version,
-                    &cancel,
+                    &actions,
+                    summary.as_ref().map(|summary| summary.output.as_str()),
                 )
             }
         })
@@ -568,10 +642,10 @@ impl Run {
 
         Ok(RecordingAnalysis {
             log_path,
-            actions: merged.actions,
-            model: merged.model,
+            actions: action_count,
+            model,
             prompt_version,
-            usage: merged.usage,
+            usage,
         })
     }
 
@@ -610,6 +684,7 @@ fn open_counted(path: &Utf8Path, read_bytes: &Arc<AtomicU64>) -> io::Result<Coun
 async fn describe_transcript(
     client: &AiClient,
     max_output_tokens: Option<u32>,
+    language: Option<&str>,
     chunk: &str,
 ) -> Result<DescribedChunk, RecordingAnalysisError> {
     let mut parts = VecDeque::from([chunk]);
@@ -617,6 +692,10 @@ async fn describe_transcript(
 
     while let Some(part) = parts.pop_front() {
         let mut request = client.describe_session_actions(part);
+
+        if let Some(language) = language {
+            request = request.language(language);
+        }
 
         if let Some(max_output_tokens) = max_output_tokens {
             request = request.max_output_tokens(max_output_tokens);
@@ -685,6 +764,7 @@ async fn read_screenshots(
 async fn describe_screenshots(
     client: &AiClient,
     max_output_tokens: Option<u32>,
+    language: Option<&str>,
     frames: &[LoadedScreenshot],
     context: Option<&LoadedScreenshot>,
 ) -> Result<DescribedChunk, RecordingAnalysisError> {
@@ -704,6 +784,10 @@ async fn describe_screenshots(
             .collect::<Vec<_>>();
 
         let mut request = client.describe_screen_actions(&screenshots);
+
+        if let Some(language) = language {
+            request = request.language(language);
+        }
 
         if let Some(max_output_tokens) = max_output_tokens {
             request = request.max_output_tokens(max_output_tokens);
@@ -763,6 +847,9 @@ struct WorkspaceSettings {
     owner: Option<String>,
     prompt_version: String,
     model: String,
+    // Absent means no language, so working files written without this field still match such an analysis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
     chunk_len: usize,
 }
 
@@ -994,30 +1081,14 @@ fn split_in_half(part: &str) -> Option<(&str, &str)> {
     Some(part.split_at(cut))
 }
 
-/// What [`merge_checkpoints`] wrote.
-struct MergedLog {
-    actions: usize,
-    model: String,
-    usage: Option<Usage>,
-}
-
-/// Writes the log from the checkpoints, into the working files, with every action in time order.
-///
-/// The log names the first model reported for a chunk, or `requested_model` when the provider reported none.
-fn merge_checkpoints(
+/// Reads the actions of every checkpoint, in time order, with the first model reported for a chunk and the tokens of
+/// all of them.
+fn read_checkpoints(
     workspace: &Utf8Path,
     total: usize,
-    start_time: i64,
-    duration: i64,
-    requested_model: &str,
-    prompt_version: &str,
     cancel: &CancellationToken,
-) -> Result<MergedLog, RecordingAnalysisError> {
-    let log_error = |error: anyhow::Error| files_error(&format!("failed to write the log: {error:#}"));
-
-    let mut actions = Vec::new();
-    let mut model = None;
-    let mut usage = Some(Usage::default());
+) -> Result<DescribedChunk, RecordingAnalysisError> {
+    let mut all = DescribedChunk::default();
 
     for index in 0..total {
         if cancel.is_cancelled() {
@@ -1025,35 +1096,40 @@ fn merge_checkpoints(
         }
 
         let described = checkpoint::read(&checkpoint::path(workspace, index)).map_err(|error| files_error(&error))?;
-        model = model.or(described.model);
-        usage = add_usage(usage, described.usage);
-        actions.extend(described.actions);
+        all.model = all.model.or(described.model);
+        all.usage = add_usage(all.usage, described.usage);
+        all.actions.extend(described.actions);
     }
 
     // A model may list the actions of a chunk slightly out of order; the sort is stable, so equal times keep their order.
-    actions.sort_by_key(|action| action.offset);
-    let model = model.unwrap_or_else(|| requested_model.to_owned());
+    all.actions.sort_by_key(|action| action.offset);
+
+    Ok(all)
+}
+
+/// Writes the log into the working files; `actions` must be in time order.
+fn write_log(
+    workspace: &Utf8Path,
+    start_time: i64,
+    duration: i64,
+    actions: &[Action],
+    summary: Option<&str>,
+) -> Result<(), RecordingAnalysisError> {
+    let log_error = |error: anyhow::Error| files_error(&format!("failed to write the log: {error:#}"));
 
     let out = File::create(workspace.join(WORKSPACE_LOG_FILE)).map_err(|error| files_error(&error))?;
-    let mut log =
-        slog::SlogWriter::start(BufWriter::new(out), start_time, &model, prompt_version).map_err(log_error)?;
+    let mut log = slog::SlogWriter::start(BufWriter::new(out), start_time).map_err(log_error)?;
 
-    for action in &actions {
+    for action in actions {
         log.action(action).map_err(log_error)?;
     }
 
-    log.finish(duration)
+    log.finish(duration, summary)
         .map_err(log_error)?
         .into_inner()
         .map_err(|error| files_error(&error.into_error()))?
         .sync_all()
-        .map_err(|error| files_error(&error))?;
-
-    Ok(MergedLog {
-        actions: actions.len(),
-        model,
-        usage,
-    })
+        .map_err(|error| files_error(&error))
 }
 
 #[cfg(test)]

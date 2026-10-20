@@ -1016,3 +1016,118 @@ async fn screenshots_are_sent_as_images_and_actions_take_their_time() {
         }
     }
 }
+
+#[tokio::test]
+async fn language_is_a_rule_of_the_instructions() {
+    let screenshots = [Screenshot {
+        id: "F00001",
+        offset: Duration::from_secs(1),
+        png: b"\x89PNG not really",
+        context: false,
+    }];
+    let answer = "{\"line\":\"L1\",\"frame\":\"F00001\",\"description\":\"A listé les fichiers\"}";
+
+    for language in [None, Some("fr-CA")] {
+        let (base_url, captured) = spawn_provider(StatusCode::OK, openai_response(answer)).await;
+        let client = client(Provider::OpenAi, base_url);
+
+        let mut session = client.describe_session_actions(TRANSCRIPT);
+        let mut screen = client.describe_screen_actions(&screenshots);
+        if let Some(language) = language {
+            session = session.language(language);
+            screen = screen.language(language);
+        }
+
+        let session = session.send().await.unwrap();
+        let session_instructions = take(&captured).body["messages"][0]["content"].clone();
+        let screen = screen.send().await.unwrap();
+        let screen_instructions = take(&captured).body["messages"][0]["content"].clone();
+
+        for (response, instructions) in [(session, session_instructions), (screen, screen_instructions)] {
+            assert_eq!(response.output[0].description, "A listé les fichiers");
+
+            let instructions = instructions.as_str().unwrap();
+            match language {
+                Some(language) => assert!(
+                    instructions.ends_with(&format!(
+                        "
+- Write every description in the language of the BCP 47 tag `{language}`; keep the JSON field names and \"[redacted]\" as they are."
+                    )),
+                    "{instructions}"
+                ),
+                None => assert!(!instructions.contains("BCP 47"), "{instructions}"),
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn session_summary_request_and_response() {
+    let actions = [Action {
+        offset: Duration::from_millis(1500),
+        description: "Listed files".to_owned(),
+        object: Some("/var/log".to_owned()),
+        parameters: [("Command".to_owned(), "ls".to_owned())].into(),
+    }];
+
+    for (provider, response) in [
+        (
+            Provider::OpenAi,
+            openai_response("\n L'utilisateur a listé les journaux. \n"),
+        ),
+        (
+            Provider::Anthropic,
+            anthropic_response("\n L'utilisateur a listé les journaux. \n"),
+        ),
+    ] {
+        let (base_url, captured) = spawn_provider(StatusCode::OK, response).await;
+
+        let response = client(provider, base_url)
+            .summarize_session(&actions)
+            .language("fr-CA")
+            .max_output_tokens(1234)
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(response.output, "L'utilisateur a listé les journaux.", "{provider:?}");
+        assert_eq!(response.model.as_deref(), Some(REPORTED_MODEL));
+        assert_eq!(response.usage, Some(USAGE));
+
+        let request = take(&captured).body;
+        let (instructions, input) = match provider {
+            Provider::Anthropic => (&request["system"], &request["messages"][0]["content"]),
+            _ => (&request["messages"][0]["content"], &request["messages"][1]["content"]),
+        };
+        assert!(
+            instructions.as_str().unwrap().contains("`fr-CA`"),
+            "{provider:?}: {instructions}"
+        );
+        assert!(
+            input.to_string().contains(
+                r#"{\"elapsedSeconds\":1.5,\"description\":\"Listed files\",\"object\":\"/var/log\",\"parameters\":{\"Command\":\"ls\"}}"#
+            ),
+            "{provider:?}: {input}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn empty_summary_is_invalid_output() {
+    let actions = [Action {
+        offset: Duration::ZERO,
+        description: "Listed files".to_owned(),
+        object: None,
+        parameters: Default::default(),
+    }];
+    let (base_url, _captured) = spawn_provider(StatusCode::OK, openai_response(" \n")).await;
+
+    let error = client(Provider::OpenAi, base_url)
+        .summarize_session(&actions)
+        .send()
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, Error::InvalidOutput { .. }), "{error:?}");
+    assert!(!error.is_transient());
+}

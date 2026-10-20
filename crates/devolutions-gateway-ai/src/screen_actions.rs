@@ -3,8 +3,8 @@
 use std::fmt;
 use std::time::Duration;
 
-use crate::client::{AiClient, Input, Prompt};
-use crate::session_actions::{Action, DEFAULT_MAX_OUTPUT_TOKENS, parse_actions};
+use crate::client::{AiClient, Input, Prompt, with_language};
+use crate::session_actions::{Action, DEFAULT_MAX_OUTPUT_TOKENS, language_rule, parse_actions};
 use crate::{Error, Response};
 
 /// Version of the prompt of this purpose.
@@ -12,7 +12,7 @@ use crate::{Error, Response};
 /// Results do not carry it: a caller that stores results should store it with them, so readers know which prompt
 /// produced them.
 /// Bump it whenever the prompt changes.
-pub const PROMPT_VERSION: &str = "screen-actions-1";
+pub const PROMPT_VERSION: &str = "screen-actions-2";
 
 const PROMPT: &str = r#"You see screenshots of a remote desktop session, in time order, and list what the user did.
 
@@ -69,6 +69,7 @@ impl AiClient {
         DescribeScreenActions {
             client: self,
             screenshots,
+            language: None,
             max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
         }
     }
@@ -79,6 +80,7 @@ impl AiClient {
 pub struct DescribeScreenActions<'a> {
     client: &'a AiClient,
     screenshots: &'a [Screenshot<'a>],
+    language: Option<&'a str>,
     max_output_tokens: u32,
 }
 
@@ -87,12 +89,21 @@ impl fmt::Debug for DescribeScreenActions<'_> {
         f.debug_struct("DescribeScreenActions")
             .field("client", self.client)
             .field("screenshots", &self.screenshots.len())
+            .field("language", &self.language)
             .field("max_output_tokens", &self.max_output_tokens)
             .finish()
     }
 }
 
-impl DescribeScreenActions<'_> {
+impl<'a> DescribeScreenActions<'a> {
+    /// Language of the session, as a BCP 47 tag such as `fr-CA`: the descriptions are written in it.
+    ///
+    /// A value that is not a tag is ignored with a warning.
+    pub fn language(mut self, language: &'a str) -> Self {
+        self.language = Some(language);
+        self
+    }
+
     /// Upper bound of tokens in the answer; the default is 16000.
     pub fn max_output_tokens(mut self, max_output_tokens: u32) -> Self {
         self.max_output_tokens = max_output_tokens;
@@ -124,8 +135,10 @@ impl DescribeScreenActions<'_> {
             .flat_map(|(screenshot, label)| [Input::Text(label), Input::Png(screenshot.png)])
             .collect::<Vec<_>>();
 
+        let system = with_language(PROMPT, self.language, language_rule);
+
         let prompt = Prompt {
-            system: PROMPT,
+            system: &system,
             input: &input,
             max_output_tokens: self.max_output_tokens,
         };
