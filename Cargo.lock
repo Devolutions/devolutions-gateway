@@ -198,6 +198,7 @@ dependencies = [
  "hyper 1.10.1",
  "hyper-util",
  "p256 0.14.0-rc.14",
+ "prost 0.13.5",
  "prost-types",
  "rand 0.10.2",
  "rcgen",

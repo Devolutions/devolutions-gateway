@@ -33,7 +33,7 @@ All time in the mock is the mock clock: real time plus an offset.
 `POST __mock__/time/advance` adds to the offset and `faults.clock_skew_secs` adds a skew on top.
 Signature windows, certificate validity, token expiry, renewal grace, rotation deadlines, `server_time` and `last_seen_at` all use it.
 A certificate is unexpired while `now ≤ notAfter`, and `notBefore` is never checked (§6).
-A stream closes, and a channel opening is refused with `certificate_expired`, once the clock reaches the certificate's `notAfter`, because §7.4 closes a stream no later than then.
+A stream closes with `certificate_expired` once the clock reaches the certificate's `notAfter`, because §7.4 closes a stream no later than then; a stream opened at `notAfter` therefore closes right after its `Challenge`.
 Advancing or freezing the clock immediately closes expired streams and re-evaluates rotation deadlines and early completion.
 `POST __mock__/time/freeze` is a test-only boundary probe that pins the mock clock to an exact Unix second and reports the published root thumbprints in the same state transition; reset restores real-time tracking.
 

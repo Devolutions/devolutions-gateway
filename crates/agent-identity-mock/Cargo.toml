@@ -57,4 +57,5 @@ uuid = { version = "1", features = ["v4", "serde"] }
 x509-cert = { version = "0.3", features = ["builder"] }
 
 [dev-dependencies]
+prost = "0.13"
 rstest = "0.25"

@@ -82,7 +82,7 @@ impl Dispatcher {
         }
     }
 
-    async fn handle<B>(self, request: http::Request<B>) -> Result<OutResponse, ConnectionAborted>
+    pub(crate) async fn handle<B>(self, request: http::Request<B>) -> Result<OutResponse, ConnectionAborted>
     where
         B: http_body::Body<Data = Bytes> + Send + 'static,
         B::Error: Into<BoxError> + Send + 'static,
