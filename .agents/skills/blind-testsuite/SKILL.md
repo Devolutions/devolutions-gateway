@@ -21,11 +21,11 @@ A derived vector accounts for every coupled field the change touches - length, c
 Where no published answer exists, compare outputs across implementations; a differential check never stands alone, because a bug shared by both passes it.
 A hand-written negative input differs from an independently valid control in the targeted dimension only, so the test can fail only for the reason it names.
 Vendored sources keep origin, version, and checksum recorded, are taken whole or cut at their own section boundaries, and are never edited, because an edited or sliced vector loses the provenance that makes it an oracle.
-Record a boundary a test deliberately leaves unchecked where the contract lists known gaps, so silence is not taken for coverage.
+Keep a coverage record beside the suite: which test checks each clause, which clauses are verified by review only, and the boundaries deliberately left unchecked, so silence is not taken for coverage.
 
 ## Review and merge
 
-The reviewer runs `test-reviewer` where provided and checks the contract both ways: every clause has a test or a recorded gap, every test cites its clause.
+The reviewer runs `test-reviewer` where provided and checks the contract against the coverage record both ways: every clause has a test or a recorded gap, every test cites its clause.
 Write the suite before the implementation; merge it once one implementation runs it green, so a test no conforming implementation can pass is found before it binds every later one.
 
 ## Read-only during implementation
