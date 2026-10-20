@@ -1,15 +1,16 @@
-//! How a stream ended, classified as [CONTRACT.md] §5.4 "Errors" and §7.4 "Termination" say.
+//! How a stream ended, classified as [CONTRACT.md §5.4 "Errors"][errors] and [§7.4 "Termination"][termination] say.
 //!
-//! [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
+//! [errors]: ../../../docs/agent-identity/CONTRACT.md#54-errors
+//! [termination]: ../../../docs/agent-identity/CONTRACT.md#74-termination
 
 use std::error::Error;
 use std::fmt;
 
 use crate::transport::NotGrpc;
 
-/// Why a stream closed or its opening failed ([CONTRACT.md] §7.4 "Termination").
+/// Why a stream closed or its opening failed ([CONTRACT.md §7.4 "Termination"][contract]).
 ///
-/// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Closure {
     pub class: ClosureClass,
@@ -23,9 +24,9 @@ pub struct Closure {
     pub reason: String,
 }
 
-/// What a closure means for the identity ([CONTRACT.md] §5.4 "Errors").
+/// What a closure means for the identity ([CONTRACT.md §5.4 "Errors"][contract]).
 ///
-/// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#54-errors
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClosureClass {
     /// The identity is over for this authority; the channel stops.

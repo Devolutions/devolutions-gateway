@@ -96,8 +96,10 @@ mod tests {
         }
     }
 
-    // crates/agent-channel-client/INTENT.md: the backoff starts at 1 s and grows to 1 h when the path cannot carry
-    // gRPC, and to 5 min after network errors, server downtime, and any other transient refusal or closure.
+    // crates/agent-channel-client/INTENT.md: the channel reconnects "with a jittered exponential backoff from 1 s".
+    // "The backoff grows to 1 h when the response shows the path cannot carry gRPC, such as a reverse proxy that answers
+    // without HTTP/2 or gRPC, and to 5 min after network errors, server downtime, and any other transient refusal or
+    // closure of the stream".
     #[rstest]
     #[case::outage(
         TransientKind::Outage,

@@ -1,10 +1,10 @@
-//! The agent's side of the agent channel ([CONTRACT.md] §7 "Channel (gRPC)").
+//! The agent's side of the agent channel ([CONTRACT.md §7 "Channel (gRPC)"][contract]).
 //!
 //! [`ChannelClient::connect`] keeps one stream open to an authority: it opens and authenticates the stream, reports
 //! the authority's messages as [`Event`]s, and reopens the stream after a transient closure.
 //! The caller decides what the messages and closures mean for the identity.
 //!
-//! [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
+//! [contract]: ../../../docs/agent-identity/CONTRACT.md#7-channel-grpc
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -74,9 +74,9 @@ pub struct Target {
 
 /// The caller-supplied part of a `Hello`, collected when it is sent.
 pub struct HelloFields {
-    /// The agent's metadata ([CONTRACT.md] §3.1 "Metadata sent by the agent").
+    /// The agent's metadata ([CONTRACT.md §3.1 "Metadata sent by the agent"][contract]).
     ///
-    /// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#31-metadata-sent-by-the-agent
     pub metadata: HashMap<String, String>,
     /// The stored `config.revision`, sent as `applied_state_versions["config"]`.
     pub config_revision: u64,
@@ -150,12 +150,12 @@ impl Channel {
         self.events.recv().await
     }
 
-    /// Acknowledges the authority's message `correlation_id` on the authenticated stream ([CONTRACT.md] §7.3).
+    /// Acknowledges the authority's message `correlation_id` ([CONTRACT.md §7.3 "Sequence"][contract]).
     ///
-    /// An acknowledgement without an authenticated stream is dropped: the authority repeats a renewal request on
-    /// the next stream, and `Hello` reconciles the config.
+    /// Only an authenticated stream carries acknowledgements, and one sent without such a stream is dropped: the
+    /// authority repeats a renewal request on the next stream, and `Hello` reconciles the config.
     ///
-    /// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
     pub fn ack(&self, correlation_id: &str) {
         let _ = self.acks.send(correlation_id.to_owned());
     }

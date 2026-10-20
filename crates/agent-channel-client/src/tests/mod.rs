@@ -433,7 +433,9 @@ async fn reports_a_refused_opening_with_its_status_trailers_and_class(
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // CONTRACT.md §7.4 and §5.4.
+    // CONTRACT.md §7.4 and §5.4 classify the closure.
+    // A transient one is an outage: crates/agent-channel-client/INTENT.md caps the backoff at 5 min "after network
+    // errors, server downtime, and any other transient refusal or closure of the stream".
     authority
         .next_opening()
         .await
@@ -852,4 +854,45 @@ fn the_default_timings_are_the_documented_ones() {
     assert_eq!(settings.keepalive_interval, Duration::from_secs(30));
     // 30 s from the TCP connection to `Welcome`, like the identity HTTP client's request timeout.
     assert_eq!(settings.opening_timeout, Duration::from_secs(30));
+}
+
+#[tokio::test]
+async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let settings = Settings {
+        backoff: Backoff {
+            jitter: Arc::new(|| 1.0 / 64.0),
+            ..Backoff::default()
+        },
+        ..Settings::default()
+    };
+    let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
+    let renew = |reason: &str| {
+        Payload::RenewRequested(RenewRequested {
+            reason: reason.to_owned(),
+        })
+    };
+
+    let mut first = authority.next_opening().await.accept();
+    first.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    let old_id = new_id();
+    first.send(&old_id, None, renew("admin")).await;
+    next_event(&mut channel).await;
+    first
+        .close(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+    next_closure(&mut channel).await;
+    channel.ack(&old_id);
+
+    let mut second = authority.next_opening().await.accept();
+    second.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    let new_id = new_id();
+    second.send(&new_id, None, renew("rotation")).await;
+    next_event(&mut channel).await;
+    channel.ack(&new_id);
+    assert_eq!(second.receive().await.correlation_id, Some(new_id));
+    Ok(())
 }
