@@ -55,6 +55,7 @@ Non-2xx agent-facing responses carry `{ "error", "message", "server_time" }` wit
 An unexpected failure, such as issuing from an expired root or a handler panic, is `500 unavailable`.
 Enrollment, renewal and check-in require a `metadata` object, which may be empty.
 A body that repeats a member name at any depth, a `csr` that is not canonical `base64`, or a CSR key that is not an uncompressed P-256 point is `invalid_request` (§1, §4).
+Only the exact token string the mock issued authenticates, so a token with another bag or another encoding of its secret is `token_invalid` (§2).
 Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are limited to 64 KiB.
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.
@@ -70,6 +71,7 @@ The channel gRPC method is `POST <prefix>/devolutions.agent.channel.v1.AgentChan
 
 The [DVLS management API][dvls-management] takes `Authorization: Bearer <credential>`.
 Missing or invalid credentials return 401 `{ "error", "message" }`; all management API errors use that shape with the matching HTTP status.
+Request bodies follow CONTRACT.md §1, so a member name repeated at any depth is 400 `invalid_request`.
 Each route requires the permission the table lists, and a credential without it gets 403 `forbidden` before the request is processed.
 The mock derives its credentials from `--admin-token`, so a test can hold any subset of the four permissions without setup:
 

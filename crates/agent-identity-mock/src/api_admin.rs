@@ -18,7 +18,6 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse as _, Response};
 use axum::routing::{MethodRouter, delete, get, patch, post};
 use axum::{Json, Router, middleware};
-use base64::Engine as _;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
@@ -223,6 +222,16 @@ fn paginate(items: Vec<Value>, page_number: u64, page_size: u64) -> Value {
 
 // ==== DVLS enrollment tokens ====
 
+/// Parses a management request body, which follows CONTRACT.md §1 and so rejects a member name repeated at any depth
+/// ([DVLS intent][dvls], "Management API").
+///
+/// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#management-api
+fn parse_body<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, ApiError> {
+    crate::json::parse_unique_members(body)
+        .and_then(serde_json::from_value)
+        .map_err(|error| ApiError::invalid_request(format!("malformed JSON body: {error}")))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CreateTokenRequest {
@@ -268,9 +277,9 @@ fn token_record(token: &Token, now: i64) -> Value {
 
 async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     app.tick().await;
-    let request: CreateTokenRequest = match serde_json::from_slice(&body) {
+    let request: CreateTokenRequest = match parse_body(&body) {
         Ok(r) => r,
-        Err(_) => return management_error(&ApiError::invalid_request("malformed JSON body")),
+        Err(error) => return management_error(&error),
     };
     let now = app.now();
     if !(1..=1_000_000).contains(&request.max_uses) {
@@ -306,10 +315,7 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Respo
     let record = token_record(token, now);
     drop(state);
 
-    // §2: dvaet1.<base64url JSON bag>.<base64url 32-byte secret>.
-    let bag = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json!({ "u": app.base_url }).to_string());
-    let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret);
-    let full_token = format!("dvaet1.{bag}.{secret}");
+    let full_token = crate::api_agent::enrollment_token(&app.base_url, &secret);
     (
         StatusCode::CREATED,
         Json(json!({ "token": full_token, "record": record })),
@@ -552,9 +558,9 @@ struct PatchIdentityRequest {
 
 async fn patch_identity(AxumState(app): AxumState<Arc<App>>, Path(id): Path<Uuid>, body: Bytes) -> Response {
     app.tick().await;
-    let request: PatchIdentityRequest = match serde_json::from_slice(&body) {
+    let request: PatchIdentityRequest = match parse_body(&body) {
         Ok(r) => r,
-        Err(_) => return management_error(&ApiError::invalid_request("malformed JSON body")),
+        Err(error) => return management_error(&error),
     };
     let len = request.friendly_name.chars().count();
     if !(1..=crate::name_eval::MAX_FRIENDLY_NAME_CHARS).contains(&len) {
@@ -637,9 +643,9 @@ async fn start_rotation(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Res
     let deadline = if body.is_empty() {
         None
     } else {
-        let request: StartRotationRequest = match serde_json::from_slice(&body) {
+        let request: StartRotationRequest = match parse_body(&body) {
             Ok(r) => r,
-            Err(_) => return management_error(&ApiError::invalid_request("malformed JSON body")),
+            Err(error) => return management_error(&error),
         };
         match request.deadline.as_deref() {
             None => None,
@@ -779,5 +785,31 @@ mod tests {
                 "invalid_request"
             );
         }
+    }
+
+    /// The management API follows CONTRACT.md §1 (INTENT.DVLS.md, "Management API"),
+    /// which rejects a body that repeats a member name at any depth with `invalid_request`.
+    #[rstest]
+    #[case::distinct_members(r#"{"flag":"first","other":"second"}"#, 201)]
+    #[case::repeated_member(r#"{"flag":"first","flag":"second"}"#, 400)]
+    #[tokio::test]
+    async fn create_token_refuses_a_repeated_member_name(
+        #[case] config: &str,
+        #[case] expected: u16,
+    ) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let body = format!(
+            r#"{{"name":"t","maxUses":1,"expiresAt":"{}","config":{config}}}"#,
+            crate::app::rfc3339(app.now() + 3600)
+        );
+        let request = Request::builder()
+            .method(Method::POST)
+            .uri("/api/v3/agent-identity/enrollment-tokens")
+            .header(AUTHORIZATION, "Bearer admin")
+            .body(Body::from(body))
+            .expect("valid request");
+        let response = router(std::sync::Arc::clone(&app)).oneshot(request).await?;
+        assert_eq!(response.status().as_u16(), expected);
+        Ok(())
     }
 }

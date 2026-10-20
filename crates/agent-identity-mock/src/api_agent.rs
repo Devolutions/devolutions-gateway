@@ -10,6 +10,7 @@ use axum::response::{IntoResponse as _, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde_json::{Map, Value, json};
 
 use crate::app::{App, rfc3339};
@@ -100,36 +101,38 @@ async fn trust_anchor(AxumState(app): AxumState<Arc<App>>) -> Response {
 }
 
 /// Parses `Authorization: Bearer <token>`; the token must be well-formed
-/// (`dvaet1.<bag>.<secret>` with `base64url` text and a canonical 32-byte secret, so only the exact secret text matches)
-/// to even reach the lookup, and a repeated header is `token_invalid` ([CONTRACT.md][contract], "2.1 Authority behavior").
+/// (`dvaet1.<bag>.<secret>` with a 32-byte secret) to even reach the lookup, and a repeated header is `token_invalid`
+/// ([CONTRACT.md][contract], "2.1 Authority behavior").
+/// Only the exact token string this mock issues authenticates (§2), so a token with another bag or another encoding of
+/// the same secret is `token_invalid`.
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.md#21-authority-behavior
-fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
+fn parse_bearer(headers: &HeaderMap, base_url: &str) -> Result<[u8; 32], ApiError> {
     if headers.get_all(AUTHORIZATION).iter().count() != 1 {
         return Err(ApiError::token_invalid());
     }
-    let header = headers
+    let token = headers
         .get(AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(ApiError::token_invalid)?;
-    let parts: Vec<&str> = header.split('.').collect();
-    let base64url_text = |text: &str| {
-        !text.is_empty()
-            && text
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-    };
-    if parts.len() != 3 || parts[0] != "dvaet1" || !base64url_text(parts[1]) {
+    let secret = token
+        .rsplit_once('.')
+        .and_then(|(_, secret)| URL_SAFE_NO_PAD.decode(secret).ok())
+        .and_then(|secret| <[u8; 32]>::try_from(secret).ok())
+        .ok_or_else(ApiError::token_invalid)?;
+    if token != enrollment_token(base_url, &secret) {
         return Err(ApiError::token_invalid());
     }
-    // The engine rejects padding and nonzero pad bits, so only the canonical secret text decodes and matches.
-    let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(parts[2])
-        .ok()
-        .and_then(|s| <[u8; 32]>::try_from(s).ok())
-        .ok_or_else(ApiError::token_invalid)?;
     Ok(secret)
+}
+
+/// Returns the enrollment token the mock issues for `secret`: `dvaet1.<bag>.<secret>` ([CONTRACT.md][contract], "2. Enrollment token").
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#2-enrollment-token
+pub(crate) fn enrollment_token(base_url: &str, secret: &[u8; 32]) -> String {
+    let bag = URL_SAFE_NO_PAD.encode(json!({ "u": base_url }).to_string());
+    format!("dvaet1.{bag}.{}", URL_SAFE_NO_PAD.encode(secret))
 }
 
 /// Parses an enroll/renew body: `{ "csr": "<base64 DER>", "metadata": {...} }`.
@@ -143,7 +146,7 @@ fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError
         .get("csr")
         .and_then(Value::as_str)
         .ok_or_else(|| ApiError::invalid_request("missing `csr`"))?;
-    // The engine rejects anything but the canonical form (§1), such as padding or nonzero pad bits.
+    // The engine rejects anything but the canonical form (§1), such as missing padding or nonzero pad bits.
     let csr_der = base64::engine::general_purpose::STANDARD
         .decode(csr)
         .map_err(|_| ApiError::invalid_request("`csr` is not canonical base64"))?;
@@ -162,7 +165,7 @@ async fn enroll(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body: B
         state.requests.enroll_total += 1;
         state.requests.request_sequence.push("enroll");
     }
-    let secret = match parse_bearer(&headers) {
+    let secret = match parse_bearer(&headers, &app.base_url) {
         Ok(secret) => secret,
         Err(err) => return api_error_response(&app, &err),
     };
@@ -449,11 +452,9 @@ fn authenticate(
 mod tests {
     use axum::http::header::AUTHORIZATION;
     use axum::http::{HeaderMap, HeaderValue};
-    use base64::Engine as _;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use rstest::rstest;
 
-    use super::{parse_bearer, parse_check_in_body, parse_csr_body};
+    use super::{enrollment_token, parse_bearer, parse_check_in_body, parse_csr_body};
 
     fn code<T>(result: Result<T, crate::state::ApiError>) -> Result<(), &'static str> {
         result.map(|_| ()).map_err(|error| error.code)
@@ -506,26 +507,31 @@ mod tests {
         headers
     }
 
-    /// CONTRACT.md §2: "The authority matches the `secret` text exactly, so only the exact token string authenticates",
-    /// and a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`.
+    const BASE_URL: &str = "https://127.0.0.1:1/mock";
+
+    fn with_bag(token: &str, bag: &str) -> String {
+        let (prefix, rest) = token.split_once('.').expect("token prefix");
+        let (_, secret) = rest.split_once('.').expect("token secret");
+        format!("{prefix}.{bag}.{secret}")
+    }
+
+    /// CONTRACT.md §2: "only the exact token string authenticates", and the secret must be canonical `base64url` (§1).
     #[rstest]
-    #[case::padded_secret(|secret: &str| format!("dvaet1.e30.{secret}="))]
-    #[case::nonzero_pad_bits(|secret: &str| format!("dvaet1.e30.{}B", &secret[..42]))]
-    #[case::standard_alphabet(|secret: &str| format!("dvaet1.e30.+{}", &secret[1..]))]
-    #[case::empty_bag(|secret: &str| format!("dvaet1..{secret}"))]
-    #[case::bag_outside_the_alphabet(|secret: &str| format!("dvaet1.e30=.{secret}"))]
-    #[case::other_prefix(|secret: &str| format!("dvaet2.e30.{secret}"))]
-    fn only_the_exact_token_string_authenticates(#[case] token: fn(&str) -> String) {
-        let secret = URL_SAFE_NO_PAD.encode([0u8; 32]);
-        assert_eq!(code(parse_bearer(&bearer(&token(&secret)))), Err("token_invalid"));
+    #[case::padded_secret(|token: &str| format!("{token}="))]
+    #[case::nonzero_pad_bits(|token: &str| format!("{}B", &token[..token.len() - 1]))]
+    #[case::standard_alphabet(|token: &str| format!("{}+", &token[..token.len() - 1]))]
+    #[case::other_json_bag(|token: &str| with_bag(token, "e30"))]
+    #[case::undecodable_bag(|token: &str| with_bag(token, "A"))]
+    #[case::empty_bag(|token: &str| with_bag(token, ""))]
+    #[case::other_prefix(|token: &str| token.replacen("dvaet1", "dvaet2", 1))]
+    fn only_the_exact_token_string_authenticates(#[case] alter: fn(&str) -> String) {
+        let token = alter(&enrollment_token(BASE_URL, &[0; 32]));
+        assert_eq!(code(parse_bearer(&bearer(&token), BASE_URL)), Err("token_invalid"));
     }
 
     #[test]
-    fn well_formed_token_yields_its_secret() {
-        let secret = URL_SAFE_NO_PAD.encode([0u8; 32]);
-        assert_eq!(
-            parse_bearer(&bearer(&format!("dvaet1.e30.{secret}"))).ok(),
-            Some([0u8; 32])
-        );
+    fn issued_token_yields_its_secret() {
+        let token = enrollment_token(BASE_URL, &[0; 32]);
+        assert_eq!(parse_bearer(&bearer(&token), BASE_URL).ok(), Some([0; 32]));
     }
 }

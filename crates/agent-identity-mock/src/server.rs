@@ -216,13 +216,14 @@ mod tests {
     use axum::body::Bytes;
     use axum::http;
     use base64::Engine as _;
-    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    use base64::engine::general_purpose::STANDARD;
     use http_body_util::{BodyExt as _, Full};
     use p256::ecdsa::VerifyingKey;
     use rstest::rstest;
     use serde_json::{Map, Value, json};
 
     use super::Dispatcher;
+    use crate::api_agent::enrollment_token;
     use crate::app::App;
     use crate::oracle::NonceStore;
     use crate::state::State;
@@ -298,7 +299,7 @@ mod tests {
             .lock()
             .await
             .create_token("test".to_owned(), 1, now + 3600, None, None, now);
-        let authorization = format!("Bearer dvaet1.e30.{}", URL_SAFE_NO_PAD.encode(secret));
+        let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
         let headers = vec![authorization.as_str(); header_count];
         let response = post(&app, "enroll", &headers, b"not json".to_vec()).await;
         assert_eq!(response, (expected.0, expected.1.to_owned()));
@@ -318,7 +319,7 @@ mod tests {
             secret
         };
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let authorization = format!("Bearer dvaet1.e30.{}", URL_SAFE_NO_PAD.encode(secret));
+        let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
         let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
         let response = post(&app, "enroll", &[authorization.as_str()], body.into_bytes()).await;
         assert_eq!(response, (500, "unavailable".to_owned()));
@@ -367,7 +368,7 @@ mod tests {
         let (status, faults) = post_json(&app, FAULTS, &[], json!({ "config_version": 7 }).to_string()).await;
         assert_eq!((status, &faults["config_version"]), (200, &json!(7)));
 
-        let authorization = format!("Bearer dvaet1.e30.{}", URL_SAFE_NO_PAD.encode(secret));
+        let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
         let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
         let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
         let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
@@ -435,6 +436,41 @@ mod tests {
             assert!(stored_revision < revision, "revision increases for {control}");
             stored_revision = revision;
         }
+        Ok(())
+    }
+
+    /// CONTRACT.md §2: "only the exact token string authenticates", so an issued token with another bag is `token_invalid`.
+    #[rstest]
+    #[case::issued_token(None, 200, Value::Null)]
+    #[case::other_json_bag(Some("e30"), 401, json!("token_invalid"))]
+    #[case::undecodable_bag(Some("A"), 401, json!("token_invalid"))]
+    #[tokio::test]
+    async fn only_the_issued_token_string_enrolls(
+        #[case] bag: Option<&str>,
+        #[case] expected_status: u16,
+        #[case] expected_error: Value,
+    ) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let expires_at = crate::app::rfc3339(app.now() + 3600);
+        let created = json!({ "name": "t", "maxUses": 1, "expiresAt": expires_at }).to_string();
+        let admin = [(http::header::AUTHORIZATION.as_str(), "Bearer admin")];
+        let (status, created) = post_json(&app, "/api/v3/agent-identity/enrollment-tokens", &admin, created).await;
+        assert_eq!(status, 201);
+        let token = created["token"].as_str().expect("issued token");
+        let token = match bag {
+            Some(bag) => {
+                let (_, secret) = token.rsplit_once('.').expect("token secret");
+                format!("dvaet1.{bag}.{secret}")
+            }
+            None => token.to_owned(),
+        };
+
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let authorization = format!("Bearer {token}");
+        let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
+        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
+        assert_eq!((status, &enrolled["error"]), (expected_status, &expected_error));
         Ok(())
     }
 
