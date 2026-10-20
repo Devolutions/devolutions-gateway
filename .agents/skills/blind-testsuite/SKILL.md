@@ -5,7 +5,7 @@ description: Write or extend a conformance suite from a CONTRACT.md and publishe
 
 # Blind test suite
 
-The suite is the contract made executable, so implementations are judged against it and not the other way round.
+The suite is independent evidence derived from the contract, not the definition of conformance, so a failing test says the implementation or the test is wrong, never the contract.
 `test-writer` decides each test's shape and `test-oracle-reviewer` what counts as an independent value; this skill is the isolation around them.
 
 ## What the author sees

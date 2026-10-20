@@ -30,7 +30,7 @@ Apply each to every normative sentence and quote it, so the author finds it afte
 - **One-implementation bias**: a library's behaviour, a number, or a rationale true for one backend; ask whether it was written to fit one implementation.
 - **Unmeasured cause**: a rationale citing a mechanism nobody measured.
 - **Untestable**: "handles", "supports", "properly", a condition without a stated outcome, or two outcomes in one sentence; propose an observable with a bound and the conformance case that checks it.
-- **Scope creep**: admin, UI, mock control, implementer choices, a rule-to-test mapping, review-only claims, known gaps, or any section that neither constrains a party in scope nor is exercised by a conformance test; propose the owning component's intent file, the suite's coverage record, or deletion.
+- **Scope creep**: admin, UI, mock control, implementer choices, a conformance section (conformance defined as passing a suite, a rule-to-test mapping, review-only claims, known gaps), an acceptance rule for the work such as "passes the suite before merge", or any section that neither constrains a party in scope nor is exercised by a conformance test; propose the owning component's intent file, the suite's coverage record, the process rules, or deletion.
 - **Intent gap**: a contract rule that takes a design decision `INTENT.md` does not, as opposed to adding detail; the human records the decision in the intent first, since a decision made only in the contract is one nobody made.
 
 ## Report
