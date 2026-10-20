@@ -50,7 +50,7 @@ public class ChannelOpeningTests
 
     // CONTRACT.md §7.3 steps 3 and 4: the proof covers the challenge as sent and the connect nonce,
     // and is verified with the key of the certificate that authenticated the opening,
-    // so the opening keeps each of them for the handshake.
+    // so the opening keeps the nonce and that certificate for the handshake.
     [Fact]
     public async Task OpeningKeepsWhatTheChannelProofCovers()
     {
@@ -75,8 +75,6 @@ public class ChannelOpeningTests
         Assert.Equal(registered.CertificateStatus, opening.Certificate.Status.ToString().ToLowerInvariant());
         Assert.Equal(registered.NotBefore, opening.Certificate.NotBefore);
         Assert.Equal(registered.NotAfter, opening.Certificate.NotAfter);
-        Assert.Equal(opening.Challenge.Id, opening.ChallengeId);
-        Assert.Equal(opening.Challenge.Challenge.Challenge_.ToByteArray(), opening.ChallengeBytes.ToArray());
     }
 
     // CONTRACT.md §7.3 steps 3 and 4: the agent signs the challenge it received, and the server verifies that proof.

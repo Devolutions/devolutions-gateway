@@ -122,21 +122,15 @@ public class ChannelHandshakeTests
         }
     }
 
-    // Each pair of failures that the handshake checks one after the other.
-    public static TheoryData<string, string> FailurePairNames
-    {
-        get
-        {
-            TheoryData<string, string> cases = new();
+    // Each pair of failures that the handshake checks one after the other, and that close the stream with different
+    // codes.
+    public static TheoryData<string, string> PairsOfFailuresWithDifferentCodes =>
+        FailurePairNames((earlier, later) => earlier.Code != later.Code);
 
-            foreach ((string earlier, string later) in FailurePairs.Keys)
-            {
-                cases.Add(earlier, later);
-            }
-
-            return cases;
-        }
-    }
+    // Each pair of failures that the handshake checks one after the other, and that close the stream with the same
+    // code, signature_invalid.
+    public static TheoryData<string, string> PairsOfFailuresWithTheSameCode =>
+        FailurePairNames((earlier, later) => earlier.Code == later.Code);
 
     // Every way to end a handshake, followed by each of the two calls a host makes.
     public static TheoryData<string, string> HandshakeEndsThenAnotherCall
@@ -299,11 +293,24 @@ public class ChannelHandshakeTests
     // The late Hello is signature_invalid like the message failures, and comes before all of them, metadata included.
     // CONTRACT.md §7.3 step 4 then checks the payload, the correlation_id, the proof, then the metadata,
     // so an agent that has not proved the key never learns whether its metadata would pass.
-    // oracle: the code and the status come from these sections; the failure details are self-derived,
-    // the handshake's own output, and only they tell two signature_invalid failures apart.
     [Theory]
-    [MemberData(nameof(FailurePairNames))]
+    [MemberData(nameof(PairsOfFailuresWithDifferentCodes))]
     public async Task EarlierFailureWins(string earlier, string later)
+    {
+        (_, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[earlier];
+
+        ChannelHandshakeResult result = await HandshakeAsync(FailurePairs[(earlier, later)]);
+
+        AssertFailed(result, expectedCode, expectedStatus);
+    }
+
+    // Two failures that both close the stream with signature_invalid differ only in their failure detail,
+    // so the detail shows that the earlier one closed it.
+    // oracle: self-derived; CONTRACT.md §7.3 step 4 fixes no failure detail,
+    // so the expected one is the handshake's own for the earlier failure alone.
+    [Theory]
+    [MemberData(nameof(PairsOfFailuresWithTheSameCode))]
+    public async Task EarlierOfTwoSignatureFailuresWins(string earlier, string later)
     {
         (_, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[earlier];
         ChannelHandshakeResult earlierAlone = await HandshakeAsync(Scenarios[earlier]);
@@ -772,6 +779,23 @@ public class ChannelHandshakeTests
     private static string WithoutHello(string closure)
     {
         return $"no Hello in time, and {closure}";
+    }
+
+    // The names of the pairs of failures whose two failures the predicate accepts.
+    private static TheoryData<string, string> FailurePairNames(Func<Failure, Failure, bool> include)
+    {
+        Dictionary<string, Failure> failures = Failures;
+        TheoryData<string, string> cases = new();
+
+        foreach ((string earlier, string later) in FailurePairs.Keys)
+        {
+            if (include(failures[earlier], failures[later]))
+            {
+                cases.Add(earlier, later);
+            }
+        }
+
+        return cases;
     }
 
     // Opens the vector stream and verifies the first message built for it.
