@@ -5,7 +5,7 @@ description: Review changed Rust or C# tests against the `test-writer` rules, in
 
 # Test reviewer
 
-Invoke `test-writer` and use its rules as review criteria without following its generation workflow; for C# tests, judge the forms by its `references/csharp.md`.
+Invoke `test-writer` and use its rules as review criteria without following its generation workflow.
 Review only changed tests unless the user requests a broader audit.
 Run `test-oracle-reviewer` on each changed test; this skill covers a test's shape, not where its expected values come from.
 When a test's name and assertions do not say which bug it catches, ask the author rather than guess.

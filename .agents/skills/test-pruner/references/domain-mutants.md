@@ -1,6 +1,8 @@
 # Domain mutants
 
-Neither mutation tool takes user-defined operators, so write each domain mutant as a patch: take it with `git diff` from an edit you then revert rather than by hand, since a hand-written hunk header is easily wrong; `git apply` it, run the scoped tests, `git apply -R` it; caught means any test failed.
+Neither mutation tool takes user-defined operators, so write each domain mutant as a patch.
+Take it with `git diff --output=<file>` from an edit you then revert, since a hand-written hunk header is easily wrong and a Windows PowerShell redirect re-encodes the patch as UTF-16 with CRLF, which `git apply` rejects.
+`git apply` it, run the scoped tests, and `git apply -R` it; caught means a test failed, and a patch that does not build proves nothing until it does.
 Patches are pull request evidence, not repository files.
 
 Codec catalog:
@@ -12,7 +14,7 @@ Codec catalog:
 - Swap two adjacent fields of the same type.
 - Flip one bit in a flags field.
 - Write one byte fewer than the size computation reports.
-- Return success (`Ok`, `true`) on a malformed-input branch that returns an error.
+- Return success (`Ok`, `true`) on a malformed-input branch that returns an error or throws.
 - Accept a reserved or out-of-range enum value.
 
 Async and resource catalog:
@@ -33,5 +35,3 @@ Decision and validation catalog, for each security or policy decision: remove it
 - Ignore one input source, such as caller-provided roots.
 - Skip verification of a candidate's chain.
 - Swap error precedence or report the wrong error.
-
-Add every mutant the challenger produces that the rest of the suite misses.

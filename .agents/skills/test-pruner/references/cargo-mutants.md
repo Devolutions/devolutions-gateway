@@ -1,7 +1,7 @@
 # cargo-mutants mechanics
 
 cargo-mutants reports whether the suite caught each mutant.
-It has no user-defined mutation operators and keeps per-test results only in its logs, so the kill matrix is parsed from the logs and domain mutants are patches as `domain-mutants.md` describes.
+It keeps per-test results only in its logs, so the kill matrix is parsed from them.
 These notes target cargo-mutants 27.1.
 
 ## Run
@@ -61,11 +61,5 @@ For assertion-level evidence, read the `panicked at <file>:<line>` location of e
 
 ## Rerun
 
-Rerun with the same scope and flags after each change.
 Run the scoped tests on the clean tree first; with `--baseline skip`, a suite broken by a test edit marks every mutant caught.
 Any mutant that moved from caught to missed without an approved deletion explaining it means revert.
-
-## Consolidation forms
-
-Cases are `rstest` with `#[case::name]` or enum-valued `#[values]`, so each case's harness name, which the kill matrix keys on, says what it checks.
-Properties are `proptest`, reusing the crate's strategies as `test-writer` says.

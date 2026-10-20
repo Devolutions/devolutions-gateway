@@ -1,6 +1,6 @@
 ---
 name: test-writer
-description: Design tests that catch bugs, choosing between an example test, parametrized cases, a snapshot, a property, and a fuzz target; Rust forms (`rstest`, `expect-test`, `proptest`) in the body, C# forms (xUnit `[Theory]`, CsCheck) in `references/csharp.md`. Use whenever adding or changing unit, integration, snapshot, or property tests in Rust or C#.
+description: Design tests that catch bugs, choosing between an example test, parametrized cases, a snapshot, a property, and a fuzz target, in Rust (`rstest`, `expect-test`, `proptest`) or C# (xUnit `[Theory]`, CsCheck). Use whenever adding or changing unit, integration, snapshot, or property tests in Rust or C#.
 ---
 
 # Test writer
