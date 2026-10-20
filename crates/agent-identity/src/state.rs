@@ -18,7 +18,7 @@ use crate::{pending, private_file, rejected, state_lock};
 const MAX_IDENTITY_BYTES: u64 = 2 * 1024 * 1024;
 pub const IDENTITY_KEY_PREFIX: &str = "devolutions-agent-identity";
 /// The rejection code of an identity whose current key no longer exists in its key store.
-const KEY_LOST: &str = "key_lost";
+pub const KEY_LOST: &str = "key_lost";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoredIdentity {
@@ -342,25 +342,33 @@ impl Store {
 
     /// Stores the chain that renew returned for the pending key.
     pub fn store_pending_chain(&self, identity: &mut StoredIdentity, chain: Vec<String>) -> anyhow::Result<()> {
-        self.update(identity, |updated| {
-            let pending = updated.keys.pending.as_mut().context("identity has no pending key")?;
-            pending.certificate_chain = Some(chain);
-            Ok(())
-        })
+        self.update(
+            identity,
+            |updated| {
+                let pending = updated.keys.pending.as_mut().context("identity has no pending key")?;
+                pending.certificate_chain = Some(chain);
+                Ok(())
+            },
+            || Ok(()),
+        )
     }
 
     /// Makes the confirmed pending key current and keeps the old key as `previous` until it is deleted.
     pub fn promote_pending(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        self.update(identity, |updated| {
-            ensure!(updated.keys.previous.is_none(), "identity still has a previous key");
-            let pending = updated.keys.pending.take().context("identity has no pending key")?;
-            ensure!(
-                pending.certificate_chain.is_some(),
-                "pending identity key has no certificate chain"
-            );
-            updated.keys.previous = Some(std::mem::replace(&mut updated.keys.current, pending));
-            Ok(())
-        })
+        self.update(
+            identity,
+            |updated| {
+                ensure!(updated.keys.previous.is_none(), "identity still has a previous key");
+                let pending = updated.keys.pending.take().context("identity has no pending key")?;
+                ensure!(
+                    pending.certificate_chain.is_some(),
+                    "pending identity key has no certificate chain"
+                );
+                updated.keys.previous = Some(std::mem::replace(&mut updated.keys.current, pending));
+                Ok(())
+            },
+            || Ok(()),
+        )
     }
 
     /// Moves the expired pending key to `previous` and records a fresh pending key before generating it.
@@ -368,34 +376,40 @@ impl Store {
     /// An earlier expired pending key held in `previous` is deleted, since the newer pending certificate retired it.
     pub fn begin_recovery(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
         let name = keys::new_key_name(&self.key_prefix);
-        self.update(identity, |updated| {
-            let expired = updated.keys.pending.take().context("identity has no pending key")?;
-            ensure!(
-                expired.certificate_chain.is_some(),
-                "pending identity key has no certificate chain"
-            );
-            updated.keys.previous = Some(expired);
-            updated.keys.pending = Some(KeyRecord {
-                key_name: name.clone(),
-                certificate_chain: None,
-            });
-            Ok(())
-        })?;
-        keys::generate(&self.backend, &name)
+        self.update(
+            identity,
+            |updated| {
+                let expired = updated.keys.pending.take().context("identity has no pending key")?;
+                ensure!(
+                    expired.certificate_chain.is_some(),
+                    "pending identity key has no certificate chain"
+                );
+                updated.keys.previous = Some(expired);
+                updated.keys.pending = Some(KeyRecord {
+                    key_name: name.clone(),
+                    certificate_chain: None,
+                });
+                Ok(())
+            },
+            || keys::generate(&self.backend, &name),
+        )
     }
 
     /// Deletes an unusable pending key and its slot, then records a fresh pending key before generating it.
     pub fn replace_pending_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
         let name = keys::new_key_name(&self.key_prefix);
-        self.update(identity, |updated| {
-            ensure!(updated.keys.pending.is_some(), "identity has no pending key");
-            updated.keys.pending = Some(KeyRecord {
-                key_name: name.clone(),
-                certificate_chain: None,
-            });
-            Ok(())
-        })?;
-        keys::generate(&self.backend, &name)
+        self.update(
+            identity,
+            |updated| {
+                ensure!(updated.keys.pending.is_some(), "identity has no pending key");
+                updated.keys.pending = Some(KeyRecord {
+                    key_name: name.clone(),
+                    certificate_chain: None,
+                });
+                Ok(())
+            },
+            || keys::generate(&self.backend, &name),
+        )
     }
 
     /// Records that the authority permanently rejected the identity.
@@ -403,26 +417,35 @@ impl Store {
         let at = OffsetDateTime::now_utc()
             .format(&Rfc3339)
             .context("format rejection timestamp")?;
-        self.update(identity, |updated| {
-            updated.rejected = Some(Rejection {
-                code: code.to_owned(),
-                at,
-            });
-            Ok(())
-        })
+        self.update(
+            identity,
+            |updated| {
+                updated.rejected = Some(Rejection {
+                    code: code.to_owned(),
+                    at,
+                });
+                Ok(())
+            },
+            || Ok(()),
+        )
     }
 
-    fn update(
+    /// Writes a changed snapshot of the identity, then runs `then` under the same state lock.
+    ///
+    /// UNTESTED: generating a key in `then` keeps a concurrent replacement of the identity from unrecording its name
+    /// before the key exists; when changing this, keep record and generation in one critical section.
+    fn update<T>(
         &self,
         identity: &mut StoredIdentity,
         change: impl FnOnce(&mut StoredIdentity) -> anyhow::Result<()>,
-    ) -> anyhow::Result<()> {
+        then: impl FnOnce() -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
         let mut updated = identity.clone();
         change(&mut updated)?;
         let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
         self.write_identity_locked(Some(identity), &updated)?;
         *identity = updated;
-        Ok(())
+        then()
     }
 
     pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
