@@ -57,7 +57,10 @@ mod tests {
     #[test]
     fn any_text_of_at_most_10_characters_is_a_language() {
         for language in ["en", "fr-CA", "zh-Hant-TW", "français", "中文", "Deutsch"] {
-            assert_eq!(Language::new(language).map(|language| language.to_string()), Ok(language.to_owned()));
+            assert_eq!(
+                Language::new(language).map(|language| language.to_string()),
+                Ok(language.to_owned())
+            );
         }
     }
 

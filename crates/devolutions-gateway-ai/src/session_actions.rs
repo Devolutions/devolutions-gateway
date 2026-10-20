@@ -37,8 +37,7 @@ Rules:
 - If the user did nothing, write only this line: {"noActions":true}"#;
 
 /// Last rule of the prompt, naming the language of the descriptions.
-pub(crate) const LANGUAGE_RULE: &str =
-    r#"- Write every description in the language `{language}`; keep the JSON field names and "[redacted]" as they are."#;
+pub(crate) const LANGUAGE_RULE: &str = r#"- Write every description in the language `{language}`; keep the JSON field names and "[redacted]" as they are."#;
 
 /// The same limit DVLS and RDM use for Claude. Reasoning models count their reasoning in it, so it cannot be small.
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;

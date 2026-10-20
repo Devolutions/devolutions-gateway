@@ -238,7 +238,6 @@ macro_rules! prompt_version {
 pub(crate) use prompt_version;
 
 /// 64-bit FNV-1a hash of `texts`, each followed by a 0xFF byte, which never occurs in UTF-8.
-#[allow(clippy::cast_lossless, reason = "`u64::from` is not const")]
 pub(crate) const fn fnv1a(texts: &[&str]) -> u64 {
     const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
@@ -259,7 +258,6 @@ pub(crate) const fn fnv1a(texts: &[&str]) -> u64 {
 }
 
 /// `name`, a hyphen, and `hash` in 16 lowercase hex digits; `N` must be the length of `name` plus 17.
-#[expect(clippy::cast_possible_truncation, reason = "the value is masked to 0..=15 first")]
 pub(crate) const fn prompt_version_bytes<const N: usize>(name: &str, hash: u64) -> [u8; N] {
     const DIGITS: &[u8; 16] = b"0123456789abcdef";
 

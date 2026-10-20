@@ -236,7 +236,10 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     assert!(entries.iter().all(|entry| entry["source"] == "ai"), "{entries:?}");
     assert_eq!(entries[0]["model"], REPORTED_MODEL);
     assert_eq!(entries[0]["promptVersion"], analysis.prompt_version.as_str());
-    assert_eq!(entries[0]["language"], "English", "English unless the caller asks for another language");
+    assert_eq!(
+        entries[0]["language"], "English",
+        "English unless the caller asks for another language"
+    );
     assert_eq!(entries[2]["summary"], "Summary 1");
     assert!(!session.workspace().exists());
     let recording_size = std::fs::metadata(recording_dir(&session.manifest_path).join("recording-0.cast"))
