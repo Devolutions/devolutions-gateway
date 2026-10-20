@@ -51,7 +51,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="maxOutputTokens">Upper bound of tokens in each AI answer; null when not asked..</param>
         /// <param name="model">Model identifier, passed to the provider as is. (required).</param>
         /// <param name="provider">provider (required).</param>
-        public AiAnalysisParams(string language = default(string), int? maxOutputTokens = default(int?), string model = default(string), AiProvider provider = default(AiProvider))
+        public AiAnalysisParams(string language = default(string), long? maxOutputTokens = default(long?), string model = default(string), AiProvider provider = default(AiProvider))
         {
             // to ensure "model" is required (not null)
             if (model == null)
@@ -76,7 +76,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <value>Upper bound of tokens in each AI answer; null when not asked.</value>
         [DataMember(Name = "maxOutputTokens", EmitDefaultValue = true)]
-        public int? MaxOutputTokens { get; set; }
+        public long? MaxOutputTokens { get; set; }
 
         /// <summary>
         /// Model identifier, passed to the provider as is.
@@ -117,8 +117,14 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Validation Result</returns>
         IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
-            // MaxOutputTokens (int?) minimum
-            if (this.MaxOutputTokens < (int?)0)
+            // MaxOutputTokens (long?) maximum
+            if (this.MaxOutputTokens > (long?)4294967295)
+            {
+                yield return new ValidationResult("Invalid value for MaxOutputTokens, must be a value less than or equal to 4294967295.", new [] { "MaxOutputTokens" });
+            }
+
+            // MaxOutputTokens (long?) minimum
+            if (this.MaxOutputTokens < (long?)0)
             {
                 yield return new ValidationResult("Invalid value for MaxOutputTokens, must be a value greater than or equal to 0.", new [] { "MaxOutputTokens" });
             }
