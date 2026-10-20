@@ -163,6 +163,8 @@ Stable options are:
     - the IPv4 wildcard bind address `0.0.0.0`, for listening to any IPv4 address, and
     - the IPv6 wildcard bind address `[::]`, for listening to any IPv6 address.
 
+    An internal URL with an IPv6 address, including `[::]`, accepts IPv6 connections only.
+
     When used in external URLs, `*` will be expanded into the value of `Hostname`.
 
 - **Subscriber** (_Object_): Subscriber API configuration.

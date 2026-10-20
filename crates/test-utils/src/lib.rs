@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::net::Ipv4Addr;
 
 use anyhow::Context as _;
 use futures_util::{Sink, Stream};
@@ -168,22 +168,20 @@ pub async fn read_assert_payload<R: AsyncRead + Unpin>(reader: &mut R, expected_
 }
 
 pub fn find_unused_ports(number: usize) -> Vec<u16> {
-    let mut ports = HashSet::with_capacity(number);
+    // UNTESTED: ports are probed on loopback only.
+    // On Windows, a listener on a wildcard address makes the firewall ask for elevation once per executable path,
+    // and every worktree builds new paths.
+    // When changing this probe, keep binding to 127.0.0.1.
+    //
+    // Every listener stays open until all ports are known, so the OS hands out distinct ports.
+    let listeners = (0..number)
+        .map(|_| std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind an ephemeral loopback port"))
+        .collect::<Vec<_>>();
 
-    'outer: for _ in 0..number {
-        for _ in 0..5 {
-            let port = portpicker::pick_unused_port()
-                .expect("at least one free port should be found (try again if this failed)");
-            if !ports.contains(&port) {
-                ports.insert(port);
-                continue 'outer;
-            }
-        }
-
-        panic!("not enough ports available");
-    }
-
-    ports.into_iter().collect()
+    listeners
+        .iter()
+        .map(|listener| listener.local_addr().expect("read the bound address").port())
+        .collect()
 }
 
 pub fn websocket_compat_read<S>(stream: S) -> impl AsyncRead + Unpin + Send + 'static
