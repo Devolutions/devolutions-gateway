@@ -36,8 +36,19 @@ fn scope_token(scope: &str) -> String {
 
 struct Gateway {
     config: DgwConfigHandle,
-    _process: tokio::process::Child,
+    process: tokio::process::Child,
     client: reqwest::Client,
+}
+
+impl Drop for Gateway {
+    // The config folder is deleted right after, and Windows can't delete the files Gateway still holds open.
+    fn drop(&mut self) {
+        let _ = self.process.start_kill();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while matches!(self.process.try_wait(), Ok(None)) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
 }
 
 impl Gateway {
@@ -53,7 +64,7 @@ impl Gateway {
 
         Self {
             config,
-            _process: process,
+            process,
             client: reqwest::Client::new(),
         }
     }
