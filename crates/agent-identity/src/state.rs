@@ -675,27 +675,34 @@ impl Store {
             }
         }
         for mut identity in self.list_identities()? {
-            if keys::open(&self.backend, &identity.keys.current.key_name)?.is_none() {
-                // The identity is kept so that its token stays a no-op and recovery needs a different token.
-                if identity.rejected.is_none() {
-                    let previous = identity.clone();
-                    identity.rejected = Some(Rejection {
-                        code: KEY_LOST.to_owned(),
-                        at: OffsetDateTime::now_utc()
-                            .format(&Rfc3339)
-                            .context("format key-lost timestamp")?,
-                    });
-                    self.write_identity_locked(Some(&previous), &identity)?;
-                }
+            // `crates/agent-identity/INTENT.md` ("Identities"): a rejected identity keeps its keys and slots until it
+            // is replaced; its key names still count as recorded below.
+            if identity.rejected.is_some() {
                 continue;
             }
+            if keys::open(&self.backend, &identity.keys.current.key_name)?.is_none() {
+                // The identity is kept so that its token stays a no-op and recovery needs a different token.
+                let previous = identity.clone();
+                identity.rejected = Some(Rejection {
+                    code: KEY_LOST.to_owned(),
+                    at: OffsetDateTime::now_utc()
+                        .format(&Rfc3339)
+                        .context("format key-lost timestamp")?,
+                });
+                self.write_identity_locked(Some(&previous), &identity)?;
+                continue;
+            }
+            // A key refused when opened is left to the identity's runner, which replaces it, so that one unusable key
+            // never stops the other identities.
             if let Some(pending) = &identity.keys.pending
-                && keys::open(&self.backend, &pending.key_name)?.is_none()
+                && matches!(keys::open(&self.backend, &pending.key_name), Ok(None))
             {
                 if pending.certificate_chain.is_none() {
                     keys::generate(&self.backend, &pending.key_name)?;
-                } else if identity.keys.previous.is_some() {
-                    // Pending-key recovery continues with a fresh key while `previous` holds the expired pending key.
+                } else {
+                    // `crates/agent-identity/INTENT.md` ("Stored identities"): a missing pending key is unusable and is
+                    // replaced by a fresh one, which keeps the pending slot, and with it the `confirm` barrier, until a
+                    // renewal is confirmed.
                     let previous = identity.clone();
                     let name = keys::new_key_name(&self.key_prefix);
                     identity.keys.pending = Some(KeyRecord {
@@ -704,14 +711,10 @@ impl Store {
                     });
                     self.write_identity_locked(Some(&previous), &identity)?;
                     keys::generate(&self.backend, &name)?;
-                } else {
-                    let previous = identity.clone();
-                    identity.keys.pending = None;
-                    self.write_identity_locked(Some(&previous), &identity)?;
                 }
             }
             if let Some(previous) = &identity.keys.previous
-                && keys::open(&self.backend, &previous.key_name)?.is_none()
+                && matches!(keys::open(&self.backend, &previous.key_name), Ok(None))
             {
                 let previous = identity.clone();
                 identity.keys.previous = None;
@@ -1584,6 +1587,81 @@ mod tests {
         for name in [&current.key_name, &newest.key_name, &fresh_name] {
             assert!(keys::open(store.key_backend(), name)?.is_some(), "{name}");
         }
+        Ok(())
+    }
+
+    fn key_file(directory: &TestDir, key_name: &str) -> Utf8PathBuf {
+        directory.0.join("identity").join("keys").join(format!("{key_name}.p8"))
+    }
+
+    #[test]
+    fn startup_replaces_a_missing_certified_pending_key_with_a_fresh_one() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Stored identities"): a pending key missing from its store is unusable,
+        // and the agent deletes it and its slot before renewing with a fresh key; the pending slot keeps the
+        // `confirm` barrier of `CONTRACT.md` §8.1 until that renewal is confirmed.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let certified = store.create_pending_key(&mut identity)?.name().to_owned();
+        store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
+        keys::delete(store.key_backend(), &certified)?;
+
+        store.reconcile()?;
+
+        let stored = store
+            .read_identity(identity.authority_id)?
+            .context("identity disappeared")?;
+        assert_eq!(stored.keys.current, identity.keys.current);
+        assert_eq!(stored.keys.previous, None);
+        let pending = stored.keys.pending.context("start-up dropped the pending slot")?;
+        assert_ne!(pending.key_name, certified);
+        assert_eq!(pending.certificate_chain, None);
+        assert!(keys::open(store.key_backend(), &pending.key_name)?.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn startup_leaves_a_refused_pending_key_to_its_runner() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Stored identities"): a pending key refused when opened is unusable and is
+        // replaced before a fresh-key renewal; start-up must not stop on it, or no identity would run.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let refused = store.create_pending_key(&mut identity)?.name().to_owned();
+        store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
+        fs::write(key_file(&directory, &refused), b"not a PKCS#8 key")?;
+        assert!(keys::open(store.key_backend(), &refused).is_err());
+
+        store.reconcile()?;
+
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
+        Ok(())
+    }
+
+    #[test]
+    fn startup_leaves_a_rejected_identity_s_slots_unchanged() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Identities"): a rejected identity keeps its keys and slots until a new
+        // identity replaces it or the agent is uninstalled.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let pending = store.create_pending_key(&mut identity)?.name().to_owned();
+        store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
+        store.reject_identity(&mut identity, "identity_revoked")?;
+        keys::delete(store.key_backend(), &pending)?;
+
+        store.reconcile()?;
+
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
         Ok(())
     }
 
