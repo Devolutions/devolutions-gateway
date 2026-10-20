@@ -632,6 +632,7 @@ async fn recording_deleted_after_start_fails() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
+    assert_eq!(task.payload["reason"], "permanent error");
     assert_eq!(task.payload["details"], "session has no recording");
 }
 
