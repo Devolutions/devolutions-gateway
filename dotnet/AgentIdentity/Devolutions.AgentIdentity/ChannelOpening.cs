@@ -21,8 +21,13 @@ namespace Devolutions.AgentIdentity;
 /// </remarks>
 public sealed class ChannelOpening
 {
+    private const string ExpiredDetail = "The certificate that opened the stream expired during the handshake.";
+
     private static readonly AgentIdentityError SignatureInvalid =
         AgentIdentityError.From(AgentIdentityErrorCode.SignatureInvalid);
+
+    private static readonly AgentIdentityError CertificateExpired =
+        AgentIdentityError.From(AgentIdentityErrorCode.CertificateExpired);
 
     private readonly TimeProvider _timeProvider;
 
@@ -34,6 +39,7 @@ public sealed class ChannelOpening
         string connectNonce,
         Guid challengeId,
         byte[] challenge,
+        DateTimeOffset openedAt,
         TimeProvider timeProvider)
     {
         Certificate = certificate;
@@ -45,6 +51,7 @@ public sealed class ChannelOpening
             Id = ChallengeId,
             Challenge = new ChallengePayload { Challenge_ = ByteString.CopyFrom(challenge) },
         };
+        OpenedAt = openedAt;
         _timeProvider = timeProvider;
     }
 
@@ -57,6 +64,16 @@ public sealed class ChannelOpening
     /// The thumbprint of the certificate that signed the opening request, for logs.
     /// </summary>
     public string CertificateThumbprint => Certificate.Thumbprint;
+
+    /// <summary>
+    /// The <c>notAfter</c> of the certificate that signed the opening request.
+    /// </summary>
+    /// <remarks>
+    /// A stream closes no later than this time, with <see cref="AgentIdentityErrorCode.CertificateExpired"/>,
+    /// so the host closes a stream still waiting for its <c>Hello</c> at this time with that error.
+    /// It is a time, not an identity, which stays hidden until the agent signs the challenge.
+    /// </remarks>
+    public DateTimeOffset CertificateNotAfter => Certificate.NotAfter;
 
     /// <summary>
     /// The certificate that signed the opening request, whose key must also sign the challenge.
@@ -83,14 +100,27 @@ public sealed class ChannelOpening
     internal ReadOnlyMemory<byte> ChallengeBytes { get; }
 
     /// <summary>
+    /// The instant the opening request was verified,
+    /// from which the agent has <see cref="ChannelHandshake.HelloTimeout"/> to answer the challenge.
+    /// </summary>
+    internal DateTimeOffset OpenedAt { get; }
+
+    /// <summary>
     /// Verifies the first message that the agent sent on the stream, as CONTRACT.md §7.3 step 4 specifies.
     /// </summary>
     /// <remarks>
-    /// The message must be a <c>Hello</c> whose <c>correlation_id</c> is the <c>id</c> of <see cref="Challenge"/>,
+    /// The method reads the clock once, and judges the deadlines of the stream before the message,
+    /// since the stream closes at either one whatever the message holds.
+    /// After <see cref="CertificateNotAfter"/>, the handshake fails with
+    /// <see cref="AgentIdentityErrorCode.CertificateExpired"/>.
+    /// More than <see cref="ChannelHandshake.HelloTimeout"/> after the opening request was verified, it fails with
+    /// <see cref="AgentIdentityErrorCode.SignatureInvalid"/>, even when the host's own timer let the message through.
+    /// The message must then be a <c>Hello</c> whose <c>correlation_id</c> is the <c>id</c> of <see cref="Challenge"/>,
     /// and whose <c>proof</c> verifies with the key of the certificate that signed the opening request;
     /// otherwise the handshake fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
     /// Only then is the metadata checked, and metadata that CONTRACT.md §3 rejects fails the handshake with
     /// <see cref="AgentIdentityErrorCode.InvalidRequest"/>.
+    /// The <c>Welcome</c> of a successful handshake carries the time of that one reading.
     /// The first call to this method or to <see cref="HelloTimedOut"/> ends the handshake, whatever its outcome.
     /// </remarks>
     /// <param name="firstMessage">The first message that the agent sent on the stream.</param>
@@ -100,6 +130,18 @@ public sealed class ChannelOpening
     {
         ArgumentNullException.ThrowIfNull(firstMessage);
         EndHandshake();
+
+        DateTimeOffset now = _timeProvider.GetUtcNow();
+
+        if (HasExpired(now))
+        {
+            return ChannelHandshakeResult.Failure(CertificateExpired, ExpiredDetail);
+        }
+
+        if (now - OpenedAt > ChannelHandshake.HelloTimeout)
+        {
+            return ChannelHandshakeResult.Failure(SignatureInvalid, "The Hello arrived after the timeout.");
+        }
 
         if (firstMessage.PayloadCase != AgentMessage.PayloadOneofCase.Hello)
         {
@@ -137,7 +179,7 @@ public sealed class ChannelOpening
         {
             Id = Guid.NewGuid().ToString("D"),
             CorrelationId = firstMessage.Id,
-            Welcome = new WelcomePayload { ServerTime = Timestamp.FromDateTimeOffset(_timeProvider.GetUtcNow()) },
+            Welcome = new WelcomePayload { ServerTime = Timestamp.FromDateTimeOffset(now) },
         };
 
         return ChannelHandshakeResult.Success(
@@ -148,9 +190,12 @@ public sealed class ChannelOpening
 
     /// <summary>
     /// Ends the handshake of a stream on which no agent message arrived within
-    /// <see cref="ChannelHandshake.HelloTimeout"/>, with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
+    /// <see cref="ChannelHandshake.HelloTimeout"/>.
     /// </summary>
     /// <remarks>
+    /// The handshake fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>,
+    /// or with <see cref="AgentIdentityErrorCode.CertificateExpired"/> when the clock reads a time after
+    /// <see cref="CertificateNotAfter"/>.
     /// The host also calls it when the agent ends the stream without sending a message.
     /// </remarks>
     /// <exception cref="InvalidOperationException">The handshake has already ended.</exception>
@@ -158,7 +203,9 @@ public sealed class ChannelOpening
     {
         EndHandshake();
 
-        return ChannelHandshakeResult.Failure(SignatureInvalid, "No Hello arrived before the timeout.");
+        return HasExpired(_timeProvider.GetUtcNow())
+            ? ChannelHandshakeResult.Failure(CertificateExpired, ExpiredDetail)
+            : ChannelHandshakeResult.Failure(SignatureInvalid, "No Hello arrived before the timeout.");
     }
 
     private void EndHandshake()
@@ -171,5 +218,11 @@ public sealed class ChannelOpening
         {
             throw new InvalidOperationException("The handshake of this channel opening has already ended.");
         }
+    }
+
+    // CONTRACT.md §6: a certificate is unexpired while now ≤ notAfter.
+    private bool HasExpired(DateTimeOffset now)
+    {
+        return now > Certificate.NotAfter;
     }
 }

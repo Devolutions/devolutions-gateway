@@ -62,10 +62,14 @@ public sealed class ChannelHandshakeResult
     public ServerMessage? Welcome { get; }
 
     /// <summary>
-    /// The error to close the stream with, when the handshake failed:
-    /// <see cref="AgentIdentityErrorCode.SignatureInvalid"/> when the agent did not prove the key in time,
-    /// or <see cref="AgentIdentityErrorCode.InvalidRequest"/> when its proof verified but its metadata is invalid.
+    /// The error to close the stream with, when the handshake failed.
     /// </summary>
+    /// <remarks>
+    /// It is <see cref="AgentIdentityErrorCode.CertificateExpired"/> when the certificate that opened the stream
+    /// expired during the handshake, and <see cref="AgentIdentityErrorCode.InvalidRequest"/> when the agent proved the
+    /// key in time but sent invalid metadata.
+    /// Every other failure is <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
+    /// </remarks>
     public AgentIdentityError? Error { get; }
 
     /// <summary>

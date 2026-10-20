@@ -95,6 +95,21 @@ public class ChannelOpeningTests
         Assert.Equal(sentBytes, opening.ChallengeBytes.ToArray());
     }
 
+    // CONTRACT.md §7.4: a stream closes no later than its certificate's notAfter, even while it waits for its Hello,
+    // so the opening gives the host that time.
+    // The vector file states it in Unix seconds, independently of any time zone.
+    [Fact]
+    public async Task OpeningGivesTheNotAfterOfItsCertificate()
+    {
+        TestAuthority authority = new(TestAuthority.DefaultNow);
+
+        ChannelOpening opening = await OpenAsync(authority, TestRequest.DefaultNonce);
+
+        Assert.Equal(
+            TestVectors.Instance.HttpSignature.RegisteredCertificate("device-a").NotAfter,
+            opening.CertificateNotAfter);
+    }
+
     private static async Task<ChannelOpening> OpenAsync(TestAuthority authority, string nonce)
     {
         SignedHttpRequest request = authority.Valid(AgentOperation.Connect, nonce: nonce).ToHttpRequest();
