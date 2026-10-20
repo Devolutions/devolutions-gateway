@@ -454,6 +454,7 @@ pub(crate) struct AiAnalysisRequest {
     #[serde(default)]
     base_url: Option<Url>,
     /// Upper bound of tokens in each AI answer.
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<i64>, minimum = 0, maximum = 4_294_967_295_u64))]
     #[serde(default)]
     max_output_tokens: Option<u32>,
     /// Language the AI writes in, any text of 1 to 10 characters such as `fr-CA` or `français`; English when absent.
