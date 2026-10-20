@@ -203,22 +203,24 @@ impl RetryState {
         let now = Instant::now();
         let max_backoff = Duration::from_secs(settings.backoff_max_secs.unwrap_or(3600).max(1));
         self.failures = self.failures.saturating_add(1);
-        let exponential = exponential_backoff(self.failures, max_backoff);
-        let backoff = if settings.disable_jitter.unwrap_or_default() {
-            exponential
+        let jitter = if settings.disable_jitter.unwrap_or_default() {
+            1.0
         } else {
-            exponential
-                .mul_f64(rand::thread_rng().gen_range(0.5..=1.5))
-                .min(max_backoff)
+            rand::thread_rng().gen_range(0.5..=1.5)
         };
+        let backoff = backoff(self.failures, jitter, max_backoff);
         let delay = retry_delay(max_backoff, backoff, retry_after);
         self.next_attempt = now.checked_add(delay).or_else(|| now.checked_add(max_backoff));
     }
 }
 
-/// Returns the unjittered delay after the `failure`-th consecutive failure, counted from 1, capped at `maximum`.
-fn exponential_backoff(failure: u32, maximum: Duration) -> Duration {
-    Duration::from_secs((1u64 << failure.min(31)).min(maximum.as_secs()))
+/// Returns the delay after the `failure`-th consecutive failure, counted from 1, scaled by `jitter` and capped at
+/// `maximum`.
+fn backoff(failure: u32, jitter: f64, maximum: Duration) -> Duration {
+    // The exponent stops at 62 so that 2^62 s times the largest jitter still fits a `Duration`.
+    Duration::from_secs(1u64 << failure.min(62))
+        .mul_f64(jitter)
+        .min(maximum)
 }
 
 fn retry_delay(maximum: Duration, backoff: Duration, retry_after: Option<Duration>) -> Duration {
@@ -448,13 +450,15 @@ mod tests {
     }
 
     #[test]
-    fn the_n_th_consecutive_failure_waits_2_to_the_n_seconds() {
+    fn the_n_th_consecutive_failure_waits_2_to_the_n_seconds_times_jitter_then_at_most_the_maximum() {
         // `crates/agent-identity/INTENT.md` ("Schedules"): a transient failure is retried after `2^n` seconds for the
-        // `n`-th consecutive failure, and never longer than 1 h.
+        // `n`-th consecutive failure, multiplied by a jitter from `[0.5, 1.5]`, and never longer than 1 h.
         let hour = Duration::from_secs(3600);
-        assert_eq!(exponential_backoff(1, hour), Duration::from_secs(2));
-        assert_eq!(exponential_backoff(3, hour), Duration::from_secs(8));
-        assert_eq!(exponential_backoff(40, hour), hour);
+        assert_eq!(backoff(1, 1.0, hour), Duration::from_secs(2));
+        assert_eq!(backoff(3, 1.5, hour), Duration::from_secs(12));
+        assert_eq!(backoff(12, 0.5, hour), Duration::from_secs(2048));
+        assert_eq!(backoff(13, 0.5, hour), hour);
+        assert_eq!(backoff(40, 1.5, hour), hour);
     }
 
     #[test]
