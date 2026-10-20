@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::io::Cursor;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use agent_identity_httpsig::{RequestSigner, Tag};
+pub use agent_identity_httpsig::RequestSigner;
+use agent_identity_httpsig::Tag;
+use anyhow::Context as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use camino::Utf8Path;
@@ -256,11 +258,13 @@ impl Client {
         Ok(response)
     }
 
+    /// Sends a renewal for the key of `csr_der` and requires the returned leaf to hold `new_key`.
     pub async fn renew(
         &self,
         base_url: &Url,
         signer: &RequestSigner,
         csr_der: &str,
+        new_key: &VerifyingKey,
         metadata: &Metadata,
         clock_offset_secs: Option<i64>,
     ) -> ClientResult<RenewResponse> {
@@ -273,7 +277,7 @@ impl Client {
             return Err(ClientError::invalid_response("unexpected renew status"));
         }
         let response: RenewResponse = parse_response(&response)?;
-        validate_chain_der(&response.certificate_chain)?;
+        validate_certificate_chain(&response.certificate_chain, new_key)?;
         Ok(response)
     }
 
@@ -530,6 +534,23 @@ fn validate_chain_der(chain: &[String]) -> ClientResult<Vec<Certificate>> {
         .collect()
 }
 
+/// Returns a signer for a stored key and the leaf of its certificate chain.
+pub fn request_signer(key: Arc<dyn DeviceKey>, chain: &[String]) -> anyhow::Result<RequestSigner> {
+    let leaf = chain.first().context("stored certificate chain is empty")?;
+    let leaf = STANDARD.decode(leaf).context("decode stored leaf certificate")?;
+    Ok(RequestSigner::new(key, &leaf))
+}
+
+/// Returns the `notBefore` and `notAfter` of a stored chain's leaf certificate.
+pub fn leaf_validity(chain: &[String]) -> anyhow::Result<(SystemTime, SystemTime)> {
+    let certificates = validate_chain_der(chain)?;
+    let validity = certificates[0].tbs_certificate().validity();
+    Ok((
+        validity.not_before.to_system_time(),
+        validity.not_after.to_system_time(),
+    ))
+}
+
 /// Validates a DER chain and requires the leaf SPKI to match the key.
 pub fn validate_certificate_chain(chain: &[String], key: &VerifyingKey) -> ClientResult<()> {
     let certificates = validate_chain_der(chain)?;
@@ -582,21 +603,39 @@ mod tests {
         }
     }
 
-    #[test]
-    fn enrollment_leaf_must_match_the_pending_key() -> anyhow::Result<()> {
-        let key = SigningKey::from_slice(&[7u8; 32])?;
+    fn self_signed_leaf(key: &SigningKey, not_before: u64, not_after: u64) -> anyhow::Result<String> {
         let spki = key.verifying_key().to_public_key_der()?;
         let spki = SubjectPublicKeyInfoOwned::try_from(spki.as_bytes())?;
-        let before = Time::try_from(UNIX_EPOCH + Duration::from_secs(1_800_000_000))?;
-        let after = Time::try_from(UNIX_EPOCH + Duration::from_secs(1_800_086_400))?;
+        let before = Time::try_from(UNIX_EPOCH + Duration::from_secs(not_before))?;
+        let after = Time::try_from(UNIX_EPOCH + Duration::from_secs(not_after))?;
         let builder = CertificateBuilder::new(
             TestProfile,
             SerialNumber::from(1u64),
             Validity::new(before, after),
             spki,
         )?;
-        let certificate = builder.build::<_, DerSignature>(&key)?;
-        let leaf = STANDARD.encode(certificate.to_der()?);
+        let certificate = builder.build::<_, DerSignature>(key)?;
+        Ok(STANDARD.encode(certificate.to_der()?))
+    }
+
+    #[test]
+    fn leaf_validity_reads_the_first_certificate_of_the_chain() -> anyhow::Result<()> {
+        let leaf = self_signed_leaf(&SigningKey::from_slice(&[7u8; 32])?, 1_800_000_000, 1_800_086_400)?;
+        let issuer = self_signed_leaf(&SigningKey::from_slice(&[8u8; 32])?, 1_700_000_000, 1_900_000_000)?;
+        assert_eq!(
+            leaf_validity(&[leaf, issuer])?,
+            (
+                UNIX_EPOCH + Duration::from_secs(1_800_000_000),
+                UNIX_EPOCH + Duration::from_secs(1_800_086_400)
+            )
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn enrollment_leaf_must_match_the_pending_key() -> anyhow::Result<()> {
+        let key = SigningKey::from_slice(&[7u8; 32])?;
+        let leaf = self_signed_leaf(&key, 1_800_000_000, 1_800_086_400)?;
         assert!(validate_certificate_chain(std::slice::from_ref(&leaf), key.verifying_key()).is_ok());
         let other_key = SigningKey::from_slice(&[8u8; 32])?;
         assert_eq!(

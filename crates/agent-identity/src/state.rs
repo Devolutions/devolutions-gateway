@@ -340,6 +340,91 @@ impl Store {
         Ok(())
     }
 
+    /// Stores the chain that renew returned for the pending key.
+    pub fn store_pending_chain(&self, identity: &mut StoredIdentity, chain: Vec<String>) -> anyhow::Result<()> {
+        self.update(identity, |updated| {
+            let pending = updated.keys.pending.as_mut().context("identity has no pending key")?;
+            pending.certificate_chain = Some(chain);
+            Ok(())
+        })
+    }
+
+    /// Makes the confirmed pending key current and keeps the old key as `previous` until it is deleted.
+    pub fn promote_pending(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
+        self.update(identity, |updated| {
+            ensure!(updated.keys.previous.is_none(), "identity still has a previous key");
+            let pending = updated.keys.pending.take().context("identity has no pending key")?;
+            ensure!(
+                pending.certificate_chain.is_some(),
+                "pending identity key has no certificate chain"
+            );
+            updated.keys.previous = Some(std::mem::replace(&mut updated.keys.current, pending));
+            Ok(())
+        })
+    }
+
+    /// Moves the expired pending key to `previous` and records a fresh pending key before generating it.
+    ///
+    /// An earlier expired pending key held in `previous` is deleted, since the newer pending certificate retired it.
+    pub fn begin_recovery(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
+        let name = keys::new_key_name(&self.key_prefix);
+        self.update(identity, |updated| {
+            let expired = updated.keys.pending.take().context("identity has no pending key")?;
+            ensure!(
+                expired.certificate_chain.is_some(),
+                "pending identity key has no certificate chain"
+            );
+            updated.keys.previous = Some(expired);
+            updated.keys.pending = Some(KeyRecord {
+                key_name: name.clone(),
+                certificate_chain: None,
+            });
+            Ok(())
+        })?;
+        keys::generate(&self.backend, &name)
+    }
+
+    /// Deletes an unusable pending key and its slot, then records a fresh pending key before generating it.
+    pub fn replace_pending_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
+        let name = keys::new_key_name(&self.key_prefix);
+        self.update(identity, |updated| {
+            ensure!(updated.keys.pending.is_some(), "identity has no pending key");
+            updated.keys.pending = Some(KeyRecord {
+                key_name: name.clone(),
+                certificate_chain: None,
+            });
+            Ok(())
+        })?;
+        keys::generate(&self.backend, &name)
+    }
+
+    /// Records that the authority permanently rejected the identity.
+    pub fn reject_identity(&self, identity: &mut StoredIdentity, code: &str) -> anyhow::Result<()> {
+        let at = OffsetDateTime::now_utc()
+            .format(&Rfc3339)
+            .context("format rejection timestamp")?;
+        self.update(identity, |updated| {
+            updated.rejected = Some(Rejection {
+                code: code.to_owned(),
+                at,
+            });
+            Ok(())
+        })
+    }
+
+    fn update(
+        &self,
+        identity: &mut StoredIdentity,
+        change: impl FnOnce(&mut StoredIdentity) -> anyhow::Result<()>,
+    ) -> anyhow::Result<()> {
+        let mut updated = identity.clone();
+        change(&mut updated)?;
+        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        self.write_identity_locked(Some(identity), &updated)?;
+        *identity = updated;
+        Ok(())
+    }
+
     pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
         if identity.keys.previous.is_some() {
             let previous = identity.clone();
@@ -582,6 +667,16 @@ impl Store {
             {
                 if pending.certificate_chain.is_none() {
                     keys::generate(&self.backend, &pending.key_name)?;
+                } else if identity.keys.previous.is_some() {
+                    // Pending-key recovery continues with a fresh key while `previous` holds the expired pending key.
+                    let previous = identity.clone();
+                    let name = keys::new_key_name(&self.key_prefix);
+                    identity.keys.pending = Some(KeyRecord {
+                        key_name: name.clone(),
+                        certificate_chain: None,
+                    });
+                    self.write_identity_locked(Some(&previous), &identity)?;
+                    keys::generate(&self.backend, &name)?;
                 } else {
                     let previous = identity.clone();
                     identity.keys.pending = None;
@@ -1378,6 +1473,118 @@ mod tests {
         let token = test_token()?;
         pending::write(&directory.0, &token, true)?;
         assert!(store.begin_enrollment(&token)?.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn recovery_keeps_the_expired_pending_key_as_previous_until_the_fresh_key_is_confirmed() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Stored identities"): during pending-key recovery the expired pending key
+        // moves to `previous` and the fresh key is recorded as `pending`; once the next `confirm` succeeds, the agent
+        // deletes the expired pending key, then promotes as usual.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let current = identity.keys.current.clone();
+        store.create_pending_key(&mut identity)?;
+        store.store_pending_chain(&mut identity, vec!["ZXhwaXJlZA==".into()])?;
+        let expired = identity.keys.pending.clone().context("pending key disappeared")?;
+
+        let fresh_name = store.begin_recovery(&mut identity)?.name().to_owned();
+
+        let stored = store
+            .read_identity(identity.authority_id)?
+            .context("identity disappeared")?;
+        assert_eq!(stored.keys.current, current);
+        assert_eq!(stored.keys.previous.as_ref(), Some(&expired));
+        assert_eq!(
+            stored.keys.pending,
+            Some(KeyRecord {
+                key_name: fresh_name.clone(),
+                certificate_chain: None,
+            })
+        );
+        for name in [&current.key_name, &expired.key_name, &fresh_name] {
+            assert!(keys::open(store.key_backend(), name)?.is_some(), "{name}");
+        }
+
+        store.store_pending_chain(&mut identity, vec!["ZnJlc2g=".into()])?;
+        store.remove_previous_key(&mut identity)?;
+        store.promote_pending(&mut identity)?;
+        store.remove_previous_key(&mut identity)?;
+        assert!(keys::open(store.key_backend(), &expired.key_name)?.is_none());
+        assert!(keys::open(store.key_backend(), &current.key_name)?.is_none());
+        assert_eq!(identity.keys.current.key_name, fresh_name);
+        Ok(())
+    }
+
+    #[test]
+    fn restart_resumes_recovery_when_the_fresh_pending_key_is_missing() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Stored identities"): a restart resumes pending-key recovery from the file,
+        // and the expired pending key in `previous` is kept until the next `confirm` succeeds; an unusable pending key
+        // is replaced by a fresh one.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store.create_pending_key(&mut identity)?;
+        store.store_pending_chain(&mut identity, vec!["ZXhwaXJlZA==".into()])?;
+        let fresh_name = store.begin_recovery(&mut identity)?.name().to_owned();
+        store.store_pending_chain(&mut identity, vec!["ZnJlc2g=".into()])?;
+        let expired = identity
+            .keys
+            .previous
+            .clone()
+            .context("expired pending key disappeared")?;
+        keys::delete(store.key_backend(), &fresh_name)?;
+
+        store.reconcile()?;
+
+        let stored = store
+            .read_identity(identity.authority_id)?
+            .context("identity disappeared")?;
+        assert_eq!(stored.keys.previous, Some(expired));
+        let pending = stored.keys.pending.context("recovery lost its pending slot")?;
+        assert_ne!(pending.key_name, fresh_name);
+        assert_eq!(pending.certificate_chain, None);
+        assert!(keys::open(store.key_backend(), &pending.key_name)?.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn promotion_keeps_the_old_key_as_previous_until_it_is_deleted() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Stored identities"): when `confirm` succeeds, `pending` becomes `current`
+        // and the old key moves to `previous` until it is deleted.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let old = identity.keys.current.clone();
+        let new_name = store.create_pending_key(&mut identity)?.name().to_owned();
+        store.store_pending_chain(&mut identity, vec!["bmV3".into()])?;
+
+        store.promote_pending(&mut identity)?;
+
+        let expected_current = KeyRecord {
+            key_name: new_name.clone(),
+            certificate_chain: Some(vec!["bmV3".into()]),
+        };
+        let stored = store
+            .read_identity(identity.authority_id)?
+            .context("identity disappeared")?;
+        assert_eq!(stored.keys.current, expected_current);
+        assert_eq!(stored.keys.previous.as_ref(), Some(&old));
+        assert_eq!(stored.keys.pending, None);
+        assert!(keys::open(store.key_backend(), &old.key_name)?.is_some());
+        store.remove_previous_key(&mut identity)?;
+        assert!(keys::open(store.key_backend(), &old.key_name)?.is_none());
+        assert!(keys::open(store.key_backend(), &new_name)?.is_some());
         Ok(())
     }
 
