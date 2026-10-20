@@ -235,7 +235,17 @@ public class EnrollmentRulesTests
     public void KeyMatchRejectsAnUndefinedCertificateStatus()
     {
         ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(
-            () => IssuedKeyMatch.ForIdentity(IdentityId, true, false, (CertificateStatus)3));
+            () => IssuedKeyMatch.ForIdentity(IdentityId, true, false, (CertificateStatus)4));
+
+        Assert.Equal("status", exception.ParamName);
+    }
+
+    // Statuses start at 1, so a status that the host never set is not a valid one.
+    [Fact]
+    public void KeyMatchRejectsAnUninitializedCertificateStatus()
+    {
+        ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(
+            () => IssuedKeyMatch.ForIdentity(IdentityId, true, false, default));
 
         Assert.Equal("status", exception.ParamName);
     }
