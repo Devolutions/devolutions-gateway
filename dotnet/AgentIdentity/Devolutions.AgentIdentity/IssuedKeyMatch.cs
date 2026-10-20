@@ -71,7 +71,9 @@ public sealed class IssuedKeyMatch
     /// </summary>
     /// <remarks>
     /// After an identity is deleted, the authority keeps only the SPKI SHA-256 and the issuance time of its keys,
-    /// so the key gets <c>identity_revoked</c> whatever token enrolled the identity.
+    /// so <see cref="EnrollmentRules.Decide"/> refuses the key with <c>identity_revoked</c> whatever token enrolled
+    /// the identity.
+    /// A deleted presented token gets <c>token_invalid</c> instead, since it authenticates nothing but a replay.
     /// </remarks>
     public static IssuedKeyMatch ForDeletedIdentity()
     {
