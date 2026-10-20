@@ -132,6 +132,12 @@ Not intended:
   Single use across the nodes of a multi-node authority comes later.
 - A different key for each authority prevents reuse with another authority, and the operation tag prevents reuse at another endpoint.
 - mTLS and TLS channel binding are not used, because a TLS-terminating proxy or IIS in front of the authority breaks them; neither is a bearer token, because a captured one replays.
+- Requests are signed with RFC 9421 HTTP Message Signatures, a standard that both the agent and a .NET authority implement with maintained libraries.
+  A hand-serialized JWS profile measured smaller and dependency-free, but it would be an in-house format that neither RFC 9421 nor RFC 9449 tooling understands.
+- Request authentication never covers the host or path: the operation tag, the per-authority key and the body digest bind a request to its endpoint, so an authority behind a rewriting proxy needs no setting.
+  Signing the URL, as DPoP's `htu` does, would make the authority configure its external URL and compare it exactly, and would cost about 95 bytes per request.
+- The agent supplies each request's freshness, a single-use nonce and its own timestamp within a window, and the authority issues none, so every operation takes one round trip and a lost response never stalls the agent.
+  Authority-issued nonces would tolerate a skewed agent clock, but they cost a round trip after an idle period, stall a retry after a lost response, and need issuance state shared across authority nodes.
 - The authority records a nonce only after the request signature and any body digest are valid.
   Requests with an invalid signature or body digest therefore cannot consume nonce storage.
 - The authority keeps each accepted nonce until 60 s after its signature expires, the last moment the freshness window could accept the same signature again.
