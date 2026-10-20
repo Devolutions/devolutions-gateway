@@ -41,8 +41,9 @@ public sealed class AuthenticatedIdentity
     /// </summary>
     /// <remarks>
     /// It is <see cref="CertificateStatus.Pending"/> or <see cref="CertificateStatus.Current"/>,
-    /// or <see cref="CertificateStatus.Retired"/> for an agent channel stream whose certificate a confirm retired
+    /// or <see cref="CertificateStatus.Retired"/> for an agent channel stream whose certificate was retired
     /// during the handshake.
+    /// CONTRACT.md §7.4 says how the host treats a stream of a retired certificate.
     /// </remarks>
     public CertificateStatus CertificateStatus { get; }
 
