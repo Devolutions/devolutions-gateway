@@ -64,7 +64,7 @@ use crate::provisioner_tasks::ai::AiProvider;
         crate::api::jrec::AiAnalysisRequest,
         crate::api::jrec::AiAnalysisConflict,
         crate::api::jrec::AiAnalysisConflictCode,
-        crate::provisioner_tasks::ai::AiProvider,
+        AiProvider,
         crate::api::tasks::TaskInfo,
         crate::api::tasks::TaskState,
         AiAnalysisParams,
