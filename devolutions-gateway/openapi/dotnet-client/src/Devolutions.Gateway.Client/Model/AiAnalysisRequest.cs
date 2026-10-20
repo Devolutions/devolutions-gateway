@@ -49,11 +49,12 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="apiKey">API key of the provider, kept in memory only until the Task ends. (required).</param>
         /// <param name="baseUrl">Endpoint of the provider API, kept in memory only; required for &#x60;openai-compatible&#x60;..</param>
+        /// <param name="language">Language the AI writes in, any text of 1 to 10 characters such as &#x60;fr-CA&#x60; or &#x60;français&#x60;; English when absent..</param>
         /// <param name="maxOutputTokens">Upper bound of tokens in each AI answer..</param>
         /// <param name="model">Model identifier, passed to the provider as is. (required).</param>
         /// <param name="provider">provider (required).</param>
         /// <param name="taskId">Task ID, chosen by the caller so it can send the same request again safely. (required).</param>
-        public AiAnalysisRequest(string apiKey = default(string), string baseUrl = default(string), int? maxOutputTokens = default(int?), string model = default(string), AiProvider provider = default(AiProvider), Guid taskId = default(Guid))
+        public AiAnalysisRequest(string apiKey = default(string), string baseUrl = default(string), string language = default(string), int? maxOutputTokens = default(int?), string model = default(string), AiProvider provider = default(AiProvider), Guid taskId = default(Guid))
         {
             // to ensure "apiKey" is required (not null)
             if (apiKey == null)
@@ -70,6 +71,7 @@ namespace Devolutions.Gateway.Client.Model
             this.Provider = provider;
             this.TaskId = taskId;
             this.BaseUrl = baseUrl;
+            this.Language = language;
             this.MaxOutputTokens = maxOutputTokens;
         }
 
@@ -86,6 +88,13 @@ namespace Devolutions.Gateway.Client.Model
         /// <value>Endpoint of the provider API, kept in memory only; required for &#x60;openai-compatible&#x60;.</value>
         [DataMember(Name = "baseUrl", EmitDefaultValue = true)]
         public string BaseUrl { get; set; }
+
+        /// <summary>
+        /// Language the AI writes in, any text of 1 to 10 characters such as &#x60;fr-CA&#x60; or &#x60;français&#x60;; English when absent.
+        /// </summary>
+        /// <value>Language the AI writes in, any text of 1 to 10 characters such as &#x60;fr-CA&#x60; or &#x60;français&#x60;; English when absent.</value>
+        [DataMember(Name = "language", EmitDefaultValue = true)]
+        public string Language { get; set; }
 
         /// <summary>
         /// Upper bound of tokens in each AI answer.
@@ -118,6 +127,7 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("class AiAnalysisRequest {\n");
             sb.Append("  ApiKey: ").Append(ApiKey).Append("\n");
             sb.Append("  BaseUrl: ").Append(BaseUrl).Append("\n");
+            sb.Append("  Language: ").Append(Language).Append("\n");
             sb.Append("  MaxOutputTokens: ").Append(MaxOutputTokens).Append("\n");
             sb.Append("  Model: ").Append(Model).Append("\n");
             sb.Append("  Provider: ").Append(Provider).Append("\n");
@@ -142,6 +152,18 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Validation Result</returns>
         IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
+            // Language (string) maxLength
+            if (this.Language != null && this.Language.Length > 10)
+            {
+                yield return new ValidationResult("Invalid value for Language, length must be less than 10.", new [] { "Language" });
+            }
+
+            // Language (string) minLength
+            if (this.Language != null && this.Language.Length < 1)
+            {
+                yield return new ValidationResult("Invalid value for Language, length must be greater than 1.", new [] { "Language" });
+            }
+
             // MaxOutputTokens (int?) minimum
             if (this.MaxOutputTokens < (int?)0)
             {

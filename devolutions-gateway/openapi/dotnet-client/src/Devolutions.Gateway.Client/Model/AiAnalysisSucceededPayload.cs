@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="fileName">Name of the new log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;. (required).</param>
         /// <param name="model">Model that wrote the log, as reported by the AI provider; the requested model when it reports none. (required).</param>
-        /// <param name="promptVersion">Versions of the prompts that wrote the log, such as &#x60;session-actions-4+session-summary-1&#x60;. (required).</param>
+        /// <param name="promptVersion">Versions of the prompts that wrote the log, such as &#x60;session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36&#x60;. (required).</param>
         /// <param name="usage">usage.</param>
         public AiAnalysisSucceededPayload(string fileName = default(string), string model = default(string), string promptVersion = default(string), AiAnalysisUsage usage = default(AiAnalysisUsage))
         {
@@ -83,9 +83,9 @@ namespace Devolutions.Gateway.Client.Model
         public string Model { get; set; }
 
         /// <summary>
-        /// Versions of the prompts that wrote the log, such as &#x60;session-actions-4+session-summary-1&#x60;.
+        /// Versions of the prompts that wrote the log, such as &#x60;session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36&#x60;.
         /// </summary>
-        /// <value>Versions of the prompts that wrote the log, such as &#x60;session-actions-4+session-summary-1&#x60;.</value>
+        /// <value>Versions of the prompts that wrote the log, such as &#x60;session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36&#x60;.</value>
         [DataMember(Name = "promptVersion", IsRequired = true, EmitDefaultValue = true)]
         public string PromptVersion { get; set; }
 

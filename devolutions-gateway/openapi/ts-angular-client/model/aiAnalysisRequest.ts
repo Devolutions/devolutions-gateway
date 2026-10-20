@@ -23,6 +23,10 @@ export interface AiAnalysisRequest {
      */
     baseUrl?: string | null;
     /**
+     * Language the AI writes in, any text of 1 to 10 characters such as `fr-CA` or `français`; English when absent.
+     */
+    language?: string | null;
+    /**
      * Upper bound of tokens in each AI answer.
      */
     maxOutputTokens?: number | null;
