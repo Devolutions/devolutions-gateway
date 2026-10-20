@@ -3,18 +3,25 @@ using System.Reflection;
 namespace Devolutions.AgentIdentity.Tests;
 
 // An instance of each type below vouches that its value passed validation,
-// so nothing but validation may create one: otherwise a host could pass unvalidated agent input in its place.
+// so nothing but validation may create one: otherwise a host could pass an unchecked value in its place.
 public class ConstructionTests
 {
-    public static TheoryData<Type> ValidatedTypes => new(
+    private static readonly Type[] Validated =
+    [
         typeof(AgentMetadata),
         typeof(CertificateSigningRequest),
         typeof(EnrollRequestBody),
         typeof(RenewRequestBody),
-        typeof(CheckInRequestBody));
+        typeof(CheckInRequestBody),
+    ];
+
+    public static TheoryData<Type> ValidatedTypes => new(Validated);
+
+    // IdentityConfig.Create checks the host's values and returns the config itself rather than a result.
+    public static TheoryData<Type> CheckedTypes => new([.. Validated, typeof(IdentityConfig)]);
 
     [Theory]
-    [MemberData(nameof(ValidatedTypes))]
+    [MemberData(nameof(CheckedTypes))]
     public void HasNoPublicOrProtectedConstructor(Type type)
     {
         IEnumerable<ConstructorInfo> reachable = type
