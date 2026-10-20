@@ -336,6 +336,8 @@ impl HandleParent {
         startup.StartupInfo.cb = u32::try_from(size_of::<STARTUPINFOEXW>()).expect("STARTUPINFOEXW size fits in u32");
         startup.lpAttributeList = attributes.raw();
         let mut information = PROCESS_INFORMATION::default();
+        // The suspended target-owned donor must not receive the Agent service's environment.
+        let environment = [0u16; 2];
         let created = {
             let _impersonation = token
                 .impersonate()
@@ -350,8 +352,8 @@ impl HandleParent {
                     None,
                     None,
                     false,
-                    CREATE_SUSPENDED | CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-                    None,
+                    CREATE_SUSPENDED | CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | EXTENDED_STARTUPINFO_PRESENT,
+                    Some(environment.as_ptr().cast()),
                     PCWSTR::null(),
                     &startup.StartupInfo,
                     &mut information,
@@ -785,6 +787,67 @@ mod tests {
             process.wait(Some(0)).expect("donor terminated"),
             windows::Win32::Foundation::WAIT_OBJECT_0
         );
+    }
+
+    #[test]
+    fn suspended_donor_does_not_inherit_caller_environment() {
+        const MARKER: &str = "PSU_DONOR_SYNTHETIC_ENVIRONMENT";
+        const VALUE: &str = "synthetic-only";
+
+        if std::env::var_os(MARKER).as_deref() != Some(std::ffi::OsStr::new(VALUE)) {
+            // Isolate synthetic input without changing the shared test process or copying its environment.
+            let status = Command::new(std::env::current_exe().expect("locate test executable"))
+                .env_clear()
+                .env(MARKER, VALUE)
+                .args([
+                    "--exact",
+                    "psu_agent::child::windows::tests::suspended_donor_does_not_inherit_caller_environment",
+                    "--nocapture",
+                ])
+                .status()
+                .expect("run isolated donor environment regression");
+            assert!(status.success(), "isolated donor environment regression failed");
+            return;
+        }
+
+        use win_api_wrappers::undoc::RTL_USER_PROCESS_PARAMETERS;
+
+        let donor = HandleParent::new(&current_token()).expect("create suspended donor");
+        let peb = donor
+            .process
+            .peb()
+            .expect("locate donor PEB")
+            .raw()
+            .expect("read donor PEB");
+        // SAFETY: The owned, same-architecture donor remains suspended with initialized process parameters.
+        let parameters = unsafe {
+            donor
+                .process
+                .read_struct::<RTL_USER_PROCESS_PARAMETERS>(peb.ProcessParameters.cast())
+        }
+        .expect("read donor process parameters");
+        assert!(!parameters.Environment.is_null(), "donor environment must be explicit");
+        let mut environment = Vec::new();
+        for offset in 0..4096 {
+            // SAFETY: Only the owned suspended donor's NUL-terminated environment is read, one unit at a time.
+            let unit = unsafe {
+                donor
+                    .process
+                    .read_struct::<u16>(parameters.Environment.cast::<u16>().wrapping_add(offset).cast())
+            }
+            .expect("read synthetic donor environment");
+            environment.push(unit);
+            if environment.ends_with(&[0, 0]) {
+                break;
+            }
+        }
+        let marker = format!("{MARKER}={VALUE}").encode_utf16().collect::<Vec<_>>();
+        assert!(
+            !environment.windows(marker.len()).any(|window| window == marker),
+            "suspended donor inherited the synthetic caller marker"
+        );
+        // CreateProcessAsUserW, lpEnvironment: explicit empty Unicode blocks have two NUL units.
+        assert!(environment == [0, 0], "suspended donor environment must be empty");
     }
 
     #[test]
