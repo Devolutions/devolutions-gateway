@@ -398,7 +398,7 @@ paths:
       description: |-
         Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a
         new log, listed under `artifacts.ai-analysis` in its manifest.
-        The answer is in the `locale` the recorder writes on the `session.start` of its first events log; without one, it is
+        The answer is in the `locale` the producer writes on the `session.start` of its first events log; without one, it is
         in the default language of the AI analysis.
         The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
         which the `Location` header of a 202 answer names.
