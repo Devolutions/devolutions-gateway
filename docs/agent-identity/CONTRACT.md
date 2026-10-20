@@ -289,6 +289,7 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
   A verifier builds `@signature-params` from the received member (RFC 9421 §2.3); the line above shows one order.
 - Components: `renew` and `check-in` → `("@method" "content-digest")`; `connect` and `confirm` → `("@method")`.
 - `Content-Digest: sha-256=:<base64>:` (RFC 9530).
+- Byte sequences in `Signature` and `Content-Digest` use `base64` with padding, in its canonical form; any other encoding → `signature_invalid`.
 - Signature: ECDSA P-256 over SHA-256 of the signature base, raw 64-byte `r‖s`.
 - Agent sets `expires = created + 60`.
 - Each signed operation has exactly one tag, one component list, and one rule for the certificate it accepts:
@@ -304,13 +305,14 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
   1. Parse; exactly one signature labelled `sig`; exactly the listed parameters, each once; `alg` matches; the covered components are **exactly** the operation's list in the table, in that order, each once → else `signature_invalid`.
      A verifier never relies on the client-declared list alone: an under-covered request, such as `renew` covering only `@method`, must fail here.
      For `renew` and `check-in`, exactly one `Content-Digest` member using `sha-256` is required.
+     The verifier detects a repeated parameter, dictionary member or label on the raw field value, since an RFC 8941 parser keeps only the last occurrence.
   2. `tag` matches the operation → else `signature_invalid`.
   3. `0 < expires − created ≤ 300`; `created ≤ now + 60`; `expires ≥ now − 60` → else `clock_skew`.
   4. Resolve `keyid` to a registered certificate with status `current` or `pending` → else `identity_unknown`; identity not revoked → else `identity_revoked`; the certificate meets the operation's rule in the table → else `certificate_expired`.
   5. Verify `content-digest` for `renew` and `check-in`, then verify the signature → else `signature_invalid`.
   6. Accept each `(keyid, nonce)` pair at most once; a pair already accepted → `signature_invalid`.
 - Nonces are committed only after the signature verifies (step 6), so garbage requests cannot burn nonces.
-- On `clock_skew`, the agent may retry once with `created` offset by `server_time − local_time`.
+- On `clock_skew`, the agent may retry once with `created` offset by `server_time − local_time`, taking `server_time` from the error body (§5.4) or, on a refused channel opening, from the `server-time` trailer (§7.4).
 - Implementations must enforce the policy checks above in addition to the RFC validation provided by their signature libraries.
 - Implementations must pass the shared test vectors in `docs/agent-identity/test-vectors.json`: a fixed P-256 key, fixed requests for all four tags, exact signature base strings, valid signatures, a channel proof (§7.3), negative cases including every cross-tag pair, and RFC 9421 Appendix B.2.4 as a sanity check.
   A signer reproduces each vector's `Signature-Input`, `Content-Digest`, signature base and channel-proof input, and returns a signature that verifies under the vector's public key; it need not reproduce the vector's signature bytes, since an ECDSA signer may be randomized.
@@ -363,7 +365,7 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
 
 ### 7.4 Termination
 
-- Auth failures at open: gRPC status `UNAUTHENTICATED` (or `PERMISSION_DENIED` for `identity_revoked`) with trailer `error-code: <§5.4 code>`.
+- Auth failures at open: gRPC status `UNAUTHENTICATED` (or `PERMISSION_DENIED` for `identity_revoked`) with trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`.
 - Revocation: the server closes live streams with `PERMISSION_DENIED` + `error-code: identity_revoked`.
 - A stream closes no later than its certificate's `notAfter` (`UNAUTHENTICATED` + `certificate_expired`).
 - When `confirm` promotes a pending certificate (§5.5), the previous `current` certificate is retired; its streams get `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open.
