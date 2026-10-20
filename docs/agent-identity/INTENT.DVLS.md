@@ -31,7 +31,7 @@ Admin error bodies are not standardized; the mock returns `{ "error": "<code>", 
 ### Enrollment tokens
 
 - `POST /enrollment-tokens` body `{ name, maxUses (1..1_000_000), expiresAt (≤ now + 365 d), friendlyNameFormat?, config? }` → `201 { token: "<full token>", record: TokenRecord }`; the full token is returned only here.
-  `friendlyNameFormat` follows `CONTRACT.md` §3, and `config` contributes the product-specific fields in each enrolled identity's effective config.
+  `friendlyNameFormat` follows the friendly-name format in `docs/agent-identity/INTENT.agent-identity.md`, "Enrollment", and `config` contributes the product-specific fields in each enrolled identity's effective config.
   A format with an unpaired brace or an unknown placeholder → `400`.
 - `GET /enrollment-tokens?pageNumber&pageSize` → page of `TokenRecord`.
 - `GET /enrollment-tokens/{id}` → `TokenRecord`; `DELETE /enrollment-tokens/{id}` → `204`.

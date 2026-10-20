@@ -178,7 +178,7 @@ Request:
 - Every field is required except `config.agent_channel_url` and product-specific config fields.
 - `authority_id` is the authority's UUID; it never changes for that authority, across restarts, upgrades, nodes, backup restores and disaster recovery, and a different `authority_id` denotes a different authority.
 - The server generates `identity_id` when it creates the identity, and the ID remains stable for that identity.
-- The friendly name (§3) is not returned to the agent.
+- The friendly name is not returned to the agent.
 - `config.version` identifies the config schema and is `1`; the agent ignores unknown config fields.
   A config with any other `version` is a transient failure (§5.4), and the agent keeps its stored config.
 - `config.revision` is an unsigned 64-bit integer that strictly increases per identity whenever the identity's effective config changes; the agent assumes no starting value or step.
