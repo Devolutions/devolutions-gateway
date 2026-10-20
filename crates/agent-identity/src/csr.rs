@@ -11,8 +11,11 @@ const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.84
 
 /// Creates the base64 DER PKCS#10 request for an on-device key.
 ///
-/// The request carries no attributes, as `CONTRACT.md` §4 "Certificates" requires.
-/// It is built by hand because x509-cert's `RequestBuilder` always adds an `extensionRequest` attribute, which is invalid when empty.
+/// The request carries no attributes, as [CONTRACT.md §4 "Certificates"][contract] requires.
+/// It is built by hand because x509-cert's `RequestBuilder` always adds an `extensionRequest` attribute,
+/// which is invalid when empty.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#4-certificates
 pub fn create(key: &dyn DeviceKey) -> anyhow::Result<String> {
     let info = CertReqInfo {
         version: Version::V1,
@@ -36,6 +39,7 @@ pub fn create(key: &dyn DeviceKey) -> anyhow::Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use der::asn1::Any;
     use der::{Decode as _, Encode as _};
     use p256::ecdsa::{DerSignature, Signature, SigningKey, VerifyingKey};
     use signature::{Signer, Verifier as _};
@@ -91,14 +95,23 @@ mod tests {
     }
 
     // `CONTRACT.md` §4: the agent's CSR carries no attributes.
+    // RFC 2986 §4.1 makes `attributes [0] IMPLICIT` mandatory,
+    // so the empty set is the element `A0 00`, not an omitted field.
     #[test]
     fn csr_carries_no_attributes() -> anyhow::Result<()> {
         let key = TestKey {
             signing_key: SigningKey::from_slice(&[1u8; 32])?,
             fail: false,
         };
-        let csr = CertReq::from_der(&STANDARD.decode(create(&key)?)?)?;
-        assert_eq!(csr.info.attributes.len(), 0);
+        let csr_der = STANDARD.decode(create(&key)?)?;
+        assert_eq!(CertReq::from_der(&csr_der)?.info.attributes.len(), 0);
+
+        // CertificationRequest ::= SEQUENCE { certificationRequestInfo, signatureAlgorithm, signature }
+        let csr_fields = Vec::<Any>::from_der(&csr_der)?;
+        // CertificationRequestInfo ::= SEQUENCE { version, subject, subjectPKInfo, attributes }
+        let info_fields = Vec::<Any>::from_der(&csr_fields[0].to_der()?)?;
+        assert_eq!(info_fields.len(), 4);
+        assert_eq!(info_fields[3].to_der()?, [0xA0, 0x00]);
         Ok(())
     }
 }
