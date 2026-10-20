@@ -84,7 +84,7 @@ public sealed class EnrollmentToken
         using (Utf8JsonWriter writer = new(json))
         {
             writer.WriteStartObject();
-            writer.WriteString("u", NormalizeProductBaseUrl(productBaseUrl));
+            writer.WriteString("u", BaseUrl.Normalize(productBaseUrl, "The product base URL", nameof(productBaseUrl)));
             writer.WriteEndObject();
         }
 
@@ -125,37 +125,5 @@ public sealed class EnrollmentToken
         Encoding.ASCII.GetBytes(secret, ascii);
 
         return SHA256.HashData(ascii);
-    }
-
-    private static string NormalizeProductBaseUrl(string productBaseUrl)
-    {
-        if (!Uri.TryCreate(productBaseUrl, UriKind.Absolute, out Uri? url))
-        {
-            throw new ArgumentException("The product base URL is not an absolute URL.", nameof(productBaseUrl));
-        }
-
-        if (url.Scheme != Uri.UriSchemeHttps)
-        {
-            throw new ArgumentException("The product base URL does not use the https scheme.", nameof(productBaseUrl));
-        }
-
-        // UserInfo is empty for https://@host, so only the component with its delimiter shows the '@'.
-        if (url.GetComponents(UriComponents.UserInfo | UriComponents.KeepDelimiter, UriFormat.UriEscaped).Length != 0)
-        {
-            throw new ArgumentException("The product base URL has user information.", nameof(productBaseUrl));
-        }
-
-        // Query and Fragment include their delimiter, so an empty query or fragment still makes them non-empty.
-        if (url.Query.Length != 0)
-        {
-            throw new ArgumentException("The product base URL has a query.", nameof(productBaseUrl));
-        }
-
-        if (url.Fragment.Length != 0)
-        {
-            throw new ArgumentException("The product base URL has a fragment.", nameof(productBaseUrl));
-        }
-
-        return url.AbsoluteUri.TrimEnd('/');
     }
 }
