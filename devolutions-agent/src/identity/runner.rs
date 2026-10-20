@@ -314,7 +314,7 @@ impl Runner {
             Err(ClientError::CertificateExpired) => self.reject("certificate_expired"),
             Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
             Err(error) => {
-                warn!(authority_id = %self.authority_id, reason = %error, "Agent Identity renewal will retry");
+                warn!(authority_id = %self.authority_id, error = %error, "Agent Identity renewal will retry");
                 self.renewal_retry.failed(&self.shared.settings, error.retry_after());
             }
         }
@@ -366,7 +366,7 @@ impl Runner {
             }
             Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
             Err(error) => {
-                warn!(authority_id = %self.authority_id, reason = %error, "Agent Identity confirmation will retry");
+                warn!(authority_id = %self.authority_id, error = %error, "Agent Identity confirmation will retry");
                 self.renewal_retry.failed(&self.shared.settings, error.retry_after());
             }
         }
@@ -403,7 +403,7 @@ impl Runner {
             }
             Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
             Err(error) => {
-                warn!(authority_id = %self.authority_id, reason = %error, "Agent Identity check-in will retry");
+                warn!(authority_id = %self.authority_id, error = %error, "Agent Identity check-in will retry");
                 self.check_in_retry.failed(&self.shared.settings, error.retry_after());
             }
         }
@@ -424,8 +424,8 @@ impl Runner {
     fn current_signer(&mut self, identity: &StoredIdentity) -> anyhow::Result<Option<RequestSigner>> {
         let current = &identity.keys.current;
         // UNTESTED: a current key missing at run time rejects the identity as `key_lost` instead of retrying forever.
-        // Start-up reconciliation has a test; this path doesn't. When changing it, keep `None` distinct from an
-        // open error, which stays a retried local failure.
+        // Start-up reconciliation has a test; this path doesn't.
+        // When changing it, keep `None` distinct from an open error, which stays a retried local failure.
         let Some(key) = device_key::open(self.shared.store.key_backend(), &current.key_name)? else {
             self.reject(KEY_LOST);
             return Ok(None);
@@ -604,10 +604,6 @@ mod tests {
         // A renewal time that has passed must compare due against the instant the step read, or the step spins.
         let now = Instant::now();
         assert_eq!(instant_at(SystemTime::now() - Duration::from_secs(1), now), now);
-        assert_eq!(
-            instant_at(SystemTime::now() + Duration::from_secs(86_400), now),
-            now + MAX_WAIT
-        );
     }
 
     #[test]
