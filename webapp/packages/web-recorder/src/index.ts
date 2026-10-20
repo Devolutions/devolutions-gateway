@@ -7,5 +7,7 @@ export type {
 } from './asciicast-v2-recorder';
 export { AsciiCastV2Recorder } from './asciicast-v2-recorder';
 export type { IRecordableSession } from './recordable-session';
+export type { SessionEventsRecorderOptions } from './session-events-recorder';
+export { SessionEventsRecorder } from './session-events-recorder';
 export type { WebMRecorderOptions, WebMRecorderTelemetryEvent } from './webm-recorder';
 export { WebMRecorder } from './webm-recorder';

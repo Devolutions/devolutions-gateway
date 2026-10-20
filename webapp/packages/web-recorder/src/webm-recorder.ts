@@ -22,11 +22,17 @@ export class WebMRecorder {
   private isStarting = false;
   private isCleaningUp = false;
   private pendingError: string | null = null;
+  private _mediaStartTime: Date | null = null;
 
   constructor(private readonly options: WebMRecorderOptions = {}) {}
 
   get isRecording() {
     return this._isRecording;
+  }
+
+  /** Start of the video on this browser's clock, so the session events log can be placed on the video timeline. */
+  get mediaStartTime(): Date | null {
+    return this._mediaStartTime ? new Date(this._mediaStartTime) : null;
   }
 
   // Resolves when the first data chunk is received (recording confirmed active).
@@ -210,6 +216,7 @@ export class WebMRecorder {
   // Drive the keepalive from rAF so the nudge is aligned with the rendering pipeline, and make a real
   // change each frame so captureStream always has fresh canvas content to sample.
   private handleMediaRecorderStart(): void {
+    this._mediaStartTime = new Date();
     const tick = (): void => {
       this.nudgeCanvas();
       this.keepaliveRaf = requestAnimationFrame(tick);
@@ -293,6 +300,7 @@ export class WebMRecorder {
 
   private cleanupResources(): void {
     this._isRecording = false;
+    this._mediaStartTime = null;
     this.isStarting = false;
     this.stopKeepalive();
 

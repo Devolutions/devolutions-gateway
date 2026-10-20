@@ -32,6 +32,11 @@ export class AsciiCastV2Recorder {
 
   constructor(private initConfig: AsciiCastV2RecorderOptions) {}
 
+  /** Start of the recording on this browser's clock, so the session events log can be placed on its timeline. */
+  get mediaStartTime(): Date | null {
+    return this.websocket ? new Date(this.startTime) : null;
+  }
+
   // Resolves when the WebSocket opens and the asciicast header is sent.
   // Rejects with an error string on any failure.
   public start(): Promise<void> {
