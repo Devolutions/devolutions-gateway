@@ -49,6 +49,10 @@ public sealed class EnrollmentToken
     /// <summary>
     /// The SHA-256 of the ASCII text of the secret segment, under which the authority stores the token.
     /// </summary>
+    /// <remarks>
+    /// <see cref="EnrollmentAuthorization.ReadBearerToken"/> returns the same hash for the token text,
+    /// so that the authority finds the token by it.
+    /// </remarks>
     public ReadOnlyMemory<byte> SecretHash { get; }
 
     /// <summary>

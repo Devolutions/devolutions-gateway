@@ -53,6 +53,29 @@ public class EnrollmentTokenTests
         }
     }
 
+    // The authority stores SecretHash when it creates a token,
+    // and finds the token of an enroll request by the hash that ReadBearerToken returns.
+    [Fact]
+    public void ReadBearerTokenReturnsTheSecretHashOfEveryCreatedToken()
+    {
+        Random random = new(3);
+
+        foreach (string productBaseUrl in (string[])["https://host/dvls", UrlOfLength(3025)])
+        {
+            for (int i = 0; i < 64; i++)
+            {
+                byte[] bytes = new byte[32];
+                random.NextBytes(bytes);
+                EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(bytes));
+
+                EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken(["Bearer " + token.Value]);
+
+                Assert.True(result.Succeeded);
+                Assert.Equal(token.SecretHash.ToArray(), result.SecretHash.ToArray());
+            }
+        }
+    }
+
     // CONTRACT.md §2: `bag` is the base64url encoding of a UTF-8 JSON object whose `u` is the product base URL.
     [Fact]
     public void CreatePutsTheProductBaseUrlInTheBag()
