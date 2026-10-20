@@ -36,11 +36,8 @@ A present `credential` requests the supplied Windows identity.
 The username is nonempty and not whitespace-only, the password is nonempty, and none of the three strings contains a NUL character.
 An omitted string has its protobuf default, the empty string.
 
-PSU maps a selected `DOMAIN\user` name to `username=user` and `domain=DOMAIN`.
-It maps `.\user` to `username=user` and `domain=.`.
-It preserves a UPN in `username` with an empty `domain`.
+PSU obtains the selected `PSCredential`'s `GetNetworkCredential()` result and copies its `UserName`, `Password`, and `Domain` to `username`, `password`, and `domain`, respectively, without further transformation.
 With an empty `domain`, the Agent treats a `username` containing `@` as a UPN and any other `username` as an account local to the Agent.
-The password is transmitted without trimming or other transformation.
 
 ## Connection eligibility
 
@@ -97,7 +94,7 @@ For an eligible Run As request, the Agent uses Windows batch logon and native pr
 The job's PowerShell runspace, startup scripts, and script execute under that identity.
 The Agent does not load the user's Windows profile, create an interactive desktop or UAC prompt, or grant rights beyond that identity's Windows permissions.
 If the target account lacks batch-logon rights or access to the executable or working directory, the launch fails as described below.
-Launching a `.cmd` or `.bat` file instead of a native Windows program also fails.
+For a supported credential-bearing launch, PSU selects a native Windows program rather than a `.cmd` or `.bat` launcher, either explicitly in `StartProcess.executable` or through the Agent's configured default when that field is empty or whitespace-only.
 The process receives the target user's base environment plus the requested environment overrides.
 
 A PSU-side refusal or credential-resolution failure produces an unsuccessful job result with an explanatory error and no credential-bearing launch.
