@@ -8,8 +8,8 @@ use uuid::Uuid;
 ///
 /// The work runs in the background; `state` and `payload` tell how it goes.
 /// The shape of `params` and `payload` belongs to the kind.
-/// For `recording-ai-analysis`, `payload` is an `AiAnalysisRunningPayload` while `running`, an
-/// `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
+/// For `recording-ai-analysis`, `params` is an `AiAnalysisParams`, and `payload` is an `AiAnalysisRunningPayload` while
+/// `running`, an `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

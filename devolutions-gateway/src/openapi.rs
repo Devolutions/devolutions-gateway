@@ -72,6 +72,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::provisioner_tasks::ai::AiProvider,
         crate::api::tasks::TaskInfo,
         crate::api::tasks::TaskState,
+        AiAnalysisParams,
         AiAnalysisRunningPayload,
         AiAnalysisSucceededPayload,
         AiAnalysisUsage,
@@ -154,8 +155,21 @@ struct SessionInfo {
     destination_host: Option<String>,
 }
 
+/// Params of an AI analysis Task: what was asked, without the API key and the base URL
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisParams {
+    provider: crate::provisioner_tasks::ai::AiProvider,
+    /// Model identifier, passed to the provider as is.
+    model: String,
+    /// Upper bound of tokens in each AI answer; null when not asked.
+    max_output_tokens: Option<u32>,
+    /// Language the AI writes in; absent when not asked, so the AI writes in English.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+}
+
 /// Payload of a `running` AI analysis Task: its progress
-#[allow(dead_code)]
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AiAnalysisRunningPayload {
@@ -169,7 +183,6 @@ struct AiAnalysisRunningPayload {
 }
 
 /// Payload of a `succeeded` AI analysis Task: the log it added to the session
-#[allow(dead_code)]
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AiAnalysisSucceededPayload {
@@ -185,7 +198,6 @@ struct AiAnalysisSucceededPayload {
 }
 
 /// Tokens counted by an AI provider
-#[allow(dead_code)]
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AiAnalysisUsage {
@@ -194,7 +206,6 @@ struct AiAnalysisUsage {
 }
 
 /// Payload of a `failed` AI analysis Task: why it failed
-#[allow(dead_code)]
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AiAnalysisFailedPayload {
