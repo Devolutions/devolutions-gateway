@@ -43,6 +43,11 @@ public sealed class IdentityConfig
     public string? AgentChannelUrl { get; }
 
     /// <summary>
+    /// The UTF-8 JSON object that <see cref="ToUtf8Json"/> copies.
+    /// </summary>
+    internal ReadOnlySpan<byte> Utf8Json => _utf8Json;
+
+    /// <summary>
     /// Creates a config with schema version 1.
     /// </summary>
     /// <remarks>
