@@ -183,11 +183,16 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(draw));
 
         byte[] serialNumber = SerialNumber(leaf);
+        // oracle: self-derived; sole guard, with SerialNumberIsDrawnAgainWhenItWouldBeZero,
+        // for a serial number whose first octet keeps its top bit while its other bits are kept, set or flipped.
+        // RFC 5280 allows any positive encoding, and .NET writes a set top bit with a leading zero octet,
+        // so only the library chooses to clear the top bit of the 16 octets drawn.
         Assert.Equal([0x7F, .. draw[1..]], serialNumber);
         Assert.True(new BigInteger(serialNumber, isUnsigned: false, isBigEndian: true) > 0);
         Assert.InRange(serialNumber.Length, 1, 20);
     }
 
+    // RFC 5280 §4.1.2.2: the serial number is positive, so never zero.
     // Clearing the top bit of 80 00 … 00 leaves zero, which is not a positive serial number.
     [Fact]
     public void SerialNumberIsDrawnAgainWhenItWouldBeZero()
@@ -198,9 +203,15 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(topBitOnly, second));
 
+        // oracle: self-derived; sole guard, with SerialNumberIsTheRandomOctetsWithTheTopBitCleared,
+        // for a serial number whose first octet keeps its top bit while its other bits are kept, set or flipped.
+        // That 80 00 … 00 becomes zero, and that the next draw becomes the serial number as drawn,
+        // follow from the library's own way of making the 16 octets positive.
         Assert.Equal(second, SerialNumber(leaf));
     }
 
+    // RFC 5280 §4.1.2.5.1 and §4.1.2.5.2: certificate times are whole seconds,
+    // and a notBefore rounded up would issue a certificate that is not yet valid.
     [Fact]
     public void NotBeforeIsTheClockTruncatedToTheSecond()
     {
@@ -209,7 +220,9 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(NowInSeconds.UtcDateTime, leaf.NotBefore.ToUniversalTime());
     }
 
-    // A certificate holds whole seconds, so a fraction of a second in the lifetime is dropped.
+    // CONTRACT.md §4: the lifetime is a server setting.
+    // RFC 5280 §4.1.2.5: a certificate holds whole seconds, so a fraction of a second in the lifetime is dropped,
+    // since rounding it up would exceed the lifetime.
     [Theory]
     [InlineData(0)]
     [InlineData(500)]
@@ -240,7 +253,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(TimeSpan.FromDays(90), IdentityCertificateIssuer.DefaultLifetime);
     }
 
-    // Reading a moving clock twice would give the certificate a validity other than its lifetime.
+    // CONTRACT.md §4: the lifetime is a server setting,
+    // and reading a moving clock twice would give the certificate a validity other than its lifetime.
     [Fact]
     public void ReadsTheClockOnce()
     {
@@ -251,6 +265,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // The certificate chains to the root that issued it, for client authentication.
+    // RFC 5280 §6 path validation, as X509Chain runs it, with the CONTRACT.md §4 EKU clientAuth.
     [Fact]
     public void ChainsToTheIssuer()
     {
@@ -287,7 +302,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal([ClientAuth], usage.EnhancedKeyUsages.Cast<Oid>().Select(oid => oid.Value));
     }
 
-    // A certificate holds whole seconds, so a lifetime under one second would end in the second it begins.
+    // RFC 5280 §4.1.2.5: a certificate holds whole seconds,
+    // so a lifetime under one second would end in the second it begins.
     [Theory]
     [InlineData(0)]
     [InlineData(-1_000)]
@@ -297,7 +313,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Throws<ArgumentOutOfRangeException>(() => Issue(lifetime: TimeSpan.FromMilliseconds(milliseconds)));
     }
 
-    // notAfter is at most the issuer's notAfter, so an issuer that expires by notBefore leaves no validity.
+    // CONTRACT.md §4: notAfter is at most the issuer's notAfter,
+    // so an issuer that expires by notBefore leaves no validity.
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -352,6 +369,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal("renewing", exception.ParamName);
     }
 
+    // INTENT.md: a renewal acts for the identity that a renew request proved, and null is no identity;
+    // the .NET Framework Design Guidelines throw ArgumentNullException for a null argument that is not allowed.
     [Theory]
     [InlineData(nameof(IdentityCertificateIssuer))]
     [InlineData(nameof(RenewalRules))]

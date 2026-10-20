@@ -159,6 +159,8 @@ public class EnrollmentRulesTests
         AssertRejected(AgentIdentityErrorCode.TokenInvalid, decision);
     }
 
+    // Framework Design Guidelines: a bad argument throws the most derived ArgumentException, whose ParamName names it,
+    // here ArgumentOutOfRangeException for a count below zero.
     [Theory]
     [InlineData(-1, 0, "maxUses")]
     [InlineData(1, -1, "identitiesCreated")]
@@ -172,6 +174,7 @@ public class EnrollmentRulesTests
 
     // Statuses start at 1, so a status that the host never set is not a valid one,
     // and a value after the last status is not one either.
+    // Framework Design Guidelines: validate enum arguments, and throw the most derived ArgumentException naming them.
     [Theory]
     [InlineData(0)]
     [InlineData(4)]
@@ -183,6 +186,7 @@ public class EnrollmentRulesTests
         Assert.Equal("status", exception.ParamName);
     }
 
+    // Framework Design Guidelines: a null argument throws ArgumentNullException, whose ParamName names it.
     [Fact]
     public void DecideRejectsANullToken()
     {

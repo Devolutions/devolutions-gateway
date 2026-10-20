@@ -89,6 +89,7 @@ public class ChannelMessagesTests
 
     // Reasons start at 1, so a reason that the host never set is not a valid one,
     // and a value after the last reason is not one either.
+    // Framework Design Guidelines: validate enum arguments, and throw the most derived ArgumentException naming them.
     [Theory]
     [InlineData("RenewRequested", 0)]
     [InlineData("RenewRequested", 3)]

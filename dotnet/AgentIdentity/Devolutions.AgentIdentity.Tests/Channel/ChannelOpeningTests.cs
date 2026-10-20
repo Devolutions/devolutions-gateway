@@ -32,6 +32,7 @@ public class ChannelOpeningTests
         Assert.False(challenge.HasCorrelationId);
     }
 
+    // CONTRACT.md §7.3 step 2: the challenge holds 32 random bytes fresh for this stream.
     // A challenge reused across streams would let a proof captured on one stream authenticate another.
     [Fact]
     public async Task EachOpeningHasItsOwnChallenge()
@@ -78,6 +79,7 @@ public class ChannelOpeningTests
         Assert.Equal(opening.Challenge.Challenge.Challenge_.ToByteArray(), opening.ChallengeBytes.ToArray());
     }
 
+    // CONTRACT.md §7.3 steps 3 and 4: the agent signs the challenge it received, and the server verifies that proof.
     // The handshake checks the proof against the challenge as sent,
     // so a host that edits the message object after sending it must not change what the agent has to sign.
     [Fact]

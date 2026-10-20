@@ -29,6 +29,7 @@ public class AgentIdentityProtocolTests
         Assert.Equal(expected, AgentIdentityProtocol.FormatTimestamp(value));
     }
 
+    // RFC 3339 dates are Gregorian, and §5.6 writes them in ASCII digits with fixed separators, whatever the culture.
     // A culture-sensitive format would write the Thai Buddhist year 2569 and the time separator of this culture.
     [Fact]
     public void FormatTimestampIgnoresTheCurrentCulture()

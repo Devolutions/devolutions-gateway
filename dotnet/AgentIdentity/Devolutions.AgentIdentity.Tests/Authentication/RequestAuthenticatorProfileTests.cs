@@ -17,6 +17,9 @@ public class RequestAuthenticatorProfileTests
     // The 16 bytes "0123456789:;<=>?", whose base64url holds a '-'.
     private const string NonceWithDash = "MDEyMzQ1Njc4OTo7PD0-Pw";
 
+    // The tag of a renew request, as Signature-Input writes it.
+    private const string TagParameter = ";tag=\"renew\"";
+
     private static readonly DateTimeOffset Now = TestAuthority.DefaultNow;
 
     private static readonly Dictionary<string, Func<SignedHttpRequest>> StepOneViolations = new()
@@ -33,6 +36,13 @@ public class RequestAuthenticatorProfileTests
             RenewWithSignatureInput(signed => [$"sig={signed}", $"sig={signed}"]),
         ["Signature-Input with a second label in a second field line"] = () =>
             RenewWithSignatureInput(signed => [$"sig={signed}", $"sig2={signed}"]),
+
+        // RFC 8941 §4.2 joins field lines with commas, and §4.2.2 fails a dictionary that ends in one.
+        ["Signature-Input with an empty second field line"] = () =>
+            RenewWithSignatureInput(signed => [$"sig={signed}", ""]),
+        ["Signature-Input ending in a comma"] = () =>
+            RenewWithSignatureInput(signed => [$"sig={signed},"]),
+
         ["Signature repeating sig in one field line"] = () =>
             RenewWithSignature(signature => [$"sig=:{signature}:, sig=:{signature}:"]),
         ["Signature repeating sig across two field lines"] = () =>
@@ -79,6 +89,12 @@ public class RequestAuthenticatorProfileTests
 
         ["created as a string"] = () => RenewWith("created", Quoted(Created)),
         ["created as a decimal"] = () => RenewWith("created", $"{Created}.0"),
+
+        // RFC 8941 §3.3.1 allows at most 15 digits, leading zeros included,
+        // and RFC 9421 §2.3 signs the integer as RFC 8941 §4.1.4 serializes it, without them.
+        ["created of 16 digits"] = () =>
+            RenewWithSignatureInput(signed => [$"sig={signed.Replace(CreatedParameter, $";created=000000{Created}")}"]),
+
         ["expires as a string"] = () => RenewWith("expires", Quoted(Expires)),
         ["expires as a decimal"] = () => RenewWith("expires", $"{Expires}.0"),
         ["alg as a token"] = () => RenewWith("alg", "ecdsa-p256-sha256"),
@@ -91,6 +107,11 @@ public class RequestAuthenticatorProfileTests
         ["nonce as a token"] = () => RenewWith("nonce", TestRequest.DefaultNonce),
         ["tag as a token"] = () => RenewWith("tag", "renew"),
 
+        // RFC 8941 §4.2.5 escapes only a quote and a backslash,
+        // so a lenient parser reads \n as n, and the tag as renew.
+        ["tag with an escape RFC 8941 does not define"] = () =>
+            RenewWithSignatureInput(signed => [$"sig={signed.Replace(TagParameter, @";tag=""re\new""")}"]),
+
         // No integer is a valid alg, keyid, nonce or tag, so these also break a rule on the value.
         ["alg as an integer"] = () => RenewWith("alg", "256"),
         ["keyid as an integer"] = () => RenewWith("keyid", "1"),
@@ -100,6 +121,10 @@ public class RequestAuthenticatorProfileTests
         // RFC 9421 §2.1.1 defines sf, which leaves this Content-Digest value unchanged in the base.
         ["a parameter on a covered component"] = () =>
             (Renew() with { Components = ["\"@method\"", "\"content-digest\";sf"] }).ToHttpRequest(),
+
+        // A verifier that drops component parameters builds the base without them, which is the one signed here.
+        ["a parameter on a covered component, not signed"] = () =>
+            RenewWithSignatureInput(signed => [$"sig={signed.Replace("\"@method\"", "\"@method\";x")}"]),
     };
 
     private static readonly Dictionary<string, Func<TestRequest, SignedHttpRequest>> ContentDigestViolations = new()
@@ -149,6 +174,30 @@ public class RequestAuthenticatorProfileTests
                 signature: [$"\t sig=:{request.Sign()}: \t"],
                 contentDigest: [$" {request.ContentDigest}\t "]);
         },
+
+        // RFC 8941 §3.3.1 allows 15 digits, leading zeros included,
+        // and RFC 9421 §2.3 signs the integer as RFC 8941 §4.1.4 serializes it, without them.
+        ["created with leading zeros, in 15 digits"] = () =>
+            RenewWithSignatureInput(signed => [$"sig={signed.Replace(CreatedParameter, $";created=00000{Created}")}"]),
+    };
+
+    // Signature-Input values that hold no inner list with its parameters;
+    // most break RFC 8941 at their very end, where a parser that read on would leave the input.
+    private static readonly Dictionary<string, Func<SignedHttpRequest>> MalformedSignatureInputs = new()
+    {
+        // RFC 9421 §3.2: the member is an inner list.
+        ["an integer member"] = () => RenewWithSignatureInput(_ => ["sig=1"]),
+
+        // RFC 8941 §4.2.3.2: a parameter has a key, and a key follows its equals sign with a bare item.
+        ["a semicolon at the end"] = () => RenewWithSignatureInput(signed => [$"sig={signed};"]),
+        ["created last, without a value"] = () => RenewWithLast("created", ""),
+
+        // RFC 8941 §4.2.4: a minus sign is followed by a digit.
+        ["created last, a minus sign alone"] = () => RenewWithLast("created", "-"),
+        ["created last, a minus sign before a letter"] = () => RenewWithLast("created", "-x"),
+
+        // RFC 8941 §4.2.5: a backslash is followed by the character it escapes, and a closing quote ends a string.
+        ["tag last, unclosed, ending in a backslash"] = () => RenewWithLast("tag", "\"renew\\"),
     };
 
     public static TheoryData<string> StepOneViolationNames => new(StepOneViolations.Keys);
@@ -173,6 +222,8 @@ public class RequestAuthenticatorProfileTests
 
     public static TheoryData<string> AcceptedFormNames => new(AcceptedForms.Keys);
 
+    public static TheoryData<string> MalformedSignatureInputNames => new(MalformedSignatureInputs.Keys);
+
     private static KeyVector DeviceA => TestVectors.Instance.Key("device-a");
 
     private static KeyVector DeviceC => TestVectors.Instance.Key("device-c");
@@ -180,6 +231,9 @@ public class RequestAuthenticatorProfileTests
     private static string Created => Now.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
 
     private static string Expires => (Now.ToUnixTimeSeconds() + 60).ToString(CultureInfo.InvariantCulture);
+
+    // The created parameter of a renew request, as Signature-Input writes it.
+    private static string CreatedParameter => $";created={Created}";
 
     // A verifier that keeps the last of repeated keys, decodes leniently, or reads a parameter of another type
     // accepts a request whose signature data a proxy, a log or another parser can read differently.
@@ -223,6 +277,36 @@ public class RequestAuthenticatorProfileTests
         Assert.Equal("ok", outcome);
     }
 
+    // CONTRACT.md §6 step 1: a malformed Signature-Input draws signature_invalid,
+    // as a result rather than an exception, and records no nonce.
+    [Theory]
+    [MemberData(nameof(MalformedSignatureInputNames))]
+    public async Task MalformedSignatureInputIsSignatureInvalid(string form)
+    {
+        TestAuthority authority = new(Now);
+
+        string outcome = await authority.OutcomeAsync(AgentOperation.Renew, MalformedSignatureInputs[form]());
+
+        Assert.Equal("signature_invalid", outcome);
+        Assert.Empty(authority.Nonces.Calls);
+    }
+
+    // RFC 8941 §4.2.5: an escaped backslash decodes to one backslash, so the received tag is re\new,
+    // which CONTRACT.md §6 step 2 rejects for renew.
+    // The signature covers the tag renew, which a parser that dropped the escaped character would read.
+    [Fact]
+    public async Task TagWithAnEscapedBackslashIsAnotherTag()
+    {
+        TestAuthority authority = new(Now);
+        SignedHttpRequest request =
+            RenewWithSignatureInput(signed => [$"sig={signed.Replace(TagParameter, @";tag=""re\\new""")}"]);
+
+        string outcome = await authority.OutcomeAsync(AgentOperation.Renew, request);
+
+        Assert.Equal("signature_invalid", outcome);
+        Assert.Empty(authority.Nonces.Calls);
+    }
+
     private static TestRequest Renew()
     {
         return TestRequest.Valid(AgentOperation.Renew, Now);
@@ -231,6 +315,17 @@ public class RequestAuthenticatorProfileTests
     private static SignedHttpRequest RenewWith(string parameter, string value)
     {
         return Renew().WithParameter(parameter, value).ToHttpRequest();
+    }
+
+    // The parameter moves to the end of Signature-Input, with the given serialized value.
+    private static SignedHttpRequest RenewWithLast(string parameter, string value)
+    {
+        TestRequest request = Renew();
+        TestRequest reordered = request with
+        {
+            Parameters = [.. request.Parameters.Where(p => p.Key != parameter), (parameter, value)],
+        };
+        return reordered.ToHttpRequest();
     }
 
     // The lines receive the signed value of @signature-params.

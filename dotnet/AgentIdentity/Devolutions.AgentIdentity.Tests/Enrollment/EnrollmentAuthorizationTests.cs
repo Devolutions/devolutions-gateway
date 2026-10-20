@@ -136,6 +136,7 @@ public class EnrollmentAuthorizationTests
         Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
     }
 
+    // CONTRACT.md §2: a token is at most 4096 bytes; §2.1 (1): a field that holds no token gets `token_invalid`.
     [Fact]
     public void RejectsATokenLongerThan4096Bytes()
     {
@@ -190,6 +191,7 @@ public class EnrollmentAuthorizationTests
         EnrollmentTokenAssert.RevealsNoPart($"{result}", Bag, Secret);
     }
 
+    // Framework Design Guidelines: a null argument throws ArgumentNullException, whose ParamName names it.
     [Fact]
     public void RejectsNullFieldLines()
     {

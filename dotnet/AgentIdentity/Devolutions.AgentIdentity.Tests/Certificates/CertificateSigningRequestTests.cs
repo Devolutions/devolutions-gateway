@@ -1,4 +1,5 @@
 using System.Formats.Asn1;
+using System.Numerics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -10,6 +11,13 @@ public class CertificateSigningRequestTests
     // SEQUENCE { SEQUENCE { id-ecPublicKey, secp256r1 }, BIT STRING of 66 octets with no unused bits }.
     internal static readonly byte[] P256SubjectPublicKeyInfoPrefix =
         Convert.FromHexString("3059301306072A8648CE3D020106082A8648CE3D030107034200");
+
+    // SEC 2 §2.4.2: P-256 is y² = x³ - 3x + b over the prime field of order p.
+    private static readonly BigInteger P256Prime = Unsigned(
+        Convert.FromHexString("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF"));
+
+    private static readonly BigInteger P256B = Unsigned(
+        Convert.FromHexString("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B"));
 
     // CONTRACT.md §4: the server ignores the CSR's subject and attributes, including requested extensions,
     // and security invariant 2 lets a CSR supply only a verified public key.
@@ -63,7 +71,8 @@ public class CertificateSigningRequestTests
         },
     };
 
-    // RFC 2986 §4 defines exactly the fields of each SEQUENCE, with no extension marker.
+    // RFC 2986 §4 defines exactly the fields of each SEQUENCE, with no extension marker,
+    // and RFC 5480 §2 those of SubjectPublicKeyInfo and of its AlgorithmIdentifier.
     private static readonly Dictionary<string, Func<ECDsa, byte[]>> RequestsWithAnExtraElement = new()
     {
         ["CertificationRequestInfo"] = key =>
@@ -161,6 +170,8 @@ public class CertificateSigningRequestTests
             point[0] = (byte)(0x06 | (point[^1] & 1));
             return point;
         },
+
+        // SEC 1 §2.3.3: the uncompressed form is 04, then x and y in 32 octets each, 65 octets in all.
         ["without its form octet"] = key => TestCsr.UncompressedPoint(key)[1..],
         ["with an extra octet"] = key => [.. TestCsr.UncompressedPoint(key), 0x00],
 
@@ -168,7 +179,7 @@ public class CertificateSigningRequestTests
         ["point at infinity"] = _ => [0x00],
     };
 
-    // DER requires an unused bit to be zero, so each BIT STRING is one whose last octet is even.
+    // X.690 §11.2.1: DER requires an unused bit to be zero, so each BIT STRING is one whose last octet is even.
     private static readonly Dictionary<string, Func<byte[]>> RequestsWithUnusedBits = new()
     {
         // RFC 5480 §2.2: the octets of the point become the bits of the BIT STRING, so none is unused.
@@ -181,6 +192,8 @@ public class CertificateSigningRequestTests
                 unusedBits: 1);
             return TestCsr.Request(TestCsr.RequestInfo(spki), key);
         },
+
+        // RFC 3279 §2.2 and §2.2.3: the BIT STRING holds the octets of the DER Ecdsa-Sig-Value, so none is unused.
         ["signature"] = () =>
         {
             using ECDsa key = NewKey();
@@ -190,6 +203,21 @@ public class CertificateSigningRequestTests
                 TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
                 TestCsr.BitString(signature, unusedBits: 1));
         },
+    };
+
+    // Uncompressed points with a coordinate of p or more, each another encoding of a point on P-256,
+    // which would give its key a second SubjectPublicKeyInfo SHA-256.
+    private static readonly Dictionary<string, (string X, string Y)> PointsWithACoordinateOutOfTheField = new()
+    {
+        // x = p, which is 0 modulo p, and y a square root of b modulo p.
+        ["x"] = (
+            "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF",
+            "66485C780E2F83D72433BD5D84A06BB6541C2AF31DAE871728BF856A174F93F4"),
+
+        // y = p + 1, which is 1 modulo p, and x a root of x³ - 3x + b - 1 modulo p.
+        ["y"] = (
+            "09E78D4EF60D05F750F6636209092BC43CBDD6B47E11A9DE20A9FEB2A50BB96C",
+            "FFFFFFFF00000001000000000000000000000001000000000000000000000000"),
     };
 
     public static TheoryData<string> RequestWithIgnoredContentsNames => new(RequestsWithIgnoredContents.Keys);
@@ -206,6 +234,10 @@ public class CertificateSigningRequestTests
 
     public static TheoryData<string> RequestWithUnusedBitsNames => new(RequestsWithUnusedBits.Keys);
 
+    public static TheoryData<string> PointWithACoordinateOutOfTheFieldNames =>
+        new(PointsWithACoordinateOutOfTheField.Keys);
+
+    // test-vectors.json csr.<name>.expected, the outcome CONTRACT.md §4 gives each request.
     [Theory]
     [MemberData(nameof(VectorData.CsrNames), MemberType = typeof(VectorData))]
     public void CsrVectorHasItsExpectedOutcome(string name)
@@ -217,6 +249,7 @@ public class CertificateSigningRequestTests
         Assert.Equal(vector.Expected, result.Succeeded ? "ok" : result.Error.Code.ToWireValue());
     }
 
+    // test-vectors.json csr.valid.public_key_sec1, after the RFC 5480 §2 prefix of a P-256 SubjectPublicKeyInfo.
     [Fact]
     public void ValidVectorYieldsTheSubjectPublicKeyInfoOfItsKey()
     {
@@ -231,6 +264,7 @@ public class CertificateSigningRequestTests
     }
 
     // A request written by .NET rather than by the test builder.
+    // CONTRACT.md §4: a P-256 key and ecdsa-with-SHA256, the profile .NET writes for this key.
     [Fact]
     public void AcceptsRequestWrittenByDotNet()
     {
@@ -254,6 +288,7 @@ public class CertificateSigningRequestTests
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
 
+    // RFC 2986 §4: none of these is a CertificationRequest.
     [Theory]
     [InlineData("")]
     [InlineData("00")]
@@ -264,6 +299,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(Convert.FromHexString(hex)));
     }
 
+    // CONTRACT.md §1: a CSR is DER, the encoding of one request.
     // Bytes after the request would give one request many encodings.
     [Fact]
     public void RejectsTrailingBytes()
@@ -376,6 +412,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, PointsNotUncompressed[point](key))));
     }
 
+    // CONTRACT.md §4: the key is a point on P-256.
     // Flipping the low bit of y leaves the point off the curve,
     // since the only other point with the same x has y' = p - y, which is y + 1 or y - 1 only for y = (p ± 1) / 2.
     // No private key exists for such a point, so the key whose point was altered signs the request.
@@ -388,6 +425,27 @@ public class CertificateSigningRequestTests
         point[^1] ^= 0x01;
 
         AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, point)));
+    }
+
+    // SEC 1 §3.2.2.1: the coordinates of a public key are integers below p,
+    // and CONTRACT.md §4 gives a key that is not a P-256 point invalid_request, not an exception.
+    // Each point is on the curve modulo p, so only the range of its coordinates rejects it;
+    // a platform's key import throws an exception of a platform-specific type for such a point.
+    // The private key of either point is unknown, and the key is invalid whatever the signature,
+    // so r = s = 1 stands in for the signature.
+    [Theory]
+    [MemberData(nameof(PointWithACoordinateOutOfTheFieldNames))]
+    public void RejectsPointWithACoordinateOutOfTheField(string coordinate)
+    {
+        (string x, string y) = PointsWithACoordinateOutOfTheField[coordinate];
+        byte[] point = [0x04, .. Convert.FromHexString(x), .. Convert.FromHexString(y)];
+        Assert.True(IsOnP256ModuloP(point));
+        byte[] der = TestCsr.Sequence(
+            TestCsr.RequestInfo(TestCsr.SubjectPublicKeyInfo(TestCsr.P256Algorithm(), point)),
+            TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
+            TestCsr.BitString(TestCsr.Sequence(TestCsr.Integer(1), TestCsr.Integer(1))));
+
+        AssertInvalid(CertificateSigningRequest.Validate(der));
     }
 
     [Theory]
@@ -478,6 +536,7 @@ public class CertificateSigningRequestTests
         return result.Csr;
     }
 
+    // CONTRACT.md §4: a CSR that breaks a rule gets invalid_request, which §5.4 maps to 400.
     private static void AssertInvalid(CsrValidationResult result)
     {
         Assert.False(result.Succeeded);
@@ -563,5 +622,19 @@ public class CertificateSigningRequestTests
         AsnReader sequence = new AsnReader(signature, AsnEncodingRules.DER).ReadSequence();
 
         return (sequence.ReadIntegerBytes().ToArray(), sequence.ReadIntegerBytes().ToArray());
+    }
+
+    // SEC 2 §2.4.2: whether the coordinates of an uncompressed point, reduced modulo p, satisfy y² = x³ - 3x + b.
+    private static bool IsOnP256ModuloP(byte[] point)
+    {
+        BigInteger x = Unsigned(point[1..33]) % P256Prime;
+        BigInteger y = Unsigned(point[33..]) % P256Prime;
+
+        return BigInteger.ModPow(y, 2, P256Prime) == ((x * x * x) - (3 * x) + P256B) % P256Prime;
+    }
+
+    private static BigInteger Unsigned(byte[] bigEndian)
+    {
+        return new BigInteger(bigEndian, isUnsigned: true, isBigEndian: true);
     }
 }

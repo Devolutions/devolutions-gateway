@@ -113,6 +113,7 @@ public class ResponseBodiesTests
         Assert.Equal("roots", exception.ParamName);
     }
 
+    // CONTRACT.md §5.1: each root has a certificate, which a null root lacks.
     [Fact]
     public void TrustAnchorRejectsANullRoot()
     {
@@ -226,6 +227,7 @@ public class ResponseBodiesTests
         Assert.Equal("certificateChain", exception.ParamName);
     }
 
+    // CONTRACT.md §4 and §5.2: a chain starts with the leaf, so it holds at least one certificate.
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void EmptyChainIsRejected(string endpoint)
@@ -235,6 +237,7 @@ public class ResponseBodiesTests
         Assert.Equal("certificateChain", exception.ParamName);
     }
 
+    // CONTRACT.md §1: each certificate of a chain is written as its DER, which a null certificate lacks.
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainWithANullCertificateIsRejected(string endpoint)
@@ -264,6 +267,7 @@ public class ResponseBodiesTests
         Assert.Equal(1, reads);
     }
 
+    // As with a chain, a writer that read the roots twice could check one list and write another.
     [Fact]
     public void TrustAnchorReadsTheRootsOnce()
     {
@@ -293,6 +297,22 @@ public class ResponseBodiesTests
         Assert.Equal("7", config["revision"].GetRawText());
         Assert.Equal("https://host/dvls", config["agent_channel_url"].GetString());
         Assert.Equal("https://psu/channel", config["psu_channel_url"].GetString());
+    }
+
+    // CONTRACT.md §5.2 and §5.6: `config` is the identity's config, and IdentityConfig.Create sets no depth limit.
+    // The value nests 64 levels, so the body nests 66, beyond the 64 that a System.Text.Json reader allows by default.
+    [Theory]
+    [MemberData(nameof(ConfigBodyNames))]
+    public void BodyCarriesADeeplyNestedConfig(string endpoint)
+    {
+        string nested = new string('[', 64) + "0" + new string(']', 64);
+        IdentityConfig config = IdentityConfig.Create(1, null, [new("extra", TestJson.Parse(nested))]);
+
+        byte[] body = ConfigBodies[endpoint](config);
+
+        using JsonDocument document = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 128 });
+        Dictionary<string, JsonElement> written = TestJson.Members(TestJson.Members(document.RootElement)["config"]);
+        Assert.True(JsonElement.DeepEquals(TestJson.Parse(nested), written["extra"]));
     }
 
     private static JsonElement[] Roots(byte[] body)
