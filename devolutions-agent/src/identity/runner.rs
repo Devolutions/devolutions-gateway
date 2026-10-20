@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use agent_identity::client::{self, Client, ClientError, RequestSigner, TerminalCode};
 use agent_identity::schedule::{self, ChannelUrl};
-use agent_identity::state::{KEY_LOST, KeyRecord, Store, StoredIdentity};
+use agent_identity::state::{KEY_LOST, KeyRecord, KeySlots, Store, StoredIdentity};
 use agent_identity::{csr, metadata};
 use anyhow::Context as _;
 use device_key::DeviceKey;
@@ -83,8 +83,10 @@ struct Runner {
     terminal: Option<&'static str>,
     /// Whether pending-key recovery signs with the current key after the expired pending key drew `identity_unknown`.
     recovery_signs_with_current: bool,
-    /// The renewal schedule inputs of the current key, fixed when this run first holds it.
-    renewal_basis: Option<RenewalBasis>,
+    /// When this run stored or loaded each certificate, which anchors its renewal schedule.
+    load_times: LoadTimes,
+    /// The renewal jitter sample of the current key, drawn once for each key.
+    renewal_jitter: Option<(String, f64)>,
     /// `None` while a check-in waits for a renewal to be confirmed.
     next_check_in: Option<Instant>,
     check_in_after_confirm: bool,
@@ -104,7 +106,8 @@ impl Runner {
             renewal_requested: false,
             terminal: None,
             recovery_signs_with_current: false,
-            renewal_basis: None,
+            load_times: LoadTimes::default(),
+            renewal_jitter: None,
             next_check_in: None,
             check_in_after_confirm: false,
             channel_url: None,
@@ -113,6 +116,14 @@ impl Runner {
         // `crates/agent-identity/INTENT.md` ("Schedules"): without a channel URL, check in when the runner starts;
         // with one, once no stream has authenticated for 1 h, counted from the runner's start.
         let now = Instant::now();
+        let loaded_at = SystemTime::now();
+        for record in std::iter::once(&identity.keys.current)
+            .chain(identity.keys.pending.iter())
+            .chain(identity.keys.previous.iter())
+            .filter(|record| record.certificate_chain.is_some())
+        {
+            runner.load_times.record(&record.key_name, loaded_at);
+        }
         runner.channel_url = runner.usable_channel_url(identity);
         runner.next_check_in = Some(if runner.channel_url.is_some() {
             now + runner.channel_failure_check_in_after()
@@ -175,6 +186,7 @@ impl Runner {
             );
             return Ok(None);
         }
+        self.load_times.retain(&identity.keys);
         let now = Instant::now();
         // `crates/agent-identity/INTENT.md` ("Stored identities"): `previous` alongside `pending` holds the expired
         // pending key of a pending-key recovery; alone, it holds the old key of a confirmed renewal.
@@ -281,6 +293,11 @@ impl Runner {
                 self.shared
                     .store
                     .store_pending_chain(identity, response.certificate_chain)?;
+                // UNTESTED: the time renew stored the pending certificate anchors its schedule after it is promoted.
+                // Only `LoadTimes` is tested, not this wiring; when changing it, record before any confirm can promote.
+                if let Some(pending) = &identity.keys.pending {
+                    self.load_times.record(&pending.key_name, SystemTime::now());
+                }
                 self.renewal_retry.succeeded();
                 self.recovery_signs_with_current = false;
             }
@@ -458,20 +475,21 @@ impl Runner {
     fn renewal_at(&mut self, identity: &StoredIdentity, now: Instant) -> anyhow::Result<Instant> {
         let current = &identity.keys.current;
         let (not_before, not_after) = client::leaf_validity(certificate_chain(current)?)?;
-        let basis = match &self.renewal_basis {
-            Some(basis) if basis.key_name == current.key_name => basis,
-            _ => self.renewal_basis.insert(RenewalBasis {
-                key_name: current.key_name.clone(),
-                loaded_at: SystemTime::now(),
-                jitter: if self.shared.settings.disable_jitter.unwrap_or_default() {
+        let jitter = match &self.renewal_jitter {
+            Some((key_name, jitter)) if *key_name == current.key_name => *jitter,
+            _ => {
+                let jitter = if self.shared.settings.disable_jitter.unwrap_or_default() {
                     0.0
                 } else {
                     rand::thread_rng().gen_range(0.0..=1.0)
-                },
-            }),
+                };
+                self.renewal_jitter = Some((current.key_name.clone(), jitter));
+                jitter
+            }
         };
+        let loaded_at = self.load_times.loaded_at(&current.key_name, SystemTime::now());
         let renewal_after = self.shared.settings.renewal_after_secs.map(Duration::from_secs);
-        let renewal_at = schedule::renewal_time(not_before, not_after, basis.loaded_at, renewal_after, basis.jitter);
+        let renewal_at = schedule::renewal_time(not_before, not_after, loaded_at, renewal_after, jitter);
         Ok(instant_at(renewal_at, now))
     }
 
@@ -528,11 +546,30 @@ impl Runner {
     }
 }
 
-/// The schedule inputs of one current key: when this run first held it and its renewal jitter sample.
-struct RenewalBasis {
-    key_name: String,
-    loaded_at: SystemTime,
-    jitter: f64,
+/// When this run stored or loaded the certificate of each key the identity holds, by key name.
+#[derive(Default)]
+struct LoadTimes(HashMap<String, SystemTime>);
+
+impl LoadTimes {
+    /// Records that this run stored or loaded the certificate of `key_name` at `at`.
+    fn record(&mut self, key_name: &str, at: SystemTime) {
+        self.0.insert(key_name.to_owned(), at);
+    }
+
+    /// Returns when this run stored or loaded the certificate of `key_name`, recording `now` when it has no record.
+    fn loaded_at(&mut self, key_name: &str, now: SystemTime) -> SystemTime {
+        *self.0.entry(key_name.to_owned()).or_insert(now)
+    }
+
+    /// Forgets the keys the identity no longer holds.
+    fn retain(&mut self, keys: &KeySlots) {
+        self.0.retain(|key_name, _| {
+            std::iter::once(&keys.current)
+                .chain(keys.pending.iter())
+                .chain(keys.previous.iter())
+                .any(|record| record.key_name == *key_name)
+        });
+    }
 }
 
 fn certificate_chain(record: &KeyRecord) -> anyhow::Result<&[String]> {
@@ -558,6 +595,8 @@ fn instant_at(at: SystemTime, now: Instant) -> Instant {
 
 #[cfg(test)]
 mod tests {
+    use std::time::UNIX_EPOCH;
+
     use super::*;
 
     #[test]
@@ -568,6 +607,20 @@ mod tests {
         assert_eq!(
             instant_at(SystemTime::now() + Duration::from_secs(86_400), now),
             now + MAX_WAIT
+        );
+    }
+
+    #[test]
+    fn a_certificate_keeps_the_time_it_was_stored_until_it_is_scheduled() {
+        // `crates/agent-identity/INTENT.md` ("Schedules"): the anchor is the earlier of `notBefore` and the moment the
+        // agent stored or loaded the certificate, so a pending certificate confirmed 6 s after renew stored it keeps
+        // the time of storage once it becomes current.
+        let stored_at = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let mut loads = LoadTimes::default();
+        loads.record("renewed", stored_at);
+        assert_eq!(
+            loads.loaded_at("renewed", stored_at + Duration::from_secs(6)),
+            stored_at
         );
     }
 }
