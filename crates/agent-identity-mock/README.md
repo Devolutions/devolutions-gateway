@@ -54,6 +54,7 @@ All paths below are relative to `base_url` (i.e. they include the path prefix).
 Non-2xx agent-facing responses carry `{ "error", "message", "server_time" }` with the §5.4 codes.
 An unexpected failure, such as issuing from an expired root or a handler panic, is `500 unavailable`.
 Enrollment, renewal and check-in require a `metadata` object, which may be empty.
+A body that repeats a member name at any depth, a `csr` that is not canonical `base64`, or a CSR key that is not an uncompressed P-256 point is `invalid_request` (§1, §4).
 Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are limited to 64 KiB.
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.

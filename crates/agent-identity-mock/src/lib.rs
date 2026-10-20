@@ -8,6 +8,7 @@ mod app;
 mod ca;
 mod channel;
 mod clock;
+mod json;
 mod name_eval;
 pub(crate) mod oracle;
 mod server;

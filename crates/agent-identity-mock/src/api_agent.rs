@@ -100,8 +100,8 @@ async fn trust_anchor(AxumState(app): AxumState<Arc<App>>) -> Response {
 }
 
 /// Parses `Authorization: Bearer <token>`; the token must be well-formed
-/// (`dvaet1.<bag>.<secret>`, 32-byte secret) to even reach the lookup, and a
-/// repeated header is `token_invalid` ([CONTRACT.md][contract], "2.1 Authority behavior").
+/// (`dvaet1.<bag>.<secret>` with `base64url` text and a canonical 32-byte secret, so only the exact secret text matches)
+/// to even reach the lookup, and a repeated header is `token_invalid` ([CONTRACT.md][contract], "2.1 Authority behavior").
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.md#21-authority-behavior
 fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
@@ -114,9 +114,16 @@ fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
         .and_then(|v| v.strip_prefix("Bearer "))
         .ok_or_else(ApiError::token_invalid)?;
     let parts: Vec<&str> = header.split('.').collect();
-    if parts.len() != 3 || parts[0] != "dvaet1" {
+    let base64url_text = |text: &str| {
+        !text.is_empty()
+            && text
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    };
+    if parts.len() != 3 || parts[0] != "dvaet1" || !base64url_text(parts[1]) {
         return Err(ApiError::token_invalid());
     }
+    // The engine rejects padding and nonzero pad bits, so only the canonical secret text decodes and matches.
     let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(parts[2])
         .ok()
@@ -127,7 +134,8 @@ fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
 
 /// Parses an enroll/renew body: `{ "csr": "<base64 DER>", "metadata": {...} }`.
 fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError> {
-    let value: Value = serde_json::from_slice(body).map_err(|_| ApiError::invalid_request("malformed JSON body"))?;
+    let value = crate::json::parse_unique_members(body)
+        .map_err(|error| ApiError::invalid_request(format!("malformed JSON body: {error}")))?;
     let object = value
         .as_object()
         .ok_or_else(|| ApiError::invalid_request("body must be a JSON object"))?;
@@ -135,9 +143,10 @@ fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError
         .get("csr")
         .and_then(Value::as_str)
         .ok_or_else(|| ApiError::invalid_request("missing `csr`"))?;
+    // The engine rejects anything but the canonical form (§1), such as padding or nonzero pad bits.
     let csr_der = base64::engine::general_purpose::STANDARD
         .decode(csr)
-        .map_err(|_| ApiError::invalid_request("`csr` is not valid base64"))?;
+        .map_err(|_| ApiError::invalid_request("`csr` is not canonical base64"))?;
     let metadata = object
         .get("metadata")
         .and_then(Value::as_object)
@@ -387,7 +396,8 @@ async fn check_in(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body:
 }
 
 fn parse_check_in_body(body: &[u8]) -> Result<Map<String, Value>, ApiError> {
-    let value: Value = serde_json::from_slice(body).map_err(|_| ApiError::invalid_request("malformed JSON body"))?;
+    let value = crate::json::parse_unique_members(body)
+        .map_err(|error| ApiError::invalid_request(format!("malformed JSON body: {error}")))?;
     let metadata = value
         .get("metadata")
         .and_then(Value::as_object)
@@ -433,4 +443,89 @@ fn authenticate(
         &mut lookup,
         nonces,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::header::AUTHORIZATION;
+    use axum::http::{HeaderMap, HeaderValue};
+    use base64::Engine as _;
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use rstest::rstest;
+
+    use super::{parse_bearer, parse_check_in_body, parse_csr_body};
+
+    fn code<T>(result: Result<T, crate::state::ApiError>) -> Result<(), &'static str> {
+        result.map(|_| ()).map_err(|error| error.code)
+    }
+
+    /// CONTRACT.md §1: "A JSON request body that repeats a member name at any depth [...] → `invalid_request`".
+    #[rstest]
+    #[case::csr(r#"{"csr":"AAEC","csr":"AAEC","metadata":{}}"#)]
+    #[case::metadata(r#"{"csr":"AAEC","metadata":{},"metadata":{}}"#)]
+    #[case::metadata_key(r#"{"csr":"AAEC","metadata":{"hostname":"a","hostname":"b"}}"#)]
+    #[case::escaped_name(r#"{"csr":"AAEC","c\u0073r":"AAEC","metadata":{}}"#)]
+    #[case::unknown_member(r#"{"csr":"AAEC","metadata":{},"x":1,"x":1}"#)]
+    #[case::object_in_array(r#"{"csr":"AAEC","metadata":{},"x":[{"y":1,"y":1}]}"#)]
+    fn csr_body_with_a_repeated_member_name_is_invalid_request(#[case] body: &str) {
+        assert_eq!(code(parse_csr_body(body.as_bytes())), Err("invalid_request"));
+    }
+
+    #[rstest]
+    #[case::metadata(r#"{"metadata":{},"metadata":{}}"#)]
+    #[case::metadata_key(r#"{"metadata":{"hostname":"a","hostname":"b"}}"#)]
+    fn check_in_body_with_a_repeated_member_name_is_invalid_request(#[case] body: &str) {
+        assert_eq!(code(parse_check_in_body(body.as_bytes())), Err("invalid_request"));
+    }
+
+    /// One name in several objects is not a repetition, and receivers ignore unknown fields (CONTRACT.md §1).
+    #[test]
+    fn same_name_in_different_objects_is_accepted() {
+        let body = r#"{"csr":"AAEC","metadata":{"csr":"a"},"x":{"csr":[1,true,null,{"csr":0.5}]}}"#;
+        assert_eq!(code(parse_csr_body(body.as_bytes())), Ok(()));
+    }
+
+    /// CONTRACT.md §1: "a request body holding another form [than the canonical `base64`] → `invalid_request`".
+    #[rstest]
+    #[case::canonical("AAE=", Ok(()))]
+    #[case::missing_padding("AAE", Err("invalid_request"))]
+    #[case::nonzero_pad_bits("AAF=", Err("invalid_request"))]
+    #[case::url_alphabet("-_8=", Err("invalid_request"))]
+    #[case::line_break("AA\\nE=", Err("invalid_request"))]
+    fn csr_must_be_canonical_base64(#[case] csr: &str, #[case] expected: Result<(), &'static str>) {
+        let body = format!(r#"{{"csr":"{csr}","metadata":{{}}}}"#);
+        assert_eq!(code(parse_csr_body(body.as_bytes())), expected);
+    }
+
+    fn bearer(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}")).expect("valid header"),
+        );
+        headers
+    }
+
+    /// CONTRACT.md §2: "The authority matches the `secret` text exactly, so only the exact token string authenticates",
+    /// and a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`.
+    #[rstest]
+    #[case::padded_secret(|secret: &str| format!("dvaet1.e30.{secret}="))]
+    #[case::nonzero_pad_bits(|secret: &str| format!("dvaet1.e30.{}B", &secret[..42]))]
+    #[case::standard_alphabet(|secret: &str| format!("dvaet1.e30.+{}", &secret[1..]))]
+    #[case::empty_bag(|secret: &str| format!("dvaet1..{secret}"))]
+    #[case::bag_outside_the_alphabet(|secret: &str| format!("dvaet1.e30=.{secret}"))]
+    #[case::other_prefix(|secret: &str| format!("dvaet2.e30.{secret}"))]
+    fn only_the_exact_token_string_authenticates(#[case] token: fn(&str) -> String) {
+        let secret = URL_SAFE_NO_PAD.encode([0u8; 32]);
+        assert_eq!(code(parse_bearer(&bearer(&token(&secret)))), Err("token_invalid"));
+    }
+
+    #[test]
+    fn well_formed_token_yields_its_secret() {
+        let secret = URL_SAFE_NO_PAD.encode([0u8; 32]);
+        assert_eq!(
+            parse_bearer(&bearer(&format!("dvaet1.e30.{secret}"))).ok(),
+            Some([0u8; 32])
+        );
+    }
 }

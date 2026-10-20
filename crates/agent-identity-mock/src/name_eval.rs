@@ -73,8 +73,8 @@ pub(crate) fn validate_friendly_name_format(format: &str) -> Result<(), String> 
 }
 
 /// Renders the friendly name: validated format, missing values evaluate to empty,
-/// `{{`/`}}` escape braces, result trimmed and truncated to 255 chars, empty falls back
-/// to the identity ID.
+/// `{{`/`}}` escape braces, and the result is trimmed, truncated to 255 Unicode scalar values and trimmed again.
+/// `str::trim` removes exactly Unicode `White_Space`; an empty result falls back to the identity ID.
 pub(crate) fn render_friendly_name(
     format: &str,
     metadata: &Map<String, Value>,
@@ -96,12 +96,12 @@ pub(crate) fn render_friendly_name(
             }
         }
     }
-    let trimmed = out.trim();
-    let truncated: String = trimmed.chars().take(MAX_FRIENDLY_NAME_CHARS).collect();
-    if truncated.is_empty() {
+    let truncated: String = out.trim().chars().take(MAX_FRIENDLY_NAME_CHARS).collect();
+    let trimmed = truncated.trim();
+    if trimmed.is_empty() {
         identity_id.to_string()
     } else {
-        truncated
+        trimmed.to_owned()
     }
 }
 
@@ -139,4 +139,32 @@ fn parse_format(format: &str) -> Result<Vec<FormatPart<'_>>, String> {
     }
     parts.push(FormatPart::Literal(rest));
     Ok(parts)
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use serde_json::{Map, Value};
+
+    use super::render_friendly_name;
+
+    /// [Shared intent][intent] ("Enrollment"): "The result is trimmed, truncated to 255 Unicode scalar values without splitting one,
+    /// and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`);
+    /// an empty result falls back to the identity ID."
+    ///
+    /// [intent]: ../../../docs/agent-identity/INTENT.agent-identity.md#enrollment
+    #[rstest]
+    #[case::trimmed_again_after_truncation(format!("{} b", "a".repeat(254)), "a".repeat(254))]
+    #[case::trimmed_before_truncation(format!("  {}", "a".repeat(255)), "a".repeat(255))]
+    #[case::truncated_by_scalar_value("é".repeat(300), "é".repeat(255))]
+    #[case::unicode_white_space("\u{3000}host\u{a0}\u{2029}".to_owned(), "host".to_owned())]
+    #[case::not_white_space("\u{200b}host".to_owned(), "\u{200b}host".to_owned())]
+    #[case::empty_falls_back_to_identity_id("\u{3000} ".to_owned(), uuid::Uuid::nil().to_string())]
+    fn friendly_name_is_trimmed_truncated_and_trimmed_again(#[case] hostname: String, #[case] expected: String) {
+        let metadata = Map::from_iter([("hostname".to_owned(), Value::String(hostname))]);
+        assert_eq!(
+            render_friendly_name("{hostname}", &metadata, "token", uuid::Uuid::nil()),
+            expected
+        );
+    }
 }

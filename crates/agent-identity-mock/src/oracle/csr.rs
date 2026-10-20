@@ -1,4 +1,4 @@
-//! PKCS#10 CSR checking per CONTRACT.md §4: P-256 key required, self-signature verified, subject and extensions ignored.
+//! PKCS#10 CSR checking per CONTRACT.md §4: uncompressed P-256 key required, self-signature verified, subject and extensions ignored.
 //! X.509 and DER provide CSR types; the signature is checked with P-256.
 
 use der::Decode as _;
@@ -36,11 +36,68 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<VerifyingKey> {
     if params_oid != SECP256R1 {
         return None;
     }
-    let key = VerifyingKey::from_sec1_bytes(spki.subject_public_key.raw_bytes()).ok()?;
+    // Only the uncompressed form (0x04 ‖ X ‖ Y), so that each key has exactly one SPKI SHA-256.
+    let point = spki.subject_public_key.as_bytes()?;
+    if point.len() != 65 || point[0] != 0x04 {
+        return None;
+    }
+    let key = VerifyingKey::from_sec1_bytes(point).ok()?;
 
     let info_der = der::Encode::to_der(&req.info).ok()?;
     let signature = Signature::from_der(req.signature.raw_bytes()).ok()?;
     key.verify(&info_der, &signature).ok()?;
 
     Some(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use der::Encode as _;
+    use der::asn1::{Any, BitString};
+    use p256::ecdsa::signature::Signer as _;
+    use p256::ecdsa::{DerSignature, SigningKey};
+    use rstest::rstest;
+    use spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned};
+    use x509_cert::request::{CertReq, CertReqInfo, Version};
+
+    use super::{ECDSA_WITH_SHA_256, ID_EC_PUBLIC_KEY, SECP256R1, check_csr};
+
+    /// Builds a CSR whose subject key is `encoded_point`, self-signed by `key`.
+    fn csr(key: &SigningKey, encoded_point: &[u8]) -> Vec<u8> {
+        let info = CertReqInfo {
+            version: Version::V1,
+            subject: Default::default(),
+            public_key: SubjectPublicKeyInfoOwned {
+                algorithm: AlgorithmIdentifierOwned {
+                    oid: ID_EC_PUBLIC_KEY,
+                    parameters: Some(Any::encode_from(&SECP256R1).expect("encodable OID")),
+                },
+                subject_public_key: BitString::from_bytes(encoded_point).expect("valid bit string"),
+            },
+            attributes: Default::default(),
+        };
+        let signature: DerSignature = key
+            .try_sign(&info.to_der().expect("encodable request info"))
+            .expect("signing succeeds");
+        CertReq {
+            info,
+            algorithm: AlgorithmIdentifierOwned {
+                oid: ECDSA_WITH_SHA_256,
+                parameters: None,
+            },
+            signature: BitString::from_bytes(signature.as_bytes()).expect("valid bit string"),
+        }
+        .to_der()
+        .expect("encodable request")
+    }
+
+    /// CONTRACT.md §4: the CSR public key must be "an uncompressed P-256 point [...], else `invalid_request`".
+    #[rstest]
+    #[case::uncompressed(false, true)]
+    #[case::compressed(true, false)]
+    fn csr_key_must_be_an_uncompressed_point(#[case] compress: bool, #[case] accepted: bool) {
+        let key = SigningKey::from_slice(&[1; 32]).expect("valid P-256 scalar");
+        let point = key.verifying_key().to_sec1_point(compress);
+        assert_eq!(check_csr(&csr(&key, point.as_bytes())).is_some(), accepted);
+    }
 }
