@@ -1,0 +1,232 @@
+namespace Devolutions.AgentIdentity.Tests;
+
+public class AgentMetadataTests
+{
+    // CONTRACT.md §3: metadata may be an empty object.
+    [Fact]
+    public void AcceptsNoEntries()
+    {
+        AgentMetadata metadata = AssertValid(AgentMetadata.Validate([]));
+
+        Assert.Empty(metadata);
+    }
+
+    [Fact]
+    public void KeepsEveryEntryInTheOrderReceived()
+    {
+        KeyValuePair<string, string>[] entries =
+        [
+            new("os_name", "Windows"),
+            new("hostname", "host"),
+            new("agent_version", "2026.3.0"),
+        ];
+
+        AgentMetadata metadata = AssertValid(AgentMetadata.Validate(entries));
+
+        Assert.Equal(entries, metadata);
+        Assert.Equal("host", metadata["hostname"]);
+    }
+
+    // CONTRACT.md §3: at most 32 keys.
+    [Fact]
+    public void Accepts32Keys()
+    {
+        AgentMetadata metadata = AssertValid(AgentMetadata.Validate(NumberedEntries(32)));
+
+        Assert.Equal(32, metadata.Count);
+    }
+
+    [Fact]
+    public void Rejects33Keys()
+    {
+        AssertInvalid(AgentMetadata.Validate(NumberedEntries(33)));
+    }
+
+    // CONTRACT.md §3: a key matches ^[a-z][a-z0-9_]{0,63}$.
+    [Theory]
+    [InlineData("a")]
+    [InlineData("hostname")]
+    [InlineData("os_version")]
+    [InlineData("z9_")]
+    [InlineData("abcdefghijklmnopqrstuvwxyz0123456789_")]
+    public void AcceptsKeyMatchingThePattern(string key)
+    {
+        AssertValid(AgentMetadata.Validate([new(key, "value")]));
+    }
+
+    [Fact]
+    public void AcceptsKeyOf64Characters()
+    {
+        AssertValid(AgentMetadata.Validate([new("k" + new string('0', 63), "value")]));
+    }
+
+    [Fact]
+    public void RejectsKeyOf65Characters()
+    {
+        AssertInvalid(AgentMetadata.Validate([new("k" + new string('0', 64), "value")]));
+    }
+
+    // A case-insensitive match would take the Kelvin sign for 'k',
+    // and a .NET regular expression ending in $ also matches before a final line feed.
+    [Theory]
+    [InlineData("empty", "")]
+    [InlineData("uppercase first letter", "Hostname")]
+    [InlineData("uppercase letter", "hostName")]
+    [InlineData("leading digit", "1hostname")]
+    [InlineData("leading underscore", "_hostname")]
+    [InlineData("hyphen", "os-name")]
+    [InlineData("space", "os name")]
+    [InlineData("trailing line feed", "hostname\n")]
+    [InlineData("non-ASCII letter", "h\u00F4stname")]
+    [InlineData("Kelvin sign", "\u212Aey")]
+    [InlineData("fullwidth letter", "\uFF48ostname")]
+    public void RejectsKeyNotMatchingThePattern(string form, string key)
+    {
+        AssertInvalid(AgentMetadata.Validate([new(key, "value")]), form);
+    }
+
+    // CONTRACT.md §3: a value has at most 1024 UTF-8 bytes.
+    // Characters of two, three and four bytes count by their bytes, not as one character or UTF-16 code unit.
+    [Theory]
+    [InlineData("a", 1024, "")]
+    [InlineData("\u00E9", 512, "")]
+    [InlineData("\u20AC", 341, "a")]
+    [InlineData("\U0001F600", 256, "")]
+    public void AcceptsValueOf1024Utf8Bytes(string unit, int count, string suffix)
+    {
+        AssertValid(AgentMetadata.Validate([new("hostname", Repeat(unit, count) + suffix)]));
+    }
+
+    [Theory]
+    [InlineData("a", 1025, "")]
+    [InlineData("\u00E9", 512, "a")]
+    [InlineData("\u20AC", 341, "aa")]
+    [InlineData("\U0001F600", 256, "a")]
+    public void RejectsValueOf1025Utf8Bytes(string unit, int count, string suffix)
+    {
+        AssertInvalid(AgentMetadata.Validate([new("hostname", Repeat(unit, count) + suffix)]));
+    }
+
+    [Fact]
+    public void AcceptsEmptyValue()
+    {
+        AssertValid(AgentMetadata.Validate([new("domain", "")]));
+    }
+
+    // CONTRACT.md §3: no C0 (U+0000 to U+001F), DEL (U+007F) or C1 (U+0080 to U+009F) control characters.
+    public static TheoryData<int> ControlCharacters =>
+        new(Enumerable.Range(0x00, 0x20).Append(0x7F).Concat(Enumerable.Range(0x80, 0x20)));
+
+    [Theory]
+    [MemberData(nameof(ControlCharacters))]
+    public void RejectsValueWithControlCharacter(int codePoint)
+    {
+        AssertInvalid(AgentMetadata.Validate([new("hostname", $"host{(char)codePoint}name")]));
+    }
+
+    // The neighbors of the control ranges, including U+00A0, the first character after C1.
+    [Theory]
+    [InlineData(0x20)]
+    [InlineData(0x7E)]
+    [InlineData(0xA0)]
+    public void AcceptsValueWithCharacterNextToAControlRange(int codePoint)
+    {
+        AssertValid(AgentMetadata.Validate([new("hostname", $"host{(char)codePoint}name")]));
+    }
+
+    // A string holding an unpaired surrogate is not Unicode text, so it has no UTF-8 encoding to measure or store.
+    [Theory]
+    [InlineData("lone high surrogate", 0x61, 0xD800, 0x62)]
+    [InlineData("lone low surrogate", 0x61, 0xDC00, 0x62)]
+    [InlineData("high surrogate at the end", 0x61, 0xD800)]
+    [InlineData("pair in reverse order", 0xDC00, 0xD800)]
+    public void RejectsValueWithUnpairedSurrogate(string form, params int[] codeUnits)
+    {
+        string value = new(codeUnits.Select(unit => (char)unit).ToArray());
+
+        AssertInvalid(AgentMetadata.Validate([new("hostname", value)]), form);
+    }
+
+    // CONTRACT.md §3: the whole object has at most 16 KiB, the sum of the UTF-8 byte lengths of all keys and values.
+    // Each value has 1021 UTF-8 bytes but 511 characters, so a count of characters would stay far below the limit.
+    [Fact]
+    public void AcceptsObjectOf16KiB()
+    {
+        // 16 keys of 3 bytes and 16 values of 1021 bytes: 16 × 1024 = 16384 bytes.
+        AssertValid(AgentMetadata.Validate(EntriesOf1024Bytes(lastKey: "k15")));
+    }
+
+    [Fact]
+    public void RejectsObjectOf16KiBAndOneByte()
+    {
+        // The same with a last key of 4 bytes: 16385 bytes.
+        AssertInvalid(AgentMetadata.Validate(EntriesOf1024Bytes(lastKey: "k150")));
+    }
+
+    // A later entry with the same key would silently replace the earlier one.
+    [Fact]
+    public void RejectsRepeatedKey()
+    {
+        AssertInvalid(AgentMetadata.Validate([new("hostname", "a"), new("hostname", "b")]));
+    }
+
+    // The failure detail goes to host logs, so it must not copy an invalid key, which could hold a line break.
+    [Fact]
+    public void FailureDetailDoesNotQuoteAnInvalidKey()
+    {
+        MetadataValidationResult result = AgentMetadata.Validate([new("host\nforged log line", "value")]);
+
+        AssertInvalid(result);
+        Assert.DoesNotContain("forged log line", result.FailureDetail);
+    }
+
+    // A null key or value can only come from the host, since neither JSON nor protobuf metadata can hold one.
+    [Fact]
+    public void ThrowsForNullKey()
+    {
+        Assert.Throws<ArgumentException>(() => AgentMetadata.Validate([new(null!, "value")]));
+    }
+
+    [Fact]
+    public void ThrowsForNullValue()
+    {
+        Assert.Throws<ArgumentException>(() => AgentMetadata.Validate([new("hostname", null!)]));
+    }
+
+    private static AgentMetadata AssertValid(MetadataValidationResult result)
+    {
+        Assert.True(result.Succeeded, result.FailureDetail);
+        Assert.Null(result.Error);
+        Assert.Null(result.FailureDetail);
+
+        return result.Metadata;
+    }
+
+    private static void AssertInvalid(MetadataValidationResult result, string? form = null)
+    {
+        Assert.False(result.Succeeded, form);
+        Assert.Equal(AgentIdentityErrorCode.InvalidRequest, result.Error.Code);
+        Assert.Equal(400, result.Error.HttpStatusCode);
+        Assert.False(string.IsNullOrEmpty(result.FailureDetail));
+        Assert.Null(result.Metadata);
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> NumberedEntries(int count)
+    {
+        return Enumerable.Range(0, count).Select(i => new KeyValuePair<string, string>($"key_{i}", "value"));
+    }
+
+    private static IEnumerable<KeyValuePair<string, string>> EntriesOf1024Bytes(string lastKey)
+    {
+        string value = Repeat("\u00E9", 510) + "a";
+
+        return Enumerable.Range(0, 15)
+            .Select(i => new KeyValuePair<string, string>($"k{i:D2}", value))
+            .Append(new KeyValuePair<string, string>(lastKey, value));
+    }
+
+    private static string Repeat(string unit, int count)
+    {
+        return string.Concat(Enumerable.Repeat(unit, count));
+    }
+}
