@@ -644,8 +644,19 @@ struct RecordingZipManifestFile {
     file_name: String,
 }
 
+/// Whether `file_name` looks like a name the Gateway itself gives to recording files.
+///
+/// The Gateway only ever uses letters, digits, `-`, `_` and `.` for those names, so we accept exactly that
+/// and turn everything else away. Listing what's allowed is safer than chasing every odd path syntax an OS
+/// supports, and it keeps a name from ever reaching outside the recording folder.
 fn is_safe_recording_file_name(file_name: &str) -> bool {
-    !file_name.is_empty() && !file_name.contains("..") && !file_name.contains('/') && !file_name.contains('\\')
+    !file_name.is_empty()
+        && file_name.len() <= 128
+        && !file_name.starts_with('.')
+        && !file_name.ends_with('.')
+        && file_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 fn recording_file_content_type(path: &Utf8Path) -> &'static str {
@@ -1001,11 +1012,23 @@ mod tests {
     #[test]
     fn rejects_unsafe_recording_file_names() {
         assert!(is_safe_recording_file_name("recording-0.webm"));
+        assert!(is_safe_recording_file_name("recording-12.trp"));
+        assert!(is_safe_recording_file_name("recording-0.cast"));
+        assert!(is_safe_recording_file_name("recording-0.slog"));
+        assert!(is_safe_recording_file_name("ai-analysis-0.slog"));
         assert!(is_safe_recording_file_name("recording.json"));
         assert!(!is_safe_recording_file_name(""));
+        assert!(!is_safe_recording_file_name(".."));
         assert!(!is_safe_recording_file_name("../secret.webm"));
+        assert!(!is_safe_recording_file_name(".hidden"));
+        assert!(!is_safe_recording_file_name("recording.json."));
         assert!(!is_safe_recording_file_name("a/b.webm"));
         assert!(!is_safe_recording_file_name("a\\b.webm"));
+        assert!(!is_safe_recording_file_name("C:secret.webm"));
+        assert!(!is_safe_recording_file_name("recording-0.webm:stream"));
+        assert!(!is_safe_recording_file_name("recording 0.webm"));
+        assert!(!is_safe_recording_file_name("récording-0.webm"));
+        assert!(!is_safe_recording_file_name(&"a".repeat(129)));
     }
 
     #[test]
