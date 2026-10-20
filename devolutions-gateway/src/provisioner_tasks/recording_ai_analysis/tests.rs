@@ -632,7 +632,9 @@ async fn recording_deleted_after_start_fails() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["details"], "session has no recording");
+    assert_eq!(task.payload["reason"], "permanent error");
+    let details = task.payload["details"].as_str().expect("details");
+    assert!(details.ends_with("has no recording"), "{details}");
 }
 
 #[tokio::test]
@@ -934,6 +936,78 @@ async fn a_new_task_replaces_the_result_of_the_earlier_one() {
 }
 
 #[tokio::test]
+async fn a_new_task_that_fails_still_removes_the_earlier_analysis() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
+    let first = harness.start_created(session_id, settings.clone()).await;
+    harness.run(first).await.expect("first analysis");
+
+    let second = harness.start_created(session_id, settings).await;
+    harness.state.provisioning.remove_task_secret(second);
+    harness.run(second).await.expect("no retry");
+
+    let task = harness.task(second).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed);
+    assert_eq!(task.payload["reason"], "key lost");
+    let dir = harness.recording_path.join(session_id.to_string());
+    assert_eq!(ai_analyses(&dir), json!([]));
+    assert!(!dir.join("ai-analysis-0.slog").exists());
+}
+
+#[tokio::test]
+async fn a_retry_of_an_attempt_that_never_got_the_session_removes_the_earlier_analysis() {
+    let mut harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
+    let first = harness.start_created(session_id, settings.clone()).await;
+    harness.run(first).await.expect("first analysis");
+    let second = harness.start_created(session_id, settings).await;
+
+    let mut task = RecordingAiAnalysis::new(
+        harness.state.conf_handle.clone(),
+        harness.state.recordings.clone(),
+        harness.state.provisioning.clone(),
+        Arc::new(harness.state.job_queue_handle.clone()),
+    );
+    task.attempt_timeout = Duration::from_millis(500);
+    harness.state.provisioner_tasks = ProvisionerTaskRunner::builder(
+        Arc::clone(harness.state.provisioner_tasks.store()),
+        Arc::new(harness.state.job_queue_handle.clone()),
+    )
+    .register(task)
+    .build();
+
+    // Another analysis of the session holds it past the attempt timeout.
+    let session = lock_session(session_id).await;
+    let error = harness.run(second).await.expect_err("timeout is retried");
+    assert!(error.to_string().contains("took longer than"), "{error:#}");
+    drop(session);
+
+    harness.run(second).await.expect("second attempt");
+
+    let task = harness.task(second).await;
+    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
+    assert_eq!(task.attempts, 2);
+    let dir = harness.recording_path.join(session_id.to_string());
+    assert_eq!(
+        ai_analyses(&dir),
+        json!([{ "fileName": "ai-analysis-0.slog" }]),
+        "one analysis per recording"
+    );
+}
+
+/// The AI analyses the manifest in `dir` lists.
+fn ai_analyses(dir: &Utf8Path) -> serde_json::Value {
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("recording.json")).expect("manifest")).expect("manifest JSON");
+    manifest["artifacts"]
+        .get("ai-analysis")
+        .cloned()
+        .unwrap_or_else(|| json!([]))
+}
+
+#[tokio::test]
 async fn the_analysis_is_in_the_language_of_the_request() {
     let harness = Harness::new().await;
     let session_id = harness.write_session();
@@ -954,7 +1028,12 @@ async fn the_analysis_is_in_the_language_of_the_request() {
     assert!(requests.lock().iter().all(|request| request.contains("`fr-CA`")));
 
     let other = harness
-        .start_in(task_id, session_id, settings, Some(Language::new("de-DE").expect("language")))
+        .start_in(
+            task_id,
+            session_id,
+            settings,
+            Some(Language::new("de-DE").expect("language")),
+        )
         .await
         .expect("started");
     assert!(
