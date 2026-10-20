@@ -1,7 +1,7 @@
 namespace Devolutions.AgentIdentity;
 
 /// <summary>
-/// The issued certificate whose public key is the key of an enroll request's CSR.
+/// The issued certificate whose public key is the key of an enroll or renew request's CSR.
 /// </summary>
 /// <remarks>
 /// The host finds it by the SPKI SHA-256 of the CSR key among every certificate the authority has issued:
@@ -45,9 +45,14 @@ public sealed class IssuedKeyMatch
     /// <summary>
     /// Creates the match of a certificate of an identity that the authority holds.
     /// </summary>
+    /// <remarks>
+    /// <see cref="RenewalRules.Decide"/> reads only the identity and the status,
+    /// since a renewal refuses any key of another identity, revoked or not.
+    /// </remarks>
     /// <param name="identityId">The identity that the certificate was issued to.</param>
     /// <param name="enrolledWithPresentedToken">
-    /// Whether the identity was enrolled with the token that the request presents.
+    /// Whether the identity was enrolled with the token that the request presents;
+    /// false for a renew request, which presents none.
     /// </param>
     /// <param name="identityRevoked">Whether the identity is revoked.</param>
     /// <param name="status">The status of the certificate.</param>
@@ -74,6 +79,8 @@ public sealed class IssuedKeyMatch
     /// so <see cref="EnrollmentRules.Decide"/> refuses the key with <c>identity_revoked</c> whatever token enrolled
     /// the identity.
     /// A deleted presented token gets <c>token_invalid</c> instead, since it authenticates nothing but a replay.
+    /// <see cref="RenewalRules.Decide"/> refuses the key with <c>invalid_request</c>, as it does any key of another
+    /// identity.
     /// </remarks>
     public static IssuedKeyMatch ForDeletedIdentity()
     {
