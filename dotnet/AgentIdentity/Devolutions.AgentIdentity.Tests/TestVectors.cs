@@ -71,7 +71,12 @@ public sealed record KeyVector(
 
 public sealed record RootVector(byte[] Certificate, string Thumbprint, byte[] PublicKeySec1);
 
-public sealed record CsrVector(byte[] Csr, string Expected, string? Description = null, byte[]? PublicKeySec1 = null);
+public sealed record CsrVector(
+    byte[] Csr,
+    string Expected,
+    string? Description = null,
+    byte[]? PublicKeySec1 = null,
+    byte[]? PrivateKeyPkcs8 = null);
 
 public sealed record HttpSignatureVectors(
     IReadOnlyList<RegisteredCertificateVector> Registered,
@@ -123,12 +128,14 @@ public sealed record HttpSignatureCaseVector(
 }
 
 /// <summary>
-/// The signature fields of a request, each a single field line; an absent field is null.
+/// The fields of a request, each a single field line; an absent field is null.
 /// </summary>
+/// <param name="ContentType">A field that the signature profile does not cover.</param>
 public sealed record HttpSignatureHeaders(
     [property: JsonPropertyName("signature-input")] string? SignatureInput = null,
     [property: JsonPropertyName("signature")] string? Signature = null,
-    [property: JsonPropertyName("content-digest")] string? ContentDigest = null);
+    [property: JsonPropertyName("content-digest")] string? ContentDigest = null,
+    [property: JsonPropertyName("content-type")] string? ContentType = null);
 
 /// <param name="Steps">Names of cases to run in order against one nonce store.</param>
 /// <param name="Expected">The outcome of each step, as in <see cref="HttpSignatureCaseVector.Expected"/>.</param>
