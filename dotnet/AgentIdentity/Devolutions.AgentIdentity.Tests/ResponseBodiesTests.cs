@@ -68,7 +68,7 @@ public class ResponseBodiesTests
     {
         byte[] body = ResponseBodies.TrustAnchor([VectorRoot]);
 
-        Dictionary<string, JsonElement> root = TestJson.Members(TestJson.Elements(TestJson.Members(body)["roots"])[0]);
+        Dictionary<string, JsonElement> root = TestJson.Members(Roots(body)[0]);
         Assert.Equal(TestVectors.Instance.Root.Certificate, TestJson.CanonicalBase64(root["certificate"]));
         Assert.Equal(TestVectors.Instance.Root.Thumbprint, root["thumbprint"].GetString());
     }
@@ -84,7 +84,7 @@ public class ResponseBodiesTests
 
         byte[] body = ResponseBodies.TrustAnchor([root]);
 
-        Dictionary<string, JsonElement> entry = TestJson.Members(TestJson.Elements(TestJson.Members(body)["roots"])[0]);
+        Dictionary<string, JsonElement> entry = TestJson.Members(Roots(body)[0]);
         Assert.Equal("2026-01-02T03:04:05Z", entry["not_before"].GetString());
         Assert.Equal("2036-07-08T13:10:11Z", entry["not_after"].GetString());
     }
@@ -97,7 +97,7 @@ public class ResponseBodiesTests
 
         byte[] body = ResponseBodies.TrustAnchor([VectorRoot, newRoot]);
 
-        JsonElement[] roots = TestJson.Elements(TestJson.Members(body)["roots"]);
+        JsonElement[] roots = Roots(body);
         Assert.Equal(
             [VectorRoot.RawData, newRoot.RawData],
             roots.Select(root => TestJson.CanonicalBase64(TestJson.Members(root)["certificate"])));
@@ -189,7 +189,7 @@ public class ResponseBodiesTests
     {
         byte[] body = ChainBodies[endpoint]([DeviceA, VectorRoot]);
 
-        JsonElement[] chain = TestJson.Elements(TestJson.Members(body)["certificate_chain"]);
+        JsonElement[] chain = Chain(body);
         Assert.Equal(
             [TestVectors.Instance.Key("device-a").Certificate, TestVectors.Instance.Root.Certificate],
             chain.Select(TestJson.CanonicalBase64));
@@ -202,7 +202,7 @@ public class ResponseBodiesTests
     {
         byte[] body = ChainBodies[endpoint]([DeviceA]);
 
-        JsonElement[] chain = TestJson.Elements(TestJson.Members(body)["certificate_chain"]);
+        JsonElement[] chain = Chain(body);
         Assert.Equal([TestVectors.Instance.Key("device-a").Certificate], chain.Select(TestJson.CanonicalBase64));
     }
 
@@ -263,6 +263,16 @@ public class ResponseBodiesTests
         Assert.Equal("7", config["revision"].GetRawText());
         Assert.Equal("https://host/dvls", config["agent_channel_url"].GetString());
         Assert.Equal("https://psu/channel", config["psu_channel_url"].GetString());
+    }
+
+    private static JsonElement[] Roots(byte[] body)
+    {
+        return TestJson.Elements(TestJson.Members(body)["roots"]);
+    }
+
+    private static JsonElement[] Chain(byte[] body)
+    {
+        return TestJson.Elements(TestJson.Members(body)["certificate_chain"]);
     }
 
     private static X509Certificate2 SelfSignedRoot(DateTimeOffset notBefore, DateTimeOffset notAfter)

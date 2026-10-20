@@ -27,7 +27,7 @@ public static class ResponseBodies
     /// <exception cref="ArgumentException"><paramref name="roots"/> is empty or holds null.</exception>
     public static byte[] TrustAnchor(IEnumerable<X509Certificate2> roots)
     {
-        X509Certificate2[] published = Certificates(roots, "root", nameof(roots));
+        X509Certificate2[] published = Certificates(roots, nameof(roots));
 
         return Write(writer =>
         {
@@ -142,22 +142,19 @@ public static class ResponseBodies
     }
 
     // Copies the certificates, so that the checks and the body see the same ones.
-    private static X509Certificate2[] Certificates(
-        IEnumerable<X509Certificate2> certificates,
-        string description,
-        string paramName)
+    private static X509Certificate2[] Certificates(IEnumerable<X509Certificate2> certificates, string paramName)
     {
         ArgumentNullException.ThrowIfNull(certificates, paramName);
         X509Certificate2[] copy = [.. certificates];
 
         if (copy.Length == 0)
         {
-            throw new ArgumentException($"There is no {description} certificate.", paramName);
+            throw new ArgumentException("There is no certificate.", paramName);
         }
 
         if (copy.Any(certificate => certificate is null))
         {
-            throw new ArgumentException($"A {description} certificate is null.", paramName);
+            throw new ArgumentException("A certificate is null.", paramName);
         }
 
         return copy;
@@ -165,7 +162,7 @@ public static class ResponseBodies
 
     private static X509Certificate2[] LeafFirstChain(IEnumerable<X509Certificate2> certificateChain)
     {
-        X509Certificate2[] chain = Certificates(certificateChain, "chain", nameof(certificateChain));
+        X509Certificate2[] chain = Certificates(certificateChain, nameof(certificateChain));
 
         // RFC 5280 §4.1.2.6: a CA encodes its subject exactly as the issuer of each certificate it issues,
         // so a chain in another order fails this comparison.
