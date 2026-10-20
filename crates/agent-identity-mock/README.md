@@ -66,7 +66,8 @@ A token's optional `config` object supplies product-specific fields to its enrol
 The mock uses a test-only unbounded push queue so config bursts cannot silently detach authenticated streams or discard termination messages.
 `POST __mock__/config` adds unknown fields so tests can check that agents preserve them.
 Only confirm promotes a pending certificate: old streams receive `Reconnect{reason:"certificate_rotated"}` and close with `OK` after 60 mock-clock seconds if still open.
-A stream awaiting `Hello` closes for revocation, deletion or its certificate's `notAfter` ahead of any handshake failure, checked at the latest when its `Hello` arrives or times out (§7.4).
+A stream awaiting `Hello` closes once the clock reaches its certificate's `notAfter`, and for revocation or deletion when its `Hello` arrives or times out (§7.4).
+These closures come ahead of any handshake failure, and revocation or deletion wins over expiry.
 A stream whose certificate is retired during that wait completes the handshake, then receives the same `Reconnect` and closes with `OK` 60 mock-clock seconds after it.
 The channel gRPC method is `POST <prefix>/devolutions.agent.channel.v1.AgentChannel/Connect` with `signature-input`/`signature` metadata (`tag="connect"`); open failures are gRPC statuses with `error-code` and `server-time` trailers (§7.4).
 

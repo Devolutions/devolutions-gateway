@@ -1336,24 +1336,32 @@ impl State {
 
     /// Re-evaluates stream expiry and rotation completion on each request and clock change.
     pub(crate) fn tick(&mut self, now: i64) {
+        // §7.4 applies revocation as well as `notAfter` to a stream awaiting `Hello`.
+        // The identity's state comes first.
         let expired_challenges = self
             .challenged_streams
             .iter()
-            .filter(|(_, stream)| {
-                self.lookup_cert(&stream.cert_thumbprint)
-                    .is_some_and(|cert| stream_expired(cert.not_after, now))
+            .filter_map(|(id, stream)| {
+                let cert = self
+                    .lookup_cert(&stream.cert_thumbprint)
+                    .filter(|cert| stream_expired(cert.not_after, now))?;
+                let reason = if cert.revoked {
+                    ("PERMISSION_DENIED", "identity_revoked", PushKind::CloseRevoked)
+                } else {
+                    ("UNAUTHENTICATED", "certificate_expired", PushKind::CloseExpired)
+                };
+                Some((*id, reason))
             })
-            .map(|(id, _)| *id)
             .collect::<Vec<_>>();
-        for stream_id in expired_challenges {
+        for (stream_id, (status, code, push)) in expired_challenges {
             if let Some(stream) = self.challenged_streams.remove(&stream_id) {
-                let _ = PushKind::CloseExpired.send(&stream.tx);
+                let _ = push.send(&stream.tx);
                 self.close_stream(
                     stream_id,
                     stream.identity_id,
                     &stream.cert_thumbprint,
-                    "UNAUTHENTICATED",
-                    Some("certificate_expired"),
+                    status,
+                    Some(code),
                 );
             }
         }

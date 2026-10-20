@@ -28,6 +28,9 @@ use crate::state::{State, StreamHandle, StreamPush, stream_expired};
 /// §7.3: the agent must answer the challenge within 10 s (real time).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How often a stream awaiting `Hello` checks its certificate's `notAfter`, well within one mock-clock second.
+const EXPIRY_CHECK_PERIOD: Duration = Duration::from_millis(250);
+
 #[derive(Clone)]
 pub(crate) struct ChannelService {
     pub(crate) app: Arc<App>,
@@ -221,6 +224,21 @@ fn awaiting_closure(
     Ok(cert.status)
 }
 
+/// The §7.4 closure due to a stream awaiting `Hello` once the clock reaches its certificate's `notAfter`.
+/// Revocation and deletion still win over expiry then, as [`awaiting_closure`] orders them.
+async fn expiry_closure(app: &App, identity_id: Uuid, cert_thumbprint: &str) -> Option<Rejection> {
+    let now = app.now();
+    let state = app.state.lock().await;
+    let expired = state
+        .lookup_cert(cert_thumbprint)
+        .is_some_and(|cert| stream_expired(cert.not_after, now));
+    if expired {
+        awaiting_closure(&state, identity_id, cert_thumbprint, now).err()
+    } else {
+        None
+    }
+}
+
 async fn close_opening_push(
     app: &App,
     out: &mpsc::Sender<Result<ServerMessage, Status>>,
@@ -290,14 +308,29 @@ async fn run_stream(
     }
 
     // Step 3: wait for the Hello, bound to this stream's challenge and the connect nonce.
-    let hello = tokio::select! {
-        result = tokio::time::timeout(HELLO_TIMEOUT, client.next()) => match result {
-            Ok(Some(Ok(message))) => Some(message),
-            Ok(Some(Err(_))) | Ok(None) | Err(_) => None,
-        },
-        push = push_rx.recv() => {
-            close_opening_push(&app, &out, stream_id, identity_id, &cert_thumbprint, push).await;
-            return;
+    // §7.4 closes the stream no later than `notAfter` even when no request applies the clock to the mock.
+    let mut expiry_check = tokio::time::interval(EXPIRY_CHECK_PERIOD);
+    expiry_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let hello = {
+        let hello_wait = tokio::time::timeout(HELLO_TIMEOUT, client.next());
+        tokio::pin!(hello_wait);
+        loop {
+            tokio::select! {
+                result = &mut hello_wait => break match result {
+                    Ok(Some(Ok(message))) => Some(message),
+                    Ok(Some(Err(_))) | Ok(None) | Err(_) => None,
+                },
+                push = push_rx.recv() => {
+                    close_opening_push(&app, &out, stream_id, identity_id, &cert_thumbprint, push).await;
+                    return;
+                }
+                _ = expiry_check.tick() => {
+                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint).await {
+                        close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
+                        return;
+                    }
+                }
+            }
         }
     };
     // §7.4: revocation, deletion and `notAfter` close a stream awaiting `Hello` ahead of the step 4 failures.
@@ -381,6 +414,12 @@ async fn run_stream(
                 message = client.next() => {
                     if message.is_none_or(|message| message.is_err()) {
                         finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
+                        return;
+                    }
+                }
+                _ = expiry_check.tick() => {
+                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint).await {
+                        close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
                         return;
                     }
                 }
@@ -1042,6 +1081,55 @@ mod tests {
         // Waiting past the 10 s `Hello` timeout costs nothing on tokio's paused clock.
         let closure = Seen::Closed(status.to_owned(), error_code.to_owned());
         assert_eq!(channel.drain(Duration::from_secs(11)).await?, [closure]);
+        Ok(())
+    }
+
+    /// CONTRACT.md §7.4: "A stream closes no later than its certificate's `notAfter`", which "also" applies "to a
+    /// stream still awaiting `Hello`", even when no request applies the clock to the mock.
+    #[tokio::test(start_paused = true)]
+    async fn stream_awaiting_hello_closes_at_not_after() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        enrolled.app.clock.freeze_at(enrolled.not_after - 1);
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        enrolled.app.clock.freeze_at(enrolled.not_after);
+
+        // Two seconds is well within the 10 s `Hello` timeout.
+        let closure = Seen::Closed("16".to_owned(), "certificate_expired".to_owned());
+        assert_eq!(channel.drain(Duration::from_secs(2)).await?, [closure]);
+        Ok(())
+    }
+
+    /// CONTRACT.md §7.4 applies revocation to a stream awaiting `Hello` as well as `notAfter`.
+    /// The identity's state comes before its certificate's, since `identity_revoked` is terminal (§5.4) where
+    /// `certificate_expired` asks for a renewal.
+    #[tokio::test(start_paused = true)]
+    async fn revocation_wins_over_not_after_for_a_stream_awaiting_hello() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        enrolled.app.clock.freeze_at(enrolled.not_before);
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        {
+            let mut state = enrolled.app.state.lock().await;
+            revoke(&enrolled, &mut state);
+            enrolled.app.clock.freeze_at(enrolled.not_after);
+            state.tick(enrolled.not_after);
+        }
+
+        let closure = Seen::Closed("7".to_owned(), "identity_revoked".to_owned());
+        assert_eq!(channel.drain(QUIET).await?, [closure]);
+        let state = enrolled.app.state.lock().await;
+        let closed = state
+            .events
+            .iter()
+            .rev()
+            .find(|event| event.body["type"] == "stream_closed");
+        assert_eq!(
+            closed.map(|event| &event.body["error_code"]),
+            Some(&Value::from("identity_revoked"))
+        );
         Ok(())
     }
 
