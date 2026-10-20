@@ -116,6 +116,7 @@ pub(super) fn open(dir: &Utf8Path, name: &str) -> anyhow::Result<Option<Box<dyn 
     };
     let metadata = file.metadata().with_context(|| format!("inspect key file {path}"))?;
     ensure!(metadata.file_type().is_file(), "key file is not a regular file");
+    ensure!(link_count(&file)? == 1, "key file has other hard links");
     #[cfg(unix)]
     ensure_owner_only(&metadata)?;
     #[cfg(target_os = "macos")]
@@ -382,6 +383,27 @@ fn wait_for_lock(deadline: Instant) -> anyhow::Result<()> {
     );
     std::thread::sleep(remaining.min(LOCK_RETRY_INTERVAL));
     Ok(())
+}
+
+#[cfg(unix)]
+fn link_count(file: &File) -> anyhow::Result<u64> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    Ok(file.metadata().context("inspect key file links")?.nlink())
+}
+
+#[cfg(windows)]
+fn link_count(file: &File) -> anyhow::Result<u64> {
+    use std::os::windows::io::AsRawHandle as _;
+
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
+
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    // SAFETY: The file handle is live and the output pointer is writable.
+    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut information) }
+        .context("inspect key file links")?;
+    Ok(u64::from(information.nNumberOfLinks))
 }
 
 #[cfg(unix)]
@@ -934,6 +956,21 @@ mod tests {
 
         assert!(open(&backend, &name)?.is_none());
         assert!(!retired.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn hard_linked_key_file_cannot_be_opened() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let real_name = new_key_name(TEST_PREFIX);
+        let alias = new_key_name(TEST_PREFIX);
+        generate(&backend, &real_name)?;
+        fs::hard_link(key_path(&directory.0, &real_name), key_path(&directory.0, &alias))?;
+        assert!(open(&backend, &alias).is_err());
+        assert!(open(&backend, &real_name).is_err());
+        fs::remove_file(key_path(&directory.0, &alias))?;
+        assert!(open(&backend, &real_name)?.is_some());
         Ok(())
     }
 
