@@ -24,7 +24,7 @@ rand = "0.10"
 rustls = { version = "0.23", default-features = false, features = ["logging", "ring", "std", "tls12"] }
 rustls-native-certs = "0.8"
 time = { version = "0.3", features = ["parsing"] }
-tokio = { version = "1.52", features = ["macros", "rt", "sync", "time"] }
+tokio = { version = "1.52", features = ["macros", "net", "rt", "sync", "time"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "ring", "tls12"] }
 tokio-stream = "0.1"
 tonic = { version = "0.12", default-features = false, features = ["codegen", "prost"] }

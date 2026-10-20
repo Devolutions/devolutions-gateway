@@ -1,5 +1,6 @@
 mod authority;
 mod proxy;
+mod socks;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -20,6 +21,7 @@ use tonic::{Code, Status};
 
 use self::authority::{Mode, Pki, TestAuthority, WAIT, vectors};
 use self::proxy::TestProxy;
+use self::socks::{SocksRequest, TestSocksProxy};
 use super::*;
 
 const CHANNEL_PROOF_DOMAIN: &[u8] = b"devolutions-agent-identity/v1/channel-proof";
@@ -817,12 +819,42 @@ async fn connects_directly_to_a_host_the_proxy_excludes() -> anyhow::Result<()> 
     Ok(())
 }
 
+#[rstest]
+#[case::socks5("socks5://agent%40corp:p%3Ass@", Some(("agent@corp", "p:ss")), None)]
+#[case::socks5h("socks5h://", None, Some("localhost"))]
 #[tokio::test]
-async fn a_socks_proxy_is_an_outage_without_a_connection() -> anyhow::Result<()> {
+async fn tunnels_through_a_socks5_proxy_resolving_the_name_where_its_scheme_says(
+    #[case] proxy_prefix: &str,
+    #[case] credentials: Option<(&str, &str)>,
+    #[case] domain: Option<&str>,
+) -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let proxy = TestSocksProxy::start().await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut url = authority.url.clone();
+    url.set_host(Some("localhost"))?;
+    let proxy_config = manual_proxy(&format!("{proxy_prefix}{}", proxy.host), &[])?;
+    let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
+    let mut channel = client.connect(identity.target(&url))?;
+    authority.next_opening().await.accept().authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    // reqwest, which sends the agent's identity requests, resolves the name locally for `socks5` and leaves it to the
+    // proxy for `socks5h`.
+    let expected = SocksRequest {
+        credentials: credentials.map(|(user, password)| (user.to_owned(), password.to_owned())),
+        domain: domain.map(str::to_owned),
+    };
+    assert_eq!(proxy.requests(), [expected]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn an_unsupported_proxy_scheme_is_an_outage_without_a_connection() -> anyhow::Result<()> {
     let authority = TestAuthority::start(Mode::Grpc).await?;
     let proxy = TestProxy::start(None).await?;
     let identity = Identity::from_vectors("device-a")?;
-    let proxy_config = manual_proxy(&format!("socks5://{}", proxy.host), &[])?;
+    let proxy_config = manual_proxy(&format!("ftp://{}", proxy.host), &[])?;
     let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
     let mut channel = client.connect(identity.target(&authority.url))?;
 
