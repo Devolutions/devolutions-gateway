@@ -398,8 +398,7 @@ paths:
       description: |-
         Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a
         new log, listed under `artifacts.ai-analysis` in its manifest.
-        The answer is in the `locale` the producer writes on the `session.start` of its first events log; without one, it is
-        in the default language of the AI analysis.
+        The answer is in the `language` of the request, English without one.
         The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
         which the `Location` header of a 202 answer names.
 
@@ -443,7 +442,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskInfo'
         '400':
-          description: Invalid request body or AI settings
+          description: Invalid request body, AI settings or language
         '401':
           description: Invalid or missing authorization token
         '403':
@@ -1618,6 +1617,12 @@ components:
           type: string
           description: Endpoint of the provider API, kept in memory only; required for `openai-compatible`.
           nullable: true
+        language:
+          type: string
+          description: Language the AI writes in, any text of 1 to 10 characters such as `fr-CA` or `français`; English when absent.
+          nullable: true
+          maxLength: 10
+          minLength: 1
         maxOutputTokens:
           type: integer
           format: int32
@@ -1672,7 +1677,9 @@ components:
           description: Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
         promptVersion:
           type: string
-          description: Versions of the prompts that wrote the log, such as `session-actions-4+session-summary-1`.
+          description: |-
+            Versions of the prompts that wrote the log, such as
+            `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
         usage:
           allOf:
           - $ref: '#/components/schemas/AiAnalysisUsage'

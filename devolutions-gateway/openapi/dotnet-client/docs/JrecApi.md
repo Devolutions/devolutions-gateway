@@ -728,7 +728,7 @@ catch (ApiException e)
 
 Starts an AI analysis of a recorded session
 
-Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under `artifacts.ai-analysis` in its manifest. The answer is in the `locale` the producer writes on the `session.start` of its first events log; without one, it is in the default language of the AI analysis. The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`, which the `Location` header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from scratch: it removes the earlier AI analysis of the session, even a succeeded one, so a session holds at most one. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a new log, listed under `artifacts.ai-analysis` in its manifest. The answer is in the `language` of the request, English without one. The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`, which the `Location` header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from scratch: it removes the earlier AI analysis of the session, even a succeeded one, so a session holds at most one. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
 
 ### Example
 ```csharp
@@ -820,7 +820,7 @@ catch (ApiException e)
 |-------------|-------------|------------------|
 | **200** | The same request came in before; nothing new starts |  -  |
 | **202** | The AI analysis Task is created and runs in the background |  * Location - Path of the new Task, &#x60;/jet/jrec/{session_id}/ai-analysis/{task_id}&#x60; <br>  |
-| **400** | Invalid request body or AI settings |  -  |
+| **400** | Invalid request body, AI settings or language |  -  |
 | **401** | Invalid or missing authorization token |  -  |
 | **403** | Insufficient permissions |  -  |
 | **404** | The session has no recording |  -  |
