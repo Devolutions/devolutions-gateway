@@ -158,20 +158,20 @@ The tests also check the library against the shared vectors in `docs/agent-ident
 The package depends on `Devolutions.Agent.Channel`, the gRPC types generated from the channel schema (CONTRACT.md [§7.1]): the handshake takes its `AgentMessage` and returns its `ServerMessage`.
 Implement the `AgentChannel` service with that package; a feed that serves this package must serve that one too.
 
-[contract]: ../../docs/agent-identity/CONTRACT.md
+[contract]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md
 [repo]: https://github.com/Devolutions/devolutions-gateway
-[§2.1]: ../../docs/agent-identity/CONTRACT.md#21-authority-behavior
-[§5.1]: ../../docs/agent-identity/CONTRACT.md#51-get-trust-anchor
-[§5.2]: ../../docs/agent-identity/CONTRACT.md#52-post-enroll
-[§5.3]: ../../docs/agent-identity/CONTRACT.md#53-post-renew
-[§5.4]: ../../docs/agent-identity/CONTRACT.md#agent-identity-errors
-[§5.5]: ../../docs/agent-identity/CONTRACT.md#55-post-confirm
-[§5.6]: ../../docs/agent-identity/CONTRACT.md#56-post-check-in-http-fallback
-[§6]: ../../docs/agent-identity/CONTRACT.md#agent-identity-signatures
-[§7.1]: ../../docs/agent-identity/CONTRACT.md#71-service
-[§7.3]: ../../docs/agent-identity/CONTRACT.md#73-sequence
-[§7.4]: ../../docs/agent-identity/CONTRACT.md#74-termination
-[§8.2]: ../../docs/agent-identity/CONTRACT.md#82-server-certificate-state
-[§8.3]: ../../docs/agent-identity/CONTRACT.md#83-root-rotation
-[invariants]: ../../docs/agent-identity/INTENT.agent-identity.md#security-invariants
+[§2.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#21-authority-behavior
+[§5.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#51-get-trust-anchor
+[§5.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#52-post-enroll
+[§5.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#53-post-renew
+[§5.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#agent-identity-errors
+[§5.5]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#55-post-confirm
+[§5.6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#56-post-check-in-http-fallback
+[§6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#agent-identity-signatures
+[§7.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#71-service
+[§7.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#73-sequence
+[§7.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#74-termination
+[§8.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#82-server-certificate-state
+[§8.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#83-root-rotation
+[invariants]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/INTENT.agent-identity.md#security-invariants
 [errors]: #errors
