@@ -109,8 +109,12 @@ impl AppCredential {
 /// It assumes DVLS's lifetime until the target refuses a younger token, whose age then bounds the lifetime.
 pub(crate) struct Session {
     credential: AppCredential,
+    /// Where token ages are read from.
+    clock: Clock,
     state: tokio::sync::Mutex<SessionState>,
 }
+
+type Clock = Box<dyn Fn() -> Instant + Send + Sync>;
 
 struct SessionState {
     login: Option<Login>,
@@ -128,8 +132,13 @@ struct Login {
 // When changing a message here, report only the target's URL, ages, lifetimes and HTTP statuses.
 impl Session {
     pub(crate) fn new(credential: AppCredential) -> Self {
+        Self::with_clock(credential, Box::new(Instant::now))
+    }
+
+    fn with_clock(credential: AppCredential, clock: Clock) -> Self {
         Self {
             credential,
+            clock,
             state: tokio::sync::Mutex::new(SessionState {
                 login: None,
                 lifetime: SESSION_LIFETIME,
@@ -141,7 +150,7 @@ impl Session {
     async fn token_id(&self, target: &Target, refused: Option<&str>) -> anyhow::Result<String> {
         let mut state = self.state.lock().await;
         if let Some(login) = &state.login {
-            let age = login.at.elapsed();
+            let age = (self.clock)().saturating_duration_since(login.at);
             // A tenth of the lifetime leaves a request time to arrive before its token expires: 42 s of DVLS's 7 minutes, beyond the HTTP client's 8 s timeout.
             let fresh = age < state.lifetime - state.lifetime / 10;
             if refused == Some(login.token_id.as_str()) {
@@ -175,7 +184,7 @@ impl Session {
             #[serde(rename = "tokenId")]
             token_id: Option<String>,
         }
-        let at = Instant::now();
+        let at = (self.clock)();
         let response = target
             .http
             .post(format!("{}{LOGIN_PATH}", target.base_url))
@@ -280,7 +289,6 @@ pub(crate) fn refusal<T>(result: anyhow::Result<T>) -> anyhow::Result<Refusal> {
 /// The refusal an unsuccessful `status` stands for, once its body is the error body the status documents.
 ///
 /// A 400 carries a `PublicApiValidationError`, and every other documented refusal a `PublicApiError`.
-/// DVLS answers a request without a `tokenId` with a 401 and no body, so a 401 may have none.
 fn refusal_from(status: u16, body: &[u8]) -> anyhow::Result<Refusal> {
     // The document's error bodies are objects whose members are all optional and limited to the schema's own:
     // `errors` is an array of field errors, and every other member is a string or null.
@@ -298,9 +306,6 @@ fn refusal_from(status: u16, body: &[u8]) -> anyhow::Result<Refusal> {
         })
     }
     let refusal = Refusal::from_status(status);
-    if refusal == Refusal::Unauthenticated && body.is_empty() {
-        return Ok(refusal);
-    }
     let body = || serde_json::from_slice::<Value>(body).ok();
     let (documented, schema) = match refusal {
         Refusal::Other(_) => return Ok(refusal),
@@ -879,7 +884,14 @@ impl<'a> Management<'a> {
     /// When the target refuses a session's token, the session logs in again and the request is sent once more.
     async fn request(&self, method: Method, path: &str, body: Option<&[u8]>, success: u16) -> anyhow::Result<Value> {
         let (status, bytes) = match self.credential {
-            Credential::Absent => self.send(&method, path, body, None).await?,
+            Credential::Absent => {
+                let (status, bytes) = self.send(&method, path, body, None).await?;
+                // DVLS answers a request without a token with a 401 and no body, unlike the `PublicApiError` its document gives every 401.
+                if status == 401 && bytes.is_empty() {
+                    return Err(Refusal::Unauthenticated.into());
+                }
+                (status, bytes)
+            }
             Credential::TokenId(token_id) => self.send(&method, path, body, Some(token_id)).await?,
             Credential::Session(session) => {
                 let token_id = session.token_id(self.target, None).await?;
@@ -1318,14 +1330,7 @@ mod tests {
             (409, r#"{"message":42}"#, None),
             (409, r#"["not an object"]"#, None),
             (403, r#"{"errors":[{"field":null,"message":"forbidden"}]}"#, None),
-            (
-                401,
-                r#"{"message":"Missing or invalid token"}"#,
-                Some(Refusal::Unauthenticated),
-            ),
-            // DVLS answers a request without a `tokenId` with a 401 and no body, which only a 401 may have.
-            (401, "", Some(Refusal::Unauthenticated)),
-            (403, "", None),
+            (401, "", None),
         ] {
             assert_eq!(
                 refusal_from(status, body.as_bytes()).ok(),
@@ -1390,7 +1395,7 @@ mod tests {
         let target = stub.start().await?;
         let management = target.management();
         management.settings().await?;
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        stub.advance(Duration::from_secs(60));
         stub.expire_tokens();
         management.settings().await?;
         management.settings().await?;
@@ -1404,7 +1409,7 @@ mod tests {
             "a fresh token was not reused"
         );
         // The stub never expires this token, so only the session's own lifetime makes it log in again.
-        tokio::time::sleep(Duration::from_millis(800)).await;
+        stub.advance(Duration::from_secs(60) - Duration::from_millis(1));
         management.settings().await?;
         assert_eq!(
             stub.counts(),
@@ -1413,7 +1418,41 @@ mod tests {
                 reads: 5,
                 refused: 1
             },
-            "a token older than the refused one was not replaced before use"
+            "a token about to reach the age of the refused one was not replaced"
+        );
+        Ok(())
+    }
+
+    /// DVLS answers a request without a token with a 401 and no body.
+    #[tokio::test]
+    async fn request_without_a_token_is_unauthenticated_by_a_bodyless_401() -> anyhow::Result<()> {
+        let stub = Stub::default();
+        let target = stub.start().await?;
+        assert_eq!(
+            refusal(target.management_as(Credential::Absent).settings().await)?,
+            Refusal::Unauthenticated
+        );
+        Ok(())
+    }
+
+    /// DVLS answers a request with a token it refuses with a `PublicApiError`, so a body-less 401 to one is malformed, though a session still logs in again on it first.
+    #[tokio::test]
+    async fn session_logs_in_again_on_a_bodyless_401_then_rejects_it() -> anyhow::Result<()> {
+        let stub = Stub::default();
+        stub.refuse_every_token();
+        stub.refuse_without_body();
+        let target = stub.start().await?;
+        assert!(
+            refusal(target.management().settings().await).is_err(),
+            "a body-less 401 to a request with a token was taken as a refusal"
+        );
+        assert_eq!(
+            stub.counts(),
+            Counts {
+                logins: 2,
+                reads: 2,
+                refused: 2
+            }
         );
         Ok(())
     }
@@ -1427,12 +1466,15 @@ mod tests {
         counts: Counts,
         open: Vec<String>,
         refuse_every_token: bool,
+        refuse_without_body: bool,
+        /// How far the test moved the clock of the session under test.
+        elapsed: Duration,
     }
 
     #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
     struct Counts {
         logins: u32,
-        /// Settings reads, accepted or refused.
+        /// Settings reads with a token, accepted or refused.
         reads: u32,
         refused: u32,
     }
@@ -1441,7 +1483,7 @@ mod tests {
         const KEY: &str = "stub-key";
         const SECRET: &str = "stub-secret";
 
-        /// Serves on a loopback port, and returns a target whose session logs in with the stub's key and secret.
+        /// Serves on a loopback port, and returns a target whose session logs in with the stub's key and secret, on a clock that moves only with `advance`.
         async fn start(&self) -> anyhow::Result<Target> {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
             let base_url = format!("http://{}", listener.local_addr()?);
@@ -1451,16 +1493,24 @@ mod tests {
                     tokio::spawn(stub.clone().serve(stream));
                 }
             });
+            let stub = self.clone();
+            let start = Instant::now();
+            let clock = Box::new(move || start + stub.state().elapsed);
             Ok(Target {
                 base_url,
-                session: Arc::new(Session::new(AppCredential::new(
-                    Self::KEY.to_owned(),
-                    Self::SECRET.to_owned(),
-                ))),
+                session: Arc::new(Session::with_clock(
+                    AppCredential::new(Self::KEY.to_owned(), Self::SECRET.to_owned()),
+                    clock,
+                )),
                 ca_path: None,
                 authority_id: None,
                 http: reqwest::Client::builder().no_proxy().build()?,
             })
+        }
+
+        /// Moves the session's clock forward.
+        fn advance(&self, by: Duration) {
+            self.state().elapsed += by;
         }
 
         /// Closes every open token, as their expiry would.
@@ -1470,6 +1520,10 @@ mod tests {
 
         fn refuse_every_token(&self) {
             self.state().refuse_every_token = true;
+        }
+
+        fn refuse_without_body(&self) {
+            self.state().refuse_without_body = true;
         }
 
         fn counts(&self) -> Counts {
@@ -1535,10 +1589,15 @@ mod tests {
                 return (200, json!({ "tokenId": token_id }).to_string());
             }
             if request_line.starts_with(&format!("GET {BASE_PATH}/settings ")) {
+                let Some(token_id) = token_id else {
+                    return (401, String::new());
+                };
                 state.counts.reads += 1;
-                let open = token_id.is_some_and(|token_id| state.open.contains(&token_id));
-                if !open || state.refuse_every_token {
+                if !state.open.contains(&token_id) || state.refuse_every_token {
                     state.counts.refused += 1;
+                    if state.refuse_without_body {
+                        return (401, String::new());
+                    }
                     return (401, json!({ "message": "Missing or invalid token" }).to_string());
                 }
                 let settings = json!({

@@ -197,10 +197,11 @@ impl Default for Options {
 }
 
 impl Options {
-    fn parse() -> anyhow::Result<Self> {
+    /// Reads the runner's arguments, without the program name.
+    fn parse(args: impl IntoIterator<Item = String>) -> anyhow::Result<Self> {
         let mut options = Self::default();
-        let mut args = env::args().skip(1);
-        while let Some(flag) = args.next() {
+        let mut args = args.into_iter().zip(1..);
+        while let Some((flag, position)) = args.next() {
             if flag == "--list" {
                 options.list = true;
                 continue;
@@ -217,43 +218,49 @@ impl Options {
                 options.expect_channel = false;
                 continue;
             }
-            let value = args.next().with_context(|| format!("missing value for {flag}"))?;
+            // An argument that is not a known flag may be a misplaced secret, so errors name only known flags.
+            let mut value = || {
+                args.next()
+                    .map(|(value, _)| value)
+                    .with_context(|| format!("missing value for {flag}"))
+            };
             match flag.as_str() {
                 "--target" => {
-                    options.target = Some(match value.as_str() {
+                    options.target = Some(match value()?.as_str() {
                         "mock" => TargetKind::Mock,
                         "dvls" => TargetKind::Dvls,
                         _ => anyhow::bail!("unknown target"),
                     });
                 }
-                "--base-url" => options.base_url = Some(value),
-                "--app-key" => options.app_key = Some(value),
-                "--app-secret" => options.app_secret = Some(value),
-                "--authority-id" => options.authority_id = Some(value),
-                "--agent-bin" => options.agent_bin = Some(value.into()),
+                "--base-url" => options.base_url = Some(value()?),
+                "--app-key" => options.app_key = Some(value()?),
+                "--app-secret" => options.app_secret = Some(value()?),
+                "--authority-id" => options.authority_id = Some(value()?),
+                "--agent-bin" => options.agent_bin = Some(value()?.into()),
                 "--agent-version" => {
-                    ensure!(!value.is_empty(), "--agent-version must not be empty");
-                    options.agent_version = Some(value);
+                    let version = value()?;
+                    ensure!(!version.is_empty(), "--agent-version must not be empty");
+                    options.agent_version = Some(version);
                 }
-                "--extra-trusted-root" => options.ca_path = Some(value.into()),
-                "--second-base-url" => options.second_base_url = Some(value),
-                "--second-app-key" => options.second_app_key = Some(value),
-                "--second-app-secret" => options.second_app_secret = Some(value),
-                "--second-authority-id" => options.second_authority_id = Some(value),
-                "--second-extra-trusted-root" => options.second_ca_path = Some(value.into()),
-                "--unprivileged-app-key" => options.unprivileged_app_key = Some(value),
-                "--unprivileged-app-secret" => options.unprivileged_app_secret = Some(value),
+                "--extra-trusted-root" => options.ca_path = Some(value()?.into()),
+                "--second-base-url" => options.second_base_url = Some(value()?),
+                "--second-app-key" => options.second_app_key = Some(value()?),
+                "--second-app-secret" => options.second_app_secret = Some(value()?),
+                "--second-authority-id" => options.second_authority_id = Some(value()?),
+                "--second-extra-trusted-root" => options.second_ca_path = Some(value()?.into()),
+                "--unprivileged-app-key" => options.unprivileged_app_key = Some(value()?),
+                "--unprivileged-app-secret" => options.unprivileged_app_secret = Some(value()?),
                 "--expect-channel" => {
-                    options.expect_channel = value.parse().context("--expect-channel must be true or false")?
+                    options.expect_channel = value()?.parse().context("--expect-channel must be true or false")?
                 }
                 "--leaf-lifetime-secs" => {
-                    options.leaf_lifetime_secs = value
+                    options.leaf_lifetime_secs = value()?
                         .parse()
                         .context("--leaf-lifetime-secs must be a positive integer")?;
                     ensure!(options.leaf_lifetime_secs > 0, "--leaf-lifetime-secs must be positive");
                 }
                 "--dvls-rotation-window-secs" => {
-                    options.dvls_rotation_window_secs = value
+                    options.dvls_rotation_window_secs = value()?
                         .parse()
                         .context("--dvls-rotation-window-secs must be a positive integer")?;
                     ensure!(
@@ -262,15 +269,15 @@ impl Options {
                     );
                 }
                 "--key-backend" => {
-                    options.key_backend = match value.as_str() {
+                    options.key_backend = match value()?.as_str() {
                         "windows-software-provider" => KeyBackend::WindowsSoftwareProvider,
                         "file" => KeyBackend::File,
                         _ => anyhow::bail!("unknown key backend"),
                     };
                 }
-                "--work-dir" => options.work_dir = value.into(),
-                "--filter" => options.filter = value,
-                _ => anyhow::bail!("unknown flag {flag}"),
+                "--work-dir" => options.work_dir = value()?.into(),
+                "--filter" => options.filter = value()?,
+                _ => anyhow::bail!("argument {position} is not a known flag"),
             }
         }
         Ok(options)
@@ -394,7 +401,7 @@ async fn run() -> anyhow::Result<()> {
         ensure!(args.next().is_none(), "--system-probe accepts exactly two paths");
         return system_probe::run(&request, &result);
     }
-    let options = Options::parse()?;
+    let options = Options::parse(env::args().skip(1))?;
     let selected: Vec<&Test> = TESTS
         .iter()
         .filter(|test| test.name.contains(&options.filter))
@@ -800,3 +807,42 @@ const TESTS: &[Test] = &[
     a!(a_rotation_migrates_through_check_in, mock_only),
     a!(a_rotation_migrates_on_schedule, mock_only),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A usage error lands in CI logs, so a credential given in a form the runner does not take, such as `--app-secret=<secret>` or a stray argument, must not appear in it.
+    #[test]
+    fn usage_errors_never_echo_a_credential() {
+        let secret = "synthetic-credential";
+        let mut cases: Vec<Vec<String>> = [
+            "--app-key",
+            "--app-secret",
+            "--second-app-key",
+            "--second-app-secret",
+            "--unprivileged-app-key",
+            "--unprivileged-app-secret",
+        ]
+        .into_iter()
+        .flat_map(|flag| {
+            let joined = format!("{flag}={secret}");
+            [vec![joined.clone()], vec![joined, "--list".to_owned()]]
+        })
+        .collect();
+        cases.push(vec!["--app-key".to_owned(), "key".to_owned(), secret.to_owned()]);
+        cases.push(vec![
+            "--app-key".to_owned(),
+            "key".to_owned(),
+            secret.to_owned(),
+            "--list".to_owned(),
+        ]);
+        for args in cases {
+            let error = Options::parse(args.clone()).err().map(|error| format!("{error:#}"));
+            assert!(
+                error.as_ref().is_some_and(|error| !error.contains(secret)),
+                "{args:?} gave {error:?}"
+            );
+        }
+    }
+}
