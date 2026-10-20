@@ -107,7 +107,8 @@ pub enum Progress {
     Reading { read_bytes: u64, total_bytes: u64 },
     /// Asking the AI: chunks already described, out of all chunks.
     ///
-    /// Sent before each chunk, then once all are described.
+    /// Sent before each chunk, then once all are described. That last event also covers the summary request, which
+    /// follows when the chunks have actions.
     Describing {
         described_chunks: usize,
         total_chunks: usize,
