@@ -25,7 +25,7 @@ Keep a coverage record beside the suite: which test checks each clause, which cl
 
 ## Review and merge
 
-The reviewer runs `test-reviewer` where provided and checks the contract against the coverage record both ways: every clause has a test or a recorded gap, every test cites its clause.
+The reviewer runs `test-reviewer` and checks the contract against the coverage record both ways: every clause has a test or a recorded gap, every test cites its clause.
 Write the suite before the implementation; merge it once one implementation runs it green, so a test no conforming implementation can pass is found before it binds every later one.
 
 ## Read-only during implementation
