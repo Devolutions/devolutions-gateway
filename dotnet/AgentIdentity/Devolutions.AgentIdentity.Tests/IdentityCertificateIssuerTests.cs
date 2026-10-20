@@ -321,6 +321,53 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Throws<ArgumentException>(() => Issue(root: root));
     }
 
+    // INTENT.md: code that acts for an identity takes the identity that the signature check produced.
+    // The renew request is signed by device-a, whose identity ID the vector file gives.
+    [Fact]
+    public async Task RenewalCertifiesTheKeyOfTheCsrForTheIdentityThatSignedTheRenewRequest()
+    {
+        Assert.Equal(Guid.Parse(IdentityIdText), TestVectors.Instance.Key("device-a").IdentityId);
+        AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
+
+        using X509Certificate2 leaf = IssueForRenewal(renewing);
+
+        Assert.Equal($"CN={IdentityIdText}", leaf.Subject);
+        Assert.Equal(_agentKey.ExportSubjectPublicKeyInfo(), leaf.PublicKey.ExportSubjectPublicKeyInfo());
+    }
+
+    // An identity that proved its key for another operation never had a renew request accepted for it.
+    [Theory]
+    [InlineData(AgentOperation.Confirm)]
+    [InlineData(AgentOperation.CheckIn)]
+    [InlineData(AgentOperation.Connect)]
+    public async Task RenewalThrowsForAnIdentityAuthenticatedForAnotherOperation(AgentOperation operation)
+    {
+        AuthenticatedIdentity identity = await TestIdentity.AuthenticateAsync(operation);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => IssueForRenewal(identity));
+
+        Assert.Equal("renewing", exception.ParamName);
+    }
+
+    [Fact]
+    public void RenewalThrowsForANullIdentity()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => IssueForRenewal(null!));
+
+        Assert.Equal("renewing", exception.ParamName);
+    }
+
+    private X509Certificate2 IssueForRenewal(AuthenticatedIdentity renewing)
+    {
+        return IdentityCertificateIssuer.Issue(
+            renewing,
+            _csr,
+            new TestRootSigner(_root, _rootKey),
+            Lifetime,
+            new FixedTimeProvider(Now),
+            _random);
+    }
+
     private X509Certificate2 Issue(
         TimeSpan? lifetime = null,
         TimeProvider? clock = null,
