@@ -15,6 +15,7 @@
 - When the configured device-key backend is unavailable on the machine, the identity feature fails loudly: it logs an error and a system event, and stops before it processes any pending-enrollment file or identity.
   The rest of the agent keeps running, and the agent never falls back to another backend, because a different backend would silently weaken or change where the device's keys live.
 - When the authority permanently rejects an identity (the terminal outcomes of the contract's error section), the agent records the rejection and never renews or reconnects for that identity again; the agent can't observe revocation any other way.
+  It keeps the identity's keys and slots, so the identity file stays the record of every key it owns, until a new identity replaces it or the agent is uninstalled.
   Only an enrollment with a different token replaces a rejected identity.
 - When an identity's current key no longer exists in its key store, the agent records the identity as rejected with the code `key_lost` instead of deleting it, so the same token stays a no-op and recovery needs a different token, as after a revocation.
 
@@ -24,8 +25,8 @@
 - A transient failure is retried after `2^n` seconds for the `n`-th consecutive failure, multiplied by a jitter drawn uniformly from `[0.5, 1.5]`, waiting at least a `Retry-After` delay when the authority sends one, and never longer than 1 h.
   Retry state lives in memory, so a restart retries at once.
 - Check-in runs only while the identity has no authenticated stream:
-  - without `config.agent_channel_url`, at service start and then every 24 h ±10%;
-  - with `config.agent_channel_url` but no stream authenticated for 1 h, once, and then every 24 h ±10% until a stream authenticates.
+  - without `config.agent_channel_url`, when the identity's runner starts (at service start or after a new enrollment), and then every 24 h ±10%;
+  - with `config.agent_channel_url` but no stream authenticated for 1 h, counted from the runner's start or from the last check-in or `ConfigUpdate` that added or changed the URL, once, and then every 24 h ±10% until a stream authenticates.
 
 ## Local state
 
@@ -100,7 +101,7 @@ The location and format of the files below are stable, because the conformance t
 ```
 
 - `rejected` is absent until the authority rejects the identity permanently or its current key is lost; `code` is the error code that rejected it, or `key_lost`.
-- `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists only between a successful `confirm` and the deletion of the old key, for crash safety.
+- `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists between a successful `confirm` and the deletion of the old key, for crash safety, and during pending-key recovery, when it holds the expired pending key until the next `confirm` succeeds.
 - `config` is stored as received, including unknown fields, and replaced only by a higher `revision`.
 - Key names are device-key names `devolutions-agent-identity_<key_uuid>`: Agent Identity owns the prefix `devolutions-agent-identity`, and `key_uuid` is a random UUID generated with each key, because the authority isn't known when the enrollment key is created.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
@@ -110,6 +111,8 @@ The location and format of the files below are stable, because the conformance t
 - One Devolutions Agent runs per machine, and it owns every device key with its prefix on the machine: at start-up it deletes each one that no `identity.json` or in-progress record names, across the whole key store.
 - During a renewal, the new key is recorded as `pending` before the renew request is sent, and the returned chain is stored on that slot.
   When `confirm` succeeds, `pending` becomes `current` and the old key moves to `previous` until it is deleted.
-- During pending-key recovery (contract §8.1), the agent keeps the expired pending key and the current key until the fresh pending certificate is confirmed, because either may still have to sign the recovery renewal; it deletes the expired pending key after the next `confirm` succeeds.
-- If a pending key is unusable locally, the agent deletes the key and its slot before renewing with a fresh key.
+- During pending-key recovery (contract §8.1), the expired pending key moves to `previous` and the fresh key is recorded as `pending`, so that a restart resumes the recovery from the file.
+  The agent keeps the expired pending key and the current key until the fresh pending certificate is confirmed, because either may still have to sign the recovery renewal; once the next `confirm` succeeds, it deletes the expired pending key, then promotes as usual.
+- If a pending key is unusable locally (missing from its store, refused when opened, or not matching the pending certificate's public key), the agent deletes the key and its slot before renewing with a fresh key.
+  A failure to sign is not unusable: it is transient and retried.
 - Writes are atomic: write a temporary file, then rename it.

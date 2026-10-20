@@ -385,13 +385,14 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
 
 #### Failure handling
 
+- The agent never checks a certificate's validity itself; it sends the request, and the server's answer decides whether a certificate is unexpired or within grace, because the server's clock is the one that counts.
 - On a transient `renew` or `confirm` error, the agent retries with backoff while the old certificate and stream remain in use.
 - `certificate_expired` on `confirm` means the pending certificate expired before it was confirmed.
   The agent cannot know whether an earlier `confirm` succeeded after a lost response, so it renews **signed with the pending key**; the server accepts a pending or current certificate within its renewal grace, whichever state it holds.
   - On success, the agent continues at step 3 with the new pending certificate.
   - On `certificate_expired` beyond grace, the identity is terminal (§5.4).
-  - On `identity_unknown`, the server holds neither certificate, so the agent retries the same renewal signed with the old current key while that certificate remains within grace.
-- If the agent can't use its pending key, it renews with a fresh key signed by the current certificate while that certificate is valid or within renewal grace.
+  - On `identity_unknown`, the server holds neither certificate, so the agent retries the same renewal signed with the old current key; `certificate_expired` on that retry is terminal.
+- If the agent can't use its pending key, it renews with a fresh key signed by the current certificate.
   Issuing the new pending certificate retires the previous pending certificate as specified in §5.3.
 - Otherwise, `identity_revoked` and `identity_unknown` are terminal (§5.4).
 
