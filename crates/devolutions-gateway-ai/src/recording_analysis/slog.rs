@@ -1,6 +1,4 @@
 //! Writes AI actions as a Session Recording Log (`.slog`): one JSON object per line, in the shipped schema.
-//!
-//! Every line says `"source":"ai"`, so a caller showing it next to the recorder's events log can tell the two apart.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -24,8 +22,13 @@ struct Line<'a> {
 #[derive(Serialize)]
 #[serde(tag = "event")]
 enum Event<'a> {
-    #[serde(rename = "session.start")]
-    Start { description: &'static str },
+    #[serde(rename = "session.start", rename_all = "camelCase")]
+    Start {
+        description: &'static str,
+        model: &'a str,
+        prompt_version: &'a str,
+        language: &'a str,
+    },
     #[serde(rename = "session.action")]
     Action {
         description: &'a str,
@@ -48,6 +51,15 @@ enum Source {
     Ai,
 }
 
+/// What `session.start` says about the session and the analysis.
+pub(super) struct LogHeader<'a> {
+    /// Unix seconds.
+    pub(super) start_time: i64,
+    pub(super) model: &'a str,
+    pub(super) prompt_version: &'a str,
+    pub(super) language: &'a str,
+}
+
 /// Writes the log of a session entry by entry, so the actions never have to be all in memory.
 pub(super) struct SlogWriter<W> {
     out: W,
@@ -56,21 +68,22 @@ pub(super) struct SlogWriter<W> {
 }
 
 impl<W: std::io::Write> SlogWriter<W> {
-    /// Writes `session.start` for a session that started at `start_time` (unix seconds).
-    ///
-    /// The model and the prompt versions stay out of the log: they belong with the result of the analysis.
-    pub(super) fn start(out: W, start_time: i64) -> anyhow::Result<Self> {
+    /// Writes `session.start`, naming the model, the versions of the prompts and the language of the analysis.
+    pub(super) fn start(out: W, header: LogHeader<'_>) -> anyhow::Result<Self> {
         let mut writer = Self {
             out,
-            start_time,
+            start_time: header.start_time,
             seq: 0,
         };
 
-        let timestamp = timestamp(start_time, Duration::ZERO)?;
+        let timestamp = timestamp(header.start_time, Duration::ZERO)?;
         writer.write(
             timestamp,
             Event::Start {
                 description: "Session started",
+                model: header.model,
+                prompt_version: header.prompt_version,
+                language: header.language,
             },
         )?;
 
@@ -142,7 +155,13 @@ mod tests {
     use super::*;
 
     fn write(start_time: i64, duration: i64, actions: &[Action], summary: Option<&str>) -> String {
-        let mut writer = SlogWriter::start(Vec::new(), start_time).expect("started");
+        let header = LogHeader {
+            start_time,
+            model: "gpt-test",
+            prompt_version: "session-actions-0123456789abcdef",
+            language: "fr-CA",
+        };
+        let mut writer = SlogWriter::start(Vec::new(), header).expect("started");
         for action in actions {
             writer.action(action).expect("written");
         }
@@ -164,7 +183,7 @@ mod tests {
     // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
     // oracle: reference webapp/packages/session-recording-log/src/fixtures/sample-complete.slog
     #[test]
-    fn writes_the_shipped_schema_with_every_line_from_ai() {
+    fn writes_the_shipped_schema_with_the_analysis_on_session_start() {
         let actions = [
             action(1500, "Listed files", Some("/var/log"), &[("Command", "ls /var/log")]),
             action(62_250, "Closed the shell", None, &[]),
@@ -173,7 +192,7 @@ mod tests {
         let slog = write(1_787_255_035, 90, &actions, Some("The user read the logs, then left."));
 
         let expected = [
-            r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai"}"#,
+            r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"session-actions-0123456789abcdef","language":"fr-CA"}"#,
             r#"{"timestamp":"2026-08-20T19:43:56.500Z","seq":1,"event":"session.action","description":"Listed files","object":"/var/log","parameters":{"Command":"ls /var/log"},"source":"ai"}"#,
             r#"{"timestamp":"2026-08-20T19:44:57.250Z","seq":2,"event":"session.action","description":"Closed the shell","source":"ai"}"#,
             r#"{"timestamp":"2026-08-20T19:45:25.000Z","seq":3,"event":"session.end","description":"Session ended","summary":"The user read the logs, then left.","source":"ai"}"#,

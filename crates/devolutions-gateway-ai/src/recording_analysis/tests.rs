@@ -212,7 +212,14 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     assert_eq!(analysis.log_path, recording_dir(&session.manifest_path).join(LOG_FILE));
     assert_eq!(analysis.actions, 1);
     assert_eq!(analysis.model, REPORTED_MODEL);
-    assert_eq!(analysis.prompt_version, "session-actions-4+session-summary-1");
+    assert_eq!(
+        analysis.prompt_version,
+        format!(
+            "{}+{}",
+            crate::session_actions::PROMPT_VERSION,
+            crate::session_summary::PROMPT_VERSION
+        )
+    );
     assert_eq!(
         analysis.usage,
         Some(Usage {
@@ -227,10 +234,9 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     );
     let entries = entries(&analysis.log_path);
     assert!(entries.iter().all(|entry| entry["source"] == "ai"), "{entries:?}");
-    assert!(
-        entries[0].get("promptVersion").is_none(),
-        "the result names the prompts, not the log"
-    );
+    assert_eq!(entries[0]["model"], REPORTED_MODEL);
+    assert_eq!(entries[0]["promptVersion"], analysis.prompt_version.as_str());
+    assert_eq!(entries[0]["language"], "English", "English unless the caller asks for another language");
     assert_eq!(entries[2]["summary"], "Summary 1");
     assert!(!session.workspace().exists());
     let recording_size = std::fs::metadata(recording_dir(&session.manifest_path).join("recording-0.cast"))
@@ -420,7 +426,7 @@ async fn the_language_reaches_every_request_and_keeps_its_own_working_files() {
         finish(
             client
                 .analyze_recording(&session.manifest, &session.manifest_path)
-                .language(language)
+                .language(Language::new(language).unwrap())
                 .start(),
         )
     };
@@ -439,7 +445,9 @@ async fn the_language_reaches_every_request_and_keeps_its_own_working_files() {
     assert!(requests[..2].iter().all(|request| request.contains("`fr-CA`")));
     assert!(requests[2..].iter().all(|request| request.contains("`de-DE`")));
     assert!(requests[5].contains(SUMMARY_PROMPT_START));
-    assert_eq!(entries(&analysis.log_path)[4]["summary"], "Summary 5");
+    let entries = entries(&analysis.log_path);
+    assert_eq!(entries[0]["language"], "de-DE");
+    assert_eq!(entries[4]["summary"], "Summary 5");
 }
 
 #[tokio::test]
@@ -452,7 +460,11 @@ async fn a_session_without_actions_has_no_summary() {
     assert_eq!(requests.lock().unwrap().len(), 1, "the summary is not asked for");
     assert_eq!(analysis.actions, 0);
     assert_eq!(analysis.model, REPORTED_MODEL);
-    assert_eq!(analysis.prompt_version, "session-actions-4", "no summary prompt was used");
+    assert_eq!(
+        analysis.prompt_version,
+        crate::session_actions::PROMPT_VERSION,
+        "no summary prompt was used"
+    );
     let entries = entries(&analysis.log_path);
     assert_eq!(entries.len(), 2);
     assert_eq!(entries[1]["event"], "session.end");
@@ -474,17 +486,16 @@ async fn a_summary_worth_asking_again_fails_the_analysis() {
 }
 
 #[tokio::test]
-async fn a_summary_that_cannot_succeed_leaves_the_log_without_one() {
+async fn a_summary_that_cannot_succeed_fails_the_analysis() {
     let session = Session::new(10);
     // The chunk is request 0, the summary request 1, which the provider refuses for good.
     let (client, _requests) = spawn_provider(|index| if index == 1 { 400 } else { 0 }).await;
 
-    let analysis = session.analyze(&client).await.unwrap();
+    let error = session.analyze(&client).await.unwrap_err();
 
-    let entries = entries(&analysis.log_path);
-    assert_eq!(entries.len(), 3);
-    assert_eq!(entries[2]["event"], "session.end");
-    assert_eq!(entries[2].get("summary"), None);
+    assert!(matches!(error, RecordingAnalysisError::Ai(_)), "{error:?}");
+    assert!(!error.is_transient());
+    assert!(!recording_dir(&session.manifest_path).join(LOG_FILE).exists());
 }
 
 #[tokio::test]
@@ -595,7 +606,7 @@ fn recordings_listed_out_of_order_are_read_in_time_order() {
         owner: None,
         prompt_version: "test".to_owned(),
         model: MODEL.to_owned(),
-        language: None,
+        language: "English".to_owned(),
         chunk_len: MAX_CHUNK_LEN,
     };
 

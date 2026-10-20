@@ -8,7 +8,9 @@
 //! obtained.
 //!
 //! Behind each purpose, the crate owns everything about talking to the model:
-//! - the prompt and its version, which a consumer that stores the results should store with them;
+//! - the prompt and its version, a hash of the prompt computed at compile time, which a consumer that stores the
+//!   results should store with them;
+//! - the language of the answer, any short text such as `fr-CA` or `français`, English by default;
 //! - the HTTP API of each provider and its quirks: OpenAI chat completions (also spoken by Mistral, Gemini and many
 //!   others) and Anthropic Messages;
 //! - the request limits: the output token limit, and a timeout, since requests are not streamed;
@@ -26,8 +28,8 @@
 //! small. Only what the purposes need is supported: one non-streamed text request per call, without chat history,
 //! tools, or embeddings.
 //!
-//! A new purpose is a module like [`session_actions`]: its prompt and `PROMPT_VERSION`, a request builder returned by
-//! a new [`AiClient`] method, and the parser of the answer.
+//! A new purpose is a module like [`session_actions`]: its prompt, language rule and `PROMPT_VERSION`, a request
+//! builder returned by a new [`AiClient`] method, and the parser of the answer.
 //!
 //! A purpose may also build on others and on files: [`recording_analysis`] reads the recordings of a session, terminal
 //! or video, describes them chunk by chunk with [`session_actions`] and [`screen_actions`], summarizes them with
@@ -35,6 +37,7 @@
 
 mod client;
 mod error;
+mod language;
 pub mod recording_analysis;
 mod response;
 pub mod screen_actions;
@@ -47,4 +50,5 @@ pub use secrecy;
 
 pub use self::client::{AiClient, AiClientBuilder, BuildError, DEFAULT_REQUEST_TIMEOUT, Provider};
 pub use self::error::Error;
+pub use self::language::{InvalidLanguage, Language, MAX_LANGUAGE_CHARS};
 pub use self::response::{Response, Usage};

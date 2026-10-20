@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use devolutions_gateway_ai::screen_actions::Screenshot;
 use devolutions_gateway_ai::session_actions::Action;
-use devolutions_gateway_ai::{AiClient, Error, Provider, Usage};
+use devolutions_gateway_ai::{AiClient, Error, Language, Provider, Usage};
 use reqwest::StatusCode;
 use tokio::io::{AsyncBufReadExt as _, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -1034,8 +1034,8 @@ async fn language_is_a_rule_of_the_instructions() {
         let mut session = client.describe_session_actions(TRANSCRIPT);
         let mut screen = client.describe_screen_actions(&screenshots);
         if let Some(language) = language {
-            session = session.language(language);
-            screen = screen.language(language);
+            session = session.language(Language::new(language).unwrap());
+            screen = screen.language(Language::new(language).unwrap());
         }
 
         let session = session.send().await.unwrap();
@@ -1047,16 +1047,13 @@ async fn language_is_a_rule_of_the_instructions() {
             assert_eq!(response.output[0].description, "A listé les fichiers");
 
             let instructions = instructions.as_str().unwrap();
-            match language {
-                Some(language) => assert!(
-                    instructions.ends_with(&format!(
-                        "
-- Write every description in the language of the BCP 47 tag `{language}`; keep the JSON field names and \"[redacted]\" as they are."
-                    )),
-                    "{instructions}"
-                ),
-                None => assert!(!instructions.contains("BCP 47"), "{instructions}"),
-            }
+            let language = language.unwrap_or("English");
+            assert!(
+                instructions.ends_with(&format!(
+                    "\n- Write every description in the language `{language}`; keep the JSON field names and \"[redacted]\" as they are."
+                )),
+                "{instructions}"
+            );
         }
     }
 }
@@ -1084,7 +1081,7 @@ async fn session_summary_request_and_response() {
 
         let response = client(provider, base_url)
             .summarize_session(&actions)
-            .language("fr-CA")
+            .language(Language::new("fr-CA").unwrap())
             .max_output_tokens(1234)
             .send()
             .await

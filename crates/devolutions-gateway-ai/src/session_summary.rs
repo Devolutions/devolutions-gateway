@@ -5,34 +5,32 @@ use std::fmt;
 
 use serde::Serialize;
 
-use crate::client::{AiClient, Input, Prompt, with_language};
+use crate::client::{AiClient, Input, Prompt, prompt_version, with_language};
 use crate::session_actions::{Action, DEFAULT_MAX_OUTPUT_TOKENS};
-use crate::{Error, Response};
+use crate::{Error, Language, Response};
 
-/// Version of the prompt of this purpose.
+/// Version of the prompt of this purpose, a hash of the prompt and its language rule.
 ///
 /// Results do not carry it: a caller that stores results should store it with them, so readers know which prompt
 /// produced them.
-/// Bump it whenever the prompt changes.
-pub const PROMPT_VERSION: &str = "session-summary-1";
+pub const PROMPT_VERSION: &str = prompt_version!("session-summary", PROMPT, LANGUAGE_RULE);
 
 const PROMPT: &str = r#"You summarize what the user did in a remote session, from the list of their actions.
 
 Input: JSON Lines, one action per line, in time order. Each action has "elapsedSeconds", the time since the session started, and "description", a short sentence naming the action. It may have "object", the main thing acted on, and "parameters", important details.
 
-Output: plain text only: no Markdown, no JSON, no lists. Write a short summary of a few sentences, five at most, saying what the user did and on what.
+Output: plain text only: no Markdown, no JSON, no lists. Write a summary saying what the user did and on what.
 
 Rules:
 - Name the main hosts, services, accounts, files, or settings the user acted on.
 - Report only what the actions show; never guess.
 - Never copy passwords, secrets, or tokens. Write "[redacted]" instead."#;
 
-fn language_rule(language: &str) -> String {
-    format!("- Write the summary in the language of the BCP 47 tag `{language}`; keep \"[redacted]\" as it is.")
-}
+/// Last rule of the prompt, naming the language of the summary.
+const LANGUAGE_RULE: &str = r#"- Write the summary in the language `{language}`; keep "[redacted]" as it is."#;
 
 impl AiClient {
-    /// Asks the model for a short plain-text summary of what the user did in a session, given the actions found in it,
+    /// Asks the model for a plain-text summary of what the user did in a session, given the actions found in it,
     /// such as by [`AiClient::describe_session_actions`].
     ///
     /// With no action there is nothing to summarize, so callers should not ask.
@@ -40,7 +38,7 @@ impl AiClient {
         SummarizeSession {
             client: self,
             actions,
-            language: None,
+            language: Language::default(),
             max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
         }
     }
@@ -51,7 +49,7 @@ impl AiClient {
 pub struct SummarizeSession<'a> {
     client: &'a AiClient,
     actions: &'a [Action],
-    language: Option<&'a str>,
+    language: Language,
     max_output_tokens: u32,
 }
 
@@ -67,12 +65,10 @@ impl fmt::Debug for SummarizeSession<'_> {
     }
 }
 
-impl<'a> SummarizeSession<'a> {
-    /// Language of the session, as a BCP 47 tag such as `fr-CA`: the summary is written in it.
-    ///
-    /// A value that is not a tag is ignored with a warning.
-    pub fn language(mut self, language: &'a str) -> Self {
-        self.language = Some(language);
+impl SummarizeSession<'_> {
+    /// Language the summary is written in; the default is English.
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
         self
     }
 
@@ -88,7 +84,7 @@ impl<'a> SummarizeSession<'a> {
     /// [`DescribeSessionActions::send`](crate::session_actions::DescribeSessionActions::send).
     pub async fn send(self) -> Result<Response<String>, Error> {
         let input = actions_as_lines(self.actions);
-        let system = with_language(PROMPT, self.language, language_rule);
+        let system = with_language(PROMPT, LANGUAGE_RULE, &self.language);
 
         let prompt = Prompt {
             system: &system,

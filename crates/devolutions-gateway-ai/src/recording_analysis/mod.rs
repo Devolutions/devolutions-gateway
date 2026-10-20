@@ -49,10 +49,9 @@ pub use self::recordings::{
 };
 use self::transcript::TranscriptError;
 use self::video::VideoError;
-use crate::client::is_language_tag;
 use crate::screen_actions::Screenshot;
 use crate::session_actions::Action;
-use crate::{AiClient, Error, Usage};
+use crate::{AiClient, Error, Language, Usage};
 
 /// Input tokens sent in one AI request, estimated at 4 characters per token.
 const MAX_INPUT_TOKENS_PER_REQUEST: usize = 100_000;
@@ -200,7 +199,8 @@ pub struct RecordingAnalysis {
     pub actions: usize,
     /// Model that wrote the log: the first one the provider reported, or the requested one when it reported none.
     pub model: String,
-    /// Versions of the prompts that wrote the log, such as `session-actions-4+session-summary-1`.
+    /// Versions of the prompts that wrote the log, such as
+    /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
     pub prompt_version: String,
     /// Tokens the provider counted for the whole analysis, answers cut and asked again included.
     ///
@@ -290,7 +290,7 @@ impl AiClient {
             manifest,
             manifest_path,
             owner: None,
-            language: None,
+            language: Language::default(),
             max_output_tokens: None,
             cancel: CancellationToken::new(),
         }
@@ -304,7 +304,7 @@ pub struct AnalyzeRecording<'a> {
     manifest: &'a RecordingManifest,
     manifest_path: &'a Utf8Path,
     owner: Option<String>,
-    language: Option<String>,
+    language: Language,
     max_output_tokens: Option<u32>,
     cancel: CancellationToken,
 }
@@ -329,21 +329,9 @@ impl AnalyzeRecording<'_> {
         self
     }
 
-    /// The language of the session, as a BCP 47 tag such as `fr-CA`: the descriptions and the summary are written in it.
-    ///
-    /// A value that is not a tag is ignored with a warning.
-    pub fn language(mut self, language: impl Into<String>) -> Self {
-        let language = language.into();
-
-        if is_language_tag(&language) {
-            self.language = Some(language);
-        } else {
-            warn!(
-                language_len = language.len(),
-                "Ignored a language that is not a BCP 47 tag"
-            );
-        }
-
+    /// Language the descriptions and the summary are written in; the default is English.
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
         self
     }
 
@@ -435,7 +423,7 @@ struct Run {
     manifest: RecordingManifest,
     manifest_path: Utf8PathBuf,
     owner: Option<String>,
-    language: Option<String>,
+    language: Language,
     max_output_tokens: Option<u32>,
     cancel: CancellationToken,
     events: mpsc::Sender<RecordingAnalysisEvent>,
@@ -451,7 +439,7 @@ impl Run {
             owner: self.owner.clone(),
             prompt_version: self.manifest.recordings.prompt_version().to_owned(),
             model: self.client.model().to_owned(),
-            language: self.language.clone(),
+            language: self.language.as_str().to_owned(),
             chunk_len: MAX_CHUNK_LEN,
         };
 
@@ -524,7 +512,7 @@ impl Run {
 
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                        described = describe_transcript(&self.client, self.max_output_tokens, self.language.as_deref(), &transcript) => described?,
+                        described = describe_transcript(&self.client, self.max_output_tokens, &self.language, &transcript) => described?,
                     }
                 }
                 Chunk::Screenshots { frames, context } => {
@@ -536,7 +524,7 @@ impl Run {
 
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                        described = describe_screenshots(&self.client, self.max_output_tokens, self.language.as_deref(), &frames, context.as_ref()) => described?,
+                        described = describe_screenshots(&self.client, self.max_output_tokens, &self.language, &frames, context.as_ref()) => described?,
                     }
                 }
             };
@@ -567,11 +555,7 @@ impl Run {
         let summary = if actions.is_empty() {
             None
         } else {
-            let mut request = self.client.summarize_session(&actions);
-
-            if let Some(language) = &self.language {
-                request = request.language(language);
-            }
+            let mut request = self.client.summarize_session(&actions).language(self.language.clone());
 
             if let Some(max_output_tokens) = self.max_output_tokens {
                 request = request.max_output_tokens(max_output_tokens);
@@ -582,15 +566,7 @@ impl Run {
                 summary = request.send() => summary,
             };
 
-            match summary {
-                Ok(summary) => Some(summary),
-                // The actions are paid for, and a retry resumes right here, so only a summary worth asking again fails.
-                Err(error) if error.is_transient() => return Err(error.into()),
-                Err(error) => {
-                    warn!(%error, "Writing the session log without a summary");
-                    None
-                }
-            }
+            Some(summary?)
         };
 
         let (model, usage) = match &summary {
@@ -614,10 +590,19 @@ impl Run {
             let workspace = workspace.clone();
             let start_time = self.manifest.start_time;
             let duration = self.manifest.duration;
+            let model = model.clone();
+            let prompt_version = prompt_version.clone();
+            let language = self.language.clone();
             move || {
+                let header = slog::LogHeader {
+                    start_time,
+                    model: &model,
+                    prompt_version: &prompt_version,
+                    language: language.as_str(),
+                };
                 write_log(
                     &workspace,
-                    start_time,
+                    header,
                     duration,
                     &actions,
                     summary.as_ref().map(|summary| summary.output.as_str()),
@@ -684,18 +669,14 @@ fn open_counted(path: &Utf8Path, read_bytes: &Arc<AtomicU64>) -> io::Result<Coun
 async fn describe_transcript(
     client: &AiClient,
     max_output_tokens: Option<u32>,
-    language: Option<&str>,
+    language: &Language,
     chunk: &str,
 ) -> Result<DescribedChunk, RecordingAnalysisError> {
     let mut parts = VecDeque::from([chunk]);
     let mut described = DescribedChunk::default();
 
     while let Some(part) = parts.pop_front() {
-        let mut request = client.describe_session_actions(part);
-
-        if let Some(language) = language {
-            request = request.language(language);
-        }
+        let mut request = client.describe_session_actions(part).language(language.clone());
 
         if let Some(max_output_tokens) = max_output_tokens {
             request = request.max_output_tokens(max_output_tokens);
@@ -764,7 +745,7 @@ async fn read_screenshots(
 async fn describe_screenshots(
     client: &AiClient,
     max_output_tokens: Option<u32>,
-    language: Option<&str>,
+    language: &Language,
     frames: &[LoadedScreenshot],
     context: Option<&LoadedScreenshot>,
 ) -> Result<DescribedChunk, RecordingAnalysisError> {
@@ -783,11 +764,7 @@ async fn describe_screenshots(
             .chain(frames[part.clone()].iter().map(|frame| frame.as_screenshot(false)))
             .collect::<Vec<_>>();
 
-        let mut request = client.describe_screen_actions(&screenshots);
-
-        if let Some(language) = language {
-            request = request.language(language);
-        }
+        let mut request = client.describe_screen_actions(&screenshots).language(language.clone());
 
         if let Some(max_output_tokens) = max_output_tokens {
             request = request.max_output_tokens(max_output_tokens);
@@ -847,9 +824,7 @@ struct WorkspaceSettings {
     owner: Option<String>,
     prompt_version: String,
     model: String,
-    // Absent means no language, so working files written without this field still match such an analysis.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    language: Option<String>,
+    language: String,
     chunk_len: usize,
 }
 
@@ -1110,7 +1085,7 @@ fn read_checkpoints(
 /// Writes the log into the working files; `actions` must be in time order.
 fn write_log(
     workspace: &Utf8Path,
-    start_time: i64,
+    header: slog::LogHeader<'_>,
     duration: i64,
     actions: &[Action],
     summary: Option<&str>,
@@ -1118,7 +1093,7 @@ fn write_log(
     let log_error = |error: anyhow::Error| files_error(&format!("failed to write the log: {error:#}"));
 
     let out = File::create(workspace.join(WORKSPACE_LOG_FILE)).map_err(|error| files_error(&error))?;
-    let mut log = slog::SlogWriter::start(BufWriter::new(out), start_time).map_err(log_error)?;
+    let mut log = slog::SlogWriter::start(BufWriter::new(out), header).map_err(log_error)?;
 
     for action in actions {
         log.action(action).map_err(log_error)?;
