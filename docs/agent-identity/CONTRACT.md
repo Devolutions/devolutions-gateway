@@ -412,7 +412,3 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
   Completion removes the old root from `GET trust-anchor`.
 - The server continues to recognize registered certificates issued by the old root after completion without requiring that root to remain published.
   The endpoint-specific validity rules still apply, and an identity whose old-root certificate is expired but within renewal grace can renew onto the new root.
-
-## 9. Conformance
-
-An authority or an agent conforms when it returns the expected outcome for every shared vector (§6) and passes the conformance suite `crates/agent-identity-conformance` run against it: the `p_*` tests for an authority, the `a_*` tests for an agent.
