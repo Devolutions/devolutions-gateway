@@ -359,8 +359,16 @@ async fn enroll_pending(
             } else {
                 store.write_identity(&identity)?;
             }
-            store.finish_enrollment(&hash, identity.authority_id)?;
             info!(authority_id = %identity.authority_id, identity_id = %identity.identity_id, "Agent Identity enrolled");
+            // UNTESTED: the identity is stored, so its runner starts even when cleanup fails.
+            // A remaining pending file is cleaned up when it is polled again, and a remaining in-progress record at the
+            // next start-up; when changing this, never let cleanup decide whether the runner starts.
+            if let Err(error) = store.finish_enrollment(&hash, identity.authority_id) {
+                warn!(
+                    error = format!("{error:#}"),
+                    "Cannot clean up a completed Agent Identity enrollment"
+                );
+            }
             Ok(PendingOutcome::Enrolled(Box::new(identity)))
         }
         Err(ClientError::Permanent(code)) => {
