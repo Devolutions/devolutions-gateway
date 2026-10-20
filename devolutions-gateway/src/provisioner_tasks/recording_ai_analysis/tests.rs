@@ -4,6 +4,7 @@ use std::time::Duration;
 use axum::http::StatusCode;
 use camino::Utf8Path;
 use devolutions_gateway_ai::session_actions::PROMPT_VERSION;
+use devolutions_gateway_ai::{Language, session_summary};
 use devolutions_gateway_task::ShutdownHandle;
 use job_queue::Job as _;
 use parking_lot::Mutex;
@@ -89,12 +90,24 @@ impl Harness {
     }
 
     async fn start(&self, task_id: Uuid, session_id: Uuid, settings: AiSettings) -> Result<StartOutcome, StartError> {
+        self.start_in(task_id, session_id, settings, None).await
+    }
+
+    /// Same as [`Harness::start`], asking for the analysis in `language`.
+    async fn start_in(
+        &self,
+        task_id: Uuid,
+        session_id: Uuid,
+        settings: AiSettings,
+        language: Option<Language>,
+    ) -> Result<StartOutcome, StartError> {
         start(
             &self.state,
             StartRequest {
                 task_id,
                 session_id,
                 settings,
+                language,
                 api_key: SecretString::from(API_KEY),
             },
         )
@@ -524,14 +537,18 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
         json!({
             "fileName": "ai-analysis-0.slog",
             "model": "gpt-test-2026-09-30",
-            "usage": { "inputTokens": 30, "outputTokens": 60 },
-            "promptVersion": PROMPT_VERSION,
+            "usage": { "inputTokens": 40, "outputTokens": 80 },
+            "promptVersion": format!("{PROMPT_VERSION}+{}", session_summary::PROMPT_VERSION),
         }),
         "chunk 0 counts from its checkpoint, the failed request not at all"
     );
 
     let requests = requests.lock().clone();
-    assert_eq!(requests.len(), 4, "only chunks 1 and 2 are sent again");
+    assert_eq!(
+        requests.len(),
+        5,
+        "only chunks 1 and 2 are sent again, then the summary"
+    );
     for (request, chunk) in requests.iter().zip([0, 1, 1, 2]) {
         assert!(request.contains(&chunk_starts[chunk]), "request for chunk {chunk}");
     }
@@ -917,6 +934,51 @@ async fn a_new_task_replaces_the_result_of_the_earlier_one() {
 }
 
 #[tokio::test]
+async fn the_analysis_is_in_the_language_of_the_request() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, requests) = spawn_ai_provider(|_| 0).await;
+    let task_id = Uuid::new_v4();
+    let language = Language::new("fr-CA").expect("language");
+
+    let outcome = harness
+        .start_in(task_id, session_id, settings.clone(), Some(language.clone()))
+        .await
+        .expect("started");
+    assert!(matches!(outcome, StartOutcome::Created(_)), "{outcome:?}");
+    harness.run(task_id).await.expect("analysis");
+
+    let task = harness.task(task_id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
+    assert_eq!(task.params["language"], "fr-CA");
+    assert!(requests.lock().iter().all(|request| request.contains("`fr-CA`")));
+
+    let other = harness
+        .start_in(task_id, session_id, settings, Some(Language::new("de-DE").expect("language")))
+        .await
+        .expect("started");
+    assert!(
+        matches!(other, StartOutcome::IdConflict(_)),
+        "the same Task ID with another language is another request: {other:?}"
+    );
+}
+
+#[tokio::test]
+async fn the_analysis_is_in_english_without_a_language() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, requests) = spawn_ai_provider(|_| 0).await;
+    let task_id = harness.start_created(session_id, settings).await;
+
+    harness.run(task_id).await.expect("analysis");
+
+    let task = harness.task(task_id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
+    assert!(task.params.get("language").is_none(), "{}", task.params);
+    assert!(requests.lock().iter().all(|request| request.contains("`English`")));
+}
+
+#[tokio::test]
 async fn a_new_task_never_resumes_from_an_earlier_task() {
     let harness = Harness::new().await;
     // About 1 MB of transcript: three chunks.
@@ -939,8 +1001,8 @@ async fn a_new_task_never_resumes_from_an_earlier_task() {
     assert_eq!(harness.task(second).await.state, ProvisionerTaskState::Succeeded);
     assert_eq!(
         requests.lock().len(),
-        2 + 3,
-        "the new Task asks about every chunk again"
+        2 + 3 + 1,
+        "the new Task asks about every chunk again, then for the summary"
     );
 }
 
