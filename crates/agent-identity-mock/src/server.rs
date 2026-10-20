@@ -7,6 +7,7 @@
 
 use std::convert::Infallible;
 use std::fmt;
+use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -15,6 +16,7 @@ use agent_channel_proto::agent_channel_server::AgentChannelServer;
 use axum::body::Bytes;
 use axum::response::IntoResponse as _;
 use axum::{Json, Router, http};
+use futures::FutureExt as _;
 use http_body_util::BodyExt as _;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -120,28 +122,31 @@ impl Dispatcher {
             return Ok(response.map(|body| body.map_err(|e| -> BoxError { Box::new(e) }).boxed_unsync()));
         }
 
-        let mut response = self
-            .rest
-            .oneshot(request)
-            .await
-            .unwrap_or_else(|never: Infallible| match never {});
+        // UNTESTED: a panicking agent-facing handler is answered with `500 unavailable` (§5.4) instead of a dropped connection.
+        // No handler panics on demand, so no test reaches this path.
+        // When changing this call, keep the panic mapped to a 500 that the agent-facing rewrite below covers.
+        let mut response = match AssertUnwindSafe(self.rest.oneshot(request)).catch_unwind().await {
+            Ok(response) => response.unwrap_or_else(|never: Infallible| match never {}),
+            Err(_) => http::StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        };
         if response.headers_mut().remove(DROP_HEADER).is_some() {
             // The mock drop fault committed the request, so abort without responding.
             return Err(ConnectionAborted);
         }
         let injected = response.headers_mut().remove(INJECTED_HEADER).is_some();
+        let status = response.status().as_u16();
         if !injected
             && (stripped == "/api/agent-identity/v1" || stripped.starts_with("/api/agent-identity/v1/"))
-            && matches!(response.status().as_u16(), 400 | 404 | 405 | 413)
+            && (matches!(status, 400 | 404 | 405 | 413) || status >= 500)
         {
-            let status = response.status().as_u16();
-            let message = match status {
-                404 => "unknown agent-identity route",
-                405 => "method not allowed",
-                413 => "agent-identity request body is too large",
-                _ => "invalid agent-identity request",
+            let (status, code, message) = match status {
+                404 => (status, "invalid_request", "unknown agent-identity route"),
+                405 => (status, "invalid_request", "method not allowed"),
+                413 => (status, "invalid_request", "agent-identity request body is too large"),
+                400 => (status, "invalid_request", "invalid agent-identity request"),
+                _ => (500, "unavailable", "unexpected agent-identity server failure"),
             };
-            response = crate::api_agent::agent_error(&self.app, status, "invalid_request", message);
+            response = crate::api_agent::agent_error(&self.app, status, code, message);
         }
         Ok(response.map(|body| body.map_err(|e| -> BoxError { Box::new(e) }).boxed_unsync()))
     }
@@ -297,6 +302,38 @@ mod tests {
         let headers = vec![authorization.as_str(); header_count];
         let response = post(&app, "enroll", &headers, b"not json".to_vec()).await;
         assert_eq!(response, (expected.0, expected.1.to_owned()));
+        Ok(())
+    }
+
+    /// CONTRACT.md §5.4: "an unexpected server failure → `500 unavailable`".
+    /// Issuing from a root that has expired is such a failure.
+    #[tokio::test]
+    async fn unexpected_failure_is_500_unavailable() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let secret = {
+            let mut state = app.state.lock().await;
+            let root_not_after = state.issuing_root().not_after;
+            app.clock.freeze_at(root_not_after);
+            let (_, secret) = state.create_token("test".to_owned(), 1, root_not_after + 60, None, None, root_not_after);
+            secret
+        };
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let authorization = format!("Bearer dvaet1.e30.{}", URL_SAFE_NO_PAD.encode(secret));
+        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let response = post(&app, "enroll", &[authorization.as_str()], body.into_bytes()).await;
+        assert_eq!(response, (500, "unavailable".to_owned()));
+        Ok(())
+    }
+
+    /// The `fail_next_response` fault takes any §5.4 code, so tests can inject `unavailable` with a 5xx status.
+    #[tokio::test]
+    async fn injected_failure_can_carry_unavailable() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let fault = json!({ "fail_next_response": { "endpoint": "check-in", "status": 503, "error": "unavailable" } });
+        let (status, _) = post_json(&app, FAULTS, &[], fault.to_string()).await;
+        assert_eq!(status, 200);
+        let response = post(&app, "check-in", &[], Vec::new()).await;
+        assert_eq!(response, (503, "unavailable".to_owned()));
         Ok(())
     }
 

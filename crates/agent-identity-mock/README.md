@@ -52,6 +52,7 @@ All paths below are relative to `base_url` (i.e. they include the path prefix).
 | POST | `/api/agent-identity/v1/check-in` | RFC 9421-signed with `tag="check-in"` and a digested `{ "metadata": {...} }` body; returns effective `config` and `renewal_requested`. |
 
 Non-2xx agent-facing responses carry `{ "error", "message", "server_time" }` with the §5.4 codes.
+An unexpected failure, such as issuing from an expired root or a handler panic, is `500 unavailable`.
 Enrollment, renewal and check-in require a `metadata` object, which may be empty.
 Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are limited to 64 KiB.
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).

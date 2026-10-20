@@ -294,6 +294,7 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                             "signature_invalid" => "signature_invalid",
                             "clock_skew" => "clock_skew",
                             "invalid_request" => "invalid_request",
+                            "unavailable" => "unavailable",
                             _ => return invalid("fail_next_response.error must be a §5.4 error code"),
                         }),
                         Some(_) => return invalid("fail_next_response.error must be a §5.4 error code"),
