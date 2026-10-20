@@ -17,7 +17,8 @@ public class ChannelHandshakeVectorTests
         ChannelProofCaseVector vector = Vectors.Case(name);
         ChannelOpening opening = await VectorChannel.OpenAsync();
 
-        ChannelHandshakeResult result = opening.VerifyHello(VectorChannel.HelloMessage(opening, vector.Proof));
+        ChannelHandshakeResult result =
+            await opening.VerifyHelloAsync(VectorChannel.HelloMessage(opening, vector.Proof));
 
         string outcome = result.Succeeded ? "ok" : result.Error.Code.ToWireValue();
         Assert.Equal(vector.ExpectedValid ? "ok" : "signature_invalid", outcome);

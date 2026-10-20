@@ -16,7 +16,7 @@ namespace Devolutions.AgentIdentity;
 /// The host sends <see cref="Challenge"/> as the first message on the stream,
 /// and the stream is authenticated only once the agent signs that challenge.
 /// The identity stays hidden until then, so that nothing acts for it on the strength of the headers alone.
-/// The host passes the first agent message to <see cref="VerifyHello"/>,
+/// The host passes the first agent message to <see cref="VerifyHelloAsync"/>,
 /// or calls <see cref="HelloTimedOut"/> when none arrives within <see cref="ChannelHandshake.HelloTimeout"/>.
 /// </remarks>
 public sealed class ChannelOpening
@@ -29,9 +29,16 @@ public sealed class ChannelOpening
     private static readonly AgentIdentityError CertificateExpired =
         AgentIdentityError.From(AgentIdentityErrorCode.CertificateExpired);
 
-    private readonly TimeProvider _timeProvider;
+    private static readonly AgentIdentityError IdentityUnknown =
+        AgentIdentityError.From(AgentIdentityErrorCode.IdentityUnknown);
 
-    // Set by the first call to VerifyHello or HelloTimedOut.
+    private static readonly AgentIdentityError IdentityRevoked =
+        AgentIdentityError.From(AgentIdentityErrorCode.IdentityRevoked);
+
+    private readonly TimeProvider _timeProvider;
+    private readonly ICertificateRegistry _certificateRegistry;
+
+    // Set by the first call to VerifyHelloAsync or HelloTimedOut.
     private int _handshakeEnded;
 
     internal ChannelOpening(
@@ -40,7 +47,8 @@ public sealed class ChannelOpening
         Guid challengeId,
         byte[] challenge,
         DateTimeOffset openedAt,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        ICertificateRegistry certificateRegistry)
     {
         Certificate = certificate;
         ConnectNonce = connectNonce;
@@ -53,6 +61,7 @@ public sealed class ChannelOpening
         };
         OpenedAt = openedAt;
         _timeProvider = timeProvider;
+        _certificateRegistry = certificateRegistry;
     }
 
     /// <summary>
@@ -69,8 +78,9 @@ public sealed class ChannelOpening
     /// The <c>notAfter</c> of the certificate that signed the opening request.
     /// </summary>
     /// <remarks>
-    /// A stream closes no later than this time, with <see cref="AgentIdentityErrorCode.CertificateExpired"/>,
-    /// so the host closes a stream still waiting for its <c>Hello</c> at this time with that error.
+    /// Once this time has passed, the host closes a stream still waiting for its <c>Hello</c> with
+    /// <see cref="AgentIdentityErrorCode.CertificateExpired"/>,
+    /// the error that <see cref="HelloTimedOut"/> returns only strictly after this time.
     /// It is a time, not an identity, which stays hidden until the agent signs the challenge.
     /// </remarks>
     public DateTimeOffset CertificateNotAfter => Certificate.NotAfter;
@@ -109,29 +119,65 @@ public sealed class ChannelOpening
     /// Verifies the first message that the agent sent on the stream, as CONTRACT.md §7.3 step 4 specifies.
     /// </summary>
     /// <remarks>
-    /// The method reads the clock once, and judges the deadlines of the stream before the message,
-    /// since the stream closes at either one whatever the message holds.
-    /// After <see cref="CertificateNotAfter"/>, the handshake fails with
-    /// <see cref="AgentIdentityErrorCode.CertificateExpired"/>.
-    /// More than <see cref="ChannelHandshake.HelloTimeout"/> after the opening request was verified, it fails with
-    /// <see cref="AgentIdentityErrorCode.SignatureInvalid"/>, even when the host's own timer let the message through.
+    /// The method reads the clock once, then the certificate registry once,
+    /// because the host cannot close the stream for a change to its identity while that identity is still hidden.
+    /// In the order of CONTRACT.md §6 step 4, the handshake fails with
+    /// <see cref="AgentIdentityErrorCode.IdentityUnknown"/> when the certificate that opened the stream is no longer
+    /// registered or its identity was deleted, with <see cref="AgentIdentityErrorCode.IdentityRevoked"/> when the
+    /// identity is revoked, and with <see cref="AgentIdentityErrorCode.CertificateExpired"/> after
+    /// <see cref="CertificateNotAfter"/>.
+    /// A certificate retired since the opening still passes,
+    /// and <see cref="AuthenticatedIdentity.CertificateStatus"/> then reports <see cref="CertificateStatus.Retired"/>.
+    /// More than <see cref="ChannelHandshake.HelloTimeout"/> after the opening request was verified,
+    /// the handshake fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>,
+    /// even when the host's own timer let the message through.
     /// The message must then be a <c>Hello</c> whose <c>correlation_id</c> is the <c>id</c> of <see cref="Challenge"/>,
     /// and whose <c>proof</c> verifies with the key of the certificate that signed the opening request;
     /// otherwise the handshake fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
     /// Only then is the metadata checked, and metadata that CONTRACT.md §3 rejects fails the handshake with
     /// <see cref="AgentIdentityErrorCode.InvalidRequest"/>.
-    /// The <c>Welcome</c> of a successful handshake carries the time of that one reading.
-    /// The first call to this method or to <see cref="HelloTimedOut"/> ends the handshake, whatever its outcome.
+    /// The <c>Welcome</c> of a successful handshake carries the time of the clock reading.
+    /// The first call to this method or to <see cref="HelloTimedOut"/> ends the handshake, whatever its outcome,
+    /// including an exception from the registry, which propagates.
     /// </remarks>
     /// <param name="firstMessage">The first message that the agent sent on the stream.</param>
+    /// <param name="cancellationToken">A token that cancels the registry lookup.</param>
     /// <exception cref="ArgumentNullException"><paramref name="firstMessage"/> is null.</exception>
-    /// <exception cref="InvalidOperationException">The handshake has already ended.</exception>
-    public ChannelHandshakeResult VerifyHello(AgentMessage firstMessage)
+    /// <exception cref="InvalidOperationException">
+    /// The handshake has already ended,
+    /// or the registry returned another certificate, or the certificate for another identity.
+    /// </exception>
+    public async ValueTask<ChannelHandshakeResult> VerifyHelloAsync(
+        AgentMessage firstMessage,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(firstMessage);
         EndHandshake();
 
         DateTimeOffset now = _timeProvider.GetUtcNow();
+
+        // The host cannot tie the stream to its identity before the proof verifies,
+        // so only this lookup sees a revocation, a deletion or a rotation since the opening.
+        RegisteredCertificate? registered = await _certificateRegistry
+            .FindByThumbprintAsync(Certificate.Thumbprint, cancellationToken)
+            .ConfigureAwait(false);
+
+        // CONTRACT.md §6 step 4, except that a certificate retired since the opening still passes:
+        // its stream then closes as every stream of a retired certificate does (§7.4),
+        // whereas identity_unknown would end the identity for an agent that did nothing wrong.
+        if (registered is null)
+        {
+            return ChannelHandshakeResult.Failure(
+                IdentityUnknown,
+                "The certificate that opened the stream is no longer registered, or its identity was deleted.");
+        }
+
+        CheckIsTheOpeningCertificate(registered);
+
+        if (registered.IdentityRevoked)
+        {
+            return ChannelHandshakeResult.Failure(IdentityRevoked, "The identity was revoked after the stream opened.");
+        }
 
         if (HasExpired(now))
         {
@@ -183,7 +229,7 @@ public sealed class ChannelOpening
         };
 
         return ChannelHandshakeResult.Success(
-            Certificate.ToIdentity(AgentOperation.Connect),
+            (Certificate with { Status = registered.Status }).ToIdentity(AgentOperation.Connect),
             metadata.Metadata,
             welcome);
     }
@@ -224,5 +270,22 @@ public sealed class ChannelOpening
     private bool HasExpired(DateTimeOffset now)
     {
         return now > Certificate.NotAfter;
+    }
+
+    // The registry answers a thumbprint with the certificate that the authority issued under it, for its one identity,
+    // so another answer is a host bug, which fails as a server error rather than as a verdict on the agent.
+    private void CheckIsTheOpeningCertificate(RegisteredCertificate registered)
+    {
+        if (AgentIdentityProtocol.ComputeThumbprint(registered.CertificateDer.Span) != Certificate.Thumbprint)
+        {
+            throw new InvalidOperationException(
+                "The certificate registry returned a certificate whose thumbprint is not the one it was asked for.");
+        }
+
+        if (registered.IdentityId != Certificate.IdentityId)
+        {
+            throw new InvalidOperationException(
+                "The certificate registry returned the certificate that opened the stream for another identity.");
+        }
     }
 }

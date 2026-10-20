@@ -31,13 +31,18 @@ internal sealed class SteppingTimeProvider(params DateTimeOffset[] readings) : T
 }
 
 /// <summary>
-/// A registry over a dictionary, which records every lookup.
+/// A registry over a dictionary, which records every lookup and can hold lookups until a test releases them.
 /// </summary>
 internal sealed class FakeCertificateRegistry : ICertificateRegistry
 {
     private readonly Dictionary<string, RegisteredCertificate> _certificates = new(StringComparer.Ordinal);
 
     public List<string> Lookups { get; } = [];
+
+    /// <summary>
+    /// A task that every lookup waits for before it answers, when set.
+    /// </summary>
+    public Task? Gate { get; set; }
 
     public void Register(string thumbprint, RegisteredCertificate certificate)
     {
@@ -52,12 +57,23 @@ internal sealed class FakeCertificateRegistry : ICertificateRegistry
         Register(key.Thumbprint, new RegisteredCertificate(key.IdentityId, key.Certificate, status, identityRevoked));
     }
 
-    public ValueTask<RegisteredCertificate?> FindByThumbprintAsync(
+    public void Unregister(string thumbprint)
+    {
+        _certificates.Remove(thumbprint);
+    }
+
+    public async ValueTask<RegisteredCertificate?> FindByThumbprintAsync(
         string thumbprint,
         CancellationToken cancellationToken)
     {
         Lookups.Add(thumbprint);
-        return ValueTask.FromResult(_certificates.GetValueOrDefault(thumbprint));
+
+        if (Gate is { } gate)
+        {
+            await gate.WaitAsync(cancellationToken);
+        }
+
+        return _certificates.GetValueOrDefault(thumbprint);
     }
 }
 

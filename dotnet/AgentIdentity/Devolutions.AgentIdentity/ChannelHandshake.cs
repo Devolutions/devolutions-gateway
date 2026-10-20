@@ -11,7 +11,7 @@ public static class ChannelHandshake
     /// <remarks>
     /// When no message arrives in that time, the host calls <see cref="ChannelOpening.HelloTimedOut"/>
     /// and closes the stream with its error.
-    /// <see cref="ChannelOpening.VerifyHello"/> also fails a message that it reads later than that,
+    /// <see cref="ChannelOpening.VerifyHelloAsync"/> also fails a message that it reads later than that,
     /// so a late timer cannot let one through.
     /// </remarks>
     public static TimeSpan HelloTimeout { get; } = TimeSpan.FromSeconds(10);

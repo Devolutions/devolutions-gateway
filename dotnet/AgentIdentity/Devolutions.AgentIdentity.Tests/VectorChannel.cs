@@ -38,21 +38,23 @@ internal static class VectorChannel
     /// <param name="status">
     /// The status to register the device's certificate with, instead of the status that the vector file gives it.
     /// </param>
-    public static async Task<ChannelOpening> OpenAsync(TimeProvider? clock = null, CertificateStatus? status = null)
+    public static Task<ChannelOpening> OpenAsync(TimeProvider? clock = null, CertificateStatus? status = null)
     {
-        VectorAuthority authority = new();
+        return OpenAsync(new VectorAuthority(), clock, status);
+    }
 
+    /// <summary>
+    /// Opens the stream through the public API, with the registry and the nonce store of <paramref name="authority"/>,
+    /// which the test can then change before the handshake.
+    /// </summary>
+    public static async Task<ChannelOpening> OpenAsync(
+        VectorAuthority authority,
+        TimeProvider? clock = null,
+        CertificateStatus? status = null)
+    {
         if (status is { } registeredStatus)
         {
-            RegisteredCertificateVector device =
-                TestVectors.Instance.HttpSignature.RegisteredCertificate(Vectors.Device);
-            authority.Registry.Register(
-                device.KeyId,
-                new RegisteredCertificate(
-                    device.IdentityId,
-                    device.Certificate,
-                    registeredStatus,
-                    device.IdentityRevoked));
+            RegisterDevice(authority.Registry, registeredStatus, identityRevoked: false);
         }
 
         RequestAuthenticator authenticator = new(
@@ -69,6 +71,17 @@ internal static class VectorChannel
         Assert.True(result.Succeeded, result.FailureDetail);
         Assert.Equal(Vectors.Challenge, result.Opening.Challenge.Challenge.Challenge_.ToByteArray());
         return result.Opening;
+    }
+
+    /// <summary>
+    /// Registers the device's certificate again, as the vector file registers it but with this status and revocation.
+    /// </summary>
+    public static void RegisterDevice(FakeCertificateRegistry registry, CertificateStatus status, bool identityRevoked)
+    {
+        RegisteredCertificateVector device = TestVectors.Instance.HttpSignature.RegisteredCertificate(Vectors.Device);
+        registry.Register(
+            device.KeyId,
+            new RegisteredCertificate(device.IdentityId, device.Certificate, status, identityRevoked));
     }
 
     /// <summary>
