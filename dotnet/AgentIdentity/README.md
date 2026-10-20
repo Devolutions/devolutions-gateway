@@ -104,9 +104,9 @@ Replace the identity's metadata, and answer with `ResponseBodies.CheckIn`, given
    Call `Opening.HelloTimedOut` instead when no message arrives within `ChannelHandshake.HelloTimeout`, when `Opening.CertificateNotAfter` passes first, or when the agent ends the stream without a message.
    The first of these calls ends the handshake, and a second one throws `InvalidOperationException`.
 4. On success, replace the identity's metadata with `Metadata`, send `Welcome`, and only then treat the stream as authenticated for `Identity`.
-5. When `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)` and close the stream with `OK` 60 s later, as for `confirm`.
-   Otherwise, send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.md [§7.3] steps 5 and 7).
-6. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.md [§7.4]).
+5. Send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.md [§7.3] steps 5 and 7).
+6. If `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: also send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)`, and close the stream with `OK` 60 s later, as for `confirm` (CONTRACT.md [§7.4]).
+7. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.md [§7.4]).
 
 A channel opening has no body: `VerifyHelloAsync` reads the registry again and checks the certificate's expiry and the deadline before the message and its proof, and the metadata of the `Hello` last, in the order of CONTRACT.md [§7.4] and [§7.3] step 4.
 
