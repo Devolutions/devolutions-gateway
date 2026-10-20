@@ -50,6 +50,7 @@ Opening a key that any other account can access fails, so a key created by a les
 ## Operations
 
 - Creating a key never replaces an existing one; if two callers create the same key at once, one of them fails, on every backend.
+  With the Windows software provider, only the caller's account and SYSTEM can block the creation of a key.
 - Opening a missing key reports that it is not there.
   Opening fails if the key breaks the access rule, is exportable, is a link, or uses an algorithm the crate does not support.
 - Deleting is idempotent: deleting a key that is already gone succeeds.

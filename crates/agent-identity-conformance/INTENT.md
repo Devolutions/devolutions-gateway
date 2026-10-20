@@ -3,7 +3,7 @@ Its expectations derive only from these sources, never from the implementation u
 
 - [CONTRACT.md](../../docs/agent-identity/CONTRACT.md) and the shared test vectors;
 - `agent-channel-proto`;
-- the DVLS management interface, as `agent-identity-mock` replicates it;
+- DVLS's management API, as `agent-identity-mock` replicates it;
 - the agent's CLI, configuration and files, as `devolutions-agent/src/identity/INTENT.md` and `crates/agent-identity/INTENT.md` define them.
 
 The mock implements the contract's agent-facing operations and channel independently of the agent.
@@ -11,18 +11,20 @@ The mock implements the contract's agent-facing operations and channel independe
 ## Shape
 
 - A binary with a custom harness, like `proxy-tester`, that exits with a failure status when any test fails.
-- Parameters: base URL, admin credentials, agent binary path, target (mock or DVLS).
+- Parameters: base URL, management API credentials, agent binary path, target (mock or DVLS).
 - Black box on both sides:
   - it drives the real agent binary through a generated configuration, pending-enrollment files, and the `identity enroll` command;
-  - it drives the authority through its management interface, and the mock also through its control surface.
+  - it drives the authority through its management API, and the mock also through its control surface.
+- Management APIs are product-specific, so the suite reaches each authority's through a module for that authority: DVLS's now, which the mock replicates, and PSU's once its management API is settled.
+  Tests never call a management API directly.
 - It depends on no agent implementation crate.
 - What it observes, in order of preference:
-  1. the management interface;
+  1. the management API;
   2. the agent's files;
   3. logs, as a last resort.
 - Tests that need mock fault injection are skipped when the target is DVLS.
   A run that skips a test for a missing fixture or privilege fails as incomplete unless `--allow-incomplete` is passed, so a partial run never reports success by default.
-  N/A is reserved for a test that does not apply to the platform.
+  N/A is reserved for a test that does not apply to the platform, or that the authority's module declares unsupported, such as an expiry test against an authority that cannot issue short-lived certificates.
 - The `testsuite` crate builds the mock and the tester, runs the mock, runs the tester against it, and requires every test to pass.
   No dependency is added to `testsuite` for this.
 - The suite must pass on Linux with the file backend, and on Windows with the Windows software provider backend.
@@ -76,9 +78,10 @@ The mock implements the contract's agent-facing operations and channel independe
   - the rotation completes at the deadline, or as soon as no active identity remains on the old root;
   - old-root certificates remain renewable afterwards;
   - emergency deadline.
-- **Management interface:**
+- **Management API:**
   - pagination stays stable during concurrent enrollment;
   - views, filters and bounds;
-  - every route requires the management permission.
+  - identity statuses, including `grace`;
+  - every route requires its permission.
 - **Keys:** non-exportable, accessible only to the agent's account and SYSTEM (root on Linux and macOS), and matching the certificate; no key is left orphaned.
 - **Multiple authorities:** identities for two authorities coexist, including across agent restarts.
