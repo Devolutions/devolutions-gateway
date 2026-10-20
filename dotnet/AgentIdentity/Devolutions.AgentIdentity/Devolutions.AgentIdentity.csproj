@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <PackageId>Devolutions.AgentIdentity</PackageId>
+    <OutputType>Library</OutputType>
+    <Authors>Devolutions Inc.</Authors>
+    <Company>Devolutions Inc.</Company>
+    <AssemblyTitle>Devolutions Agent Identity</AssemblyTitle>
+    <Description>Agent-facing protocol rules shared by every Devolutions Agent Identity authority</Description>
+    <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
+    <RootNamespace>Devolutions.AgentIdentity</RootNamespace>
+    <Version>2026.10.20</Version>
+    <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Devolutions.AgentIdentity.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../crates/agent-channel-proto/dotnet/Devolutions.Agent.Channel/Devolutions.Agent.Channel.csproj" />
+  </ItemGroup>
+</Project>
