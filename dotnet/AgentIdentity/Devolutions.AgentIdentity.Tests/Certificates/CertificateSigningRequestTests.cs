@@ -53,6 +53,18 @@ public class CertificateSigningRequestTests
                 attributes: TestCsr.Tlv(0xA0, extensionRequest));
             return TestCsr.Request(info, key);
         },
+
+        // CONTRACT.md §4: attributes need no "canonical DER form, such as a sorted `SET OF`" (X.690 §11.6).
+        // Their encodings first differ in the last arc of the OIDs, 04 then 03, so the set descends.
+        ["attributes out of DER order"] = key =>
+        {
+            static byte[] Attribute(string oid) =>
+                TestCsr.Sequence(TestCsr.Oid(oid), TestCsr.Tlv(0x31, TestCsr.Tlv(0x0C, "a"u8.ToArray())));
+            byte[] info = TestCsr.RequestInfo(
+                key.ExportSubjectPublicKeyInfo(),
+                attributes: TestCsr.Tlv(0xA0, Attribute("1.2.4"), Attribute("1.2.3")));
+            return TestCsr.Request(info, key);
+        },
     };
 
     // X.690 §10.1: DER writes each length in the fewest octets.
