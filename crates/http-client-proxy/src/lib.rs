@@ -223,6 +223,27 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
     Ok(Some(proxy_url))
 }
 
+/// Returns the proxy that `config` selects for `url`, or `None` to connect directly.
+///
+/// Every client applies this one rule, so that the same target goes through the same proxy whichever client
+/// connects to it.
+pub fn proxy_for_url(url: &Url, config: &ProxyConfig) -> Option<Url> {
+    match config {
+        ProxyConfig::Off => None,
+        // UNTESTED: System mode uses the machine's proxy settings (environment variables or WinHTTP).
+        // A unit test can't set them without changing the machine or racing other tests over the environment.
+        // When changing this arm, check a target behind a system proxy and one in its bypass list.
+        ProxyConfig::System => detect_system_proxy_for_url(url).ok().flatten(),
+        ProxyConfig::Manual(manual) => {
+            if manual.should_bypass(url) {
+                None
+            } else {
+                manual.select_proxy(url).cloned()
+            }
+        }
+    }
+}
+
 /// Builds a reqwest client with proxy configuration for a specific target URL.
 ///
 /// This function uses the provided configuration to determine the appropriate
@@ -242,26 +263,7 @@ pub fn build_client_with_proxy(
     url: &Url,
     config: &ProxyConfig,
 ) -> reqwest::Result<reqwest::Client> {
-    let proxy_url = match config {
-        ProxyConfig::Off => {
-            // No proxy mode - never use a proxy.
-            None
-        }
-        ProxyConfig::System => {
-            // System mode - use environment variables or WinHTTP.
-            detect_system_proxy_for_url(url).ok().flatten()
-        }
-        ProxyConfig::Manual(manual) => {
-            // Manual mode - check exclude list, then use configured URLs.
-            if manual.should_bypass(url) {
-                None
-            } else {
-                manual.select_proxy(url).cloned()
-            }
-        }
-    };
-
-    if let Some(proxy_url) = proxy_url {
+    if let Some(proxy_url) = proxy_for_url(url, config) {
         // Create reqwest::Proxy from the proxy URL.
         let proxy = reqwest::Proxy::all(proxy_url.clone()).inspect_err(|error| {
             warn!(%proxy_url, %error, "Failed to configure proxy");
@@ -329,7 +331,34 @@ pub fn get_or_create_cached_client(
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
+
+    fn manual(exclude: &[&str]) -> ProxyConfig {
+        let url = |url| Url::parse(url).expect("valid proxy URL");
+        ProxyConfig::Manual(ManualProxyConfig {
+            http: Some(url("http://http-proxy.test:3128")),
+            https: Some(url("http://https-proxy.test:3128")),
+            all: Some(url("http://all-proxy.test:3128")),
+            exclude: exclude.iter().map(|pattern| (*pattern).to_owned()).collect(),
+        })
+    }
+
+    #[rstest]
+    #[case::off(ProxyConfig::Off, "https://authority.test/dvls", None)]
+    #[case::manual_https(manual(&[]), "https://authority.test/dvls", Some("http://https-proxy.test:3128/"))]
+    #[case::manual_http(manual(&[]), "http://authority.test/dvls", Some("http://http-proxy.test:3128/"))]
+    #[case::manual_bypassed(manual(&[".test"]), "https://authority.test/dvls", None)]
+    fn selects_the_proxy_the_mode_and_exclude_list_name(
+        #[case] config: ProxyConfig,
+        #[case] target: &str,
+        #[case] expected: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let selected = proxy_for_url(&Url::parse(target)?, &config);
+        assert_eq!(selected.as_ref().map(Url::as_str), expected);
+        Ok(())
+    }
 
     #[test]
     fn domain_exclusion_respects_label_boundaries() -> anyhow::Result<()> {
