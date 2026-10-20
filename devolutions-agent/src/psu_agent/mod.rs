@@ -1,5 +1,7 @@
 mod process;
 
+mod child;
+
 mod process_tree;
 
 mod powershell;
@@ -42,6 +44,23 @@ use protocol::{
 const PROTOCOL_VERSION: &str = "poc.v1";
 const CAPABILITY_JOB_EXECUTION: &str = "job_execution";
 const CAPABILITY_PSREMOTING_TUNNEL: &str = "psremoting_grpc_tunnel";
+const CAPABILITY_JOB_EXECUTION_RUN_AS: &str = "job_execution_run_as";
+
+impl std::fmt::Debug for protocol::ProcessCredential {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ProcessCredential([REDACTED])")
+    }
+}
+
+impl Drop for protocol::ProcessCredential {
+    fn drop(&mut self) {
+        use zeroize::Zeroize as _;
+
+        self.username.zeroize();
+        self.password.zeroize();
+        self.domain.zeroize();
+    }
+}
 
 pub struct PsuAgentTask {
     conf_handle: ConfHandle,
@@ -120,6 +139,25 @@ struct PsuConnection {
     outgoing_tx: mpsc::Sender<AgentMessage>,
     response_stream: Streaming<protocol::ServerMessage>,
     agent_id: String,
+    security: ConnectionSecurity,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConnectionAuthentication {
+    AppToken,
+    Device,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConnectionSecurity {
+    authentication: ConnectionAuthentication,
+    verified_https: bool,
+}
+
+impl ConnectionSecurity {
+    fn permits_credentials(self) -> bool {
+        cfg!(windows) && self.authentication == ConnectionAuthentication::Device && self.verified_https
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -264,22 +302,34 @@ impl PsuAgent {
             .await
             .with_context(|| format!("timed out connecting PSU gRPC endpoint at {}", self.display_url))?
             .with_context(|| format!("failed to connect PSU gRPC endpoint at {}", self.display_url))?;
-        let (authorization, agent_id) = if let Some(identity) = identity {
+        let (authorization, agent_id, authentication) = if let Some(identity) = identity {
             identity
                 .prepare(channel.clone(), &self.conf, &self.machine_name)
                 .await?;
-            (identity.authorization()?, identity.device_id()?)
+            (
+                identity.authorization()?,
+                identity.device_id()?,
+                ConnectionAuthentication::Device,
+            )
         } else {
             (
                 format!("Bearer {}", app_token.context("missing PSU application token")?),
                 self.agent_id.clone(),
+                ConnectionAuthentication::AppToken,
             )
+        };
+        // Constructed only after the transport handshake and this attempt's identity preparation succeed.
+        // psu_endpoint uses normal chain and hostname verification for HTTPS, without a bypass or HTTP retry.
+        // UNTESTED: A live enrolled connection over normally trusted HTTPS needs a provisioned PSU fixture.
+        let security = ConnectionSecurity {
+            authentication,
+            verified_https: self.conf.server_url.scheme() == "https",
         };
         let mut client = AgentControlClient::new(channel);
 
         let (outgoing_tx, outgoing_rx) = mpsc::channel(256);
         let powershell_version = get_powershell_version(&self.powershell_executable).await;
-        let mut registration = self.create_registration_message(powershell_version);
+        let mut registration = self.create_registration_message(powershell_version, security);
         registration.agent_id.clone_from(&agent_id);
         if let Some(AgentPayload::RegisterAgent(register)) = &mut registration.payload {
             register.agent_id.clone_from(&agent_id);
@@ -303,6 +353,7 @@ impl PsuAgent {
             outgoing_tx,
             response_stream,
             agent_id,
+            security,
         })
     }
 
@@ -312,6 +363,7 @@ impl PsuAgent {
             &connection.outgoing_tx,
             shutdown_signal,
             &connection.agent_id,
+            connection.security,
         )
         .await
     }
@@ -322,6 +374,7 @@ impl PsuAgent {
         outgoing_tx: &mpsc::Sender<AgentMessage>,
         shutdown_signal: &mut ShutdownSignal,
         agent_id: &str,
+        security: ConnectionSecurity,
     ) -> anyhow::Result<()>
     where
         S: Stream<Item = Result<protocol::ServerMessage, tonic::Status>> + Unpin,
@@ -356,6 +409,7 @@ impl PsuAgent {
                             &mut process_tasks,
                             &mut connection_id,
                             agent_id,
+                            security,
                         ) => Some(result),
                     };
 
@@ -378,6 +432,10 @@ impl PsuAgent {
         }
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "dispatch carries the concrete connection's identity and security"
+    )]
     async fn handle_server_message(
         &self,
         message: protocol::ServerMessage,
@@ -386,6 +444,7 @@ impl PsuAgent {
         process_tasks: &mut JoinSet<anyhow::Result<()>>,
         connection_id: &mut String,
         agent_id: &str,
+        security: ConnectionSecurity,
     ) -> anyhow::Result<()> {
         match message.payload {
             Some(ServerPayload::RegisterAccepted(accepted)) => {
@@ -417,13 +476,14 @@ impl PsuAgent {
 
                 process_tasks.spawn(async move {
                     process::run_process(
-                        start_process,
+                        *start_process,
                         channels,
                         outgoing_tx,
                         registry,
                         agent_id,
                         connection_id,
                         default_executable,
+                        security,
                     )
                     .await
                 });
@@ -461,7 +521,24 @@ impl PsuAgent {
             .context("failed to resolve PSU gRPC AppToken secret")
     }
 
-    fn create_registration_message(&self, powershell_version: String) -> AgentMessage {
+    fn create_registration_message(&self, powershell_version: String, security: ConnectionSecurity) -> AgentMessage {
+        let mut capabilities = vec![
+            AgentCapability {
+                name: CAPABILITY_JOB_EXECUTION.to_owned(),
+                version: PROTOCOL_VERSION.to_owned(),
+            },
+            AgentCapability {
+                name: CAPABILITY_PSREMOTING_TUNNEL.to_owned(),
+                version: PROTOCOL_VERSION.to_owned(),
+            },
+        ];
+        if security.permits_credentials() {
+            capabilities.push(AgentCapability {
+                name: CAPABILITY_JOB_EXECUTION_RUN_AS.to_owned(),
+                version: PROTOCOL_VERSION.to_owned(),
+            });
+        }
+
         AgentMessage {
             request_id: Uuid::new_v4().simple().to_string(),
             agent_id: self.agent_id.clone(),
@@ -476,16 +553,7 @@ impl PsuAgent {
                 architecture: std::env::consts::ARCH.to_owned(),
                 agent_version: env!("CARGO_PKG_VERSION").to_owned(),
                 protocol_version: PROTOCOL_VERSION.to_owned(),
-                capabilities: vec![
-                    AgentCapability {
-                        name: CAPABILITY_JOB_EXECUTION.to_owned(),
-                        version: PROTOCOL_VERSION.to_owned(),
-                    },
-                    AgentCapability {
-                        name: CAPABILITY_PSREMOTING_TUNNEL.to_owned(),
-                        version: PROTOCOL_VERSION.to_owned(),
-                    },
-                ],
+                capabilities,
                 powershell_runtimes: vec![PowerShellRuntime {
                     runtime_id: "pwsh-default".to_owned(),
                     kind: "pwsh".to_owned(),
@@ -647,6 +715,63 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn run_as_registration_requires_this_connections_device_authentication_and_tls() {
+        let agent = test_agent("https://localhost:5001", "token", ConnectionSettings::default());
+        // Approved CONTRACT.md, Connection eligibility: every condition applies to this connection.
+        for (authentication, verified_https, expected) in [
+            (ConnectionAuthentication::AppToken, false, false),
+            (ConnectionAuthentication::AppToken, true, false),
+            (ConnectionAuthentication::Device, false, false),
+            (ConnectionAuthentication::Device, true, cfg!(windows)),
+        ] {
+            let security = ConnectionSecurity {
+                authentication,
+                verified_https,
+            };
+            let message = agent.create_registration_message("7".to_owned(), security);
+            let Some(AgentPayload::RegisterAgent(registration)) = message.payload else {
+                panic!("expected registration");
+            };
+            let capabilities = registration
+                .capabilities
+                .iter()
+                .filter(|capability| capability.name == "job_execution_run_as")
+                .collect::<Vec<_>>();
+            assert_eq!(capabilities.len(), usize::from(expected));
+            if expected {
+                assert_eq!(registration.os, "windows");
+                assert_eq!(capabilities[0].version, "poc.v1");
+            }
+            assert_eq!(security.permits_credentials(), expected);
+        }
+    }
+
+    #[test]
+    fn replacement_app_token_connection_cannot_inherit_device_eligibility() {
+        let agent = test_agent("https://localhost:5001", "token", ConnectionSettings::default());
+        let device = ConnectionSecurity {
+            authentication: ConnectionAuthentication::Device,
+            verified_https: true,
+        };
+        let replacement = ConnectionSecurity {
+            authentication: ConnectionAuthentication::AppToken,
+            verified_https: true,
+        };
+        let _previous_registration = agent.create_registration_message("7".to_owned(), device);
+        let message = agent.create_registration_message("7".to_owned(), replacement);
+        let Some(AgentPayload::RegisterAgent(registration)) = message.payload else {
+            panic!("expected registration");
+        };
+        assert!(!replacement.permits_credentials());
+        assert!(
+            !registration
+                .capabilities
+                .iter()
+                .any(|capability| capability.name == "job_execution_run_as")
+        );
+    }
+
     async fn first_connection_byte(scheme: &str) -> u8 {
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind endpoint");
         let url = format!("{scheme}://{}", listener.local_addr().expect("listener address"));
@@ -682,6 +807,256 @@ mod tests {
             b'P',
             "HTTP connection must start with the HTTP/2 preface"
         );
+    }
+
+    #[tokio::test]
+    async fn https_rejects_untrusted_certificate_without_plaintext_fallback() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let certificate =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("generate certificate");
+        let mut config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![certificate.cert.der().clone()],
+                rustls::pki_types::PrivatePkcs8KeyDer::from(certificate.key_pair.serialize_der()).into(),
+            )
+            .expect("TLS server configuration");
+        config.alpn_protocols = vec![b"h2".to_vec()];
+        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind endpoint");
+        let address = listener.local_addr().expect("listener address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept TLS connection");
+            assert!(
+                acceptor.accept(stream).await.is_err(),
+                "untrusted certificate must fail TLS"
+            );
+        });
+        let endpoint = psu_endpoint(
+            &format!("https://localhost:{}", address.port()),
+            &ConnectionSettings::default(),
+        )
+        .expect("create endpoint");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), endpoint.connect())
+                .await
+                .expect("TLS verification timed out")
+                .is_err()
+        );
+        server.await.expect("TLS server panicked");
+    }
+
+    #[test]
+    fn http_registration_does_not_advertise_run_as() {
+        let agent = test_agent("http://localhost:5000", "token", ConnectionSettings::default());
+        let registration = agent.create_registration_message(
+            "7".to_owned(),
+            ConnectionSecurity {
+                authentication: ConnectionAuthentication::AppToken,
+                verified_https: false,
+            },
+        );
+        let Some(AgentPayload::RegisterAgent(registration)) = registration.payload else {
+            panic!("expected registration");
+        };
+        assert!(
+            !registration
+                .capabilities
+                .iter()
+                .any(|capability| capability.name == CAPABILITY_JOB_EXECUTION_RUN_AS)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_device_https_registration_advertises_run_as_contract() {
+        let agent = test_agent("https://localhost:5001", "token", ConnectionSettings::default());
+        let registration = agent.create_registration_message(
+            "7".to_owned(),
+            ConnectionSecurity {
+                authentication: ConnectionAuthentication::Device,
+                verified_https: true,
+            },
+        );
+        let Some(AgentPayload::RegisterAgent(registration)) = registration.payload else {
+            panic!("expected registration");
+        };
+        let capability = registration
+            .capabilities
+            .iter()
+            .find(|capability| capability.name == CAPABILITY_JOB_EXECUTION_RUN_AS)
+            .expect("run-as capability");
+        assert_eq!(capability.version, "poc.v1");
+    }
+
+    #[test]
+    fn credential_is_redacted_in_enclosing_protocol_debug_output() {
+        let mut message = start_process("job", "pwsh", &[]);
+        let Some(ServerPayload::StartProcess(request)) = message.payload.as_mut() else {
+            panic!("expected StartProcess");
+        };
+        request.credential = Some(protocol::ProcessCredential {
+            username: "private-user".to_owned(),
+            password: "private-password".to_owned(),
+            domain: "private-domain".to_owned(),
+        });
+        let debug = format!("{message:?}");
+        assert!(debug.contains("[REDACTED]"));
+        for secret in ["private-user", "private-password", "private-domain"] {
+            assert!(!debug.contains(secret));
+        }
+    }
+
+    #[test]
+    fn credential_wire_tags_match_the_psu_contract() {
+        use prost::Message as _;
+
+        // Hand-derived from approved CONTRACT.md, Credential message, using proto3 length-delimited fields.
+        let request = protocol::StartProcess {
+            credential: Some(protocol::ProcessCredential {
+                username: "u".to_owned(),
+                password: "p".to_owned(),
+                domain: ".".to_owned(),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            request.encode_to_vec(),
+            [
+                0x4a, 9, // StartProcess.credential, field 9.
+                0x0a, 1, b'u', // ProcessCredential.username, field 1.
+                0x12, 1, b'p', // ProcessCredential.password, field 2.
+                0x1a, 1, b'.', // ProcessCredential.domain, field 3.
+            ]
+        );
+        let legacy_request = protocol::StartProcess::decode(&[0x0a, 1, b'j', 0x12, 1, b's'][..])
+            .expect("decode legacy StartProcess without credential");
+        assert!(legacy_request.credential.is_none());
+        assert_eq!(legacy_request.correlation_id, "j");
+        assert_eq!(legacy_request.stream_id, "s");
+        let empty_credential = protocol::StartProcess::decode(&[0x4a, 0][..]).expect("decode present empty credential");
+        assert!(empty_credential.credential.is_some());
+        assert_eq!(empty_credential.encode_to_vec(), [0x4a, 0]);
+    }
+
+    #[tokio::test]
+    async fn dispatch_refuses_present_credentials_on_each_ineligible_connection() {
+        for (authentication, verified_https) in [
+            (ConnectionAuthentication::AppToken, false),
+            (ConnectionAuthentication::AppToken, true),
+            (ConnectionAuthentication::Device, false),
+            #[cfg(not(windows))]
+            (ConnectionAuthentication::Device, true),
+        ] {
+            let security = ConnectionSecurity {
+                authentication,
+                verified_https,
+            };
+            for credential in [
+                protocol::ProcessCredential::default(),
+                protocol::ProcessCredential {
+                    username: "private-user".to_owned(),
+                    password: "private-password".to_owned(),
+                    domain: "private-domain".to_owned(),
+                },
+            ] {
+                assert_dispatch_refusal(security, credential).await;
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn eligible_connection_reports_invalid_fields_without_starting() {
+        for (username, password, domain) in [
+            ("", "", ""),
+            (" \t", "private-password", ""),
+            ("private-user", "", ""),
+            ("private-user\0suffix", "private-password", ""),
+            ("private-user", "private-password\0suffix", ""),
+            ("private-user", "private-password", "private-domain\0suffix"),
+        ] {
+            assert_dispatch_refusal(
+                ConnectionSecurity {
+                    authentication: ConnectionAuthentication::Device,
+                    verified_https: true,
+                },
+                protocol::ProcessCredential {
+                    username: username.to_owned(),
+                    password: password.to_owned(),
+                    domain: domain.to_owned(),
+                },
+            )
+            .await;
+        }
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn eligible_connection_reports_failed_logon_without_service_identity_fallback() {
+        assert_dispatch_refusal(
+            ConnectionSecurity {
+                authentication: ConnectionAuthentication::Device,
+                verified_https: true,
+            },
+            protocol::ProcessCredential {
+                username: format!("psu-{}", &Uuid::new_v4().simple().to_string()[..12]),
+                password: "private-password".to_owned(),
+                domain: ".".to_owned(),
+            },
+        )
+        .await;
+    }
+
+    async fn assert_dispatch_refusal(security: ConnectionSecurity, credential: protocol::ProcessCredential) {
+        let agent = test_agent("https://localhost:5001", "token", ConnectionSettings::default());
+        let (server_tx, server_rx) = mpsc::channel(1);
+        let (outgoing_tx, mut outgoing_rx) = mpsc::channel(8);
+        let (shutdown_handle, mut shutdown_signal) = ShutdownHandle::new();
+        let mut message = start_process("refused-job", "must-not-start", &[]);
+        let Some(ServerPayload::StartProcess(request)) = message.payload.as_mut() else {
+            panic!("expected StartProcess");
+        };
+        request.credential = Some(credential);
+        let serve = tokio::spawn(async move {
+            agent
+                .serve_messages(
+                    &mut ReceiverStream::new(server_rx),
+                    &outgoing_tx,
+                    &mut shutdown_signal,
+                    &agent.agent_id,
+                    security,
+                )
+                .await
+        });
+        server_tx.send(Ok(message)).await.expect("send credential request");
+        // Approved CONTRACT.md, Launch and failure behavior: ordered existing responses, no ProcessStarted.
+        let explanation = tokio::time::timeout(Duration::from_secs(5), async {
+            let closed = outgoing_rx.recv().await.expect("StreamClosed");
+            let Some(AgentPayload::StreamClosed(closed)) = closed.payload else {
+                panic!("launch failure must close stream first, never ProcessStarted");
+            };
+            assert_eq!(closed.stream_id, "refused-job");
+            assert!(closed.error);
+            assert!(!closed.reason.is_empty());
+            let completed = outgoing_rx.recv().await.expect("ProcessCompleted");
+            let Some(AgentPayload::ProcessCompleted(completed)) = completed.payload else {
+                panic!("launch failure must complete process second");
+            };
+            assert_eq!(completed.correlation_id, "refused-job");
+            assert_eq!(completed.exit_code, -1);
+            assert!(!completed.canceled);
+            assert_eq!(completed.error_message, closed.reason);
+            closed.reason
+        })
+        .await
+        .expect("launch failure responses timed out");
+        for secret in ["private-user", "private-password", "private-domain"] {
+            assert!(!explanation.contains(secret));
+        }
+        shutdown_handle.signal();
+        serve.await.expect("serve task").expect("serve");
+        assert!(outgoing_rx.recv().await.is_none());
     }
 
     #[test]
@@ -921,7 +1296,7 @@ mod tests {
     }
 
     fn start_process(id: &str, executable: &str, arguments: &[&str]) -> protocol::ServerMessage {
-        server_message(ServerPayload::StartProcess(protocol::StartProcess {
+        server_message(ServerPayload::StartProcess(Box::new(protocol::StartProcess {
             correlation_id: id.to_owned(),
             stream_id: id.to_owned(),
             executable: executable.to_owned(),
@@ -929,7 +1304,8 @@ mod tests {
             working_directory: String::new(),
             environment: HashMap::new(),
             metadata: HashMap::new(),
-        }))
+            credential: None,
+        })))
     }
 
     #[tokio::test]
@@ -959,6 +1335,10 @@ mod tests {
                     &outgoing_tx,
                     &mut shutdown_signal,
                     &agent.agent_id,
+                    ConnectionSecurity {
+                        authentication: ConnectionAuthentication::AppToken,
+                        verified_https: false,
+                    },
                 )
                 .await
         });

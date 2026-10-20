@@ -15,6 +15,8 @@ fn generate_psu_agent_proto() {
 
     tonic_build::configure()
         .build_transport(false)
+        .skip_debug("devolutions.psu.agent.poc.v1.ProcessCredential")
+        .boxed(".devolutions.psu.agent.poc.v1.ServerMessage.payload.start_process")
         .compile_protos(&["proto/psu_agent.proto"], &["proto"])
         .expect("failed to compile PSU agent proto");
 }
