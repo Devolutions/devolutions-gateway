@@ -373,7 +373,11 @@ impl Store {
 
     /// Moves the expired pending key to `previous` and records a fresh pending key before generating it.
     ///
-    /// An earlier expired pending key held in `previous` is deleted, since the newer pending certificate retired it.
+    /// [`crates/agent-identity/INTENT.md`] ("Stored identities"): if recovery must start again before a `confirm`
+    /// succeeds, the newest expired pending key replaces the one in `previous` and the older one is deleted, because
+    /// the server holds the newest as pending or current and accepts it to sign the next recovery renewal within grace.
+    ///
+    /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
     pub fn begin_recovery(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
         let name = keys::new_key_name(&self.key_prefix);
         self.update(
@@ -1540,6 +1544,46 @@ mod tests {
         assert!(keys::open(store.key_backend(), &expired.key_name)?.is_none());
         assert!(keys::open(store.key_backend(), &current.key_name)?.is_none());
         assert_eq!(identity.keys.current.key_name, fresh_name);
+        Ok(())
+    }
+
+    #[test]
+    fn repeated_recovery_keeps_the_newest_expired_pending_key_and_deletes_the_older() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Stored identities"): if recovery must start again before a `confirm`
+        // succeeds, the newest expired pending key replaces the one in `previous` and the older one is deleted, so the
+        // newest signs the next recovery renewal; the runner signs that renewal with `previous`.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let current = identity.keys.current.clone();
+        store.create_pending_key(&mut identity)?;
+        store.store_pending_chain(&mut identity, vec!["b2xkZXI=".into()])?;
+        let older = identity.keys.pending.clone().context("pending key disappeared")?;
+        store.begin_recovery(&mut identity)?;
+        store.store_pending_chain(&mut identity, vec!["bmV3ZXN0".into()])?;
+        let newest = identity.keys.pending.clone().context("recovery lost its pending key")?;
+
+        let fresh_name = store.begin_recovery(&mut identity)?.name().to_owned();
+
+        let stored = store
+            .read_identity(identity.authority_id)?
+            .context("identity disappeared")?;
+        assert_eq!(stored.keys.current, current);
+        assert_eq!(stored.keys.previous.as_ref(), Some(&newest));
+        assert_eq!(
+            stored.keys.pending,
+            Some(KeyRecord {
+                key_name: fresh_name.clone(),
+                certificate_chain: None,
+            })
+        );
+        assert!(keys::open(store.key_backend(), &older.key_name)?.is_none());
+        for name in [&current.key_name, &newest.key_name, &fresh_name] {
+            assert!(keys::open(store.key_backend(), name)?.is_some(), "{name}");
+        }
         Ok(())
     }
 
