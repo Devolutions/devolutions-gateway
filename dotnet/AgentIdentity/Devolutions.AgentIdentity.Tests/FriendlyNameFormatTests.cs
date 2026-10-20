@@ -7,6 +7,19 @@ public class FriendlyNameFormatTests
 
     private const string TokenName = "Fleet";
 
+    // A dvaet1 token for https://host/dvls (CONTRACT.md §2), which an administrator might paste into a format.
+    private const string Bag = "eyJ1IjoiaHR0cHM6Ly9ob3N0L2R2bHMifQ";
+    private const string Secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+    private const string Token = "dvaet1." + Bag + "." + Secret;
+
+    // The placeholders of INTENT.agent-identity.md, "Enrollment": the known metadata keys of CONTRACT.md §3,
+    // and the token's name.
+    private static readonly string[] Placeholders =
+    [
+        "{hostname}", "{fqdn}", "{domain}", "{os_name}", "{os_version}", "{arch}", "{agent_version}", "{machine_id}",
+        "{token_name}",
+    ];
+
     // A value for each known metadata key of CONTRACT.md §3.
     private static readonly Dictionary<string, string> Metadata = new()
     {
@@ -79,6 +92,67 @@ public class FriendlyNameFormatTests
         Assert.False(FriendlyNameFormat.TryParse(format, out FriendlyNameFormat? parsed, out string? error));
         Assert.Null(parsed);
         Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    // The error says where the problem is, counting Unicode scalar values from 1,
+    // so that U+1F600, which UTF-16 writes as two code units, counts as one character.
+    [Theory]
+    [InlineData("{", 1)]
+    [InlineData("ab}", 3)]
+    [InlineData("{hostname} {", 12)]
+    [InlineData("{{x}}}", 6)]
+    [InlineData("x{Hostname}", 2)]
+    [InlineData("\U0001F600{", 2)]
+    [InlineData("\U0001F600\U0001F600 {Hostname}", 4)]
+    public void TryParseErrorGivesThePositionOfTheProblem(string format, int position)
+    {
+        Assert.False(FriendlyNameFormat.TryParse(format, out _, out string? error));
+        Assert.Matches($@"\bcharacter {position}\b", error);
+    }
+
+    // Every error lists the placeholders, so that the administrator can correct the format.
+    [Theory]
+    [InlineData("{")]
+    [InlineData("}")]
+    [InlineData("{Hostname}")]
+    public void TryParseErrorListsThePlaceholders(string format)
+    {
+        Assert.False(FriendlyNameFormat.TryParse(format, out _, out string? error));
+
+        foreach (string placeholder in Placeholders)
+        {
+            Assert.Contains(placeholder, error, StringComparison.Ordinal);
+        }
+    }
+
+    // INTENT.agent-identity.md, security invariant 9: tokens never appear in logs, not even partially.
+    // A format is administrator input that may hold a pasted token, and a host may log why a format was refused.
+    // Each row holds the token in an unknown placeholder, or as literal text before each kind of error.
+    public static TheoryData<string> FormatsHoldingAToken => new()
+    {
+        "{" + Token + "}",
+        "{hostname} " + Token + " {Hostname}",
+        "{hostname} " + Token + " {",
+        Token + "}",
+    };
+
+    [Theory]
+    [MemberData(nameof(FormatsHoldingAToken))]
+    public void TryParseErrorRevealsNoPartOfTheFormat(string format)
+    {
+        Assert.False(FriendlyNameFormat.TryParse(format, out _, out string? error));
+        EnrollmentTokenAssert.RevealsNoPart(error, Bag, Secret);
+    }
+
+    // A log statement may format the object of a valid format that holds a pasted token as literal text.
+    [Fact]
+    public void ToStringRevealsNoPartOfTheFormat()
+    {
+        Assert.True(
+            FriendlyNameFormat.TryParse("{hostname} " + Token, out FriendlyNameFormat? parsed, out string? error),
+            error);
+
+        EnrollmentTokenAssert.RevealsNoPart($"{parsed}", Bag, Secret);
     }
 
     // INTENT.agent-identity.md, "Enrollment": a missing metadata value evaluates to empty.
@@ -224,18 +298,12 @@ public class FriendlyNameFormatTests
     [Fact]
     public void DefaultFormatIsTheHostname()
     {
-        Assert.Equal("{hostname}", FriendlyNameFormat.Default.ToString());
+        Dictionary<string, string> withoutHostname = new() { ["fqdn"] = "pc-042.corp.example" };
+
         Assert.Equal("pc-042", FriendlyNameFormat.Default.Evaluate(Metadata, TokenName, IdentityId));
-    }
-
-    // The authority stores the format text with the token and parses it again at each enrollment.
-    [Fact]
-    public void ToStringReturnsTheParsedText()
-    {
-        const string format = "{{{token_name}}} {hostname}";
-
-        Assert.True(FriendlyNameFormat.TryParse(format, out FriendlyNameFormat? parsed, out _));
-        Assert.Equal(format, parsed.ToString());
+        Assert.Equal(
+            "0f8fad5b-d9cb-469f-a165-70867728950e",
+            FriendlyNameFormat.Default.Evaluate(withoutHostname, TokenName, IdentityId));
     }
 
     [Fact]

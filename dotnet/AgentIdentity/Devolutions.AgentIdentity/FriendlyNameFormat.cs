@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Text;
 
 namespace Devolutions.AgentIdentity;
@@ -7,11 +8,18 @@ namespace Devolutions.AgentIdentity;
 /// The format from which the authority creates an identity's friendly name once, at enrollment.
 /// </summary>
 /// <remarks>
+/// <para>
 /// A format is text with placeholders: <c>{hostname}</c>, <c>{fqdn}</c>, <c>{domain}</c>, <c>{os_name}</c>,
 /// <c>{os_version}</c>, <c>{arch}</c>, <c>{agent_version}</c> and <c>{machine_id}</c> for the reported metadata,
 /// and <c>{token_name}</c> for the name of the enrollment token.
 /// <c>{{</c> and <c>}}</c> write a literal brace.
 /// The name is never sent to the agent, and later metadata updates never rename the identity.
+/// </para>
+/// <para>
+/// A format is administrator input that may hold a pasted token, which never appears in logs,
+/// so no member returns any part of the format text.
+/// The host stores the text that it parsed with the token.
+/// </para>
 /// </remarks>
 public sealed class FriendlyNameFormat
 {
@@ -19,23 +27,27 @@ public sealed class FriendlyNameFormat
     private static readonly string[] Placeholders =
         ["hostname", "fqdn", "domain", "os_name", "os_version", "arch", "agent_version", "machine_id", "token_name"];
 
+    // Ends every parse error without repeating the format text.
+    private static readonly string ErrorGuidance =
+        " The placeholders are "
+        + string.Join(", ", Placeholders[..^1].Select(placeholder => "{" + placeholder + "}"))
+        + " and {" + Placeholders[^1] + "}, and '{{' and '}}' write literal braces.";
+
     private const string TokenNamePlaceholder = "token_name";
 
     private const int MaxScalarValues = 255;
 
-    private readonly string _format;
     private readonly Segment[] _segments;
 
-    private FriendlyNameFormat(string format, Segment[] segments)
+    private FriendlyNameFormat(Segment[] segments)
     {
-        _format = format;
         _segments = segments;
     }
 
     /// <summary>
-    /// The format that a token without one uses: <c>{hostname}</c>.
+    /// The format of a token created without one: <c>{hostname}</c>.
     /// </summary>
-    public static FriendlyNameFormat Default { get; } = new("{hostname}", [new Segment("hostname", true)]);
+    public static FriendlyNameFormat Default { get; } = new([new Segment("hostname", true)]);
 
     /// <summary>
     /// Parses a format, which the authority does when an administrator creates a token with it.
@@ -43,7 +55,9 @@ public sealed class FriendlyNameFormat
     /// <param name="format">The format text.</param>
     /// <param name="result">The format, when the text is valid.</param>
     /// <param name="error">
-    /// Why the text is invalid, for the administrator: an unpaired brace or an unknown placeholder.
+    /// Why the text is invalid, for the administrator: an unpaired brace or an unknown placeholder,
+    /// its position counted in Unicode scalar values from 1, and the valid placeholders.
+    /// The error holds no part of the format text.
     /// </param>
     /// <returns>Whether the text is a valid format.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="format"/> is null.</exception>
@@ -65,7 +79,7 @@ public sealed class FriendlyNameFormat
             return false;
         }
 
-        result = new FriendlyNameFormat(format, [.. segments]);
+        result = new FriendlyNameFormat([.. segments]);
         error = null;
 
         return true;
@@ -118,11 +132,11 @@ public sealed class FriendlyNameFormat
     }
 
     /// <summary>
-    /// Returns the format text, which the authority stores with the token.
+    /// Returns the type name, never the format text, which may hold a pasted token.
     /// </summary>
     public override string ToString()
     {
-        return _format;
+        return nameof(FriendlyNameFormat);
     }
 
     // Adds the segments of the format, or returns why the format is invalid.
@@ -146,15 +160,14 @@ public sealed class FriendlyNameFormat
 
                 if (end < 0)
                 {
-                    return "The format has a '{' without a matching '}'; write '{{' for a literal '{'.";
+                    return ParseError("an unpaired '{'", format, position);
                 }
 
                 string name = format[(position + 1)..end];
 
                 if (!Placeholders.Contains(name, StringComparer.Ordinal))
                 {
-                    return "The format has the unknown placeholder '{" + name + "}'; the placeholders are "
-                        + string.Join(", ", Placeholders.Select(placeholder => "{" + placeholder + "}")) + ".";
+                    return ParseError("an unknown placeholder", format, position);
                 }
 
                 segments.Add(new Segment(literal.ToString(), false));
@@ -164,7 +177,7 @@ public sealed class FriendlyNameFormat
             }
             else if (c == '}')
             {
-                return "The format has a '}' without a matching '{'; write '}}' for a literal '}'.";
+                return ParseError("an unpaired '}'", format, position);
             }
             else
             {
@@ -176,6 +189,25 @@ public sealed class FriendlyNameFormat
         segments.Add(new Segment(literal.ToString(), false));
 
         return null;
+    }
+
+    // Says what is wrong and where, without any part of the format text.
+    // The position counts Unicode scalar values from 1, as an administrator counts characters,
+    // and a lone surrogate counts as one.
+    private static string ParseError(string problem, string format, int index)
+    {
+        int character = 1;
+        ReadOnlySpan<char> before = format.AsSpan(0, index);
+
+        while (!before.IsEmpty)
+        {
+            Rune.DecodeFromUtf16(before, out _, out int consumed);
+            before = before[consumed..];
+            character++;
+        }
+
+        return "The format has " + problem + " at character " + character.ToString(CultureInfo.InvariantCulture) + "."
+            + ErrorGuidance;
     }
 
     // Keeps the first 255 Unicode scalar values, so that a surrogate pair is kept or dropped whole.
