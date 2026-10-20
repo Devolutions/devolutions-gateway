@@ -372,7 +372,9 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
 - Auth failures at open: gRPC status `UNAUTHENTICATED` (or `PERMISSION_DENIED` for `identity_revoked`) with trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`.
 - Revocation: the server closes live streams with `PERMISSION_DENIED` + `error-code: identity_revoked`.
 - A stream closes no later than its certificate's `notAfter` (`UNAUTHENTICATED` + `certificate_expired`).
+- These two closures also apply to a stream still awaiting `Hello`, ahead of the failures of §7.3 step 4; an identity revoked and then deleted during that wait gets `UNAUTHENTICATED` + `identity_unknown`.
 - When `confirm` promotes a pending certificate (§5.5), the previous `current` certificate is retired; its streams get `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open.
+  A stream whose certificate is retired while it awaits `Hello` still completes the handshake, then gets the same treatment.
 - After a stream closes, the agent reconnects unless the identity is terminal (§5.4).
 
 ## 8. Renewal and rotation
