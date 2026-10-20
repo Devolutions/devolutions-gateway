@@ -42,7 +42,7 @@ pub(crate) struct JrecArtifact {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactKind {
     AiAnalysis,
-    /// The session events log a recorder pushes next to its recording.
+    /// The session events log a producer pushes next to its recording.
     Events,
 }
 

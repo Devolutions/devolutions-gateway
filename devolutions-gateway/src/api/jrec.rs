@@ -69,7 +69,7 @@ struct JrecPushQueryParam {
     artifact: Option<PushArtifact>,
 }
 
-/// An artifact a recorder pushes next to its recording, instead of a recording clip.
+/// An artifact a producer pushes next to its recording, instead of a recording clip.
 #[derive(Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum PushArtifact {

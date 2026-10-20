@@ -89,7 +89,7 @@ pub struct ClientPush<S> {
 pub enum PushTarget {
     /// A clip of the recording, listed in `files`.
     Clip(RecordingFileType),
-    /// The session events log, an artifact the recorder pushes next to its recording.
+    /// The session events log, an artifact a producer pushes next to its recording.
     Events,
 }
 
@@ -632,7 +632,7 @@ impl Ord for DisconnectedTtl {
 pub struct RecordingManagerTask {
     rx: RecordingMessageReceiver,
     ongoing_recordings: HashMap<Uuid, OnGoingRecording>,
-    /// Sessions whose recorder is pushing its events log.
+    /// Sessions whose producer is pushing its events log.
     events_pushes: HashSet<Uuid>,
     recordings_path: Utf8PathBuf,
     session_manager_handle: SessionMessageSender,
