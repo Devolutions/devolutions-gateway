@@ -11,7 +11,8 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Status, Streaming};
+use tonic::metadata::MetadataMap;
+use tonic::{Code, Status, Streaming};
 use tower::Layer as _;
 use uuid::Uuid;
 
@@ -72,7 +73,7 @@ async fn stream_once(
                         events.send(event).await.ok()?;
                     }
                 }
-                Ok(None) => return Some(Closure::from_status(&Status::ok("stream ended"))),
+                Ok(None) => return Some(ended_with_ok(&mut opened.inbound, &opened.headers, "stream ended").await),
                 Err(status) => return Some(Closure::from_status(&status)),
             },
             Some(correlation_id) = acks.recv() => {
@@ -110,7 +111,7 @@ async fn authenticate(target: &Target, opened: &mut Opened) -> Result<(), Closur
             correlation_id: Some(correlation_id),
             payload: Some(Payload::Welcome(_)),
             ..
-        } = next_message(&mut opened.inbound, "Welcome").await?
+        } = next_message(&mut opened.inbound, &opened.headers, "Welcome").await?
             && correlation_id == hello_id
         {
             return Ok(());
@@ -141,6 +142,8 @@ fn push_event(message: ServerMessage) -> Option<Event> {
 struct Opened {
     outbound: mpsc::Sender<AgentMessage>,
     inbound: Streaming<ServerMessage>,
+    /// The response headers, which hold the status of a trailers-only response.
+    headers: MetadataMap,
     /// The nonce of the opening signature, which the channel proof binds.
     nonce: String,
     challenge_id: String,
@@ -148,14 +151,27 @@ struct Opened {
 }
 
 /// Receives the next message of a stream that must not end before `awaited` arrives.
-async fn next_message(inbound: &mut Streaming<ServerMessage>, awaited: &str) -> Result<ServerMessage, Closure> {
+async fn next_message(
+    inbound: &mut Streaming<ServerMessage>,
+    headers: &MetadataMap,
+    awaited: &str,
+) -> Result<ServerMessage, Closure> {
     match inbound.message().await {
         Ok(Some(message)) => Ok(message),
-        Ok(None) => Err(Closure::from_status(&Status::ok(format!(
-            "stream ended before {awaited}"
-        )))),
+        Ok(None) => Err(ended_with_ok(inbound, headers, &format!("stream ended before {awaited}")).await),
         Err(status) => Err(Closure::from_status(&status)),
     }
+}
+
+/// Classifies a stream that ended with gRPC status OK, with the trailers it ended with.
+///
+/// A trailers-only response carries them in `headers`.
+async fn ended_with_ok(inbound: &mut Streaming<ServerMessage>, headers: &MetadataMap, reason: &str) -> Closure {
+    let metadata = match inbound.trailers().await {
+        Ok(Some(trailers)) => trailers,
+        Ok(None) | Err(_) => headers.clone(),
+    };
+    Closure::from_status(&Status::with_metadata(Code::Ok, reason, metadata))
 }
 
 /// Builds the `Hello` that answers a challenge ([CONTRACT.md §7.3 "Sequence"][contract], step 3).
@@ -233,11 +249,12 @@ async fn open(shared: &Shared, target: &Target, clock_offset: i64) -> Result<Ope
     let (handoff, nonce) = OpeningNonce::new();
     let mut request = tonic::Request::new(ReceiverStream::new(outbound_receiver));
     request.extensions_mut().insert(handoff);
-    let mut inbound = client
+    let response = client
         .connect(request)
         .await
-        .map_err(|status| Closure::from_status(&status))?
-        .into_inner();
+        .map_err(|status| Closure::from_status(&status))?;
+    let headers = response.metadata().clone();
+    let mut inbound = response.into_inner();
     let nonce = nonce
         .await
         .map_err(|_| Closure::outage("opening signed without a nonce"))?;
@@ -246,11 +263,12 @@ async fn open(shared: &Shared, target: &Target, clock_offset: i64) -> Result<Ope
             id,
             payload: Some(Payload::Challenge(challenge)),
             ..
-        } = next_message(&mut inbound, "Challenge").await?
+        } = next_message(&mut inbound, &headers, "Challenge").await?
         {
             return Ok(Opened {
                 outbound,
                 inbound,
+                headers,
                 nonce,
                 challenge_id: id,
                 challenge: challenge.challenge,

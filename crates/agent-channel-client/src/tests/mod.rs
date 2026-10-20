@@ -896,3 +896,54 @@ async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     assert_eq!(second.receive().await.correlation_id, Some(new_id));
     Ok(())
 }
+
+/// Checks that a closure with gRPC status OK keeps its trailers and stays transient.
+fn assert_ok_closure_with_trailers(closure: &Closure) {
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(closure.grpc_code, Some(Code::Ok));
+    assert_eq!(closure.error_code.as_deref(), Some("future_code"));
+    assert_eq!(closure.server_time.as_deref(), Some(SERVER_TIME));
+}
+
+#[tokio::test]
+async fn reports_the_trailers_of_an_opening_refused_with_ok() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+
+    authority
+        .next_opening()
+        .await
+        .refuse(closing_status(Code::Ok, Some("future_code")));
+    assert_ok_closure_with_trailers(&next_closure(&mut channel).await.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn reports_the_trailers_of_a_stream_closed_with_ok_before_welcome() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.challenge(&[1; 32]).await;
+    stream.receive().await;
+
+    stream.close(closing_status(Code::Ok, Some("future_code"))).await;
+    assert_ok_closure_with_trailers(&next_closure(&mut channel).await.0);
+    Ok(())
+}
+
+#[tokio::test]
+async fn reports_the_trailers_of_a_stream_closed_with_ok_after_welcome() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    // CONTRACT.md §7.4: a retired certificate's streams are closed with OK.
+    stream.close(closing_status(Code::Ok, Some("future_code"))).await;
+    assert_ok_closure_with_trailers(&next_closure(&mut channel).await.0);
+    Ok(())
+}
