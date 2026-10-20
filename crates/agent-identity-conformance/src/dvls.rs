@@ -1,8 +1,8 @@
 //! DVLS's management API, which the mock replicates.
 //!
 //! Management APIs are product-specific, so tests reach an authority's only through the module for that authority.
-//! Every route, field name, paging rule, enum spelling and status code of DVLS's management API lives here, so tests depend only on the operations and records below.
-//! `docs/agent-identity/INTENT.DVLS.md`, "Management API", holds the decisions behind them.
+//! Every route, header, field name, paging rule, enum spelling, status code and error body of DVLS's management API lives here, so tests depend only on the operations and records below.
+//! DVLS's OpenAPI document for Agent Identity is the reference for all of them; `docs/agent-identity/INTENT.DVLS.md`, "Management API", holds the decisions behind them.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -18,10 +18,16 @@ use time::format_description::well_known::Rfc3339;
 use crate::client::{Target, Token};
 use crate::{Context, TargetKind};
 
-const BASE_PATH: &str = "/api/v3/agent-identity";
+const BASE_PATH: &str = "/api/v1/agent-identity";
 
-/// The largest page a listing returns.
+/// The request header that carries the management API credential, a DVLS session token.
+const CREDENTIAL_HEADER: &str = "tokenId";
+
+/// The largest page of identities a listing returns.
 pub(crate) const MAX_PAGE_SIZE: u64 = 100;
+
+/// The largest page of enrollment tokens a listing returns.
+pub(crate) const MAX_TOKEN_PAGE_SIZE: u64 = 500;
 
 /// Why a test cannot apply to a target at all, as opposed to a fixture the run lacks.
 ///
@@ -83,6 +89,8 @@ pub(crate) enum Refusal {
     NotFound,
     /// The request conflicts with the resource's state.
     Conflict,
+    /// The request is valid but exceeds what the authority can carry out, such as a rotation deadline after the rotation maximum.
+    Unprocessable,
     /// Any other unsuccessful HTTP status.
     Other(u16),
 }
@@ -95,6 +103,7 @@ impl Refusal {
             403 => Self::Forbidden,
             404 => Self::NotFound,
             409 => Self::Conflict,
+            422 => Self::Unprocessable,
             _ => Self::Other(status),
         }
     }
@@ -116,8 +125,33 @@ pub(crate) fn refusal<T>(result: anyhow::Result<T>) -> anyhow::Result<Refusal> {
     }
 }
 
+/// The refusal an unsuccessful `status` stands for, once its body is the error body the status documents.
+///
+/// A 400 carries a `PublicApiValidationError`, and every other documented refusal a `PublicApiError`.
+fn refusal_from(status: u16, body: &[u8]) -> anyhow::Result<Refusal> {
+    let refusal = Refusal::from_status(status);
+    let body = || serde_json::from_slice::<Value>(body).ok();
+    let (documented, schema) = match refusal {
+        Refusal::Other(_) => return Ok(refusal),
+        Refusal::Invalid => (
+            body().is_some_and(|body| {
+                body["errors"].as_array().is_some_and(|errors| {
+                    errors.iter().all(|error| {
+                        error.is_object()
+                            && (error["field"].is_null() || error["field"].is_string())
+                            && error["message"].is_string()
+                    })
+                })
+            }),
+            "PublicApiValidationError",
+        ),
+        _ => (body().is_some_and(|body| body["message"].is_string()), "PublicApiError"),
+    };
+    ensure!(documented, "HTTP {status} body is not a {schema}");
+    Ok(refusal)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub(crate) enum TokenState {
     Active,
     Exhausted,
@@ -129,30 +163,33 @@ pub(crate) enum TokenState {
 pub(crate) struct TokenRecord {
     pub(crate) id: String,
     pub(crate) name: String,
+    #[serde(rename = "useCount")]
     pub(crate) used_count: u64,
     pub(crate) state: TokenState,
+    #[serde(deserialize_with = "timestamp")]
+    pub(crate) created_on: OffsetDateTime,
+    #[serde(deserialize_with = "timestamp")]
+    pub(crate) expires_on: OffsetDateTime,
     // The members below are only compared, so a record may omit them.
     #[serde(default)]
     max_uses: Option<u64>,
-    #[serde(default, deserialize_with = "optional_timestamp")]
-    expires_at: Option<OffsetDateTime>,
-    #[serde(default, deserialize_with = "optional_timestamp")]
-    created_at: Option<OffsetDateTime>,
     #[serde(default)]
-    created_by: Option<Value>,
+    created_by: Option<String>,
     #[serde(default)]
     friendly_name_format: Option<String>,
     #[serde(default)]
-    config: Option<Value>,
+    config: Option<BTreeMap<String, String>>,
 }
 
 /// What a token creation request asks for.
 pub(crate) struct TokenSpec {
     pub(crate) name: String,
     pub(crate) max_uses: u64,
-    pub(crate) expires_at: OffsetDateTime,
+    /// When the token stops enrolling devices; `None` leaves it to the authority's default.
+    pub(crate) expires_on: Option<OffsetDateTime>,
     pub(crate) friendly_name_format: Option<String>,
-    pub(crate) config: Option<Value>,
+    /// Product-specific config entries for the identities the token enrolls.
+    pub(crate) config: Option<BTreeMap<String, String>>,
 }
 
 impl TokenSpec {
@@ -161,7 +198,7 @@ impl TokenSpec {
         Ok(Self {
             name: format!("conformance-{}", uuid::Uuid::new_v4()),
             max_uses,
-            expires_at: OffsetDateTime::now_utc() + time::Duration::seconds(i64::try_from(lifetime.as_secs())?),
+            expires_on: Some(OffsetDateTime::now_utc() + time::Duration::try_from(lifetime)?),
             friendly_name_format: None,
             config: None,
         })
@@ -171,20 +208,21 @@ impl TokenSpec {
         let mut body = json!({
             "name": self.name,
             "maxUses": self.max_uses,
-            "expiresAt": self.expires_at.format(&Rfc3339)?,
         });
+        if let Some(instant) = self.expires_on {
+            body["expiresOn"] = json!(instant.format(&Rfc3339)?);
+        }
         if let Some(format) = &self.friendly_name_format {
             body["friendlyNameFormat"] = json!(format);
         }
         if let Some(config) = &self.config {
-            body["config"] = config.clone();
+            body["config"] = json!(config);
         }
         Ok(serde_json::to_vec(&body)?)
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub(crate) enum IdentityStatus {
     Active,
     Grace,
@@ -195,16 +233,15 @@ pub(crate) enum IdentityStatus {
 impl IdentityStatus {
     const fn query_value(self) -> &'static str {
         match self {
-            Self::Active => "active",
-            Self::Grace => "grace",
-            Self::Expired => "expired",
-            Self::Revoked => "revoked",
+            Self::Active => "Active",
+            Self::Grace => "Grace",
+            Self::Expired => "Expired",
+            Self::Revoked => "Revoked",
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub(crate) enum CertificateStatus {
     Pending,
     Current,
@@ -218,29 +255,24 @@ pub(crate) struct CertificateRecord {
     /// Only compared, so a record may omit it.
     #[serde(default)]
     serial_number: Option<String>,
-    #[serde(deserialize_with = "timestamp")]
+    #[serde(rename = "validFrom", deserialize_with = "timestamp")]
     pub(crate) not_before: OffsetDateTime,
-    #[serde(deserialize_with = "timestamp")]
+    #[serde(rename = "validUntil", deserialize_with = "timestamp")]
     pub(crate) not_after: OffsetDateTime,
     /// The issuing root's thumbprint.
+    #[serde(rename = "issuerThumbprint")]
     pub(crate) issuer: String,
     pub(crate) status: CertificateStatus,
 }
 
 /// The current certificate, as an identity's summary shows it.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct CurrentCertificate {
-    #[serde(deserialize_with = "timestamp")]
+    #[serde(rename = "validUntil", deserialize_with = "timestamp")]
     pub(crate) not_after: OffsetDateTime,
     /// The issuing root's thumbprint.
+    #[serde(rename = "issuerThumbprint")]
     pub(crate) issuer: String,
-}
-
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-pub(crate) struct TokenReference {
-    pub(crate) id: String,
-    pub(crate) name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -249,25 +281,30 @@ pub(crate) struct IdentityRecord {
     pub(crate) id: String,
     pub(crate) friendly_name: String,
     pub(crate) status: IdentityStatus,
+    #[serde(rename = "isConnected")]
     pub(crate) connected: bool,
-    #[serde(default)]
+    /// A summary omits the keys it was not asked for, and the member when none remain.
+    #[serde(default, deserialize_with = "null_as_default")]
     pub(crate) metadata: BTreeMap<String, String>,
     /// Every certificate issued to the identity; only the full view lists them.
     #[serde(default)]
     pub(crate) certificates: Option<Vec<CertificateRecord>>,
     #[serde(default)]
     pub(crate) certificate: Option<CurrentCertificate>,
+    // The enrollment token members are only compared, so a record may omit them.
     #[serde(default)]
-    pub(crate) enrollment_token: Option<TokenReference>,
+    enrollment_token_id: Option<String>,
+    #[serde(default)]
+    enrollment_token_name: Option<String>,
     /// When the identity was created; only the full view shows it.
-    #[serde(default, deserialize_with = "optional_timestamp")]
+    #[serde(rename = "createdOn", default, deserialize_with = "optional_timestamp")]
     pub(crate) created_at: Option<OffsetDateTime>,
-    #[serde(default, deserialize_with = "optional_timestamp")]
+    #[serde(rename = "lastSeenOn", default, deserialize_with = "optional_timestamp")]
     pub(crate) last_seen_at: Option<OffsetDateTime>,
     /// The request-renewal flag; a summary omits it, which reads as `false`.
-    #[serde(default)]
+    #[serde(rename = "isRenewalRequested", default, deserialize_with = "null_as_default")]
     pub(crate) renewal_requested: bool,
-    #[serde(default, deserialize_with = "optional_timestamp")]
+    #[serde(rename = "revokedOn", default, deserialize_with = "optional_timestamp")]
     pub(crate) revoked_at: Option<OffsetDateTime>,
 }
 
@@ -314,7 +351,7 @@ pub(crate) struct Page<T> {
     pub(crate) size: u64,
     #[serde(rename = "totalCount")]
     pub(crate) total_count: u64,
-    #[serde(rename = "totalPages")]
+    #[serde(rename = "totalPage")]
     pub(crate) total_pages: u64,
 }
 
@@ -322,12 +359,12 @@ pub(crate) struct Page<T> {
 #[derive(Clone, Default)]
 pub(crate) struct IdentityQuery {
     full: Option<bool>,
-    metadata: Option<Vec<String>>,
+    metadata: Vec<String>,
     status: Option<IdentityStatus>,
     token_id: Option<String>,
     issuer: Option<String>,
-    last_seen_before: Option<OffsetDateTime>,
-    last_seen_after: Option<OffsetDateTime>,
+    last_seen_to: Option<OffsetDateTime>,
+    last_seen_from: Option<OffsetDateTime>,
     name_contains: Option<String>,
     page: Option<(u64, u64)>,
 }
@@ -353,7 +390,7 @@ impl IdentityQuery {
 
     /// Only these metadata keys in a summary.
     pub(crate) fn metadata(mut self, keys: &[&str]) -> Self {
-        self.metadata = Some(keys.iter().map(|key| (*key).to_owned()).collect());
+        self.metadata = keys.iter().map(|key| (*key).to_owned()).collect();
         self
     }
 
@@ -368,13 +405,15 @@ impl IdentityQuery {
         self
     }
 
-    pub(crate) fn last_seen_before(mut self, instant: OffsetDateTime) -> Self {
-        self.last_seen_before = Some(instant);
+    /// Identities last seen at or before `instant`.
+    pub(crate) fn last_seen_to(mut self, instant: OffsetDateTime) -> Self {
+        self.last_seen_to = Some(instant);
         self
     }
 
-    pub(crate) fn last_seen_after(mut self, instant: OffsetDateTime) -> Self {
-        self.last_seen_after = Some(instant);
+    /// Identities last seen at or after `instant`.
+    pub(crate) fn last_seen_from(mut self, instant: OffsetDateTime) -> Self {
+        self.last_seen_from = Some(instant);
         self
     }
 
@@ -394,10 +433,10 @@ impl IdentityQuery {
         let (number, size) = self.page.unwrap_or((1, MAX_PAGE_SIZE));
         let mut parameters = vec![("pageNumber", number.to_string()), ("pageSize", size.to_string())];
         if let Some(full) = self.full {
-            parameters.push(("view", if full { "full" } else { "summary" }.to_owned()));
+            parameters.push(("view", if full { "Full" } else { "Summary" }.to_owned()));
         }
-        if let Some(keys) = &self.metadata {
-            parameters.push(("metadata", keys.join(",")));
+        for key in &self.metadata {
+            parameters.push(("metadataKey", key.clone()));
         }
         if let Some(status) = self.status {
             parameters.push(("status", status.query_value().to_owned()));
@@ -406,16 +445,16 @@ impl IdentityQuery {
             parameters.push(("enrollmentTokenId", id.clone()));
         }
         if let Some(issuer) = &self.issuer {
-            parameters.push(("issuer", issuer.clone()));
+            parameters.push(("issuerThumbprint", issuer.clone()));
         }
-        if let Some(instant) = self.last_seen_before {
-            parameters.push(("lastSeenBefore", instant.format(&Rfc3339)?));
+        if let Some(instant) = self.last_seen_from {
+            parameters.push(("lastSeenFrom", instant.format(&Rfc3339)?));
         }
-        if let Some(instant) = self.last_seen_after {
-            parameters.push(("lastSeenAfter", instant.format(&Rfc3339)?));
+        if let Some(instant) = self.last_seen_to {
+            parameters.push(("lastSeenTo", instant.format(&Rfc3339)?));
         }
         if let Some(text) = &self.name_contains {
-            parameters.push(("q", text.clone()));
+            parameters.push(("search", text.clone()));
         }
         Ok(parameters
             .iter()
@@ -439,7 +478,6 @@ fn percent_encode(value: &str) -> String {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub(crate) enum RotationPhase {
     Idle,
     Rotating,
@@ -449,22 +487,28 @@ pub(crate) enum RotationPhase {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RootSummary {
     pub(crate) thumbprint: String,
-    /// Only compared, so a summary may omit it.
+    // The validity members are only compared, so a summary may omit them.
     #[serde(default, deserialize_with = "optional_timestamp")]
-    not_after: Option<OffsetDateTime>,
+    valid_from: Option<OffsetDateTime>,
+    #[serde(default, deserialize_with = "optional_timestamp")]
+    valid_until: Option<OffsetDateTime>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RotationStatus {
     pub(crate) phase: RotationPhase,
+    /// Only compared, so a status may omit it.
+    #[serde(default, deserialize_with = "optional_timestamp")]
+    started_on: Option<OffsetDateTime>,
     #[serde(default)]
     pub(crate) old_root: Option<RootSummary>,
     #[serde(default)]
     pub(crate) new_root: Option<RootSummary>,
-    #[serde(default, deserialize_with = "optional_timestamp")]
+    #[serde(rename = "deadlineOn", default, deserialize_with = "optional_timestamp")]
     pub(crate) deadline: Option<OffsetDateTime>,
     /// Non-revoked identities that still hold an unexpired current or pending old-root certificate.
+    #[serde(rename = "oldRootActiveIdentityCount")]
     pub(crate) active_identities_on_old_root: u64,
 }
 
@@ -500,9 +544,51 @@ impl RotationDeadline {
     fn body(self) -> anyhow::Result<Vec<u8>> {
         let body = match self {
             Self::Default => json!({}),
-            Self::Now => json!({ "deadline": "now" }),
-            Self::At(instant) => json!({ "deadline": instant.format(&Rfc3339)? }),
+            // Any deadline at or before the authority's current time requests an emergency rotation.
+            // An hour in the past stays at or before it despite clock skew or an advanced mock clock.
+            Self::Now => json!({ "deadlineOn": (OffsetDateTime::now_utc() - time::Duration::HOUR).format(&Rfc3339)? }),
+            Self::At(instant) => json!({ "deadlineOn": instant.format(&Rfc3339)? }),
         };
+        Ok(serde_json::to_vec(&body)?)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Settings {
+    /// The `authority_id` agents receive at enrollment.
+    pub(crate) authority_id: String,
+    /// The administrator's switch for the agent channel.
+    #[serde(rename = "isAgentChannelEnabled")]
+    pub(crate) channel_enabled: bool,
+    /// Whether the authority offers the agent channel: it is enabled and the hosting supports it.
+    #[serde(rename = "isAgentChannelAvailable")]
+    pub(crate) channel_available: bool,
+    /// The lifetime of the certificates issued from now on.
+    pub(crate) certificate_lifetime_days: u64,
+    pub(crate) rotation_notifications_per_second: u64,
+}
+
+/// The settings a change sets; the others keep their value.
+#[derive(Clone, Default)]
+pub(crate) struct SettingsChange {
+    pub(crate) channel_enabled: Option<bool>,
+    pub(crate) certificate_lifetime_days: Option<u64>,
+    pub(crate) rotation_notifications_per_second: Option<u64>,
+}
+
+impl SettingsChange {
+    fn body(&self) -> anyhow::Result<Vec<u8>> {
+        let mut body = json!({});
+        if let Some(enabled) = self.channel_enabled {
+            body["isAgentChannelEnabled"] = json!(enabled);
+        }
+        if let Some(days) = self.certificate_lifetime_days {
+            body["certificateLifetimeDays"] = json!(days);
+        }
+        if let Some(rate) = self.rotation_notifications_per_second {
+            body["rotationNotificationsPerSecond"] = json!(rate);
+        }
         Ok(serde_json::to_vec(&body)?)
     }
 }
@@ -518,27 +604,31 @@ pub(crate) struct Route {
 
 impl std::fmt::Display for Route {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} {}", self.method, self.path)
+        write!(f, "{} {BASE_PATH}{}", self.method, self.path)
     }
 }
 
 /// Every management API route, acting on one token and one identity.
 ///
-/// The token creation route asks for `create`, the rename route for `rename`, and the rotation route for an emergency rotation.
-/// When `inert_rotation` is set, the rotation request is malformed so that it cannot rotate the target even if authorization is broken.
+/// The token creation route asks for `create`, the rename route for `rename`, the rotation route for an emergency rotation, and the settings route turns the agent channel off.
+/// When `inert` is set, the rotation request is malformed and the settings change is empty, so that neither can change the target even if authorization is broken.
 pub(crate) fn routes(
     token_id: &str,
     identity_id: &str,
     create: &TokenSpec,
     rename: &str,
-    inert_rotation: bool,
+    inert: bool,
 ) -> anyhow::Result<Vec<Route>> {
-    let token = format!("/enrollment-tokens/{token_id}");
-    let identity = format!("/identities/{identity_id}");
-    let rotation = if inert_rotation {
-        b"{".to_vec()
+    let token = format!("/enrollment-token/{token_id}");
+    let identity = format!("/{identity_id}");
+    let (rotation, settings) = if inert {
+        (b"{".to_vec(), SettingsChange::default().body()?)
     } else {
-        RotationDeadline::Now.body()?
+        let settings = SettingsChange {
+            channel_enabled: Some(false),
+            ..SettingsChange::default()
+        };
+        (RotationDeadline::Now.body()?, settings.body()?)
     };
     let route = |method: Method, path: String, body: Option<Vec<u8>>, success: u16, permission: Permission| Route {
         method,
@@ -550,23 +640,17 @@ pub(crate) fn routes(
     Ok(vec![
         route(
             Method::POST,
-            "/enrollment-tokens".to_owned(),
+            "/enrollment-token".to_owned(),
             Some(create.body()?),
             201,
             Permission::Manage,
         ),
-        route(
-            Method::GET,
-            "/enrollment-tokens".to_owned(),
-            None,
-            200,
-            Permission::View,
-        ),
+        route(Method::GET, "/enrollment-token".to_owned(), None, 200, Permission::View),
         route(Method::GET, token.clone(), None, 200, Permission::View),
         route(Method::DELETE, token, None, 204, Permission::Manage),
         route(
             Method::GET,
-            format!("/identities?enrollmentTokenId={token_id}"),
+            format!("?enrollmentTokenId={token_id}"),
             None,
             200,
             Permission::View,
@@ -594,13 +678,21 @@ pub(crate) fn routes(
             202,
             Permission::Manage,
         ),
-        route(Method::GET, "/ca/rotation".to_owned(), None, 200, Permission::View),
+        route(Method::GET, "/rotation".to_owned(), None, 200, Permission::View),
         route(
             Method::POST,
-            "/ca/rotation".to_owned(),
+            "/rotation".to_owned(),
             Some(rotation),
             202,
             Permission::RotateRoot,
+        ),
+        route(Method::GET, "/settings".to_owned(), None, 200, Permission::View),
+        route(
+            Method::PATCH,
+            "/settings".to_owned(),
+            Some(settings),
+            200,
+            Permission::Manage,
         ),
     ])
 }
@@ -617,25 +709,32 @@ impl<'a> Management<'a> {
     }
 
     /// Sends a request and returns its JSON body, or the refusal when the status is not `success`.
-    ///
-    /// A refusal is identified by its status alone, which is all DVLS's intent fixes.
     async fn request(&self, method: Method, path: &str, body: Option<&[u8]>, success: u16) -> anyhow::Result<Value> {
-        let (status, bytes) = self
+        let mut request = self
             .target
-            .exchange(
-                method.clone(),
-                &format!("{BASE_PATH}{path}"),
-                body,
-                self.credential,
-                None,
-            )
-            .await?;
+            .http
+            .request(method.clone(), format!("{}{BASE_PATH}{path}", self.target.base_url));
+        if let Some(credential) = self.credential {
+            request = request.header(CREDENTIAL_HEADER, credential);
+        }
+        if let Some(body) = body {
+            request = request
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .body(body.to_vec());
+        }
+        let response = request.send().await.with_context(|| format!("send {method} {path}"))?;
+        let status = response.status().as_u16();
+        let bytes = response
+            .bytes()
+            .await
+            .with_context(|| format!("read the {method} {path} response"))?;
         if status != success {
             ensure!(
                 !(200..300).contains(&status),
                 "{method} {path} succeeded with HTTP {status} instead of {success}"
             );
-            return Err(Refusal::from_status(status).into());
+            let refusal = refusal_from(status, &bytes).with_context(|| format!("{method} {path} refusal"))?;
+            return Err(refusal.into());
         }
         if bytes.is_empty() {
             return Ok(Value::Null);
@@ -674,25 +773,26 @@ impl<'a> Management<'a> {
 
     pub(crate) async fn create_token_from(&self, spec: &TokenSpec) -> anyhow::Result<Token> {
         #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct Created {
             token: String,
-            record: CreatedRecord,
+            enrollment_token: CreatedRecord,
         }
         #[derive(Deserialize)]
         struct CreatedRecord {
             id: String,
         }
         let created: Created = self
-            .fetch(Method::POST, "/enrollment-tokens", Some(&spec.body()?), 201)
+            .fetch(Method::POST, "/enrollment-token", Some(&spec.body()?), 201)
             .await?;
         Ok(Token {
             text: created.token,
-            id: created.record.id,
+            id: created.enrollment_token.id,
         })
     }
 
     pub(crate) async fn token(&self, id: &str) -> anyhow::Result<TokenRecord> {
-        self.fetch(Method::GET, &format!("/enrollment-tokens/{id}"), None, 200)
+        self.fetch(Method::GET, &format!("/enrollment-token/{id}"), None, 200)
             .await
     }
 
@@ -700,23 +800,27 @@ impl<'a> Management<'a> {
     pub(crate) async fn token_discloses_secret(&self, token: &Token) -> anyhow::Result<bool> {
         let (_, secret) = token.text.rsplit_once('.').context("token has no secret")?;
         let record = self
-            .request(Method::GET, &format!("/enrollment-tokens/{}", token.id), None, 200)
+            .request(Method::GET, &format!("/enrollment-token/{}", token.id), None, 200)
             .await?;
         Ok(contains_text(&record, secret))
+    }
+
+    /// One page, counted from 1, of at most `size` tokens.
+    pub(crate) async fn tokens(&self, number: u64, size: u64) -> anyhow::Result<Page<TokenRecord>> {
+        self.fetch(
+            Method::GET,
+            &format!("/enrollment-token?pageNumber={number}&pageSize={size}"),
+            None,
+            200,
+        )
+        .await
     }
 
     /// Every token, walking all pages.
     pub(crate) async fn all_tokens(&self) -> anyhow::Result<Vec<TokenRecord>> {
         let mut tokens = Vec::new();
         for number in 1.. {
-            let page: Page<TokenRecord> = self
-                .fetch(
-                    Method::GET,
-                    &format!("/enrollment-tokens?pageNumber={number}&pageSize={MAX_PAGE_SIZE}"),
-                    None,
-                    200,
-                )
-                .await?;
+            let page = self.tokens(number, MAX_TOKEN_PAGE_SIZE).await?;
             tokens.extend(page.items);
             if number >= page.total_pages {
                 break;
@@ -726,16 +830,22 @@ impl<'a> Management<'a> {
     }
 
     pub(crate) async fn delete_token(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::DELETE, &format!("/enrollment-tokens/{id}"), None, 204)
+        self.request(Method::DELETE, &format!("/enrollment-token/{id}"), None, 204)
             .await
             .map(drop)
     }
 
     /// The full view of one identity.
     pub(crate) async fn identity(&self, id: &str) -> anyhow::Result<IdentityRecord> {
-        let path = format!("/identities/{id}");
+        let path = format!("/{id}");
         let value = self.request(Method::GET, &path, None, 200).await?;
-        for name in ["certificates", "enrollmentToken", "createdAt", "renewalRequested"] {
+        for name in [
+            "certificates",
+            "enrollmentTokenId",
+            "enrollmentTokenName",
+            "createdOn",
+            "isRenewalRequested",
+        ] {
             ensure!(
                 value.get(name).is_some_and(|field| !field.is_null()),
                 "full identity record omits {name}"
@@ -756,13 +866,8 @@ impl<'a> Management<'a> {
     }
 
     pub(crate) async fn identities(&self, query: &IdentityQuery) -> anyhow::Result<Page<IdentityRecord>> {
-        self.fetch(
-            Method::GET,
-            &format!("/identities?{}", query.query_string()?),
-            None,
-            200,
-        )
-        .await
+        self.fetch(Method::GET, &format!("?{}", query.query_string()?), None, 200)
+            .await
     }
 
     /// Every identity `query` selects, walking all pages and checking that they agree with the reported total.
@@ -795,35 +900,43 @@ impl<'a> Management<'a> {
 
     pub(crate) async fn rename(&self, id: &str, friendly_name: &str) -> anyhow::Result<IdentityRecord> {
         let body = serde_json::to_vec(&json!({ "friendlyName": friendly_name }))?;
-        self.fetch(Method::PATCH, &format!("/identities/{id}"), Some(&body), 200)
-            .await
+        self.fetch(Method::PATCH, &format!("/{id}"), Some(&body), 200).await
     }
 
     pub(crate) async fn revoke(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::POST, &format!("/identities/{id}/revoke"), None, 204)
+        self.request(Method::POST, &format!("/{id}/revoke"), None, 204)
             .await
             .map(drop)
     }
 
     pub(crate) async fn delete_identity(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::DELETE, &format!("/identities/{id}"), None, 204)
+        self.request(Method::DELETE, &format!("/{id}"), None, 204)
             .await
             .map(drop)
     }
 
     pub(crate) async fn request_renewal(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::POST, &format!("/identities/{id}/request-renewal"), None, 202)
+        self.request(Method::POST, &format!("/{id}/request-renewal"), None, 202)
             .await
             .map(drop)
     }
 
     pub(crate) async fn rotation(&self) -> anyhow::Result<RotationStatus> {
-        self.fetch(Method::GET, "/ca/rotation", None, 200).await
+        self.fetch(Method::GET, "/rotation", None, 200).await
     }
 
     pub(crate) async fn rotate(&self, deadline: RotationDeadline) -> anyhow::Result<RotationStatus> {
-        self.fetch(Method::POST, "/ca/rotation", Some(&deadline.body()?), 202)
+        self.fetch(Method::POST, "/rotation", Some(&deadline.body()?), 202)
             .await
+    }
+
+    pub(crate) async fn settings(&self) -> anyhow::Result<Settings> {
+        self.fetch(Method::GET, "/settings", None, 200).await
+    }
+
+    /// Applies `change` and returns the resulting settings.
+    pub(crate) async fn change_settings(&self, change: &SettingsChange) -> anyhow::Result<Settings> {
+        self.fetch(Method::PATCH, "/settings", Some(&change.body()?), 200).await
     }
 }
 
@@ -836,6 +949,11 @@ fn optional_timestamp<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Opti
     Option::<String>::deserialize(deserializer)?
         .map(|text| OffsetDateTime::parse(&text, &Rfc3339).map_err(serde::de::Error::custom))
         .transpose()
+}
+
+/// Reads a nullable member, so that `null` means the same as an absent member.
+fn null_as_default<'de, D: Deserializer<'de>, T: Deserialize<'de> + Default>(deserializer: D) -> Result<T, D::Error> {
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 fn contains_text(value: &Value, text: &str) -> bool {
@@ -857,14 +975,15 @@ mod tests {
         json!({
             "id": "identity-id",
             "friendlyName": "test",
-            "status": "active",
-            "connected": false,
-            "metadata": {},
+            "status": "Active",
+            "isConnected": false,
+            "metadata": { "hostname": "test" },
             "certificates": [],
-            "enrollmentToken": { "id": "token-id", "name": "test" },
-            "createdAt": "2026-09-25T12:00:00Z",
-            "renewalRequested": false,
-            "certificate": { "issuer": "root-id", "notAfter": "2026-12-24T12:00:00Z" }
+            "enrollmentTokenId": "token-id",
+            "enrollmentTokenName": "test",
+            "createdOn": "2026-09-25T12:00:00Z",
+            "isRenewalRequested": false,
+            "certificate": { "issuerThumbprint": "root-id", "validUntil": "2026-12-24T12:00:00Z" }
         })
     }
 
@@ -874,8 +993,8 @@ mod tests {
         let mut noisy = identity();
         noisy["request_id"] = json!("different");
         noisy["certificate"]["request_id"] = json!("different");
-        noisy["lastSeenAt"] = Value::Null;
-        noisy["revokedAt"] = Value::Null;
+        noisy["lastSeenOn"] = Value::Null;
+        noisy["revokedOn"] = Value::Null;
         ensure!(
             serde_json::from_value::<IdentityRecord>(noisy)? == record,
             "unknown or null optional identity fields changed the record"
@@ -892,11 +1011,27 @@ mod tests {
                 == serde_json::from_value::<IdentityRecord>(null_certificate)?,
             "null optional identity certificate was not treated as absent"
         );
+        // A summary omits the metadata and the renewal flag; the document declares both nullable.
+        let mut summary = identity();
+        let members = summary.as_object_mut().context("identity fixture must be an object")?;
+        members.remove("metadata");
+        members.remove("isRenewalRequested");
+        let mut null_summary = identity();
+        null_summary["metadata"] = Value::Null;
+        null_summary["isRenewalRequested"] = Value::Null;
+        let summary: IdentityRecord = serde_json::from_value(summary)?;
+        ensure!(
+            summary.metadata.is_empty()
+                && !summary.renewal_requested
+                && serde_json::from_value::<IdentityRecord>(null_summary)? == summary,
+            "null metadata or renewal flag was not treated as absent"
+        );
         let rotation: RotationStatus = serde_json::from_value(json!({
-            "phase": "idle",
-            "activeIdentitiesOnOldRoot": 0,
+            "phase": "Idle",
+            "oldRootActiveIdentityCount": 0,
             "request_id": "different",
-            "deadline": null,
+            "startedOn": null,
+            "deadlineOn": null,
             "oldRoot": null,
             "newRoot": null
         }))?;
@@ -929,21 +1064,61 @@ mod tests {
     #[test]
     fn records_reject_null_or_malformed_required_fields() {
         for (name, value) in [
-            ("metadata", Value::Null),
             ("status", Value::Null),
-            ("createdAt", json!("not a timestamp")),
-            ("lastSeenAt", json!(123)),
+            ("status", json!("active")),
+            ("isConnected", Value::Null),
+            ("createdOn", json!("not a timestamp")),
+            ("lastSeenOn", json!(123)),
         ] {
             let mut record = identity();
-            record[name] = value;
+            record[name] = value.clone();
             assert!(
                 serde_json::from_value::<IdentityRecord>(record).is_err(),
-                "malformed {name} was accepted"
+                "{name} = {value} was accepted"
             );
         }
         assert!(
-            serde_json::from_value::<RotationStatus>(json!({ "phase": null, "activeIdentitiesOnOldRoot": 0 })).is_err(),
+            serde_json::from_value::<RotationStatus>(json!({ "phase": null, "oldRootActiveIdentityCount": 0 }))
+                .is_err(),
             "explicit null rotation phase was accepted"
         );
+    }
+
+    #[test]
+    fn refusals_require_the_documented_error_body() {
+        // The document: 400 carries a PublicApiValidationError, and 401, 403, 404, 409 and 422 a PublicApiError.
+        for (status, body, expected) in [
+            (
+                400,
+                r#"{"errors":[{"field":"maxUses","message":"too small"}]}"#,
+                Some(Refusal::Invalid),
+            ),
+            (
+                400,
+                r#"{"errors":[{"field":null,"message":"malformed"}]}"#,
+                Some(Refusal::Invalid),
+            ),
+            (400, r#"{"message":"invalid"}"#, None),
+            (409, r#"{"message":"rotation in progress"}"#, Some(Refusal::Conflict)),
+            (422, r#"{"message":"deadline too late"}"#, Some(Refusal::Unprocessable)),
+            (403, r#"{"errors":[{"field":null,"message":"forbidden"}]}"#, None),
+            (401, "", None),
+        ] {
+            assert_eq!(
+                refusal_from(status, body.as_bytes()).ok(),
+                expected,
+                "HTTP {status} with {body:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn identity_query_repeats_metadata_keys() -> anyhow::Result<()> {
+        // The document's example for `metadataKey`: "?metadataKey=hostname&metadataKey=os_name".
+        let query = IdentityQuery::default()
+            .metadata(&["hostname", "os_name"])
+            .query_string()?;
+        assert!(query.contains("metadataKey=hostname&metadataKey=os_name"), "{query}");
+        Ok(())
     }
 }

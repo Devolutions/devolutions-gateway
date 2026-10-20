@@ -24,7 +24,7 @@ use x509_cert::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage, Subject
 use crate::client::{Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field};
 use crate::dvls::{
     self, CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal, RotationDeadline,
-    RotationStatus, TokenSpec, TokenState, refusal,
+    RotationStatus, Settings, SettingsChange, TokenSpec, TokenState, refusal,
 };
 use crate::signer::{KeyPair, SignatureParameter, SignedHeaders, thumbprint};
 use crate::{Context, channel};
@@ -739,7 +739,7 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
 
 pub(crate) async fn p_token_config_contributes_to_effective_config(ctx: Context) -> anyhow::Result<()> {
     let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
-    spec.config = Some(json!({ "psu_channel_url": "https://psu.example" }));
+    spec.config = Some([("psu_channel_url".to_owned(), "https://psu.example".to_owned())].into());
     let token = ctx.target.management().create_token_from(&spec).await?;
     let identity = identity(&ctx.target, &token, "token-config").await?;
     ensure!(
@@ -1540,11 +1540,11 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
     let (_, mut identity) = issued(&ctx, "check-in").await?;
     let enrolled = identity.config.clone();
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let initial_seen = before.last_seen_at.context("new identity has no lastSeenAt")?;
-    let created_at = before.created_at.context("full identity omitted createdAt")?;
+    let initial_seen = before.last_seen_at.context("new identity has no last-seen time")?;
+    let created_at = before.created_at.context("full identity omitted the creation time")?;
     ensure!(
         enrolled["revision"].as_u64().is_some() && created_at <= initial_seen,
-        "enrollment omitted a config revision or the identity's initial lastSeenAt"
+        "enrollment omitted a config revision or the identity's initial last-seen time"
     );
     next_last_seen_second(&ctx).await?;
     let current = ctx
@@ -1553,13 +1553,15 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
         .await?;
     expect_status(&current, 200)?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
-    let current_seen = after.last_seen_at.context("current check-in did not set lastSeenAt")?;
+    let current_seen = after
+        .last_seen_at
+        .context("current check-in did not set the last-seen time")?;
     ensure!(
         current.body["config"] == enrolled
             && current.body["renewal_requested"] == false
             && after.metadata_value("hostname") == Some("current-check-in")
             && initial_seen < current_seen,
-        "current-certificate check-in did not return config or refresh metadata and lastSeenAt"
+        "current-certificate check-in did not return config or refresh metadata and the last-seen time"
     );
     ctx.target.management().request_renewal(&identity.identity_id).await?;
     let key = KeyPair::generate()?;
@@ -1576,7 +1578,7 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
     let after_pending = identity_record(&ctx.target, &identity.identity_id).await?;
     let pending_seen = after_pending
         .last_seen_at
-        .context("pending check-in did not set lastSeenAt")?;
+        .context("pending check-in did not set the last-seen time")?;
     ensure!(
         pending.body["config"] == enrolled
             && pending.body["renewal_requested"] == true
@@ -1585,7 +1587,7 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
             && before_pending
                 .last_seen_at
                 .is_none_or(|previous| pending_seen > previous),
-        "pending-certificate check-in did not return config or refresh metadata and lastSeenAt"
+        "pending-certificate check-in did not return config or refresh metadata and the last-seen time"
     );
     let before_invalid = after_pending;
     next_last_seen_second(&ctx).await?;
@@ -1619,7 +1621,7 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
     let after_invalid = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
         after_invalid.metadata == before_invalid.metadata && after_invalid.last_seen_at == before_invalid.last_seen_at,
-        "invalid check-in changed metadata or lastSeenAt"
+        "invalid check-in changed metadata or the last-seen time"
     );
     expect_status(&ctx.target.confirm(&identity).await?, 204)?;
     let confirmed = ctx.target.check_in(&identity, &json!({})).await?;
@@ -2330,7 +2332,7 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
     if ctx.mock() {
         ensure!(
             replayed.last_seen_at > pending.last_seen_at,
-            "replayed renew did not refresh lastSeenAt"
+            "replayed renew did not refresh the last-seen time"
         );
     }
     ensure!(
@@ -2351,7 +2353,7 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     let (_, mut identity) = issued(&ctx, "confirm-idempotent").await?;
     let old_thumb = identity.thumbprint.clone();
     let original = identity_record(&ctx.target, &identity.identity_id).await?;
-    let initial_seen = original.last_seen_at.context("new identity has no lastSeenAt")?;
+    let initial_seen = original.last_seen_at.context("new identity has no last-seen time")?;
     let original_events = if ctx.mock() {
         Some(ctx.target.events(&identity.identity_id).await?)
     } else {
@@ -2365,8 +2367,8 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
             && initial_seen
                 < already_current
                     .last_seen_at
-                    .context("current confirm omitted lastSeenAt")?,
-        "confirm with an already current certificate changed status or did not refresh lastSeenAt"
+                    .context("current confirm omitted the last-seen time")?,
+        "confirm with an already current certificate changed status or did not refresh the last-seen time"
     );
     if let Some(events) = &original_events {
         ensure!(
@@ -2386,9 +2388,13 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     ensure!(
         promoted.has_certificate(&old_thumb, CertificateStatus::Retired)
             && promoted.has_certificate(&identity.thumbprint, CertificateStatus::Current)
-            && before_promotion.last_seen_at.context("renew omitted lastSeenAt")?
-                < promoted.last_seen_at.context("pending confirm omitted lastSeenAt")?,
-        "confirm did not promote pending, retire current or refresh lastSeenAt"
+            && before_promotion
+                .last_seen_at
+                .context("renew omitted the last-seen time")?
+                < promoted
+                    .last_seen_at
+                    .context("pending confirm omitted the last-seen time")?,
+        "confirm did not promote pending, retire current or refresh the last-seen time"
     );
     let events = if ctx.mock() {
         Some(ctx.target.events(&identity.identity_id).await?)
@@ -2400,9 +2406,13 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
     let replayed = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
         replayed.certificates == promoted.certificates
-            && promoted.last_seen_at.context("confirmed identity omitted lastSeenAt")?
-                < replayed.last_seen_at.context("confirm retry omitted lastSeenAt")?,
-        "idempotent confirm retry changed certificate statuses or failed to refresh lastSeenAt"
+            && promoted
+                .last_seen_at
+                .context("confirmed identity omitted the last-seen time")?
+                < replayed
+                    .last_seen_at
+                    .context("confirm retry omitted the last-seen time")?,
+        "idempotent confirm retry changed certificate statuses or failed to refresh the last-seen time"
     );
     if let Some(events) = events {
         ensure!(
@@ -2927,17 +2937,17 @@ pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context)
     );
     let after_time = after
         .last_seen_at
-        .context("Hello did not set lastSeenAt")?
+        .context("Hello did not set the last-seen time")?
         .unix_timestamp();
     if let Some(before_time) = before.last_seen_at {
         ensure!(
             after_time > before_time.unix_timestamp(),
-            "Hello did not advance lastSeenAt"
+            "Hello did not advance the last-seen time"
         );
     }
     ensure!(
         server_time.seconds.abs_diff(after_time) <= 2,
-        "Welcome server_time disagrees with lastSeenAt"
+        "Welcome server_time disagrees with the last-seen time"
     );
     Ok(())
 }
@@ -2947,7 +2957,9 @@ pub(crate) async fn p_channel_agent_message_refreshes_last_seen(ctx: Context) ->
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let seen_before = before.last_seen_at.context("authenticated Hello omitted lastSeenAt")?;
+    let seen_before = before
+        .last_seen_at
+        .context("authenticated Hello omitted the last-seen time")?;
     next_last_seen_second(&ctx).await?;
     ctx.target.management().request_renewal(&identity.identity_id).await?;
     let request = stream.next().await?;
@@ -2962,20 +2974,20 @@ pub(crate) async fn p_channel_agent_message_refreshes_last_seen(ctx: Context) ->
         identity_record(&ctx.target, &identity.identity_id)
             .await?
             .last_seen_at
-            .context("management API request omitted lastSeenAt")?
+            .context("management API request omitted the last-seen time")?
             == seen_before,
-        "management API request or server push refreshed lastSeenAt before AgentMessage"
+        "management API request or server push refreshed the last-seen time before AgentMessage"
     );
     stream.ack(&request).await?;
     let started = Instant::now();
     loop {
         let after = identity_record(&ctx.target, &identity.identity_id).await?;
-        if seen_before < after.last_seen_at.context("AgentMessage omitted lastSeenAt")? {
+        if seen_before < after.last_seen_at.context("AgentMessage omitted the last-seen time")? {
             break;
         }
         ensure!(
             started.elapsed() < Duration::from_secs(5),
-            "authenticated AgentMessage did not refresh lastSeenAt"
+            "authenticated AgentMessage did not refresh the last-seen time"
         );
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
@@ -3126,7 +3138,7 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
         ensure!(!record.connected, "{variant} connected the identity");
         ensure!(
             record.last_seen_at == initial.last_seen_at,
-            "{variant} updated lastSeenAt"
+            "{variant} updated the last-seen time"
         );
         ensure!(record.metadata == initial.metadata, "{variant} changed metadata");
         replay_headers = Some(stream.headers);
@@ -3196,7 +3208,7 @@ pub(crate) async fn p_channel_no_hello_timeout(ctx: Context) -> anyhow::Result<(
     ensure!(!record.connected, "identity connected without Hello");
     ensure!(
         record.last_seen_at == initial.last_seen_at,
-        "lastSeenAt updated without Hello"
+        "last-seen time updated without Hello"
     );
     Ok(())
 }
@@ -4529,7 +4541,7 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
     );
     let too_late = RotationDeadline::At(maximum + time::Duration::seconds(1));
     ensure!(
-        refusal(ctx.target.management().rotate(too_late).await)? == Refusal::Invalid,
+        refusal(ctx.target.management().rotate(too_late).await)? == Refusal::Unprocessable,
         "a deadline after the rotation maximum was accepted"
     );
     ensure!(
@@ -4595,7 +4607,7 @@ pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: C
         .context("own old-root maximum is missing")?;
     let too_late = RotationDeadline::At(maximum + time::Duration::days(1));
     ensure!(
-        refusal(ctx.target.management().rotate(too_late).await)? == Refusal::Invalid,
+        refusal(ctx.target.management().rotate(too_late).await)? == Refusal::Unprocessable,
         "a deadline after the rotation maximum was accepted"
     );
     let status = ctx.target.management().rotation().await?;
@@ -5118,12 +5130,12 @@ pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx
     let mut overlapping = Vec::new();
     let mut page = 1;
     loop {
-        ensure!(page <= 20, "overlapping page walk did not reach an empty page");
-        let (rows, _) = listing_page(&ctx.target, &token, page).await?;
-        if rows.is_empty() {
+        ensure!(page <= 20, "overlapping page walk did not reach the last page");
+        let listing = listing_page(&ctx.target, &token, page).await?;
+        overlapping.extend(listing.rows.into_iter().map(|(id, _)| id));
+        if page >= listing.total_pages {
             break;
         }
-        overlapping.extend(rows.into_iter().map(|(id, _)| id));
         if page <= 3 {
             for n in 0..2 {
                 created.push(
@@ -5154,13 +5166,15 @@ pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx
     let mut walked = Vec::new();
     let mut timestamps = Vec::new();
     for page in 1..=5 {
-        let (rows, total) = listing_page(&ctx.target, &token, page).await?;
+        let listing = listing_page(&ctx.target, &token, page).await?;
         ensure!(
-            total == created.len() as u64,
-            "page {page} reports totalCount {total} instead of {}",
+            listing.total_count == created.len() as u64 && listing.total_pages == 5,
+            "page {page} reports {} identities on {} pages instead of {} on 5",
+            listing.total_count,
+            listing.total_pages,
             created.len()
         );
-        for (id, created_at) in rows {
+        for (id, created_at) in listing.rows {
             walked.push(id);
             timestamps.push(created_at);
         }
@@ -5171,21 +5185,23 @@ pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx
     );
     ensure!(
         timestamps.windows(2).all(|pair| pair[0] <= pair[1]),
-        "createdAt decreased in creation order"
+        "creation time decreased in creation order"
     );
     ensure!(
-        listing_page(&ctx.target, &token, 6).await?.0.is_empty(),
-        "page beyond the last page is not empty"
+        refusal(listing_page(&ctx.target, &token, 6).await)? == Refusal::Invalid,
+        "page past the last page was not refused"
     );
     Ok(())
 }
 
-/// Reads one two-row page of the token's identities as `(id, createdAt)` pairs, with the reported total.
-async fn listing_page(
-    target: &Target,
-    token: &Token,
-    page: u64,
-) -> anyhow::Result<(Vec<(String, time::OffsetDateTime)>, u64)> {
+/// One two-row page of the token's identities as `(id, creation time)` pairs, with the reported totals.
+struct ListingPage {
+    rows: Vec<(String, time::OffsetDateTime)>,
+    total_count: u64,
+    total_pages: u64,
+}
+
+async fn listing_page(target: &Target, token: &Token, page: u64) -> anyhow::Result<ListingPage> {
     let listing = target
         .management()
         .identities(&IdentityQuery::enrolled_with(token).full().page(page, 2))
@@ -5193,9 +5209,18 @@ async fn listing_page(
     let rows = listing
         .items
         .into_iter()
-        .map(|row| Ok((row.id, row.created_at.context("full listing omitted createdAt")?)))
+        .map(|row| {
+            Ok((
+                row.id,
+                row.created_at.context("full listing omitted the creation time")?,
+            ))
+        })
         .collect::<anyhow::Result<Vec<_>>>()?;
-    Ok((rows, listing.total_count))
+    Ok(ListingPage {
+        rows,
+        total_count: listing.total_count,
+        total_pages: listing.total_pages,
+    })
 }
 
 pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::Result<()> {
@@ -5308,21 +5333,17 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
             && paged.items[0].id == revoked.identity_id,
         "page fields incorrect"
     );
-    let beyond = management.identities(&of_token().page(3, 1)).await?;
-    ensure!(beyond.items.is_empty(), "page beyond the last page was not empty");
-    for (number, size) in [(1, 0), (1, dvls::MAX_PAGE_SIZE + 1), (0, 1)] {
+    // A page past the last, and a page number beyond the management API's integers, are invalid.
+    for (number, size) in [
+        (1, 0),
+        (1, dvls::MAX_PAGE_SIZE + 1),
+        (0, 1),
+        (3, 1),
+        (u64::MAX, dvls::MAX_PAGE_SIZE),
+    ] {
         ensure!(
             refusal(management.identities(&of_token().page(number, size)).await)? == Refusal::Invalid,
             "page {number} of size {size} was accepted"
-        );
-    }
-    if ctx.mock() {
-        let huge = management
-            .identities(&of_token().page(u64::MAX, dvls::MAX_PAGE_SIZE))
-            .await?;
-        ensure!(
-            huge.items.is_empty(),
-            "huge page number overflowed instead of returning an empty page"
         );
     }
     expect_status(
@@ -5341,13 +5362,13 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
     let observed = identity_record(&ctx.target, &active.identity_id).await?;
     let instant = observed
         .last_seen_at
-        .context("check-in did not set lastSeenAt for filtering")?;
+        .context("check-in did not set the last-seen time for filtering")?;
     let after = instant - time::Duration::seconds(1);
     let before = instant + time::Duration::seconds(1);
     for (query, expected) in [
-        (of_token().status(IdentityStatus::Active).last_seen_after(after), true),
-        (of_token().status(IdentityStatus::Active).last_seen_before(before), true),
-        (of_token().status(IdentityStatus::Active).last_seen_after(before), false),
+        (of_token().status(IdentityStatus::Active).last_seen_from(after), true),
+        (of_token().status(IdentityStatus::Active).last_seen_to(before), true),
+        (of_token().status(IdentityStatus::Active).last_seen_from(before), false),
     ] {
         let result = management.identities(&query).await?;
         ensure!(
@@ -5431,6 +5452,14 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         refusal(management.create_token_from(&spec).await)? == Refusal::Invalid,
         "token expiring after 365 days was accepted"
     );
+    // The document: a token page holds at most 500 tokens.
+    management.tokens(1, dvls::MAX_TOKEN_PAGE_SIZE).await?;
+    for (number, size) in [(1, 0), (1, dvls::MAX_TOKEN_PAGE_SIZE + 1), (0, 1)] {
+        ensure!(
+            refusal(management.tokens(number, size).await)? == Refusal::Invalid,
+            "token page {number} of size {size} was accepted"
+        );
+    }
     Ok(())
 }
 
@@ -5480,6 +5509,7 @@ async fn assert_management_routes_denied(
     let token_before = management.token(&token.id).await?;
     let roots_before = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
     let rotation_before = management.rotation().await?;
+    let settings_before = management.settings().await?;
     let events_before = if ctx.mock() {
         Some(ctx.target.events(&identity.identity_id).await?)
     } else {
@@ -5487,7 +5517,7 @@ async fn assert_management_routes_denied(
     };
     let mut create = TokenSpec::new(1, TOKEN_LIFETIME)?;
     create.name = format!("unauthorized-{}", uuid::Uuid::new_v4());
-    // On a non-disposable DVLS target, the rotation request is malformed so that it cannot rotate even if authorization is broken.
+    // On a non-disposable DVLS target, the rotation request is malformed and the settings change empty, so that neither can change the target even if authorization is broken.
     let routes = dvls::routes(&token.id, &identity.identity_id, &create, "unauthorized", !ctx.mock())?;
     let denied = ctx.target.management_as(credential);
     for route in routes.iter().filter(|route| selected(route.permission)) {
@@ -5516,6 +5546,10 @@ async fn assert_management_routes_denied(
                 && trust_anchor_snapshot(&ctx.target.trust_anchor().await?)? == roots_before,
             "unauthorized {route} changed CA rotation state"
         );
+        ensure!(
+            management.settings().await? == settings_before,
+            "unauthorized {route} changed the settings"
+        );
         if let Some(events) = &events_before {
             ensure!(
                 ctx.target.events(&identity.identity_id).await? == *events,
@@ -5534,9 +5568,9 @@ async fn assert_management_routes_denied(
     Ok(())
 }
 
-/// DVLS's intent, "Management API": "A request without the required permission is refused with `403`."
+/// The OpenAPI document gives each operation a 403 response that names the permission it lacks, such as "Missing the AgentIdentityManage permission" for a settings change.
 ///
-/// Each route group is called with a credential lacking that group's permission; on the mock it holds every other permission, so none stands in for the missing one.
+/// Each route group, the settings included, is called with a credential lacking that group's permission; on the mock it holds every other permission, so none stands in for the missing one.
 pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Result<()> {
     for permission in Permission::ALL {
         let credential = dvls::credential_lacking(&ctx, permission)
@@ -5583,6 +5617,319 @@ pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Resu
             "unauthorized rotation changed state"
         );
     }
+    Ok(())
+}
+
+/// The OpenAPI document, on a token's `expiresOn`: "in the future and at most 365 days ahead ... (Default: 90 days ahead)".
+pub(crate) async fn p_token_expiry_default_and_maximum(ctx: Context) -> anyhow::Result<()> {
+    let management = ctx.target.management();
+    let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
+    spec.expires_on = None;
+    let default = management.create_token_from(&spec).await?;
+    let record = management.token(&default.id).await?;
+    let ahead = record.expires_on - record.created_on;
+    ensure!(
+        (ahead - time::Duration::days(90)).abs() <= time::Duration::MINUTE,
+        "a token created without an expiry expires {ahead} after its creation instead of 90 days"
+    );
+    let longest = management
+        .create_token_from(&TokenSpec::new(1, Duration::from_secs(365 * DAY_SECS - 3600))?)
+        .await?;
+    let mut past = TokenSpec::new(1, TOKEN_LIFETIME)?;
+    past.expires_on = Some(time::OffsetDateTime::now_utc() - time::Duration::HOUR);
+    ensure!(
+        refusal(management.create_token_from(&past).await)? == Refusal::Invalid,
+        "a token that has already expired was accepted"
+    );
+    for token in [default, longest] {
+        management.delete_token(&token.id).await?;
+    }
+    Ok(())
+}
+
+/// The OpenAPI document: starting a rotation is 409 when "no root exists yet", and "The first token also creates the Agent Identity root".
+pub(crate) async fn p_rotation_without_root_conflicts(ctx: Context) -> anyhow::Result<()> {
+    expect_status(
+        &ctx.target.control("reset", &json!({ "without_root": true })).await?,
+        200,
+    )?;
+    let published = |roots: &Value| roots["roots"].as_array().map(Vec::len);
+    ensure!(
+        published(&ctx.target.trust_anchor().await?) == Some(0),
+        "an authority without a root published one"
+    );
+    ensure!(
+        refusal(ctx.target.management().rotate(RotationDeadline::Default).await)? == Refusal::Conflict,
+        "a rotation started without a root"
+    );
+    ensure!(
+        !ctx.target.management().rotation().await?.rotating()
+            && published(&ctx.target.trust_anchor().await?) == Some(0),
+        "a refused rotation without a root changed the rotation or published a root"
+    );
+    let _ = token(&ctx, 1).await?;
+    ensure!(
+        published(&ctx.target.trust_anchor().await?) == Some(1),
+        "the first token did not create the root"
+    );
+    Ok(())
+}
+
+/// The OpenAPI document: starting a rotation is 409 when "the root key is unavailable", and creating the first token is 409 when "The first root cannot be created because the data encryption key is unavailable".
+pub(crate) async fn p_root_key_unavailable_conflicts(ctx: Context) -> anyhow::Result<()> {
+    let _ = issued(&ctx, "root-key").await?;
+    let roots = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
+    ctx.target.faults(&json!({ "root_key_unavailable": true })).await?;
+    ensure!(
+        refusal(ctx.target.management().rotate(RotationDeadline::Default).await)? == Refusal::Conflict,
+        "a rotation started with an unavailable root key"
+    );
+    ensure!(
+        !ctx.target.management().rotation().await?.rotating()
+            && trust_anchor_snapshot(&ctx.target.trust_anchor().await?)? == roots,
+        "a refused rotation changed the rotation or the published roots"
+    );
+
+    expect_status(
+        &ctx.target.control("reset", &json!({ "without_root": true })).await?,
+        200,
+    )?;
+    ctx.target.faults(&json!({ "root_key_unavailable": true })).await?;
+    let spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
+    ensure!(
+        refusal(ctx.target.management().create_token_from(&spec).await)? == Refusal::Conflict,
+        "the first token was created although its root could not be"
+    );
+    ensure!(
+        ctx.target
+            .management()
+            .all_tokens()
+            .await?
+            .iter()
+            .all(|record| record.name != spec.name)
+            && ctx.target.trust_anchor().await?["roots"]
+                .as_array()
+                .is_some_and(Vec::is_empty),
+        "a refused first token was kept or published a root"
+    );
+    Ok(())
+}
+
+/// The OpenAPI document, on the settings: `authorityId` is "The authority_id agents receive at enrollment", and `isAgentChannelAvailable` is "Whether DVLS offers the agent channel: it is enabled and the hosting supports it".
+/// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`.
+pub(crate) async fn p_settings_read(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "settings").await?;
+    let settings = ctx.target.management().settings().await?;
+    ensure!(
+        uuid::Uuid::parse_str(&settings.authority_id)? == uuid::Uuid::parse_str(&identity.authority_id)?,
+        "the settings report another authority ID than enrollment"
+    );
+    ensure!(
+        settings.channel_available == identity.agent_channel_url.is_some(),
+        "the settings and enrollment disagree on whether the agent channel is offered"
+    );
+    ensure!(
+        settings.channel_enabled || !settings.channel_available,
+        "the agent channel is offered while it is disabled"
+    );
+    Ok(())
+}
+
+/// The OpenAPI document, on a settings change: `certificateLifetimeDays` is "from 1 to 365 days" and `rotationNotificationsPerSecond` "from 1 to 1000".
+pub(crate) async fn p_settings_change_bounds(ctx: Context) -> anyhow::Result<()> {
+    require_settings_changes(&ctx)?;
+    let management = ctx.target.management();
+    let original = management.settings().await?;
+    restoring_settings(&ctx, &original, async {
+        let lifetime = |days| SettingsChange {
+            certificate_lifetime_days: Some(days),
+            ..SettingsChange::default()
+        };
+        let rate = |per_second| SettingsChange {
+            rotation_notifications_per_second: Some(per_second),
+            ..SettingsChange::default()
+        };
+        for (change, name) in [
+            (lifetime(0), "a certificate lifetime of 0 days"),
+            (lifetime(366), "a certificate lifetime of 366 days"),
+            (rate(0), "0 rotation notifications per second"),
+            (rate(1001), "1001 rotation notifications per second"),
+        ] {
+            ensure!(
+                refusal(management.change_settings(&change).await)? == Refusal::Invalid,
+                "{name} was accepted"
+            );
+        }
+        ensure!(
+            management.settings().await? == original,
+            "a refused settings change changed the settings"
+        );
+        for (change, name) in [
+            (lifetime(1), "a certificate lifetime of 1 day"),
+            (lifetime(365), "a certificate lifetime of 365 days"),
+            (rate(1), "1 rotation notification per second"),
+            (rate(1000), "1000 rotation notifications per second"),
+        ] {
+            let changed = management.change_settings(&change).await.context(name)?;
+            ensure!(
+                changed == management.settings().await?
+                    && change
+                        .certificate_lifetime_days
+                        .is_none_or(|days| changed.certificate_lifetime_days == days)
+                    && change
+                        .rotation_notifications_per_second
+                        .is_none_or(|per_second| changed.rotation_notifications_per_second == per_second),
+                "{name} was not applied"
+            );
+        }
+        Ok(())
+    })
+    .await
+}
+
+/// The OpenAPI document: `certificateLifetimeDays` is "The lifetime of the identity certificates issued from now on, in days".
+pub(crate) async fn p_settings_certificate_lifetime_applies_to_new_certificates(ctx: Context) -> anyhow::Result<()> {
+    require_settings_changes(&ctx)?;
+    let management = ctx.target.management();
+    let original = management.settings().await?;
+    if !ctx.mock() && ctx.leaf_lifetime_secs != original.certificate_lifetime_days * DAY_SECS {
+        return Err(
+            crate::Incomplete("requires --leaf-lifetime-secs to match the DVLS certificate lifetime in days").into(),
+        );
+    }
+    let (_, earlier) = issued(&ctx, "lifetime-before").await?;
+    let earlier_expiry = identity_record(&ctx.target, &earlier.identity_id)
+        .await?
+        .not_after()
+        .context("identity has no current certificate")?;
+    let days = if original.certificate_lifetime_days == 7 { 8 } else { 7 };
+    restoring_settings(&ctx, &original, async {
+        let changed = management
+            .change_settings(&SettingsChange {
+                certificate_lifetime_days: Some(days),
+                ..SettingsChange::default()
+            })
+            .await?;
+        ensure!(
+            changed.certificate_lifetime_days == days && management.settings().await? == changed,
+            "the certificate lifetime change was not applied"
+        );
+        let issued_from = time::OffsetDateTime::now_utc();
+        let (_, later) = issued(&ctx, "lifetime-after").await?;
+        expect_status(
+            &ctx.target.renew(&earlier, &KeyPair::generate()?, &json!({})).await?,
+            200,
+        )?;
+        let issued_until = time::OffsetDateTime::now_utc();
+        // The tolerance covers the clock difference between the runner and the authority; a lifetime one day off falls outside it.
+        let tolerance = time::Duration::minutes(5);
+        let lifetime = time::Duration::days(i64::try_from(days)?);
+        let expected = (issued_from + lifetime - tolerance)..=(issued_until + lifetime + tolerance);
+        let later = identity_record(&ctx.target, &later.identity_id).await?;
+        let earlier = identity_record(&ctx.target, &earlier.identity_id).await?;
+        for (certificate, name) in [
+            (
+                later.certificate_with(CertificateStatus::Current),
+                "an enrolled certificate",
+            ),
+            (
+                earlier.certificate_with(CertificateStatus::Pending),
+                "a renewed certificate",
+            ),
+        ] {
+            let not_after = certificate.with_context(|| format!("{name} is missing"))?.not_after;
+            ensure!(
+                expected.contains(&not_after),
+                "{name} issued after the change expires at {not_after} instead of {days} days after its issuance"
+            );
+        }
+        ensure!(
+            earlier.not_after() == Some(earlier_expiry),
+            "the certificate lifetime change altered a certificate issued before it"
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// The OpenAPI document: `isAgentChannelEnabled` "turns the agent channel off behind a reverse proxy that breaks gRPC", and `isAgentChannelAvailable` is "Whether DVLS offers the agent channel: it is enabled and the hosting supports it".
+/// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`.
+pub(crate) async fn p_settings_channel_switch_withdraws_and_restores_channel_url(ctx: Context) -> anyhow::Result<()> {
+    require_settings_changes(&ctx)?;
+    let management = ctx.target.management();
+    let original = management.settings().await?;
+    let (_, identity) = issued(&ctx, "channel-switch").await?;
+    let url = identity
+        .agent_channel_url
+        .clone()
+        .context("enrollment offered no agent channel")?;
+    ensure!(
+        original.channel_enabled && original.channel_available,
+        "the settings do not report the agent channel that enrollment offered"
+    );
+    restoring_settings(&ctx, &original, async {
+        let switch = |enabled| SettingsChange {
+            channel_enabled: Some(enabled),
+            ..SettingsChange::default()
+        };
+        let disabled = management.change_settings(&switch(false)).await?;
+        ensure!(
+            !disabled.channel_enabled && !disabled.channel_available,
+            "the agent channel is still offered after it was disabled"
+        );
+        ensure!(
+            check_in_config(&ctx.target, &identity)
+                .await?
+                .get("agent_channel_url")
+                .is_none(),
+            "check-in config kept the agent channel URL after the channel was disabled"
+        );
+        let enabled = management.change_settings(&switch(true)).await?;
+        ensure!(
+            enabled.channel_enabled && enabled.channel_available,
+            "the agent channel is not offered after it was enabled again"
+        );
+        ensure!(
+            check_in_config(&ctx.target, &identity).await?["agent_channel_url"] == url.as_str(),
+            "check-in config did not restore the agent channel URL"
+        );
+        Ok(())
+    })
+    .await
+}
+
+const DAY_SECS: u64 = 24 * 3600;
+
+/// Changing the settings of a DVLS target affects every agent it serves, so only a disposable one allows it.
+fn require_settings_changes(ctx: &Context) -> anyhow::Result<()> {
+    if ctx.mock() || ctx.disposable_dvls_target {
+        Ok(())
+    } else {
+        Err(crate::Incomplete("changing settings requires --disposable-dvls-target").into())
+    }
+}
+
+/// Runs `test`, then restores `original`, so that a failing test leaves the target's settings as it found them.
+async fn restoring_settings(
+    ctx: &Context,
+    original: &Settings,
+    test: impl Future<Output = anyhow::Result<()>>,
+) -> anyhow::Result<()> {
+    let result = test.await;
+    let restored = ctx
+        .target
+        .management()
+        .change_settings(&SettingsChange {
+            channel_enabled: Some(original.channel_enabled),
+            certificate_lifetime_days: Some(original.certificate_lifetime_days),
+            rotation_notifications_per_second: Some(original.rotation_notifications_per_second),
+        })
+        .await;
+    result?;
+    ensure!(
+        restored? == *original,
+        "restoring the settings did not return them to their original values"
+    );
     Ok(())
 }
 

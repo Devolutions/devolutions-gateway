@@ -3880,7 +3880,10 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
                 case.until_identity(&target, &id, "connected channel", |record| record.connected)
                     .await?
             };
-            ensure!(connected.last_seen_at.is_some(), "channel did not update lastSeenAt");
+            ensure!(
+                connected.last_seen_at.is_some(),
+                "channel did not update the last-seen time"
+            );
             ensure!(
                 connected.metadata_value("hostname") == Some(&*case.metadata_hostname),
                 "initial Hello ignored the metadata override"
@@ -3898,7 +3901,7 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
             if case.ctx.mock() {
                 ensure!(
                     connected.last_seen_at.is_some() && connected.last_seen_at != enrolled.last_seen_at,
-                    "authenticated Hello did not refresh lastSeenAt"
+                    "authenticated Hello did not refresh the last-seen time"
                 );
             }
             Ok(())

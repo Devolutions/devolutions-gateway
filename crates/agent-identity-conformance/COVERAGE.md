@@ -39,5 +39,5 @@ The `p_*` tests check an authority and the `a_*` tests the agent; the tests name
 
 The suite's tests of each party's own intent:
 
-- DVLS's management API (`docs/agent-identity/INTENT.DVLS.md`), reached only through the suite's DVLS module: `p_management_tokens_crud_and_states`, `p_management_requires_auth`, `p_management_permission_denied`, `p_rotation_start_requires_auth`, `p_listing_pagination_stable_during_concurrent_enrollment`, `p_listing_views_filters_and_bounds`, `p_identity_statuses`.
+- DVLS's management API (`docs/agent-identity/INTENT.DVLS.md` and DVLS's OpenAPI document), reached only through the suite's DVLS module: `p_management_tokens_crud_and_states`, `p_token_expiry_default_and_maximum`, `p_management_requires_auth`, `p_management_permission_denied`, `p_rotation_start_requires_auth`, `p_rotation_without_root_conflicts`, `p_root_key_unavailable_conflicts`, `p_listing_pagination_stable_during_concurrent_enrollment`, `p_listing_views_filters_and_bounds`, `p_identity_statuses`, `p_settings_read`, `p_settings_change_bounds`, `p_settings_certificate_lifetime_applies_to_new_certificates`, `p_settings_channel_switch_withdraws_and_restores_channel_url`.
 - Friendly names (shared intent, "Enrollment"): `p_friendly_name_format`, `p_friendly_name_white_space_and_truncation`.

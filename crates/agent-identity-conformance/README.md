@@ -15,8 +15,10 @@ Start two mocks as described in the [mock README] for the complete multi-authori
 
 Use `--filter p_` for protocol-only checks or `--list` to inspect test names.
 Use `--key-backend windows-software-provider|file` to select `Identity.KeyBackend` (`WindowsSoftwareProvider` or `File`); the default is Windows software provider on Windows and file elsewhere.
-On DVLS, supply `--disposable-dvls-target` only when rotation is safe, and provide `--unprivileged-admin-token`, a management API credential without any permission, to check permission denials.
-The runner reaches each authority's management API only through the module for that authority, `src/dvls.rs` for DVLS and the mock that replicates it.
+`--admin-token` is the management API credential: on DVLS, a session token, which the runner sends in the `tokenId` header; on the mock, the mock's own `--admin-token`.
+On DVLS, supply `--disposable-dvls-target` only when rotation and settings changes are safe, and provide `--unprivileged-admin-token`, a session token without any Agent Identity permission, to check permission denials.
+Settings tests restore the original settings when they finish.
+The runner reaches each authority's management API only through the module for that authority: `src/dvls.rs` speaks DVLS's management API, as DVLS's OpenAPI document defines it and the mock replicates it.
 The disposable rotation checks require no other active identities on the published root; otherwise they report `SKIP` before rotating.
 `--dvls-rotation-window-secs` defaults to 60; `--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
