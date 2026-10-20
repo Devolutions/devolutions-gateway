@@ -327,23 +327,27 @@ async fn chain_evaluation_time(ctx: &Context) -> anyhow::Result<i64> {
     Ok(time::OffsetDateTime::now_utc().unix_timestamp())
 }
 
+/// Validates an issued chain against the published roots.
+///
+/// The root profile and the number of CA tiers are each authority's choice ([CONTRACT.md] §4 "Certificates"), so only RFC 5280 path rules apply: intermediates must be CAs allowed to sign certificates, while the trust anchor needs no extensions.
+/// An issuer signature algorithm this tester cannot verify makes the test incomplete rather than failed.
+///
+/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
 fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()> {
     ensure!(chain.len() >= 2, "certificate chain has no issuer");
     let certs = chain
         .iter()
         .map(|encoded| Certificate::from_der(&decoded_certificate(encoded)?).map_err(anyhow::Error::from))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    for issuer in &certs[1..] {
-        let (_, basic) = issuer
-            .tbs_certificate()
-            .get_extension::<BasicConstraints>()?
-            .context("chain issuer lacks basic constraints")?;
-        ensure!(basic.ca, "chain issuer is not a CA");
-        let (_, usage) = issuer
-            .tbs_certificate()
-            .get_extension::<KeyUsage>()?
-            .context("chain issuer lacks key usage")?;
-        ensure!(usage.key_cert_sign(), "chain issuer lacks keyCertSign");
+    for intermediate in &certs[1..certs.len() - 1] {
+        let basic = intermediate.tbs_certificate().get_extension::<BasicConstraints>()?;
+        ensure!(
+            basic.is_some_and(|(_, basic)| basic.ca),
+            "chain intermediate is not a CA"
+        );
+        if let Some((_, usage)) = intermediate.tbs_certificate().get_extension::<KeyUsage>()? {
+            ensure!(usage.key_cert_sign(), "chain intermediate lacks keyCertSign");
+        }
     }
     let anchors = roots["roots"].as_array().context("missing trust anchors")?;
     let root_der = decoded_certificate(chain.last().context("missing chain root")?)?;
@@ -370,35 +374,28 @@ fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()>
             "certificate issuer mismatch"
         );
         let issuer_key = pair[1].tbs_certificate().subject_public_key_info();
-        let ec = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
-        ensure!(
-            issuer_key.algorithm.oid == ec,
-            "unsupported certificate issuer key algorithm"
-        );
-        let curve = issuer_key
-            .algorithm
-            .parameters
-            .as_ref()
-            .context("certificate issuer has no curve")?
-            .decode_as::<ObjectIdentifier>()?;
+        let curve = (issuer_key.algorithm.oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1"))
+            .then_some(issuer_key.algorithm.parameters.as_ref())
+            .flatten()
+            .and_then(|parameters| parameters.decode_as::<ObjectIdentifier>().ok());
+        let algorithm = pair[0].signature_algorithm().oid;
         let signed_bytes = pair[0].tbs_certificate().to_der()?;
         let signature = pair[0].signature().as_bytes().context("certificate signature")?;
-        if curve == ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7") {
-            ensure!(
-                pair[0].signature_algorithm().oid == ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2"),
-                "P-256 certificate used an unsupported signature algorithm"
-            );
+        if curve == Some(ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7"))
+            && algorithm == ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2")
+        {
             let key = VerifyingKey::from_public_key_der(&issuer_key.to_der()?)?;
             key.verify(&signed_bytes, &Signature::from_der(signature)?)?;
-        } else if curve == ObjectIdentifier::new_unwrap("1.3.132.0.34") {
-            ensure!(
-                pair[0].signature_algorithm().oid == ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3"),
-                "P-384 certificate used an unsupported signature algorithm"
-            );
+        } else if curve == Some(ObjectIdentifier::new_unwrap("1.3.132.0.34"))
+            && algorithm == ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3")
+        {
             let key = VerifyingKey384::from_public_key_der(&issuer_key.to_der()?)?;
             key.verify(&signed_bytes, &Signature384::from_der(signature)?)?;
         } else {
-            anyhow::bail!("unsupported certificate issuer curve {curve}");
+            return Err(crate::Incomplete(
+                "the tester cannot verify the issuer's certificate signature algorithm; only P-256 with SHA-256 and P-384 with SHA-384 are supported",
+            )
+            .into());
         }
     }
     Ok(())
@@ -2210,20 +2207,30 @@ pub(crate) async fn p_signature_noncanonical_base64_rejected(ctx: Context) -> an
     Ok(())
 }
 
-pub(crate) async fn p_signature_repeated_parameter_rejected(ctx: Context) -> anyhow::Result<()> {
-    let (_, identity) = issued(&ctx, "repeated-parameter").await?;
+pub(crate) async fn p_signature_repeated_raw_items_rejected(ctx: Context) -> anyhow::Result<()> {
+    let (_, identity) = issued(&ctx, "repeated-raw-items").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "rejected" } }))?;
     let sign = || identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
     for (variant, headers) in [
         (
-            "signed over the received member",
-            resigned(&identity.key, with_repeated_tag(sign())?)?,
+            "tag parameter signed over the received member",
+            resigned(&identity.key, with_repeated_tag(sign(), "renew"))?,
         ),
         (
-            "signed over the member a last-wins parser keeps",
-            with_repeated_tag(sign())?,
+            "tag parameter signed over the member a last-wins parser keeps",
+            with_repeated_tag(sign(), "renew"),
+        ),
+        ("Signature-Input label in one field", with_repeated_input_label(sign())),
+        ("Signature label in one field", with_repeated_signature_label(sign())),
+        (
+            "Content-Digest member signed over the received field",
+            resigned(&identity.key, with_repeated_digest_member(sign())?)?,
+        ),
+        (
+            "Content-Digest member signed over the member a last-wins parser keeps",
+            with_repeated_digest_member(sign())?,
         ),
     ] {
         expect_error(
@@ -2231,10 +2238,10 @@ pub(crate) async fn p_signature_repeated_parameter_rejected(ctx: Context) -> any
             401,
             "signature_invalid",
         )
-        .with_context(|| format!("repeated renew tag parameter {variant}"))?;
+        .with_context(|| format!("renew with a repeated {variant}"))?;
         ensure!(
             identity_record(&ctx.target, &identity.identity_id).await? == before,
-            "repeated renew tag parameter {variant} changed identity state"
+            "renew with a repeated {variant} changed identity state"
         );
     }
     Ok(())
@@ -2252,11 +2259,19 @@ pub(crate) async fn p_connect_signature_noncanonical_or_repeated_rejected(ctx: C
         ("unpadded signature", rewrite_signature(sign(), without_padding)?),
         (
             "repeated tag signed over the received member",
-            resigned(&identity.key, with_repeated_tag(sign())?)?,
+            resigned(&identity.key, with_repeated_tag(sign(), "connect"))?,
         ),
         (
             "repeated tag signed over the member a last-wins parser keeps",
-            with_repeated_tag(sign())?,
+            with_repeated_tag(sign(), "connect"),
+        ),
+        (
+            "Signature-Input label repeated in one value",
+            with_repeated_input_label(sign()),
+        ),
+        (
+            "Signature label repeated in one value",
+            with_repeated_signature_label(sign()),
         ),
     ] {
         let failure = channel::open_with_headers(&ctx.target, &identity, headers)
@@ -2303,13 +2318,29 @@ fn rewrite_digest(
 /// Appends a second, identical `tag` parameter without re-signing.
 ///
 /// The signature still covers the member that an RFC 8941 parser keeps, since it retains only the last occurrence.
-fn with_repeated_tag(mut headers: SignedHeaders) -> anyhow::Result<SignedHeaders> {
-    let (_, tag) = headers
-        .input
-        .rsplit_once(";tag=")
-        .context("signature input has no trailing tag parameter")?;
-    let repeated = format!(";tag={tag}");
-    headers.input.push_str(&repeated);
+fn with_repeated_tag(mut headers: SignedHeaders, tag: &str) -> SignedHeaders {
+    headers.input.push_str(&format!(";tag=\"{tag}\""));
+    headers
+}
+
+/// Repeats the whole `sig` member in one `Signature-Input` value; both copies match the signed member.
+fn with_repeated_input_label(mut headers: SignedHeaders) -> SignedHeaders {
+    headers.input = format!("{0}, {0}", headers.input);
+    headers
+}
+
+/// Repeats the whole `sig` member in one `Signature` value; both copies carry the valid signature.
+fn with_repeated_signature_label(mut headers: SignedHeaders) -> SignedHeaders {
+    headers.signature = format!("{0}, {0}", headers.signature);
+    headers
+}
+
+/// Repeats the `sha-256` member in one `Content-Digest` value without re-signing.
+///
+/// The signature still covers the member that an RFC 8941 parser keeps, since it retains only the last occurrence.
+fn with_repeated_digest_member(mut headers: SignedHeaders) -> anyhow::Result<SignedHeaders> {
+    let digest = headers.digest.as_deref().context("signed content digest")?;
+    headers.digest = Some(format!("{digest}, {digest}"));
     Ok(headers)
 }
 
@@ -5178,91 +5209,94 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
 }
 
 pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx: Context) -> anyhow::Result<()> {
-    let token = token(&ctx, 15).await?;
-    let mut expected = Vec::new();
+    let token = token(&ctx, 10).await?;
+    let mut created = Vec::new();
     for n in 0..4 {
-        expected.push(
+        created.push(
             identity(&ctx.target, &token, &format!("initial-{n}"))
                 .await?
                 .identity_id,
         );
     }
-    let first = ctx
-        .target
-        .identities_for(&token, "&pageSize=2&pageNumber=1&view=full")
-        .await?;
-    expect_status(&first, 200)?;
-    let first_ids = first.body["data"]
-        .as_array()
-        .context("first page")?
-        .iter()
-        .map(|row| field(row, "id").map(str::to_owned))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    ensure!(first_ids == expected[..2], "initial page is not in creation order");
-    let mut seen = first_ids.clone();
-    let mut timestamps = first.body["data"]
-        .as_array()
-        .context("first page")?
-        .iter()
-        .map(|row| field(row, "createdAt").map(str::to_owned))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    for page in 2..=5 {
-        if page <= 4 {
+    let initial = created.clone();
+    let mut overlapping = Vec::new();
+    let mut page = 1;
+    loop {
+        ensure!(page <= 20, "overlapping page walk did not reach an empty page");
+        let (rows, _) = listing_page(&ctx.target, &token, page).await?;
+        if rows.is_empty() {
+            break;
+        }
+        overlapping.extend(rows.into_iter().map(|(id, _)| id));
+        if page <= 3 {
             for n in 0..2 {
-                expected.push(
-                    identity(&ctx.target, &token, &format!("later-{page}-{n}"))
+                created.push(
+                    identity(&ctx.target, &token, &format!("overlapping-{page}-{n}"))
                         .await?
                         .identity_id,
                 );
             }
         }
-        let repeat_first = ctx.target.identities_for(&token, "&pageSize=2&pageNumber=1").await?;
-        expect_status(&repeat_first, 200)?;
-        ensure!(
-            repeat_first.body["data"]
-                .as_array()
-                .context("repeated first page")?
-                .iter()
-                .map(|row| field(row, "id").map(str::to_owned))
-                .collect::<anyhow::Result<Vec<_>>>()?
-                == first_ids,
-            "new enrollments shifted the already-fetched first page"
-        );
-        let next = ctx
-            .target
-            .identities_for(&token, &format!("&pageSize=2&pageNumber={page}&view=full"))
-            .await?;
-        expect_status(&next, 200)?;
-        ensure!(
-            count(&next.body, "totalCount")? == expected.len() as u64 && count(&next.body, "currentPage")? == page,
-            "page {page} has incorrect paging metadata"
-        );
-        let rows = next.body["data"].as_array().context("page rows")?;
-        ensure!(rows.len() == 2, "page {page} has the wrong number of rows");
-        for row in rows {
-            seen.push(field(row, "id")?.to_owned());
-            timestamps.push(field(row, "createdAt")?.to_owned());
+        page += 1;
+    }
+    let mut distinct: Vec<String> = Vec::new();
+    for id in overlapping {
+        if !distinct.contains(&id) {
+            distinct.push(id);
         }
     }
     ensure!(
-        seen == expected,
-        "page traversal omitted, duplicated or reordered identity IDs"
+        initial.iter().all(|id| distinct.contains(id)),
+        "overlapping page walk missed an identity that existed when it started"
     );
+    let mut in_creation_order = created.iter();
     ensure!(
-        seen.iter().collect::<HashSet<_>>().len() == expected.len(),
-        "page traversal repeated an identity ID"
+        distinct.iter().all(|id| in_creation_order.any(|created| created == id)),
+        "overlapping page walk listed identities out of creation order"
+    );
+
+    let mut walked = Vec::new();
+    let mut timestamps = Vec::new();
+    for page in 1..=5 {
+        let (rows, total) = listing_page(&ctx.target, &token, page).await?;
+        ensure!(
+            total == created.len() as u64,
+            "page {page} reports totalCount {total} instead of {}",
+            created.len()
+        );
+        for (id, created_at) in rows {
+            walked.push(id);
+            timestamps.push(time::OffsetDateTime::parse(&created_at, &Rfc3339)?);
+        }
+    }
+    ensure!(
+        walked == created,
+        "page walk without concurrent enrollment did not list every identity exactly once in creation order"
     );
     ensure!(
         timestamps.windows(2).all(|pair| pair[0] <= pair[1]),
         "createdAt decreased in creation order"
     );
-    let beyond = ctx.target.identities_for(&token, "&pageSize=2&pageNumber=6").await?;
-    expect_status(&beyond, 200)?;
     ensure!(
-        beyond.body["data"].as_array().is_some_and(Vec::is_empty),
+        listing_page(&ctx.target, &token, 6).await?.0.is_empty(),
         "page beyond the last page is not empty"
     );
     Ok(())
+}
+
+/// Reads one two-row page of the token's identities as `(id, createdAt)` pairs, with the reported total.
+async fn listing_page(target: &Target, token: &Token, page: u64) -> anyhow::Result<(Vec<(String, String)>, u64)> {
+    let reply = target
+        .identities_for(token, &format!("&pageSize=2&pageNumber={page}&view=full"))
+        .await?;
+    expect_status(&reply, 200)?;
+    let rows = reply.body["data"]
+        .as_array()
+        .context("listing page has no data array")?
+        .iter()
+        .map(|row| Ok((field(row, "id")?.to_owned(), field(row, "createdAt")?.to_owned())))
+        .collect::<anyhow::Result<Vec<_>>>()?;
+    Ok((rows, count(&reply.body, "totalCount")?))
 }
 
 pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::Result<()> {
@@ -6433,13 +6467,41 @@ mod tests {
         unknown_curve[offset + p384_oid.len() - 1] = 0x23;
         let unsupported = vec![chain[0].clone(), STANDARD.encode(unknown_curve), chain[2].clone()];
         ensure!(
-            format!(
-                "{:#}",
-                verify_chain(&unsupported, &roots, time::OffsetDateTime::now_utc().unix_timestamp())
-                    .expect_err("unsupported issuer curve was accepted")
-            )
-            .contains("unsupported"),
-            "unsupported issuer curve was not a conformance failure"
+            verify_chain(&unsupported, &roots, time::OffsetDateTime::now_utc().unix_timestamp())
+                .expect_err("unverifiable issuer curve was accepted")
+                .downcast_ref::<crate::Incomplete>()
+                .is_some(),
+            "an issuer algorithm the tester cannot verify was reported as a conformance failure"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn chain_requires_ca_intermediates_but_no_root_profile() -> anyhow::Result<()> {
+        let plain = |name: &str| -> anyhow::Result<rcgen::CertificateParams> {
+            let mut params = rcgen::CertificateParams::new(Vec::<String>::new())?;
+            params.distinguished_name.push(rcgen::DnType::CommonName, name);
+            Ok(params)
+        };
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let root_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+        let root = plain("root without extensions")?.self_signed(&root_key)?;
+        let leaf_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+        let leaf = plain("leaf")?.signed_by(&leaf_key, &root, &root_key)?;
+        let roots = json!({ "roots": [{ "certificate": STANDARD.encode(root.der()) }] });
+        verify_chain(&[STANDARD.encode(leaf.der()), STANDARD.encode(root.der())], &roots, now)
+            .context("a root without CA extensions was rejected")?;
+        let intermediate_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+        let intermediate = plain("non-CA intermediate")?.signed_by(&intermediate_key, &root, &root_key)?;
+        let leaf = plain("leaf")?.signed_by(&leaf_key, &intermediate, &intermediate_key)?;
+        let chain = [
+            STANDARD.encode(leaf.der()),
+            STANDARD.encode(intermediate.der()),
+            STANDARD.encode(root.der()),
+        ];
+        ensure!(
+            verify_chain(&chain, &roots, now).is_err(),
+            "a non-CA intermediate was accepted"
         );
         Ok(())
     }

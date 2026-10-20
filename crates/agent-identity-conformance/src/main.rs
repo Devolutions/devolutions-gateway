@@ -573,7 +573,7 @@ const TESTS: &[Test] = &[
     p!(p_extra_signature_parameters_rejected_connect).channel(),
     p!(p_signature_parser_wire_negatives),
     p!(p_signature_noncanonical_base64_rejected),
-    p!(p_signature_repeated_parameter_rejected),
+    p!(p_signature_repeated_raw_items_rejected),
     p!(p_connect_signature_noncanonical_or_repeated_rejected).channel(),
     p!(p_replay_nonce_rejected),
     p!(p_replay_window_rejected),
