@@ -1,14 +1,17 @@
 use std::ffi::c_void;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context as _, ensure};
 use p256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest as _, Sha256};
 use win_api_wrappers::handle::Handle;
+use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{
-    HLOCAL, LocalFree, NTE_BAD_KEYSET, NTE_BAD_PROVIDER, NTE_NO_MORE_ITEMS, NTE_NOT_FOUND, NTE_NOT_SUPPORTED,
-    NTE_PROV_DLL_NOT_FOUND, NTE_PROVIDER_DLL_FAIL, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    ERROR_ALREADY_EXISTS, ERROR_NOT_FOUND, ERROR_PATH_NOT_FOUND, HANDLE, HLOCAL, LocalFree, NTE_BAD_KEYSET,
+    NTE_BAD_PROVIDER, NTE_NO_MORE_ITEMS, NTE_NOT_FOUND, NTE_NOT_SUPPORTED, NTE_PROV_DLL_NOT_FOUND,
+    NTE_PROVIDER_DLL_FAIL, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
 use windows::Win32::Security::Cryptography::{
@@ -24,7 +27,9 @@ use windows::Win32::Security::{
     SECURITY_ATTRIBUTES,
 };
 use windows::Win32::System::Threading::{
-    CreateMutexExW, ReleaseMutex, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject,
+    AddSIDToBoundaryDescriptor, ClosePrivateNamespace, CreateBoundaryDescriptorW, CreateMutexExW,
+    CreatePrivateNamespaceW, DeleteBoundaryDescriptor, OpenPrivateNamespaceW, ReleaseMutex,
+    SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject,
 };
 use windows::core::PCWSTR;
 
@@ -167,24 +172,63 @@ impl DeviceKey for StoreKey {
 }
 
 const CREATION_LOCK_TIMEOUT_MS: u32 = 5_000;
+const CREATION_BOUNDARY: &str = "device-key";
 
 /// Serializes the creators of one key name across every process and session.
 ///
 /// The provider persists a key only when it is finalized, and two creators that both started before either finalized both succeed.
 /// The existence check and the whole creation therefore run under this lock.
-/// The lock name derives from the key name, which only the key's owner knows before the key exists.
-struct CreationLock(Handle);
+///
+/// The lock is a mutex in a private namespace whose boundary holds the caller's SID.
+/// Only a process running as the caller's account is within that boundary and can create the namespace, and the namespace's DACL lets only that account and SYSTEM open it.
+/// Another account therefore can't hold the lock to block creation.
+/// Creators running as the same account share the namespace, so they still serialize, and any of them can hold the lock.
+struct CreationLock {
+    mutex: Handle,
+    // The mutex's handle closes before the namespace's, as fields drop in declaration order.
+    _namespace: PrivateNamespace,
+}
 
 impl CreationLock {
-    fn acquire(name: &str, user_sid: &str) -> anyhow::Result<Self> {
-        let descriptor = SecurityDescriptor::new(&key_descriptor_sddl(user_sid))?;
+    fn acquire(name: &str, user: &Sid) -> anyhow::Result<Self> {
+        let descriptor = SecurityDescriptor::new(&key_descriptor_sddl(&user.to_string()))?;
         let attributes = SECURITY_ATTRIBUTES {
             nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>())?,
             lpSecurityDescriptor: descriptor.0.0,
             bInheritHandle: false.into(),
         };
-        // Machine keys are shared by every session, so the lock lives in the global namespace.
-        let lock_name = wide(&format!("Global\\device-key-{name}"));
+        // UNTESTED: another account can neither create nor open the namespace.
+        // The boundary holds only the caller's SID and the DACL grants only the caller and SYSTEM; tests run as a single account.
+        // When changing the boundary or the descriptor, keep every other account out of both.
+        let boundary = BoundaryDescriptor::new(user)?;
+        // The boundary identifies the namespace, and an alias names it only within this process.
+        // An alias can't name two open handles at once, so each acquisition takes its own.
+        static NEXT_ALIAS: AtomicU64 = AtomicU64::new(0);
+        let alias = format!("{CREATION_BOUNDARY}-{}", NEXT_ALIAS.fetch_add(1, Ordering::Relaxed));
+        let wide_alias = wide(&alias);
+        let namespace = create_or_open_namespace(
+            || {
+                // SAFETY: The attributes, their descriptor, the boundary and the NUL-terminated alias remain live for the call.
+                let handle = unsafe {
+                    CreatePrivateNamespaceW(
+                        Some(&attributes),
+                        boundary.0.0.cast_const(),
+                        PCWSTR::from_raw(wide_alias.as_ptr()),
+                    )
+                };
+                PrivateNamespace::from_raw(handle)
+            },
+            || {
+                // SAFETY: The boundary and the NUL-terminated alias remain live for the call.
+                let handle =
+                    unsafe { OpenPrivateNamespaceW(boundary.0.0.cast_const(), PCWSTR::from_raw(wide_alias.as_ptr())) };
+                PrivateNamespace::from_raw(handle)
+            },
+        )?;
+        // UNTESTED: creators in different sessions share the lock.
+        // The boundary holds no session SID, so the namespace is the same in every session, as machine keys are; tests run in a single session.
+        // When changing the boundary, keep it free of session SIDs.
+        let lock_name = wide(&format!("{alias}\\{name}"));
         // SAFETY: The attributes, their descriptor and the NUL-terminated name remain live for the call.
         let raw = unsafe {
             CreateMutexExW(
@@ -196,11 +240,14 @@ impl CreationLock {
         }
         .context("open machine-key creation lock")?;
         // SAFETY: CreateMutexExW returned a new handle that this lock owns.
-        let handle = unsafe { Handle::new_owned(raw) }.context("own machine-key creation lock")?;
+        let mutex = unsafe { Handle::new_owned(raw) }.context("own machine-key creation lock")?;
         // SAFETY: The handle is live and has SYNCHRONIZE access.
-        match unsafe { WaitForSingleObject(handle.raw(), CREATION_LOCK_TIMEOUT_MS) } {
+        match unsafe { WaitForSingleObject(mutex.raw(), CREATION_LOCK_TIMEOUT_MS) } {
             // A holder that died either never finalized its key or left it for the existence check.
-            WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Self(handle)),
+            WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Self {
+                mutex,
+                _namespace: namespace,
+            }),
             WAIT_TIMEOUT => anyhow::bail!("timed out waiting for machine-key creation lock after five seconds"),
             _ => Err(std::io::Error::last_os_error()).context("wait for machine-key creation lock"),
         }
@@ -210,7 +257,78 @@ impl CreationLock {
 impl Drop for CreationLock {
     fn drop(&mut self) {
         // SAFETY: The thread that acquired this lock owns the mutex until this release.
-        let _ = unsafe { ReleaseMutex(self.0.raw()) };
+        let _ = unsafe { ReleaseMutex(self.mutex.raw()) };
+    }
+}
+
+/// Creates the creation lock's namespace, or opens it when another creator already created it.
+///
+/// The namespace disappears when its last handle closes, which can happen between a create that found it and the open, so creation is attempted again, a bounded number of times.
+fn create_or_open_namespace<T>(
+    mut create: impl FnMut() -> windows::core::Result<T>,
+    mut open: impl FnMut() -> windows::core::Result<T>,
+) -> anyhow::Result<T> {
+    const ATTEMPTS: usize = 3;
+
+    for _ in 0..ATTEMPTS {
+        match create() {
+            Err(error) if error.code() == ERROR_ALREADY_EXISTS.to_hresult() => {}
+            result => return result.context("create machine-key creation namespace"),
+        }
+        match open() {
+            Err(error)
+                if error.code() == ERROR_PATH_NOT_FOUND.to_hresult()
+                    || error.code() == ERROR_NOT_FOUND.to_hresult() => {}
+            result => return result.context("open machine-key creation namespace"),
+        }
+    }
+    anyhow::bail!("machine-key creation namespace disappeared before it could be opened {ATTEMPTS} times")
+}
+
+struct BoundaryDescriptor(HANDLE);
+
+impl BoundaryDescriptor {
+    fn new(sid: &Sid) -> anyhow::Result<Self> {
+        let name = wide(CREATION_BOUNDARY);
+        // SAFETY: The boundary name is NUL-terminated.
+        let handle = unsafe { CreateBoundaryDescriptorW(PCWSTR::from_raw(name.as_ptr()), 0) };
+        ensure!(
+            !handle.is_invalid(),
+            "create machine-key creation boundary: {}",
+            std::io::Error::last_os_error()
+        );
+        let mut descriptor = Self(handle);
+        // SAFETY: The descriptor is live and may be reallocated in place; the SID remains live for the call.
+        unsafe { AddSIDToBoundaryDescriptor(&mut descriptor.0, sid.as_psid_const()) }
+            .context("add caller SID to machine-key creation boundary")?;
+        Ok(descriptor)
+    }
+}
+
+impl Drop for BoundaryDescriptor {
+    fn drop(&mut self) {
+        // SAFETY: CreateBoundaryDescriptorW allocated this descriptor.
+        unsafe { DeleteBoundaryDescriptor(self.0) };
+    }
+}
+
+struct PrivateNamespace(HANDLE);
+
+impl PrivateNamespace {
+    fn from_raw(handle: HANDLE) -> windows::core::Result<Self> {
+        if handle.is_invalid() {
+            Err(windows::core::Error::from_win32())
+        } else {
+            Ok(Self(handle))
+        }
+    }
+}
+
+impl Drop for PrivateNamespace {
+    fn drop(&mut self) {
+        // The namespace is closed without being destroyed, because other creators may still use it.
+        // SAFETY: This wrapper owns the namespace handle.
+        let _ = unsafe { ClosePrivateNamespace(self.0, 0) };
     }
 }
 
@@ -219,9 +337,9 @@ pub(super) fn generate(name: &str) -> anyhow::Result<Box<dyn DeviceKey>> {
     let user = Token::current_process_token()
         .sid_and_attributes()
         .context("get process user SID")?
-        .sid
-        .to_string();
+        .sid;
     let _lock = CreationLock::acquire(name, &user)?;
+    let user = user.to_string();
     ensure!(provider.key(name)?.is_none(), "machine key {name} already exists");
     let key = provider.create(name)?;
     configure_and_finalize(&key, &user)?;
@@ -417,9 +535,7 @@ fn ensure_trusted_descriptor(key: &Key) -> anyhow::Result<()> {
         .sid_and_attributes()
         .context("get process user SID")?
         .sid;
-    let system =
-        win_api_wrappers::identity::sid::Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None)
-            .context("get SYSTEM SID")?;
+    let system = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).context("get SYSTEM SID")?;
     let owner = crate::windows_acl::owner_sid(descriptor)?;
     ensure!(owner == caller || owner == system, "machine key owner is not trusted");
     let mut expected = vec![system.clone()];
@@ -531,7 +647,6 @@ fn wide(string: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use p256::ecdsa::signature::Verifier as _;
-    use win_api_wrappers::identity::sid::Sid;
     use windows::Win32::Security::WinLocalSystemSid;
 
     use super::*;
@@ -651,15 +766,13 @@ mod tests {
 
     #[test]
     fn creation_wait_for_another_creator_expires() -> anyhow::Result<()> {
-        use windows::Win32::System::Threading::CreateMutexW;
-
         let name = crate::new_key_name("devolutions-agent-test");
         let _cleanup = TestKey(name.clone());
-        let lock_name = wide(&format!("Global\\device-key-{name}"));
-        // SAFETY: The lock name is NUL-terminated.
-        let raw = unsafe { CreateMutexW(None, true, PCWSTR::from_raw(lock_name.as_ptr())) }?;
-        // SAFETY: CreateMutexW returned a new owned handle.
-        let _held = unsafe { Handle::new_owned(raw) }?;
+        let user = Token::current_process_token()
+            .sid_and_attributes()
+            .context("get process user SID")?
+            .sid;
+        let _held = CreationLock::acquire(&name, &user)?;
 
         let started = std::time::Instant::now();
         let creator = std::thread::spawn(move || generate(&name).map(|_| ()));
@@ -674,6 +787,56 @@ mod tests {
         );
         assert!(started.elapsed() >= std::time::Duration::from_secs(5));
         Ok(())
+    }
+
+    #[test]
+    fn a_mutex_under_the_former_global_lock_name_cannot_block_creation() -> anyhow::Result<()> {
+        use windows::Win32::System::Threading::CreateMutexW;
+
+        if !run_machine_key_test()? {
+            return Ok(());
+        }
+        let name = crate::new_key_name("devolutions-agent-test");
+        let _cleanup = TestKey(name.clone());
+        let squatted_name = wide(&format!("Global\\device-key-{name}"));
+        // SAFETY: The mutex name is NUL-terminated.
+        let raw = unsafe { CreateMutexW(None, true, PCWSTR::from_raw(squatted_name.as_ptr())) }?;
+        // SAFETY: CreateMutexW returned a new owned handle.
+        let _squatter = unsafe { Handle::new_owned(raw) }?;
+
+        // The squatter's thread owns the mutex, which it could acquire again, so creation runs on another thread.
+        let creator = std::thread::spawn(move || generate(&name).map(|_| ()));
+        creator
+            .join()
+            .map_err(|_| anyhow::anyhow!("generator panicked"))?
+            .context("create a machine key while a mutex holds the former global lock name")
+    }
+
+    #[test]
+    fn a_namespace_closed_between_create_and_open_is_created_again() -> anyhow::Result<()> {
+        let mut creates = 0;
+        let namespace = create_or_open_namespace(
+            || {
+                creates += 1;
+                if creates == 1 {
+                    Err(ERROR_ALREADY_EXISTS.to_hresult().into())
+                } else {
+                    Ok("created")
+                }
+            },
+            || Err(ERROR_PATH_NOT_FOUND.to_hresult().into()),
+        )?;
+        assert_eq!(namespace, "created");
+        Ok(())
+    }
+
+    #[test]
+    fn a_namespace_that_keeps_disappearing_fails_instead_of_retrying_forever() {
+        let result = create_or_open_namespace::<()>(
+            || Err(ERROR_ALREADY_EXISTS.to_hresult().into()),
+            || Err(ERROR_PATH_NOT_FOUND.to_hresult().into()),
+        );
+        assert!(result.is_err());
     }
 
     #[test]
