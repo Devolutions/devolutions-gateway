@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::app::{App, rfc3339};
 use crate::name_eval;
 use crate::oracle::{CertStatus, Endpoint, Rejection, verify_channel_proof, verify_request};
-use crate::state::{StreamHandle, StreamPush, stream_expired};
+use crate::state::{State, StreamHandle, StreamPush, stream_expired};
 
 /// §7.3: the agent must answer the challenge within 10 s (real time).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
@@ -86,7 +86,7 @@ impl AgentChannel for ChannelService {
             let result = if duplicate_signature {
                 Err(Rejection::SignatureInvalid)
             } else {
-                let crate::state::State {
+                let State {
                     identities,
                     cert_index,
                     nonces,
@@ -171,6 +171,56 @@ async fn finish_stream(
         .close_stream(stream_id, identity_id, cert_thumbprint, status, error_code);
 }
 
+/// Closes a stream for an authentication failure or a §7.4 closure.
+async fn close_rejected(
+    app: &App,
+    out: &mpsc::Sender<Result<ServerMessage, Status>>,
+    stream_id: Uuid,
+    identity_id: Uuid,
+    cert_thumbprint: &str,
+    rejection: Rejection,
+) {
+    close_with(out, rejection_status(rejection, app.now())).await;
+    let status = if rejection == Rejection::IdentityRevoked {
+        "PERMISSION_DENIED"
+    } else {
+        "UNAUTHENTICATED"
+    };
+    finish_stream(
+        app,
+        stream_id,
+        identity_id,
+        cert_thumbprint,
+        status,
+        Some(rejection.code()),
+    )
+    .await;
+}
+
+/// Checks a stream awaiting `Hello` against the closures of [CONTRACT.md][contract] ("7.4 Termination"), on the
+/// identity first, then on the certificate that opened the stream, and returns that certificate's status when none
+/// applies.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
+fn awaiting_closure(
+    state: &State,
+    identity_id: Uuid,
+    cert_thumbprint: &str,
+    now: i64,
+) -> Result<CertStatus, Rejection> {
+    let cert = state
+        .lookup_cert(cert_thumbprint)
+        .filter(|cert| cert.identity_id == identity_id)
+        .ok_or(Rejection::IdentityUnknown)?;
+    if cert.revoked {
+        return Err(Rejection::IdentityRevoked);
+    }
+    if stream_expired(cert.not_after, now) {
+        return Err(Rejection::CertificateExpired);
+    }
+    Ok(cert.status)
+}
+
 async fn close_opening_push(
     app: &App,
     out: &mpsc::Sender<Result<ServerMessage, Status>>,
@@ -242,35 +292,38 @@ async fn run_stream(
     // Step 3: wait for the Hello, bound to this stream's challenge and the connect nonce.
     let hello = tokio::select! {
         result = tokio::time::timeout(HELLO_TIMEOUT, client.next()) => match result {
-            Ok(Some(Ok(message))) => message,
-            Ok(Some(Err(_))) | Ok(None) | Err(_) => {
-                close_with(&out, error_status(Code::Unauthenticated, "signature_invalid", app.now())).await;
-                finish_stream(
-                    &app,
-                    stream_id,
-                    identity_id,
-                    &cert_thumbprint,
-                    "UNAUTHENTICATED",
-                    Some("signature_invalid"),
-                )
-                .await;
-                return;
-            }
+            Ok(Some(Ok(message))) => Some(message),
+            Ok(Some(Err(_))) | Ok(None) | Err(_) => None,
         },
         push = push_rx.recv() => {
             close_opening_push(&app, &out, stream_id, identity_id, &cert_thumbprint, push).await;
             return;
         }
     };
-    let hello_id = hello.id.clone();
-    let hello_ok = hello.correlation_id.as_deref() == Some(challenge_id.as_str())
-        && match &hello.payload {
-            Some(agent_message::Payload::Hello(hello)) => {
-                verify_channel_proof(auth.public_key(), &challenge, auth.nonce(), &hello.proof)
+    // §7.4: revocation, deletion and `notAfter` close a stream awaiting `Hello` ahead of the step 4 failures.
+    let closure = {
+        let now = app.now();
+        awaiting_closure(&*app.state.lock().await, identity_id, &cert_thumbprint, now)
+    };
+    if let Err(rejection) = closure {
+        close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
+        return;
+    }
+    let hello = hello.filter(|hello| {
+        hello.correlation_id.as_deref() == Some(challenge_id.as_str())
+            && match &hello.payload {
+                Some(agent_message::Payload::Hello(hello)) => {
+                    verify_channel_proof(auth.public_key(), &challenge, auth.nonce(), &hello.proof)
+                }
+                _ => false,
             }
-            _ => false,
-        };
-    if !hello_ok {
+    });
+    let Some(AgentMessage {
+        id: hello_id,
+        payload: Some(agent_message::Payload::Hello(hello_payload)),
+        ..
+    }) = hello
+    else {
         close_with(
             &out,
             error_status(Code::Unauthenticated, "signature_invalid", app.now()),
@@ -285,9 +338,6 @@ async fn run_stream(
             Some("signature_invalid"),
         )
         .await;
-        return;
-    }
-    let Some(agent_message::Payload::Hello(hello_payload)) = hello.payload else {
         return;
     };
     let applied_config_revision = hello_payload.applied_state_versions.get("config").copied().unwrap_or(0);
@@ -340,26 +390,13 @@ async fn run_stream(
     }
 
     // Step 4: only now does anything happen server-side.
+    // A Hello held by the handshake barrier is checked against the §7.4 closures again when it is released.
     let authentication = {
         let now = app.now();
         let mut state = app.state.lock().await;
         state.tick(now);
-        let rejection = match state.lookup_cert(&cert_thumbprint) {
-            Some(cert)
-                if cert.identity_id == identity_id
-                    && matches!(cert.status, CertStatus::Current | CertStatus::Pending) =>
-            {
-                if cert.revoked {
-                    Some(Rejection::IdentityRevoked)
-                } else if stream_expired(cert.not_after, now) {
-                    Some(Rejection::CertificateExpired)
-                } else {
-                    None
-                }
-            }
-            _ => Some(Rejection::IdentityUnknown),
-        };
-        if let Some(rejection) = rejection {
+        let closure = awaiting_closure(&state, identity_id, &cert_thumbprint, now);
+        if let Err(rejection) = closure {
             Err(rejection)
         } else {
             state.challenged_streams.remove(&stream_id);
@@ -385,13 +422,27 @@ async fn run_stream(
                     (identity.renewal_requested.as_ref().map(|f| f.reason.as_str()), update)
                 })
                 .expect("authenticated identity exists");
+            // §7.4: once the handshake completes, a stream whose certificate was retired while it awaited `Hello`
+            // gets the retired streams' `Reconnect`, after `Welcome`, and closes 60 s after it.
+            let retired = closure == Ok(CertStatus::Retired);
+            if retired && push_tx.send(StreamPush::Reconnect("certificate_rotated")).is_ok() {
+                state.record_event(
+                    identity_id,
+                    "reconnect_sent",
+                    serde_json::json!({
+                        "stream_id": stream_id,
+                        "cert_thumbprint": cert_thumbprint,
+                        "reason": "certificate_rotated",
+                    }),
+                );
+            }
             state.streams.insert(
                 stream_id,
                 StreamHandle {
                     identity_id,
                     cert_thumbprint: cert_thumbprint.clone(),
                     tx: push_tx,
-                    retire_at: None,
+                    retire_at: retired.then(|| now.saturating_add(60)),
                 },
             );
             state.requests.authenticated_connects += 1;
@@ -401,20 +452,7 @@ async fn run_stream(
     let (renewal_reason, config_update) = match authentication {
         Ok(result) => result,
         Err(rejection) => {
-            close_with(&out, rejection_status(rejection, app.now())).await;
-            finish_stream(
-                &app,
-                stream_id,
-                identity_id,
-                &cert_thumbprint,
-                if rejection == Rejection::IdentityRevoked {
-                    "PERMISSION_DENIED"
-                } else {
-                    "UNAUTHENTICATED"
-                },
-                Some(rejection.code()),
-            )
-            .await;
+            close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
             return;
         }
     };
@@ -596,29 +634,40 @@ async fn run_stream(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, VecDeque};
     use std::convert::Infallible;
     use std::sync::Arc;
     use std::time::Duration;
 
-    use agent_channel_proto::{ServerMessage, server_message};
+    use agent_channel_proto::{AgentMessage, Hello, ServerMessage, agent_message, server_message};
     use axum::body::Bytes;
     use axum::http;
     use base64::Engine as _;
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-    use http_body_util::{BodyExt as _, StreamBody};
+    use http_body_util::combinators::UnsyncBoxBody;
+    use http_body_util::{BodyExt as _, Empty, StreamBody};
     use hyper::body::Frame;
     use p256::ecdsa::signature::Signer as _;
     use p256::ecdsa::{Signature, SigningKey};
+    use p256::pkcs8::DecodePrivateKey as _;
     use prost::Message as _;
     use rstest::rstest;
     use serde_json::{Map, Value};
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::Code;
+    use uuid::Uuid;
 
     use super::error_status;
     use crate::app::App;
+    use crate::oracle::CertStatus;
     use crate::server::Dispatcher;
+    use crate::state::{Cert, State};
+
+    type ServerBody = UnsyncBoxBody<Bytes, Box<dyn std::error::Error + Send + Sync>>;
+
+    /// How long a stream stays silent before a test reads it as waiting.
+    const QUIET: Duration = Duration::from_millis(500);
 
     #[test]
     fn stream_failure_carries_error_code_and_server_time_trailers() {
@@ -630,93 +679,310 @@ mod tests {
         assert_eq!(trailer("server-time"), Some("2026-09-21T14:13:20Z"));
     }
 
-    /// Server events on a stream opened at `now`, until it closes or goes quiet for 500 ms.
+    /// A server event on a channel stream, as the agent sees it.
     #[derive(Debug, PartialEq, Eq)]
     enum Seen {
         Challenge,
+        Welcome,
+        Reconnect(String),
+        /// The `grpc-status` and `error-code` trailers.
         Closed(String, String),
+    }
+
+    /// A freshly enrolled identity whose certificate key the test holds.
+    struct Enrolled {
+        app: Arc<App>,
+        identity_id: Uuid,
+        key: SigningKey,
+        keyid: String,
+        not_before: i64,
+        not_after: i64,
+    }
+
+    impl Enrolled {
+        async fn new() -> anyhow::Result<Self> {
+            let app = App::for_test()?;
+            let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+            let vector = &vectors["csr"]["valid"];
+            let key = SigningKey::from_pkcs8_der(
+                &STANDARD.decode(vector["private_key_pkcs8"].as_str().unwrap_or_default())?,
+            )?;
+            let csr = STANDARD.decode(vector["csr"].as_str().unwrap_or_default())?;
+            let mut state = app.state.lock().await;
+            let now = app.now();
+            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+            let identity_id = state
+                .enroll(&secret, &csr, Map::new(), now, &app.base_url)
+                .expect("enrollment succeeds")
+                .identity_id;
+            let cert = state
+                .identities
+                .get(&identity_id)
+                .and_then(|identity| identity.certs.first())
+                .expect("issued certificate");
+            let (keyid, not_before, not_after) = (cert.thumbprint.clone(), cert.not_before, cert.not_after);
+            drop(state);
+            Ok(Self {
+                app,
+                identity_id,
+                key,
+                keyid,
+                not_before,
+                not_after,
+            })
+        }
+
+        /// Registers a pending certificate for `key`, as a renewal would (CONTRACT.md §5.3), and returns its thumbprint.
+        async fn add_pending(&self, key: &SigningKey) -> String {
+            let mut state = self.app.state.lock().await;
+            let thumbprint = crate::ca::thumbprint(b"pending certificate");
+            let issuer = state.issuing_root().thumbprint.clone();
+            let issued_seq = state.serial_seq;
+            state.serial_seq += 1;
+            state.cert_index.insert(thumbprint.clone(), self.identity_id);
+            state
+                .identities
+                .get_mut(&self.identity_id)
+                .expect("enrolled identity")
+                .certs
+                .push(Cert {
+                    thumbprint: thumbprint.clone(),
+                    der: Vec::new(),
+                    public_key: *key.verifying_key(),
+                    serial: format!("{issued_seq:x}"),
+                    not_before: self.not_before,
+                    not_after: self.not_after,
+                    issuer,
+                    status: CertStatus::Pending,
+                    issued_seq,
+                });
+            thumbprint
+        }
+
+        /// Sends `POST confirm` signed by `key` (CONTRACT.md §5.5) and returns the response status.
+        async fn confirm(&self, key: &SigningKey, keyid: &str) -> anyhow::Result<http::StatusCode> {
+            let (_, signature_input, signature) = sign(key, keyid, "confirm", self.app.now())?;
+            let request = http::Request::post("/mock/api/agent-identity/v1/confirm")
+                .header("signature-input", signature_input)
+                .header("signature", signature)
+                .body(Empty::<Bytes>::new())?;
+            let response = Dispatcher::new(Arc::clone(&self.app))
+                .handle(request)
+                .await
+                .expect("the mock answers");
+            Ok(response.status())
+        }
+
+        /// Moves the mock clock to `now` and applies it, as `__mock__/time/advance` does.
+        async fn advance_to(&self, now: i64) {
+            self.app.clock.freeze_at(now);
+            self.app.tick().await;
+        }
+    }
+
+    /// Signs a `("@method")` request for `tag` at mock time `now` (CONTRACT.md §6), and returns its nonce and its
+    /// `signature-input` and `signature` header values.
+    fn sign(key: &SigningKey, keyid: &str, tag: &str, now: i64) -> anyhow::Result<(String, String, String)> {
+        let nonce = URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes());
+        let params = format!(
+            "(\"@method\");created={now};expires={};nonce=\"{nonce}\";keyid=\"{keyid}\";alg=\"ecdsa-p256-sha256\";tag=\"{tag}\"",
+            now + 60,
+        );
+        let signature: Signature =
+            key.try_sign(format!("\"@method\": POST\n\"@signature-params\": {params}").as_bytes())?;
+        let signature = format!("sig=:{}:", STANDARD.encode(signature.to_bytes()));
+        Ok((nonce, format!("sig={params}"), signature))
+    }
+
+    /// The closing status in `headers`, which carry an RFC 3339 `server-time` with any status but `OK` (CONTRACT.md §7.4).
+    fn closed(headers: &http::HeaderMap) -> Option<Seen> {
+        let value = |name: &str| {
+            headers
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        let status = headers.contains_key("grpc-status").then(|| value("grpc-status"))?;
+        if status != "0" {
+            let server_time = value("server-time");
+            let parsed = time::OffsetDateTime::parse(&server_time, &time::format_description::well_known::Rfc3339);
+            assert!(parsed.is_ok(), "`server-time` {server_time:?} is not RFC 3339");
+        }
+        Some(Seen::Closed(status, value("error-code")))
+    }
+
+    /// How the agent answers the `Challenge`; each answer fails CONTRACT.md §7.3 step 4.
+    #[derive(Clone, Copy, Debug)]
+    enum Answer {
+        Nothing,
+        BadProof,
+        WrongCorrelation,
+        InvalidMetadata,
+    }
+
+    /// A channel stream as the agent sees it.
+    struct Channel {
+        agent: mpsc::Sender<Result<Frame<Bytes>, Infallible>>,
+        body: Option<ServerBody>,
+        received: Vec<u8>,
+        seen: VecDeque<Seen>,
+        nonce: String,
+        /// The last `Challenge`'s envelope `id` and bytes.
+        challenge: (String, Vec<u8>),
+    }
+
+    impl Channel {
+        /// Opens a stream signed by the enrolled certificate at the current mock time (CONTRACT.md §7.3 step 1).
+        async fn open(enrolled: &Enrolled) -> anyhow::Result<Self> {
+            let (nonce, signature_input, signature) =
+                sign(&enrolled.key, &enrolled.keyid, "connect", enrolled.app.now())?;
+            let (agent, agent_messages) = mpsc::channel(4);
+            let request = http::Request::post(format!("/mock/{}/Connect", agent_channel_proto::SERVICE_NAME))
+                .header("content-type", "application/grpc")
+                .header("te", "trailers")
+                .header("signature-input", signature_input)
+                .header("signature", signature)
+                .body(StreamBody::new(ReceiverStream::new(agent_messages)))?;
+            let response = Dispatcher::new(Arc::clone(&enrolled.app))
+                .handle(request)
+                .await
+                .expect("the mock answers");
+            let mut seen = VecDeque::new();
+            let body = match closed(response.headers()) {
+                Some(refused) => {
+                    seen.push_back(refused);
+                    None
+                }
+                None => Some(response.into_body()),
+            };
+            Ok(Self {
+                agent,
+                body,
+                received: Vec::new(),
+                seen,
+                nonce,
+                challenge: Default::default(),
+            })
+        }
+
+        /// Reads the next server event, or `None` once the stream has closed or stays silent for `quiet`.
+        async fn next(&mut self, quiet: Duration) -> anyhow::Result<Option<Seen>> {
+            while self.seen.is_empty() {
+                let Some(body) = &mut self.body else {
+                    break;
+                };
+                let frame = match tokio::time::timeout(quiet, body.frame()).await {
+                    Err(_) => break,
+                    Ok(None) => {
+                        self.body = None;
+                        continue;
+                    }
+                    Ok(Some(frame)) => frame.map_err(|error| anyhow::anyhow!("{error}"))?,
+                };
+                if let Some(trailers) = frame.trailers_ref() {
+                    self.seen.extend(closed(trailers));
+                    self.body = None;
+                } else if let Some(data) = frame.data_ref() {
+                    self.received.extend_from_slice(data);
+                    self.decode_received()?;
+                }
+            }
+            Ok(self.seen.pop_front())
+        }
+
+        /// Every server event until the stream closes or stays silent for `quiet`.
+        async fn drain(&mut self, quiet: Duration) -> anyhow::Result<Vec<Seen>> {
+            let mut seen = Vec::new();
+            while let Some(event) = self.next(quiet).await? {
+                seen.push(event);
+            }
+            Ok(seen)
+        }
+
+        /// Decodes each complete gRPC message received so far: a compression flag, a 4-byte big-endian length, then
+        /// the message.
+        fn decode_received(&mut self) -> anyhow::Result<()> {
+            while let Some(&[_, a, b, c, d]) = self.received.get(..5) {
+                let end = 5 + usize::try_from(u32::from_be_bytes([a, b, c, d]))?;
+                let Some(bytes) = self.received.get(5..end) else {
+                    break;
+                };
+                let message = ServerMessage::decode(bytes)?;
+                self.received.drain(..end);
+                let seen = match message.payload {
+                    Some(server_message::Payload::Challenge(challenge)) => {
+                        self.challenge = (message.id, challenge.challenge);
+                        Seen::Challenge
+                    }
+                    Some(server_message::Payload::Welcome(_)) => Seen::Welcome,
+                    Some(server_message::Payload::Reconnect(reconnect)) => Seen::Reconnect(reconnect.reason),
+                    other => anyhow::bail!("unexpected server message {other:?}"),
+                };
+                self.seen.push_back(seen);
+            }
+            Ok(())
+        }
+
+        /// Sends one agent message.
+        async fn send(&self, message: AgentMessage) -> anyhow::Result<()> {
+            let message = message.encode_to_vec();
+            let mut framed = vec![0];
+            framed.extend_from_slice(&u32::try_from(message.len())?.to_be_bytes());
+            framed.extend_from_slice(&message);
+            // A stream the mock already closed has dropped its receiver; its trailers tell the outcome.
+            let _ = self.agent.send(Ok(Frame::data(Bytes::from(framed)))).await;
+            Ok(())
+        }
+
+        /// A `Hello` answering the last `Challenge` with a proof by `key` (CONTRACT.md §7.3 step 3).
+        fn hello(&self, key: &SigningKey) -> anyhow::Result<AgentMessage> {
+            let mut proven = b"devolutions-agent-identity/v1/channel-proof\0".to_vec();
+            proven.extend_from_slice(&self.challenge.1);
+            proven.extend_from_slice(self.nonce.as_bytes());
+            let proof: Signature = key.try_sign(&proven)?;
+            Ok(AgentMessage {
+                id: Uuid::new_v4().to_string(),
+                correlation_id: Some(self.challenge.0.clone()),
+                payload: Some(agent_message::Payload::Hello(Hello {
+                    metadata: HashMap::new(),
+                    capabilities: Vec::new(),
+                    applied_state_versions: HashMap::from([("config".to_owned(), 1)]),
+                    proof: proof.to_bytes().to_vec(),
+                })),
+            })
+        }
+
+        async fn answer(&self, answer: Answer, key: &SigningKey) -> anyhow::Result<()> {
+            let mut message = self.hello(key)?;
+            let Some(agent_message::Payload::Hello(hello)) = &mut message.payload else {
+                unreachable!("a Hello message");
+            };
+            match answer {
+                Answer::Nothing => return Ok(()),
+                Answer::BadProof => hello.proof = vec![0; 64],
+                Answer::WrongCorrelation => message.correlation_id = Some(Uuid::new_v4().to_string()),
+                Answer::InvalidMetadata => {
+                    hello
+                        .metadata
+                        .insert("hostname".to_owned(), "control\u{1}character".to_owned());
+                }
+            }
+            self.send(message).await
+        }
     }
 
     /// Opens a channel stream signed by a freshly enrolled certificate, with the mock clock frozen at `notAfter + offset`
     /// or `notBefore + offset`, and never sends a `Hello`.
     async fn open_at(from_not_after: bool, offset: i64) -> anyhow::Result<Vec<Seen>> {
-        let app = App::for_test()?;
-        let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
-        let (keyid, now) = {
-            let mut state = app.state.lock().await;
-            let now = app.now();
-            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
-            let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-            let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
-            let identity_id = state
-                .enroll(&secret, &csr, Map::new(), now, &app.base_url)
-                .expect("enrollment succeeds")
-                .identity_id;
-            // The test signs with its own key, so that key replaces the enrolled one.
-            let cert = state
-                .identities
-                .get_mut(&identity_id)
-                .and_then(|identity| identity.certs.first_mut())
-                .expect("issued certificate");
-            cert.public_key = *key.verifying_key();
-            let at = if from_not_after {
-                cert.not_after
-            } else {
-                cert.not_before
-            } + offset;
-            (cert.thumbprint.clone(), at)
-        };
-        app.clock.freeze_at(now);
-
-        let params = format!(
-            "(\"@method\");created={now};expires={};nonce=\"{}\";keyid=\"{keyid}\";alg=\"ecdsa-p256-sha256\";tag=\"connect\"",
-            now + 60,
-            URL_SAFE_NO_PAD.encode([0u8; 16])
-        );
-        let signature: Signature =
-            key.try_sign(format!("\"@method\": POST\n\"@signature-params\": {params}").as_bytes())?;
-        let (_agent, agent_messages) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(1);
-        let request = http::Request::post(format!("/mock/{}/Connect", agent_channel_proto::SERVICE_NAME))
-            .header("content-type", "application/grpc")
-            .header("te", "trailers")
-            .header("signature-input", format!("sig={params}"))
-            .header("signature", format!("sig=:{}:", STANDARD.encode(signature.to_bytes())))
-            .body(StreamBody::new(ReceiverStream::new(agent_messages)))?;
-        let response = Dispatcher::new(Arc::clone(&app))
-            .handle(request)
-            .await
-            .expect("the mock answers");
-
-        let closed = |headers: &http::HeaderMap| {
-            let value = |name: &str| {
-                headers
-                    .get(name)
-                    .and_then(|value| value.to_str().ok())
-                    .unwrap_or_default()
-                    .to_owned()
-            };
-            headers
-                .contains_key("grpc-status")
-                .then(|| Seen::Closed(value("grpc-status"), value("error-code")))
-        };
-        let mut seen = Vec::new();
-        if let Some(refused) = closed(response.headers()) {
-            seen.push(refused);
-            return Ok(seen);
-        }
-        let mut body = response.into_body();
-        while let Ok(Some(frame)) = tokio::time::timeout(Duration::from_millis(500), body.frame()).await {
-            let frame = frame.map_err(|error| anyhow::anyhow!("{error}"))?;
-            if let Some(data) = frame.data_ref() {
-                let message = ServerMessage::decode(&data[5..])?;
-                assert!(matches!(message.payload, Some(server_message::Payload::Challenge(_))));
-                seen.push(Seen::Challenge);
-            } else if let Some(trailers) = frame.trailers_ref() {
-                seen.extend(closed(trailers));
-                break;
-            }
-        }
-        Ok(seen)
+        let enrolled = Enrolled::new().await?;
+        let at = if from_not_after {
+            enrolled.not_after
+        } else {
+            enrolled.not_before
+        } + offset;
+        enrolled.app.clock.freeze_at(at);
+        Channel::open(&enrolled).await?.drain(QUIET).await
     }
 
     /// CONTRACT.md §6 accepts a `connect` signed by a certificate while `now ≤ notAfter`, whatever its `notBefore`,
@@ -733,6 +999,84 @@ mod tests {
         #[case] expected: Vec<Seen>,
     ) -> anyhow::Result<()> {
         assert_eq!(open_at(from_not_after, offset).await?, expected);
+        Ok(())
+    }
+
+    fn revoke(enrolled: &Enrolled, state: &mut State) {
+        assert!(state.revoke(enrolled.identity_id, enrolled.app.now()).is_ok());
+    }
+
+    fn revoke_then_delete(enrolled: &Enrolled, state: &mut State) {
+        revoke(enrolled, state);
+        assert!(state.delete_identity(enrolled.identity_id, enrolled.app.now()).is_ok());
+    }
+
+    /// Real time passes `notAfter` without any request applying the clock to the mock.
+    fn pass_not_after(enrolled: &Enrolled, _: &mut State) {
+        enrolled.app.clock.freeze_at(enrolled.not_after + 1);
+    }
+
+    /// CONTRACT.md §7.4: the revocation and `notAfter` closures "also apply to a stream still awaiting `Hello`, ahead of
+    /// the failures of §7.3 step 4; an identity revoked and then deleted during that wait gets `UNAUTHENTICATED` +
+    /// `error-code: identity_unknown`".
+    /// gRPC codes: 7 is `PERMISSION_DENIED` and 16 is `UNAUTHENTICATED`.
+    #[rstest]
+    #[case::revoked(revoke, "7", "identity_revoked")]
+    #[case::revoked_then_deleted(revoke_then_delete, "16", "identity_unknown")]
+    #[case::not_after_passed(pass_not_after, "16", "certificate_expired")]
+    #[tokio::test(start_paused = true)]
+    async fn closure_during_the_hello_wait_wins_over_the_handshake_failures(
+        #[case] close: fn(&Enrolled, &mut State),
+        #[case] status: &str,
+        #[case] error_code: &str,
+        #[values(Answer::Nothing, Answer::BadProof, Answer::WrongCorrelation, Answer::InvalidMetadata)] answer: Answer,
+    ) -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        enrolled.app.clock.freeze_at(enrolled.not_before);
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        close(&enrolled, &mut *enrolled.app.state.lock().await);
+        channel.answer(answer, &enrolled.key).await?;
+
+        // Waiting past the 10 s `Hello` timeout costs nothing on tokio's paused clock.
+        let closure = Seen::Closed(status.to_owned(), error_code.to_owned());
+        assert_eq!(channel.drain(Duration::from_secs(11)).await?, [closure]);
+        Ok(())
+    }
+
+    /// CONTRACT.md §7.4: "A stream whose certificate is retired while it awaits `Hello` still completes the handshake,
+    /// then gets the same treatment" as the streams of a certificate `confirm` retires: they "get
+    /// `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open".
+    #[tokio::test(start_paused = true)]
+    async fn certificate_retired_during_the_hello_wait_completes_the_handshake_then_rotates() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let opened_at = enrolled.not_before;
+        enrolled.app.clock.freeze_at(opened_at);
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        let pending_key = SigningKey::from_slice(&[8; 32]).expect("valid P-256 scalar");
+        let pending_keyid = enrolled.add_pending(&pending_key).await;
+        assert_eq!(
+            enrolled.confirm(&pending_key, &pending_keyid).await?,
+            http::StatusCode::NO_CONTENT
+        );
+
+        // The 60 s run from the `Reconnect`, which comes 30 s after the `confirm`.
+        let hello_at = opened_at + 30;
+        enrolled.app.clock.freeze_at(hello_at);
+        channel.send(channel.hello(&enrolled.key)?).await?;
+        let reconnect = Seen::Reconnect("certificate_rotated".to_owned());
+        assert_eq!(channel.drain(QUIET).await?, [Seen::Welcome, reconnect]);
+
+        enrolled.advance_to(hello_at + 59).await;
+        assert_eq!(channel.drain(QUIET).await?, Vec::new());
+        enrolled.advance_to(hello_at + 60).await;
+        assert_eq!(
+            channel.drain(QUIET).await?,
+            [Seen::Closed("0".to_owned(), String::new())]
+        );
         Ok(())
     }
 }

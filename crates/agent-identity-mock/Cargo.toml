@@ -59,3 +59,4 @@ x509-cert = { version = "0.3", features = ["builder"] }
 [dev-dependencies]
 prost = "0.13"
 rstest = "0.25"
+tokio = { version = "1.52", features = ["test-util"] }
