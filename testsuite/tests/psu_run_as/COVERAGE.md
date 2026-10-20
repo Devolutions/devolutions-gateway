@@ -100,7 +100,7 @@ No diagnostic wording is prescribed; the reason must merely be nonempty and iden
 | 114 | No new retry/deduplication semantics | Review-only boundary; tests use unused IDs and demand no new duplicate-request behavior. |
 | 118 | Credentials only in credential field on eligible connection | PSU sending policy is peer; the fixture deliberately sends an ineligible message to test Agent defense. Agent onward forwarding is unchecked. |
 | 119 | No copying into arguments, environment, metadata, persisted config or diagnostics | Partial: received Diagnostic/StreamClosed/ProcessCompleted strings and top-level temporary captures/config files are checked for literal sentinels after a conforming rejection. Arguments/environment/outbound metadata, other persistence and encodings are gaps. |
-| 120 | No credential-message/password logging; debug redacts message | Partial: literal username/password/domain absence in captured stdout/stderr/log/config files and received diagnostics. Eligible/debug paths, structural redaction, encoded values and logs outside the temporary directory remain review/fixture gaps. |
+| 120 | No credential-message/password logging; debug redacts message | Partial: literal username/password/domain absence in captured stdout/stderr/log/config files and received diagnostics. Hard termination can discard buffered log writes, so this does not establish refusal-path log confidentiality. Eligible/debug paths, structural redaction, encoded values and logs outside the temporary directory remain review/fixture gaps. |
 | 121 | PSU vault storage unchanged | Peer. |
 | 122 | Job application output is not automatically redacted | Boundary: StreamData is not subjected to confidentiality assertions; no application-output redaction requirement is invented. |
 
@@ -117,6 +117,8 @@ No real account logon, successful credentialed launch, rejected invalid credenti
 
 The test-owned server accepts its configured stream but does not implement PSU certificate identity binding or a vault.
 That is sufficient to exercise the Agent's defensive response on an HTTP app-token configuration, not to establish PSU authentication conformance.
+The Agent is terminated after protocol completion without a public log-flush acknowledgement.
+Credential strings absent from files do not prove they were absent from buffered or discarded log entries.
 No full conformance-success claim is valid until the gaps above are independently covered.
 
 [contract]: ../../../docs/psu-agent/CONTRACT.md
