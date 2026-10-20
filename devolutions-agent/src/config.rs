@@ -19,7 +19,8 @@ const DEFAULT_RDP_PORT: u16 = 3389;
 pub struct Conf {
     pub log_file: Utf8PathBuf,
     pub verbosity_profile: dto::VerbosityProfile,
-    pub identity: dto::IdentityConf,
+    /// Defined in the identity module, [`crate::identity::config`].
+    pub identity: crate::identity::config::IdentityConf,
     pub updater: dto::UpdaterConf,
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
@@ -292,17 +293,7 @@ impl Conf {
         let identity = conf_file.identity.clone().unwrap_or_default();
         let mut debug = conf_file.debug.clone().unwrap_or_default();
         if let Some(settings) = &mut debug.identity {
-            if let Some(prefix) = &settings.key_name_prefix {
-                device_key::validate_prefix(prefix).context("invalid __debug__.identity.key_name_prefix")?;
-            }
-            settings.extra_trusted_root = settings
-                .extra_trusted_root
-                .as_deref()
-                .map(|path| normalize_data_path(path, &data_dir));
-            settings.metadata_override_path = settings
-                .metadata_override_path
-                .as_deref()
-                .map(|path| normalize_data_path(path, &data_dir));
+            settings.normalize(&data_dir)?;
         }
 
         let log_file = conf_file
@@ -474,7 +465,7 @@ pub fn get_conf_file_path() -> Utf8PathBuf {
     get_data_dir().join("agent.json")
 }
 
-fn normalize_data_path(path: &Utf8Path, data_dir: &Utf8Path) -> Utf8PathBuf {
+pub(crate) fn normalize_data_path(path: &Utf8Path, data_dir: &Utf8Path) -> Utf8PathBuf {
     if path.is_absolute() {
         path.to_owned()
     } else {
@@ -853,40 +844,6 @@ pub mod dto {
         }
     }
 
-    #[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
-    pub enum IdentityKeyBackend {
-        WindowsSoftwareProvider,
-        File,
-    }
-
-    impl Default for IdentityKeyBackend {
-        fn default() -> Self {
-            if cfg!(windows) {
-                Self::WindowsSoftwareProvider
-            } else {
-                Self::File
-            }
-        }
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
-    #[serde(rename_all = "PascalCase")]
-    pub struct IdentityConf {
-        #[serde(default = "default_true")]
-        pub enabled: bool,
-        #[serde(default)]
-        pub key_backend: IdentityKeyBackend,
-    }
-
-    impl Default for IdentityConf {
-        fn default() -> Self {
-            Self {
-                enabled: true,
-                key_backend: IdentityKeyBackend::default(),
-            }
-        }
-    }
-
     /// Source of truth for Agent configuration
     ///
     /// This struct represents the JSON file used for configuration as close as possible
@@ -904,8 +861,9 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
 
+        /// Agent Identity configuration, defined in the identity module, [`crate::identity::config`].
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub identity: Option<IdentityConf>,
+        pub identity: Option<crate::identity::config::IdentityConf>,
 
         #[serde(skip_serializing_if = "Option::is_none")]
         pub updater: Option<UpdaterConf>,
@@ -1012,8 +970,9 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_directives: Option<String>,
 
+        /// Agent Identity test-only knobs, defined in the identity module, [`crate::identity::config`].
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub identity: Option<IdentityDebugConf>,
+        pub identity: Option<crate::identity::config::IdentityDebugConf>,
 
         /// Skip MSI installation in updater module
         ///
@@ -1055,38 +1014,6 @@ pub mod dto {
         /// Useful for testing with unsigned or test-signed broker clients.
         #[serde(default)]
         pub skip_broker_signature_validation: bool,
-    }
-
-    #[derive(PartialEq, Eq, Debug, Clone, Default, Serialize, Deserialize)]
-    pub struct IdentityDebugConf {
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub renewal_after_secs: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub disable_jitter: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub extra_trusted_root: Option<Utf8PathBuf>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub backoff_max_secs: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub pending_poll_interval_ms: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub acl_grant_current_user: Option<bool>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub key_name_prefix: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub metadata_override_path: Option<Utf8PathBuf>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub check_in_interval_secs: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub channel_failure_check_in_after_secs: Option<u64>,
-        #[serde(flatten)]
-        pub rest: serde_json::Map<String, serde_json::Value>,
-    }
-
-    impl IdentityDebugConf {
-        pub fn has_settings(&self) -> bool {
-            *self != Self::default()
-        }
     }
 
     /// Manual Default trait implementation just to make sure default values are deliberates
@@ -1197,93 +1124,6 @@ pub fn handle_cli(command: &str) -> Result<(), anyhow::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn identity_config_parses_all_debug_controls_and_defaults() -> anyhow::Result<()> {
-        let config: dto::ConfFile = serde_json::from_value(serde_json::json!({
-            "Identity": { "KeyBackend": "File" },
-            "__debug__": {
-                "identity": {
-                    "renewal_after_secs": 1,
-                    "disable_jitter": false,
-                    "extra_trusted_root": "ca.pem",
-                    "backoff_max_secs": 2,
-                    "pending_poll_interval_ms": 200,
-                    "acl_grant_current_user": true,
-                    "key_name_prefix": "test-run",
-                    "metadata_override_path": "metadata.json",
-                    "check_in_interval_secs": 3,
-                    "channel_failure_check_in_after_secs": 4
-                }
-            }
-        }))?;
-        let identity = config.identity.context("missing identity config")?;
-        assert!(identity.enabled);
-        assert_eq!(identity.key_backend, dto::IdentityKeyBackend::File);
-        let debug = config
-            .debug
-            .context("missing debug config")?
-            .identity
-            .context("missing identity debug config")?;
-        assert!(debug.has_settings());
-        assert_eq!(debug.renewal_after_secs, Some(1));
-        assert_eq!(debug.disable_jitter, Some(false));
-        assert_eq!(debug.extra_trusted_root.as_deref(), Some(Utf8Path::new("ca.pem")));
-        assert_eq!(debug.backoff_max_secs, Some(2));
-        assert_eq!(debug.pending_poll_interval_ms, Some(200));
-        assert_eq!(debug.acl_grant_current_user, Some(true));
-        assert_eq!(debug.key_name_prefix.as_deref(), Some("test-run"));
-        assert_eq!(
-            debug.metadata_override_path.as_deref(),
-            Some(Utf8Path::new("metadata.json"))
-        );
-        assert_eq!(debug.check_in_interval_secs, Some(3));
-        assert_eq!(debug.channel_failure_check_in_after_secs, Some(4));
-        let empty: dto::IdentityDebugConf = serde_json::from_str("{}")?;
-        assert!(!empty.has_settings());
-        let explicit_false: dto::IdentityDebugConf = serde_json::from_str(r#"{"disable_jitter":false}"#)?;
-        assert!(explicit_false.has_settings());
-        Ok(())
-    }
-
-    #[test]
-    fn identity_backend_values_are_platform_independent() -> anyhow::Result<()> {
-        for (backend, expected) in [
-            ("File", dto::IdentityKeyBackend::File),
-            (
-                "WindowsSoftwareProvider",
-                dto::IdentityKeyBackend::WindowsSoftwareProvider,
-            ),
-        ] {
-            let file: dto::ConfFile = serde_json::from_value(serde_json::json!({"Identity": {"KeyBackend": backend}}))?;
-            assert_eq!(Conf::from_conf_file(&file)?.identity.key_backend, expected);
-        }
-        let config: dto::IdentityConf = serde_json::from_str("{}")?;
-        let expected = if cfg!(windows) {
-            dto::IdentityKeyBackend::WindowsSoftwareProvider
-        } else {
-            dto::IdentityKeyBackend::File
-        };
-        assert_eq!(config.key_backend, expected);
-        assert!(serde_json::from_str::<dto::IdentityKeyBackend>("\"KeyStore\"").is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn invalid_identity_key_prefix_is_rejected_at_config_load() -> anyhow::Result<()> {
-        for prefix in ["", "Upper", "with_underscore", &"a".repeat(65)] {
-            let file: dto::ConfFile =
-                serde_json::from_value(serde_json::json!({"__debug__": {"identity": {"key_name_prefix": prefix}}}))?;
-            let error = Conf::from_conf_file(&file)
-                .err()
-                .context("invalid identity key prefix was accepted")?;
-            assert!(
-                format!("{error:#}").contains("__debug__.identity.key_name_prefix"),
-                "{error:#}"
-            );
-        }
-        Ok(())
-    }
 
     fn valid_tunnel_json() -> serde_json::Value {
         serde_json::json!({

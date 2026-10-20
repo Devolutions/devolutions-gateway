@@ -72,14 +72,7 @@ impl AgentService {
                 "**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**",
             );
         }
-        if conf
-            .debug
-            .identity
-            .as_ref()
-            .is_some_and(|settings| settings.has_settings())
-        {
-            warn!("Agent Identity debug settings are enabled; remove __debug__.identity for production");
-        }
+        devolutions_agent::identity::config::warn_about_debug_settings(conf.debug.identity.as_ref());
 
         Ok(AgentService {
             conf_handle,

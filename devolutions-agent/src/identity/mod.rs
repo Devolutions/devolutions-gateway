@@ -1,3 +1,8 @@
+//! Agent Identity in the agent binary: the identity service task, the `identity` command and its configuration.
+
+pub mod cli;
+pub mod config;
+
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -17,7 +22,8 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use rand::Rng as _;
 use tokio::time::sleep;
 
-use crate::config::{ConfHandle, dto};
+use self::config::{IdentityDebugConf, IdentityKeyBackend};
+use crate::config::ConfHandle;
 
 pub struct IdentityTask {
     conf_handle: ConfHandle,
@@ -44,8 +50,8 @@ impl Task for IdentityTask {
 
         loop {
             let backend = match conf.identity.key_backend {
-                dto::IdentityKeyBackend::File => Store::file_backend(&data_dir),
-                dto::IdentityKeyBackend::WindowsSoftwareProvider => KeyBackend::WindowsSoftwareProvider,
+                IdentityKeyBackend::File => Store::file_backend(&data_dir),
+                IdentityKeyBackend::WindowsSoftwareProvider => KeyBackend::WindowsSoftwareProvider,
             };
             let store = Store::new(
                 data_dir.clone(),
@@ -131,7 +137,7 @@ impl RetryState {
         self.next_attempt.is_none_or(|next| Instant::now() >= next)
     }
 
-    fn failed(&mut self, settings: &dto::IdentityDebugConf, retry_after: Option<Duration>) {
+    fn failed(&mut self, settings: &IdentityDebugConf, retry_after: Option<Duration>) {
         let now = Instant::now();
         let max_backoff = Duration::from_secs(settings.backoff_max_secs.unwrap_or(3600).max(1));
         let exponential = Duration::from_secs((1u64 << self.failures.min(31)).min(max_backoff.as_secs()));
@@ -156,7 +162,7 @@ async fn run_pending_enrollments(
     store: &Store,
     client: &Client,
     data_dir: &Utf8Path,
-    settings: &dto::IdentityDebugConf,
+    settings: &IdentityDebugConf,
     poll_interval: Duration,
     shutdown: &mut ShutdownSignal,
 ) -> anyhow::Result<()> {
@@ -212,7 +218,7 @@ async fn process_pending(
     store: &Store,
     client: &Client,
     path: &Utf8Path,
-    settings: &dto::IdentityDebugConf,
+    settings: &IdentityDebugConf,
 ) -> anyhow::Result<PendingOutcome> {
     let token = match pending::read(path, settings.acl_grant_current_user.unwrap_or_default()) {
         Ok(PendingRead::Ready(token)) => token,
@@ -244,7 +250,7 @@ async fn enroll_pending(
     store: &Store,
     client: &Client,
     token: &Token,
-    settings: &dto::IdentityDebugConf,
+    settings: &IdentityDebugConf,
 ) -> anyhow::Result<PendingOutcome> {
     let Some((record, key)) = store.begin_enrollment(token)? else {
         return Ok(PendingOutcome::Completed);
