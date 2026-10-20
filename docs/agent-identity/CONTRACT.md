@@ -58,7 +58,7 @@ Unless stated otherwise, implementations must follow these conventions.
   Fields:
   - `u` (required): absolute `https` product base URL without a query or fragment, e.g. `https://host/dvls`.
 - `secret`: `base64url` of 32 random bytes; opaque to the agent beyond this format.
-  The authority matches the `secret` text exactly, so only the exact token string authenticates.
+  The authority authenticates a token by its exact `secret` text alone and never checks the `bag`, which carries only routing data.
 - Total length ≤ 4096 bytes.
   The agent rejects malformed tokens locally without contacting the server and treats the failure as permanent.
 
