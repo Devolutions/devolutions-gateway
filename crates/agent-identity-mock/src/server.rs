@@ -360,6 +360,17 @@ mod tests {
         (status, serde_json::from_slice(&body).expect("JSON body"))
     }
 
+    /// Logs the application identity of [`App::for_test`] in under the path prefix and returns the `tokenId`.
+    async fn login(app: &Arc<App>) -> String {
+        let credentials = json!({ "appKey": "admin", "appSecret": "secret" }).to_string();
+        let (status, result) = post_json(app, "/api/v1/login", &[], credentials).await;
+        assert_eq!(status, 200);
+        result["tokenId"]
+            .as_str()
+            .expect("LoginResult has a tokenId")
+            .to_owned()
+    }
+
     /// The control must reach the enrollment response, not only configs stored before it was set.
     #[tokio::test]
     async fn config_version_fault_overrides_the_enrollment_config() -> anyhow::Result<()> {
@@ -467,7 +478,8 @@ mod tests {
         let app = App::for_test()?;
         let expires_at = crate::app::rfc3339(app.now() + 3600);
         let created = json!({ "name": "t", "maxUses": 1, "expiresOn": expires_at }).to_string();
-        let admin = [("tokenId", "admin")];
+        let token_id = login(&app).await;
+        let admin = [("tokenId", token_id.as_str())];
         let (status, created) = post_json(&app, "/api/v1/agent-identity/enrollment-token", &admin, created).await;
         assert_eq!(status, 201);
         let token = alter(created["token"].as_str().expect("issued token"));
@@ -523,10 +535,26 @@ mod tests {
         assert_eq!(published_roots().await, 0);
 
         let token = json!({ "name": "t", "maxUses": 1 }).to_string();
-        let admin = [("tokenId", "admin")];
+        let token_id = login(&app).await;
+        let admin = [("tokenId", token_id.as_str())];
         let (status, _) = post_json(&app, "/api/v1/agent-identity/enrollment-token", &admin, token).await;
         assert_eq!(status, 201);
         assert_eq!(published_roots().await, 1);
+        Ok(())
+    }
+
+    /// A reset keeps the management API sessions, so that a tester stays logged in across the resets between its tests.
+    #[tokio::test]
+    async fn reset_keeps_management_sessions() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let token_id = login(&app).await;
+        let (status, _) = post_json(&app, "/__mock__/reset", &[], Bytes::new()).await;
+        assert_eq!(status, 200);
+
+        let token = json!({ "name": "t", "maxUses": 1 }).to_string();
+        let admin = [("tokenId", token_id.as_str())];
+        let (status, _) = post_json(&app, "/api/v1/agent-identity/enrollment-token", &admin, token).await;
+        assert_eq!(status, 201);
         Ok(())
     }
 }

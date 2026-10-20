@@ -392,7 +392,7 @@ struct ResetRequest {
 
 /// `POST reset` clears tokens, identities, nonces, faults, settings, rotation and the clock offset.
 /// It creates a fresh root, unless `without_root` asks for a DVLS that has never created one, and keeps
-/// `authority_id`, the TLS certificate and the admin token.
+/// `authority_id`, the TLS certificate, and the management API's application identity and sessions.
 async fn reset(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
     let request = if body.is_empty() {
         ResetRequest::default()

@@ -2,7 +2,8 @@
 //! `<prefix>/api/v1/agent-identity`, with the operations, models, paging, errors and enum spelling of DVLS's OpenAPI
 //! document.
 //!
-//! A credential travels in the `tokenId` header, and each operation requires one of DVLS's four permissions.
+//! The `tokenId` header carries a session that DVLS's login opens, and each operation requires one of DVLS's four
+//! permissions.
 //! Invalid parameters are `400` with a `PublicApiValidationError` body; every other error carries a `PublicApiError`
 //! body.
 //!
@@ -24,6 +25,10 @@ use uuid::Uuid;
 use crate::app::{App, nanos, parse_date_time, rfc3339, rfc3339_nanos};
 use crate::oracle::CertStatus;
 use crate::state::{ApiError, Cert, Identity, IdentityStatus, State, Token};
+
+mod login;
+
+pub use login::ManagementLogin;
 
 const BASE_PATH: &str = "/api/v1/agent-identity";
 const TOKEN_ID_HEADER: &str = "tokenId";
@@ -69,6 +74,8 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route(&path("/{id}/revoke"), requires(Revoke, post(revoke_identity)))
         .route(&path("/{id}/request-renewal"), requires(Manage, post(request_renewal)))
         .route_layer(middleware::from_fn_with_state(Arc::clone(&app), authenticate))
+        .route("/api/v1/login", post(login::login))
+        .route("/api/v1/logout", post(login::logout))
         .with_state(app)
 }
 
@@ -93,8 +100,8 @@ impl Permission {
         Permission::RotateRoot,
     ];
 
-    /// Returns the permission's name in a scoped mock credential.
-    fn credential_name(self) -> &'static str {
+    /// Returns the permission's name in a scoped application key.
+    fn key_name(self) -> &'static str {
         match self {
             Permission::View => "view",
             Permission::Manage => "manage",
@@ -118,7 +125,7 @@ impl Permission {
     }
 }
 
-/// The permissions a management API credential holds.
+/// The permissions a management API session holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct Permissions(u8);
 
@@ -138,12 +145,13 @@ impl FromIterator<Permission> for Permissions {
     }
 }
 
-/// Returns the permissions a management API credential holds, or `None` when the credential is invalid.
+/// Returns the permissions of a session that `key` opens, or `None` when `key` is not one of the keys of the application
+/// identity `app_key`.
 ///
-/// `<admin-token>` holds every permission, `<admin-token>-unprivileged` none, and `<admin-token>.<scope>` the ones its scope lists.
+/// `<app-key>` holds every permission, `<app-key>-unprivileged` none, and `<app-key>.<scope>` the ones its scope lists.
 /// The scope is `none` or a `+`-separated list of `view`, `manage`, `revoke` and `rotate-root`.
-fn credential_permissions(admin_token: &str, credential: &str) -> Option<Permissions> {
-    let suffix = credential.strip_prefix(admin_token)?;
+fn key_permissions(app_key: &str, key: &str) -> Option<Permissions> {
+    let suffix = key.strip_prefix(app_key)?;
     match suffix {
         "" => return Some(Permissions::all()),
         "-unprivileged" => return Some(Permissions::default()),
@@ -158,7 +166,7 @@ fn credential_permissions(admin_token: &str, credential: &str) -> Option<Permiss
         .map(|name| {
             Permission::ALL
                 .into_iter()
-                .find(|permission| permission.credential_name() == name)
+                .find(|permission| permission.key_name() == name)
         })
         .collect()
 }
@@ -167,15 +175,16 @@ fn requires(permission: Permission, route: MethodRouter<Arc<App>>) -> MethodRout
     route.route_layer(middleware::from_fn_with_state(permission, authorize))
 }
 
-/// Authenticates the single `tokenId` header.
+/// Authenticates the session the single `tokenId` header names.
 async fn authenticate(AxumState(app): AxumState<Arc<App>>, mut request: Request, next: Next) -> Response {
-    let mut credentials = request.headers().get_all(TOKEN_ID_HEADER).iter();
-    let permissions = match (credentials.next(), credentials.next()) {
-        (Some(credential), None) => credential
-            .to_str()
-            .ok()
-            .and_then(|credential| credential_permissions(&app.admin_token, credential)),
+    let mut token_ids = request.headers().get_all(TOKEN_ID_HEADER).iter();
+    let token_id = match (token_ids.next(), token_ids.next()) {
+        (Some(token_id), None) => token_id.to_str().ok().map(str::to_owned),
         _ => None,
+    };
+    let permissions = match token_id {
+        Some(token_id) => app.login.session_permissions(&token_id).await,
+        None => None,
     };
     let Some(permissions) = permissions else {
         return ManagementError::status(StatusCode::UNAUTHORIZED, "missing or invalid token").into_response();

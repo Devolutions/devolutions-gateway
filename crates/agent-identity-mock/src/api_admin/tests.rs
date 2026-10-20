@@ -1,8 +1,10 @@
 //! Each test cites the operation (by `operationId`) or schema of DVLS's OpenAPI document that it pins.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use axum::body::Body;
+use anyhow::Context as _;
+use axum::body::{Body, Bytes};
 use axum::http::{Method, Request};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -12,11 +14,12 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
-use super::{BASE_PATH, Permission, Permissions, TOKEN_ID_HEADER, credential_permissions, router};
+use super::{BASE_PATH, Permission, Permissions, TOKEN_ID_HEADER, key_permissions, router};
 use crate::app::{App, nanos, rfc3339};
 use crate::state::{State, StreamPush};
 
-const ADMIN: &str = "admin";
+const APP_KEY: &str = "admin";
+const APP_SECRET: &str = "secret";
 const DAY: i64 = 24 * 3600;
 
 /// Returns an app whose clock is frozen at its current second, and that second.
@@ -27,6 +30,25 @@ fn frozen_app() -> anyhow::Result<(Arc<App>, i64)> {
     Ok((app, now))
 }
 
+/// Sends a request to `uri` and returns the status and the raw body.
+async fn request(
+    app: &Arc<App>,
+    method: Method,
+    uri: &str,
+    headers: &[(&str, &str)],
+    body: Option<String>,
+) -> anyhow::Result<(u16, Bytes)> {
+    let mut request = Request::builder().method(method).uri(uri);
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    let request = request.body(body.map_or_else(Body::empty, Body::from))?;
+    let response = router(Arc::clone(app)).oneshot(request).await?;
+    let status = response.status().as_u16();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    Ok((status, bytes))
+}
+
 /// Sends a management API request and returns the status and the JSON body, `null` when empty.
 async fn send(
     app: &Arc<App>,
@@ -35,14 +57,7 @@ async fn send(
     headers: &[(&str, &str)],
     body: Option<String>,
 ) -> anyhow::Result<(u16, Value)> {
-    let mut request = Request::builder().method(method).uri(format!("{BASE_PATH}{path}"));
-    for (name, value) in headers {
-        request = request.header(*name, *value);
-    }
-    let request = request.body(body.map_or_else(Body::empty, Body::from))?;
-    let response = router(Arc::clone(app)).oneshot(request).await?;
-    let status = response.status().as_u16();
-    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
+    let (status, bytes) = request(app, method, &format!("{BASE_PATH}{path}"), headers, body).await?;
     let body = if bytes.is_empty() {
         Value::Null
     } else {
@@ -51,16 +66,38 @@ async fn send(
     Ok((status, body))
 }
 
-/// Sends a request with the full-permission credential and an optional JSON body.
+/// Posts `body` to DVLS's `LoginPublicApi_Login` and returns the status and the raw body.
+async fn post_login(app: &Arc<App>, body: Value) -> anyhow::Result<(u16, Bytes)> {
+    request(app, Method::POST, "/api/v1/login", &[], Some(body.to_string())).await
+}
+
+/// Logs `app_key` in with the application secret and returns the session's `tokenId`.
+async fn login(app: &Arc<App>, app_key: &str) -> anyhow::Result<String> {
+    let (status, body) = post_login(app, json!({ "appKey": app_key, "appSecret": APP_SECRET })).await?;
+    anyhow::ensure!(status == 200, "login of {app_key} failed with {status}");
+    let body: Value = serde_json::from_slice(&body)?;
+    Ok(body["tokenId"]
+        .as_str()
+        .context("LoginResult has a tokenId")?
+        .to_owned())
+}
+
+/// Sends a request in a session holding every permission, with an optional JSON body.
 async fn call(app: &Arc<App>, method: Method, path: &str, body: Option<Value>) -> anyhow::Result<(u16, Value)> {
+    let token_id = login(app, APP_KEY).await?;
     send(
         app,
         method,
         path,
-        &[(TOKEN_ID_HEADER, ADMIN)],
+        &[(TOKEN_ID_HEADER, &token_id)],
         body.map(|body| body.to_string()),
     )
     .await
+}
+
+/// Reads the settings in the session `token_id` names, an operation any session with View can call.
+async fn get_settings(app: &Arc<App>, token_id: &str) -> anyhow::Result<(u16, Value)> {
+    send(app, Method::GET, "/settings", &[(TOKEN_ID_HEADER, token_id)], None).await
 }
 
 /// Returns the `field` of each `PublicApiFieldError` in a `PublicApiValidationError`.
@@ -136,31 +173,143 @@ fn config_entries(count: usize) -> Value {
 
 // ==== Authentication and permissions ====
 
+/// `LoginPublicApi_Login`: "Login successful, returns the tokenId to use in the header on the following requests", in
+/// a `LoginResult` whose only member is `tokenId`.
+#[tokio::test]
+async fn login_returns_a_login_result() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let (status, body) = post_login(&app, json!({ "appKey": APP_KEY, "appSecret": APP_SECRET })).await?;
+    assert_eq!(status, 200);
+    let body: Value = serde_json::from_slice(&body)?;
+    let members = body.as_object().expect("LoginResult is an object");
+    assert_eq!(members.len(), 1, "{body}");
+    assert!(members["tokenId"].is_string(), "{body}");
+    Ok(())
+}
+
+/// `LoginPublicApi_Login` "returns the tokenId to use in the header on the following requests".
+#[tokio::test]
+async fn login_token_id_authenticates_requests() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let token_id = login(&app, APP_KEY).await?;
+    assert_eq!(get_settings(&app, &token_id).await?.0, 200);
+    Ok(())
+}
+
+/// Each login opens another session with a new `tokenId`, and earlier sessions stay open.
+#[tokio::test]
+async fn each_login_opens_another_session() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let first = login(&app, APP_KEY).await?;
+    let second = login(&app, APP_KEY).await?;
+    assert_ne!(first, second);
+    assert_eq!(get_settings(&app, &first).await?.0, 200);
+    assert_eq!(get_settings(&app, &second).await?.0, 200);
+    Ok(())
+}
+
+/// A DVLS `tokenId` expires 7 minutes after its login, however often it is used, and then is `401` like an unknown
+/// one; a new login opens another session.
+/// The lifetime runs on real time, which the mock clock that tests advance by days doesn't move.
+#[tokio::test(start_paused = true)]
+async fn token_id_expires_its_lifetime_after_login() -> anyhow::Result<()> {
+    const DVLS_TOKEN_LIFETIME: Duration = Duration::from_secs(7 * 60);
+    let app = App::for_test()?;
+    let token_id = login(&app, APP_KEY).await?;
+
+    app.clock.advance_by(30 * DAY);
+    tokio::time::advance(DVLS_TOKEN_LIFETIME - Duration::from_secs(1)).await;
+    assert_eq!(get_settings(&app, &token_id).await?.0, 200);
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let (status, body) = get_settings(&app, &token_id).await?;
+    assert_eq!(status, 401);
+    assert_public_api_error(&body);
+
+    let token_id = login(&app, APP_KEY).await?;
+    assert_eq!(get_settings(&app, &token_id).await?.0, 200);
+    Ok(())
+}
+
+/// `LoginPublicApi_LogOut` "closes the session of the token sent in the tokenId header" with `200` and no body, after
+/// which that `tokenId` is `401`; other sessions stay open.
+#[tokio::test]
+async fn logout_closes_its_session_only() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let closed = login(&app, APP_KEY).await?;
+    let open = login(&app, APP_KEY).await?;
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/v1/logout",
+        &[(TOKEN_ID_HEADER, &closed)],
+        None,
+    )
+    .await?;
+    assert_eq!(response, (200, Bytes::new()));
+    let (status, body) = get_settings(&app, &closed).await?;
+    assert_eq!(status, 401);
+    assert_public_api_error(&body);
+    assert_eq!(get_settings(&app, &open).await?.0, 200);
+    Ok(())
+}
+
+/// `LoginPublicApi_Login` answers a failed login with `401` and a `PublicApiError`.
+/// The application key, its scoped keys and its `-unprivileged` key log in with the application secret only.
 #[rstest]
-#[case::admin_token("admin", &[Permission::View, Permission::Manage, Permission::Revoke, Permission::RotateRoot])]
+#[case::wrong_secret(APP_KEY, "wrong")]
+#[case::scoped_key_wrong_secret("admin.view", "wrong")]
+#[case::unknown_key("other", APP_SECRET)]
+#[tokio::test]
+async fn failed_login_is_401(#[case] app_key: &str, #[case] app_secret: &str) -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let (status, body) = post_login(&app, json!({ "appKey": app_key, "appSecret": app_secret })).await?;
+    assert_eq!(status, 401);
+    assert_public_api_error(&serde_json::from_slice(&body)?);
+    Ok(())
+}
+
+/// `LoginPublicApi_Login` answers a "Missing appKey or appSecret" with `400` and no body.
+/// Both members are nullable, and an empty one is missing too.
+#[rstest]
+#[case::missing_key(json!({ "appSecret": APP_SECRET }))]
+#[case::missing_secret(json!({ "appKey": APP_KEY }))]
+#[case::null_key(json!({ "appKey": null, "appSecret": APP_SECRET }))]
+#[case::empty_key(json!({ "appKey": "", "appSecret": APP_SECRET }))]
+#[case::empty_secret(json!({ "appKey": APP_KEY, "appSecret": "" }))]
+#[tokio::test]
+async fn login_without_key_or_secret_is_400_without_body(#[case] credentials: Value) -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let response = post_login(&app, credentials).await?;
+    assert_eq!(response, (400, Bytes::new()));
+    Ok(())
+}
+
+#[rstest]
+#[case::app_key("admin", &[Permission::View, Permission::Manage, Permission::Revoke, Permission::RotateRoot])]
 #[case::unprivileged("admin-unprivileged", &[])]
 #[case::scope_none("admin.none", &[])]
 #[case::scope_one("admin.rotate-root", &[Permission::RotateRoot])]
 #[case::scope_several("admin.view+revoke", &[Permission::View, Permission::Revoke])]
-fn credential_holds_its_permissions(#[case] credential: &str, #[case] expected: &[Permission]) {
-    let held = credential_permissions("admin", credential).expect("credential is valid");
+fn key_holds_its_permissions(#[case] key: &str, #[case] expected: &[Permission]) {
+    let held = key_permissions("admin", key).expect("key is valid");
     let held: Vec<Permission> = Permission::ALL.into_iter().filter(|p| held.contains(*p)).collect();
     assert_eq!(held, expected);
 }
 
 #[rstest]
 #[case::empty("")]
-#[case::other_secret("other")]
-#[case::longer_secret("admin2")]
+#[case::other_key("other")]
+#[case::longer_key("admin2")]
 #[case::empty_scope("admin.")]
 #[case::unknown_permission("admin.view+audit")]
 #[case::trailing_separator("admin.view+")]
 #[case::display_name("admin.View")]
-fn invalid_credential_is_refused(#[case] credential: &str) {
-    assert_eq!(credential_permissions("admin", credential), None::<Permissions>);
+fn invalid_key_is_refused(#[case] key: &str) {
+    assert_eq!(key_permissions("admin", key), None::<Permissions>);
 }
 
-/// Each operation's `403` response in DVLS's OpenAPI document names the permission the operation requires.
+/// Each operation's `403` response in DVLS's OpenAPI document names the permission the operation requires, and a
+/// session holds the permissions of the application key that logged in.
 #[rstest]
 #[case::get_identities(Method::GET, "", "view", "manage+revoke+rotate-root", "AgentIdentityView")]
 #[case::get_identity(Method::GET, "/{id}", "view", "manage+revoke+rotate-root", "AgentIdentityView")]
@@ -235,7 +384,7 @@ async fn operation_requires_its_permission(
     let app = App::for_test()?;
     let path = route.replace("{id}", &Uuid::new_v4().to_string());
 
-    let refused = format!("{ADMIN}.{all_others}");
+    let refused = login(&app, &format!("{APP_KEY}.{all_others}")).await?;
     let (status, body) = send(&app, method.clone(), &path, &[(TOKEN_ID_HEADER, &refused)], None).await?;
     assert_eq!(status, 403);
     assert_public_api_error(&body);
@@ -246,7 +395,7 @@ async fn operation_requires_its_permission(
         "{body}"
     );
 
-    let granted = format!("{ADMIN}.{required}");
+    let granted = login(&app, &format!("{APP_KEY}.{required}")).await?;
     let (status, _) = send(&app, method, &path, &[(TOKEN_ID_HEADER, &granted)], None).await?;
     assert!(!matches!(status, 401 | 403), "{status}");
     Ok(())
@@ -256,21 +405,29 @@ async fn operation_requires_its_permission(
 #[tokio::test]
 async fn token_id_header_name_is_case_insensitive() -> anyhow::Result<()> {
     let app = App::for_test()?;
-    let (status, _) = send(&app, Method::GET, "/settings", &[("TOKENID", ADMIN)], None).await?;
+    let token_id = login(&app, APP_KEY).await?;
+    let (status, _) = send(&app, Method::GET, "/settings", &[("TOKENID", &token_id)], None).await?;
     assert_eq!(status, 200);
     Ok(())
 }
 
 /// Each operation's `401` response: "Missing or invalid token", with a `PublicApiError` body.
+/// `{session}` stands for the `tokenId` of an open session.
 #[rstest]
 #[case::missing(&[])]
 #[case::bearer_authorization(&[("authorization", "Bearer admin")])]
 #[case::unknown_credential(&[("tokenId", "other")])]
-#[case::repeated_header(&[("tokenId", "admin"), ("tokenId", "admin")])]
+#[case::app_key(&[("tokenId", "admin")])]
+#[case::repeated_header(&[("tokenId", "{session}"), ("tokenId", "{session}")])]
 #[tokio::test]
 async fn missing_or_invalid_token_is_401(#[case] headers: &[(&str, &str)]) -> anyhow::Result<()> {
     let app = App::for_test()?;
-    let (status, body) = send(&app, Method::GET, "/settings", headers, None).await?;
+    let token_id = login(&app, APP_KEY).await?;
+    let headers: Vec<(&str, &str)> = headers
+        .iter()
+        .map(|&(name, value)| (name, if value == "{session}" { token_id.as_str() } else { value }))
+        .collect();
+    let (status, body) = send(&app, Method::GET, "/settings", &headers, None).await?;
     assert_eq!(status, 401);
     assert_public_api_error(&body);
     Ok(())
@@ -457,12 +614,13 @@ async fn create_token_refuses_a_repeated_member_name(
     #[case] expected: u16,
 ) -> anyhow::Result<()> {
     let app = App::for_test()?;
+    let token_id = login(&app, APP_KEY).await?;
     let body = format!(r#"{{"name":"t","maxUses":1,"config":{config}}}"#);
     let (status, _) = send(
         &app,
         Method::POST,
         "/enrollment-token",
-        &[(TOKEN_ID_HEADER, ADMIN)],
+        &[(TOKEN_ID_HEADER, &token_id)],
         Some(body),
     )
     .await?;
@@ -1247,7 +1405,7 @@ async fn rotation_notifies_at_the_settings_rate() -> anyhow::Result<()> {
     assert_eq!(first_window.iter().filter(|sent| **sent).count(), 2);
 
     // The rate window is real time, while the mock clock stays frozen.
-    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    tokio::time::sleep(Duration::from_millis(1100)).await;
     assert_eq!(call(&app, Method::GET, "/rotation", None).await?.0, 200);
     let second_window = rotation_notified(&mut streams);
     let expected: Vec<bool> = first_window.iter().map(|sent| !sent).collect();

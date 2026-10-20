@@ -7,14 +7,16 @@ It shares only `crates/agent-channel-proto` (the generated gRPC types) with the 
 ## Usage
 
 ```
-agent-identity-mock --listen 127.0.0.1:0 --path-prefix /mock --admin-token <secret> --state-dir <dir>
+agent-identity-mock --listen 127.0.0.1:0 --path-prefix /mock --app-key <key> --app-secret <secret> --state-dir <dir>
 ```
 
 | Flag | Meaning |
 |---|---|
 | `--listen <addr:port>` | TCP bind address; it must be a loopback address because the mock control surface is unauthenticated, and port `0` picks a free port. |
 | `--path-prefix <prefix>` | Every route lives under this prefix (e.g. `/mock`); requests outside it get a bare 404. Must start with `/` and not end with `/`. |
-| `--admin-token <secret>` | Secret from which the [management API](#management-api) credentials derive. |
+| `--app-key <key>` | Key of the application identity that [logs in](#login) to the management API; the keys that hold fewer permissions derive from it. |
+| `--app-secret <secret>` | Secret of the application identity, shared by all its keys. |
+| `--token-lifetime-secs <secs>` | How long a `tokenId` lasts after its login; `420` (DVLS's 7 minutes) by default. |
 | `--state-dir <dir>` | Where `ready.json` and the TLS CA PEM are written; created if missing. |
 
 On startup the server generates a TLS CA and a server certificate for `localhost`/`127.0.0.1` and serves HTTPS on a single port with ALPN `h2` and `http/1.1` (REST and gRPC share the port).
@@ -30,7 +32,7 @@ It then writes `<state-dir>/ready.json` atomically (temp file + rename):
 
 ## Clock
 
-All time in the mock is the mock clock: real time plus an offset.
+All time in the mock is the mock clock, real time plus an offset, except the [`tokenId` lifetime](#login).
 `POST __mock__/time/advance` adds to the offset and `faults.clock_skew_secs` adds a skew on top.
 Signature windows, certificate validity, token expiry, renewal grace, rotation deadlines, `server_time` and `lastSeenOn` all use it.
 A certificate is unexpired while `now ≤ notAfter`, and `notBefore` is never checked (§6).
@@ -71,23 +73,37 @@ These closures come ahead of any handshake failure, and revocation or deletion w
 A stream whose certificate is retired during that wait completes the handshake, then receives the same `Reconnect` and closes with `OK` 60 mock-clock seconds after it.
 The channel gRPC method is `POST <prefix>/devolutions.agent.channel.v1.AgentChannel/Connect` with `signature-input`/`signature` metadata (`tag="connect"`); open failures are gRPC statuses with `error-code` and `server-time` trailers (§7.4).
 
+### Login
+
+DVLS's login opens the sessions that authenticate the [management API](#management-api), with the operations and models of DVLS's public OpenAPI document:
+
+| Method | Path | Notes |
+|---|---|---|
+| POST | `/api/v1/login` | Body `LoginParameters`, `{ appKey, appSecret }`; 200 → `LoginResult`, `{ tokenId }`. A missing or empty `appKey` or `appSecret` is 400 with no body, and a wrong key or secret is 401 with a `PublicApiError` body, `{ "message" }`. |
+| POST | `/api/v1/logout` | Closes the session the `tokenId` header names; 200 with no body. |
+
+Each login opens another session with a new random `tokenId`, and earlier sessions stay open.
+A `tokenId` expires `--token-lifetime-secs` after its login, however often it is used.
+The lifetime runs on real time, not the mock clock, because tests advance the mock clock by days.
+
+The application identity's keys derive from `--app-key`, so a test can hold any subset of the four permissions without setup; each logs in with `--app-secret`:
+
+| Key | Permissions |
+|---|---|
+| `<app-key>` | All four, like a DVLS built-in administrator. |
+| `<app-key>.<scope>` | Those in `<scope>`: `none`, or a `+`-separated list of `view`, `manage`, `revoke` and `rotate-root`, such as `view+revoke`. |
+| `<app-key>-unprivileged` | None, like `<app-key>.none`. |
+
+Any other key, including a scope with an empty or unknown permission name, fails to log in.
+
 ### Management API
 
 The [DVLS management API][dvls-management] has the operations, models, enums, paging and errors of DVLS's OpenAPI document for Agent Identity (`v1`, 14 operations), under `/api/v1/agent-identity`.
-A request carries its credential in the `tokenId` header; a missing, repeated or invalid credential is 401.
+A request carries the `tokenId` of a [session](#login) in the `tokenId` header; a missing, repeated, unknown, expired or logged-out `tokenId` is 401.
 Invalid parameters are 400 with a `PublicApiValidationError` body, `{ "errors": [ { "field", "message" } ] }`, where `field` names the camelCase member or query parameter, `config.<key>` for a token config entry, or is `null` for a malformed body or query string.
 Every other error is 401, 403, 404, 409 or 422 with a `PublicApiError` body, `{ "message" }`.
 A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth, as CONTRACT.md §1 requires of agent-facing bodies.
-Each operation requires the permission the table lists, and a credential without it gets 403 before the request is processed.
-The mock derives its credentials from `--admin-token`, so a test can hold any subset of the four permissions without setup:
-
-| Credential | Permissions |
-|---|---|
-| `<admin-token>` | All four, like a DVLS built-in administrator's session. |
-| `<admin-token>.<scope>` | Those in `<scope>`: `none`, or a `+`-separated list of `view`, `manage`, `revoke` and `rotate-root`, such as `view+revoke`. |
-| `<admin-token>-unprivileged` | None, like `<admin-token>.none`. |
-
-Any other credential, including a scope with an empty or unknown permission name, is invalid.
+Each operation requires the permission the table lists, and a session without it gets 403 before the request is processed.
 
 Enums are PascalCase.
 An identity's `status` is `Active` (an unexpired current or pending certificate), `Grace` (no unexpired certificate, but one within renewal grace), `Expired` (beyond renewal grace) or `Revoked`, as the DVLS intent's "Terminology" defines.
@@ -129,7 +145,7 @@ Certificate issuance and token-use consumption share the state lock; issued key 
 | POST | `/__mock__/faults` | Merges `drop_next_response`, `fail_next_response`, `clock_skew_secs`, `leaf_lifetime_secs`, `channel_available`, `channel_broken`, `malformed_channel_url`, `rotation_rate_limit_per_sec`, `config_version` and `root_key_unavailable`; absent keys retain their value, and `null` clears optional fields. `leaf_lifetime_secs` (seconds) overrides the `certificateLifetimeDays` setting and `rotation_rate_limit_per_sec` the `rotationNotificationsPerSecond` setting, without the settings' bounds. `channel_available` is whether the hosting supports the channel; toggling it changes the channel offer as the [management API](#management-api) describes. `config_version` (an unsigned integer) replaces `config.version` in every config the mock delivers, and setting it to a different version or clearing it bumps every identity's config revision and pushes `ConfigUpdate`; `channel_broken` only rejects new streams. Set `malformed_channel_url` to `true` for an HTTP URL, `"query"` for an HTTPS URL with a query, or `"fragment"` for an HTTPS URL with a fragment in new enrollments; `false` or `null` clears it. `root_key_unavailable` (a boolean) makes the root key undecryptable: enrollment and renewal fail with `500 unavailable`, root rotation and the creation of a first root with 409. |
 | POST | `/__mock__/config` | `{ "fields": {...} }` merges non-reserved fields into each identity's config; effective changes bump revisions and push `ConfigUpdate`. |
 | POST | `/__mock__/config/stale` | `{ "identity_id": "<uuid>", "revision": <lower integer> }` sends a stale `ConfigUpdate` with `mock_stale_marker` without changing server config; returns `{ "sent": <count> }`. |
-| POST | `/__mock__/reset` | Clears tokens, identities, nonces, faults, settings, rotation and the clock offset, and creates a fresh root; keeps `authority_id`, the TLS certificate and the admin token; live streams close with `identity_unknown`. The body is empty or `{ "without_root"?: <bool> }`; `true` leaves no root, as at startup, until the first token creates one. Responds `{ "authority_id" }`. |
+| POST | `/__mock__/reset` | Clears tokens, identities, nonces, faults, settings, rotation and the clock offset, and creates a fresh root; keeps `authority_id`, the TLS certificate, and the application identity and its sessions; live streams close with `identity_unknown`. The body is empty or `{ "without_root"?: <bool> }`; `true` leaves no root, as at startup, until the first token creates one. Responds `{ "authority_id" }`. |
 | POST | `/__mock__/time/advance` | `{ "secs": <int> }` moves the mock clock and immediately applies stream expiry, rotation deadlines and early completion; responds `{ "now": <unix>, "server_time": "<RFC 3339>" }`. |
 | POST | `/__mock__/time/freeze` | `{ "now": <unix second> }` pins time and returns `{ "now", "published_roots": ["<thumbprint>", ...] }` after applying expiry and rotation deadlines at that exact second. |
 | GET | `/__mock__/events?identity_id=<uuid>` | Returns `{ "events": [...] }` in increasing `seq` order: `stream_opened`, `stream_authenticated` (with `applied_config_revision`), `stream_closed` (with `status` and optional `error_code`), `cert_status_changed`, `reconnect_sent`, `renew_received`, `config_changed`, `config_update_sent`, `stale_config_update_sent`, and `check_in_received` (with `renewal_requested`). |
@@ -164,7 +180,7 @@ X.509 and DER supply CSR structure types; P-256 performs signature verification.
 ## Tests
 
 `cargo test -p agent-identity-mock` replays every signature, proof and CSR vector through the verifier and validators used by the server.
-It also pins each management API operation, error class, paging bound, permission and setting effect to DVLS's OpenAPI document.
+It also pins the login, each management API operation, error class, paging bound, permission and setting effect to DVLS's OpenAPI documents.
 
 [contract]: ../../docs/agent-identity/CONTRACT.md
 [dvls-management]: ../../docs/agent-identity/INTENT.DVLS.md#management-api

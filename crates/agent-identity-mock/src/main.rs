@@ -4,8 +4,9 @@
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
-use agent_identity_mock::{App, Dispatcher, MockClock, State, serve};
+use agent_identity_mock::{App, Dispatcher, ManagementLogin, MockClock, State, serve};
 use anyhow::Context as _;
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -16,9 +17,14 @@ use uuid::Uuid;
 struct Args {
     listen: SocketAddr,
     path_prefix: String,
-    admin_token: String,
+    app_key: String,
+    app_secret: String,
+    token_lifetime: Duration,
     state_dir: PathBuf,
 }
+
+/// DVLS's `tokenId` lifetime.
+const DEFAULT_TOKEN_LIFETIME: Duration = Duration::from_secs(7 * 60);
 
 /// Parses the command-line arguments, without the program name.
 ///
@@ -29,7 +35,9 @@ struct Args {
 fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Args> {
     let mut listen = None;
     let mut path_prefix = None;
-    let mut admin_token = None;
+    let mut app_key = None;
+    let mut app_secret = None;
+    let mut token_lifetime = DEFAULT_TOKEN_LIFETIME;
     let mut state_dir = None;
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -43,7 +51,15 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Args> {
                 );
             }
             "--path-prefix" => path_prefix = Some(value("--path-prefix")?),
-            "--admin-token" => admin_token = Some(value("--admin-token")?),
+            "--app-key" => app_key = Some(value("--app-key")?),
+            "--app-secret" => app_secret = Some(value("--app-secret")?),
+            "--token-lifetime-secs" => {
+                token_lifetime = Duration::from_secs(
+                    value("--token-lifetime-secs")?
+                        .parse()
+                        .context("--token-lifetime-secs must be a number of seconds")?,
+                );
+            }
             "--state-dir" => state_dir = Some(PathBuf::from(value("--state-dir")?)),
             other => anyhow::bail!("unknown argument {other:?}"),
         }
@@ -59,7 +75,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Args> {
     Ok(Args {
         listen,
         path_prefix,
-        admin_token: admin_token.context("missing --admin-token")?,
+        app_key: app_key.context("missing --app-key")?,
+        app_secret: app_secret.context("missing --app-secret")?,
+        token_lifetime,
         state_dir: state_dir.context("missing --state-dir")?,
     })
 }
@@ -133,7 +151,7 @@ async fn main() -> anyhow::Result<()> {
         authority_id: Uuid::new_v4(),
         base_url: base_url.clone(),
         prefix: args.path_prefix,
-        admin_token: args.admin_token,
+        login: ManagementLogin::new(args.app_key, args.app_secret, args.token_lifetime),
         clock,
         handshake_gate: tokio::sync::watch::channel(true).0,
         state: Mutex::new(state),
@@ -151,7 +169,7 @@ async fn main() -> anyhow::Result<()> {
     // The ticker covers idle servers with live streams.
     let ticker_app = Arc::clone(&app);
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             interval.tick().await;
@@ -166,6 +184,8 @@ async fn main() -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use rstest::rstest;
 
     use super::parse_args;
@@ -176,7 +196,9 @@ mod tests {
             listen,
             "--path-prefix",
             "/mock",
-            "--admin-token",
+            "--app-key",
+            "admin",
+            "--app-secret",
             "secret",
             "--state-dir",
             "state",
@@ -202,5 +224,16 @@ mod tests {
             .err()
             .expect("non-loopback address is refused");
         assert!(error.to_string().contains("loopback"), "{error}");
+    }
+
+    /// DVLS's `tokenId` lifetime, 7 minutes, is the default.
+    #[rstest]
+    #[case::default(&[], Duration::from_secs(7 * 60))]
+    #[case::flag(&["--token-lifetime-secs", "30"], Duration::from_secs(30))]
+    fn token_lifetime_is_dvls_lifetime_unless_set(#[case] extra_args: &[&str], #[case] expected: Duration) {
+        let mut args = args_with_listen("127.0.0.1:0");
+        args.extend(extra_args.iter().map(|arg| (*arg).to_owned()));
+        let lifetime = parse_args(args).ok().map(|args| args.token_lifetime);
+        assert_eq!(lifetime, Some(expected));
     }
 }

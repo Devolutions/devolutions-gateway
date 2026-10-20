@@ -14,6 +14,7 @@ pub(crate) mod oracle;
 mod server;
 mod state;
 
+pub use api_admin::ManagementLogin;
 pub use app::App;
 pub use clock::MockClock;
 pub use server::{Dispatcher, serve};
