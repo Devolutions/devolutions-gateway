@@ -7,6 +7,8 @@ use camino::{Utf8Path, Utf8PathBuf};
 use device_key::{self as keys, DeviceKey, KeyBackend};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use url::Url;
 use uuid::{Uuid, Variant};
 
@@ -15,6 +17,8 @@ use crate::{pending, private_file, rejected, state_lock};
 
 const MAX_IDENTITY_BYTES: u64 = 2 * 1024 * 1024;
 pub const IDENTITY_KEY_PREFIX: &str = "devolutions-agent-identity";
+/// The rejection code of an identity whose current key no longer exists in its key store.
+const KEY_LOST: &str = "key_lost";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoredIdentity {
@@ -556,7 +560,17 @@ impl Store {
         }
         for mut identity in self.list_identities()? {
             if keys::open(&self.backend, &identity.keys.current.key_name)?.is_none() {
-                self.remove_identity_locked(&identity)?;
+                // The identity is kept so that its token stays a no-op and recovery needs a different token.
+                if identity.rejected.is_none() {
+                    let previous = identity.clone();
+                    identity.rejected = Some(Rejection {
+                        code: KEY_LOST.to_owned(),
+                        at: OffsetDateTime::now_utc()
+                            .format(&Rfc3339)
+                            .context("format key-lost timestamp")?,
+                    });
+                    self.write_identity_locked(Some(&previous), &identity)?;
+                }
                 continue;
             }
             if let Some(pending) = &identity.keys.pending
@@ -1323,6 +1337,43 @@ mod tests {
                 .config["revision"],
             10
         );
+        Ok(())
+    }
+
+    #[test]
+    fn missing_current_key_rejects_the_identity_as_key_lost() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Identities", "Stored identities"): a missing current key records
+        // `rejected { code: "key_lost" }` and keeps the identity, so the same token stays a no-op.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        keys::delete(store.key_backend(), &identity.keys.current.key_name)?;
+
+        store.reconcile()?;
+
+        let stored = store
+            .read_identity(identity.authority_id)?
+            .context("identity with a lost key was deleted")?;
+        let rejection = stored
+            .rejected
+            .clone()
+            .context("identity with a lost key is not rejected")?;
+        assert_eq!(rejection.code, "key_lost");
+        let at = OffsetDateTime::parse(&rejection.at, &Rfc3339)?;
+        assert_eq!(at.offset(), time::UtcOffset::UTC);
+        assert_eq!(
+            StoredIdentity {
+                rejected: None,
+                ..stored
+            },
+            identity
+        );
+        let token = test_token()?;
+        pending::write(&directory.0, &token, true)?;
+        assert!(store.begin_enrollment(&token)?.is_none());
         Ok(())
     }
 }
