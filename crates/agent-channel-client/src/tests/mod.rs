@@ -696,3 +696,34 @@ async fn an_opening_without_welcome_in_time_is_an_outage() -> anyhow::Result<()>
     assert_eq!(closure.grpc_code, None);
     Ok(())
 }
+
+#[tokio::test]
+async fn opens_a_new_stream_while_the_current_one_stays_open() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let client = client(&authority, Settings::default())?;
+    let mut current = client.connect(Identity::from_vectors("device-a")?.target(&authority.url))?;
+    let mut current_stream = authority.next_opening().await.accept();
+    current_stream.authenticate().await;
+    assert_eq!(next_event(&mut current).await, Event::Authenticated);
+
+    // CONTRACT.md §7.3 step 6 and §8.1 step 4: the new stream, here for a renewed key, opens before the old one closes.
+    let mut next = client.connect(Identity::from_vectors("device-b")?.target(&authority.url))?;
+    let mut next_stream = authority.next_opening().await.accept();
+    next_stream.authenticate().await;
+    assert_eq!(next_event(&mut next).await, Event::Authenticated);
+    assert!(
+        current_stream
+            .receive_within(Duration::from_millis(300))
+            .await
+            .is_none(),
+        "the current stream ended before the caller closed it"
+    );
+
+    drop(current);
+    assert!(matches!(
+        current_stream.receive_within(WAIT).await,
+        Some(Ok(None) | Err(_))
+    ));
+    assert!(next_stream.receive_within(Duration::from_millis(300)).await.is_none());
+    Ok(())
+}
