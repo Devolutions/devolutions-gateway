@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// A Task: the permanent record of one piece of work the provisioner asked Gateway to do  The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes. The shape of &#x60;params&#x60; and &#x60;payload&#x60; belongs to the kind. For &#x60;recording-ai-analysis&#x60;, &#x60;payload&#x60; is an &#x60;AiAnalysisRunningPayload&#x60; while &#x60;running&#x60;, an &#x60;AiAnalysisSucceededPayload&#x60; once &#x60;succeeded&#x60;, and an &#x60;AiAnalysisFailedPayload&#x60; once &#x60;failed&#x60;.
+    /// A Task: the permanent record of one piece of work the provisioner asked Gateway to do  The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes. The shape of &#x60;params&#x60; and &#x60;payload&#x60; belongs to the kind. For &#x60;recording-ai-analysis&#x60;, &#x60;params&#x60; is an &#x60;AiAnalysisParams&#x60;, and &#x60;payload&#x60; is an &#x60;AiAnalysisRunningPayload&#x60; while &#x60;running&#x60;, an &#x60;AiAnalysisSucceededPayload&#x60; once &#x60;succeeded&#x60;, and an &#x60;AiAnalysisFailedPayload&#x60; once &#x60;failed&#x60;.
     /// </summary>
     [DataContract(Name = "TaskInfo")]
     public partial class TaskInfo : IValidatableObject

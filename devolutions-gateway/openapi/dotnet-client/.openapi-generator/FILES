@@ -12,6 +12,7 @@ docs/AgentStatus.md
 docs/AiAnalysisConflict.md
 docs/AiAnalysisConflictCode.md
 docs/AiAnalysisFailedPayload.md
+docs/AiAnalysisParams.md
 docs/AiAnalysisRequest.md
 docs/AiAnalysisRunningPayload.md
 docs/AiAnalysisSucceededPayload.md
@@ -135,6 +136,7 @@ src/Devolutions.Gateway.Client/Model/AgentStatus.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisConflict.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisConflictCode.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisFailedPayload.cs
+src/Devolutions.Gateway.Client/Model/AiAnalysisParams.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisRequest.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisRunningPayload.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisSucceededPayload.cs

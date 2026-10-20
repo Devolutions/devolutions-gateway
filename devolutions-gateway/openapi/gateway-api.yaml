@@ -1600,6 +1600,28 @@ components:
         reason:
           type: string
           description: 'Kind of failure: `permanent error`, `attempts exhausted`, `key lost`, `timed out`, `invalid task` or `not queued`.'
+    AiAnalysisParams:
+      type: object
+      description: 'Params of an AI analysis Task: what was asked, without the API key and the base URL'
+      required:
+      - provider
+      - model
+      properties:
+        language:
+          type: string
+          description: Language the AI writes in; absent when not asked, so the AI writes in English.
+          nullable: true
+        maxOutputTokens:
+          type: integer
+          format: int32
+          description: Upper bound of tokens in each AI answer; null when not asked.
+          nullable: true
+          minimum: 0
+        model:
+          type: string
+          description: Model identifier, passed to the provider as is.
+        provider:
+          $ref: '#/components/schemas/AiProvider'
     AiAnalysisRequest:
       type: object
       description: Settings of an AI analysis
@@ -2824,8 +2846,8 @@ components:
 
         The work runs in the background; `state` and `payload` tell how it goes.
         The shape of `params` and `payload` belongs to the kind.
-        For `recording-ai-analysis`, `payload` is an `AiAnalysisRunningPayload` while `running`, an
-        `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
+        For `recording-ai-analysis`, `params` is an `AiAnalysisParams`, and `payload` is an `AiAnalysisRunningPayload` while
+        `running`, an `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
       required:
       - id
       - kind

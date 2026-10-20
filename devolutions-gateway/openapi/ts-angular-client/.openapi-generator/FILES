@@ -29,6 +29,7 @@ model/agentStatus.ts
 model/aiAnalysisConflict.ts
 model/aiAnalysisConflictCode.ts
 model/aiAnalysisFailedPayload.ts
+model/aiAnalysisParams.ts
 model/aiAnalysisRequest.ts
 model/aiAnalysisRunningPayload.ts
 model/aiAnalysisSucceededPayload.ts
