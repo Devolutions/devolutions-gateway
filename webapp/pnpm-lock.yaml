@@ -70,8 +70,8 @@ importers:
         specifier: ^0.7.2
         version: 0.7.2
       '@devolutions/ldap-wasm-js':
-        specifier: ^0.3.4
-        version: 0.3.4
+        specifier: ^0.3.5
+        version: 0.3.5
       '@devolutions/terminal-shared':
         specifier: ^1.4.1
         version: 1.4.1(typescript@5.9.3)
@@ -1372,8 +1372,8 @@ packages:
   '@devolutions/iron-remote-desktop@0.11.0':
     resolution: {integrity: sha512-ZH8xfabDA+6rAXkW2V3XgRdj0LHOsHoXAzars/H22DmKsHM39LdMfheKFUR3qLaFDM8mjf6DTFngzjgr+Byx0Q==}
 
-  '@devolutions/ldap-wasm-js@0.3.4':
-    resolution: {integrity: sha512-9gI9j7yGL2MKEG1wEQExP6AF8ON31T1lGsmMGVmccbouXOoHI76ti7rqhkqYotTB0bDHA1yO9ljzVr80lXwubg==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/ldap-wasm-js/-/@devolutions/ldap-wasm-js-0.3.4.tgz}
+  '@devolutions/ldap-wasm-js@0.3.5':
+    resolution: {integrity: sha512-6PrNnzoQO5QhVoeWjvJAjE/XmcqTANPxW4V4q0z2ZpF+4MDxztdyLQbWHsuzphiU8qbUYO5uPfkF8phdKW2TuQ==, tarball: https://devolutions.jfrog.io/devolutions/api/npm/npm/@devolutions/ldap-wasm-js/-/@devolutions/ldap-wasm-js-0.3.5.tgz}
 
   '@devolutions/terminal-shared@1.4.1':
     resolution: {integrity: sha512-GLfuO3/sLKXwxvFczTPe+QSF8r2htV/2uvdfkxg4NzunFB9y4vLOnNjndCzN+1R5p0H1tv0wEnGTFcKbJQdvsQ==}
@@ -8445,7 +8445,7 @@ snapshots:
 
   '@devolutions/iron-remote-desktop@0.11.0': {}
 
-  '@devolutions/ldap-wasm-js@0.3.4': {}
+  '@devolutions/ldap-wasm-js@0.3.5': {}
 
   '@devolutions/terminal-shared@1.4.1(typescript@5.9.3)':
     dependencies:
