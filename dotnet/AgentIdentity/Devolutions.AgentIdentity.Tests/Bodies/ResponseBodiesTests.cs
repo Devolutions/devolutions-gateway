@@ -13,6 +13,7 @@ public class ResponseBodiesTests
     // The identity is device-a of the vector file, whose certificate the vector root issued.
     private const string AuthorityIdText = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
     private const string IdentityIdText = "0b3c6a52-7a38-4f55-9a1c-2f1a8d3c9e01";
+    private const string NilIdText = "00000000-0000-0000-0000-000000000000";
 
     private static readonly DateTimeOffset Now = new(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
 
@@ -138,23 +139,17 @@ public class ResponseBodiesTests
         Assert.Equal(JsonValueKind.Object, members["config"].ValueKind);
     }
 
-    // RFC 9562 §5.9: the nil UUID stands for the absence of a UUID, and CONTRACT.md §5.2 requires both IDs.
-    [Fact]
-    public void EnrollRejectsTheNilAuthorityId()
+    // RFC 9562 §5.9: the nil UUID, with all 128 bits zero, stands for the absence of a UUID,
+    // and CONTRACT.md §5.2 requires both IDs.
+    [Theory]
+    [InlineData(NilIdText, IdentityIdText, "authorityId")]
+    [InlineData(AuthorityIdText, NilIdText, "identityId")]
+    public void EnrollRejectsANilId(string authorityId, string identityId, string parameter)
     {
         ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => ResponseBodies.Enroll(Guid.Empty, IdentityId, [DeviceA, VectorRoot], Config));
+            () => ResponseBodies.Enroll(Guid.Parse(authorityId), Guid.Parse(identityId), [DeviceA, VectorRoot], Config));
 
-        Assert.Equal("authorityId", exception.ParamName);
-    }
-
-    [Fact]
-    public void EnrollRejectsTheNilIdentityId()
-    {
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => ResponseBodies.Enroll(AuthorityId, Guid.Empty, [DeviceA, VectorRoot], Config));
-
-        Assert.Equal("identityId", exception.ParamName);
+        Assert.Equal(parameter, exception.ParamName);
     }
 
     // CONTRACT.md §5.3: `200`: `{ "certificate_chain": [ ... ] }`.

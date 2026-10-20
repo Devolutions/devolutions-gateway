@@ -10,125 +10,114 @@ public class EnrollmentAuthorizationTests
     private const string Secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
     private const string Token = "dvaet1." + Bag + "." + Secret;
 
-    // CONTRACT.md §2.1: the authority finds the token whose SHA-256(secret) matches,
-    // and §2 makes it match the secret text exactly.
-    [Fact]
-    public void ReadsTheSecretHashOfABearerToken()
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken(["Bearer " + Token]);
+    public static TheoryData<string> FieldLinesWithoutABearerTokenNames => new(FieldLinesWithoutABearerToken.Keys);
 
-        Assert.True(result.Succeeded);
-        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
+    // Field lines that hold no bearer token, by what is wrong with them.
+    private static Dictionary<string, string[]> FieldLinesWithoutABearerToken
+    {
+        get
+        {
+            Dictionary<string, string[]> fieldLines = new()
+            {
+                // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is missing.
+                ["no field"] = [],
+
+                // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is repeated,
+                // even when every field line holds the same valid token.
+                ["the same token twice"] = ["Bearer " + Token, "Bearer " + Token],
+                ["a token, then an empty field"] = ["Bearer " + Token, ""],
+                ["an empty field, then a token"] = ["", "Bearer " + Token],
+
+                // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is not `Bearer`.
+                ["Basic"] = ["Basic " + Token],
+                ["DPoP"] = ["DPoP " + Token],
+                ["Bearers"] = ["Bearers " + Token],
+                ["Bear"] = ["Bear " + Token],
+                ["no scheme"] = [Token],
+
+                // RFC 9110 §11.4: one or more spaces, and nothing else, separate the scheme from the token.
+                ["the scheme alone"] = ["Bearer"],
+                ["the scheme and a space"] = ["Bearer "],
+                ["no space"] = ["Bearer" + Token],
+                ["a tab"] = ["Bearer\t" + Token],
+                ["a space and a tab"] = ["Bearer \t" + Token],
+            };
+
+            // CONTRACT.md §2.1 (1): a field that holds no token gets `token_invalid`.
+            foreach ((string name, string token) in MalformedTokens)
+            {
+                fieldLines.Add(name, ["Bearer " + token]);
+            }
+
+            return fieldLines;
+        }
     }
 
-    // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is missing.
-    [Fact]
-    public void RejectsARequestWithoutAuthorization()
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([]);
-
-        AssertTokenInvalid(result);
-    }
-
-    // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is repeated,
-    // even when every field line holds the same valid token.
-    [Theory]
-    [InlineData("Bearer " + Token, "Bearer " + Token)]
-    [InlineData("Bearer " + Token, "")]
-    [InlineData("", "Bearer " + Token)]
-    public void RejectsARepeatedAuthorizationField(string first, string second)
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([first, second]);
-
-        AssertTokenInvalid(result);
-    }
-
-    // RFC 9110 §11.1: the authentication scheme is case-insensitive.
-    [Theory]
-    [InlineData("bearer")]
-    [InlineData("BEARER")]
-    [InlineData("bEaReR")]
-    public void AcceptsTheBearerSchemeInAnyCase(string scheme)
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([scheme + " " + Token]);
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
-    }
-
-    // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is not `Bearer`.
-    [Theory]
-    [InlineData("Basic " + Token)]
-    [InlineData("DPoP " + Token)]
-    [InlineData("Bearers " + Token)]
-    [InlineData("Bear " + Token)]
-    [InlineData(Token)]
-    public void RejectsAnotherScheme(string fieldValue)
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([fieldValue]);
-
-        AssertTokenInvalid(result);
-    }
-
-    // RFC 9110 §11.4: `credentials = auth-scheme [ 1*SP ( token68 / #auth-param ) ]`.
-    [Theory]
-    [InlineData("Bearer  " + Token)]
-    [InlineData("Bearer   " + Token)]
-    public void AcceptsSeveralSpacesBeforeTheToken(string fieldValue)
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([fieldValue]);
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
-    }
-
-    // RFC 9110 §11.4: one or more spaces, and nothing else, separate the scheme from the token.
-    [Theory]
-    [InlineData("Bearer")]
-    [InlineData("Bearer ")]
-    [InlineData("Bearer" + Token)]
-    [InlineData("Bearer\t" + Token)]
-    [InlineData("Bearer \t" + Token)]
-    public void RejectsAFieldWithoutSpacesThenAToken(string fieldValue)
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([fieldValue]);
-
-        AssertTokenInvalid(result);
-    }
-
-    // CONTRACT.md §2: a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`;
-    // §2.1 (1): a field that holds no token gets `token_invalid`.
+    // CONTRACT.md §2: a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`.
     // The pattern covers the whole value, so a line terminator after the token is not part of a match.
-    public static TheoryData<string> MalformedTokens => new()
+    private static Dictionary<string, string> MalformedTokens => new()
     {
-        "dvaet2." + Bag + "." + Secret,
-        "DVAET1." + Bag + "." + Secret,
-        "dvaet1" + Bag + "." + Secret,
-        Bag + "." + Secret,
-        "dvaet1.." + Secret,
-        "dvaet1." + Bag + "=." + Secret,
-        "dvaet1." + Bag + "+/." + Secret,
-        "dvaet1." + Bag + " ." + Secret,
-        "dvaet1." + Bag + "\uFF41." + Secret,
-        "dvaet1." + Bag + "." + Bag + "." + Secret,
-        "dvaet1." + Bag,
-        "dvaet1." + Bag + ".",
-        "dvaet1." + Bag + "." + Secret[..42],
-        "dvaet1." + Bag + "." + Secret + "A",
-        "dvaet1." + Bag + "." + Secret[..42] + "=",
-        "dvaet1." + Bag + "." + Secret[..42] + "/",
-        Token + "\n",
-        Token + "\r\n",
-        Token + "\0",
-        Token + ",",
-        Token + ", Bearer " + Token,
+        ["another version"] = "dvaet2." + Bag + "." + Secret,
+        ["an uppercase prefix"] = "DVAET1." + Bag + "." + Secret,
+        ["no dot after the prefix"] = "dvaet1" + Bag + "." + Secret,
+        ["no prefix"] = Bag + "." + Secret,
+        ["an empty bag"] = "dvaet1.." + Secret,
+        ["a padded bag"] = "dvaet1." + Bag + "=." + Secret,
+        ["base64 characters in the bag"] = "dvaet1." + Bag + "+/." + Secret,
+        ["a space in the bag"] = "dvaet1." + Bag + " ." + Secret,
+        ["a fullwidth letter in the bag"] = "dvaet1." + Bag + "\uFF41." + Secret,
+        ["a third dot"] = "dvaet1." + Bag + "." + Bag + "." + Secret,
+        ["no secret"] = "dvaet1." + Bag,
+        ["an empty secret"] = "dvaet1." + Bag + ".",
+        ["a 42-character secret"] = "dvaet1." + Bag + "." + Secret[..42],
+        ["a 44-character secret"] = "dvaet1." + Bag + "." + Secret + "A",
+        ["a padded secret"] = "dvaet1." + Bag + "." + Secret[..42] + "=",
+        ["a base64 character in the secret"] = "dvaet1." + Bag + "." + Secret[..42] + "/",
+        ["a line feed after the token"] = Token + "\n",
+        ["a CRLF after the token"] = Token + "\r\n",
+        ["a NUL after the token"] = Token + "\0",
+        ["a comma after the token"] = Token + ",",
+        ["a second credential after the token"] = Token + ", Bearer " + Token,
     };
 
+    // CONTRACT.md §2.1: the authority finds the token whose SHA-256(secret) matches,
+    // and §2 makes it match the secret text exactly.
     [Theory]
-    [MemberData(nameof(MalformedTokens))]
-    public void RejectsAValueThatIsNotADvaet1Token(string token)
+    [InlineData("a bearer token", "Bearer " + Token)]
+    // RFC 9110 §11.1: the authentication scheme is case-insensitive.
+    [InlineData("a lowercase scheme", "bearer " + Token)]
+    [InlineData("an uppercase scheme", "BEARER " + Token)]
+    [InlineData("a mixed-case scheme", "bEaReR " + Token)]
+    // RFC 9110 §11.4: `credentials = auth-scheme [ 1*SP ( token68 / #auth-param ) ]`.
+    [InlineData("two spaces", "Bearer  " + Token)]
+    [InlineData("three spaces", "Bearer   " + Token)]
+    // CONTRACT.md §2.1 (1): the authority finds a token by `SHA-256(secret)` alone,
+    // and §2 makes the bag routing data that the authority never trusts, so it is not decoded.
+    // The rows are a bag of an impossible base64url length, one that decodes to bytes that are not JSON,
+    // and the bag of {"u":"https://other/psu"}.
+    [InlineData("a one-character bag", "Bearer dvaet1.A." + Secret)]
+    [InlineData("a bag that is not JSON", "Bearer dvaet1._-_-." + Secret)]
+    [InlineData("the bag of another URL", "Bearer dvaet1.eyJ1IjoiaHR0cHM6Ly9vdGhlci9wc3UifQ." + Secret)]
+    // RFC 9110 §5.5: a field value excludes the white space around it,
+    // which a parser removes before evaluating the value.
+    [InlineData("a space before", " Bearer " + Token)]
+    [InlineData("a space after", "Bearer " + Token + " ")]
+    [InlineData("tabs around", "\tBearer " + Token + "\t")]
+    [InlineData("spaces and tabs around", " \t Bearer " + Token + " \t ")]
+    public void ReadsTheSecretHashOfABearerToken(string name, string fieldValue)
     {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken(["Bearer " + token]);
+        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([fieldValue]);
+
+        Assert.True(result.Succeeded, name);
+        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
+    }
+
+    [Theory]
+    [MemberData(nameof(FieldLinesWithoutABearerTokenNames))]
+    public void RejectsFieldLinesWithoutABearerToken(string fieldLines)
+    {
+        EnrollmentAuthorizationResult result =
+            EnrollmentAuthorization.ReadBearerToken(FieldLinesWithoutABearerToken[fieldLines]);
 
         AssertTokenInvalid(result);
     }
@@ -158,23 +147,6 @@ public class EnrollmentAuthorizationTests
         AssertTokenInvalid(result);
     }
 
-    // CONTRACT.md §2.1 (1): the authority finds a token by `SHA-256(secret)` alone,
-    // and §2 makes the bag routing data that the authority never trusts, so it is not decoded.
-    // The rows are a bag of an impossible base64url length, one that decodes to bytes that are not JSON,
-    // and the bag of {"u":"https://other/psu"}.
-    [Theory]
-    [InlineData("A")]
-    [InlineData("_-_-")]
-    [InlineData("eyJ1IjoiaHR0cHM6Ly9vdGhlci9wc3UifQ")]
-    public void ReadsTheSecretHashWhateverTheBag(string bag)
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken(
-            ["Bearer dvaet1." + bag + "." + Secret]);
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
-    }
-
     // CONTRACT.md §2: the authority matches the `secret` text exactly.
     // Ending in '9' (sextet 61) instead of '8' (sextet 60) sets a pad bit,
     // so a lenient decoder reads the same 32 bytes, but the text, and so its hash, differs.
@@ -189,21 +161,6 @@ public class EnrollmentAuthorizationTests
         Assert.True(result.Succeeded);
         Assert.Equal(HashOf(nonCanonical), result.SecretHash.ToArray());
         Assert.NotEqual(HashOf(Secret), result.SecretHash.ToArray());
-    }
-
-    // RFC 9110 §5.5: a field value excludes the white space around it,
-    // which a parser removes before evaluating the value.
-    [Theory]
-    [InlineData(" Bearer " + Token)]
-    [InlineData("Bearer " + Token + " ")]
-    [InlineData("\tBearer " + Token + "\t")]
-    [InlineData(" \t Bearer " + Token + " \t ")]
-    public void IgnoresWhiteSpaceAroundTheFieldValue(string fieldValue)
-    {
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([fieldValue]);
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
     }
 
     // INTENT.agent-identity.md, security invariant 9: tokens never appear in logs, not even partially,

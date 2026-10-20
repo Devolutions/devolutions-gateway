@@ -29,10 +29,57 @@ public class RequestAuthenticatorTests
         },
     };
 
-    public static TheoryData<AgentOperation> Operations => new(Enum.GetValues<AgentOperation>());
+    // Each request fails the two checks its key names.
+    // For a wrong key, device-b signs for the keyid of device-a;
+    // for a wrong digest, the body changes after signing, so only its digest fails.
+    private static readonly Dictionary<string, Func<(TestAuthority Authority, TestRequest Request)>> TwoFailures =
+        new()
+        {
+            ["revoked identity, wrong key"] = () =>
+            {
+                TestAuthority authority = new(Now);
+                authority.Registry.Register(DeviceA, identityRevoked: true);
+                return (authority, authority.Valid(AgentOperation.Renew) with { Key = DeviceB });
+            },
+            ["retired certificate, wrong key"] = () =>
+            {
+                TestAuthority authority = new(Now);
+                authority.Registry.Register(DeviceA, CertificateStatus.Retired);
+                return (authority, authority.Valid(AgentOperation.Renew) with { Key = DeviceB });
+            },
+            ["expired certificate, wrong key"] = () =>
+            {
+                TestAuthority authority = new(DeviceACertificate.NotAfter.AddSeconds(1));
+                return (authority, authority.Valid(AgentOperation.Confirm) with { Key = DeviceB });
+            },
+            ["beyond renewal grace, wrong digest"] = () =>
+            {
+                TestAuthority authority = new(DeviceACertificate.NotAfter + DeviceALifetime);
+                return (authority, authority.Valid(AgentOperation.Renew) with { Body = [0x7B, 0x7D] });
+            },
+            ["retired certificate, revoked identity"] = () =>
+            {
+                TestAuthority authority = new(Now);
+                authority.Registry.Register(DeviceA, CertificateStatus.Retired, identityRevoked: true);
+                return (authority, authority.Valid(AgentOperation.Renew));
+            },
+            ["expired certificate, revoked identity"] = () =>
+            {
+                TestAuthority authority = new(DeviceACertificate.NotAfter.AddSeconds(1));
+                authority.Registry.Register(DeviceA, identityRevoked: true);
+                return (authority, authority.Valid(AgentOperation.Confirm));
+            },
+        };
 
-    public static TheoryData<AgentOperation> OperationsWithoutRenewalGrace =>
-        new(AgentOperation.Confirm, AgentOperation.CheckIn, AgentOperation.Connect);
+    // The renewal grace of device-a's certificate ends at notAfter + (notAfter − notBefore).
+    private static readonly Dictionary<string, Func<DateTimeOffset>> RenewalGraceInstants = new()
+    {
+        ["one tick after notAfter"] = () => DeviceACertificate.NotAfter.AddTicks(1),
+        ["one tick before grace ends"] = () => (DeviceACertificate.NotAfter + DeviceALifetime).AddTicks(-1),
+        ["when grace ends"] = () => DeviceACertificate.NotAfter + DeviceALifetime,
+    };
+
+    public static TheoryData<AgentOperation> Operations => new(Enum.GetValues<AgentOperation>());
 
     public static TheoryData<AgentOperation, CertificateStatus> OperationsWithAcceptedStatuses
     {
@@ -49,9 +96,6 @@ public class RequestAuthenticatorTests
             return cases;
         }
     }
-
-    public static TheoryData<CertificateStatus> AcceptedStatuses =>
-        new(CertificateStatus.Pending, CertificateStatus.Current);
 
     public static TheoryData<string> OversizedRequestNames => new(OversizedRequests.Keys);
 
@@ -99,68 +143,29 @@ public class RequestAuthenticatorTests
     }
 
     // CONTRACT.md §6: the earliest failing step decides,
-    // so the identity's state is reported even when the signature would not verify.
-    // In these tests, device-b signs for the keyid of device-a.
-    [Fact]
-    public async Task RevokedIdentityWinsOverABadSignature()
+    // so the identity's state is reported even when the signature or the digest would not verify.
+    [Theory]
+    [InlineData("revoked identity, wrong key", "identity_revoked")]
+    [InlineData("retired certificate, wrong key", "identity_unknown")]
+    [InlineData("expired certificate, wrong key", "certificate_expired")]
+    [InlineData("beyond renewal grace, wrong digest", "certificate_expired")]
+    public async Task StepFourFailureWinsOverAStepFiveFailure(string request, string expected)
     {
-        TestAuthority authority = new(Now);
-        authority.Registry.Register(DeviceA, identityRevoked: true);
+        (TestAuthority authority, TestRequest failing) = TwoFailures[request]();
 
-        string outcome = await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew) with { Key = DeviceB });
-
-        Assert.Equal("identity_revoked", outcome);
-    }
-
-    [Fact]
-    public async Task RetiredCertificateWinsOverABadSignature()
-    {
-        TestAuthority authority = new(Now);
-        authority.Registry.Register(DeviceA, CertificateStatus.Retired);
-
-        string outcome = await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew) with { Key = DeviceB });
-
-        Assert.Equal("identity_unknown", outcome);
-    }
-
-    [Fact]
-    public async Task ExpiredCertificateWinsOverABadSignature()
-    {
-        TestAuthority authority = new(DeviceACertificate.NotAfter.AddSeconds(1));
-
-        string outcome = await authority.OutcomeAsync(authority.Valid(AgentOperation.Confirm) with { Key = DeviceB });
-
-        Assert.Equal("certificate_expired", outcome);
-    }
-
-    // The body changes after signing, so only its digest fails.
-    [Fact]
-    public async Task CertificateBeyondRenewalGraceWinsOverABodyThatDoesNotMatchItsDigest()
-    {
-        TestAuthority authority = new(DeviceACertificate.NotAfter + DeviceALifetime);
-        TestRequest request = authority.Valid(AgentOperation.Renew) with { Body = [0x7B, 0x7D] };
-
-        Assert.Equal("certificate_expired", await authority.OutcomeAsync(request));
+        Assert.Equal(expected, await authority.OutcomeAsync(failing));
     }
 
     // CONTRACT.md §6 step 4 resolves the certificate before it reads the identity's revocation,
     // and reads revocation before validity, so a revoked identity always draws the terminal identity_revoked.
-    [Fact]
-    public async Task RetiredCertificateWinsOverRevocation()
+    [Theory]
+    [InlineData("retired certificate, revoked identity", "identity_unknown")]
+    [InlineData("expired certificate, revoked identity", "identity_revoked")]
+    public async Task StepFourReturnsItsEarliestFailingCheck(string request, string expected)
     {
-        TestAuthority authority = new(Now);
-        authority.Registry.Register(DeviceA, CertificateStatus.Retired, identityRevoked: true);
+        (TestAuthority authority, TestRequest failing) = TwoFailures[request]();
 
-        Assert.Equal("identity_unknown", await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew)));
-    }
-
-    [Fact]
-    public async Task RevocationWinsOverExpiry()
-    {
-        TestAuthority authority = new(DeviceACertificate.NotAfter.AddSeconds(1));
-        authority.Registry.Register(DeviceA, identityRevoked: true);
-
-        Assert.Equal("identity_revoked", await authority.OutcomeAsync(authority.Valid(AgentOperation.Confirm)));
+        Assert.Equal(expected, await authority.OutcomeAsync(failing));
     }
 
     // CONTRACT.md §6 table: every operation accepts a current or pending certificate.
@@ -185,23 +190,24 @@ public class RequestAuthenticatorTests
     }
 
     // CONTRACT.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
+    // A clock truncated to the second would still accept the certificate one tick after its notAfter.
+    // Renew has no row one tick after, because its grace still accepts the certificate then.
     [Theory]
-    [MemberData(nameof(Operations))]
-    public async Task CertificateIsAcceptedAtItsNotAfter(AgentOperation operation)
+    [InlineData(AgentOperation.Renew, 0, "ok")]
+    [InlineData(AgentOperation.Confirm, 0, "ok")]
+    [InlineData(AgentOperation.CheckIn, 0, "ok")]
+    [InlineData(AgentOperation.Connect, 0, "ok")]
+    [InlineData(AgentOperation.Confirm, 1, "certificate_expired")]
+    [InlineData(AgentOperation.CheckIn, 1, "certificate_expired")]
+    [InlineData(AgentOperation.Connect, 1, "certificate_expired")]
+    public async Task CertificateExpiresAfterTheExactInstantOfItsNotAfter(
+        AgentOperation operation,
+        int ticksAfterNotAfter,
+        string expected)
     {
-        TestAuthority authority = new(DeviceACertificate.NotAfter);
+        TestAuthority authority = new(DeviceACertificate.NotAfter.AddTicks(ticksAfterNotAfter));
 
-        Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(operation)));
-    }
-
-    // A clock truncated to the second would still accept the certificate here.
-    [Theory]
-    [MemberData(nameof(OperationsWithoutRenewalGrace))]
-    public async Task CertificateIsExpiredOneTickAfterItsNotAfter(AgentOperation operation)
-    {
-        TestAuthority authority = new(DeviceACertificate.NotAfter.AddTicks(1));
-
-        Assert.Equal("certificate_expired", await authority.OutcomeAsync(authority.Valid(operation)));
+        Assert.Equal(expected, await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
     // CONTRACT.md §6: notBefore is not checked,
@@ -217,33 +223,21 @@ public class RequestAuthenticatorTests
 
     // CONTRACT.md §6 table: renew accepts a certificate while now < notAfter + (notAfter − notBefore).
     [Theory]
-    [MemberData(nameof(AcceptedStatuses))]
-    public async Task RenewAcceptsACertificateOneTickAfterItsNotAfter(CertificateStatus status)
+    [InlineData(CertificateStatus.Pending, "one tick after notAfter", "ok")]
+    [InlineData(CertificateStatus.Current, "one tick after notAfter", "ok")]
+    [InlineData(CertificateStatus.Pending, "one tick before grace ends", "ok")]
+    [InlineData(CertificateStatus.Current, "one tick before grace ends", "ok")]
+    [InlineData(CertificateStatus.Pending, "when grace ends", "certificate_expired")]
+    [InlineData(CertificateStatus.Current, "when grace ends", "certificate_expired")]
+    public async Task RenewGraceIsTheCertificateLifetimeAfterItsNotAfter(
+        CertificateStatus status,
+        string instant,
+        string expected)
     {
-        TestAuthority authority = new(DeviceACertificate.NotAfter.AddTicks(1));
+        TestAuthority authority = new(RenewalGraceInstants[instant]());
         authority.Registry.Register(DeviceA, status);
 
-        Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew)));
-    }
-
-    [Theory]
-    [MemberData(nameof(AcceptedStatuses))]
-    public async Task RenewAcceptsACertificateOneTickBeforeItsGraceEnds(CertificateStatus status)
-    {
-        TestAuthority authority = new((DeviceACertificate.NotAfter + DeviceALifetime).AddTicks(-1));
-        authority.Registry.Register(DeviceA, status);
-
-        Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew)));
-    }
-
-    [Theory]
-    [MemberData(nameof(AcceptedStatuses))]
-    public async Task RenewRejectsACertificateWhenItsGraceEnds(CertificateStatus status)
-    {
-        TestAuthority authority = new(DeviceACertificate.NotAfter + DeviceALifetime);
-        authority.Registry.Register(DeviceA, status);
-
-        Assert.Equal("certificate_expired", await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew)));
+        Assert.Equal(expected, await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew)));
     }
 
     // A second reading of the clock between the window and the certificate check

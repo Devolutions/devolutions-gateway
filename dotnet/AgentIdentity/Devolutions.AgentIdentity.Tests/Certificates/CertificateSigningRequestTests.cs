@@ -11,6 +11,201 @@ public class CertificateSigningRequestTests
     internal static readonly byte[] P256SubjectPublicKeyInfoPrefix =
         Convert.FromHexString("3059301306072A8648CE3D020106082A8648CE3D030107034200");
 
+    // CONTRACT.md §4: the server ignores the CSR's subject and attributes, including requested extensions,
+    // and security invariant 2 lets a CSR supply only a verified public key.
+    private static readonly Dictionary<string, Func<ECDsa, byte[]>> RequestsWithIgnoredContents = new()
+    {
+        ["subject, attributes and extensions"] = key =>
+        {
+            CertificateRequest request = new("CN=Administrator, O=Another Identity", key, HashAlgorithmName.SHA256);
+            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+            SubjectAlternativeNameBuilder alternativeName = new();
+            alternativeName.AddUri(new Uri("urn:uuid:5d2e8f14-3c61-4b7a-8e29-6a0f4c1d7b02"));
+            request.CertificateExtensions.Add(alternativeName.Build());
+            // RFC 2985 §5.4.1 challengePassword, a DirectoryString.
+            byte[] challengePassword = [0x0C, 0x02, 0x70, 0x77];
+            request.OtherRequestAttributes.Add(new AsnEncodedData("1.2.840.113549.1.9.7", challengePassword));
+            return request.CreateSigningRequest();
+        },
+
+        // CONTRACT.md §4: the agent's CSR carries an empty attribute set, A0 00.
+        ["empty attribute set"] = key =>
+            TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), attributes: [0xA0, 0x00]), key),
+
+        // CONTRACT.md §4: the server ignores an extensionRequest with an empty Extensions list,
+        // which common CSR builders emit although RFC 5280 §4.1 gives Extensions SIZE (1..MAX).
+        // The attribute is the PKCS #9 extensionRequest (RFC 2985 §5.4.2) with one value, an empty SEQUENCE.
+        ["extensionRequest with empty Extensions"] = key =>
+        {
+            byte[] extensionRequest = TestCsr.Sequence(
+                TestCsr.Oid("1.2.840.113549.1.9.14"),
+                TestCsr.Tlv(0x31, TestCsr.Sequence()));
+            byte[] info = TestCsr.RequestInfo(
+                key.ExportSubjectPublicKeyInfo(),
+                attributes: TestCsr.Tlv(0xA0, extensionRequest));
+            return TestCsr.Request(info, key);
+        },
+    };
+
+    // X.690 §10.1: DER writes each length in the fewest octets.
+    private static readonly Dictionary<string, Func<byte[]>> RequestsWithALongerLength = new()
+    {
+        // The self-signature covers only the request info, so the request still verifies with a longer outer length.
+        ["CertificationRequest"] = () => TestCsr.TlvWithLongerLength(0x30, ValidVectorContents()),
+
+        // The same rule inside the request info, which a test can only change by signing the request again.
+        ["subject"] = () =>
+        {
+            using ECDsa key = NewKey();
+            byte[] subject = TestCsr.TlvWithLongerLength(0x30, []);
+            byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject);
+            return TestCsr.Request(info, key);
+        },
+    };
+
+    // RFC 2986 §4 defines exactly the fields of each SEQUENCE, with no extension marker.
+    private static readonly Dictionary<string, Func<ECDsa, byte[]>> RequestsWithAnExtraElement = new()
+    {
+        ["CertificationRequestInfo"] = key =>
+        {
+            byte[] info = TestCsr.Sequence(
+                TestCsr.Integer(0),
+                TestCsr.EmptySubject,
+                key.ExportSubjectPublicKeyInfo(),
+                TestCsr.EmptyAttributes,
+                TestCsr.Null);
+            return TestCsr.Request(info, key);
+        },
+        ["CertificationRequest"] = key =>
+        {
+            byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
+            return TestCsr.Sequence(
+                info,
+                TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
+                TestCsr.BitString(TestCsr.Sign(key, info)),
+                TestCsr.Null);
+        },
+
+        // Another element would give the key a second SubjectPublicKeyInfo, and so a second SHA-256.
+        ["AlgorithmIdentifier of the key"] = key =>
+        {
+            byte[] algorithm = TestCsr.Sequence(
+                TestCsr.Oid(TestCsr.IdEcPublicKey),
+                TestCsr.Oid(TestCsr.Secp256r1),
+                TestCsr.Null);
+            byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
+            return TestCsr.Request(TestCsr.RequestInfo(spki), key);
+        },
+        ["SubjectPublicKeyInfo"] = key =>
+        {
+            byte[] spki = TestCsr.Sequence(
+                TestCsr.P256Algorithm(),
+                TestCsr.BitString(TestCsr.UncompressedPoint(key)),
+                TestCsr.Null);
+            return TestCsr.Request(TestCsr.RequestInfo(spki), key);
+        },
+    };
+
+    private static readonly Dictionary<string, Func<byte[]>> RequestsForAKeyNotNamedP256 = new()
+    {
+        // CONTRACT.md §4: the key is a P-256 key.
+        ["P-384 key"] = () =>
+        {
+            using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP384);
+            return TestCsr.For(key);
+        },
+
+        // secp256k1 (SEC 2 §2.4.1) points also take 65 octets uncompressed, so only the curve name tells them apart.
+        ["P-256 point named secp256k1"] = () =>
+        {
+            using ECDsa key = NewKey();
+            byte[] algorithm = TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), TestCsr.Oid("1.3.132.0.10"));
+            byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
+            return TestCsr.Request(TestCsr.RequestInfo(spki), key);
+        },
+    };
+
+    // RFC 5480 §2.1.1: the parameters of id-ecPublicKey MUST be present, and only namedCurve is allowed.
+    private static readonly Dictionary<string, Func<ECDsa, byte[]>> KeysWithoutANamedCurve = new()
+    {
+        ["no parameters"] = key => TestCsr.SubjectPublicKeyInfo(
+            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey)),
+            TestCsr.UncompressedPoint(key)),
+        ["implicitCurve"] = key => TestCsr.SubjectPublicKeyInfo(
+            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), TestCsr.Null),
+            TestCsr.UncompressedPoint(key)),
+
+        // The specified form of the P-256 domain parameters,
+        // which .NET writes for a key imported with explicit parameters.
+        ["specifiedCurve"] = key =>
+        {
+            using ECDsa explicitKey = ECDsa.Create(key.ExportExplicitParameters(includePrivateParameters: false));
+            return explicitKey.ExportSubjectPublicKeyInfo();
+        },
+    };
+
+    // CONTRACT.md §4: an uncompressed point, so that each key has exactly one SubjectPublicKeyInfo.
+    private static readonly Dictionary<string, Func<ECDsa, byte[]>> PointsNotUncompressed = new()
+    {
+        // SEC 1 §2.3.3: the compressed form is 02 for an even y or 03 for an odd y, then x.
+        ["compressed"] = key =>
+        {
+            ECParameters parameters = key.ExportParameters(includePrivateParameters: false);
+            return [(byte)(0x02 | (parameters.Q.Y![^1] & 1)), .. parameters.Q.X!];
+        },
+
+        // ANSI X9.62 also defines a hybrid form, 06 or 07 then both coordinates; RFC 5480 §2.2 rejects it.
+        ["hybrid"] = key =>
+        {
+            byte[] point = TestCsr.UncompressedPoint(key);
+            point[0] = (byte)(0x06 | (point[^1] & 1));
+            return point;
+        },
+        ["without its form octet"] = key => TestCsr.UncompressedPoint(key)[1..],
+        ["with an extra octet"] = key => [.. TestCsr.UncompressedPoint(key), 0x00],
+
+        // SEC 1 §2.3.3: the point at infinity is the single octet 00.
+        ["point at infinity"] = _ => [0x00],
+    };
+
+    // DER requires an unused bit to be zero, so each BIT STRING is one whose last octet is even.
+    private static readonly Dictionary<string, Func<byte[]>> RequestsWithUnusedBits = new()
+    {
+        // RFC 5480 §2.2: the octets of the point become the bits of the BIT STRING, so none is unused.
+        ["subjectPublicKey"] = () =>
+        {
+            using ECDsa key = NewKeyWhere(point => (point[^1] & 1) == 0);
+            byte[] spki = TestCsr.SubjectPublicKeyInfo(
+                TestCsr.P256Algorithm(),
+                TestCsr.UncompressedPoint(key),
+                unusedBits: 1);
+            return TestCsr.Request(TestCsr.RequestInfo(spki), key);
+        },
+        ["signature"] = () =>
+        {
+            using ECDsa key = NewKey();
+            (byte[] info, byte[] signature) = SignedInfoWhere(key, (_, s) => (s[^1] & 1) == 0);
+            return TestCsr.Sequence(
+                info,
+                TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
+                TestCsr.BitString(signature, unusedBits: 1));
+        },
+    };
+
+    public static TheoryData<string> RequestWithIgnoredContentsNames => new(RequestsWithIgnoredContents.Keys);
+
+    public static TheoryData<string> RequestWithALongerLengthNames => new(RequestsWithALongerLength.Keys);
+
+    public static TheoryData<string> RequestWithAnExtraElementNames => new(RequestsWithAnExtraElement.Keys);
+
+    public static TheoryData<string> RequestForAKeyNotNamedP256Names => new(RequestsForAKeyNotNamedP256.Keys);
+
+    public static TheoryData<string> KeyWithoutANamedCurveNames => new(KeysWithoutANamedCurve.Keys);
+
+    public static TheoryData<string> PointNotUncompressedNames => new(PointsNotUncompressed.Keys);
+
+    public static TheoryData<string> RequestWithUnusedBitsNames => new(RequestsWithUnusedBits.Keys);
+
     [Theory]
     [MemberData(nameof(VectorData.CsrNames), MemberType = typeof(VectorData))]
     public void CsrVectorHasItsExpectedOutcome(string name)
@@ -47,53 +242,14 @@ public class CertificateSigningRequestTests
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
 
-    // CONTRACT.md §4: the server ignores the CSR's subject and attributes, including requested extensions,
-    // and security invariant 2 lets a CSR supply only a verified public key.
-    [Fact]
-    public void AcceptsAnySubjectAttributesAndExtensions()
-    {
-        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        CertificateRequest request = new("CN=Administrator, O=Another Identity", key, HashAlgorithmName.SHA256);
-        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
-        SubjectAlternativeNameBuilder alternativeName = new();
-        alternativeName.AddUri(new Uri("urn:uuid:5d2e8f14-3c61-4b7a-8e29-6a0f4c1d7b02"));
-        request.CertificateExtensions.Add(alternativeName.Build());
-        // RFC 2985 §5.4.1 challengePassword, a DirectoryString.
-        byte[] challengePassword = [0x0C, 0x02, 0x70, 0x77];
-        request.OtherRequestAttributes.Add(new AsnEncodedData("1.2.840.113549.1.9.7", challengePassword));
-
-        CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(request.CreateSigningRequest()));
-
-        Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
-    }
-
-    // CONTRACT.md §4: the agent's CSR carries an empty attribute set, A0 00.
-    [Fact]
-    public void AcceptsEmptyAttributeSet()
+    [Theory]
+    [MemberData(nameof(RequestWithIgnoredContentsNames))]
+    public void AcceptsAnySubjectAndAttributes(string request)
     {
         using ECDsa key = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), attributes: [0xA0, 0x00]);
 
-        CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
-
-        Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
-    }
-
-    // CONTRACT.md §4: the server ignores an extensionRequest with an empty Extensions list,
-    // which common CSR builders emit although RFC 5280 §4.1 gives Extensions SIZE (1..MAX).
-    // The attribute is the PKCS #9 extensionRequest (RFC 2985 §5.4.2) with one value, an empty SEQUENCE.
-    [Fact]
-    public void AcceptsExtensionRequestWithEmptyExtensions()
-    {
-        using ECDsa key = NewKey();
-        byte[] extensionRequest = TestCsr.Sequence(
-            TestCsr.Oid("1.2.840.113549.1.9.14"),
-            TestCsr.Tlv(0x31, TestCsr.Sequence()));
-        byte[] info = TestCsr.RequestInfo(
-            key.ExportSubjectPublicKeyInfo(),
-            attributes: TestCsr.Tlv(0xA0, extensionRequest));
-
-        CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
+        CertificateSigningRequest csr =
+            AssertValid(CertificateSigningRequest.Validate(RequestsWithIgnoredContents[request](key)));
 
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
@@ -117,14 +273,11 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate([.. valid, 0x00]));
     }
 
-    // X.690 §10.1: DER writes each length in the fewest octets.
-    // The self-signature covers only the request info, so the request still verifies with a longer outer length.
-    [Fact]
-    public void RejectsLengthInMoreOctetsThanNeeded()
+    [Theory]
+    [MemberData(nameof(RequestWithALongerLengthNames))]
+    public void RejectsLengthInMoreOctetsThanNeeded(string element)
     {
-        byte[] contents = ValidVectorContents();
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.TlvWithLongerLength(0x30, contents)));
+        AssertInvalid(CertificateSigningRequest.Validate(RequestsWithALongerLength[element]()));
     }
 
     // X.690 §10.1: DER uses the definite form of length.
@@ -134,17 +287,6 @@ public class CertificateSigningRequestTests
         byte[] contents = ValidVectorContents();
 
         AssertInvalid(CertificateSigningRequest.Validate([0x30, 0x80, .. contents, 0x00, 0x00]));
-    }
-
-    // The same rule inside the request info, which a test can only change by signing the request again.
-    [Fact]
-    public void RejectsLengthInMoreOctetsThanNeededInsideTheRequestInfo()
-    {
-        using ECDsa key = NewKey();
-        byte[] subject = TestCsr.TlvWithLongerLength(0x30, []);
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
     }
 
     // RFC 2986 §4.1: version is v1, encoded 0.
@@ -172,101 +314,36 @@ public class CertificateSigningRequestTests
     }
 
     // RFC 2986 §4.1: attributes is a required field, a constructed [0] IMPLICIT SET OF Attribute.
-    [Fact]
-    public void RejectsRequestInfoWithoutAttributes()
-    {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.Sequence(TestCsr.Integer(0), TestCsr.EmptySubject, key.ExportSubjectPublicKeyInfo());
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
-    }
-
-    [Fact]
-    public void RejectsPrimitiveAttributes()
+    // The rows leave it out and write it primitive, 80 00.
+    [Theory]
+    [InlineData("")]
+    [InlineData("8000")]
+    public void RejectsRequestInfoWithoutConstructedAttributes(string attributes)
     {
         using ECDsa key = NewKey();
         byte[] info = TestCsr.Sequence(
             TestCsr.Integer(0),
             TestCsr.EmptySubject,
             key.ExportSubjectPublicKeyInfo(),
-            [0x80, 0x00]);
+            Convert.FromHexString(attributes));
 
         AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
     }
 
-    // RFC 2986 §4 defines exactly the fields of each SEQUENCE, with no extension marker.
-    [Fact]
-    public void RejectsExtraElementInRequestInfo()
+    [Theory]
+    [MemberData(nameof(RequestWithAnExtraElementNames))]
+    public void RejectsExtraElement(string sequence)
     {
         using ECDsa key = NewKey();
-        byte[] info = TestCsr.Sequence(
-            TestCsr.Integer(0),
-            TestCsr.EmptySubject,
-            key.ExportSubjectPublicKeyInfo(),
-            TestCsr.EmptyAttributes,
-            TestCsr.Null);
 
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
+        AssertInvalid(CertificateSigningRequest.Validate(RequestsWithAnExtraElement[sequence](key)));
     }
 
-    [Fact]
-    public void RejectsExtraElementInRequest()
+    [Theory]
+    [MemberData(nameof(RequestForAKeyNotNamedP256Names))]
+    public void RejectsKeyNotNamedP256(string key)
     {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
-        byte[] der = TestCsr.Sequence(
-            info,
-            TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
-            TestCsr.BitString(TestCsr.Sign(key, info)),
-            TestCsr.Null);
-
-        AssertInvalid(CertificateSigningRequest.Validate(der));
-    }
-
-    // CONTRACT.md §4: the key is a P-256 key.
-    [Fact]
-    public void RejectsKeyOnAnotherCurve()
-    {
-        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP384);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.For(key)));
-    }
-
-    // secp256k1 (SEC 2 §2.4.1) points also take 65 octets uncompressed, so only the curve name tells them apart.
-    [Fact]
-    public void RejectsP256PointNamedAsAnotherCurve()
-    {
-        using ECDsa key = NewKey();
-        byte[] algorithm = TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), TestCsr.Oid("1.3.132.0.10"));
-        byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
-    }
-
-    // Another element would give the key a second SubjectPublicKeyInfo, and so a second SHA-256.
-    [Fact]
-    public void RejectsKeyAlgorithmWithAnExtraElement()
-    {
-        using ECDsa key = NewKey();
-        byte[] algorithm = TestCsr.Sequence(
-            TestCsr.Oid(TestCsr.IdEcPublicKey),
-            TestCsr.Oid(TestCsr.Secp256r1),
-            TestCsr.Null);
-        byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
-    }
-
-    [Fact]
-    public void RejectsSubjectPublicKeyInfoWithAnExtraElement()
-    {
-        using ECDsa key = NewKey();
-        byte[] spki = TestCsr.Sequence(
-            TestCsr.P256Algorithm(),
-            TestCsr.BitString(TestCsr.UncompressedPoint(key)),
-            TestCsr.Null);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
+        AssertInvalid(CertificateSigningRequest.Validate(RequestsForAKeyNotNamedP256[key]()));
     }
 
     // RFC 5480 §2.1.2: id-ecDH restricts the key to key agreement; CONTRACT.md §4 needs a signing key.
@@ -280,85 +357,23 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
     }
 
-    // RFC 5480 §2.1.1: the parameters of id-ecPublicKey MUST be present, and only namedCurve is allowed.
-    [Fact]
-    public void RejectsKeyWithoutCurveParameters()
+    [Theory]
+    [MemberData(nameof(KeyWithoutANamedCurveNames))]
+    public void RejectsKeyWithoutANamedCurve(string parameters)
     {
         using ECDsa key = NewKey();
-        byte[] algorithm = TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey));
-        byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
+        byte[] spki = KeysWithoutANamedCurve[parameters](key);
 
         AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
     }
 
-    [Fact]
-    public void RejectsImplicitCurve()
-    {
-        using ECDsa key = NewKey();
-        byte[] algorithm = TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), TestCsr.Null);
-        byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
-    }
-
-    // The specified form of the P-256 domain parameters, which .NET writes for a key imported with explicit parameters.
-    [Fact]
-    public void RejectsSpecifiedCurve()
-    {
-        using ECDsa key = NewKey();
-        using ECDsa explicitKey = ECDsa.Create(key.ExportExplicitParameters(includePrivateParameters: false));
-        byte[] spki = explicitKey.ExportSubjectPublicKeyInfo();
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
-    }
-
-    // CONTRACT.md §4: an uncompressed point, so that each key has exactly one SubjectPublicKeyInfo.
-    // SEC 1 §2.3.3: the compressed form is 02 for an even y or 03 for an odd y, then x.
-    [Fact]
-    public void RejectsCompressedPoint()
-    {
-        using ECDsa key = NewKey();
-        ECParameters parameters = key.ExportParameters(includePrivateParameters: false);
-        byte[] point = [(byte)(0x02 | (parameters.Q.Y![^1] & 1)), .. parameters.Q.X!];
-
-        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, point)));
-    }
-
-    // ANSI X9.62 also defines a hybrid form, 06 or 07 then both coordinates; RFC 5480 §2.2 rejects it.
-    [Fact]
-    public void RejectsHybridPoint()
-    {
-        using ECDsa key = NewKey();
-        byte[] point = TestCsr.UncompressedPoint(key);
-        point[0] = (byte)(0x06 | (point[^1] & 1));
-
-        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, point)));
-    }
-
-    [Fact]
-    public void RejectsPointWithoutItsFormOctet()
+    [Theory]
+    [MemberData(nameof(PointNotUncompressedNames))]
+    public void RejectsPointNotUncompressed(string point)
     {
         using ECDsa key = NewKey();
 
-        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, TestCsr.UncompressedPoint(key)[1..])));
-    }
-
-    [Fact]
-    public void RejectsPointWithAnExtraOctet()
-    {
-        using ECDsa key = NewKey();
-        byte[] point = [.. TestCsr.UncompressedPoint(key), 0x00];
-
-        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, point)));
-    }
-
-    // SEC 1 §2.3.3: the point at infinity is the single octet 00.
-    [Fact]
-    public void RejectsPointAtInfinity()
-    {
-        using ECDsa key = NewKey();
-
-        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, [0x00])));
+        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, PointsNotUncompressed[point](key))));
     }
 
     // Flipping the low bit of y leaves the point off the curve,
@@ -375,18 +390,11 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, point)));
     }
 
-    // RFC 5480 §2.2: the octets of the point become the bits of the BIT STRING, so none is unused.
-    // DER requires an unused bit to be zero, so the key is one whose last octet is even.
-    [Fact]
-    public void RejectsKeyBitStringWithUnusedBits()
+    [Theory]
+    [MemberData(nameof(RequestWithUnusedBitsNames))]
+    public void RejectsBitStringWithUnusedBits(string bitString)
     {
-        using ECDsa key = NewKeyWhere(point => (point[^1] & 1) == 0);
-        byte[] spki = TestCsr.SubjectPublicKeyInfo(
-            TestCsr.P256Algorithm(),
-            TestCsr.UncompressedPoint(key),
-            unusedBits: 1);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
+        AssertInvalid(CertificateSigningRequest.Validate(RequestsWithUnusedBits[bitString]()));
     }
 
     // CONTRACT.md §4: the signature algorithm is ecdsa-with-SHA256, even when the signature verifies under it.
@@ -457,20 +465,6 @@ public class CertificateSigningRequestTests
             info,
             TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
             TestCsr.BitString(negative));
-
-        AssertInvalid(CertificateSigningRequest.Validate(der));
-    }
-
-    // DER requires an unused bit to be zero, so the signature is one whose last octet is even.
-    [Fact]
-    public void RejectsSignatureBitStringWithUnusedBits()
-    {
-        using ECDsa key = NewKey();
-        (byte[] info, byte[] signature) = SignedInfoWhere(key, (_, s) => (s[^1] & 1) == 0);
-        byte[] der = TestCsr.Sequence(
-            info,
-            TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
-            TestCsr.BitString(signature, unusedBits: 1));
 
         AssertInvalid(CertificateSigningRequest.Validate(der));
     }

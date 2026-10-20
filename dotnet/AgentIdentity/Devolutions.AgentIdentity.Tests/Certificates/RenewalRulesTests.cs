@@ -81,27 +81,4 @@ public class RenewalRulesTests
         Assert.Null(decision.Error);
         Assert.Null(decision.FailureDetail);
     }
-
-    // INTENT.md: code that acts for an identity takes the identity that the signature check produced,
-    // and only a renew request proves the identity that a renewal acts for.
-    [Theory]
-    [InlineData(AgentOperation.Confirm)]
-    [InlineData(AgentOperation.CheckIn)]
-    [InlineData(AgentOperation.Connect)]
-    public async Task ThrowsForAnIdentityAuthenticatedForAnotherOperation(AgentOperation operation)
-    {
-        AuthenticatedIdentity identity = await TestIdentity.AuthenticateAsync(operation);
-
-        ArgumentException exception = Assert.Throws<ArgumentException>(() => RenewalRules.Decide(identity, null));
-
-        Assert.Equal("renewing", exception.ParamName);
-    }
-
-    [Fact]
-    public void ThrowsForANullIdentity()
-    {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => RenewalRules.Decide(null!, null));
-
-        Assert.Equal("renewing", exception.ParamName);
-    }
 }

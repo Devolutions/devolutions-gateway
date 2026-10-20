@@ -77,21 +77,20 @@ public class EnrollmentTokenTests
     }
 
     // CONTRACT.md §2: `bag` is the base64url encoding of a UTF-8 JSON object whose `u` is the product base URL.
-    [Fact]
-    public void CreatePutsTheProductBaseUrlInTheBag()
-    {
-        EnrollmentToken token = EnrollmentToken.Create("https://host/dvls", new ReplayingGenerator(SecretBytes));
-
-        Assert.Equal(("u", "https://host/dvls"), Assert.Single(BagMembers(token)));
-    }
-
-    // The agent appends `/api/agent-identity/v1/...` to `u` (CONTRACT.md §5), so `u` ends without a slash.
     [Theory]
+    [InlineData("https://host/dvls", "https://host/dvls")]
+    // The agent appends `/api/agent-identity/v1/...` to `u` (CONTRACT.md §5), so `u` ends without a slash.
     [InlineData("https://host/dvls/", "https://host/dvls")]
     [InlineData("https://host/dvls//", "https://host/dvls")]
     [InlineData("https://host/", "https://host")]
     [InlineData("https://host", "https://host")]
-    public void CreateRemovesTrailingSlashesFromTheUrl(string productBaseUrl, string expected)
+    // A URI holds no white space (RFC 3986 §2):
+    // white space around it is not part of it (Appendix C),
+    // and a space or a non-ASCII character inside it is percent-encoded (§2.1; RFC 3987 §3.1).
+    [InlineData(" https://host/dvls\t", "https://host/dvls")]
+    [InlineData("https://host/my dvls", "https://host/my%20dvls")]
+    [InlineData("https://host/dvls\u00E9", "https://host/dvls%C3%A9")]
+    public void CreatePutsTheProductBaseUrlInTheBag(string productBaseUrl, string expected)
     {
         EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes));
 
@@ -116,30 +115,17 @@ public class EnrollmentTokenTests
         "https://@host/dvls",
     ];
 
-    public static TheoryData<string> UnacceptableUrlRows => new(UnacceptableUrls);
+    // The unacceptable URLs, and a URL one byte longer than the longest that fits in a token (CONTRACT.md §2).
+    public static TheoryData<string> RejectedUrlRows => new([.. UnacceptableUrls, UrlOfLength(3026)]);
 
     [Theory]
-    [MemberData(nameof(UnacceptableUrlRows))]
+    [MemberData(nameof(RejectedUrlRows))]
     public void CreateRejectsAnotherUrl(string productBaseUrl)
     {
         ArgumentException exception = Assert.Throws<ArgumentException>(
             () => EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes)));
 
         Assert.Equal("productBaseUrl", exception.ParamName);
-    }
-
-    // A URI holds no white space (RFC 3986 §2):
-    // white space around it is not part of it (Appendix C),
-    // and a space or a non-ASCII character inside it is percent-encoded (§2.1; RFC 3987 §3.1).
-    [Theory]
-    [InlineData(" https://host/dvls\t", "https://host/dvls")]
-    [InlineData("https://host/my dvls", "https://host/my%20dvls")]
-    [InlineData("https://host/dvls\u00E9", "https://host/dvls%C3%A9")]
-    public void CreateWritesTheUrlInUriSyntax(string productBaseUrl, string expected)
-    {
-        EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes));
-
-        Assert.Equal(("u", expected), Assert.Single(BagMembers(token)));
     }
 
     // CONTRACT.md §2: a token is at most 4096 bytes.
@@ -151,15 +137,6 @@ public class EnrollmentTokenTests
         EnrollmentToken token = EnrollmentToken.Create(UrlOfLength(3025), new ReplayingGenerator(SecretBytes));
 
         Assert.Equal(4095, token.Value.Length);
-    }
-
-    [Fact]
-    public void CreateRejectsAUrlThatMakesTheTokenTooLong()
-    {
-        ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => EnrollmentToken.Create(UrlOfLength(3026), new ReplayingGenerator(SecretBytes)));
-
-        Assert.Equal("productBaseUrl", exception.ParamName);
     }
 
     // INTENT.agent-identity.md, security invariant 9: tokens never appear in logs, not even partially,
@@ -174,8 +151,6 @@ public class EnrollmentTokenTests
     }
 
     // INTENT.agent-identity.md, security invariant 9: a host may log the exception of a failed creation.
-    public static TheoryData<string> RejectedUrlRows => new([.. UnacceptableUrls, UrlOfLength(3026)]);
-
     [Theory]
     [MemberData(nameof(RejectedUrlRows))]
     public void CreateFailureRevealsNoPartOfTheSecret(string productBaseUrl)
@@ -186,23 +161,22 @@ public class EnrollmentTokenTests
         EnrollmentTokenAssert.RevealsNoPart(exception.Message, SecretText);
     }
 
-    [Fact]
-    public void CreateRejectsANullUrl()
+    [Theory]
+    [InlineData("productBaseUrl")]
+    [InlineData("randomNumberGenerator")]
+    public void CreateRejectsANullArgument(string parameter)
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => EnrollmentToken.Create(null!, new ReplayingGenerator(SecretBytes)));
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(CreationsWithANullArgument[parameter]);
 
-        Assert.Equal("productBaseUrl", exception.ParamName);
+        Assert.Equal(parameter, exception.ParamName);
     }
 
-    [Fact]
-    public void CreateRejectsANullGenerator()
+    // A creation with one null argument, by the name of the parameter that receives it.
+    private static Dictionary<string, Action> CreationsWithANullArgument => new()
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => EnrollmentToken.Create("https://host/dvls", null!));
-
-        Assert.Equal("randomNumberGenerator", exception.ParamName);
-    }
+        ["productBaseUrl"] = () => EnrollmentToken.Create(null!, new ReplayingGenerator(SecretBytes)),
+        ["randomNumberGenerator"] = () => EnrollmentToken.Create("https://host/dvls", null!),
+    };
 
     private static string UrlOfLength(int length)
     {

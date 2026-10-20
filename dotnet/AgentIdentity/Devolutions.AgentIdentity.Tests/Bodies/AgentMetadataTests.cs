@@ -181,16 +181,12 @@ public class AgentMetadataTests
     }
 
     // A null key or value can only come from the host, since neither JSON nor protobuf metadata can hold one.
-    [Fact]
-    public void ThrowsForNullKey()
+    [Theory]
+    [InlineData(null, "value")]
+    [InlineData("hostname", null)]
+    public void ThrowsForNullKeyOrValue(string? key, string? value)
     {
-        Assert.Throws<ArgumentException>(() => AgentMetadata.Validate([new(null!, "value")]));
-    }
-
-    [Fact]
-    public void ThrowsForNullValue()
-    {
-        Assert.Throws<ArgumentException>(() => AgentMetadata.Validate([new("hostname", null!)]));
+        Assert.Throws<ArgumentException>(() => AgentMetadata.Validate([new(key!, value!)]));
     }
 
     private static AgentMetadata AssertValid(MetadataValidationResult result)

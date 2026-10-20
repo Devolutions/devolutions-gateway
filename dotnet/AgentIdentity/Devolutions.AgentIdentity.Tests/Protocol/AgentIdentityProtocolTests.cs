@@ -4,6 +4,17 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class AgentIdentityProtocolTests
 {
+    public static TheoryData<string> VectorCertificateNames => new(VectorCertificates.Select(vector => vector.Name));
+
+    // Each certificate of the vector file, named by its path in the file.
+    private static IEnumerable<(string Name, byte[] Certificate, string Thumbprint)> VectorCertificates =>
+    [
+        .. TestVectors.Instance.Keys.Select(key => ($"keys[{key.Name}]", key.Certificate, key.Thumbprint)),
+        ("root", TestVectors.Instance.Root.Certificate, TestVectors.Instance.Root.Thumbprint),
+        .. TestVectors.Instance.HttpSignature.Registered.Select(
+            registered => ($"http_signature.registered[{registered.Name}]", registered.Certificate, registered.KeyId)),
+    ];
+
     // CONTRACT.md §1: timestamps are RFC 3339 UTC strings ending in `Z`, such as 2026-09-24T12:00:00Z.
     // A timestamp names the whole second that contains the instant.
     [Theory]
@@ -40,32 +51,15 @@ public class AgentIdentityProtocolTests
     }
 
     // CONTRACT.md §1: a thumbprint is base64url(SHA-256(certificate DER)).
-    // The vector file gives the thumbprint of each certificate.
-    [Theory]
-    [MemberData(nameof(VectorData.KeyNames), MemberType = typeof(VectorData))]
-    public void KeyCertificateHasTheVectorThumbprint(string name)
-    {
-        KeyVector key = TestVectors.Instance.Key(name);
-
-        Assert.Equal(key.Thumbprint, AgentIdentityProtocol.ComputeThumbprint(key.Certificate));
-    }
-
-    [Fact]
-    public void RootCertificateHasTheVectorThumbprint()
-    {
-        RootVector root = TestVectors.Instance.Root;
-
-        Assert.Equal(root.Thumbprint, AgentIdentityProtocol.ComputeThumbprint(root.Certificate));
-    }
-
     // CONTRACT.md §6: a request's `keyid` is the thumbprint of the certificate that signs it.
+    // The vector file gives each certificate with its thumbprint, or a registered certificate with its keyid.
     [Theory]
-    [MemberData(nameof(VectorData.RegisteredCertificateNames), MemberType = typeof(VectorData))]
-    public void RegisteredCertificateHasTheVectorKeyId(string name)
+    [MemberData(nameof(VectorCertificateNames))]
+    public void CertificateHasTheVectorThumbprint(string name)
     {
-        RegisteredCertificateVector registered = TestVectors.Instance.HttpSignature.RegisteredCertificate(name);
+        (_, byte[] certificate, string thumbprint) = VectorCertificates.Single(vector => vector.Name == name);
 
-        Assert.Equal(registered.KeyId, AgentIdentityProtocol.ComputeThumbprint(registered.Certificate));
+        Assert.Equal(thumbprint, AgentIdentityProtocol.ComputeThumbprint(certificate));
     }
 
     // CONTRACT.md §5.4: servers accept request bodies up to 64 KiB.

@@ -6,88 +6,67 @@ public class EnrollmentRulesTests
 
     private static readonly Guid IdentityId = Guid.Parse("0f8fad5b-d9cb-469f-a165-70867728950e");
 
+    public static TheoryData<string> KeysButTheReplayNames => new(KeysButTheReplay.Keys);
+
+    // The issued keys that each key rule of CONTRACT.md §2.1 matches, except the replay, by name.
+    private static Dictionary<string, IssuedKeyMatch> KeysButTheReplay => new()
+    {
+        ["the key of another token's identity"] =
+            IssuedKeyMatch.ForIdentity(IdentityId, false, false, CertificateStatus.Current),
+        ["a key of a revoked identity"] = IssuedKeyMatch.ForIdentity(IdentityId, true, true, CertificateStatus.Current),
+        ["the key of a pending certificate"] =
+            IssuedKeyMatch.ForIdentity(IdentityId, true, false, CertificateStatus.Pending),
+        ["the key of a retired certificate"] =
+            IssuedKeyMatch.ForIdentity(IdentityId, true, false, CertificateStatus.Retired),
+        ["the key of a deleted identity"] = IssuedKeyMatch.ForDeletedIdentity(),
+    };
+
     // CONTRACT.md §2.1: a token creates an identity when it exists, has not been deleted, has not expired,
     // and fewer than `max_uses` identities have been created with it; (6) a new identity.
-    [Fact]
-    public void CreatesAnIdentityForANewKeyWithAUsableToken()
+    // The rows are a usable token, one that expires one tick after now, and one that can create one more identity.
+    [Theory]
+    [InlineData(TimeSpan.TicksPerDay, 3)]
+    [InlineData(1L, 3)]
+    [InlineData(TimeSpan.TicksPerDay, 9)]
+    public void CreatesAnIdentityForANewKeyWithAUsableToken(long ticksToExpiry, int identitiesCreated)
     {
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), null, Now);
+        EnrollmentTokenState token = new(false, Now.AddTicks(ticksToExpiry), maxUses: 10, identitiesCreated);
+
+        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
 
         Assert.Equal(EnrollmentOutcome.CreateIdentity, decision.Outcome);
         Assert.Null(decision.ExistingIdentityId);
         Assert.Null(decision.Error);
     }
 
-    // CONTRACT.md §5.4: `token_expired` when `now ≥ expires_at`.
-    [Fact]
-    public void RejectsATokenAtItsExpiryWithTokenExpired()
-    {
-        EnrollmentTokenState token = new(false, expiresAt: Now, maxUses: 10, identitiesCreated: 3);
-
-        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
-
-        AssertRejected(AgentIdentityErrorCode.TokenExpired, decision);
-    }
-
-    [Fact]
-    public void CreatesAnIdentityJustBeforeTheTokenExpiry()
-    {
-        EnrollmentTokenState token = new(false, expiresAt: Now.AddTicks(1), maxUses: 10, identitiesCreated: 3);
-
-        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
-
-        Assert.Equal(EnrollmentOutcome.CreateIdentity, decision.Outcome);
-    }
-
-    // CONTRACT.md §2.1: a token creates an identity only while fewer than `max_uses` identities have been created
-    // with it; (5) `token_exhausted`.
-    [Theory]
-    [InlineData(10, 10)]
-    [InlineData(10, 11)]
-    [InlineData(0, 0)]
-    public void RejectsATokenThatCreatedMaxUsesIdentitiesWithTokenExhausted(int maxUses, int identitiesCreated)
-    {
-        EnrollmentTokenState token = new(false, Now.AddDays(1), maxUses, identitiesCreated);
-
-        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
-
-        AssertRejected(AgentIdentityErrorCode.TokenExhausted, decision);
-    }
-
-    [Fact]
-    public void CreatesTheLastIdentityThatATokenAllows()
-    {
-        EnrollmentTokenState token = new(false, Now.AddDays(1), maxUses: 10, identitiesCreated: 9);
-
-        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
-
-        Assert.Equal(EnrollmentOutcome.CreateIdentity, decision.Outcome);
-    }
-
-    // CONTRACT.md §2.1: a deleted token authenticates only for an idempotent replay;
-    // every other use returns `token_invalid`.
-    [Fact]
-    public void RejectsADeletedTokenWithTokenInvalid()
-    {
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(deleted: true), null, Now);
-
-        AssertRejected(AgentIdentityErrorCode.TokenInvalid, decision);
-    }
-
     // CONTRACT.md §2.1: when several outcomes apply, the earliest wins:
     // (4) `token_invalid` for a deleted token, then `token_expired` for an expired one; (5) `token_exhausted`.
     [Theory]
-    [InlineData(true, true, false, AgentIdentityErrorCode.TokenInvalid)]
-    [InlineData(true, false, true, AgentIdentityErrorCode.TokenInvalid)]
-    [InlineData(true, true, true, AgentIdentityErrorCode.TokenInvalid)]
-    [InlineData(false, true, true, AgentIdentityErrorCode.TokenExpired)]
+    // CONTRACT.md §5.4: `token_expired` when `now ≥ expires_at`.
+    [InlineData(false, 0L, 10, 3, AgentIdentityErrorCode.TokenExpired)]
+    // CONTRACT.md §2.1: a token creates an identity only while fewer than `max_uses` identities have been created
+    // with it.
+    [InlineData(false, TimeSpan.TicksPerDay, 10, 10, AgentIdentityErrorCode.TokenExhausted)]
+    [InlineData(false, TimeSpan.TicksPerDay, 10, 11, AgentIdentityErrorCode.TokenExhausted)]
+    [InlineData(false, TimeSpan.TicksPerDay, 0, 0, AgentIdentityErrorCode.TokenExhausted)]
+    // CONTRACT.md §2.1: a deleted token authenticates only for an idempotent replay;
+    // every other use returns `token_invalid`, whether or not the token has also expired or been exhausted.
+    [InlineData(true, TimeSpan.TicksPerDay, 10, 3, AgentIdentityErrorCode.TokenInvalid)]
+    [InlineData(true, 0L, 10, 3, AgentIdentityErrorCode.TokenInvalid)]
+    [InlineData(true, TimeSpan.TicksPerDay, 10, 10, AgentIdentityErrorCode.TokenInvalid)]
+    [InlineData(true, 0L, 10, 10, AgentIdentityErrorCode.TokenInvalid)]
+    // CONTRACT.md §2.1: (4) `token_expired` comes before (5) `token_exhausted`.
+    [InlineData(false, 0L, 10, 10, AgentIdentityErrorCode.TokenExpired)]
     public void RejectsANewKeyWithTheEarliestTokenOutcome(
         bool deleted,
-        bool expired,
-        bool exhausted,
+        long ticksToExpiry,
+        int maxUses,
+        int identitiesCreated,
         AgentIdentityErrorCode expected)
     {
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(deleted, expired, exhausted), null, Now);
+        EnrollmentTokenState token = new(deleted, Now.AddTicks(ticksToExpiry), maxUses, identitiesCreated);
+
+        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
 
         AssertRejected(expected, decision);
     }
@@ -120,48 +99,22 @@ public class EnrollmentRulesTests
     // the key of a pending or retired certificate of a non-revoked identity → `invalid_request`,
     // instead of the replay, which needs the current certificate.
     [Theory]
-    [InlineData(false, false, CertificateStatus.Current, AgentIdentityErrorCode.InvalidRequest)]
-    [InlineData(false, false, CertificateStatus.Pending, AgentIdentityErrorCode.InvalidRequest)]
-    [InlineData(false, false, CertificateStatus.Retired, AgentIdentityErrorCode.InvalidRequest)]
-    [InlineData(false, true, CertificateStatus.Current, AgentIdentityErrorCode.InvalidRequest)]
-    [InlineData(true, true, CertificateStatus.Current, AgentIdentityErrorCode.IdentityRevoked)]
-    [InlineData(true, true, CertificateStatus.Pending, AgentIdentityErrorCode.IdentityRevoked)]
-    [InlineData(true, true, CertificateStatus.Retired, AgentIdentityErrorCode.IdentityRevoked)]
-    [InlineData(true, false, CertificateStatus.Pending, AgentIdentityErrorCode.InvalidRequest)]
-    [InlineData(true, false, CertificateStatus.Retired, AgentIdentityErrorCode.InvalidRequest)]
-    public void RejectsAnIssuedKeyByTheFirstMatchingRule(
-        bool enrolledWithPresentedToken,
-        bool identityRevoked,
-        CertificateStatus status,
-        AgentIdentityErrorCode expected)
-    {
-        IssuedKeyMatch keyMatch =
-            IssuedKeyMatch.ForIdentity(IdentityId, enrolledWithPresentedToken, identityRevoked, status);
-
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), keyMatch, Now);
-
-        AssertRejected(expected, decision);
-    }
-
-    // CONTRACT.md §2.1: the key of a certificate of a deleted identity → `identity_revoked`.
-    // The authority keeps only the SPKI SHA-256 and issuance time of a deleted identity's keys,
-    // so no other key rule applies to them.
-    [Fact]
-    public void RejectsTheKeyOfADeletedIdentityWithIdentityRevoked()
-    {
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), IssuedKeyMatch.ForDeletedIdentity(), Now);
-
-        AssertRejected(AgentIdentityErrorCode.IdentityRevoked, decision);
-    }
-
+    [InlineData(false, false, CertificateStatus.Current, false, false, AgentIdentityErrorCode.InvalidRequest)]
+    [InlineData(false, false, CertificateStatus.Pending, false, false, AgentIdentityErrorCode.InvalidRequest)]
+    [InlineData(false, false, CertificateStatus.Retired, false, false, AgentIdentityErrorCode.InvalidRequest)]
+    [InlineData(false, true, CertificateStatus.Current, false, false, AgentIdentityErrorCode.InvalidRequest)]
+    [InlineData(true, true, CertificateStatus.Current, false, false, AgentIdentityErrorCode.IdentityRevoked)]
+    [InlineData(true, true, CertificateStatus.Pending, false, false, AgentIdentityErrorCode.IdentityRevoked)]
+    [InlineData(true, true, CertificateStatus.Retired, false, false, AgentIdentityErrorCode.IdentityRevoked)]
+    [InlineData(true, false, CertificateStatus.Pending, false, false, AgentIdentityErrorCode.InvalidRequest)]
+    [InlineData(true, false, CertificateStatus.Retired, false, false, AgentIdentityErrorCode.InvalidRequest)]
     // CONTRACT.md §2.1: (3) the result of the key lookup comes before (4) `token_expired` and (5) `token_exhausted`.
-    [Theory]
     [InlineData(false, false, CertificateStatus.Current, true, false, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(false, false, CertificateStatus.Current, false, true, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(true, true, CertificateStatus.Current, true, false, AgentIdentityErrorCode.IdentityRevoked)]
     [InlineData(true, true, CertificateStatus.Retired, false, true, AgentIdentityErrorCode.IdentityRevoked)]
     [InlineData(true, false, CertificateStatus.Pending, true, true, AgentIdentityErrorCode.InvalidRequest)]
-    public void RejectsAnIssuedKeyBeforeAnExpiredOrExhaustedToken(
+    public void RejectsAnIssuedKeyByTheFirstMatchingRule(
         bool enrolledWithPresentedToken,
         bool identityRevoked,
         CertificateStatus status,
@@ -178,11 +131,17 @@ public class EnrollmentRulesTests
         AssertRejected(expected, decision);
     }
 
-    [Fact]
-    public void RejectsTheKeyOfADeletedIdentityBeforeAnExpiredAndExhaustedToken()
+    // CONTRACT.md §2.1: the key of a certificate of a deleted identity → `identity_revoked`,
+    // and (3) the result of the key lookup comes before (4) `token_expired` and (5) `token_exhausted`.
+    // The authority keeps only the SPKI SHA-256 and issuance time of a deleted identity's keys,
+    // so no other key rule applies to them.
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public void RejectsTheKeyOfADeletedIdentityWithIdentityRevoked(bool expired, bool exhausted)
     {
         EnrollmentDecision decision = EnrollmentRules.Decide(
-            Token(expired: true, exhausted: true),
+            Token(expired: expired, exhausted: exhausted),
             IssuedKeyMatch.ForDeletedIdentity(),
             Now);
 
@@ -192,30 +151,10 @@ public class EnrollmentRulesTests
     // CONTRACT.md §2.1 (3): a deleted token gets `token_invalid` for anything but an idempotent replay,
     // whatever the CSR public key matches.
     [Theory]
-    [InlineData(false, false, CertificateStatus.Current)]
-    [InlineData(true, true, CertificateStatus.Current)]
-    [InlineData(true, false, CertificateStatus.Pending)]
-    [InlineData(true, false, CertificateStatus.Retired)]
-    public void RejectsADeletedTokenWithTokenInvalidForAnIssuedKeyButTheReplay(
-        bool enrolledWithPresentedToken,
-        bool identityRevoked,
-        CertificateStatus status)
+    [MemberData(nameof(KeysButTheReplayNames))]
+    public void RejectsADeletedTokenWithTokenInvalidForAnIssuedKeyButTheReplay(string key)
     {
-        IssuedKeyMatch keyMatch =
-            IssuedKeyMatch.ForIdentity(IdentityId, enrolledWithPresentedToken, identityRevoked, status);
-
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(deleted: true), keyMatch, Now);
-
-        AssertRejected(AgentIdentityErrorCode.TokenInvalid, decision);
-    }
-
-    [Fact]
-    public void RejectsADeletedTokenWithTokenInvalidForTheKeyOfADeletedIdentity()
-    {
-        EnrollmentDecision decision = EnrollmentRules.Decide(
-            Token(deleted: true),
-            IssuedKeyMatch.ForDeletedIdentity(),
-            Now);
+        EnrollmentDecision decision = EnrollmentRules.Decide(Token(deleted: true), KeysButTheReplay[key], Now);
 
         AssertRejected(AgentIdentityErrorCode.TokenInvalid, decision);
     }
@@ -231,21 +170,15 @@ public class EnrollmentRulesTests
         Assert.Equal(parameter, exception.ParamName);
     }
 
-    [Fact]
-    public void KeyMatchRejectsAnUndefinedCertificateStatus()
+    // Statuses start at 1, so a status that the host never set is not a valid one,
+    // and a value after the last status is not one either.
+    [Theory]
+    [InlineData(0)]
+    [InlineData(4)]
+    public void KeyMatchRejectsAnUndefinedCertificateStatus(int status)
     {
         ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(
-            () => IssuedKeyMatch.ForIdentity(IdentityId, true, false, (CertificateStatus)4));
-
-        Assert.Equal("status", exception.ParamName);
-    }
-
-    // Statuses start at 1, so a status that the host never set is not a valid one.
-    [Fact]
-    public void KeyMatchRejectsAnUninitializedCertificateStatus()
-    {
-        ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(
-            () => IssuedKeyMatch.ForIdentity(IdentityId, true, false, default));
+            () => IssuedKeyMatch.ForIdentity(IdentityId, true, false, (CertificateStatus)status));
 
         Assert.Equal("status", exception.ParamName);
     }

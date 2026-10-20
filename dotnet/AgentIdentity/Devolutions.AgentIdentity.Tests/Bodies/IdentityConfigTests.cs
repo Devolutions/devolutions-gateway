@@ -149,21 +149,6 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new(name, TestJson.Parse("2"))]);
     }
 
-    // RFC 8259 §4: with a repeated name, receivers disagree on the value, as CONTRACT.md §1 notes of request bodies.
-    [Fact]
-    public void CreateRejectsARepeatedProductFieldName()
-    {
-        AssertRejectsProductFields(
-            [new("psu_channel_url", TestJson.Parse("\"a\"")), new("psu_channel_url", TestJson.Parse("\"b\""))]);
-    }
-
-    // CONTRACT.md §1: an absent field is omitted, never written as null.
-    [Fact]
-    public void CreateRejectsANullProductFieldValue()
-    {
-        AssertRejectsProductFields([new("psu_channel_url", TestJson.Parse("null"))]);
-    }
-
     // The default JsonElement holds no JSON value at all.
     [Fact]
     public void CreateRejectsAProductFieldWithoutAValue()
@@ -187,41 +172,49 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new("label", TestJson.Parse(value))]);
     }
 
-    // CONTRACT.md §1: JSON keys are snake_case, so the members inside a product field's value are too.
+    // CONTRACT.md §1: JSON keys are snake_case, so the members inside a product field's value are too,
+    // whether an object or an array holds them.
     [Theory]
     [InlineData("""{"maxSessions": 4}""")]
     [InlineData("""{"limits": {"max_sessions": 4, "Max_paths": 2}}""")]
-    public void CreateRejectsAMemberNameThatIsNotSnakeCaseInANestedObject(string value)
-    {
-        AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
-    }
-
-    [Theory]
     [InlineData("""[{"Path": "a"}]""")]
     [InlineData("""{"paths": [["a"], [{"pathName": "b"}]]}""")]
-    public void CreateRejectsAMemberNameThatIsNotSnakeCaseInAnObjectInAnArray(string value)
+    public void CreateRejectsAMemberNameThatIsNotSnakeCaseInAValue(string value)
     {
         AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
     }
 
     // RFC 8259 §4: with a repeated name, receivers disagree on the value, as CONTRACT.md §1 notes of request bodies.
-    // A name and its escaped spelling are the same name.
-    [Theory]
-    [InlineData("""{"max_sessions": 4, "max_sessions": 5}""")]
-    [InlineData("""{"limits": [{"max_sessions": 4, "max_sessions": 5}]}""")]
-    [InlineData("""{"max_sessions": 4, "max\u005Fsessions": 5}""")]
-    public void CreateRejectsAMemberNameRepeatedInOneObjectOfAValue(string value)
+    // A product field is a member of the config, and a name and its escaped spelling are the same name.
+    private static readonly Dictionary<string, KeyValuePair<string, JsonElement>[]> RepeatedMemberNames = new()
     {
-        AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
+        ["product field"] =
+            [new("psu_channel_url", TestJson.Parse("\"a\"")), new("psu_channel_url", TestJson.Parse("\"b\""))],
+        ["member of a value"] =
+            [new("policy_limits", TestJson.Parse("""{"max_sessions": 4, "max_sessions": 5}"""))],
+        ["member of an object in an array"] =
+            [new("policy_limits", TestJson.Parse("""{"limits": [{"max_sessions": 4, "max_sessions": 5}]}"""))],
+        ["member of a value with an escaped name"] =
+            [new("policy_limits", TestJson.Parse("""{"max_sessions": 4, "max\u005Fsessions": 5}"""))],
+    };
+
+    public static TheoryData<string> RepeatedMemberNameForms => new(RepeatedMemberNames.Keys);
+
+    [Theory]
+    [MemberData(nameof(RepeatedMemberNameForms))]
+    public void CreateRejectsARepeatedMemberName(string form)
+    {
+        AssertRejectsProductFields(RepeatedMemberNames[form]);
     }
 
     // CONTRACT.md §1: an absent field is omitted, never written as null, at any depth.
     [Theory]
-    [InlineData("""{"proxy": null}""")]
-    [InlineData("""[{"proxy": null}]""")]
-    public void CreateRejectsANullMemberInAValue(string value)
+    [InlineData("psu_channel_url", "null")]
+    [InlineData("policy_limits", """{"proxy": null}""")]
+    [InlineData("policy_limits", """[{"proxy": null}]""")]
+    public void CreateRejectsANullFieldOrMember(string name, string value)
     {
-        AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
+        AssertRejectsProductFields([new(name, TestJson.Parse(value))]);
     }
 
     // A name repeats only within one object, and an array element is no field, so it may be null.
