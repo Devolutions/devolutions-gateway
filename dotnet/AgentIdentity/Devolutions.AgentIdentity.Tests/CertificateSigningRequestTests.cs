@@ -26,7 +26,8 @@ public class CertificateSigningRequestTests
     public void ValidVectorYieldsTheSubjectPublicKeyInfoOfItsKey()
     {
         CsrVector vector = TestVectors.Instance.Csr["valid"];
-        byte[] expected = [.. P256SubjectPublicKeyInfoPrefix, .. vector.PublicKeySec1!];
+        Assert.NotNull(vector.PublicKeySec1);
+        byte[] expected = [.. P256SubjectPublicKeyInfoPrefix, .. vector.PublicKeySec1];
 
         CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(vector.Csr));
 
@@ -46,7 +47,7 @@ public class CertificateSigningRequestTests
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
 
-    // CONTRACT.md §4: the server ignores the CSR subject and extensions,
+    // CONTRACT.md §4: the server ignores the CSR's subject and attributes, including requested extensions,
     // and security invariant 2 lets a CSR supply only a verified public key.
     [Fact]
     public void AcceptsAnySubjectAttributesAndExtensions()
@@ -66,6 +67,37 @@ public class CertificateSigningRequestTests
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
 
+    // CONTRACT.md §4: the agent's CSR carries an empty attribute set, A0 00.
+    [Fact]
+    public void AcceptsEmptyAttributeSet()
+    {
+        using ECDsa key = NewKey();
+        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), attributes: [0xA0, 0x00]);
+
+        CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
+
+        Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
+    }
+
+    // CONTRACT.md §4: the server ignores an extensionRequest with an empty Extensions list,
+    // which common CSR builders emit although RFC 5280 §4.1 gives Extensions SIZE (1..MAX).
+    // The attribute is the PKCS #9 extensionRequest (RFC 2985 §5.4.2) with one value, an empty SEQUENCE.
+    [Fact]
+    public void AcceptsExtensionRequestWithEmptyExtensions()
+    {
+        using ECDsa key = NewKey();
+        byte[] extensionRequest = TestCsr.Sequence(
+            TestCsr.Oid("1.2.840.113549.1.9.14"),
+            TestCsr.Tlv(0x31, TestCsr.Sequence()));
+        byte[] info = TestCsr.RequestInfo(
+            key.ExportSubjectPublicKeyInfo(),
+            attributes: TestCsr.Tlv(0xA0, extensionRequest));
+
+        CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
+
+        Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("00")]
@@ -80,30 +112,28 @@ public class CertificateSigningRequestTests
     [Fact]
     public void RejectsTrailingBytes()
     {
-        byte[] valid = TestVectors.Instance.Csr["valid"].Csr;
+        byte[] valid = AcceptedValidVector();
 
         AssertInvalid(CertificateSigningRequest.Validate([.. valid, 0x00]));
     }
 
     // X.690 §10.1: DER writes each length in the fewest octets.
-    // The vector request is 223 octets long, which DER writes 81 DF;
-    // its self-signature covers only the request info, so it still verifies.
+    // The self-signature covers only the request info, so the request still verifies with a longer outer length.
     [Fact]
     public void RejectsLengthInMoreOctetsThanNeeded()
     {
-        byte[] valid = TestVectors.Instance.Csr["valid"].Csr;
-        Assert.Equal([0x30, 0x81, 0xDF], valid[..3]);
+        byte[] contents = ValidVectorContents();
 
-        AssertInvalid(CertificateSigningRequest.Validate([0x30, 0x82, 0x00, 0xDF, .. valid[3..]]));
+        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.TlvWithLongerLength(0x30, contents)));
     }
 
     // X.690 §10.1: DER uses the definite form of length.
     [Fact]
     public void RejectsIndefiniteLength()
     {
-        byte[] valid = TestVectors.Instance.Csr["valid"].Csr;
+        byte[] contents = ValidVectorContents();
 
-        AssertInvalid(CertificateSigningRequest.Validate([0x30, 0x80, .. valid[3..], 0x00, 0x00]));
+        AssertInvalid(CertificateSigningRequest.Validate([0x30, 0x80, .. contents, 0x00, 0x00]));
     }
 
     // The same rule inside the request info, which a test can only change by signing the request again.
@@ -111,7 +141,8 @@ public class CertificateSigningRequestTests
     public void RejectsLengthInMoreOctetsThanNeededInsideTheRequestInfo()
     {
         using ECDsa key = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject: [0x30, 0x81, 0x00]);
+        byte[] subject = TestCsr.TlvWithLongerLength(0x30, []);
+        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject);
 
         AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
     }
@@ -460,6 +491,30 @@ public class CertificateSigningRequestTests
         Assert.Equal(400, result.Error.HttpStatusCode);
         Assert.False(string.IsNullOrEmpty(result.FailureDetail));
         Assert.Null(result.Csr);
+    }
+
+    // The valid vector, checked to be accepted, so that only the rule a test breaks in it can reject the result.
+    private static byte[] AcceptedValidVector()
+    {
+        byte[] valid = TestVectors.Instance.Csr["valid"].Csr;
+        AssertValid(CertificateSigningRequest.Validate(valid));
+
+        return valid;
+    }
+
+    // The contents of the valid vector's outer SEQUENCE, located by System.Formats.Asn1,
+    // so that a test depends on no octet or length of the vector.
+    private static byte[] ValidVectorContents()
+    {
+        byte[] valid = AcceptedValidVector();
+        _ = AsnDecoder.ReadEncodedValue(valid, AsnEncodingRules.DER, out int offset, out int length, out _);
+        byte[] contents = valid[offset..(offset + length)];
+
+        // Wrapped again with the fewest length octets, the contents give back the vector,
+        // so a test that wraps them otherwise changes only the form of the length.
+        Assert.Equal(valid, TestCsr.Sequence(contents));
+
+        return contents;
     }
 
     private static ECDsa NewKey()

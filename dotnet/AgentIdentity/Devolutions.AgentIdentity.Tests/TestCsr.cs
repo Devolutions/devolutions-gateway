@@ -34,6 +34,18 @@ internal static class TestCsr
         return [tag, .. Length(body.Length), .. body];
     }
 
+    /// <summary>
+    /// An element whose length takes one octet more than DER allows (X.690 §10.1):
+    /// the long form for a length below 128, or else a leading zero octet.
+    /// </summary>
+    public static byte[] TlvWithLongerLength(byte tag, byte[] contents)
+    {
+        byte[] length = Length(contents.Length);
+        byte[] longer = length.Length == 1 ? [0x81, length[0]] : [(byte)(0x80 | length.Length), 0x00, .. length[1..]];
+
+        return [tag, .. longer, .. contents];
+    }
+
     public static byte[] Sequence(params byte[][] elements)
     {
         return Tlv(0x30, elements);
@@ -77,9 +89,9 @@ internal static class TestCsr
         return [0x04, .. parameters.Q.X!, .. parameters.Q.Y!];
     }
 
-    public static byte[] RequestInfo(byte[] subjectPublicKeyInfo, byte[]? subject = null)
+    public static byte[] RequestInfo(byte[] subjectPublicKeyInfo, byte[]? subject = null, byte[]? attributes = null)
     {
-        return Sequence(Integer(0), subject ?? EmptySubject, subjectPublicKeyInfo, EmptyAttributes);
+        return Sequence(Integer(0), subject ?? EmptySubject, subjectPublicKeyInfo, attributes ?? EmptyAttributes);
     }
 
     public static byte[] SignatureAlgorithm(string oid)
