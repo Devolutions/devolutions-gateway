@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::api::preflight::PreflightAlertStatus;
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
+use crate::provisioner_tasks::ai::AiProvider;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -159,7 +160,7 @@ struct SessionInfo {
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct AiAnalysisParams {
-    provider: crate::provisioner_tasks::ai::AiProvider,
+    provider: AiProvider,
     /// Model identifier, passed to the provider as is.
     model: String,
     /// Upper bound of tokens in each AI answer; null when not asked.
