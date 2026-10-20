@@ -294,11 +294,11 @@ mod tests {
     ) -> anyhow::Result<()> {
         let app = App::for_test()?;
         let now = app.now();
-        let (_, secret) = app
-            .state
-            .lock()
-            .await
-            .create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let (_, secret) =
+            app.state
+                .lock()
+                .await
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
         let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
         let headers = vec![authorization.as_str(); header_count];
         let response = post(&app, "enroll", &headers, b"not json".to_vec()).await;
@@ -315,7 +315,14 @@ mod tests {
             let mut state = app.state.lock().await;
             let root_not_after = state.issuing_root().not_after;
             app.clock.freeze_at(root_not_after);
-            let (_, secret) = state.create_token("test".to_owned(), 1, root_not_after + 60, None, None, root_not_after);
+            let (_, secret) = state.create_token(
+                "test".to_owned(),
+                1,
+                crate::app::nanos(root_not_after + 60),
+                None,
+                None,
+                root_not_after,
+            );
             secret
         };
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
@@ -358,11 +365,11 @@ mod tests {
     async fn config_version_fault_overrides_the_enrollment_config() -> anyhow::Result<()> {
         let app = App::for_test()?;
         let now = app.now();
-        let (_, secret) = app
-            .state
-            .lock()
-            .await
-            .create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let (_, secret) =
+            app.state
+                .lock()
+                .await
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
 
         let (status, faults) = post_json(&app, FAULTS, &[], json!({ "config_version": 7 }).to_string()).await;
@@ -396,8 +403,8 @@ mod tests {
         app.clock.freeze_at(now);
         let mut stored_revision = {
             let mut state = app.state.lock().await;
-            *state = State::new(now)?;
-            let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+            *state = State::with_root(now)?;
+            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
             let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
             let identity_id = state
                 .enroll(&secret, &csr, Map::new(), now, &app.base_url)

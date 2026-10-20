@@ -21,7 +21,7 @@ use axum::{Json, Router, middleware};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
-use crate::app::{App, parse_date_time, rfc3339};
+use crate::app::{App, nanos, parse_date_time, rfc3339, rfc3339_nanos};
 use crate::oracle::CertStatus;
 use crate::state::{ApiError, Cert, Identity, IdentityStatus, State, Token};
 
@@ -340,7 +340,8 @@ fn integer_member(body: &Map<String, Value>, name: &str, min: i64, max: i64, err
     integer
 }
 
-fn date_time_member(body: &Map<String, Value>, name: &str, errors: &mut FieldErrors) -> Option<i64> {
+/// Returns a date-time member in Unix nanoseconds.
+fn date_time_member(body: &Map<String, Value>, name: &str, errors: &mut FieldErrors) -> Option<i128> {
     let text = string_member(body, name, errors)?;
     let time = parse_date_time(text);
     if time.is_none() {
@@ -355,7 +356,7 @@ fn parse_id(raw: &str, not_found: &str) -> Result<Uuid, ManagementError> {
 }
 
 /// The query string of a request.
-/// An empty value counts as absent, and a single-valued parameter takes its first value.
+/// A single-valued parameter takes its first value; an empty value is present and validated like any other.
 struct QueryParams(Vec<(String, String)>);
 
 impl QueryParams {
@@ -372,7 +373,7 @@ impl QueryParams {
     fn all<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a str> {
         self.0
             .iter()
-            .filter(move |(key, value)| key == name && !value.is_empty())
+            .filter(move |(key, _)| key == name)
             .map(|(_, value)| value.as_str())
     }
 
@@ -390,7 +391,8 @@ impl QueryParams {
         }
     }
 
-    fn date_time(&self, name: &str, errors: &mut FieldErrors) -> Option<i64> {
+    /// Returns a date-time parameter in Unix nanoseconds.
+    fn date_time(&self, name: &str, errors: &mut FieldErrors) -> Option<i128> {
         let raw = self.single(name)?;
         let time = parse_date_time(raw);
         if time.is_none() {
@@ -474,7 +476,7 @@ fn token_view(token: &Token, now: i64) -> Value {
         "name": token.name,
         "maxUses": token.max_uses,
         "useCount": token.used_count,
-        "expiresOn": rfc3339(token.expires_at),
+        "expiresOn": rfc3339_nanos(token.expires_at_ns),
         "state": token.state(now),
         "createdOn": rfc3339(token.created_at),
         "createdBy": token.created_by,
@@ -550,16 +552,16 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
     if member(&body, "maxUses").is_none() {
         errors.add("maxUses", "maxUses is required");
     }
-    let expires_at = match date_time_member(&body, "expiresOn", &mut errors) {
-        None => now + DEFAULT_TOKEN_LIFETIME_SECS,
-        Some(expires_at) => {
-            if !(now < expires_at && expires_at <= now + MAX_TOKEN_LIFETIME_SECS) {
+    let expires_at_ns = match date_time_member(&body, "expiresOn", &mut errors) {
+        None => nanos(now + DEFAULT_TOKEN_LIFETIME_SECS),
+        Some(expires_at_ns) => {
+            if !(nanos(now) < expires_at_ns && expires_at_ns <= nanos(now + MAX_TOKEN_LIFETIME_SECS)) {
                 errors.add(
                     "expiresOn",
                     "expiresOn must be in the future and at most 365 days ahead",
                 );
             }
-            expires_at
+            expires_at_ns
         }
     };
     let friendly_name_format = string_member(&body, "friendlyNameFormat", &mut errors);
@@ -586,7 +588,7 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
     let (id, secret) = state.create_token(
         name.to_owned(),
         u64::try_from(max_uses).expect("maxUses is at least 1"),
-        expires_at,
+        expires_at_ns,
         friendly_name_format.map(ToOwned::to_owned),
         config.cloned(),
         now,
@@ -621,9 +623,14 @@ async fn list_tokens(
         .filter(|token| token.deleted_at.is_none())
         .collect();
     match paging.sort_field {
-        "name" => tokens.sort_by(|a, b| a.name.cmp(&b.name).then(a.created_seq.cmp(&b.created_seq))),
-        "expiresOn" => tokens.sort_by_key(|token| (token.expires_at, token.created_seq)),
-        _ => tokens.sort_by_key(|token| token.created_seq),
+        "name" => tokens.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then((a.created_at, a.created_seq).cmp(&(b.created_at, b.created_seq)))
+        }),
+        "expiresOn" => tokens.sort_by_key(|token| (token.expires_at_ns, token.created_at, token.created_seq)),
+        // The creation order breaks ties within a second.
+        _ => tokens.sort_by_key(|token| (token.created_at, token.created_seq)),
     }
     if !paging.ascending {
         tokens.reverse();
@@ -779,8 +786,8 @@ async fn list_identities(
             (statuses.is_empty() || statuses.contains(&identity.status(now)))
                 && (token_ids.is_empty() || token_ids.contains(&identity.token_id))
                 && issuer.is_none_or(|issuer| identity.current_cert().is_some_and(|cert| cert.issuer == issuer))
-                && last_seen_from.is_none_or(|from| from <= last_seen_on(identity))
-                && last_seen_to.is_none_or(|to| last_seen_on(identity) <= to)
+                && last_seen_from.is_none_or(|from| from <= nanos(last_seen_on(identity)))
+                && last_seen_to.is_none_or(|to| nanos(last_seen_on(identity)) <= to)
                 && search
                     .as_deref()
                     .is_none_or(|search| identity.friendly_name.to_lowercase().contains(search))
@@ -899,7 +906,7 @@ fn rotation_view(state: &State, now: i64) -> Value {
     json!({
         "phase": "Rotating",
         "startedOn": rfc3339(rotation.started_at),
-        "deadlineOn": rfc3339(rotation.deadline),
+        "deadlineOn": rfc3339_nanos(rotation.deadline_ns),
         "oldRoot": root_view(&rotation.old_root),
         "newRoot": root_view(&rotation.new_root),
         "oldRootActiveIdentityCount": state.active_identities_on_old_root(now),

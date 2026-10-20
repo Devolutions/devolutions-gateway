@@ -8,11 +8,12 @@ use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use rstest::rstest;
 use serde_json::{Value, json};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tower::ServiceExt as _;
 use uuid::Uuid;
 
 use super::{BASE_PATH, Permission, Permissions, TOKEN_ID_HEADER, credential_permissions, router};
-use crate::app::{App, rfc3339};
+use crate::app::{App, nanos, rfc3339};
 use crate::state::{State, StreamPush};
 
 const ADMIN: &str = "admin";
@@ -85,16 +86,33 @@ fn assert_public_api_error(body: &Value) {
 /// Enrolls an identity with the CSR test vector and `metadata`, as the agent-facing enroll does.
 /// An app holds at most one, since a key is enrolled once.
 async fn enroll(app: &Arc<App>, metadata: Value) -> anyhow::Result<Uuid> {
+    Ok(enroll_with_chain(app, metadata).await?.0)
+}
+
+/// Enrolls like [`enroll`] and also returns the issued certificate chain, leaf first, in DER.
+async fn enroll_with_chain(app: &Arc<App>, metadata: Value) -> anyhow::Result<(Uuid, Vec<Vec<u8>>)> {
     let vectors: Value = serde_json::from_str(include_str!("../../../../docs/agent-identity/test-vectors.json"))?;
     let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
     let now = app.now();
     let mut state = app.state.lock().await;
-    let (_, secret) = state.create_token("test".to_owned(), 1, now + DAY, None, None, now);
+    let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + DAY), None, None, now);
     let metadata = metadata.as_object().cloned().expect("metadata is an object");
-    Ok(state
+    let enrolled = state
         .enroll(&secret, &csr, metadata, now, &app.base_url)
-        .expect("enrollment succeeds")
-        .identity_id)
+        .expect("enrollment succeeds");
+    Ok((enrolled.identity_id, enrolled.certificate_chain))
+}
+
+/// Returns an app in the state a fresh mock process starts in, which `main` builds with [`State::new`].
+async fn pristine_app() -> anyhow::Result<(Arc<App>, i64)> {
+    let (app, now) = frozen_app()?;
+    *app.state.lock().await = State::new(now);
+    Ok((app, now))
+}
+
+/// Returns `<seconds>.5Z`, half a second after `unix_secs`.
+fn half_second_after(unix_secs: i64) -> String {
+    format!("{}.5Z", rfc3339(unix_secs).trim_end_matches('Z'))
 }
 
 async fn create_token(app: &Arc<App>, body: Value) -> anyhow::Result<String> {
@@ -234,15 +252,11 @@ async fn operation_requires_its_permission(
     Ok(())
 }
 
-/// The `tokenId` header carries the credential; header names are case-insensitive (RFC 9110, "5.1. Field Names").
-#[rstest]
-#[case::token_id("tokenId")]
-#[case::lowercase("tokenid")]
-#[case::uppercase("TOKENID")]
+/// The `tokenId` header carries the credential, and header names are case-insensitive (RFC 9110, "5.1. Field Names").
 #[tokio::test]
-async fn token_id_header_authenticates(#[case] header: &str) -> anyhow::Result<()> {
+async fn token_id_header_name_is_case_insensitive() -> anyhow::Result<()> {
     let app = App::for_test()?;
-    let (status, _) = send(&app, Method::GET, "/settings", &[(header, ADMIN)], None).await?;
+    let (status, _) = send(&app, Method::GET, "/settings", &[("TOKENID", ADMIN)], None).await?;
     assert_eq!(status, 200);
     Ok(())
 }
@@ -338,6 +352,25 @@ async fn create_token_accepts_its_bounds(#[case] body: fn(i64) -> Value) -> anyh
     Ok(())
 }
 
+/// `AgentIdentityEnrollmentTokenCreateDTO.expiresOn` is a date-time, which keeps its fraction of a second: half a
+/// second ahead is in the future, and the token expires then.
+#[tokio::test]
+async fn token_expiry_keeps_its_fraction_of_a_second() -> anyhow::Result<()> {
+    let (app, now) = frozen_app()?;
+    let expires_on = half_second_after(now);
+    let body = json!({ "name": "t", "maxUses": 1, "expiresOn": expires_on });
+    let (status, created) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
+    assert_eq!(status, 201, "{created}");
+    assert_eq!(
+        (
+            &created["enrollmentToken"]["expiresOn"],
+            &created["enrollmentToken"]["state"]
+        ),
+        (&json!(expires_on), &json!("Active"))
+    );
+    Ok(())
+}
+
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`'s `400`: invalid parameters, including a friendly-name
 /// format with an unpaired brace or an unknown placeholder, reported in a `PublicApiValidationError`.
 #[rstest]
@@ -350,6 +383,10 @@ async fn create_token_accepts_its_bounds(#[case] body: fn(i64) -> Value) -> anyh
 #[case::expiry_now(|now| json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now) }), "expiresOn")]
 #[case::expiry_beyond_365_days(
     |now| json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now + 365 * DAY + 1) }),
+    "expiresOn"
+)]
+#[case::expiry_half_a_second_beyond_365_days(
+    |now| json!({ "name": "t", "maxUses": 1, "expiresOn": half_second_after(now + 365 * DAY) }),
     "expiresOn"
 )]
 #[case::expiry_not_a_date_time(|_| json!({ "name": "t", "maxUses": 1, "expiresOn": "soon" }), "expiresOn")]
@@ -433,11 +470,12 @@ async fn create_token_refuses_a_repeated_member_name(
     Ok(())
 }
 
-/// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`: "The first token also creates the Agent Identity root".
+/// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`: "The first token also creates the Agent Identity root";
+/// a freshly started mock, like a DVLS that never used Agent Identity, holds none before it.
 #[tokio::test]
 async fn first_token_creates_the_root() -> anyhow::Result<()> {
-    let (app, now) = frozen_app()?;
-    app.state.lock().await.reset(now, false)?;
+    let (app, _) = pristine_app().await?;
+    assert!(app.state.lock().await.roots.is_empty());
     create_token(&app, json!({ "name": "t", "maxUses": 1 })).await?;
     let state = app.state.lock().await;
     assert_eq!(state.roots.iter().filter(|root| root.published).count(), 1);
@@ -448,12 +486,8 @@ async fn first_token_creates_the_root() -> anyhow::Result<()> {
 /// data encryption key is unavailable".
 #[tokio::test]
 async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result<()> {
-    let (app, now) = frozen_app()?;
-    {
-        let mut state = app.state.lock().await;
-        state.reset(now, false)?;
-        state.faults.root_key_unavailable = true;
-    }
+    let (app, _) = pristine_app().await?;
+    app.state.lock().await.faults.root_key_unavailable = true;
     let (status, body) = call(
         &app,
         Method::POST,
@@ -510,6 +544,24 @@ async fn list_tokens_sorts(#[case] query: &str, #[case] expected: [&str; 3]) -> 
     Ok(())
 }
 
+/// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens` sorts by the `createdOn` property, whatever the creation
+/// order: a token created at an earlier mock time comes first.
+#[rstest]
+#[case::ascending("?sortField=createdOn&sortOrder=1", ["earlier", "later"])]
+#[case::descending("?sortField=createdOn&sortOrder=0", ["later", "earlier"])]
+#[tokio::test]
+async fn list_tokens_sorts_by_creation_time(#[case] query: &str, #[case] expected: [&str; 2]) -> anyhow::Result<()> {
+    let (app, now) = frozen_app()?;
+    app.clock.freeze_at(now + 60);
+    create_token(&app, json!({ "name": "later", "maxUses": 1 })).await?;
+    app.clock.freeze_at(now);
+    create_token(&app, json!({ "name": "earlier", "maxUses": 1 })).await?;
+    let (status, page) = call(&app, Method::GET, &format!("/enrollment-token{query}"), None).await?;
+    assert_eq!(status, 200);
+    assert_eq!(names(&page), expected);
+    Ok(())
+}
+
 /// `AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken` returns `204`, then `404` "already deleted"; a deleted
 /// token is neither returned nor listed.
 #[tokio::test]
@@ -532,40 +584,61 @@ async fn deleted_token_is_gone() -> anyhow::Result<()> {
 
 // ==== Identities ====
 
-/// `AgentIdentityPublicApi_GetAgentIdentity` returns an `AgentIdentity` in the Full view.
+/// The `(thumbprint, serialNumber, validFrom, validUntil)` of a DER certificate, as `AgentIdentityCertificate` defines
+/// them: the thumbprint is the base64url of the SHA-256 of the DER encoding, and the serial number is hexadecimal.
+fn certificate_fields(der: &[u8]) -> anyhow::Result<(String, String, String, String)> {
+    use der::Decode as _;
+    use sha2::Digest as _;
+
+    let certificate = x509_cert::Certificate::from_der(der)?;
+    let tbs = certificate.tbs_certificate();
+    let serial: String = tbs
+        .serial_number()
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let serial = serial.trim_start_matches('0').to_owned();
+    let validity = tbs.validity();
+    let unix = |time: x509_cert::time::Time| i64::try_from(time.to_unix_duration().as_secs());
+    Ok((
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(der)),
+        serial,
+        rfc3339(unix(validity.not_before)?),
+        rfc3339(unix(validity.not_after)?),
+    ))
+}
+
+/// `AgentIdentityPublicApi_GetAgentIdentity` returns an `AgentIdentity` in the Full view; its certificate members
+/// describe the issued certificate chain.
 #[tokio::test]
 async fn get_identity_returns_the_full_view() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
-    let id = enroll(&app, json!({ "hostname": "host-a" })).await?;
-    let (root, token_id, thumbprint, serial) = {
-        let state = app.state.lock().await;
-        let identity = &state.identities[&id];
-        let cert = identity.current_cert().expect("current certificate");
-        (
-            state.issuing_root().thumbprint.clone(),
-            identity.token_id,
-            cert.thumbprint.clone(),
-            cert.serial.clone(),
-        )
-    };
+    let (id, chain) = enroll_with_chain(&app, json!({ "hostname": "host-a" })).await?;
+    let (thumbprint, serial, valid_from, valid_until) = certificate_fields(&chain[0])?;
+    let (root, ..) = certificate_fields(&chain[1])?;
+    // The certificate follows the default 90-day lifetime.
+    assert_eq!((&valid_from, &valid_until), (&rfc3339(now), &rfc3339(now + 90 * DAY)));
+    let token_id = app.state.lock().await.identities[&id].token_id;
+
     let (status, view) = call(&app, Method::GET, &format!("/{id}"), None).await?;
     assert_eq!(status, 200);
-    // The friendly name follows the default format `{hostname}`, and the certificate the default 90-day lifetime.
+    // The friendly name follows the default format `{hostname}`.
     let expected = json!({
         "id": id,
         "friendlyName": "host-a",
         "status": "Active",
         "isConnected": false,
         "lastSeenOn": rfc3339(now),
-        "certificate": { "issuerThumbprint": root, "validUntil": rfc3339(now + 90 * DAY) },
+        "certificate": { "issuerThumbprint": root, "validUntil": valid_until },
         "metadata": { "hostname": "host-a" },
         "certificates": [{
             "issuerThumbprint": root,
             "serialNumber": serial,
             "status": "Current",
             "thumbprint": thumbprint,
-            "validFrom": rfc3339(now),
-            "validUntil": rfc3339(now + 90 * DAY),
+            "validFrom": valid_from,
+            "validUntil": valid_until,
         }],
         "createdOn": rfc3339(now),
         "enrollmentTokenId": token_id,
@@ -651,8 +724,28 @@ async fn status_filter_selects_identities(#[case] query: &str, #[case] expected:
     Ok(())
 }
 
+/// `AgentIdentityPublicApi_GetAgentIdentities`' `lastSeenFrom` and `lastSeenTo` are inclusive date-times that keep
+/// their fraction of a second.
+#[rstest]
+#[case::from_the_same_second(|now| format!("?lastSeenFrom={}", rfc3339(now)), 1)]
+#[case::from_half_a_second_later(|now| format!("?lastSeenFrom={}", half_second_after(now)), 0)]
+#[case::to_the_same_second(|now| format!("?lastSeenTo={}", rfc3339(now)), 1)]
+#[case::to_half_a_second_earlier(|now| format!("?lastSeenTo={}", half_second_after(now - 1)), 0)]
+#[tokio::test]
+async fn last_seen_filters_keep_fractions_of_a_second(
+    #[case] query: fn(i64) -> String,
+    #[case] expected: u64,
+) -> anyhow::Result<()> {
+    let (app, now) = frozen_app()?;
+    app.state.lock().await.insert_connected_identity(now, DAY);
+    let (status, page) = call(&app, Method::GET, &query(now), None).await?;
+    assert_eq!((status, &page["totalCount"]), (200, &json!(expected)));
+    Ok(())
+}
+
 /// `AgentIdentityPublicApi_GetAgentIdentities`' `400`: invalid parameters, including enum values other than the
-/// PascalCase ones of `AgentIdentityView` and `AgentIdentityStatus`.
+/// PascalCase ones of `AgentIdentityView` and `AgentIdentityStatus`, and empty values, since no parameter sets
+/// `allowEmptyValue`.
 #[rstest]
 #[case::lowercase_status("?status=active", "status")]
 #[case::certificate_status("?status=Pending", "status")]
@@ -660,6 +753,10 @@ async fn status_filter_selects_identities(#[case] query: &str, #[case] expected:
 #[case::token_id("?enrollmentTokenId=build-agents", "enrollmentTokenId")]
 #[case::last_seen_from("?lastSeenFrom=yesterday", "lastSeenFrom")]
 #[case::last_seen_to("?lastSeenTo=1700000000", "lastSeenTo")]
+#[case::empty_view("?view=", "view")]
+#[case::empty_status("?status=", "status")]
+#[case::empty_token_id("?enrollmentTokenId=", "enrollmentTokenId")]
+#[case::empty_last_seen_from("?lastSeenFrom=", "lastSeenFrom")]
 #[tokio::test]
 async fn list_identities_refuses_an_invalid_filter(#[case] query: &str, #[case] field: &str) -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -812,7 +909,7 @@ async fn page_size_within_bounds_is_accepted(#[case] path: &str, #[case] page_si
 }
 
 /// The paging parameters' schemas: `pageNumber` ≥ 1, `pageSize` from 1 to its maximum, `sortOrder` 0 or 1, and
-/// `sortField` among the allowed values.
+/// `sortField` among the allowed values; an empty value is not absent, since no parameter sets `allowEmptyValue`.
 #[rstest]
 #[case::identity_page_size_101("?pageSize=101", "pageSize")]
 #[case::token_page_size_501("/enrollment-token?pageSize=501", "pageSize")]
@@ -822,6 +919,10 @@ async fn page_size_within_bounds_is_accepted(#[case] path: &str, #[case] page_si
 #[case::sort_order_two("?sortOrder=2", "sortOrder")]
 #[case::identity_sort_by_name("?sortField=name", "sortField")]
 #[case::token_sort_by_use_count("/enrollment-token?sortField=useCount", "sortField")]
+#[case::empty_page_number("?pageNumber=", "pageNumber")]
+#[case::empty_page_size("/enrollment-token?pageSize=", "pageSize")]
+#[case::empty_sort_order("?sortOrder=", "sortOrder")]
+#[case::empty_sort_field("/enrollment-token?sortField=", "sortField")]
 #[tokio::test]
 async fn paging_out_of_bounds_is_refused(#[case] path: &str, #[case] field: &str) -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -969,12 +1070,18 @@ async fn deadline_at_or_before_now_is_an_emergency(#[case] offset: i64) -> anyho
     Ok(())
 }
 
-/// `AgentIdentityPublicApi_StartAgentIdentityRotation`'s `422`: "deadlineOn is after the rotation maximum".
+/// `AgentIdentityPublicApi_StartAgentIdentityRotation`'s `422`: "deadlineOn is after the rotation maximum", even by a
+/// fraction of a second.
+#[rstest]
+#[case::one_second(|maximum| rfc3339(maximum + 1))]
+#[case::half_a_second(half_second_after)]
 #[tokio::test]
-async fn deadline_after_the_rotation_maximum_is_unprocessable() -> anyhow::Result<()> {
+async fn deadline_after_the_rotation_maximum_is_unprocessable(
+    #[case] deadline: fn(i64) -> String,
+) -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
     app.state.lock().await.insert_connected_identity(now, 3600);
-    let body = json!({ "deadlineOn": rfc3339(now + 3601) });
+    let body = json!({ "deadlineOn": deadline(now + 3600) });
     let (status, refused) = call(&app, Method::POST, "/rotation", Some(body)).await?;
     assert_eq!(status, 422);
     assert_public_api_error(&refused);
@@ -988,7 +1095,7 @@ fn rotation_in_progress(state: &mut State, now: i64) {
 }
 
 fn no_root_yet(state: &mut State, now: i64) {
-    state.reset(now, false).expect("reset succeeds");
+    *state = State::new(now);
 }
 
 fn root_key_unavailable(state: &mut State, _: i64) {
@@ -1116,8 +1223,16 @@ async fn leaf_lifetime_fault_overrides_the_setting() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Returns, for each stream, whether it received a rotation `RenewRequested` since the last call.
+fn rotation_notified(streams: &mut [UnboundedReceiver<StreamPush>]) -> Vec<bool> {
+    streams
+        .iter_mut()
+        .map(|stream| matches!(stream.try_recv(), Ok(StreamPush::RenewRequested("rotation"))))
+        .collect()
+}
+
 /// `AgentIdentitySettings.rotationNotificationsPerSecond`: "How many connected identities are notified per second during
-/// a root rotation".
+/// a root rotation"; an identity beyond the rate is notified in the next second.
 #[tokio::test]
 async fn rotation_notifies_at_the_settings_rate() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1128,12 +1243,15 @@ async fn rotation_notifies_at_the_settings_rate() -> anyhow::Result<()> {
         (0..3).map(|_| state.insert_connected_identity(now, DAY).1).collect()
     };
     assert_eq!(call(&app, Method::POST, "/rotation", Some(json!({}))).await?.0, 202);
-    let notified = streams
-        .iter_mut()
-        .map(|stream| stream.try_recv())
-        .filter(|push| matches!(push, Ok(StreamPush::RenewRequested("rotation"))))
-        .count();
-    assert_eq!(notified, 2);
+    let first_window = rotation_notified(&mut streams);
+    assert_eq!(first_window.iter().filter(|sent| **sent).count(), 2);
+
+    // The rate window is real time, while the mock clock stays frozen.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    assert_eq!(call(&app, Method::GET, "/rotation", None).await?.0, 200);
+    let second_window = rotation_notified(&mut streams);
+    let expected: Vec<bool> = first_window.iter().map(|sent| !sent).collect();
+    assert_eq!(second_window, expected);
     Ok(())
 }
 

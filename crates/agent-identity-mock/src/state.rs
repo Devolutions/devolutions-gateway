@@ -14,6 +14,7 @@ use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+use crate::app::nanos;
 use crate::ca::{self, RootCa};
 use crate::name_eval;
 use crate::oracle::{
@@ -192,8 +193,8 @@ pub(crate) struct Token {
     pub(crate) name: String,
     pub(crate) max_uses: u64,
     pub(crate) used_count: u64,
-    /// Unix seconds.
-    pub(crate) expires_at: i64,
+    /// Unix nanoseconds, since a management API date-time keeps its fraction of a second.
+    pub(crate) expires_at_ns: i128,
     pub(crate) friendly_name_format: Option<String>,
     pub(crate) config: Option<Value>,
     /// Unix seconds.
@@ -208,7 +209,7 @@ pub(crate) struct Token {
 impl Token {
     /// Returns the DVLS token state, where `Expired` wins over `Exhausted`.
     pub(crate) fn state(&self, now: i64) -> &'static str {
-        if now >= self.expires_at {
+        if nanos(now) >= self.expires_at_ns {
             "Expired"
         } else if self.used_count >= self.max_uses {
             "Exhausted"
@@ -413,8 +414,8 @@ pub(crate) struct Rotation {
     pub(crate) new_root: String,
     /// Unix seconds.
     pub(crate) started_at: i64,
-    /// Unix seconds.
-    pub(crate) deadline: i64,
+    /// Unix nanoseconds, since a management API date-time keeps its fraction of a second.
+    pub(crate) deadline_ns: i128,
 }
 
 #[derive(Default)]
@@ -462,7 +463,7 @@ pub struct State {
     issued_keys: HashMap<[u8; 32], IssuedKey>,
     /// All known roots; the issuing root is the last one, `published` gates
     /// `trust-anchor` listing.
-    /// Empty only after a reset without a root, until the first enrollment token creates one.
+    /// Empty until the first enrollment token creates a root, at startup or after a reset without a root.
     pub(crate) roots: Vec<RootCa>,
     pub(crate) rotation: Option<Rotation>,
     pub(crate) nonces: NonceStore,
@@ -493,15 +494,18 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(now: i64) -> anyhow::Result<Self> {
-        let root = RootCa::generate(1, now)?;
-        Ok(Self {
+    /// Creates the state of a DVLS that has never used Agent Identity: it holds no root until the first enrollment
+    /// token creates one ([DVLS intent][dvls], "Root CA").
+    ///
+    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    pub fn new(now: i64) -> Self {
+        Self {
             tokens: HashMap::new(),
             token_hashes: HashMap::new(),
             identities: HashMap::new(),
             cert_index: HashMap::new(),
             issued_keys: HashMap::new(),
-            roots: vec![root],
+            roots: Vec::new(),
             rotation: None,
             nonces: NonceStore::default(),
             faults: Faults::default(),
@@ -517,12 +521,22 @@ impl State {
             next_event_seq: 1,
             rotation_push_queue: VecDeque::new(),
             rotation_push_times: VecDeque::new(),
-            root_seq: 1,
+            root_seq: 0,
             serial_seq: 100,
             next_identity_seq: 1,
             next_token_seq: 1,
             last_created_at: now,
-        })
+        }
+    }
+
+    /// Creates the state a mock reset leaves: one published root.
+    #[cfg(test)]
+    pub(crate) fn with_root(now: i64) -> anyhow::Result<Self> {
+        let mut state = Self::new(now);
+        state
+            .ensure_root(now)
+            .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+        Ok(state)
     }
 
     pub(crate) fn record_event(&mut self, identity_id: Uuid, event_type: &str, fields: Value) {
@@ -900,7 +914,7 @@ impl State {
         if token.deleted_at.is_some() {
             return Err(ApiError::token_invalid());
         }
-        if now >= token.expires_at {
+        if nanos(now) >= token.expires_at_ns {
             return Err(ApiError::token_expired());
         }
         if token.used_count >= token.max_uses {
@@ -1197,7 +1211,8 @@ impl State {
     /// identity, or `now` if none exist.
     /// A rotation in progress, no root yet and an unavailable root key are conflicts, and a deadline after the maximum
     /// is unprocessable.
-    pub(crate) fn start_rotation(&mut self, deadline: Option<i64>, now: i64) -> Result<(), ApiError> {
+    /// The deadline is in Unix nanoseconds.
+    pub(crate) fn start_rotation(&mut self, deadline_ns: Option<i128>, now: i64) -> Result<(), ApiError> {
         if self.roots.is_empty() {
             return Err(ApiError::conflict("no root exists yet"));
         }
@@ -1217,8 +1232,9 @@ impl State {
             .map(|cert| cert.not_after)
             .max()
             .unwrap_or(now);
-        let deadline = deadline.unwrap_or(maximum);
-        if deadline > maximum {
+        let maximum = nanos(maximum);
+        let deadline_ns = deadline_ns.unwrap_or(maximum);
+        if deadline_ns > maximum {
             return Err(ApiError::unprocessable(
                 "rotation deadline exceeds the latest active old-root certificate",
             ));
@@ -1253,7 +1269,7 @@ impl State {
             old_root,
             new_root: new_root_thumbprint,
             started_at: now,
-            deadline,
+            deadline_ns,
         });
         self.drain_rotation_pushes(now);
         self.complete_rotation_if_ready(now);
@@ -1308,7 +1324,7 @@ impl State {
         let Some(rotation) = &self.rotation else {
             return;
         };
-        if now < rotation.deadline && self.active_identities_on_old_root(now) != 0 {
+        if nanos(now) < rotation.deadline_ns && self.active_identities_on_old_root(now) != 0 {
             return;
         }
         let old_root = rotation.old_root.clone();
@@ -1455,7 +1471,7 @@ impl State {
         &mut self,
         name: String,
         max_uses: u64,
-        expires_at: i64,
+        expires_at_ns: i128,
         friendly_name_format: Option<String>,
         config: Option<Value>,
         now: i64,
@@ -1467,7 +1483,7 @@ impl State {
             name,
             max_uses,
             used_count: 0,
-            expires_at,
+            expires_at_ns,
             friendly_name_format,
             config,
             created_at: now,
@@ -1651,7 +1667,7 @@ mod tests {
     #[test]
     fn rotation_destroys_the_old_signing_key() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
+        let mut state = State::with_root(now)?;
         let old_root = state.issuing_root().thumbprint.clone();
         state
             .start_rotation(None, now)
@@ -1674,8 +1690,8 @@ mod tests {
     #[test]
     fn rotation_completes_during_last_identity_revocation() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let mut state = State::with_root(now)?;
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1684,7 +1700,7 @@ mod tests {
             .expect("enrollment succeeds")
             .identity_id;
         state
-            .start_rotation(Some(now + 3600), now)
+            .start_rotation(Some(nanos(now + 3600)), now)
             .expect("rotation starts with one active old-root identity");
         assert!(state.rotation.is_some());
         state.revoke(identity_id, now).expect("revocation succeeds");
@@ -1701,8 +1717,8 @@ mod tests {
     #[test]
     fn old_root_certificate_counts_as_active_through_its_not_after() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let mut state = State::with_root(now)?;
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1726,8 +1742,8 @@ mod tests {
     #[test]
     fn config_burst_preserves_stream_and_control_pushes() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let mut state = State::with_root(now)?;
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1781,9 +1797,9 @@ mod tests {
     #[test]
     fn failed_issuance_does_not_consume_an_enrollment_use() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
+        let mut state = State::with_root(now)?;
         let expired_root = state.issuing_root().not_after;
-        let (token_id, secret) = state.create_token("test".to_owned(), 1, expired_root + 60, None, None, now);
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(expired_root + 60), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1804,9 +1820,9 @@ mod tests {
     #[test]
     fn unavailable_root_key_fails_enrollment() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
+        let mut state = State::with_root(now)?;
         state.faults.root_key_unavailable = true;
-        let (token_id, secret) = state.create_token("test".to_owned(), 1, now + 60, None, None, now);
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 60), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1822,9 +1838,11 @@ mod tests {
     #[test]
     fn issued_key_origin_and_time_survive_identity_deletion() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
-        let (owner_token_id, owner_secret) = state.create_token("owner".to_owned(), 1, now + 3600, None, None, now);
-        let (other_token_id, other_secret) = state.create_token("other".to_owned(), 1, now + 3600, None, None, now);
+        let mut state = State::with_root(now)?;
+        let (owner_token_id, owner_secret) =
+            state.create_token("owner".to_owned(), 1, nanos(now + 3600), None, None, now);
+        let (other_token_id, other_secret) =
+            state.create_token("other".to_owned(), 1, nanos(now + 3600), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1873,10 +1891,16 @@ mod tests {
     #[test]
     fn enrollment_includes_token_config_at_initial_revision() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
+        let mut state = State::with_root(now)?;
         let token_config = json!({ "psu_channel_url": "https://psu.example", "product_enabled": true });
-        let (token_id, secret) =
-            state.create_token("test".to_owned(), 1, now + 3600, None, Some(token_config.clone()), now);
+        let (token_id, secret) = state.create_token(
+            "test".to_owned(),
+            1,
+            nanos(now + 3600),
+            None,
+            Some(token_config.clone()),
+            now,
+        );
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1909,8 +1933,8 @@ mod tests {
     #[test]
     fn config_version_override_reaches_live_and_reconnecting_streams() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let mut state = State::new(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+        let mut state = State::with_root(now)?;
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;

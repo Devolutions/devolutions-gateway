@@ -28,7 +28,7 @@ impl App {
     #[cfg(test)]
     pub(crate) fn for_test() -> anyhow::Result<Arc<Self>> {
         let clock = MockClock::new();
-        let state = State::new(clock.now())?;
+        let state = State::with_root(clock.now())?;
         Ok(Arc::new(App {
             authority_id: Uuid::new_v4(),
             base_url: "https://127.0.0.1:1/mock".to_owned(),
@@ -60,9 +60,26 @@ pub(crate) fn rfc3339(unix_secs: i64) -> String {
     }
 }
 
-/// Parses a management API date-time to Unix seconds: RFC 3339, or ISO 8601 without an offset, which is UTC.
+const NANOS_PER_SEC: i128 = 1_000_000_000;
+
+/// Converts Unix seconds to Unix nanoseconds, the precision of management API date-times.
+pub(crate) fn nanos(unix_secs: i64) -> i128 {
+    i128::from(unix_secs) * NANOS_PER_SEC
+}
+
+/// RFC 3339 UTC with a `Z` designator and only the fractional digits the instant needs.
+pub(crate) fn rfc3339_nanos(unix_nanos: i128) -> String {
+    use time::format_description::well_known::Rfc3339;
+    match time::OffsetDateTime::from_unix_timestamp_nanos(unix_nanos) {
+        Ok(t) => t.format(&Rfc3339).unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned()),
+        Err(_) => "1970-01-01T00:00:00Z".to_owned(),
+    }
+}
+
+/// Parses a management API date-time to Unix nanoseconds, keeping its fraction of a second: RFC 3339, or ISO 8601
+/// without an offset, which is UTC.
 /// DVLS's OpenAPI document reads every date-time "UTC unless an offset is given".
-pub(crate) fn parse_date_time(value: &str) -> Option<i64> {
+pub(crate) fn parse_date_time(value: &str) -> Option<i128> {
     use time::format_description::well_known::{Iso8601, Rfc3339};
     time::OffsetDateTime::parse(value, &Rfc3339)
         .ok()
@@ -71,5 +88,5 @@ pub(crate) fn parse_date_time(value: &str) -> Option<i64> {
                 .ok()
                 .map(time::PrimitiveDateTime::assume_utc)
         })
-        .map(time::OffsetDateTime::unix_timestamp)
+        .map(time::OffsetDateTime::unix_timestamp_nanos)
 }

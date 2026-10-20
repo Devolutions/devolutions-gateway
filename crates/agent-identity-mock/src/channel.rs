@@ -645,7 +645,7 @@ mod tests {
         let (keyid, now) = {
             let mut state = app.state.lock().await;
             let now = app.now();
-            let (_, secret) = state.create_token("test".to_owned(), 1, now + 3600, None, None, now);
+            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
             let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
             let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
             let identity_id = state

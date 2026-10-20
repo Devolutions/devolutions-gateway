@@ -128,7 +128,7 @@ async fn main() -> anyhow::Result<()> {
     let base_url = format!("https://127.0.0.1:{}{}", local_addr.port(), args.path_prefix);
 
     let clock = MockClock::new();
-    let state = State::new(clock.now()).context("initial state")?;
+    let state = State::new(clock.now());
     let app = Arc::new(App {
         authority_id: Uuid::new_v4(),
         base_url: base_url.clone(),
