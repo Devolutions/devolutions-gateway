@@ -76,7 +76,7 @@ It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONT
 
 ### Identities
 
-- The management API names each record an identity (`/identities`), like the wire names; `/devices` stays free for a later view that groups identities by machine.
+- The management API names each record an identity, like the wire names; "device" stays free for a later view that groups identities by machine.
 - Each identity receives a strictly increasing creation key when inserted, and listings sort by that key; the creation time is non-decreasing in this order.
   A page walk returns every identity that existed when the walk started at least once, and exactly once when no enrollment overlaps the walk; only a deletion during the walk can make it miss one.
   An identity whose enrollment overlaps the walk may be missing from it or make the next page repeat one entry; clients deduplicate by `id`.
