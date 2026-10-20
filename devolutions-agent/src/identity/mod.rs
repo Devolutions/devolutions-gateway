@@ -202,7 +202,8 @@ impl RetryState {
     fn failed(&mut self, settings: &IdentityDebugConf, retry_after: Option<Duration>) {
         let now = Instant::now();
         let max_backoff = Duration::from_secs(settings.backoff_max_secs.unwrap_or(3600).max(1));
-        let exponential = Duration::from_secs((1u64 << self.failures.min(31)).min(max_backoff.as_secs()));
+        self.failures = self.failures.saturating_add(1);
+        let exponential = exponential_backoff(self.failures, max_backoff);
         let backoff = if settings.disable_jitter.unwrap_or_default() {
             exponential
         } else {
@@ -212,8 +213,12 @@ impl RetryState {
         };
         let delay = retry_delay(max_backoff, backoff, retry_after);
         self.next_attempt = now.checked_add(delay).or_else(|| now.checked_add(max_backoff));
-        self.failures = self.failures.saturating_add(1);
     }
+}
+
+/// Returns the unjittered delay after the `failure`-th consecutive failure, counted from 1, capped at `maximum`.
+fn exponential_backoff(failure: u32, maximum: Duration) -> Duration {
+    Duration::from_secs((1u64 << failure.min(31)).min(maximum.as_secs()))
 }
 
 fn retry_delay(maximum: Duration, backoff: Duration, retry_after: Option<Duration>) -> Duration {
@@ -440,6 +445,16 @@ mod tests {
         fn flush(&self) -> Result<(), sysevent::SysEventError> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn the_n_th_consecutive_failure_waits_2_to_the_n_seconds() {
+        // `crates/agent-identity/INTENT.md` ("Schedules"): a transient failure is retried after `2^n` seconds for the
+        // `n`-th consecutive failure, and never longer than 1 h.
+        let hour = Duration::from_secs(3600);
+        assert_eq!(exponential_backoff(1, hour), Duration::from_secs(2));
+        assert_eq!(exponential_backoff(3, hour), Duration::from_secs(8));
+        assert_eq!(exponential_backoff(40, hour), hour);
     }
 
     #[test]
