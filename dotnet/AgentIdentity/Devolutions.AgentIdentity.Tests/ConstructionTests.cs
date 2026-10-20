@@ -6,7 +6,7 @@ namespace Devolutions.AgentIdentity.Tests;
 // so nothing but validation may create one: otherwise a host could pass unvalidated agent input in its place.
 public class ConstructionTests
 {
-    public static TheoryData<Type> ValidatedTypes => new(typeof(AgentMetadata));
+    public static TheoryData<Type> ValidatedTypes => new(typeof(AgentMetadata), typeof(CertificateSigningRequest));
 
     [Theory]
     [MemberData(nameof(ValidatedTypes))]
