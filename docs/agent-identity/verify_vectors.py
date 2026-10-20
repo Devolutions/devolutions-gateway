@@ -104,7 +104,7 @@ sig_ok_cases = 0
 for case in V["http_signature"]["cases"]:
     name = case["name"]; h = case["headers"]
     if "signature_base" in case and case["expected"] == "ok":
-        # Negative cases carry the originally signed base (CONTRACT.md §6 note), so only positive cases are compared.
+        # Negative cases carry the originally signed base (see the file's `evaluation` field), so only positive cases are compared.
         mine = my_base(case) if "signature-input" in h and h["signature-input"].startswith("sig=") and h["signature-input"].count("sig") >= 1 else None
         if mine is not None and "," not in h["signature-input"].split(")")[0] and h["signature-input"].count("=(") == 1:
             check(mine == case["signature_base"], f"{name}: my signature base differs from vector")

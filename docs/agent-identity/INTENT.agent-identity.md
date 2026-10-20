@@ -158,7 +158,11 @@ Not intended:
 
 ### Conformance
 
-- Shared positive and negative test vectors keep signature and channel-proof behavior consistent across languages.
+- `docs/agent-identity/test-vectors.json` holds shared positive and negative vectors for request signatures and channel proofs, so that implementations in different languages check the same bytes.
+  Its `evaluation` field says how a verifier runs them.
+- A signer passes a vector when it reproduces the vector's `Signature-Input`, `Content-Digest`, signature base and channel-proof input, and its signature verifies under the vector's public key.
+  It need not reproduce the vector's signature bytes, because an ECDSA signer may be randomized.
+- `docs/agent-identity/verify_vectors.py` recomputes every vector with a library independent of any implementation, so that an error in the vectors cannot pass unnoticed into every implementation that agrees with them.
 - The mock authority and the agent implement the protocol independently and share only the channel schema, so that a misreading of the contract shared by both sides cannot pass the conformance suite.
 
 ## Implementation decisions

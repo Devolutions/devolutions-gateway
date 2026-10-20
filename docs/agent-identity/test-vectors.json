@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Shared test vectors for docs/agent-identity/CONTRACT.md. Timestamps are Unix seconds. Signatures are ECDSA P-256 / SHA-256, raw r||s, RFC 6979 deterministic, so a conforming signer reproduces them byte for byte. Keys are test-only.",
+  "description": "Shared test vectors for docs/agent-identity/CONTRACT.md. Timestamps are Unix seconds. Signatures are ECDSA P-256 / SHA-256, raw r||s, generated with RFC 6979 deterministic nonces. Keys are test-only.",
   "evaluation": "For http_signature.cases, a verifier holding the `registered` certificates, an empty nonce store and clock `now` returns `expected` (`ok` or a §5.4 error code) for a request to `endpoint` (renew, connect, confirm or check-in) with the case's `method`. `sequences` run their steps in order against one nonce store. Certificate validity follows §5.3 (renew grace), §5.5 and §5.6 (confirm and check-in: pending or current, unexpired, no grace) and §6 step 4. In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request. Key-reuse rules depend on server state and are covered by the conformance suite, not by these vectors.",
   "keys": [
     {

@@ -314,11 +314,6 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 - Nonces are committed only after the signature verifies (step 6), so garbage requests cannot burn nonces.
 - On `clock_skew`, the agent may retry once with `created` offset by `server_time − local_time`, taking `server_time` from the error body (§5.4) or, on a refused channel opening, from the `server-time` trailer (§7.4).
 - Implementations must enforce the policy checks above in addition to the RFC validation provided by their signature libraries.
-- Implementations must pass the shared test vectors in `docs/agent-identity/test-vectors.json`: a fixed P-256 key, fixed requests for all four tags, exact signature base strings, valid signatures, a channel proof (§7.3), negative cases including every cross-tag pair, and RFC 9421 Appendix B.2.4 as a sanity check.
-  A signer reproduces each vector's `Signature-Input`, `Content-Digest`, signature base and channel-proof input, and returns a signature that verifies under the vector's public key; it need not reproduce the vector's signature bytes, since an ECDSA signer may be randomized.
-  A verifier returns each vector's expected outcome.
-  In negative cases, `signature_base` is the base that was originally signed, not what a verifier recomputes from the altered request.
-  `docs/agent-identity/verify_vectors.py` recomputes every vector independently of any implementation.
 
 <a id="agent-identity-channel"></a>
 
