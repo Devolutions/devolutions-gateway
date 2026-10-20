@@ -4,10 +4,11 @@ use std::sync::Mutex;
 use anyhow::{Context as _, ensure};
 use p256::ecdsa::{Signature, VerifyingKey};
 use sha2::{Digest as _, Sha256};
+use win_api_wrappers::handle::Handle;
 use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{
     HLOCAL, LocalFree, NTE_BAD_KEYSET, NTE_BAD_PROVIDER, NTE_NO_MORE_ITEMS, NTE_NOT_FOUND, NTE_NOT_SUPPORTED,
-    NTE_PROV_DLL_NOT_FOUND, NTE_PROVIDER_DLL_FAIL,
+    NTE_PROV_DLL_NOT_FOUND, NTE_PROVIDER_DLL_FAIL, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Security::Authorization::{ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1};
 use windows::Win32::Security::Cryptography::{
@@ -20,6 +21,10 @@ use windows::Win32::Security::Cryptography::{
 };
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, OBJECT_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
+    SECURITY_ATTRIBUTES,
+};
+use windows::Win32::System::Threading::{
+    CreateMutexExW, ReleaseMutex, SYNCHRONIZATION_SYNCHRONIZE, WaitForSingleObject,
 };
 use windows::core::PCWSTR;
 
@@ -161,14 +166,64 @@ impl DeviceKey for StoreKey {
     }
 }
 
+const CREATION_LOCK_TIMEOUT_MS: u32 = 5_000;
+
+/// Serializes the creators of one key name across every process and session.
+///
+/// The provider persists a key only when it is finalized, and two creators that both started before either finalized both succeed.
+/// The existence check and the whole creation therefore run under this lock.
+/// The lock name derives from the key name, which only the key's owner knows before the key exists.
+struct CreationLock(Handle);
+
+impl CreationLock {
+    fn acquire(name: &str, user_sid: &str) -> anyhow::Result<Self> {
+        let descriptor = SecurityDescriptor::new(&key_descriptor_sddl(user_sid))?;
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>())?,
+            lpSecurityDescriptor: descriptor.0.0,
+            bInheritHandle: false.into(),
+        };
+        // Machine keys are shared by every session, so the lock lives in the global namespace.
+        let lock_name = wide(&format!("Global\\device-key-{name}"));
+        // SAFETY: The attributes, their descriptor and the NUL-terminated name remain live for the call.
+        let raw = unsafe {
+            CreateMutexExW(
+                Some(&attributes),
+                PCWSTR::from_raw(lock_name.as_ptr()),
+                0,
+                SYNCHRONIZATION_SYNCHRONIZE.0,
+            )
+        }
+        .context("open machine-key creation lock")?;
+        // SAFETY: CreateMutexExW returned a new handle that this lock owns.
+        let handle = unsafe { Handle::new_owned(raw) }.context("own machine-key creation lock")?;
+        // SAFETY: The handle is live and has SYNCHRONIZE access.
+        match unsafe { WaitForSingleObject(handle.raw(), CREATION_LOCK_TIMEOUT_MS) } {
+            // A holder that died either never finalized its key or left it for the existence check.
+            WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Self(handle)),
+            WAIT_TIMEOUT => anyhow::bail!("timed out waiting for machine-key creation lock after five seconds"),
+            _ => Err(std::io::Error::last_os_error()).context("wait for machine-key creation lock"),
+        }
+    }
+}
+
+impl Drop for CreationLock {
+    fn drop(&mut self) {
+        // SAFETY: The thread that acquired this lock owns the mutex until this release.
+        let _ = unsafe { ReleaseMutex(self.0.raw()) };
+    }
+}
+
 pub(super) fn generate(name: &str) -> anyhow::Result<Box<dyn DeviceKey>> {
     let provider = Provider::open()?;
-    let key = provider.create(name)?;
     let user = Token::current_process_token()
         .sid_and_attributes()
         .context("get process user SID")?
         .sid
         .to_string();
+    let _lock = CreationLock::acquire(name, &user)?;
+    ensure!(provider.key(name)?.is_none(), "machine key {name} already exists");
+    let key = provider.create(name)?;
     configure_and_finalize(&key, &user)?;
     if let Err(error) = ensure_trusted_descriptor(&key) {
         let _ = key.delete();
@@ -592,6 +647,33 @@ mod tests {
         );
         println!("SKIP: machine-key test requires elevation");
         Ok(false)
+    }
+
+    #[test]
+    fn creation_wait_for_another_creator_expires() -> anyhow::Result<()> {
+        use windows::Win32::System::Threading::CreateMutexW;
+
+        let name = crate::new_key_name("devolutions-agent-test");
+        let _cleanup = TestKey(name.clone());
+        let lock_name = wide(&format!("Global\\device-key-{name}"));
+        // SAFETY: The lock name is NUL-terminated.
+        let raw = unsafe { CreateMutexW(None, true, PCWSTR::from_raw(lock_name.as_ptr())) }?;
+        // SAFETY: CreateMutexW returned a new owned handle.
+        let _held = unsafe { Handle::new_owned(raw) }?;
+
+        let started = std::time::Instant::now();
+        let creator = std::thread::spawn(move || generate(&name).map(|_| ()));
+        let error = creator
+            .join()
+            .map_err(|_| anyhow::anyhow!("generator panicked"))?
+            .err()
+            .context("creation did not wait for the held lock")?;
+        assert!(
+            format!("{error:#}").contains("timed out waiting for machine-key creation lock"),
+            "{error:#}"
+        );
+        assert!(started.elapsed() >= std::time::Duration::from_secs(5));
+        Ok(())
     }
 
     #[test]

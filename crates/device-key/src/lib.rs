@@ -13,11 +13,10 @@ use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub enum KeyBackend {
+    /// Creating a key waits at most five seconds for another creator of the same name.
     WindowsSoftwareProvider,
     /// File operations wait at most five seconds for the key-directory lock.
-    File {
-        dir: Utf8PathBuf,
-    },
+    File { dir: Utf8PathBuf },
 }
 
 /// A requested backend is unavailable on this platform or machine.
