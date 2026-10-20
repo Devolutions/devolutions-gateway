@@ -114,6 +114,7 @@ The location and format of the files below are stable, because the conformance t
   When `confirm` succeeds, `pending` becomes `current` and the old key moves to `previous` until it is deleted.
 - During pending-key recovery (contract §8.1), the expired pending key moves to `previous` and the fresh key is recorded as `pending`, so that a restart resumes the recovery from the file.
   The agent keeps the expired pending key and the current key until the fresh pending certificate is confirmed, because either may still have to sign the recovery renewal; once the next `confirm` succeeds, it deletes the expired pending key, then promotes as usual.
+  If recovery must start again before a `confirm` succeeds, the newest expired pending key replaces the one in `previous` and the older one is deleted: the server holds the newest as pending or current, whichever state it reached, so it signs the next recovery renewal within grace.
 - If a pending key is unusable locally (missing from its store, refused when opened, or not matching the pending certificate's public key), the agent deletes the key and its slot before renewing with a fresh key.
   A failure to sign is not unusable: it is transient and retried.
 - Writes are atomic: write a temporary file, then rename it.
