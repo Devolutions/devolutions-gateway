@@ -1016,7 +1016,14 @@ async fn an_ended_task_leaves_the_working_files_of_another_task() {
     std::fs::create_dir_all(&workspace).expect("working files of a newer Task");
     std::fs::write(
         workspace.join("analysis.json"),
-        json!({ "owner": Uuid::new_v4().to_string(), "promptVersion": "p", "model": "m", "chunkLen": 1 }).to_string(),
+        json!({
+            "owner": Uuid::new_v4().to_string(),
+            "promptVersion": "p",
+            "model": "m",
+            "language": "English",
+            "chunkLen": 1,
+        })
+        .to_string(),
     )
     .expect("settings of a newer Task");
     let record = harness.task(task_id).await;
