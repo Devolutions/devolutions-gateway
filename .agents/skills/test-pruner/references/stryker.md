@@ -44,7 +44,7 @@ $name = @{}
 foreach ($t in $trx.TestRun.TestDefinitions.UnitTest) { $name[$t.id] = $t.name }
 $report.files.PSObject.Properties | Where-Object Name -like '*<Module>*' | ForEach-Object {
     foreach ($m in $_.Value.mutants | Where-Object status -eq 'Killed') {
-        foreach ($id in $m.killedBy) { "$($m.id)`tL$($m.location.start.line) $($m.mutatorName): $($m.replacement)`t$($name[$id])" }
+        foreach ($id in $m.killedBy) { "$($m.id)`tL$($m.location.start.line) $($m.mutatorName): $($m.replacement)`t$id`t$($name[$id])" }
     }
 }
 ```
@@ -54,7 +54,7 @@ Read kills only from `killedBy`; `coveredBy` lists the tests that ran against a 
 The script lists `Killed` mutants only; attribute a `Timeout` by applying it by hand, as below, and running its `coveredBy` tests one at a time before counting it caught.
 One row with an argument xUnit cannot serialize makes the whole theory one test id, so the matrix cannot tell its rows apart; `test-writer`'s C# forms avoid this.
 Stryker keeps no per-test output, so for assertion-level evidence apply the mutant by hand from `location` and `replacement`, run the killing test with `dotnet test --filter "FullyQualifiedName~<Class>.<Method>"`, and read the failing assertion from the stack trace.
-Mutant ids are assigned in order over the whole project, so an edit anywhere can renumber them, and lines shift with edits above; across runs match mutants by file, `mutatorName`, `replacement`, and the text of the mutated line in `files[<path>].source`.
+Mutant ids are assigned in order over the whole project, so an edit anywhere can renumber them, and lines shift with edits above; across runs match mutants by file, `mutatorName`, `replacement`, and the text of the mutated line in `files[<path>].source`, and mutants sharing all four by their order in the file, which test and comment edits leave unchanged.
 
 ## Rerun
 

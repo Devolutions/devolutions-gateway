@@ -4,7 +4,7 @@ The repository's C# tests are xUnit v2; each rule in `SKILL.md` takes these form
 
 Properties use CsCheck: compose `Gen<T>` with LINQ and `Sample` it; keep each type's generator in one static class of the test project so it is written once, as a crate keeps its strategies.
 CsCheck rather than FsCheck, because its generators shrink without per-type shrinkers, so a composed generator costs one declaration like a `proptest` strategy, and it adds no FSharp.Core to a C# test project.
-A failing `Sample` prints a seed; replay it with `seed:` or the `CsCheck_Seed` environment variable, and pin a regression by keeping the shrunk value as an `[InlineData]` row rather than the seed, since a generator change moves the seed's meaning.
+A failing `Sample` prints a seed; replay it with `seed:` or the `CsCheck_Seed` environment variable, and pin the failure by keeping the shrunk value in a regression test rather than the seed, since a generator change moves the seed's meaning.
 Where the C# code under test has no fuzz target, a parser of untrusted input gets a CsCheck property over malformed inputs, and a pull request comment says it is not fuzzed.
 
 No snapshot library is in use; write the expected value inline and, past a screen, in a sibling file copied into the test output.
