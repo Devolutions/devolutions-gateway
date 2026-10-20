@@ -703,6 +703,8 @@ const TESTS: &[Test] = &[
     a!(a_check_in_enables_channel, mock_only),
     a!(a_check_in_recovers_broken_channel, mock_only),
     a!(a_config_unknown_fields_and_hello_revision, mock_only).channel(),
+    a!(a_config_unsupported_version_keeps_stored_config, mock_only),
+    a!(a_config_unsupported_version_on_enroll_keeps_pending, mock_only),
     a!(a_multi_authority).second().channel(),
     a!(a_key_non_exportable),
     a!(a_file_backend_permissions),

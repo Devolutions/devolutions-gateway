@@ -4859,6 +4859,113 @@ pub(crate) async fn a_config_unknown_fields_and_hello_revision(ctx: Context) -> 
     .await
 }
 
+fn completed_check_ins(events: &[Value]) -> usize {
+    events
+        .iter()
+        .filter(|event| event["type"] == "check_in_received")
+        .count()
+}
+
+pub(crate) async fn a_config_unsupported_version_keeps_stored_config(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "channel_available": false })).await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let (id, state) = case.enrolled(&target, &token).await?;
+            let authority = field(&state, "authority_id")?.to_owned();
+            let stored = state["config"].clone();
+            let stored_revision = count(&stored, "revision")?;
+            ensure!(
+                stored["version"] == 1,
+                "agent stored an enrollment config whose version is not 1"
+            );
+            let started = Instant::now();
+            while completed_check_ins(&target.events(&id).await?) == 0 {
+                case.check_running()?;
+                ensure!(started.elapsed() < WAIT, "agent did not check in without a channel");
+                tokio::time::sleep(POLL).await;
+            }
+            target.faults(&json!({ "config_version": 2 })).await?;
+            let baseline = completed_check_ins(&target.events(&id).await?);
+            let started = Instant::now();
+            while completed_check_ins(&target.events(&id).await?) < baseline + 2 {
+                let current = case.state(&authority)?;
+                ensure!(
+                    current["config"] == stored && current.get("rejected").is_none(),
+                    "agent replaced its stored config with an unsupported config version"
+                );
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent stopped checking in after receiving an unsupported config version"
+                );
+                tokio::time::sleep(POLL).await;
+            }
+            ensure!(
+                case.state(&authority)?["config"] == stored,
+                "agent replaced its stored config with an unsupported config version"
+            );
+            target.faults(&json!({ "config_version": null })).await?;
+            let updated = case
+                .until_state(&target, &authority, &id, "the supported config version", |state| {
+                    state["config"]["version"] == 1
+                        && state["config"]["revision"]
+                            .as_u64()
+                            .is_some_and(|revision| revision > stored_revision)
+                })
+                .await?;
+            ensure!(
+                updated.get("rejected").is_none(),
+                "agent recorded a rejection after an unsupported config version"
+            );
+            Ok(())
+        })
+    })
+    .await
+}
+
+pub(crate) async fn a_config_unsupported_version_on_enroll_keeps_pending(ctx: Context) -> anyhow::Result<()> {
+    with_agent(ctx, None, true, |case| {
+        Box::pin(async move {
+            let target = case.ctx.target.clone();
+            target
+                .faults(&json!({ "channel_available": false, "config_version": 2 }))
+                .await?;
+            let token = new_token(case, 1).await?;
+            case.write_pending(&token.text)?;
+            let started = Instant::now();
+            while count(&target.requests(Some(&token)).await?, "enroll")? < 2 {
+                ensure!(
+                    case.pending_path().exists() && !case.has_stored_identity()?,
+                    "agent stored an identity or dropped its pending file for an unsupported config version"
+                );
+                case.check_running()?;
+                ensure!(
+                    started.elapsed() < WAIT,
+                    "agent did not retry an enrollment answered with an unsupported config version"
+                );
+                tokio::time::sleep(POLL).await;
+            }
+            ensure!(
+                case.pending_path().exists()
+                    && !case.has_stored_identity()?
+                    && !case.rejection_path_for(&token.text).exists(),
+                "agent treated an unsupported config version on enrollment as final"
+            );
+            target.faults(&json!({ "config_version": null })).await?;
+            let (_, state) = case.enrolled(&target, &token).await?;
+            ensure!(
+                state["config"]["version"] == 1,
+                "agent stored an enrollment config whose version is not 1"
+            );
+            Ok(())
+        })
+    })
+    .await
+}
+
 pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
