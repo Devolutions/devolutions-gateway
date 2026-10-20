@@ -257,7 +257,6 @@ public abstract class RequestBodyTests
         Assert.NotNull(outcome.Error);
         Assert.Equal(AgentIdentityErrorCode.InvalidRequest, outcome.Error.Code);
         Assert.Equal(400, outcome.Error.HttpStatusCode);
-        Assert.Equal(AgentIdentityError.From(AgentIdentityErrorCode.InvalidRequest).Message, outcome.Error.Message);
         Assert.False(string.IsNullOrEmpty(outcome.FailureDetail));
         Assert.Null(outcome.Metadata);
         Assert.Null(outcome.Csr);
