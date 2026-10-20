@@ -5,7 +5,7 @@
 //! The `tokenId` header carries a session that DVLS's login opens, and each operation requires one of DVLS's four
 //! permissions.
 //! Invalid parameters are `400` with a `PublicApiValidationError` body; every other error carries a `PublicApiError`
-//! body.
+//! body, except the `401` for a missing `tokenId` header, which has none.
 //!
 //! [dvls-intent]: ../../../../docs/agent-identity/INTENT.DVLS.md#management-api
 
@@ -14,7 +14,7 @@ use std::sync::Arc;
 use axum::body::Bytes;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Path, Query, Request, State as AxumState};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{MethodRouter, delete, get, patch, post};
@@ -176,18 +176,28 @@ fn requires(permission: Permission, route: MethodRouter<Arc<App>>) -> MethodRout
 }
 
 /// Authenticates the session the single `tokenId` header names.
+///
+/// Like DVLS, a request without a `tokenId` header is `401` without a body, and one whose `tokenId` names no open
+/// session is `401` with a fixed `PublicApiError`; so is one with several `tokenId` headers.
 async fn authenticate(AxumState(app): AxumState<Arc<App>>, mut request: Request, next: Next) -> Response {
     let mut token_ids = request.headers().get_all(TOKEN_ID_HEADER).iter();
     let token_id = match (token_ids.next(), token_ids.next()) {
+        (None, _) => return StatusCode::UNAUTHORIZED.into_response(),
         (Some(token_id), None) => token_id.to_str().ok().map(str::to_owned),
-        _ => None,
+        (Some(_), Some(_)) => None,
     };
     let permissions = match token_id {
         Some(token_id) => app.login.session_permissions(&token_id).await,
         None => None,
     };
     let Some(permissions) = permissions else {
-        return ManagementError::status(StatusCode::UNAUTHORIZED, "missing or invalid token").into_response();
+        // DVLS's `Content-Type` names a charset, which `Json` omits.
+        return (
+            StatusCode::UNAUTHORIZED,
+            [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+            r#"{"message":"Missing or invalid token"}"#,
+        )
+            .into_response();
     };
     request.extensions_mut().insert(permissions);
     next.run(request).await

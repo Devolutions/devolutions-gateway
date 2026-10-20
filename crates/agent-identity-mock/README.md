@@ -80,7 +80,7 @@ DVLS's login opens the sessions that authenticate the [management API](#manageme
 | Method | Path | Notes |
 |---|---|---|
 | POST | `/api/v1/login` | Body `LoginParameters`, `{ appKey, appSecret }`; 200 → `LoginResult`, `{ tokenId }`. A missing or empty `appKey` or `appSecret`, or a member `LoginParameters` does not define, is 400 with no body, and a wrong key or secret is 401 with a `PublicApiError` body, `{ "message" }`. |
-| POST | `/api/v1/logout` | Closes the session the `tokenId` header names; 200 with no body. |
+| POST | `/api/v1/logout` | Closes the session the `tokenId` header names; 200 with no `Content-Type` and no body, even without a `tokenId` or with one that names no open session, so a logout is idempotent. |
 
 Each login opens another session with a new random `tokenId`, and earlier sessions stay open.
 A `tokenId` expires `--token-lifetime-secs` after its login, however often it is used.
@@ -99,9 +99,11 @@ Any other key, including a scope with an empty or unknown permission name, fails
 ### Management API
 
 The [DVLS management API][dvls-management] has the operations, models, enums, paging and errors of DVLS's OpenAPI document for Agent Identity (`v1`, 14 operations), under `/api/v1/agent-identity`.
-A request carries the `tokenId` of a [session](#login) in the `tokenId` header; a missing, repeated, unknown, expired or logged-out `tokenId` is 401.
+A request carries the `tokenId` of a [session](#login) in the `tokenId` header.
+A request without one, even with an `Authorization` header, is 401 with no `Content-Type` and no body.
+A repeated, unknown, expired or logged-out `tokenId` is 401 with `Content-Type: application/json; charset=utf-8` and exactly `{"message":"Missing or invalid token"}`.
 Invalid parameters are 400 with a `PublicApiValidationError` body, `{ "errors": [ { "field", "message" } ] }`, where `field` names the camelCase member or query parameter, `config.<key>` for a token config entry, or is `null` for a malformed body or query string.
-Every other error is 401, 403, 404, 409 or 422 with a `PublicApiError` body, `{ "message" }`.
+Every other error is 403, 404, 409 or 422 with a `PublicApiError` body, `{ "message" }`.
 A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth, as CONTRACT.md §1 requires of agent-facing bodies.
 Each operation requires the permission the table lists, and a session without it gets 403 before the request is processed.
 

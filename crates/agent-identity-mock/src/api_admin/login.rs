@@ -100,6 +100,9 @@ pub(super) async fn login(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> R
 }
 
 /// `LoginPublicApi_LogOut`: closes the session the `tokenId` header names.
+///
+/// Like DVLS, it answers `200` without a body whether or not the header names an open session, so a logout is
+/// idempotent.
 pub(super) async fn logout(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap) -> StatusCode {
     if let Some(token_id) = headers.get(TOKEN_ID_HEADER).and_then(|value| value.to_str().ok()) {
         app.login.close_session(token_id).await;

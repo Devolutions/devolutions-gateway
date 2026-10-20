@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use axum::body::{Body, Bytes};
+use axum::http::header::CONTENT_TYPE;
 use axum::http::{Method, Request};
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
@@ -30,6 +31,9 @@ fn frozen_app() -> anyhow::Result<(Arc<App>, i64)> {
     Ok((app, now))
 }
 
+/// A response's status, `Content-Type` and raw body.
+type RawResponse = (u16, Option<String>, Bytes);
+
 /// Sends a request to `uri` and returns the status and the raw body.
 async fn request(
     app: &Arc<App>,
@@ -38,6 +42,18 @@ async fn request(
     headers: &[(&str, &str)],
     body: Option<String>,
 ) -> anyhow::Result<(u16, Bytes)> {
+    let (status, _, body) = exchange(app, method, uri, headers, body).await?;
+    Ok((status, body))
+}
+
+/// Sends a request to `uri` and returns the status, the `Content-Type` and the raw body.
+async fn exchange(
+    app: &Arc<App>,
+    method: Method,
+    uri: &str,
+    headers: &[(&str, &str)],
+    body: Option<String>,
+) -> anyhow::Result<RawResponse> {
     let mut request = Request::builder().method(method).uri(uri);
     for (name, value) in headers {
         request = request.header(*name, *value);
@@ -45,8 +61,14 @@ async fn request(
     let request = request.body(body.map_or_else(Body::empty, Body::from))?;
     let response = router(Arc::clone(app)).oneshot(request).await?;
     let status = response.status().as_u16();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .map(|value| value.to_str())
+        .transpose()?
+        .map(str::to_owned);
     let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await?;
-    Ok((status, bytes))
+    Ok((status, content_type, bytes))
 }
 
 /// Sends a management API request and returns the status and the JSON body, `null` when empty.
@@ -98,6 +120,37 @@ async fn call(app: &Arc<App>, method: Method, path: &str, body: Option<Value>) -
 /// Reads the settings in the session `token_id` names, an operation any session with View can call.
 async fn get_settings(app: &Arc<App>, token_id: &str) -> anyhow::Result<(u16, Value)> {
     send(app, Method::GET, "/settings", &[(TOKEN_ID_HEADER, token_id)], None).await
+}
+
+/// Reads the settings, a route that requires a session, with `headers` and returns the raw response.
+async fn get_settings_raw(app: &Arc<App>, headers: &[(&str, &str)]) -> anyhow::Result<RawResponse> {
+    exchange(app, Method::GET, &format!("{BASE_PATH}/settings"), headers, None).await
+}
+
+/// Posts DVLS's `LoginPublicApi_LogOut` with `headers` and returns the raw response.
+async fn logout(app: &Arc<App>, headers: &[(&str, &str)]) -> anyhow::Result<RawResponse> {
+    exchange(app, Method::POST, "/api/v1/logout", headers, None).await
+}
+
+// The following responses are DVLS's, as measured on DVLS built from RDM `c642866388b`.
+
+/// DVLS's `401` to a route that requires a session when the request has no `tokenId` header.
+fn no_token_id_401() -> RawResponse {
+    (401, None, Bytes::new())
+}
+
+/// DVLS's `401` to a route that requires a session when the request's `tokenId` names no open session.
+fn invalid_token_id_401() -> RawResponse {
+    (
+        401,
+        Some("application/json; charset=utf-8".to_owned()),
+        Bytes::from_static(br#"{"message":"Missing or invalid token"}"#),
+    )
+}
+
+/// DVLS's response to `LoginPublicApi_LogOut`, whether or not the `tokenId` header names an open session.
+fn logout_200() -> RawResponse {
+    (200, None, Bytes::new())
 }
 
 /// Returns the `field` of each `PublicApiFieldError` in a `PublicApiValidationError`.
@@ -208,8 +261,8 @@ async fn each_login_opens_another_session() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A DVLS `tokenId` expires 7 minutes after its login, however often it is used, and then is `401` like an unknown
-/// one; a new login opens another session.
+/// A DVLS `tokenId` expires 7 minutes after its login, however often it is used, and then gets DVLS's `401` for an
+/// unknown one; a new login opens another session.
 /// The lifetime runs on real time, which the mock clock that tests advance by days doesn't move.
 #[tokio::test(start_paused = true)]
 async fn token_id_expires_its_lifetime_after_login() -> anyhow::Result<()> {
@@ -221,35 +274,47 @@ async fn token_id_expires_its_lifetime_after_login() -> anyhow::Result<()> {
     tokio::time::advance(DVLS_TOKEN_LIFETIME - Duration::from_secs(1)).await;
     assert_eq!(get_settings(&app, &token_id).await?.0, 200);
     tokio::time::advance(Duration::from_secs(1)).await;
-    let (status, body) = get_settings(&app, &token_id).await?;
-    assert_eq!(status, 401);
-    assert_public_api_error(&body);
+    let response = get_settings_raw(&app, &[(TOKEN_ID_HEADER, &token_id)]).await?;
+    assert_eq!(response, invalid_token_id_401());
 
     let token_id = login(&app, APP_KEY).await?;
     assert_eq!(get_settings(&app, &token_id).await?.0, 200);
     Ok(())
 }
 
-/// `LoginPublicApi_LogOut` "closes the session of the token sent in the tokenId header" with `200` and no body, after
-/// which that `tokenId` is `401`; other sessions stay open.
+/// `LoginPublicApi_LogOut` "closes the session of the token sent in the tokenId header" with DVLS's logout response,
+/// after which that `tokenId` gets DVLS's `401` for an unknown one; other sessions stay open.
 #[tokio::test]
 async fn logout_closes_its_session_only() -> anyhow::Result<()> {
     let app = App::for_test()?;
     let closed = login(&app, APP_KEY).await?;
     let open = login(&app, APP_KEY).await?;
-    let response = request(
-        &app,
-        Method::POST,
-        "/api/v1/logout",
-        &[(TOKEN_ID_HEADER, &closed)],
-        None,
-    )
-    .await?;
-    assert_eq!(response, (200, Bytes::new()));
-    let (status, body) = get_settings(&app, &closed).await?;
-    assert_eq!(status, 401);
-    assert_public_api_error(&body);
+    assert_eq!(logout(&app, &[(TOKEN_ID_HEADER, &closed)]).await?, logout_200());
+    let response = get_settings_raw(&app, &[(TOKEN_ID_HEADER, &closed)]).await?;
+    assert_eq!(response, invalid_token_id_401());
     assert_eq!(get_settings(&app, &open).await?.0, 200);
+    Ok(())
+}
+
+/// `LoginPublicApi_LogOut` answers like DVLS when the `tokenId` header names no session or is missing.
+#[rstest]
+#[case::missing(&[])]
+#[case::unknown(&[(TOKEN_ID_HEADER, "other")])]
+#[tokio::test]
+async fn logout_without_a_session_is_200_without_body(#[case] headers: &[(&str, &str)]) -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    assert_eq!(logout(&app, headers).await?, logout_200());
+    Ok(())
+}
+
+/// `LoginPublicApi_LogOut` is idempotent: logging out a session again answers like the first logout.
+#[tokio::test]
+async fn logout_is_idempotent() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let token_id = login(&app, APP_KEY).await?;
+    let headers = [(TOKEN_ID_HEADER, token_id.as_str())];
+    logout(&app, &headers).await?;
+    assert_eq!(logout(&app, &headers).await?, logout_200());
     Ok(())
 }
 
@@ -422,25 +487,47 @@ async fn token_id_header_name_is_case_insensitive() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Each operation's `401` response: "Missing or invalid token", with a `PublicApiError` body.
-/// `{session}` stands for the `tokenId` of an open session.
-#[rstest]
-#[case::missing(&[])]
-#[case::bearer_authorization(&[("authorization", "Bearer admin")])]
-#[case::unknown_credential(&[("tokenId", "other")])]
-#[case::app_key(&[("tokenId", "admin")])]
-#[case::repeated_header(&[("tokenId", "{session}"), ("tokenId", "{session}")])]
+/// A route that requires a session answers a request without a `tokenId` header like DVLS.
 #[tokio::test]
-async fn missing_or_invalid_token_is_401(#[case] headers: &[(&str, &str)]) -> anyhow::Result<()> {
+async fn missing_token_id_is_401_without_body() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    assert_eq!(get_settings_raw(&app, &[]).await?, no_token_id_401());
+    Ok(())
+}
+
+/// A bearer `Authorization` header is no `tokenId` header, even when it carries an open session's `tokenId`.
+#[tokio::test]
+async fn bearer_authorization_is_a_missing_token_id() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let authorization = format!("Bearer {}", login(&app, APP_KEY).await?);
+    let response = get_settings_raw(&app, &[("authorization", &authorization)]).await?;
+    assert_eq!(response, no_token_id_401());
+    Ok(())
+}
+
+/// A route that requires a session answers a `tokenId` that no login returned like DVLS, while another session is open.
+#[rstest]
+#[case::unknown("other")]
+#[case::app_key(APP_KEY)]
+#[tokio::test]
+async fn unknown_token_id_is_401_missing_or_invalid_token(#[case] token_id: &str) -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    login(&app, APP_KEY).await?;
+    let response = get_settings_raw(&app, &[(TOKEN_ID_HEADER, token_id)]).await?;
+    assert_eq!(response, invalid_token_id_401());
+    Ok(())
+}
+
+/// A request that repeats the `tokenId` header names no session, even when each header names the same open one.
+#[tokio::test]
+async fn repeated_token_id_header_is_401_missing_or_invalid_token() -> anyhow::Result<()> {
     let app = App::for_test()?;
     let token_id = login(&app, APP_KEY).await?;
-    let headers: Vec<(&str, &str)> = headers
-        .iter()
-        .map(|&(name, value)| (name, if value == "{session}" { token_id.as_str() } else { value }))
-        .collect();
-    let (status, body) = send(&app, Method::GET, "/settings", &headers, None).await?;
-    assert_eq!(status, 401);
-    assert_public_api_error(&body);
+    let headers = [
+        (TOKEN_ID_HEADER, token_id.as_str()),
+        (TOKEN_ID_HEADER, token_id.as_str()),
+    ];
+    assert_eq!(get_settings_raw(&app, &headers).await?, invalid_token_id_401());
     Ok(())
 }
 
