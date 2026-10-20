@@ -55,6 +55,8 @@ public class EnrollmentTokenTests
 
     // The authority stores SecretHash when it creates a token,
     // and finds the token of an enroll request by the hash that ReadBearerToken returns.
+    // CONTRACT.md §2: the authority matches the `secret` text exactly,
+    // so both hashes are the SHA-256 of the 43 ASCII characters of the token's secret.
     [Fact]
     public void ReadBearerTokenReturnsTheSecretHashOfEveryCreatedToken()
     {
@@ -67,11 +69,14 @@ public class EnrollmentTokenTests
                 byte[] bytes = new byte[32];
                 random.NextBytes(bytes);
                 EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(bytes));
+                byte[] expected = SHA256.HashData(Encoding.ASCII.GetBytes(token.Value.Split('.')[2]));
 
-                EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken(["Bearer " + token.Value]);
+                EnrollmentAuthorizationResult result =
+                    EnrollmentAuthorization.ReadBearerToken(["Bearer " + token.Value]);
 
                 Assert.True(result.Succeeded);
-                Assert.Equal(token.SecretHash.ToArray(), result.SecretHash.ToArray());
+                Assert.Equal(expected, token.SecretHash.ToArray());
+                Assert.Equal(expected, result.SecretHash.ToArray());
             }
         }
     }
@@ -161,6 +166,7 @@ public class EnrollmentTokenTests
         EnrollmentTokenAssert.RevealsNoPart(exception.Message, SecretText);
     }
 
+    // Framework Design Guidelines: a null argument throws ArgumentNullException, whose ParamName names it.
     [Theory]
     [InlineData("productBaseUrl")]
     [InlineData("randomNumberGenerator")]

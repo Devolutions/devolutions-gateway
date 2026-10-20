@@ -22,8 +22,11 @@ public class AuthenticationTypeTests
 
     public static TheoryData<Type> AuthenticationTypeData => new(AuthenticationTypes);
 
+    // INTENT.md: code that acts for an identity takes it as a type only the signature check can create.
     // A public or protected constructor would let a caller build an identity from any values,
     // or a subclass of one with its own constructor.
+    // The other types carry an identity, or the opening that becomes one, out of the check.
+    // oracle: self-derived beyond AuthenticatedIdentity; sole guard for a public AuthenticationResult constructor.
     [Theory]
     [MemberData(nameof(AuthenticationTypeData))]
     public void TypeHasNoPublicOrProtectedConstructor(Type type)

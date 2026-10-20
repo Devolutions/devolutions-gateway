@@ -133,6 +133,7 @@ public class FriendlyNameFormatTests
         EnrollmentTokenAssert.RevealsNoPart(error, Bag, Secret);
     }
 
+    // INTENT.agent-identity.md, security invariant 9: tokens never appear in logs, not even partially.
     // A log statement may format the object of a valid format that holds a pasted token as literal text.
     [Fact]
     public void ToStringRevealsNoPartOfTheFormat()
@@ -164,6 +165,8 @@ public class FriendlyNameFormatTests
         Assert.Equal("Fleet", Evaluate("{token_name}", metadata));
     }
 
+    // INTENT.agent-identity.md, "Enrollment": the format holds the placeholders and the escaped braces,
+    // and a placeholder evaluates to its value.
     // A value is substituted once, so braces that a device reports are text, not placeholders.
     [Fact]
     public void EvaluatesBracesInAValueAsText()
@@ -286,6 +289,7 @@ public class FriendlyNameFormatTests
             FriendlyNameFormat.Default.Evaluate(withoutHostname, TokenName, IdentityId));
     }
 
+    // Framework Design Guidelines: a null argument throws ArgumentNullException, whose ParamName names it.
     [Fact]
     public void TryParseRejectsANullFormat()
     {
@@ -295,6 +299,7 @@ public class FriendlyNameFormatTests
         Assert.Equal("format", exception.ParamName);
     }
 
+    // Framework Design Guidelines: a null argument throws ArgumentNullException, whose ParamName names it.
     [Theory]
     [InlineData("metadata")]
     [InlineData("tokenName")]

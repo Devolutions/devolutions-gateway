@@ -35,6 +35,7 @@ public class RequestAuthenticatorVectorTests
         Assert.Equal(vector.Expected, outcome.Outcome);
     }
 
+    // test-vectors.json http_signature.sequences, with CONTRACT.md §6 step 6.
     // A replayed nonce must fail, a nonce must survive a request that failed verification,
     // and a nonce accepted for one operation must not authenticate another.
     [Theory]
@@ -53,6 +54,7 @@ public class RequestAuthenticatorVectorTests
         Assert.Equal(sequence.Expected, outcomes);
     }
 
+    // test-vectors.json signature_base of each case, as RFC 9421 §2.5 builds it.
     // A signature base that differs from the signed one in any byte fails verification for every agent,
     // and an accepted request does not show which byte the verifier would get wrong in another request.
     [Theory]

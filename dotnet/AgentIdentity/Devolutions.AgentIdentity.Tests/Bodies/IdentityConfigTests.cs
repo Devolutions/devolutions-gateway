@@ -110,11 +110,13 @@ public class IdentityConfigTests
     }
 
     // CONTRACT.md §1: JSON keys are snake_case, lowercase words of letters and digits joined by single underscores.
+    // zz09 starts and goes on with the last letter, and holds the first and last digits.
     [Theory]
     [InlineData("a")]
     [InlineData("psu_channel_url")]
     [InlineData("ipv4_address")]
     [InlineData("tier_2")]
+    [InlineData("zz09")]
     public void CreateAcceptsASnakeCaseProductFieldName(string name)
     {
         IdentityConfig config = IdentityConfig.Create(1, null, [new(name, TestJson.Parse("true"))]);
@@ -149,6 +151,7 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new(name, TestJson.Parse("2"))]);
     }
 
+    // RFC 8259 §4: an object member is a name and a value.
     // The default JsonElement holds no JSON value at all.
     [Fact]
     public void CreateRejectsAProductFieldWithoutAValue()
@@ -156,6 +159,7 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new("psu_channel_url", default)]);
     }
 
+    // RFC 8259 §4: a member name is a string, which a null name is not.
     [Fact]
     public void CreateRejectsAProductFieldWithoutAName()
     {
@@ -217,6 +221,7 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new(name, TestJson.Parse(value))]);
     }
 
+    // RFC 8259 §4 asks for unique names within an object, and §5 makes array elements values rather than members.
     // A name repeats only within one object, and an array element is no field, so it may be null.
     [Fact]
     public void CreateAcceptsAValueWhoseMembersFollowTheConventions()

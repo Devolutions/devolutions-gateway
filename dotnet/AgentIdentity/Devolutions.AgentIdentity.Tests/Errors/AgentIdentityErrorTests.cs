@@ -11,6 +11,25 @@ public class AgentIdentityErrorTests
 
     private const string ServerTimeText = "2026-09-24T12:00:00Z";
 
+    private static readonly string[] FrameworkLevelErrorNames =
+    [
+        nameof(AgentIdentityError.MalformedBody),
+        nameof(AgentIdentityError.UnknownRoute),
+        nameof(AgentIdentityError.MethodNotAllowed),
+        nameof(AgentIdentityError.BodyTooLarge),
+        nameof(AgentIdentityError.UnexpectedFailure),
+        nameof(AgentIdentityError.ServiceUnavailable),
+    ];
+
+    public static TheoryData<string> PublicErrorNames => new(PublicErrors.Select(error => error.Name));
+
+    // Every error that the library hands out: the error of each code, and each framework-level error.
+    private static IEnumerable<(string Name, AgentIdentityError Error)> PublicErrors =>
+    [
+        .. Enum.GetValues<AgentIdentityErrorCode>().Select(code => ($"From({code})", AgentIdentityError.From(code))),
+        .. FrameworkLevelErrorNames.Select(name => (name, FrameworkLevelError(name))),
+    ];
+
     // CONTRACT.md §5.4, column "HTTP".
     [Theory]
     [MemberData(nameof(AgentIdentityErrorCodeTests.HttpStatusCodes), MemberType = typeof(AgentIdentityErrorCodeTests))]
@@ -22,6 +41,8 @@ public class AgentIdentityErrorTests
         Assert.Equal(expectedStatus, error.HttpStatusCode);
     }
 
+    // CONTRACT.md §5.4 has no code for the default value of the enum.
+    // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
     [Fact]
     public void FromRejectsAnUndefinedCode()
     {
@@ -47,6 +68,17 @@ public class AgentIdentityErrorTests
 
         Assert.Equal(expectedStatus, error.HttpStatusCode);
         Assert.Equal(expectedCode, error.Code);
+    }
+
+    // CONTRACT.md §5.4: every error body, framework-level failures included, carries a `message` of human text.
+    // The contract leaves its wording free, so only its presence is checked.
+    [Theory]
+    [MemberData(nameof(PublicErrorNames))]
+    public void ErrorHasAHumanMessage(string name)
+    {
+        AgentIdentityError error = PublicErrors.Single(entry => entry.Name == name).Error;
+
+        Assert.False(string.IsNullOrWhiteSpace(error.Message));
     }
 
     // CONTRACT.md §5.4 body, with the snake_case keys and the timestamp format of §1.
@@ -80,7 +112,7 @@ public class AgentIdentityErrorTests
         Assert.Equal(expected, exception.StatusCode);
     }
 
-    // CONTRACT.md §7.4: trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`.
+    // CONTRACT.md §7.4: trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`, in no stated order.
     [Fact]
     public void RpcExceptionHasExactlyTheContractTrailers()
     {
@@ -88,7 +120,9 @@ public class AgentIdentityErrorTests
 
         Assert.Equal(
             [("error-code", "clock_skew"), ("server-time", ServerTimeText)],
-            exception.Trailers.Select(entry => (entry.Key, entry.Value)));
+            exception.Trailers
+                .Select(entry => (entry.Key, entry.Value))
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal));
     }
 
     private static AgentIdentityError FrameworkLevelError(string name)

@@ -29,6 +29,7 @@ public abstract class RequestBodyTests
 
     protected abstract RequestBodyOutcome Parse(byte[] utf8Json);
 
+    // CONTRACT.md §5.2, §5.3 and §5.6 define the bodies, and §3 their metadata.
     [Fact]
     public void AcceptsValidBody()
     {
@@ -51,6 +52,7 @@ public abstract class RequestBodyTests
         AssertValid(ParseText(Body(ValidMetadata, extraMembers)));
     }
 
+    // RFC 8259 §7: an escape stands for its character; AgentMetadata keeps the order in which the entries were sent.
     [Fact]
     public void ReturnsTheMetadataUnescapedInTheOrderSent()
     {
@@ -168,6 +170,7 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(ValidMetadata, "")[..^1]));
     }
 
+    // CONTRACT.md §5.2, §5.3 and §5.6: each body is a JSON object; RFC 8259 §2: a JSON text holds one value.
     [Theory]
     [InlineData("[]")]
     [InlineData(""" "body" """)]
@@ -208,6 +211,7 @@ public abstract class RequestBodyTests
         AssertInvalid(Parse([.. body[..index], .. bytes, .. body[(index + 1)..]]));
     }
 
+    // RFC 8259 §9 lets a parser limit nesting, and the Parse methods document a limit of 64 levels.
     // The body object is the first level, so 63 nested arrays reach 64 levels.
     [Fact]
     public void AcceptsNestingOf64Levels()
@@ -277,6 +281,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         return BodyWithCsr(Quote(ValidCsr), metadata, extraMembers);
     }
 
+    // test-vectors.json csr.valid gives the public key, which RFC 5480 §2 places in this SubjectPublicKeyInfo.
     [Fact]
     public void ReturnsTheValidatedCsr()
     {
@@ -360,6 +365,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         AssertOnlyCanonicalCsrIsValid(canonical, canonical.Replace('+', '-').Replace('/', '_'));
     }
 
+    // test-vectors.json csr.bad_self_signature expects invalid_request.
     [Fact]
     public void RejectsCsrThatFailsValidation()
     {
@@ -368,12 +374,14 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         AssertInvalid(ParseText(BodyWithCsr(Quote(csr), ValidMetadata)));
     }
 
+    // RFC 2986 §4: a CSR is a DER SEQUENCE, which no empty byte string encodes.
     [Fact]
     public void RejectsEmptyCsr()
     {
         AssertInvalid(ParseText(BodyWithCsr(Quote(""), ValidMetadata)));
     }
 
+    // CONTRACT.md §1 makes csr sent twice invalid_request.
     [Fact]
     public void RejectsRepeatedCsr()
     {

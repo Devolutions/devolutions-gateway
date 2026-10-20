@@ -1,3 +1,5 @@
+using System.Collections;
+
 namespace Devolutions.AgentIdentity.Tests;
 
 public class AgentMetadataTests
@@ -11,6 +13,7 @@ public class AgentMetadataTests
         Assert.Empty(metadata);
     }
 
+    // AgentMetadata documents that enumeration follows the order in which the agent sent the entries.
     [Fact]
     public void KeepsEveryEntryInTheOrderReceived()
     {
@@ -25,6 +28,33 @@ public class AgentMetadataTests
 
         Assert.Equal(entries, metadata);
         Assert.Equal("host", metadata["hostname"]);
+    }
+
+    // A host that enumerates the metadata through the non-generic IEnumerable sees the same entries in the same order.
+    // Enumerable.Cast would take the generic enumerator, so the loop calls the non-generic one.
+    [Fact]
+    public void NonGenericEnumerationKeepsEveryEntryInTheOrderReceived()
+    {
+        KeyValuePair<string, string>[] entries = [new("os_name", "Windows"), new("hostname", "host")];
+        AgentMetadata metadata = AssertValid(AgentMetadata.Validate(entries));
+
+        List<KeyValuePair<string, string>> enumerated = [];
+        foreach (KeyValuePair<string, string> entry in (IEnumerable)metadata)
+        {
+            enumerated.Add(entry);
+        }
+
+        Assert.Equal(entries, enumerated);
+    }
+
+    // IReadOnlyDictionary<TKey, TValue>.ContainsKey is true for a key received and false for any other.
+    [Fact]
+    public void ContainsOnlyTheKeysReceived()
+    {
+        AgentMetadata metadata = AssertValid(AgentMetadata.Validate([new("hostname", "host")]));
+
+        Assert.True(metadata.ContainsKey("hostname"));
+        Assert.False(metadata.ContainsKey("absent"));
     }
 
     // CONTRACT.md §3: at most 32 keys.
@@ -107,6 +137,7 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate([new("hostname", Repeat(unit, count) + suffix)]));
     }
 
+    // CONTRACT.md §3 gives a value no minimum length.
     [Fact]
     public void AcceptsEmptyValue()
     {
@@ -134,6 +165,7 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate([new("hostname", $"host{(char)codePoint}name")]));
     }
 
+    // CONTRACT.md §3 measures a value in UTF-8 bytes.
     // A string holding an unpaired surrogate is not Unicode text, so it has no UTF-8 encoding to measure or store.
     [Theory]
     [InlineData("lone high surrogate", 0x61, 0xD800, 0x62)]
@@ -163,6 +195,7 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate(EntriesOf1024Bytes(lastKey: "k150")));
     }
 
+    // CONTRACT.md §1 makes one metadata key sent twice invalid_request.
     // A later entry with the same key would silently replace the earlier one.
     [Fact]
     public void RejectsRepeatedKey()
@@ -170,6 +203,7 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate([new("hostname", "a"), new("hostname", "b")]));
     }
 
+    // MetadataValidationResult.FailureDetail documents that the detail quotes a key only when the key is valid.
     // The failure detail goes to host logs, so it must not copy an invalid key, which could hold a line break.
     [Fact]
     public void FailureDetailDoesNotQuoteAnInvalidKey()
@@ -180,6 +214,7 @@ public class AgentMetadataTests
         Assert.DoesNotContain("forged log line", result.FailureDetail);
     }
 
+    // AgentMetadata.Validate documents an ArgumentException for an entry with a null key or value.
     // A null key or value can only come from the host, since neither JSON nor protobuf metadata can hold one.
     [Theory]
     [InlineData(null, "value")]

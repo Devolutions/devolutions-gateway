@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -179,6 +180,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
+    // CONTRACT.md §6 step 4: a certificate that is neither current nor pending draws identity_unknown.
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task RetiredCertificateIsIdentityUnknown(AgentOperation operation)
@@ -240,6 +242,7 @@ public class RequestAuthenticatorTests
         Assert.Equal(expected, await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew)));
     }
 
+    // CONTRACT.md §6 states the window of step 3 and the certificate rule of step 4 against the same `now`.
     // A second reading of the clock between the window and the certificate check
     // would judge the certificate a day later, after it expired.
     [Fact]
@@ -249,6 +252,50 @@ public class RequestAuthenticatorTests
         TestAuthority authority = new(first, clock: new SteppingTimeProvider(first, first.AddDays(1)));
 
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(AgentOperation.Confirm)));
+    }
+
+    // CONTRACT.md §6 step 3: 0 < expires − created ≤ 300.
+    [Fact]
+    public async Task SignatureLifetimeOf300SecondsIsAccepted()
+    {
+        TestAuthority authority = new(Now);
+        string expires = (Now.ToUnixTimeSeconds() + 300).ToString(CultureInfo.InvariantCulture);
+
+        string outcome = await authority.OutcomeAsync(
+            authority.Valid(AgentOperation.Confirm).WithParameter("expires", expires));
+
+        Assert.Equal("ok", outcome);
+    }
+
+    // RFC 8941 §3.3.1: an integer may be negative, and RFC 9421 §2.3 serializes it with its sign.
+    // At the Unix epoch, all three inequalities of CONTRACT.md §6 step 3 hold,
+    // and the certificate of device-a, whose notBefore is later, is accepted because §6 does not check notBefore.
+    [Fact]
+    public async Task CreatedBeforeTheUnixEpochIsAccepted()
+    {
+        TestAuthority authority = new(DateTimeOffset.UnixEpoch);
+        TestRequest request = authority.Valid(AgentOperation.Confirm)
+            .WithParameter("created", "-1")
+            .WithParameter("expires", "59");
+
+        Assert.Equal("ok", await authority.OutcomeAsync(request));
+    }
+
+    // CONTRACT.md §6: the earliest failing step decides.
+    // RFC 8941 §3.3.5 allows a byte sequence of no bytes, in its canonical base64 of no characters,
+    // so the signature passes step 1 and its length fails only step 5, after the window of step 3.
+    [Fact]
+    public async Task SignatureOfNoBytesIsJudgedAfterTheWindow()
+    {
+        TestAuthority authority = new(Now);
+        string expires = (Now.ToUnixTimeSeconds() + 301).ToString(CultureInfo.InvariantCulture);
+        TestRequest request = authority.Valid(AgentOperation.Confirm).WithParameter("expires", expires);
+
+        string outcome = await authority.OutcomeAsync(
+            AgentOperation.Confirm,
+            request.ToHttpRequest(signature: ["sig=::"]));
+
+        Assert.Equal("clock_skew", outcome);
     }
 
     // CONTRACT.md §6 step 6: a pair the store already holds fails, whichever request recorded it.
@@ -289,8 +336,42 @@ public class RequestAuthenticatorTests
         Assert.Equal("signature_invalid", outcome);
     }
 
+    // A method that is not a token gives @method no value, so no signature base exists to verify,
+    // not even an empty one: RFC 9421 §2.5 ends every base with its @signature-params line.
+    [Fact]
+    public async Task MethodThatIsNotATokenCannotVerifyASignatureOverNoBytes()
+    {
+        TestAuthority authority = new(Now);
+        TestRequest request = authority.Valid(AgentOperation.Confirm) with { Method = "" };
+        using ECDsa key = ECDsa.Create();
+        key.ImportPkcs8PrivateKey(request.Key.PrivateKeyPkcs8, out _);
+        byte[] signature = key.SignData(
+            [],
+            HashAlgorithmName.SHA256,
+            DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+
+        string outcome = await authority.OutcomeAsync(
+            AgentOperation.Confirm,
+            request.ToHttpRequest(signature: [$"sig=:{Convert.ToBase64String(signature)}:"]));
+
+        Assert.Equal("signature_invalid", outcome);
+    }
+
+    // RFC 9110 §5.6.2: a token may hold any of these punctuation characters, besides letters and digits.
+    [Fact]
+    public async Task MethodWithEveryTokenPunctuationCharacterIsAccepted()
+    {
+        TestAuthority authority = new(Now);
+
+        string outcome = await authority.OutcomeAsync(
+            authority.Valid(AgentOperation.Confirm) with { Method = "A!#$%&'*+-.^_`|~" });
+
+        Assert.Equal("ok", outcome);
+    }
+
     // The shared intent, security invariant 7: signed opening headers never authenticate a stream on their own.
     // An uninitialized operation names no endpoint, so it authenticates nothing either.
+    // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
     [Theory]
     [InlineData(AgentOperation.Connect)]
     [InlineData((AgentOperation)0)]
@@ -307,6 +388,7 @@ public class RequestAuthenticatorTests
 
     // The registry answers by thumbprint, so another certificate is a host bug,
     // which must fail as a server error rather than draw an outcome the agent acts on.
+    // CONTRACT.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
     [Fact]
     public async Task RegistryReturningACertificateWithAnotherThumbprintThrows()
     {
@@ -321,6 +403,7 @@ public class RequestAuthenticatorTests
     }
 
     // CONTRACT.md §4: the authority issues P-256 leaves only, so any other registered bytes are a host bug.
+    // CONTRACT.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
     // The keyid is the thumbprint of those bytes, so the registry answers with what it was asked for.
     [Theory]
     [InlineData("a P-384 certificate")]

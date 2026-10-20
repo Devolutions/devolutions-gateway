@@ -74,6 +74,7 @@ public class AgentIdentityErrorCodeTests
         Assert.Equal(expected, code.ToGrpcStatusCode());
     }
 
+    // CONTRACT.md §5.4 lists exactly these ten codes.
     // A code added without a contract row would otherwise go untested in every table above.
     [Fact]
     public void EveryCodeHasAContractRow()
@@ -86,6 +87,7 @@ public class AgentIdentityErrorCodeTests
     }
 
     // The default value of the enum is not a code, so a mapping must not turn it into one.
+    // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
     [Fact]
     public void UndefinedCodeHasNoMapping()
     {

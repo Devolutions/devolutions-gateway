@@ -299,6 +299,8 @@ public class ChannelHandshakeTests
     // The late Hello is signature_invalid like the message failures, and comes before all of them, metadata included.
     // CONTRACT.md §7.3 step 4 then checks the payload, the correlation_id, the proof, then the metadata,
     // so an agent that has not proved the key never learns whether its metadata would pass.
+    // oracle: the code and the status come from these sections; the failure details are self-derived,
+    // the handshake's own output, and only they tell two signature_invalid failures apart.
     [Theory]
     [MemberData(nameof(FailurePairNames))]
     public async Task EarlierFailureWins(string earlier, string later)
@@ -366,6 +368,8 @@ public class ChannelHandshakeTests
     }
 
     // A retired certificate passes the handshake, but the revocation of its identity still blocks it.
+    // CONTRACT.md §7.4: revocation closes a stream still awaiting its Hello, with PERMISSION_DENIED and
+    // identity_revoked.
     [Fact]
     public async Task RevocationWinsOverARetiredCertificate()
     {
@@ -376,6 +380,8 @@ public class ChannelHandshakeTests
     }
 
     // Whatever the outcome, the handshake reads the registry once, for the certificate that opened the stream.
+    // CONTRACT.md §7.4 applies a deletion or a revocation since the opening to a stream awaiting its Hello,
+    // so the handshake reads the registry again; that it reads it exactly once is the library's API.
     [Theory]
     [MemberData(nameof(ScenarioNames))]
     public async Task HandshakeReadsTheRegistryOnce(string scenario)
@@ -390,6 +396,8 @@ public class ChannelHandshakeTests
 
     // The registry answers a thumbprint with the certificate issued under it, for its one identity,
     // so another answer is a host bug, which must fail as a server error rather than draw an outcome the agent acts on.
+    // CONTRACT.md §5.4: an unexpected server failure is the transient `500 unavailable`,
+    // whereas identity_unknown and identity_revoked are terminal; the exception type is the library's API.
     [Theory]
     [MemberData(nameof(WrongRegistryAnswersAndCalls))]
     public async Task RegistryAnsweringForAnotherCertificateOrIdentityThrows(string answer, string call)
@@ -403,6 +411,10 @@ public class ChannelHandshakeTests
 
     // The handshake ends when VerifyHelloAsync is called, not when the registry answers,
     // so a Hello timer that fires during the lookup cannot end the handshake a second time.
+    // CONTRACT.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
+    // Only the library's API decides that the call, not the answer, ends the handshake,
+    // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
+    // that the object's state does not allow.
     [Fact]
     public async Task HandshakeEndsBeforeTheRegistryAnswers()
     {
@@ -423,6 +435,11 @@ public class ChannelHandshakeTests
 
     // The timeout ends the handshake when HelloTimedOutAsync is called too,
     // so a Hello that arrives during its lookup cannot authenticate a stream that is being closed.
+    // CONTRACT.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both,
+    // and closes it for the timeout with signature_invalid.
+    // Only the library's API decides that the call, not the answer, ends the handshake,
+    // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
+    // that the object's state does not allow.
     [Fact]
     public async Task TimeoutEndsTheHandshakeBeforeTheRegistryAnswers()
     {
@@ -535,6 +552,7 @@ public class ChannelHandshakeTests
         Assert.Equal(hello.Id, welcome.CorrelationId);
     }
 
+    // channel.proto: Welcome carries server_time.
     // The clock reads the time of the opening twice, to judge the request and to start the Hello timeout,
     // then the time of the handshake, then a later time.
     // The Welcome carries the time at which the server answers, from that one reading.
@@ -554,6 +572,7 @@ public class ChannelHandshakeTests
         Assert.Equal(250_000_000, serverTime.Nanos);
     }
 
+    // CONTRACT.md §7.3 step 3: the Hello answers the Challenge id, with a proof over the challenge bytes.
     // The agent answers the Challenge it received, so the handshake holds the Hello to the id and bytes as sent,
     // even if the host later edits the message object it sent.
     [Fact]
@@ -640,6 +659,7 @@ public class ChannelHandshakeTests
         Assert.Equal(Timestamp.FromDateTimeOffset(answered), result.Welcome.Welcome.ServerTime);
     }
 
+    // CONTRACT.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
     // A Hello that the host passes on after the timeout fails, so a late host timer cannot let it through.
     [Fact]
     public async Task HelloOneTickAfterTheTimeoutIsSignatureInvalid()
@@ -653,6 +673,8 @@ public class ChannelHandshakeTests
         AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
+    // CONTRACT.md §7.3 steps 1 and 2: the agent sends nothing until it receives the Challenge,
+    // which the server sends once it has verified the opening request.
     // The agent can answer only once the opening is verified and its challenge sent,
     // so the 10 s run from the end of verification, not from the earlier reading that judged the request.
     // Here the registry and the nonce store take 5 s, and the Hello comes 10 s after them.
@@ -671,6 +693,9 @@ public class ChannelHandshakeTests
 
     // The first agent message decides the stream: a second one could retry a failed proof,
     // and a late Hello could authenticate a stream that already timed out.
+    // CONTRACT.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
+    // Only the library's API decides that a later call throws InvalidOperationException,
+    // which the Framework Design Guidelines give a call that the object's state does not allow.
     [Theory]
     [MemberData(nameof(HandshakeEndsThenAnotherCall))]
     public async Task HandshakeEndsAtTheFirstCall(string first, string second)

@@ -20,6 +20,7 @@ public class ConstructionTests
     // IdentityConfig.Create checks the host's values and returns the config itself rather than a result.
     public static TheoryData<Type> CheckedTypes => new([.. Validated, typeof(IdentityConfig)]);
 
+    // oracle: self-derived; sole guard for a public IdentityConfig constructor that takes already-serialized JSON.
     [Theory]
     [MemberData(nameof(CheckedTypes))]
     public void HasNoPublicOrProtectedConstructor(Type type)
@@ -34,6 +35,7 @@ public class ConstructionTests
 
     // Validation returns a result that holds the instance,
     // so a public static member returning the type itself would be another factory.
+    // oracle: self-derived; sole guard for a public AgentMetadata factory that skips validation.
     [Theory]
     [MemberData(nameof(ValidatedTypes))]
     public void NoPublicStaticMemberReturnsTheType(Type type)

@@ -9,7 +9,7 @@ public class StrictBase64Tests
     private const string Base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     private const string Base64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-    // CONTRACT.md: base64 is RFC 4648 §4 with padding, and base64url is RFC 4648 §5 without padding.
+    // CONTRACT.md Definitions: base64 is RFC 4648 §4 with padding, and base64url is RFC 4648 §5 without padding.
     private static readonly Dictionary<string, Codec> Codecs = new()
     {
         ["base64"] = new(StrictBase64.TryDecodeBase64, Base64Alphabet, "==", "=", base64 => base64),
@@ -106,6 +106,7 @@ public class StrictBase64Tests
         Assert.Equal(length, bytes.Length);
     }
 
+    // RFC 4648 §10 gives the length of each vector, which differs from the length each row requires.
     [Theory]
     [InlineData("base64", "", 1)]
     [InlineData("base64", "Zg==", 0)]
@@ -124,6 +125,7 @@ public class StrictBase64Tests
         Assert.False(Codecs[encoding].TryDecode(encoded, out _, length));
     }
 
+    // CONTRACT.md Definitions: base64url is RFC 4648 §5 without padding.
     [Theory]
     [MemberData(nameof(Base64UrlForms))]
     public void Base64UrlEncodesWithoutPadding(string expected, byte[] value)
@@ -154,7 +156,7 @@ public class StrictBase64Tests
         }
     }
 
-    // Only the final quantum has pad bits,
+    // RFC 4648 §3.5: only the final quantum has pad bits, which a canonical encoding sets to zero,
     // so trying every final quantum of one or two bytes checks that each value has exactly one accepted encoding.
     [Theory]
     [InlineData("base64")]

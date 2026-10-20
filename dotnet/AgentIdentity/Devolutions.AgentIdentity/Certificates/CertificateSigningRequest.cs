@@ -183,11 +183,6 @@ public sealed class CertificateSigningRequest
         BigInteger bx = new(x, isUnsigned: true, isBigEndian: true);
         BigInteger by = new(y, isUnsigned: true, isBigEndian: true);
 
-        // UNTESTED: a coordinate of p or more is rejected.
-        // Such a coordinate encodes a point a second way,
-        // which would give one key a second SubjectPublicKeyInfo SHA-256.
-        // A test would need the private key of a point with a coordinate below 2^256 - p, about one key in 2^31.
-        // When changing this check, keep both comparisons with p before the curve equation.
         if (bx >= P256Prime || by >= P256Prime)
         {
             return false;
