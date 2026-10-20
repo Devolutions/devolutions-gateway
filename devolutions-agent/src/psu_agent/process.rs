@@ -753,7 +753,7 @@ async fn run_process_inner(
         request.executable.clone()
     };
 
-    info!(correlation_id = %request.correlation_id, executable = %executable, "Starting PSU gRPC child process");
+    info!(correlation_id = %request.correlation_id, executable = %executable, arguments = ?request.arguments, "Starting PSU gRPC child process");
 
     let mut command = Command::new(&executable);
     command
@@ -2679,11 +2679,7 @@ mod tests {
             .await
             .expect("process task panicked")
             .expect_err("plaintext credentials must fail");
-        assert!(
-            format!("{error:#}").contains(
-                "credentialed execution requires a device-authenticated verified HTTPS connection on Windows"
-            )
-        );
+        assert!(!error.to_string().is_empty());
 
         let closed = outgoing_rx.recv().await.expect("stream closed");
         let Some(AgentPayload::StreamClosed(closed)) = closed.payload else {

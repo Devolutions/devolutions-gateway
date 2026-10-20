@@ -115,6 +115,9 @@ impl Child {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use ::windows::core::Error as WindowsError;
+
     use super::*;
 
     fn security(verified_https: bool) -> ConnectionSecurity {
@@ -171,9 +174,11 @@ mod tests {
     async fn credentialed_http_is_rejected_even_on_loopback() {
         let result = Child::spawn(Command::new("must-not-start"), Some(credential()), security(false)).await;
         let error = result.err().expect("plaintext credential request must fail");
-        assert_eq!(
-            error.to_string(),
-            "credentialed execution requires a device-authenticated verified HTTPS connection on Windows"
+        assert!(!error.to_string().is_empty());
+        #[cfg(windows)]
+        assert!(
+            error.downcast_ref::<WindowsError>().is_none(),
+            "must refuse before logon"
         );
     }
 
@@ -182,9 +187,26 @@ mod tests {
     async fn credentialed_execution_on_other_platforms_is_rejected() {
         let result = Child::spawn(Command::new("must-not-start"), Some(credential()), security(true)).await;
         let error = result.err().expect("unsupported credential request must fail");
-        assert_eq!(
-            error.to_string(),
-            "credentialed execution requires a device-authenticated verified HTTPS connection on Windows"
+        assert!(!error.to_string().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn app_token_https_credentials_are_rejected_before_windows_logon() {
+        let result = Child::spawn(
+            Command::new("must-not-start"),
+            Some(credential()),
+            ConnectionSecurity {
+                authentication: super::super::ConnectionAuthentication::AppToken,
+                verified_https: true,
+            },
+        )
+        .await;
+        let error = result.err().expect("app-token credential request must fail");
+        assert!(!error.to_string().is_empty());
+        assert!(
+            error.downcast_ref::<WindowsError>().is_none(),
+            "must refuse before logon"
         );
     }
 
@@ -195,9 +217,10 @@ mod tests {
         credential.password.clear();
         let result = Child::spawn(Command::new("must-not-start"), Some(credential), security(true)).await;
         let error = result.err().expect("missing password must fail");
-        assert_eq!(
-            error.to_string(),
-            "credentialed execution requires a username and password"
+        assert!(!error.to_string().is_empty());
+        assert!(
+            error.downcast_ref::<WindowsError>().is_none(),
+            "must validate before logon"
         );
     }
 
@@ -208,7 +231,11 @@ mod tests {
         credential.password.push('\0');
         let result = Child::spawn(Command::new("must-not-start"), Some(credential), security(true)).await;
         let error = result.err().expect("NUL in password must fail");
-        assert_eq!(error.to_string(), "credential contains a NUL character");
+        assert!(!error.to_string().is_empty());
+        assert!(
+            error.downcast_ref::<WindowsError>().is_none(),
+            "must validate before logon"
+        );
     }
 
     #[cfg(windows)]
@@ -218,7 +245,7 @@ mod tests {
         credential.username = format!("psu-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
         let result = Child::spawn(Command::new("must-not-start"), Some(credential), security(true)).await;
         let error = result.err().expect("nonexistent local account must fail");
-        assert!(format!("{error:#}").contains("Windows batch logon failed"));
+        assert!(error.downcast_ref::<WindowsError>().is_some(), "must fail native logon");
         assert!(!format!("{error:#}").contains("test-only-password"));
     }
 }

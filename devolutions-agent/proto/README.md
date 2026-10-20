@@ -20,12 +20,7 @@ The executable must be a native Windows program, such as `pwsh.exe` or `powershe
 The user's profile is not loaded, no interactive desktop or UAC prompt is created, and the process receives the user's base environment plus the requested overrides.
 Run As changes the process identity; it does not bypass Windows logon policy or grant additional privileges.
 
-Windows briefly creates an always-suspended copy of the Agent as a pipe-handle donor so concurrent process launches cannot inherit another job's streams.
 The target account also needs read and execute access to the Agent executable.
-Both processes use the explicit target token, and their user SID and logon-session identifier are checked before the child can run.
-The donor is terminated after launch or failure and belongs to a kill-on-close job for Agent-exit cleanup.
-Executable and working-directory lookup impersonates the target account only during process creation, including access to UNC shares.
-Process-exit notifications use a Windows registered wait rather than occupying a Tokio blocking worker for the lifetime of the job.
 
 Credentials travel only in the protobuf message on the authenticated TLS stream, not in metadata, environment variables, command-line arguments, or configuration.
 The agent redacts the credential message in debug output and clears its decoded credential strings and temporary UTF-16 password after use.

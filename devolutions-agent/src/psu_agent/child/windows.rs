@@ -52,7 +52,9 @@ impl Child {
             Some(".")
         };
         let domain = domain.map(WideString::from).unwrap_or_default();
-        let mut password = Zeroizing::new(credential.password.encode_utf16().collect::<Vec<_>>());
+        // UTF-8 byte length bounds the UTF-16 unit count, so extending and adding NUL cannot reallocate.
+        let mut password = Zeroizing::new(Vec::with_capacity(credential.password.len() + 1));
+        password.extend(credential.password.encode_utf16());
         password.push(0);
         let mut token = HANDLE::default();
         // UNTESTED: Successful batch logon must select the requested local, domain, or UPN account.
@@ -113,6 +115,7 @@ impl Child {
         let mut information = PROCESS_INFORMATION::default();
 
         let created = {
+            // UNTESTED: Distinct-account creation must retain the required caller privileges while impersonating.
             let _impersonation = token.impersonate().context("failed to impersonate process account")?;
             #[cfg(test)]
             tests::BEFORE_CREATE.with(|callback| {

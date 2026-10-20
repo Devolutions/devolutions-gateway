@@ -748,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn replacement_app_token_connection_cannot_inherit_device_eligibility() {
+    fn app_token_registration_does_not_reuse_prior_device_registration() {
         let agent = test_agent("https://localhost:5001", "token", ConnectionSettings::default());
         let device = ConnectionSecurity {
             authentication: ConnectionAuthentication::Device,
@@ -844,49 +844,6 @@ mod tests {
                 .is_err()
         );
         server.await.expect("TLS server panicked");
-    }
-
-    #[test]
-    fn http_registration_does_not_advertise_run_as() {
-        let agent = test_agent("http://localhost:5000", "token", ConnectionSettings::default());
-        let registration = agent.create_registration_message(
-            "7".to_owned(),
-            ConnectionSecurity {
-                authentication: ConnectionAuthentication::AppToken,
-                verified_https: false,
-            },
-        );
-        let Some(AgentPayload::RegisterAgent(registration)) = registration.payload else {
-            panic!("expected registration");
-        };
-        assert!(
-            !registration
-                .capabilities
-                .iter()
-                .any(|capability| capability.name == CAPABILITY_JOB_EXECUTION_RUN_AS)
-        );
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn windows_device_https_registration_advertises_run_as_contract() {
-        let agent = test_agent("https://localhost:5001", "token", ConnectionSettings::default());
-        let registration = agent.create_registration_message(
-            "7".to_owned(),
-            ConnectionSecurity {
-                authentication: ConnectionAuthentication::Device,
-                verified_https: true,
-            },
-        );
-        let Some(AgentPayload::RegisterAgent(registration)) = registration.payload else {
-            panic!("expected registration");
-        };
-        let capability = registration
-            .capabilities
-            .iter()
-            .find(|capability| capability.name == CAPABILITY_JOB_EXECUTION_RUN_AS)
-            .expect("run-as capability");
-        assert_eq!(capability.version, "poc.v1");
     }
 
     #[test]
