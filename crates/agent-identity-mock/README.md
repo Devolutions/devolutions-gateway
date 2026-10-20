@@ -153,7 +153,7 @@ The old root's signing key is discarded when rotation starts.
 `src/oracle/` is a test-only verifier of CONTRACT.md §4, §6 and §7.3, written independently of the agent's RFC 9421 library and implementation and not intended for production use.
 For signed requests it checks, in order, (1) strict syntax, parameters, algorithm and covered components, (2) endpoint tag, (3) signature window, (4) certificate registration, status, revocation and validity, (5) renew/check-in content digest and P-256 signature, then (6) replay nonce insertion only after verification.
 For channels it verifies the P-256 proof over the §7.3 domain separator, zero byte, challenge and connect nonce; the channel service owns the handshake and state updates.
-For CSRs it checks the PKCS#10 structure, P-256 subject key, required signature algorithm and self-signature while ignoring the subject and extensions (§4).
+For CSRs it checks the PKCS#10 structure, P-256 subject key, required signature algorithm and self-signature over the request info as received, while ignoring the subject and attributes, whose contents need not be canonical DER (§4).
 The RFC 9421 Appendix B.2.4 vector exercises its raw P-256 verifier without widening the request profile.
 Its crate-local runtime API is `verify_request`, `verify_channel_proof`, `check_csr`, `content_digest_header`, `Endpoint`, `Rejection`, `RegisteredCert`, `CertStatus`, `NonceStore` and `AuthenticatedIdentity`.
 Vector tests also use the test-only `verify_raw_signature` entry to check the RFC example and the positive fixtures' exact signed bases.
