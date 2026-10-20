@@ -21,7 +21,8 @@
 
 ## Schedules
 
-- An identity renews at `notBefore + 2/3 × lifetime` plus a jitter drawn uniformly from `[0, lifetime / 12]`, or as soon as the authority requests a renewal.
+- An identity renews `2/3 × lifetime` after its certificate's anchor, plus a jitter drawn uniformly from `[0, lifetime / 12]`, or as soon as the authority requests a renewal.
+  The lifetime is `notAfter − notBefore`; the anchor is the earlier of `notBefore` and the moment the agent stored or loaded the certificate, so that an authority clock ahead of the agent's never delays renewal.
 - A transient failure is retried after `2^n` seconds for the `n`-th consecutive failure, multiplied by a jitter drawn uniformly from `[0.5, 1.5]`, waiting at least a `Retry-After` delay when the authority sends one, and never longer than 1 h.
   Retry state lives in memory, so a restart retries at once.
 - Check-in runs only while the identity has no authenticated stream:
