@@ -81,8 +81,8 @@ struct Runner {
     renewal_requested: bool,
     /// Whether pending-key recovery signs with the current key after the expired pending key drew `identity_unknown`.
     recovery_signs_with_current: bool,
-    /// The renewal jitter sample, drawn once for each current key.
-    renewal_jitter: Option<(String, f64)>,
+    /// The renewal schedule inputs of the current key, fixed when this run first holds it.
+    renewal_basis: Option<RenewalBasis>,
     /// `None` while a check-in waits for a renewal to be confirmed.
     next_check_in: Option<Instant>,
     check_in_after_confirm: bool,
@@ -101,7 +101,7 @@ impl Runner {
             local_retry: RetryState::default(),
             renewal_requested: false,
             recovery_signs_with_current: false,
-            renewal_jitter: None,
+            renewal_basis: None,
             next_check_in: None,
             check_in_after_confirm: false,
             channel_url: None,
@@ -425,20 +425,20 @@ impl Runner {
     fn renewal_at(&mut self, identity: &StoredIdentity, now: Instant) -> anyhow::Result<Instant> {
         let current = &identity.keys.current;
         let (not_before, not_after) = client::leaf_validity(certificate_chain(current)?)?;
-        let jitter = match &self.renewal_jitter {
-            Some((key_name, jitter)) if *key_name == current.key_name => *jitter,
-            _ => {
-                let jitter = if self.shared.settings.disable_jitter.unwrap_or_default() {
+        let basis = match &self.renewal_basis {
+            Some(basis) if basis.key_name == current.key_name => basis,
+            _ => self.renewal_basis.insert(RenewalBasis {
+                key_name: current.key_name.clone(),
+                loaded_at: SystemTime::now(),
+                jitter: if self.shared.settings.disable_jitter.unwrap_or_default() {
                     0.0
                 } else {
                     rand::thread_rng().gen_range(0.0..=1.0)
-                };
-                self.renewal_jitter = Some((current.key_name.clone(), jitter));
-                jitter
-            }
+                },
+            }),
         };
         let renewal_after = self.shared.settings.renewal_after_secs.map(Duration::from_secs);
-        let renewal_at = schedule::renewal_time(not_before, not_after, renewal_after, jitter);
+        let renewal_at = schedule::renewal_time(not_before, not_after, basis.loaded_at, renewal_after, basis.jitter);
         Ok(instant_at(renewal_at, now))
     }
 
@@ -493,6 +493,13 @@ impl Runner {
             .channel_failure_check_in_after_secs
             .map_or(CHANNEL_FAILURE_CHECK_IN_AFTER, Duration::from_secs)
     }
+}
+
+/// The schedule inputs of one current key: when this run first held it and its renewal jitter sample.
+struct RenewalBasis {
+    key_name: String,
+    loaded_at: SystemTime,
+    jitter: f64,
 }
 
 fn certificate_chain(record: &KeyRecord) -> anyhow::Result<&[String]> {
