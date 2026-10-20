@@ -1,0 +1,140 @@
+// AgentControl public interface from revision 406a74ce561b72ba8c03331558965c87ba8b6ed1.
+// Only ProcessCredential and StartProcess field 9 extend it, per CONTRACT.md "Credential message".
+syntax = "proto3";
+
+package devolutions.psu.agent.poc.v1;
+
+option csharp_namespace = "Devolutions.Psu.Agent.Protocol";
+
+import "google/protobuf/timestamp.proto";
+
+service AgentControl {
+  rpc Connect(stream AgentMessage) returns (stream ServerMessage);
+}
+
+message AgentMessage {
+  string request_id = 1;
+  string agent_id = 2;
+  string connection_id = 3;
+  google.protobuf.Timestamp timestamp = 4;
+
+  oneof payload {
+    RegisterAgent register_agent = 10;
+    AgentHeartbeat heartbeat = 11;
+    ProcessStarted process_started = 20;
+    ProcessCompleted process_completed = 21;
+    StreamData stream_data = 40;
+    StreamClosed stream_closed = 41;
+    AgentDiagnostic diagnostic = 50;
+  }
+}
+
+message ServerMessage {
+  string request_id = 1;
+  string connection_id = 2;
+  google.protobuf.Timestamp timestamp = 3;
+
+  oneof payload {
+    RegisterAccepted register_accepted = 10;
+    ServerHeartbeat heartbeat = 11;
+    StartProcess start_process = 20;
+    StopProcess stop_process = 21;
+    StreamData stream_data = 40;
+    StreamClosed stream_closed = 41;
+  }
+}
+
+message RegisterAgent {
+  string agent_id = 1;
+  string instance_id = 2;
+  string display_name = 3;
+  string machine_name = 4;
+  string os = 5;
+  string architecture = 6;
+  string agent_version = 7;
+  string protocol_version = 8;
+  repeated AgentCapability capabilities = 9;
+  repeated PowerShellRuntime powershell_runtimes = 10;
+}
+
+message RegisterAccepted {
+  string connection_id = 1;
+}
+
+message AgentCapability {
+  string name = 1;
+  string version = 2;
+}
+
+message PowerShellRuntime {
+  reserved 5;
+  reserved "supports_named_pipe_psrp";
+
+  string runtime_id = 1;
+  string kind = 2;
+  string version = 3;
+  string executable_path = 4;
+}
+
+message AgentHeartbeat {
+  repeated string running_process_ids = 1;
+}
+
+message ServerHeartbeat {
+}
+
+message StartProcess {
+  reserved 3;
+  reserved "named_pipe_name";
+
+  string correlation_id = 1;
+  string stream_id = 2;
+  string executable = 4;
+  repeated string arguments = 5;
+  string working_directory = 6;
+  map<string, string> environment = 7;
+  map<string, string> metadata = 8;
+  ProcessCredential credential = 9;
+}
+
+message ProcessCredential {
+  string username = 1;
+  string password = 2;
+  string domain = 3;
+}
+
+message StopProcess {
+  string correlation_id = 1;
+  bool kill_process = 3;
+}
+
+message ProcessStarted {
+  string correlation_id = 1;
+  int32 process_id = 3;
+}
+
+message ProcessCompleted {
+  string correlation_id = 1;
+  int32 exit_code = 3;
+  bool canceled = 4;
+  string error_message = 5;
+}
+
+message StreamData {
+  string stream_id = 1;
+  uint64 sequence = 2;
+  bytes data = 3;
+  bool end_of_stream = 4;
+}
+
+message StreamClosed {
+  string stream_id = 1;
+  string reason = 2;
+  bool error = 3;
+}
+
+message AgentDiagnostic {
+  string level = 1;
+  string message = 2;
+  map<string, string> properties = 3;
+}
