@@ -7,6 +7,8 @@ use agent_channel_proto::agent_channel_client::AgentChannelClient;
 use agent_channel_proto::server_message::Payload;
 use agent_channel_proto::{Ack, AgentMessage, Hello, ServerMessage, agent_message};
 use agent_identity_httpsig::{ChannelLayer, OpeningNonce, RequestSigner};
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Status, Streaming};
@@ -44,7 +46,7 @@ async fn stream_once(
     events: &mpsc::Sender<Event>,
     acks: &mut mpsc::UnboundedReceiver<String>,
 ) -> Option<Closure> {
-    let mut opened = match open(shared, target).await {
+    let mut opened = match open_at_authority_time(shared, target).await {
         Ok(opened) => opened,
         Err(closure) => return Some(closure),
     };
@@ -76,27 +78,17 @@ async fn stream_once(
     }
 }
 
-/// Answers the challenge and waits for `Welcome` ([CONTRACT.md] §7.3 steps 2–4).
+/// Answers the challenge and waits for `Welcome` ([CONTRACT.md] §7.3 steps 3–4).
 ///
 /// Until `Welcome` answers the `Hello`, every other message is ignored, so that nothing counts before the
 /// authority has verified the proof.
 ///
 /// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
 async fn authenticate(target: &Target, opened: &mut Opened) -> Result<(), Closure> {
-    let (challenge_id, challenge) = loop {
-        if let ServerMessage {
-            id,
-            payload: Some(Payload::Challenge(challenge)),
-            ..
-        } = opened.next_message("Challenge").await?
-        {
-            break (id, challenge.challenge);
-        }
-    };
-    if challenge.len() != CHALLENGE_LEN {
+    if opened.challenge.len() != CHALLENGE_LEN {
         return Err(Closure::outage("challenge is not 32 bytes"));
     }
-    let hello = hello(target, &challenge_id, &challenge, &opened.nonce)?;
+    let hello = hello(target, &opened.challenge_id, &opened.challenge, &opened.nonce)?;
     let hello_id = hello.id.clone();
     opened
         .outbound
@@ -108,7 +100,7 @@ async fn authenticate(target: &Target, opened: &mut Opened) -> Result<(), Closur
             correlation_id: Some(correlation_id),
             payload: Some(Payload::Welcome(_)),
             ..
-        } = opened.next_message("Welcome").await?
+        } = next_message(&mut opened.inbound, "Welcome").await?
             && correlation_id == hello_id
         {
             return Ok(());
@@ -135,24 +127,24 @@ fn push_event(message: ServerMessage) -> Option<Event> {
     }
 }
 
-/// A stream whose opening the authority accepted.
+/// A stream whose opening the authority accepted with a `Challenge`.
 struct Opened {
     outbound: mpsc::Sender<AgentMessage>,
     inbound: Streaming<ServerMessage>,
     /// The nonce of the opening signature, which the channel proof binds.
     nonce: String,
+    challenge_id: String,
+    challenge: Vec<u8>,
 }
 
-impl Opened {
-    /// Receives the next message of a stream that must not end before `awaited` arrives.
-    async fn next_message(&mut self, awaited: &str) -> Result<ServerMessage, Closure> {
-        match self.inbound.message().await {
-            Ok(Some(message)) => Ok(message),
-            Ok(None) => Err(Closure::from_status(&Status::ok(format!(
-                "stream ended before {awaited}"
-            )))),
-            Err(status) => Err(Closure::from_status(&status)),
-        }
+/// Receives the next message of a stream that must not end before `awaited` arrives.
+async fn next_message(inbound: &mut Streaming<ServerMessage>, awaited: &str) -> Result<ServerMessage, Closure> {
+    match inbound.message().await {
+        Ok(Some(message)) => Ok(message),
+        Ok(None) => Err(Closure::from_status(&Status::ok(format!(
+            "stream ended before {awaited}"
+        )))),
+        Err(status) => Err(Closure::from_status(&status)),
     }
 }
 
@@ -177,34 +169,72 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
     })
 }
 
-/// Sends the signed opening request ([CONTRACT.md] §7.3 step 1).
+/// Opens a stream, and retries once at the authority's time when it refuses the opening with `clock_skew`
+/// ([CONTRACT.md] §6).
 ///
 /// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
-async fn open(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
+async fn open_at_authority_time(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
+    match open(shared, target, 0).await {
+        Err(closure) => match clock_offset(&closure) {
+            Some(offset) => open(shared, target, offset).await,
+            None => Err(closure),
+        },
+        opened => opened,
+    }
+}
+
+/// Returns `server_time − local_time` in seconds for a `clock_skew` refusal with a `server-time` trailer.
+fn clock_offset(closure: &Closure) -> Option<i64> {
+    if closure.error_code.as_deref() != Some("clock_skew") {
+        return None;
+    }
+    let server_time = OffsetDateTime::parse(closure.server_time.as_deref()?, &Rfc3339).ok()?;
+    Some(server_time.unix_timestamp() - OffsetDateTime::now_utc().unix_timestamp())
+}
+
+/// Sends the signed opening request, with its `created` time offset by `clock_offset` seconds, and waits for the
+/// `Challenge` ([CONTRACT.md] §7.3 steps 1–2).
+///
+/// [CONTRACT.md]: ../../docs/agent-identity/CONTRACT.md
+async fn open(shared: &Shared, target: &Target, clock_offset: i64) -> Result<Opened, Closure> {
     let service = shared
         .transport
         .connect(&target.url, shared.settings.keepalive_interval)
         .await?;
     let signer = RequestSigner::new(Arc::clone(&target.key), &target.leaf_certificate_der);
-    let service = ChannelLayer::new(signer, &target.url).layer(service);
+    let service = ChannelLayer::new(signer, &target.url)
+        .with_clock_offset(clock_offset)
+        .layer(service);
     let (_, origin) = endpoint(&target.url).map_err(|error| Closure::outage(format!("{error:#}")))?;
     let mut client = AgentChannelClient::with_origin(service, origin);
     let (outbound, outbound_receiver) = mpsc::channel(16);
     let (handoff, nonce) = OpeningNonce::new();
     let mut request = tonic::Request::new(ReceiverStream::new(outbound_receiver));
     request.extensions_mut().insert(handoff);
-    let inbound = client
+    let mut inbound = client
         .connect(request)
         .await
         .map_err(|status| Closure::from_status(&status))?
         .into_inner();
-    Ok(Opened {
-        outbound,
-        inbound,
-        nonce: nonce
-            .await
-            .map_err(|_| Closure::outage("opening signed without a nonce"))?,
-    })
+    let nonce = nonce
+        .await
+        .map_err(|_| Closure::outage("opening signed without a nonce"))?;
+    loop {
+        if let ServerMessage {
+            id,
+            payload: Some(Payload::Challenge(challenge)),
+            ..
+        } = next_message(&mut inbound, "Challenge").await?
+        {
+            return Ok(Opened {
+                outbound,
+                inbound,
+                nonce,
+                challenge_id: id,
+                challenge: challenge.challenge,
+            });
+        }
+    }
 }
 
 /// Returns the bytes a channel proof signs ([CONTRACT.md] §7.3 step 3).

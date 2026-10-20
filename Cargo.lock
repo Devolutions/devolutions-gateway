@@ -105,6 +105,7 @@ dependencies = [
  "rustls-native-certs",
  "serde_json",
  "signature 3.0.0",
+ "time",
  "tokio 1.52.3",
  "tokio-rustls",
  "tokio-stream",

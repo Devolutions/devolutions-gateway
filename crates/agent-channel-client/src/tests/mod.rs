@@ -13,6 +13,8 @@ use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use p256::pkcs8::DecodePrivateKey as _;
 use rstest::rstest;
 use signature::Verifier as _;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 use tonic::{Code, Status};
 
 use self::authority::{Mode, Pki, TestAuthority, WAIT, vectors};
@@ -573,5 +575,68 @@ async fn a_proof_signing_failure_closes_the_stream_as_an_outage() -> anyhow::Res
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert!(!matches!(stream.receive_within(WAIT).await, Some(Ok(Some(_)))));
+    Ok(())
+}
+
+/// The `created` parameter of an opening signature.
+fn created(opening: &authority::Opening) -> i64 {
+    opening
+        .signature_input()
+        .split_once(";created=")
+        .and_then(|(_, rest)| rest.split(';').next())
+        .and_then(|created| created.parse().ok())
+        .expect("signature-input without created")
+}
+
+fn clock_skew_refusal(server_time: OffsetDateTime) -> Status {
+    let mut status = Status::new(Code::Unauthenticated, "clock skew");
+    let metadata = status.metadata_mut();
+    metadata.insert("error-code", "clock_skew".parse().expect("ASCII error code"));
+    metadata.insert(
+        "server-time",
+        server_time
+            .format(&Rfc3339)
+            .expect("RFC 3339 time")
+            .parse()
+            .expect("ASCII time"),
+    );
+    status
+}
+
+#[tokio::test]
+async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let server_time = OffsetDateTime::now_utc() + Duration::from_secs(7200);
+
+    authority.next_opening().await.refuse(clock_skew_refusal(server_time));
+
+    // CONTRACT.md §6: the retry offsets `created` by `server_time − local_time`, from the `server-time` trailer.
+    let retry = authority.next_opening().await;
+    let retry_created = created(&retry);
+    let expected = server_time.unix_timestamp();
+    assert!(
+        (expected..=expected + 5).contains(&retry_created),
+        "created {retry_created}, server time {expected}"
+    );
+    retry.accept().authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_second_clock_skew_refusal_is_transient() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let server_time = OffsetDateTime::now_utc() + Duration::from_secs(7200);
+
+    authority.next_opening().await.refuse(clock_skew_refusal(server_time));
+    authority.next_opening().await.refuse(clock_skew_refusal(server_time));
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(closure.error_code.as_deref(), Some("clock_skew"));
     Ok(())
 }
