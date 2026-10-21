@@ -8,7 +8,7 @@ description: Judge whether a test's expected value is justified independently of
 A test whose expected value came from the code under test detects change, not bugs.
 For each test, ask whether the expected value can be justified without running the code.
 
-Independent sources: a spec example, an external capture, a hand-derived value, an input the test chose itself and asserts was honored, a real property such as round-trip or `encode` writing exactly `size()` bytes, or a reference model.
+Independent sources: a spec example, an external capture, a hand-derived value, an input the test chose itself and asserts was honored, a named law such as round-trip, a property a document states, such as `encode` writing exactly `size()` bytes, or a reference model.
 Self-derived sources: a snapshot of current output, a value computed through the code or a shared helper, a production constant or message copied into the test, a mock that returns what is then asserted, `is_ok()` or `!is_empty()` on an input that no requirement says must succeed, or a restatement of what a derive or the type system guarantees.
 
 Verify instead of guessing.
@@ -31,13 +31,17 @@ Strong kinds name an independent source, and a test, case, or assertion marked w
 - `intent <path> §<section>`: a statement in an intent file.
 - `regression <issue or crash file>`: a bug report, as a Jira key such as `DGW-123` or a GitHub issue such as `#123` or `owner/repo#123`, or a fuzz crash file under `fuzz/`.
 - `reference <implementation, capture, or model>`: what another implementation or a reference model does, recorded or compared live.
-- `property <statement>`: a property no document states, such as a round-trip or an input the test chose being honored.
+- `property <law>`: a law of the code under test named by one of `round-trip`, `idempotent`, `involution`, `commutative`, `associative`, or `monotonic`.
 
 Write every path from the repository root, with forward slashes and exact case, such as `crates/gateway-db/INTENT.md`, because markers sit at every depth and a root-relative path reads and resolves the same from each.
 A `spec` document outside `docs/`, such as `RFC 6455` or `MS-RDPBCGR`, is named rather than given as a path.
-`§<section>` names a heading in the file, in any case, or the number the heading starts with, so `§3.2` matches `3.2 Framing`.
+`§<section>` names the `id` of an anchor the file places before a heading as `<a id="…"></a>`, or else a heading, in any case, or the number a heading starts with, so `§3.2` matches `3.2 Framing`.
+Cite the anchor when the file has one, because it survives a renamed heading or a renumbered section.
 
-A hand-derived value or a checked snapshot takes the kind of the source it was checked against.
+A `property` law is accepted only by its well-known name, because the name is its definition, while any other property needs a written source: it takes the kind of the document that states it, and is `scaffold` until one does.
+An assertion whose expected value comes from running the code under test is self-derived even over generated inputs, so it is `mutant` or `scaffold`, never `property`.
+A codec's `round-trip` test never replaces its spec or capture vectors, because a round-trip passes symmetric bugs.
+A hand-derived value, a checked snapshot, or an input the test chose and asserts was honored takes the kind of the source that requires it.
 
 Weak kinds name a self-derived source, which detects change rather than bugs, so any intentional change, such as a refactor or a new feature, may delete a test, case, or assertion marked with one without justification unless `test-pruner` protects it:
 
