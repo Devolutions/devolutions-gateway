@@ -158,18 +158,8 @@ public class IdentityConfigTests
     [InlineData("psu-channel")]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("psu channel")]
-    // oracle: scaffold
-    [InlineData("_psu")]
-    // oracle: scaffold
-    [InlineData("psu_")]
-    // oracle: scaffold
-    [InlineData("psu__channel")]
-    // oracle: scaffold
-    [InlineData("2fa")]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("psu\n")]
-    // oracle: scaffold
-    [InlineData("caf\u00E9")]
     public void CreateRejectsAProductFieldNameThatIsNotSnakeCase(string name)
     {
         AssertRejectsProductFields([new(name, TestJson.Parse("true"))]);
@@ -207,8 +197,6 @@ public class IdentityConfigTests
     // RFC 8259 §8.1: JSON text exchanged between systems is UTF-8, which cannot encode an unpaired surrogate.
     // Failing here keeps every later serialization of the config from failing.
     [Theory]
-    // oracle: scaffold
-    [InlineData("""["ok", "\ud800"]""")]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("""{"\ud800": 1}""")]
     public void CreateRejectsAProductFieldValueThatIsNotUnicodeText(string value)
@@ -299,20 +287,6 @@ public class IdentityConfigTests
 
         JsonElement written = TestJson.Members(config.ToUtf8Json())["policy_limits"];
         Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), written));
-    }
-
-    // A config is immutable, and the response bodies and ConfigUpdate messages write its JSON as it was created.
-    // oracle: scaffold
-    [Fact]
-    public void ChangingTheReturnedJsonLeavesTheConfigUnchanged()
-    {
-        IdentityConfig config = IdentityConfig.Create(3, "https://host/dvls");
-        byte[] first = config.ToUtf8Json();
-        byte[] original = [.. first];
-
-        first.AsSpan().Fill((byte)' ');
-
-        Assert.Equal(original, config.ToUtf8Json());
     }
 
     private static void AssertRejectsProductFields(KeyValuePair<string, JsonElement>[] productFields)

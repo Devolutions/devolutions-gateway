@@ -18,11 +18,10 @@ public class ChannelOpeningTests
     // CONTRACT.agent-identity.md §7.3 step 2: the first message is Challenge,
     // with 32 random bytes fresh for this stream.
     // CONTRACT.agent-identity.md §1 and §7.3: ids are lowercase hyphenated UUIDs.
-    // The bytes come from the injected generator, the host's source of every secret byte.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Fact]
-    public async Task ChallengeHolds32BytesFromTheInjectedGenerator()
+    public async Task ChallengeHolds32Bytes()
     {
         TestAuthority authority = new(TestAuthority.DefaultNow);
 
@@ -30,11 +29,8 @@ public class ChannelOpeningTests
 
         ServerMessage challenge = opening.Challenge;
         Assert.Equal(ServerMessage.PayloadOneofCase.Challenge, challenge.PayloadCase);
-        // oracle: scaffold
-        Assert.Equal(Enumerable.Range(0, 32).Select(i => (byte)i), challenge.Challenge.Challenge_.ToByteArray());
+        Assert.Equal(32, challenge.Challenge.Challenge_.Length);
         Assert.Matches(UuidPattern, challenge.Id);
-        // oracle: scaffold
-        Assert.False(challenge.HasCorrelationId);
     }
 
     // Step 2: the challenge holds 32 random bytes fresh for this stream.
@@ -50,9 +46,10 @@ public class ChannelOpeningTests
 
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
         Assert.NotEqual(first.Challenge.Id, second.Challenge.Id);
-        // oracle: scaffold
-        Assert.Equal(
-            Enumerable.Range(32, 32).Select(i => (byte)i),
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+        Assert.Equal(32, second.Challenge.Challenge.Challenge_.Length);
+        Assert.NotEqual(
+            first.Challenge.Challenge.Challenge_.ToByteArray(),
             second.Challenge.Challenge.Challenge_.ToByteArray());
     }
 

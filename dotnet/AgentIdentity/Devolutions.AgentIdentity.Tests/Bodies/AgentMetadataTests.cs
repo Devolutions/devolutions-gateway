@@ -14,10 +14,10 @@ public class AgentMetadataTests
         Assert.Empty(metadata);
     }
 
-    // AgentMetadata documents that enumeration follows the order in which the agent sent the entries.
-    // oracle: scaffold
+    // Metadata is a JSON object of string to string, and keeps each entry received.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
     [Fact]
-    public void KeepsEveryEntryInTheOrderReceived()
+    public void KeepsEveryEntryReceived()
     {
         KeyValuePair<string, string>[] entries =
         [
@@ -28,7 +28,9 @@ public class AgentMetadataTests
 
         AgentMetadata metadata = AssertValid(AgentMetadata.Validate(entries));
 
-        Assert.Equal(entries, metadata);
+        Assert.Equal(
+            entries.OrderBy(entry => entry.Key, StringComparer.Ordinal),
+            metadata.OrderBy(entry => entry.Key, StringComparer.Ordinal));
         Assert.Equal("host", metadata["hostname"]);
     }
 
@@ -249,9 +251,6 @@ public class AgentMetadataTests
     private static AgentMetadata AssertValid(MetadataValidationResult result)
     {
         Assert.True(result.Succeeded, result.FailureDetail);
-        // oracle: scaffold
-        Assert.Null(result.Error);
-        Assert.Null(result.FailureDetail);
 
         return result.Metadata;
     }
@@ -264,8 +263,6 @@ public class AgentMetadataTests
         Assert.Equal(400, result.Error.HttpStatusCode);
         // oracle: mutant an empty failure detail for a repeated key or for metadata over 16 KiB
         Assert.False(string.IsNullOrEmpty(result.FailureDetail));
-        // oracle: scaffold
-        Assert.Null(result.Metadata);
     }
 
     private static IEnumerable<KeyValuePair<string, string>> NumberedEntries(int count)

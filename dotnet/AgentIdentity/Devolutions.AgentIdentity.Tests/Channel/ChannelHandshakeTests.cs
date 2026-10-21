@@ -313,25 +313,17 @@ public class ChannelHandshakeTests
         AssertFailed(result, expectedCode, expectedStatus);
     }
 
-    // Two failures that both close the stream with signature_invalid differ only in their failure detail,
-    // so the detail shows that the earlier one closed it.
-    // CONTRACT.agent-identity.md §7.3 step 4 fixes no failure detail,
-    // so the expected one is the handshake's own for the earlier failure alone.
-    // oracle: scaffold
+    // Two failures that both close the stream with signature_invalid close it with signature_invalid together.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Theory]
     [MemberData(nameof(PairsOfFailuresWithTheSameCode))]
-    public async Task EarlierOfTwoSignatureFailuresWins(string earlier, string later)
+    public async Task TwoSignatureFailuresAreSignatureInvalid(string earlier, string later)
     {
         (_, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[earlier];
-        ChannelHandshakeResult earlierAlone = await HandshakeAsync(Scenarios[earlier]);
-        ChannelHandshakeResult laterAlone = await HandshakeAsync(Scenarios[later]);
 
         ChannelHandshakeResult result = await HandshakeAsync(FailurePairs[(earlier, later)]);
 
-        Assert.NotEqual(laterAlone.FailureDetail, earlierAlone.FailureDetail);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
         AssertFailed(result, expectedCode, expectedStatus);
-        Assert.Equal(earlierAlone.FailureDetail, result.FailureDetail);
     }
 
     // The shared intent, security invariant 5: revocation blocks authentication, including of a stream whose identity
@@ -407,20 +399,24 @@ public class ChannelHandshakeTests
         AssertFailed(result, AgentIdentityErrorCode.IdentityRevoked, StatusCode.PermissionDenied);
     }
 
-    // Whatever the outcome, the handshake reads the registry once, for the certificate that opened the stream.
     // CONTRACT.agent-identity.md §7.4 applies a deletion or a revocation since the opening to a stream awaiting its
-    // Hello, so the handshake reads the registry again; that it reads it exactly once is the library's API.
-    // oracle: scaffold
+    // Hello, so whatever the outcome, the handshake reads the registry again
+    // for the certificate that opened the stream.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Theory]
     [MemberData(nameof(ScenarioNames))]
-    public async Task HandshakeReadsTheRegistryOnce(string scenario)
+    public async Task HandshakeReadsTheRegistryForTheOpeningCertificate(string scenario)
     {
+        VectorAuthority openingOnly = new();
+        await VectorChannel.OpenAsync(openingOnly);
         VectorAuthority authority = new();
 
         await HandshakeAsync(Scenarios[scenario], authority);
 
-        // The lookup of the opening, then the one of the handshake.
-        Assert.Equal([DeviceA.Thumbprint, DeviceA.Thumbprint], authority.Registry.Lookups);
+        // The lookups of the opening, then those of the handshake.
+        string[] handshakeLookups = [.. authority.Registry.Lookups.Skip(openingOnly.Registry.Lookups.Count)];
+        Assert.NotEmpty(handshakeLookups);
+        Assert.All(handshakeLookups, thumbprint => Assert.Equal(DeviceA.Thumbprint, thumbprint));
     }
 
     // The registry answers a thumbprint with the certificate issued under it, for its one identity,

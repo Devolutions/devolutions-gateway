@@ -21,9 +21,9 @@ public class AuthenticationTypeTests
         typeof(ChannelOpening),
         // oracle: mutant a public AuthenticationResult constructor
         typeof(AuthenticationResult),
-        // oracle: scaffold
+        // oracle: mutant a public ChannelOpeningResult constructor
         typeof(ChannelOpeningResult),
-        // oracle: scaffold
+        // oracle: mutant a public ChannelHandshakeResult constructor
         typeof(ChannelHandshakeResult),
     ];
 

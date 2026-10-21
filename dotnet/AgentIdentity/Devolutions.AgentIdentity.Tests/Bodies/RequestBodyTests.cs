@@ -60,16 +60,15 @@ public abstract class RequestBodyTests
         AssertValid(ParseText(Body(ValidMetadata, extraMembers)));
     }
 
-    // An escape stands for its character; AgentMetadata keeps the order in which the entries were sent.
+    // An escape stands for its character.
     // oracle: spec RFC 8259 §7
-    // oracle: scaffold
     [Fact]
-    public void ReturnsTheMetadataUnescapedInTheOrderSent()
+    public void ReturnsTheMetadataUnescaped()
     {
         RequestBodyOutcome outcome = ParseText(Body("""{"os_name": "Windows", "host\u006eame": "h\u00e9"}""", ""));
-        KeyValuePair<string, string>[] expected = [new("os_name", "Windows"), new("hostname", "hé")];
+        KeyValuePair<string, string>[] expected = [new("hostname", "hé"), new("os_name", "Windows")];
 
-        Assert.Equal(expected, AssertValid(outcome).Metadata!);
+        Assert.Equal(expected, AssertValid(outcome).Metadata!.OrderBy(entry => entry.Key, StringComparer.Ordinal));
     }
 
     // Metadata may be an empty object.
@@ -291,9 +290,6 @@ public abstract class RequestBodyTests
     protected static RequestBodyOutcome AssertValid(RequestBodyOutcome outcome)
     {
         Assert.True(outcome.Succeeded, outcome.FailureDetail);
-        // oracle: scaffold
-        Assert.Null(outcome.Error);
-        Assert.Null(outcome.FailureDetail);
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
         Assert.NotNull(outcome.Metadata);
 
@@ -313,9 +309,6 @@ public abstract class RequestBodyTests
         // more than 32 metadata keys, a key outside the pattern, or a value with a control character
         // or over 1024 UTF-8 bytes
         Assert.False(string.IsNullOrEmpty(outcome.FailureDetail));
-        // oracle: scaffold
-        Assert.Null(outcome.Metadata);
-        Assert.Null(outcome.Csr);
     }
 
     private static string NestedArrays(int depth)
@@ -490,8 +483,6 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
 
     private void AssertOnlyCanonicalCsrIsValid(string canonical, string altered)
     {
-        // oracle: scaffold
-        Assert.NotEqual(canonical, altered);
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
         AssertValid(ParseText(BodyWithCsr(Quote(canonical), ValidMetadata)));
 

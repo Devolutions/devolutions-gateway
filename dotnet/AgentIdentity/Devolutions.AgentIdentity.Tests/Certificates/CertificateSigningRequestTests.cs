@@ -594,8 +594,6 @@ public class CertificateSigningRequestTests
     {
         Assert.True(result.Succeeded, result.FailureDetail);
         Assert.Null(result.Error);
-        // oracle: scaffold
-        Assert.Null(result.FailureDetail);
 
         return result.Csr;
     }
@@ -611,8 +609,6 @@ public class CertificateSigningRequestTests
         // oracle: mutant an empty failure detail for a CSR that is followed by other bytes,
         // that has a version other than 0, or whose key is not an id-ecPublicKey key
         Assert.False(string.IsNullOrEmpty(result.FailureDetail));
-        // oracle: scaffold
-        Assert.Null(result.Csr);
     }
 
     // The valid vector, checked to be accepted, so that only the rule a test breaks in it can reject the result.
