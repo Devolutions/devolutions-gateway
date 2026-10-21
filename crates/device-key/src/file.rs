@@ -846,10 +846,12 @@ mod tests {
 
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
-    fn cleanup_leaves_entries_that_only_resemble_its_temporaries() -> anyhow::Result<()> {
+    fn files_outside_the_naming_scheme_survive_list_and_delete() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
-        let leftover = create_leftover(&directory)?;
+        let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        let leftover = create_leftover(&directory)?;
         let uuid = || Uuid::new_v4().to_string();
         // RFC 9562 §4 places the version in the first digit of the third group and the variant in the first digit of the fourth.
         let uuid_with_digit = |index: usize, digit: &str| {
@@ -857,8 +859,13 @@ mod tests {
             uuid.replace_range(index..=index, digit);
             uuid
         };
-        // The crate names a temporary `.{key name}-{lowercase version 4 UUID}.tmp`; each name differs in one part.
-        let foreign_files = [
+        // The crate names a key `{key name}.p8` and its copies `.{key name}-{lowercase version 4 UUID}.tmp` or `.deleted`.
+        // Each name below falls outside that scheme.
+        let outside_files = [
+            "notes.txt".to_owned(),
+            format!("{name}.p8.bak"),
+            format!(".{name}.tmp"),
+            format!(".{name}.deleted"),
             // A letter in the first digit, which encodes neither version nor variant, makes the uppercase form differ.
             format!(".{name}-{}.tmp", uuid_with_digit(0, "a").to_uppercase()),
             format!(".{name}-{}.tmp", uuid_with_digit(14, "1")),
@@ -866,20 +873,18 @@ mod tests {
             format!(".{}-{}.tmp", name.to_uppercase(), uuid()),
             format!("{name}-{}.tmp", uuid()),
         ];
-        for file_name in &foreign_files {
+        for file_name in &outside_files {
             create_restricted_file(&directory.0.join(file_name))?;
         }
-        let foreign_directory = directory.0.join(format!(".{name}-{}.tmp", uuid()));
-        fs::create_dir(&foreign_directory)?;
 
         // An operation may skip an unexpected entry or fail, so only what it leaves behind is checked.
-        let _ = list(&directory.backend(), TEST_PREFIX);
+        let _ = list(&backend, TEST_PREFIX);
+        let _ = delete(&backend, &name);
 
         assert!(!leftover.exists());
-        for file_name in &foreign_files {
+        for file_name in &outside_files {
             assert!(directory.0.join(file_name).is_file(), "{file_name}");
         }
-        assert!(foreign_directory.is_dir());
         Ok(())
     }
 
