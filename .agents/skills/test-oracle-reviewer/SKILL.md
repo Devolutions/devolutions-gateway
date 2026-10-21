@@ -29,12 +29,12 @@ Strong kinds name an independent source, and a test, case, or assertion marked w
 - `spec <document> §<section>`: normative text other than a contract or intent file, such as an RFC, a Microsoft open specification, or `docs/JMUX-spec.md`.
 - `contract <path> §<section>`: a `CONTRACT*.md`.
 - `intent <path> §<section>`: a statement in an intent file.
-- `regression <issue or crash file>`: a bug report or fuzz crash.
+- `regression <issue or crash file>`: a bug report, as a Jira key such as `DGW-123` or a GitHub issue such as `#123` or `owner/repo#123`, or a fuzz crash file under `fuzz/`.
 - `reference <implementation, capture, or model>`: what another implementation or a reference model does, recorded or compared live.
 - `property <statement>`: a property no document states, such as a round-trip or an input the test chose being honored.
 
 Write every path from the repository root, with forward slashes and exact case, such as `crates/gateway-db/INTENT.md`, because markers sit at every depth and a root-relative path reads and resolves the same from each.
-A `spec` document outside `docs/`, such as `RFC 6455` or `MS-RDPBCGR`, is named rather than given as a path, and a `regression` crash file is a path under `fuzz/`.
+A `spec` document outside `docs/`, such as `RFC 6455` or `MS-RDPBCGR`, is named rather than given as a path.
 `§<section>` names a heading in the file, in any case, or the number the heading starts with, so `§3.2` matches `3.2 Framing`.
 
 A hand-derived value or a checked snapshot takes the kind of the source it was checked against.
