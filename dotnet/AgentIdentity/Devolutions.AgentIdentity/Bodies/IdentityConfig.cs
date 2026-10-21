@@ -1,5 +1,8 @@
 using System.Buffers;
+using System.Text;
 using System.Text.Json;
+
+using Devolutions.Agent.Channel.V1;
 
 namespace Devolutions.AgentIdentity;
 
@@ -21,6 +24,9 @@ public sealed class IdentityConfig
 
     // The schema of the config; the agent treats a config of another version as a transient failure.
     private const int SchemaVersion = 1;
+
+    // CONTRACT.agent-identity.md §7.1: neither side of the agent channel sends an envelope larger than 64 KiB.
+    private const int MaxEnvelopeBytes = 64 * 1024;
 
     private readonly byte[] _utf8Json;
 
@@ -62,6 +68,10 @@ public sealed class IdentityConfig
     /// The members of every object inside a value follow the same rules:
     /// each has a snake_case name, which no other member of its object has, and a value other than <c>null</c>.
     /// An array element is no member, so it may be <c>null</c>.
+    /// CONTRACT.agent-identity.md §7.1 limits each agent channel message to 65,536 bytes of protobuf,
+    /// so the config must fit one <c>ConfigUpdate</c> message.
+    /// That message is measured as <see cref="ChannelMessages.ConfigUpdate"/> builds it, with a 36-character <c>id</c>,
+    /// so the outcome never depends on the UUID generated for it.
     /// </remarks>
     /// <param name="revision">The revision of the config.</param>
     /// <param name="agentChannelUrl">
@@ -76,7 +86,9 @@ public sealed class IdentityConfig
     /// or a product-specific field has no name, a name that is not snake_case or that the contract gives a member,
     /// no value, the value <c>null</c>, or a value that UTF-8 JSON cannot carry, such as a lone surrogate;
     /// or a member inside a value has a name that is not snake_case or that its object repeats, or the value
-    /// <c>null</c>.
+    /// <c>null</c>;
+    /// or the <c>ConfigUpdate</c> message that carries the config would exceed 65,536 bytes
+    /// (CONTRACT.agent-identity.md §7.1), an error reported for <paramref name="productFields"/>.
     /// </exception>
     public static IdentityConfig Create(
         ulong revision,
@@ -87,7 +99,18 @@ public sealed class IdentityConfig
             ? null
             : BaseUrl.Normalize(agentChannelUrl, "The agent channel URL", nameof(agentChannelUrl));
 
-        return new IdentityConfig(revision, normalizedUrl, Write(revision, normalizedUrl, productFields ?? []));
+        byte[] utf8Json = Write(revision, normalizedUrl, productFields ?? []);
+        int envelopeBytes = ConfigUpdateBytes(utf8Json);
+
+        if (envelopeBytes > MaxEnvelopeBytes)
+        {
+            throw new ArgumentException(
+                $"The ConfigUpdate message of the config would take {envelopeBytes} bytes, "
+                    + $"more than the {MaxEnvelopeBytes} bytes that the agent channel carries.",
+                nameof(productFields));
+        }
+
+        return new IdentityConfig(revision, normalizedUrl, utf8Json);
     }
 
     /// <summary>
@@ -124,6 +147,20 @@ public sealed class IdentityConfig
         }
 
         return buffer.WrittenSpan.ToArray();
+    }
+
+    // Measures the ConfigUpdate that ChannelMessages builds for the config.
+    // Its id is a fresh lowercase hyphenated UUID, so a placeholder of the same 36 characters stands in for it,
+    // and the outcome never depends on the UUID generated.
+    private static int ConfigUpdateBytes(byte[] utf8Json)
+    {
+        ServerMessage envelope = new()
+        {
+            Id = Guid.Empty.ToString("D"),
+            ConfigUpdate = new ConfigUpdate { ConfigJson = Encoding.UTF8.GetString(utf8Json) },
+        };
+
+        return envelope.CalculateSize();
     }
 
     private static void WriteProductFields(

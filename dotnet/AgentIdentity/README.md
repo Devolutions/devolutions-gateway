@@ -99,16 +99,20 @@ Replace the identity's metadata, and answer with `ResponseBodies.CheckIn`, given
 
 ### Agent channel
 
+Set the gRPC `MaxReceiveMessageSize` and `MaxSendMessageSize` options of the `AgentChannel` service to 65,536 bytes, the message limit of CONTRACT.agent-identity.md [§7.1].
+The send limit is only a backstop, since `IdentityConfig.Create` refuses a config whose `ConfigUpdate` message would exceed it.
+
 1. Pass the request method and the values of the `signature-input` and `signature` request headers, in received order, to `RequestAuthenticator.AuthenticateChannelOpeningAsync`.
 2. Send the result's `Opening.Challenge` as the first message on the stream.
 3. Pass the first agent message to `Opening.VerifyHelloAsync`.
    Call `Opening.HelloTimedOutAsync` instead when no message arrives within `ChannelHandshake.HelloTimeout`, when `Opening.CertificateNotAfter` passes first, or when the agent ends the stream without a message.
-   Call `Opening.FirstMessageUnreadableAsync` instead when the first message cannot be decoded, for example because a protobuf `string` holds invalid UTF-8 (CONTRACT.agent-identity.md [§7.3] step 4).
+   Call `Opening.FirstMessageUnreadableAsync` instead when the first message cannot be decoded, for example because it exceeds `MaxReceiveMessageSize` or a protobuf `string` holds invalid UTF-8 (CONTRACT.agent-identity.md [§7.1], [§7.3] step 4).
    The first of these calls ends the handshake, and a second one throws `InvalidOperationException`.
 4. On success, replace the identity's metadata with `Metadata`, send `Welcome`, and only then treat the stream as authenticated for `Identity`.
 5. Send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.agent-identity.md [§7.3] steps 5 and 7).
 6. If `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: also send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)`, and close the stream with `OK` 60 s later, as for `confirm` (CONTRACT.agent-identity.md [§7.4]).
 7. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.agent-identity.md [§7.4]).
+8. When a later agent message cannot be decoded or exceeds `MaxReceiveMessageSize`, close the stream with `AgentIdentityError.From(AgentIdentityErrorCode.InvalidRequest).ToRpcException(serverTime)` (CONTRACT.agent-identity.md [§7.4]).
 
 `VerifyHelloAsync`, `HelloTimedOutAsync` and `FirstMessageUnreadableAsync` read the registry again, so a deletion, a revocation or the certificate's expiry since the opening closes the stream with its own error, ahead of the handshake failures (CONTRACT.agent-identity.md [§7.4]).
 A channel opening has no body: `VerifyHelloAsync` then checks the deadline, the message and its proof, and the metadata of the `Hello` last (CONTRACT.agent-identity.md [§7.3] step 4).
