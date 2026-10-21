@@ -11,6 +11,7 @@ use agent_channel_proto::agent_channel_server::{AgentChannel, AgentChannelServer
 use agent_channel_proto::server_message::Payload;
 use agent_channel_proto::{AgentMessage, Challenge, ServerMessage, Welcome};
 use anyhow::Context as _;
+use hyper::body::{Bytes, Frame};
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt as _, ReadBuf};
@@ -168,6 +169,7 @@ pub(super) struct Opening {
     pub(super) headers: http::HeaderMap,
     inbound: Streaming<AgentMessage>,
     reply: oneshot::Sender<Result<mpsc::Receiver<Result<ServerMessage, Status>>, Status>>,
+    encoded: mpsc::UnboundedSender<Bytes>,
 }
 
 impl Opening {
@@ -200,6 +202,7 @@ impl Opening {
             nonce,
             inbound: self.inbound,
             outbound,
+            encoded: self.encoded,
         }
     }
 }
@@ -210,6 +213,8 @@ pub(super) struct ServerStream {
     pub(super) nonce: String,
     inbound: Streaming<AgentMessage>,
     outbound: mpsc::Sender<Result<ServerMessage, Status>>,
+    /// Messages the test encoded itself, sent as they are.
+    encoded: mpsc::UnboundedSender<Bytes>,
 }
 
 impl ServerStream {
@@ -234,6 +239,16 @@ impl ServerStream {
 
     async fn send_message(&self, message: ServerMessage) {
         self.outbound.send(Ok(message)).await.expect("stream closed");
+    }
+
+    /// Sends `message`, which the test encoded as protobuf itself, as one gRPC message ("Length-Prefixed-Message" in
+    /// gRPC over HTTP2).
+    pub(super) fn send_encoded(&self, message: &[u8]) {
+        let length = u32::try_from(message.len()).expect("message shorter than 4 GiB");
+        let mut frame = vec![0 /* Compressed-Flag */];
+        frame.extend_from_slice(&length.to_be_bytes() /* Message-Length */);
+        frame.extend_from_slice(message);
+        self.encoded.send(Bytes::from(frame)).expect("stream closed");
     }
 
     /// Closes the stream with `status` in its trailers.
@@ -287,6 +302,32 @@ impl ServerStream {
 #[derive(Clone)]
 struct OriginalPath(String);
 
+/// Where a stream's handler queues the messages its test encodes itself.
+#[derive(Clone)]
+struct EncodedMessages(mpsc::UnboundedSender<Bytes>);
+
+/// A response body that sends the messages a test encoded itself between the messages of the gRPC service.
+struct WithEncodedMessages {
+    body: tonic::body::BoxBody,
+    encoded: mpsc::UnboundedReceiver<Bytes>,
+}
+
+impl hyper::body::Body for WithEncodedMessages {
+    type Data = Bytes;
+    type Error = Status;
+
+    fn poll_frame(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Result<Frame<Bytes>, Status>>> {
+        if let Poll::Ready(Some(message)) = self.encoded.poll_recv(cx) {
+            return Poll::Ready(Some(Ok(Frame::data(message))));
+        }
+        Pin::new(&mut self.body).poll_frame(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.encoded.is_closed() && self.body.is_end_stream()
+    }
+}
+
 struct Handler {
     openings: mpsc::UnboundedSender<Opening>,
 }
@@ -304,6 +345,11 @@ impl AgentChannel for Handler {
             .get::<OriginalPath>()
             .map(|path| path.0.clone())
             .unwrap_or_default();
+        let encoded = request
+            .extensions()
+            .get::<EncodedMessages>()
+            .map(|encoded| encoded.0.clone())
+            .expect("a queue for encoded messages");
         let headers = request.metadata().clone().into_headers();
         let (reply, decision) = oneshot::channel();
         self.openings
@@ -312,6 +358,7 @@ impl AgentChannel for Handler {
                 headers,
                 inbound: request.into_inner(),
                 reply,
+                encoded,
             })
             .map_err(|_| Status::internal("test ended"))?;
         let outbound = decision.await.map_err(|_| Status::internal("opening dropped"))??;
@@ -332,13 +379,18 @@ where
                 *request.uri_mut() = rpc_path.parse().expect("valid RPC path");
             }
             request.extensions_mut().insert(OriginalPath(path));
+            let (encoded, encoded_messages) = mpsc::unbounded_channel();
+            request.extensions_mut().insert(EncodedMessages(encoded));
             let mut response = grpc.call(request).await?;
             if let Some(content_type) = content_type {
                 response
                     .headers_mut()
                     .insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static(content_type));
             }
-            Ok::<_, Infallible>(response)
+            Ok::<_, Infallible>(response.map(|body| WithEncodedMessages {
+                body,
+                encoded: encoded_messages,
+            }))
         }
     });
     let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())

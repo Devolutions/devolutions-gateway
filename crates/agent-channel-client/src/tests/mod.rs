@@ -367,6 +367,57 @@ async fn reports_pushes_with_their_envelope_ids_and_ignores_unknown_payloads() -
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-service
+#[tokio::test]
+async fn processes_a_message_as_large_as_an_envelope_may_be() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    // A `RenewRequested` of 65,536 bytes, padded with a field the agent doesn't know, as a newer authority may add.
+    let id = new_id();
+    let mut message = length_delimited(1 /* id */, id.as_bytes());
+    message.extend(length_delimited(
+        12, /* renew_requested */
+        &length_delimited(1 /* reason */, b"admin"),
+    ));
+    let padding = 65_536 - message.len() - 2 /* key of field 1000 */ - 3 /* length of the padding */;
+    message.extend(length_delimited(1000, &vec![0; padding]));
+    assert_eq!(message.len(), 65_536);
+    stream.send_encoded(&message);
+
+    assert_eq!(
+        next_event(&mut channel).await,
+        Event::RenewRequested {
+            id,
+            reason: "admin".to_owned()
+        }
+    );
+    Ok(())
+}
+
+/// Encodes a protobuf record of wire type `LEN` (protobuf encoding, "Length-Delimited Records").
+fn length_delimited(field: u32, value: &[u8]) -> Vec<u8> {
+    let mut record = varint(u64::from((field << 3) | 2));
+    record.extend(varint(u64::try_from(value.len()).expect("length fits 64 bits")));
+    record.extend_from_slice(value);
+    record
+}
+
+/// Encodes a protobuf base-128 varint (protobuf encoding, "Base 128 Varints").
+fn varint(mut value: u64) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    while 0x80 <= value {
+        bytes.push(u8::try_from(value & 0x7f).expect("7 bits") | 0x80);
+        value >>= 7;
+    }
+    bytes.push(u8::try_from(value).expect("7 bits"));
+    bytes
+}
+
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
 #[tokio::test]
 async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
