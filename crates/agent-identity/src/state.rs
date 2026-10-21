@@ -1939,7 +1939,7 @@ mod tests {
             fs::rename(&authority, &moved)?;
             match replace_directory(&authority, &moved, replacement) {
                 // Windows creates a link only under Developer Mode or elevation.
-                Err(error) if error.kind() == ErrorKind::PermissionDenied => return Ok(()),
+                Err(error) if error.kind() == ErrorKind::PermissionDenied => continue,
                 result => result?,
             }
 
