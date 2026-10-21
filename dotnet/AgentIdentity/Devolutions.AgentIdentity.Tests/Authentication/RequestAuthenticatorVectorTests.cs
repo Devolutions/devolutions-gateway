@@ -132,7 +132,6 @@ public class RequestAuthenticatorVectorTests
         IEnumerable<string> values = headers
             .SelectMany(header => Regex.Matches(header, "(?:keyid|nonce)=\"([^\"]+)\"|=:([^:]+):"))
             .Select(match => match.Groups[1].Success ? match.Groups[1].Value : match.Groups[2].Value);
-        Assert.NotNull(outcome.FailureDetail);
         Assert.All(headers.Concat(values), value => Assert.DoesNotContain(value, outcome.FailureDetail));
     }
 

@@ -27,8 +27,7 @@ public class AgentIdentityErrorCodeTests
         Assert.Equal(expected, code.ToWireValue());
     }
 
-    // CONTRACT.agent-identity.md §5.4, column "HTTP".
-    // The table gives `unavailable` 5xx, and an unexpected failure gets 500.
+    // CONTRACT.agent-identity.md §5.4, column "HTTP", for the codes to which it gives one status.
     public static TheoryData<AgentIdentityErrorCode, int> HttpStatusCodes => new()
     {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
@@ -49,9 +48,14 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.ClockSkew, 401 },
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.InvalidRequest, 400 },
-        // An unexpected server failure → `500 unavailable`.
+    };
+
+    // CONTRACT.agent-identity.md §5.4, column "HTTP", for the codes to which it gives a class of statuses,
+    // with the lowest and the highest status of the class: `unavailable` is 5xx.
+    public static TheoryData<AgentIdentityErrorCode, int, int> HttpStatusClasses => new()
+    {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
-        { AgentIdentityErrorCode.Unavailable, 500 },
+        { AgentIdentityErrorCode.Unavailable, 500, 599 },
     };
 
     [Theory]
@@ -59,6 +63,13 @@ public class AgentIdentityErrorCodeTests
     public void HttpStatusCodeIsTheContractStatus(AgentIdentityErrorCode code, int expected)
     {
         Assert.Equal(expected, code.ToHttpStatusCode());
+    }
+
+    [Theory]
+    [MemberData(nameof(HttpStatusClasses))]
+    public void HttpStatusCodeIsInTheContractClass(AgentIdentityErrorCode code, int lowest, int highest)
+    {
+        Assert.InRange(code.ToHttpStatusCode(), lowest, highest);
     }
 
     // CONTRACT.agent-identity.md §7.4: an authentication failure closes the stream with UNAUTHENTICATED,
@@ -105,7 +116,7 @@ public class AgentIdentityErrorCodeTests
         AgentIdentityErrorCode[] defined = Enum.GetValues<AgentIdentityErrorCode>();
 
         Assert.Equal(defined, CodesOf(WireValues));
-        Assert.Equal(defined, CodesOf(HttpStatusCodes));
+        Assert.Equal(defined, CodesOf(HttpStatusCodes).Concat(CodesOf(HttpStatusClasses)).Order());
         Assert.Equal(defined, CodesOf(GrpcStatusCodes));
     }
 
