@@ -1175,7 +1175,7 @@ mod tests {
     fn replacing_a_file_waits_for_a_reader_to_close_it() -> anyhow::Result<()> {
         // A reader holding the destination open, even one sharing deletion as the standard library does, makes
         // `MoveFileExW` fail with `ERROR_ACCESS_DENIED` until it closes the file.
-        let directory = camino::Utf8PathBuf::from_path_buf(std::env::temp_dir())
+        let directory = Utf8PathBuf::from_path_buf(std::env::temp_dir())
             .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
             .join(format!("ai-{}", uuid::Uuid::new_v4().simple()));
         fs::create_dir_all(&directory)?;
