@@ -1,6 +1,6 @@
 # Patterns from two agent-written contracts
 
-`docs/agent-identity/CONTRACT.md` (Devolutions/devolutions-gateway, PR #2000) and `picky-crypto/CONTRACT.md` (Devolutions/picky-rs) were written by agents under maintainer review.
+`docs/agent-identity/CONTRACT.agent-identity.md` (Devolutions/devolutions-gateway, PR #2000) and `picky-crypto/CONTRACT.md` (Devolutions/picky-rs) were written by agents under maintainer review.
 They are not shape references; use them to recognise what review kept and what it had to fix.
 
 ## Kept by review

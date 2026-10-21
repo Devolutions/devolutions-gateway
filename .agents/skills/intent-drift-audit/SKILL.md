@@ -13,14 +13,14 @@ It reports; it never edits intent or contract and never silently fixes code duri
 Paths under audit: the diff, the named component or module, or the subtree.
 State which revision you audited; if the checkout may be behind, fetch intent and code from the remote default branch or the PR head.
 Applicable intent is what `intent-files` Placement makes cumulative for each audited path.
-Where a statement says "see `CONTRACT.<name>.md` §N", the contract section is the statement; when the user names a contract, audit an implementation against it directly, treating each item `contract-authoring` requires per operation as a statement and the conformance suite's coverage of each as part of the evidence.
+Where a statement says "see `CONTRACT.<name>.md §<section>`", the contract section is the statement; when the user names a contract, audit an implementation against it directly, treating each item `contract-authoring` requires per operation as a statement and the conformance suite's coverage of each as part of the evidence.
 
 ## Verify
 
 Split each file into normative statements, one per bullet or sentence, skipping purpose prose; a sentence about an external producer or environment is context for the statements that depend on it, not a statement.
 Classify by meaning, not position: a sentence that constrains the software is a statement wherever it sits, including a glossary definition that carries its rule ("Eject removes credential material from memory, best effort"); only purely explanatory text is context.
 Statements in an ancestor file that govern code outside the audited paths are out of scope: skip them and count them in the header.
-Give each an ID of section plus ordinal (`xtask/INTENT.md#requirements-1`, `CONTRACT.agent-identity.md#6.3-2`) so a later audit can diff against this one.
+Give each an ID of its section's anchor, or its number or heading where it has none, plus an ordinal (`CONTRACT.agent-identity.md#agent-identity-channel-2`, `xtask/INTENT.md#requirements-1`), so a later audit can diff against this one even after a heading is reworded or a section renumbered.
 A statement is a target, not a requirement, only when it describes behaviour as not yet built ("TPM keys are wanted later"); "for now" on a present constraint ("remains a CI-only check for now") and a `NOTE:` stating an anti-requirement are requirements today, so read the sentence, not the marker; realising a target anyway is worth a note.
 It runs on a merged tree or a branch whose implementation is finished; mid-implementation, say so and stop, because every unfinished statement would read as a violation.
 For each: cite `path:line`; decide **conforms**, **violates**, **partial** (honoured on some paths, configurations, or the primary path and bypassed on another), **not yet realised** (a deferred target), or **cannot verify** (say what is missing); for a diff, mark **introduced**, **fixed**, or **pre-existing**.

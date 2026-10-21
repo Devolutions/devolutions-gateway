@@ -36,7 +36,7 @@ Use it as the checklist when reviewing or before handing a draft back.
 
 ## Belongs elsewhere, or nowhere
 
-- A rationale intent restated the token format and operations table under "decisions it must preserve"; the maintainer made `CONTRACT.md` self-contained and kept only the choices and reasons.
+- A rationale intent restated the token format and operations table under "decisions it must preserve"; the maintainer made the contract self-contained and kept only the choices and reasons.
 - "This is verbatim the same as what is written in the README.md. INTENT.md is not intended to be the same as README.md." ([IronVNC #1542](https://github.com/Devolutions/IronVNC/pull/1542#discussion_r4013943689))
 - "I would remove this, as it's part of the file name / convention." ([#1946](https://github.com/Devolutions/devolutions-gateway/pull/1946#discussion_r3898220402))
 - "A backend is a thin adapter" and "it passes the full conformance suite" in every backend intent drew "does that belong to this crate?" and "how useful is that invariant?"; both were cut.

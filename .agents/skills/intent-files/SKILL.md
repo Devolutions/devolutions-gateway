@@ -1,6 +1,6 @@
 ---
 name: intent-files
-description: Discipline for INTENT.md and *.intent.md files - the durable design decisions and rationale behind a component; what belongs there versus CONTRACT*.md or AGENTS.md, where they go, how to word statements so they stay true. Use when drafting or revising intent files, or when another intent skill needs the vocabulary.
+description: Discipline for INTENT.md and *.intent.md files - the durable design decisions and rationale behind a component; what belongs there versus CONTRACT*.md or AGENTS.md, where they go, how to word statements so they stay true, and how cited sections keep stable anchors. Use when drafting or revising intent files, when anchoring a section for citation, or when another intent skill needs the vocabulary.
 ---
 
 # Intent files
@@ -35,10 +35,17 @@ A design shared by several components is a part file, `INTENT.<feature>.md` or `
 A part is read from several directories, so it names repository paths as code (`docs/agent-identity/CONTRACT.agent-identity.md`) rather than relative links.
 A file per source file is the exception, never the default, and never mechanical.
 
+## Anchors
+
+A section that tests, code comments, or other documents cite or will cite carries an anchor on its own line just before its heading, and citations name the anchor rather than the heading text or number, because rewording a heading or inserting a section changes those and breaks every citation.
+The anchor is `<a id="<scope>-<topic>"></a>`, where `<scope>` names the file's component, feature, or contract (`<a id="agent-identity-channel"></a>`) and no other section in the repository uses the id, copies of a part file aside, so a search for it finds only the section and its citers.
+An anchor keeps its id once published, even when its heading is reworded or its section renumbered; removing one breaks every citation of it, so the change that removes it updates them.
+A file whose rules a test may cite has at least one heading, with an anchor on each cited section, rather than one flat list, because a flat list leaves a citation nothing narrower than the whole file.
+
 ## Shape
 
 No mandatory sections, no title (the directory names the component), and no length budget; one commitment may be the whole file, and intent is read on demand by directory, like a doc comment, not loaded on every task.
-A flat list for a handful; topical headings only when they aid retrieval; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
+A flat list for a handful that nothing cites; topical headings only when they aid retrieval or carry an anchor; `Overview` or `Purpose` only for a non-obvious role; `Non-goals` only for plausible, deliberately excluded behaviour.
 A reason accompanies a commitment when it explains why a tempting alternative stays excluded; related commitments may share one, and reasons live in the same file as the commitments they support, so that two documents cannot drift apart.
 One meaning per verb, because that is what lets a reader tell a requirement from advice: the declarative present or an imperative states a requirement, `should` a recommendation, `may` a permission, `can` a capability; never addressed to agents, since that constrains the contributor, not the software; sentences follow `prose-writer`.
 Everything written normatively is to be realised by the time the branch merges; behaviour that is not yet to be built says so in the sentence ("TPM keys are wanted later"), so an implementer knows not to build it and a reviewer knows not to expect it.
