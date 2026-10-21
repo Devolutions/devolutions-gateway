@@ -1871,6 +1871,39 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn an_authority_directory_named_in_upper_case_is_checked_too() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Local state"): every authority directory is checked; on a case-insensitive
+        // file system, such as Windows', an upper-case name is the same directory, and skipping it would let its token
+        // enroll again.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        let canonical = directory.authority(identity.authority_id);
+        open_to(&canonical, OtherUsers::Group)?;
+        let upper_case = canonical.with_file_name(identity.authority_id.to_string().to_uppercase());
+        fs::rename(&canonical, &upper_case)?;
+        let token = test_token()?;
+        pending::write(&directory.0, &token, true)?;
+
+        let start_up = directory
+            .store()
+            .err()
+            .context("start-up skipped an upper-case authority directory")?;
+        let enrollment = store
+            .begin_enrollment(&token)
+            .err()
+            .context("an upper-case authority directory let its token begin another enrollment")?;
+
+        assert_eq!(untrusted_directory(&start_up), Some(upper_case.as_path()));
+        assert_eq!(untrusted_directory(&enrollment), Some(upper_case.as_path()));
+        assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
+        Ok(())
+    }
+
     /// What a test puts in place of an authority directory.
     #[derive(Clone, Copy, Debug)]
     enum Replacement {

@@ -142,10 +142,13 @@ pub(crate) fn check_authority_directories(data_dir: &Utf8Path, grant_current_use
     for entry in entries {
         let entry = entry.context("read authority directory entry")?;
         let name = entry.file_name();
-        let Some(authority_id) = name
-            .to_str()
-            .and_then(|name| Uuid::parse_str(name).ok().filter(|uuid| uuid.to_string() == name))
-        else {
+        // A case variant of an authority ID names the same directory on a case-insensitive file system, such as the
+        // default ones of Windows and macOS.
+        let Some(authority_id) = name.to_str().and_then(|name| {
+            Uuid::parse_str(name)
+                .ok()
+                .filter(|uuid| uuid.to_string().eq_ignore_ascii_case(name))
+        }) else {
             continue;
         };
         let path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| anyhow::anyhow!("non-UTF-8 authority path"))?;
@@ -153,6 +156,8 @@ pub(crate) fn check_authority_directories(data_dir: &Utf8Path, grant_current_use
             authority_ids.push(authority_id);
         }
     }
+    authority_ids.sort_unstable();
+    authority_ids.dedup();
     Ok(authority_ids)
 }
 
