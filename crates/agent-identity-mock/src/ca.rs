@@ -146,7 +146,8 @@ pub(crate) struct Leaf {
     pub(crate) not_after: i64,
 }
 
-/// Issues a leaf per §4; the lifetime is capped at the issuing root's `notAfter`.
+/// Issues a leaf per §4, whose only extensions are KeyUsage, EKU and SAN, so that it carries no basicConstraints; the
+/// lifetime is capped at the issuing root's `notAfter`.
 pub(crate) fn issue_leaf(
     root: &RootCa,
     identity_id: uuid::Uuid,
@@ -164,12 +165,6 @@ pub(crate) fn issue_leaf(
     let subject = Name::from_str(&format!("CN={identity_id}")).context("leaf name")?;
     let san_uri = Ia5String::new(&format!("urn:uuid:{identity_id}")).context("leaf SAN URI")?;
     let mut builder = new_builder(&root.name, &subject, public_key, serial, not_before, not_after)?;
-    builder
-        .add_extension(&BasicConstraints {
-            ca: false,
-            path_len_constraint: None,
-        })
-        .context("add basic constraints")?;
     builder
         .add_extension(&KeyUsage(KeyUsages::DigitalSignature.into()))
         .context("add key usage")?;
@@ -197,4 +192,56 @@ pub(crate) fn public_key_der(key: &VerifyingKey) -> Vec<u8> {
     key.to_public_key_der()
         .map(|d| d.as_bytes().to_vec())
         .unwrap_or_else(|_| key.to_sec1_bytes().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    use der::Decode as _;
+    use der::asn1::ObjectIdentifier;
+    use p256::ecdsa::SigningKey;
+
+    use super::{RootCa, issue_leaf};
+
+    /// CONTRACT.agent-identity.md §4: the leaf has a SAN, an EKU and a KeyUsage, and "carries no other extension except
+    /// an authority key identifier and a subject key identifier; in particular it carries no basicConstraints".
+    /// The OIDs are those RFC 5280 §4.2.1 assigns under `id-ce` (2.5.29).
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    #[test]
+    fn leaf_carries_only_the_listed_extensions() -> anyhow::Result<()> {
+        let subject_key_identifier = ObjectIdentifier::new_unwrap("2.5.29.14");
+        let key_usage = ObjectIdentifier::new_unwrap("2.5.29.15");
+        let subject_alt_name = ObjectIdentifier::new_unwrap("2.5.29.17");
+        let authority_key_identifier = ObjectIdentifier::new_unwrap("2.5.29.35");
+        let extended_key_usage = ObjectIdentifier::new_unwrap("2.5.29.37");
+        let now = 1_800_000_000;
+        let root = RootCa::generate(1, now)?;
+        let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
+
+        let leaf = issue_leaf(&root, uuid::Uuid::nil(), key.verifying_key(), 2, now, 3600)?;
+
+        let certificate = x509_cert::Certificate::from_der(&leaf.der)?;
+        let extensions: BTreeSet<ObjectIdentifier> = certificate
+            .tbs_certificate()
+            .extensions()
+            .into_iter()
+            .flatten()
+            .map(|extension| extension.extn_id)
+            .collect();
+        let required = BTreeSet::from([subject_alt_name, extended_key_usage, key_usage]);
+        let allowed = BTreeSet::from([
+            subject_alt_name,
+            extended_key_usage,
+            key_usage,
+            authority_key_identifier,
+            subject_key_identifier,
+        ]);
+        assert!(
+            required.is_subset(&extensions),
+            "missing a required extension: {extensions:?}"
+        );
+        assert!(allowed.is_superset(&extensions), "unlisted extension: {extensions:?}");
+        Ok(())
+    }
 }
