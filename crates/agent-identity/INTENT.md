@@ -39,6 +39,8 @@ The location and format of the files below are stable, because the conformance t
   One that fails the check is never repaired, and stops all identity processing until it is fixed, because skipping it would let a local attacker hide or forge an identity, for example hide a rejected identity so that its token enrolls again.
   The running agent repeats the check before every use of its state and on each pending-directory poll, stops every identity and its streams while any directory fails it, and resumes without a restart once all pass.
   A directory passes only if it is owned by the agent's account and is, on Unix, closed to group and other, or on Windows, protected by exactly the DACL the agent provisions; a link, a reparse point, a non-directory and, on a case-insensitive file system, any case variant of its name are all checked.
+- An `identity.json` that fails the same check is treated like an untrusted authority directory: never repaired, never read as absent, and it stops all identity processing until it is fixed.
+- The agent ignores and keeps a rejection marker or in-progress record that it doesn't own or that other users can access: trusting one would let a local attacker reject a token or supply its enrollment key, while an attacker able to write one could delete it anyway, so ignoring it opens nothing new.
 - Every state change holds an exclusive lock on the identity directory: the file `<data-dir>/identity/.agent-identity.lock` on Linux and macOS, and on Windows an unshared handle on `<data-dir>/identity` itself; on Windows, a busy lock is retried for 30 s.
 - Size limits: a pending file holds at most 16 KiB of plaintext, an in-progress record 16 KiB, `identity.json` 2 MiB, and a rejection marker 1 KiB.
 
@@ -106,7 +108,8 @@ The location and format of the files below are stable, because the conformance t
 - `rejected` is absent until the authority rejects the identity permanently or its current key is lost; `code` is the error code that rejected it, or `key_lost`.
 - `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists between a successful `confirm` and the deletion of the old key, for crash safety, and during pending-key recovery, when it holds the expired pending key until the next `confirm` succeeds.
 - `config` is stored as received, including unknown fields, and replaced only by a higher `revision`.
-- `base_url` is the enrollment token's `u` as received, without its trailing slashes, and request paths are joined onto it as text, so that a path prefix reaches the authority byte for byte, with no rewriting of host case, ports or percent-encoding.
+- `base_url` is the enrollment token's `u` as received, without its trailing slashes, and request paths are joined onto it as text, so that a path prefix reaches the authority byte for byte.
+  The stored value and the joined text keep the host's case, its port and percent-encoding as received; the HTTP client may still lowercase the host and drop a default port on the wire, which RFC 9110 §4.2.3 treats as the same origin.
 - Key names are device-key names `devolutions-agent-identity_<key_uuid>`: Agent Identity owns the prefix `devolutions-agent-identity`, and `key_uuid` is a random UUID generated with each key, because the authority isn't known when the enrollment key is created.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
 - The agent writes a key's name to its record (`identity.json` or the in-progress record) before creating the key, and deletes a key before removing its name from the record.
