@@ -202,15 +202,7 @@ impl Store {
     pub fn list_identities(&self) -> anyhow::Result<Vec<StoredIdentity>> {
         let mut identities = Vec::new();
         for authority_id in private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user)? {
-            if let Some(identity) = self.read_stored_identity(authority_id)? {
-                identities.push(identity);
-            } else {
-                match fs::symlink_metadata(self.identity_path(authority_id)) {
-                    Ok(_) => anyhow::bail!("stored identity file is untrusted"),
-                    Err(error) if error.kind() == ErrorKind::NotFound => {}
-                    Err(error) => return Err(error).context("inspect stored identity file"),
-                }
-            }
+            identities.extend(self.read_stored_identity(authority_id)?);
         }
         identities.sort_by_key(|identity| identity.authority_id);
         Ok(identities)
@@ -239,13 +231,6 @@ impl Store {
             "stored identity authority changed"
         );
         let existing = self.read_stored_identity(identity.authority_id)?;
-        if existing.is_none() {
-            match fs::symlink_metadata(self.identity_path(identity.authority_id)) {
-                Ok(_) => anyhow::bail!("stored identity file is untrusted"),
-                Err(error) if error.kind() == ErrorKind::NotFound => {}
-                Err(error) => return Err(error).context("inspect stored identity file"),
-            }
-        }
         ensure!(
             existing.as_ref() == previous,
             "stored identity changed; reload before updating"
