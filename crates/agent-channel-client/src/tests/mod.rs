@@ -1046,6 +1046,8 @@ async fn sends_a_socks4_proxy_the_address_of_the_authority() -> anyhow::Result<(
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 #[tokio::test]
 async fn an_unsupported_proxy_scheme_is_an_outage_without_a_connection() -> anyhow::Result<()> {
     let authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1055,6 +1057,8 @@ async fn an_unsupported_proxy_scheme_is_an_outage_without_a_connection() -> anyh
     let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
     let mut channel = client.connect(identity.target(&authority.url))?;
 
+    // The channel connects only through the configured proxy, which can't carry it here, so it fails without a
+    // connection, neither through the proxy nor around it; a failure the contract does not name is transient.
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert!(proxy.heads().is_empty());
