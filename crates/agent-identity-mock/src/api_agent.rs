@@ -459,6 +459,7 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §1: "A JSON request body that repeats a member name at any depth [...] →
     /// `invalid_request`".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[rstest]
     #[case::csr(r#"{"csr":"AAEC","csr":"AAEC","metadata":{}}"#)]
     #[case::metadata(r#"{"csr":"AAEC","metadata":{},"metadata":{}}"#)]
@@ -470,6 +471,7 @@ mod tests {
         assert_eq!(code(parse_csr_body(body.as_bytes())), Err("invalid_request"));
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[rstest]
     #[case::metadata(r#"{"metadata":{},"metadata":{}}"#)]
     #[case::metadata_key(r#"{"metadata":{"hostname":"a","hostname":"b"}}"#)]
@@ -481,7 +483,7 @@ mod tests {
     /// top-level object, [...] → `invalid_request`".
     /// The unknown member `x` nests `wrappers` containers around `innermost`, so each `_64` case holds 64 objects and
     /// arrays and each `_65` case 65, counting the top-level object and an empty innermost one.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[rstest]
     #[case::arrays_64(63, "[", "0", "]", Ok(()))]
     #[case::arrays_65(64, "[", "0", "]", Err("invalid_request"))]
@@ -505,7 +507,7 @@ mod tests {
     /// surrogate, in any member, including an unknown one → `invalid_request`".
     /// `hostname` is a known metadata key and `x` an unknown member; a surrogate pair in order escapes one scalar
     /// value, U+1F600, and `ED A0 80` is U+D800 encoded as if it were a scalar value, which UTF-8 forbids.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[rstest]
     #[case::escaped_surrogate_pair(br#"{"csr":"AAEC","metadata":{"hostname":"\ud83d\ude00"}}"#, Ok(()))]
     #[case::escaped_lone_leading_surrogate(
@@ -526,6 +528,7 @@ mod tests {
 
     /// One name in several objects is not a repetition, and receivers ignore unknown fields (CONTRACT.agent-identity.md
     /// §1).
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[test]
     fn same_name_in_different_objects_is_accepted() {
         let body = r#"{"csr":"AAEC","metadata":{"csr":"a"},"x":{"csr":[1,true,null,{"csr":0.5}]}}"#;
@@ -534,6 +537,7 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §1: "a request body holding another form [than the canonical `base64`] →
     /// `invalid_request`".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[rstest]
     #[case::canonical("AAE=", Ok(()))]
     #[case::missing_padding("AAE", Err("invalid_request"))]
@@ -563,6 +567,7 @@ mod tests {
     }
 
     /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[rstest]
     #[case::issued_token(|token: &str| token.to_owned())]
     #[case::other_json_bag(|token: &str| with_bag(token, "e30"))]
@@ -574,6 +579,8 @@ mod tests {
     }
 
     /// Any other secret text is another token, even a non-canonical `base64url` encoding of the same bytes (CONTRACT.agent-identity.md §1, §2).
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[rstest]
     #[case::padded_secret(|token: &str| format!("{token}="))]
     #[case::nonzero_pad_bits(|token: &str| format!("{}B", &token[..token.len() - 1]))]

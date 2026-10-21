@@ -1780,6 +1780,7 @@ mod tests {
     /// Offering the channel adds `agent_channel_url` to every config, and the version override lengthens `version`.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     #[rstest]
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
     #[case::agent_channel_enabled(disable_agent_channel, enable_agent_channel)]
     #[case::hosting_support(withdraw_hosting_support, restore_hosting_support)]
     #[case::config_version(keep_defaults, override_config_version)]
@@ -1815,7 +1816,8 @@ mod tests {
     /// The management API refuses such a token config, but the channel offer and the version override can grow one
     /// after the token is created.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
     #[test]
     fn enrollment_past_the_envelope_limit_creates_no_identity() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -1855,6 +1857,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[rstest]
     #[case::current_unexpired(&[CURRENT], 999, IdentityStatus::Active)]
     #[case::current_at_not_after(&[CURRENT], 1000, IdentityStatus::Active)]
@@ -1875,6 +1879,7 @@ mod tests {
         assert_eq!(identity_status(false, certs.iter().copied(), now), expected);
     }
 
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
     #[rstest]
     #[case::unexpired(999)]
     #[case::in_grace(1050)]
@@ -1883,6 +1888,8 @@ mod tests {
         assert_eq!(identity_status(true, [CURRENT], now), IdentityStatus::Revoked);
     }
 
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Root rotation
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     #[test]
     fn rotation_destroys_the_old_signing_key() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -1906,6 +1913,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     #[test]
     fn rotation_completes_during_last_identity_revocation() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -1933,6 +1941,8 @@ mod tests {
     /// and CONTRACT.agent-identity.md §6 keeps a certificate unexpired while `now ≤ notAfter`.
     ///
     /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#rotation
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[test]
     fn old_root_certificate_counts_as_active_through_its_not_after() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -1958,6 +1968,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     #[test]
     fn config_burst_preserves_stream_and_control_pushes() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -2013,6 +2024,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     #[test]
     fn failed_issuance_does_not_consume_an_enrollment_use() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -2037,6 +2049,8 @@ mod tests {
     /// unavailable`.
     ///
     /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[test]
     fn unavailable_root_key_fails_enrollment() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -2055,7 +2069,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     #[test]
     fn issued_key_origin_and_time_survive_identity_deletion() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -2108,6 +2122,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
     #[test]
     fn enrollment_includes_token_config_at_initial_revision() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -2150,6 +2166,7 @@ mod tests {
 
     /// An override that skipped the revision bump would leave the agent's stored config at the same revision,
     /// so neither a live push nor the reconciliation after Welcome would deliver the unsupported version.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     #[test]
     fn config_version_override_reaches_live_and_reconnecting_streams() -> anyhow::Result<()> {
         let now = 1_790_000_000;

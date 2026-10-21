@@ -230,6 +230,7 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §4: the CSR public key must be "an uncompressed P-256 point [...], else
     /// `invalid_request`".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[rstest]
     #[case::uncompressed(false, true)]
     #[case::compressed(true, false)]
@@ -242,6 +243,7 @@ mod tests {
     }
 
     /// CONTRACT.agent-identity.md §4: the server ignores the CSR's subject and attributes and "does not require their contents in canonical DER form, such as a sorted `SET OF`".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[rstest]
     #[case::unsorted_rdn(Csr { subject: UNSORTED_RDN.to_vec(), ..Csr::valid() })]
     #[case::non_minimal_length_in_subject(Csr { subject: NON_MINIMAL_LENGTH_RDN.to_vec(), ..Csr::valid() })]
@@ -254,6 +256,7 @@ mod tests {
     /// CONTRACT.agent-identity.md §4: the server "verifies the CSR self-signature", which covers the request as
     /// received.
     /// This CSR carries `UNSORTED_RDN` but is signed over its re-encoding, so only a check that re-encoded the request would accept it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[test]
     fn csr_signed_over_a_reencoded_request_is_invalid_request() {
         let received = Csr {
@@ -268,6 +271,9 @@ mod tests {
     }
 
     /// Each case breaks one rule of a valid CSR, which is then `invalid_request`: the key, self-signature and signature algorithm rules of CONTRACT.agent-identity.md §4, and the DER PKCS#10 structure (CONTRACT.agent-identity.md §1, RFC 2986 §4) outside the ignored subject and attributes.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: spec RFC 2986 §4
     #[rstest]
     #[case::wrong_curve(Csr { public_key: public_key(ID_EC_PUBLIC_KEY, SECP384R1, false), ..Csr::valid() })]
     #[case::wrong_key_algorithm(Csr { public_key: public_key(ID_EC_DH, SECP256R1, false), ..Csr::valid() })]
@@ -275,8 +281,10 @@ mod tests {
     // Signed with SHA-256, so that only the algorithm identifier is wrong.
     #[case::signature_algorithm_not_ecdsa_with_sha256(Csr { signature_algorithm: algorithm(ECDSA_WITH_SHA_384, &[]), ..Csr::valid() })]
     // RFC 5758 §3.2: the ecdsa-with-SHA256 encoding "MUST omit the parameters field"; here they are NULL.
+    // oracle: spec RFC 5758 §3.2
     #[case::signature_algorithm_with_parameters(Csr { signature_algorithm: algorithm(ECDSA_WITH_SHA_256, &[0x05, 0x00]), ..Csr::valid() })]
     // RFC 3279 §2.2.3: the BIT STRING holds the DER `Ecdsa-Sig-Value`, a whole number of octets.
+    // oracle: spec RFC 3279 §2.2.3
     #[case::signature_not_octet_aligned(Csr { signature_unused_bits: 1, ..Csr::valid() })]
     #[case::version_2(Csr { version: vec![0x02, 0x01, 0x01], ..Csr::valid() })]
     #[case::non_minimal_length_in_public_key(Csr { public_key: with_long_form_length(&public_key(ID_EC_PUBLIC_KEY, SECP256R1, false)), ..Csr::valid() })]

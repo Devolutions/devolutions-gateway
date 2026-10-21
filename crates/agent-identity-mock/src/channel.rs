@@ -820,6 +820,7 @@ mod tests {
     /// protobuf, not counting gRPC's 5-byte message prefix, and sends none larger".
     const ENVELOPE_LIMIT: usize = 65_536;
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[test]
     fn stream_failure_carries_error_code_and_server_time_trailers() {
         let status = error_status(Code::Unauthenticated, "clock_skew", 1_790_000_000);
@@ -1160,6 +1161,8 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §6 accepts a `connect` signed by a certificate while `now ≤ notAfter`, whatever its
     /// `notBefore`, and §7.3 step 2 then sends `Challenge`; §7.4 closes the stream no later than `notAfter`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[rstest]
     #[case::before_not_before(false, -10, vec![Seen::Challenge])]
     #[case::before_not_after(true, -1, vec![Seen::Challenge])]
@@ -1261,7 +1264,7 @@ mod tests {
     /// §7.1 treats a message larger than 64 KiB as one that cannot be decoded.
     /// Each message corrupts or oversizes a `Hello` the mock would accept, sent a minute after enrollment with new
     /// metadata, so that a mock reading it would change the identity's metadata or last-seen time.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     #[rstest]
     #[case::invalid_utf8_in_a_string_field(append_invalid_utf8_id)]
     #[case::truncated(truncate_payload)]
@@ -1299,7 +1302,7 @@ mod tests {
     /// closure.
     /// §7.1 treats a message larger than 64 KiB as one that cannot be decoded.
     /// Each message corrupts or oversizes an `Ack`, which the mock otherwise reads and ignores.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[rstest]
     #[case::invalid_utf8_in_a_string_field(append_invalid_utf8_id)]
     #[case::truncated(truncate_payload)]
@@ -1358,6 +1361,7 @@ mod tests {
     /// the failures of §7.3 step 4; an identity revoked and then deleted during that wait gets `UNAUTHENTICATED` +
     /// `error-code: identity_unknown`".
     /// gRPC codes: 7 is `PERMISSION_DENIED` and 16 is `UNAUTHENTICATED`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[rstest]
     #[case::revoked(revoke, "7", "identity_revoked")]
     #[case::revoked_then_deleted(revoke_then_delete, "16", "identity_unknown")]
@@ -1385,6 +1389,7 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §7.4: "A stream closes no later than its certificate's `notAfter`", which "also"
     /// applies "to a stream still awaiting `Hello`", even when no request applies the clock to the mock.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[tokio::test(start_paused = true)]
     async fn stream_awaiting_hello_closes_at_not_after() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1479,7 +1484,7 @@ mod tests {
     /// CONTRACT.agent-identity.md §7.4: "A stream whose certificate is retired while it awaits `Hello` still completes
     /// the handshake, then gets the same treatment" as the streams of a certificate `confirm` retires: they "get
     /// `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open".
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[tokio::test(start_paused = true)]
     async fn certificate_retired_during_the_hello_wait_completes_the_handshake_then_rotates() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1512,7 +1517,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.5
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     #[tokio::test]
     async fn confirm_with_a_body_is_invalid_request_and_promotes_nothing() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;

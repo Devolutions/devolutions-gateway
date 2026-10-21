@@ -207,7 +207,7 @@ mod tests {
     /// CONTRACT.agent-identity.md §4: the leaf has a SAN, an EKU and a KeyUsage, and "carries no other extension except
     /// an authority key identifier and a subject key identifier; in particular it carries no basicConstraints".
     /// The OIDs are those RFC 5280 §4.2.1 assigns under `id-ce` (2.5.29).
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[test]
     fn leaf_carries_only_the_listed_extensions() -> anyhow::Result<()> {
         let subject_key_identifier = ObjectIdentifier::new_unwrap("2.5.29.14");

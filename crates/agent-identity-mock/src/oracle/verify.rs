@@ -424,6 +424,7 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §6: "A certificate is unexpired while `now ≤ notAfter`" and "`notBefore` is not
     /// checked".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[rstest]
     #[case::connect_at_not_after(Endpoint::Connect, (900, 1000), Rejection::SignatureInvalid)]
     #[case::connect_after_not_after(Endpoint::Connect, (899, 999), Rejection::CertificateExpired)]
@@ -447,6 +448,7 @@ mod tests {
         assert_eq!(step_4_outcome(endpoint, status, validity), Some(expected));
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[test]
     fn nonce_conflict_keeps_original_expiry_through_boundary() {
         let mut store = NonceStore::default();
@@ -457,6 +459,7 @@ mod tests {
         assert!(store.insert_fresh("key", "nonce", 200, 121));
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[test]
     fn rejects_extra_signature_parameters_including_bare_boolean() {
         let header = format!(
@@ -524,11 +527,13 @@ mod tests {
         }
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[test]
     fn well_formed_check_in_headers_reach_key_lookup() {
         assert_eq!(CheckInHeaders::well_formed().verify(), Some(Rejection::IdentityUnknown));
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[rstest]
     #[case::signature_nonzero_trailing_bits(|h: &mut CheckInHeaders| h.signature = format!("sig=:{}B==:", "A".repeat(85)))]
     #[case::signature_missing_padding(|h: &mut CheckInHeaders| h.signature = format!("sig=:{}:", "A".repeat(86)))]

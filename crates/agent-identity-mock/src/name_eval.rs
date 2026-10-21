@@ -153,6 +153,7 @@ mod tests {
     /// an empty result falls back to the identity ID."
     ///
     /// [intent]: ../../../docs/agent-identity/INTENT.agent-identity.md#enrollment
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
     #[rstest]
     #[case::trimmed_again_after_truncation(format!("{} b", "a".repeat(254)), "a".repeat(254))]
     #[case::trimmed_before_truncation(format!("  {}", "a".repeat(255)), "a".repeat(255))]

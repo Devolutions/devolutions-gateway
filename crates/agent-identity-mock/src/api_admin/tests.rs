@@ -232,6 +232,7 @@ fn config_entries(count: usize) -> Value {
 
 /// `LoginPublicApi_Login`: "Login successful, returns the tokenId to use in the header on the following requests", in
 /// a `LoginResult` whose only member is `tokenId`.
+// oracle: spec DVLS public OpenAPI document §LoginPublicApi_Login
 #[tokio::test]
 async fn login_returns_a_login_result() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -245,6 +246,7 @@ async fn login_returns_a_login_result() -> anyhow::Result<()> {
 }
 
 /// `LoginPublicApi_Login` "returns the tokenId to use in the header on the following requests".
+// oracle: spec DVLS public OpenAPI document §LoginPublicApi_Login
 #[tokio::test]
 async fn login_token_id_authenticates_requests() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -288,6 +290,8 @@ async fn token_id_expires_its_lifetime_after_login() -> anyhow::Result<()> {
 
 /// `LoginPublicApi_LogOut` "closes the session of the token sent in the tokenId header" with DVLS's logout response,
 /// after which that `tokenId` gets DVLS's `401` for an unknown one; other sessions stay open.
+// oracle: spec DVLS public OpenAPI document §LoginPublicApi_LogOut
+// oracle: reference DVLS built from RDM c642866388b
 #[tokio::test]
 async fn logout_closes_its_session_only() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -301,6 +305,7 @@ async fn logout_closes_its_session_only() -> anyhow::Result<()> {
 }
 
 /// `LoginPublicApi_LogOut` answers like DVLS when the `tokenId` header names no session or is missing.
+// oracle: reference DVLS built from RDM c642866388b
 #[rstest]
 #[case::missing(&[])]
 #[case::unknown(&[(TOKEN_ID_HEADER, "other")])]
@@ -312,6 +317,7 @@ async fn logout_without_a_session_is_200_without_body(#[case] headers: &[(&str, 
 }
 
 /// `LoginPublicApi_LogOut` is idempotent: logging out a session again answers like the first logout.
+// oracle: reference DVLS built from RDM c642866388b
 #[tokio::test]
 async fn logout_is_idempotent() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -324,6 +330,7 @@ async fn logout_is_idempotent() -> anyhow::Result<()> {
 
 /// `LoginPublicApi_Login` answers a failed login with `401` and a `PublicApiError`.
 /// The application key, its scoped keys and its `-unprivileged` key log in with the application secret only.
+// oracle: spec DVLS public OpenAPI document §LoginPublicApi_Login
 #[rstest]
 #[case::wrong_secret(APP_KEY, "wrong")]
 #[case::scoped_key_wrong_secret("admin.view", "wrong")]
@@ -339,6 +346,7 @@ async fn failed_login_is_401(#[case] app_key: &str, #[case] app_secret: &str) ->
 
 /// `LoginPublicApi_Login` answers a "Missing appKey or appSecret" with `400` and no body.
 /// Both members are nullable, and an empty one is missing too.
+// oracle: spec DVLS public OpenAPI document §LoginPublicApi_Login
 #[rstest]
 #[case::missing_key(json!({ "appSecret": APP_SECRET }))]
 #[case::missing_secret(json!({ "appKey": APP_KEY }))]
@@ -355,6 +363,7 @@ async fn login_without_key_or_secret_is_400_without_body(#[case] credentials: Va
 
 /// `LoginParameters` sets `additionalProperties: false` in DVLS's public OpenAPI document, so a member it does not
 /// define is a `400` without a body, even beside valid credentials.
+// oracle: spec DVLS public OpenAPI document §LoginParameters
 #[tokio::test]
 async fn login_refuses_a_member_outside_login_parameters() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -390,6 +399,7 @@ fn invalid_key_is_refused(#[case] key: &str) {
 
 /// Each operation's `403` response in DVLS's OpenAPI document names the permission the operation requires, and a
 /// session holds the permissions of the application key that logged in.
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
 #[rstest]
 #[case::get_identities(Method::GET, "", "view", "manage+revoke+rotate-root", "AgentIdentityView")]
 #[case::get_identity(Method::GET, "/{id}", "view", "manage+revoke+rotate-root", "AgentIdentityView")]
@@ -482,6 +492,7 @@ async fn operation_requires_its_permission(
 }
 
 /// The `tokenId` header carries the credential, and header names are case-insensitive (RFC 9110, "5.1. Field Names").
+// oracle: spec RFC 9110 §5.1
 #[tokio::test]
 async fn token_id_header_name_is_case_insensitive() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -492,6 +503,7 @@ async fn token_id_header_name_is_case_insensitive() -> anyhow::Result<()> {
 }
 
 /// A route that requires a session answers a request without a `tokenId` header like DVLS.
+// oracle: reference DVLS built from RDM c642866388b
 #[tokio::test]
 async fn missing_token_id_is_401_without_body() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -500,6 +512,7 @@ async fn missing_token_id_is_401_without_body() -> anyhow::Result<()> {
 }
 
 /// A bearer `Authorization` header is no `tokenId` header, even when it carries an open session's `tokenId`.
+// oracle: reference DVLS built from RDM c642866388b
 #[tokio::test]
 async fn bearer_authorization_is_a_missing_token_id() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -510,6 +523,7 @@ async fn bearer_authorization_is_a_missing_token_id() -> anyhow::Result<()> {
 }
 
 /// A route that requires a session answers a `tokenId` that no login returned like DVLS, while another session is open.
+// oracle: reference DVLS built from RDM c642866388b
 #[rstest]
 #[case::unknown("other")]
 #[case::app_key(APP_KEY)]
@@ -523,6 +537,7 @@ async fn unknown_token_id_is_401_missing_or_invalid_token(#[case] token_id: &str
 }
 
 /// A request that repeats the `tokenId` header names no session, even when each header names the same open one.
+// oracle: reference DVLS built from RDM c642866388b
 #[tokio::test]
 async fn repeated_token_id_header_is_401_missing_or_invalid_token() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -540,6 +555,8 @@ async fn repeated_token_id_header_is_401_missing_or_invalid_token() -> anyhow::R
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken` returns `201` with an
 /// `AgentIdentityEnrollmentTokenCreated`, whose token `GetAgentIdentityEnrollmentToken` never returns.
 /// `expiresOn` defaults to 90 days ahead, and a token without a friendly-name format or config omits them.
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 #[tokio::test]
 async fn create_token_returns_the_full_token_only_once() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -578,6 +595,7 @@ async fn create_token_returns_the_full_token_only_once() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityEnrollmentToken.friendlyNameFormat` and `config` echo the created token's.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityEnrollmentToken
 #[tokio::test]
 async fn create_token_keeps_its_format_and_config() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -595,6 +613,7 @@ async fn create_token_keeps_its_format_and_config() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityEnrollmentTokenCreateDTO`'s limits, at their bounds.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityEnrollmentTokenCreateDTO
 #[rstest]
 #[case::max_uses(|_| json!({ "name": "t", "maxUses": 1_000_000 }))]
 #[case::expiry_365_days_ahead(|now| json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now + 365 * DAY) }))]
@@ -613,6 +632,7 @@ async fn create_token_accepts_its_bounds(#[case] body: fn(i64) -> Value) -> anyh
 
 /// `AgentIdentityEnrollmentTokenCreateDTO.expiresOn` is a date-time, which keeps its fraction of a second: half a
 /// second ahead is in the future, and the token expires then.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityEnrollmentTokenCreateDTO
 #[tokio::test]
 async fn token_expiry_keeps_its_fraction_of_a_second() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -632,6 +652,7 @@ async fn token_expiry_keeps_its_fraction_of_a_second() -> anyhow::Result<()> {
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`'s `400`: invalid parameters, including a friendly-name
 /// format with an unpaired brace or an unknown placeholder, reported in a `PublicApiValidationError`.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 #[rstest]
 #[case::missing_name(|_| json!({ "maxUses": 1 }), "name")]
 #[case::blank_name(|_| json!({ "name": "  ", "maxUses": 1 }), "name")]
@@ -649,10 +670,12 @@ async fn token_expiry_keeps_its_fraction_of_a_second() -> anyhow::Result<()> {
     "expiresOn"
 )]
 #[case::expiry_not_a_date_time(|_| json!({ "name": "t", "maxUses": 1, "expiresOn": "soon" }), "expiresOn")]
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
 #[case::unpaired_brace(
     |_| json!({ "name": "t", "maxUses": 1, "friendlyNameFormat": "{hostname" }),
     "friendlyNameFormat"
 )]
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
 #[case::unknown_placeholder(
     |_| json!({ "name": "t", "maxUses": 1, "friendlyNameFormat": "{nope}" }),
     "friendlyNameFormat"
@@ -692,6 +715,7 @@ async fn create_token_refuses_an_invalid_member(
 }
 
 /// `AgentIdentityEnrollmentTokenCreateDTO.config` keys match `^[a-z][a-z0-9_]{0,63}$`, so at most 64 bytes.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityEnrollmentTokenCreateDTO
 #[tokio::test]
 async fn create_token_refuses_a_65_byte_config_key() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -732,6 +756,7 @@ fn token_config_for_envelope(base_url: &str, envelope_len: usize) -> Value {
 /// would start with a config one byte past it is refused on `config`, in a `PublicApiValidationError`, and not
 /// created.
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
 #[tokio::test]
 async fn create_token_refuses_a_config_past_the_envelope_limit() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -747,6 +772,7 @@ async fn create_token_refuses_a_config_past_the_envelope_limit() -> anyhow::Resu
 /// CONTRACT.agent-identity.md §7.1 accepts envelopes up to 64 KiB, so a token whose identities start with a config
 /// whose `ConfigUpdate` envelope is exactly that size is created.
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
 #[tokio::test]
 async fn create_token_accepts_a_config_at_the_envelope_limit() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -761,6 +787,7 @@ async fn create_token_accepts_a_config_at_the_envelope_limit() -> anyhow::Result
 /// conventions"), which refuses a member name repeated at any depth, as the mock's README states.
 ///
 /// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
 #[rstest]
 #[case::distinct_members(r#"{"flag":"first","other":"second"}"#, 201)]
 #[case::repeated_member(r#"{"flag":"first","flag":"second"}"#, 400)]
@@ -786,6 +813,7 @@ async fn create_token_refuses_a_repeated_member_name(
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`: "The first token also creates the Agent Identity root";
 /// a freshly started mock, like a DVLS that never used Agent Identity, holds none before it.
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
 #[tokio::test]
 async fn first_token_creates_the_root() -> anyhow::Result<()> {
     let (app, _) = pristine_app().await?;
@@ -798,6 +826,7 @@ async fn first_token_creates_the_root() -> anyhow::Result<()> {
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`'s `409`: "The first root cannot be created because the
 /// data encryption key is unavailable".
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 #[tokio::test]
 async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result<()> {
     let (app, _) = pristine_app().await?;
@@ -816,6 +845,7 @@ async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result
 }
 
 /// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens` returns a `PagedResultOfAgentIdentityEnrollmentToken`.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[tokio::test]
 async fn list_tokens_returns_a_page() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -839,6 +869,7 @@ async fn list_tokens_returns_a_page() -> anyhow::Result<()> {
 
 /// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens`' `sortField` (`createdOn`, `name` or `expiresOn`, by
 /// default `createdOn`) and `sortOrder` (1 ascending by default, 0 descending).
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[rstest]
 #[case::default("", ["c", "a", "b"])]
 #[case::created_descending("?sortOrder=0", ["b", "a", "c"])]
@@ -860,6 +891,7 @@ async fn list_tokens_sorts(#[case] query: &str, #[case] expected: [&str; 3]) -> 
 
 /// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens` sorts by the `createdOn` property, whatever the creation
 /// order: a token created at an earlier mock time comes first.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[rstest]
 #[case::ascending("?sortField=createdOn&sortOrder=1", ["earlier", "later"])]
 #[case::descending("?sortField=createdOn&sortOrder=0", ["later", "earlier"])]
@@ -878,6 +910,7 @@ async fn list_tokens_sorts_by_creation_time(#[case] query: &str, #[case] expecte
 
 /// `AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken` returns `204`, then `404` "already deleted"; a deleted
 /// token is neither returned nor listed.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken
 #[tokio::test]
 async fn deleted_token_is_gone() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -925,6 +958,7 @@ fn certificate_fields(der: &[u8]) -> anyhow::Result<(String, String, String, Str
 
 /// `AgentIdentityPublicApi_GetAgentIdentity` returns an `AgentIdentity` in the Full view; its certificate members
 /// describe the issued certificate chain.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentity
 #[tokio::test]
 async fn get_identity_returns_the_full_view() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -965,6 +999,7 @@ async fn get_identity_returns_the_full_view() -> anyhow::Result<()> {
 
 /// `AgentIdentity.metadata` in the Summary view carries "only the keys requested with metadataKey and omits the field
 /// when it has none of them"; the Full-view-only members are absent.
+// oracle: spec DVLS public OpenAPI document §AgentIdentity
 #[rstest]
 #[case::no_keys("", Value::Null)]
 #[case::one_key("?metadataKey=hostname", json!({ "hostname": "host-a" }))]
@@ -1007,6 +1042,7 @@ async fn summary_view_carries_the_requested_metadata(
 
 /// `AgentIdentityPublicApi_GetAgentIdentities` with `view=Full` lists each identity as `GetAgentIdentity` returns it,
 /// ignoring `metadataKey`.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[tokio::test]
 async fn full_view_lists_each_identity_whole() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1018,6 +1054,7 @@ async fn full_view_lists_each_identity_whole() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityPublicApi_GetAgentIdentities`' `status` filter takes `AgentIdentityStatus` values, repeated.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[rstest]
 #[case::active("?status=Active", 1)]
 #[case::revoked("?status=Revoked", 1)]
@@ -1040,6 +1077,7 @@ async fn status_filter_selects_identities(#[case] query: &str, #[case] expected:
 
 /// `AgentIdentityPublicApi_GetAgentIdentities`' `lastSeenFrom` and `lastSeenTo` are inclusive date-times that keep
 /// their fraction of a second.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[rstest]
 #[case::from_the_same_second(|now| format!("?lastSeenFrom={}", rfc3339(now)), 1)]
 #[case::from_half_a_second_later(|now| format!("?lastSeenFrom={}", half_second_after(now)), 0)]
@@ -1060,6 +1098,7 @@ async fn last_seen_filters_keep_fractions_of_a_second(
 /// `AgentIdentityPublicApi_GetAgentIdentities`' `400`: invalid parameters, including enum values other than the
 /// PascalCase ones of `AgentIdentityView` and `AgentIdentityStatus`, and empty values, since no parameter sets
 /// `allowEmptyValue`.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[rstest]
 #[case::lowercase_status("?status=active", "status")]
 #[case::certificate_status("?status=Pending", "status")]
@@ -1082,6 +1121,7 @@ async fn list_identities_refuses_an_invalid_filter(#[case] query: &str, #[case] 
 
 /// `AgentIdentityPublicApi_PatchAgentIdentity` renames and returns the Full view; "Only the provided fields are
 /// changed".
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_PatchAgentIdentity
 #[rstest]
 #[case::renamed(json!({ "friendlyName": "renamed" }), "renamed")]
 #[case::empty_patch(json!({}), "test-1")]
@@ -1103,6 +1143,7 @@ async fn patch_identity_changes_the_provided_name(#[case] patch: Value, #[case] 
 }
 
 /// `AgentIdentityPatchDTO.friendlyName`: "1 to 255 Unicode scalar values that do not start or end with white space".
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPatchDTO
 #[rstest]
 #[case::empty(json!({ "friendlyName": "" }), "friendlyName")]
 #[case::leading_space(json!({ "friendlyName": " name" }), "friendlyName")]
@@ -1122,6 +1163,7 @@ async fn patch_identity_refuses_an_invalid_name(#[case] patch: Value, #[case] fi
 
 /// `AgentIdentityPublicApi_RevokeAgentIdentity` returns `204`, also for a revoked identity, which "can then neither
 /// authenticate nor renew": its live streams close.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_RevokeAgentIdentity
 #[tokio::test]
 async fn revoke_identity_is_idempotent() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1140,6 +1182,7 @@ async fn revoke_identity_is_idempotent() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityPublicApi_DeleteAgentIdentity` deletes only a revoked identity: `409` before, `204`, then `404`.
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
 #[tokio::test]
 async fn delete_identity_requires_revocation() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1157,6 +1200,7 @@ async fn delete_identity_requires_revocation() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityPublicApi_RequestAgentIdentityRenewal` sets the request-renewal flag and notifies the connected agent.
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
 #[tokio::test]
 async fn request_renewal_flags_and_notifies() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1172,6 +1216,7 @@ async fn request_renewal_flags_and_notifies() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityPublicApi_RequestAgentIdentityRenewal`'s `409`: "The identity is revoked".
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_RequestAgentIdentityRenewal
 #[tokio::test]
 async fn request_renewal_of_a_revoked_identity_is_a_conflict() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1185,12 +1230,19 @@ async fn request_renewal_of_a_revoked_identity_is_a_conflict() -> anyhow::Result
 
 /// The `404` of each operation on one identity or token, for an unknown GUID and for an ID that is not one.
 #[rstest]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentity
 #[case::get_identity(Method::GET, "/{id}")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_PatchAgentIdentity
 #[case::patch_identity(Method::PATCH, "/{id}")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_DeleteAgentIdentity
 #[case::delete_identity(Method::DELETE, "/{id}")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_RevokeAgentIdentity
 #[case::revoke_identity(Method::POST, "/{id}/revoke")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_RequestAgentIdentityRenewal
 #[case::request_renewal(Method::POST, "/{id}/request-renewal")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentToken
 #[case::get_token(Method::GET, "/enrollment-token/{id}")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken
 #[case::delete_token(Method::DELETE, "/enrollment-token/{id}")]
 #[tokio::test]
 async fn unknown_record_is_404(
@@ -1210,9 +1262,13 @@ async fn unknown_record_is_404(
 /// `pageSize` allows up to 100 identities ("Every item carries metadata and certificates") and 500 tokens, 25 by
 /// default.
 #[rstest]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::identities_minimum("?pageSize=1", 1)]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::identities_maximum("?pageSize=100", 100)]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[case::tokens_maximum("/enrollment-token?pageSize=500", 500)]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[case::default_size("/enrollment-token", 25)]
 #[tokio::test]
 async fn page_size_within_bounds_is_accepted(#[case] path: &str, #[case] page_size: u64) -> anyhow::Result<()> {
@@ -1225,17 +1281,29 @@ async fn page_size_within_bounds_is_accepted(#[case] path: &str, #[case] page_si
 /// The paging parameters' schemas: `pageNumber` ≥ 1, `pageSize` from 1 to its maximum, `sortOrder` 0 or 1, and
 /// `sortField` among the allowed values; an empty value is not absent, since no parameter sets `allowEmptyValue`.
 #[rstest]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::identity_page_size_101("?pageSize=101", "pageSize")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[case::token_page_size_501("/enrollment-token?pageSize=501", "pageSize")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::page_size_zero("?pageSize=0", "pageSize")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::page_number_zero("?pageNumber=0", "pageNumber")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[case::page_number_not_an_integer("/enrollment-token?pageNumber=first", "pageNumber")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::sort_order_two("?sortOrder=2", "sortOrder")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::identity_sort_by_name("?sortField=name", "sortField")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[case::token_sort_by_use_count("/enrollment-token?sortField=useCount", "sortField")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::empty_page_number("?pageNumber=", "pageNumber")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[case::empty_page_size("/enrollment-token?pageSize=", "pageSize")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[case::empty_sort_order("?sortOrder=", "sortOrder")]
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[case::empty_sort_field("/enrollment-token?sortField=", "sortField")]
 #[tokio::test]
 async fn paging_out_of_bounds_is_refused(#[case] path: &str, #[case] field: &str) -> anyhow::Result<()> {
@@ -1247,6 +1315,7 @@ async fn paging_out_of_bounds_is_refused(#[case] path: &str, #[case] field: &str
 }
 
 /// A page past the last is `400`; page 1 of an empty listing is the last page.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentities
 #[rstest]
 #[case::empty_first_page(0, 1, 200)]
 #[case::empty_second_page(0, 2, 400)]
@@ -1268,6 +1337,7 @@ async fn page_past_the_last_is_refused(
 }
 
 /// `PagedResultOfAgentIdentity` of an empty listing: no page, no data.
+// oracle: spec DVLS public OpenAPI document §PagedResultOfAgentIdentity
 #[tokio::test]
 async fn empty_listing_has_no_page() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1282,6 +1352,7 @@ async fn empty_listing_has_no_page() -> anyhow::Result<()> {
 // ==== Rotation ====
 
 /// `AgentIdentityRotation` while Idle omits every root and time and counts 0.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityRotation
 #[tokio::test]
 async fn idle_rotation_has_no_roots() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1295,6 +1366,7 @@ async fn idle_rotation_has_no_roots() -> anyhow::Result<()> {
 
 /// `AgentIdentityPublicApi_StartAgentIdentityRotation` with `{}` uses the rotation maximum: the latest expiry among the
 /// old root's unexpired current or pending certificates of identities that are not revoked.
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
 #[tokio::test]
 async fn rotation_defaults_to_the_rotation_maximum() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1346,6 +1418,7 @@ fn tokyo_time(unix_secs: i64) -> String {
 }
 
 /// `AgentIdentityRotationCreateDTO.deadlineOn` is "UTC unless an offset is given".
+// oracle: spec DVLS public OpenAPI document §AgentIdentityRotationCreateDTO
 #[rstest]
 #[case::utc(|now| rfc3339(now + 1800))]
 #[case::without_offset(|now| rfc3339(now + 1800).trim_end_matches('Z').to_owned())]
@@ -1362,6 +1435,8 @@ async fn rotation_deadline_is_utc_unless_an_offset_is_given(#[case] deadline: fn
 
 /// `AgentIdentityRotationCreateDTO.deadlineOn`: "A time at or before now requests an emergency rotation", which
 /// completes at once and unpublishes the old root (CONTRACT.agent-identity.md §8.3).
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
 #[rstest]
 #[case::now(0)]
 #[case::past(-60)]
@@ -1386,6 +1461,7 @@ async fn deadline_at_or_before_now_is_an_emergency(#[case] offset: i64) -> anyho
 
 /// `AgentIdentityPublicApi_StartAgentIdentityRotation`'s `422`: "deadlineOn is after the rotation maximum", even by a
 /// fraction of a second.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_StartAgentIdentityRotation
 #[rstest]
 #[case::one_second(|maximum| rfc3339(maximum + 1))]
 #[case::half_a_second(half_second_after)]
@@ -1418,6 +1494,7 @@ fn root_key_unavailable(state: &mut State, _: i64) {
 
 /// `AgentIdentityPublicApi_StartAgentIdentityRotation`'s `409`: "A rotation is in progress, no root exists yet, or the
 /// root key is unavailable".
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_StartAgentIdentityRotation
 #[rstest]
 #[case::rotation_in_progress(rotation_in_progress)]
 #[case::no_root_yet(no_root_yet)]
@@ -1434,6 +1511,7 @@ async fn rotation_conflict_is_409(#[case] arrange: fn(&mut State, i64)) -> anyho
 
 /// `AgentIdentityPublicApi_StartAgentIdentityRotation` requires an `AgentIdentityRotationCreateDTO` body, whose
 /// `deadlineOn` is a date-time with no `"now"` literal.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_StartAgentIdentityRotation
 #[rstest]
 #[case::empty_body(None, Value::Null)]
 #[case::now_literal(Some(json!({ "deadlineOn": "now" })), json!("deadlineOn"))]
@@ -1451,6 +1529,9 @@ async fn rotation_refuses_an_invalid_body(#[case] body: Option<Value>, #[case] f
 
 /// `AgentIdentitySettings` by default: the channel enabled and offered, 90-day certificates (CONTRACT.agent-identity.md
 /// §4), and 10 rotation notifications per second (INTENT.DVLS.md, "Load").
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentitySettings
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Load
 #[tokio::test]
 async fn settings_have_their_defaults() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1471,6 +1552,8 @@ async fn settings_have_their_defaults() -> anyhow::Result<()> {
 
 /// `AgentIdentitySettingsPatchDTO.isAgentChannelEnabled` switches the channel off and on: `config.agent_channel_url`
 /// leaves and returns (CONTRACT.agent-identity.md §5.2), each change bumping the config revision.
+// oracle: spec DVLS public OpenAPI document §AgentIdentitySettingsPatchDTO
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
 #[tokio::test]
 async fn channel_setting_withdraws_and_restores_the_channel_url() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1501,6 +1584,7 @@ async fn channel_setting_withdraws_and_restores_the_channel_url() -> anyhow::Res
 
 /// `AgentIdentitySettings.isAgentChannelAvailable`: "it is enabled and the hosting supports it"; the mock's
 /// `channel_available` fault stands for the hosting.
+// oracle: spec DVLS public OpenAPI document §AgentIdentitySettings
 #[tokio::test]
 async fn channel_is_unavailable_without_hosting_support() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1515,6 +1599,7 @@ async fn channel_is_unavailable_without_hosting_support() -> anyhow::Result<()> 
 }
 
 /// `AgentIdentitySettings.certificateLifetimeDays`: "The lifetime of the identity certificates issued from now on".
+// oracle: spec DVLS public OpenAPI document §AgentIdentitySettings
 #[tokio::test]
 async fn certificate_lifetime_applies_to_new_certificates() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1528,6 +1613,7 @@ async fn certificate_lifetime_applies_to_new_certificates() -> anyhow::Result<()
 }
 
 /// The `leaf_lifetime_secs` mock fault overrides `certificateLifetimeDays` with seconds, for expiry tests.
+// oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
 #[tokio::test]
 async fn leaf_lifetime_fault_overrides_the_setting() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1548,6 +1634,8 @@ fn rotation_notified(streams: &mut [UnboundedReceiver<StreamPush>]) -> Vec<bool>
 
 /// `AgentIdentitySettings.rotationNotificationsPerSecond`: "How many connected identities are notified per second during
 /// a root rotation"; an identity beyond the rate is notified in the next second.
+// oracle: spec DVLS public OpenAPI document §AgentIdentitySettings
+// oracle: intent docs/agent-identity/INTENT.DVLS.md §Load
 #[tokio::test]
 async fn rotation_notifies_at_the_settings_rate() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1571,6 +1659,7 @@ async fn rotation_notifies_at_the_settings_rate() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentitySettingsPatchDTO`'s limits, at their bounds.
+// oracle: spec DVLS public OpenAPI document §AgentIdentitySettingsPatchDTO
 #[rstest]
 #[case::shortest_lifetime("certificateLifetimeDays", 1)]
 #[case::longest_lifetime("certificateLifetimeDays", 365)]
@@ -1586,6 +1675,7 @@ async fn settings_accept_their_bounds(#[case] member: &str, #[case] value: i64) 
 
 /// `AgentIdentityPublicApi_PatchAgentIdentitySettings`' `400`: values outside `AgentIdentitySettingsPatchDTO`'s ranges
 /// or types, and members it does not define, such as the read-only `authorityId`.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_PatchAgentIdentitySettings
 #[rstest]
 #[case::zero_lifetime(json!({ "certificateLifetimeDays": 0 }), "certificateLifetimeDays")]
 #[case::lifetime_366_days(json!({ "certificateLifetimeDays": 366 }), "certificateLifetimeDays")]

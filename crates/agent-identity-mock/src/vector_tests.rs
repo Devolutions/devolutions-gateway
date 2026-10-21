@@ -181,6 +181,7 @@ fn run_case(registry: &HashMap<String, RegisteredCert>, nonces: &mut NonceStore,
     }
 }
 
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
 #[test]
 fn http_signature_cases() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
@@ -211,6 +212,8 @@ fn http_signature_cases() {
     );
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
 #[test]
 fn check_in_two_digest_members_uses_the_oracle() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
@@ -246,6 +249,8 @@ fn check_in_two_digest_members_uses_the_oracle() {
     );
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+// oracle: spec RFC 9421 §2.3
 #[test]
 fn noncanonical_valid_signature_input_preserves_signed_base() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
@@ -269,6 +274,7 @@ fn noncanonical_valid_signature_input_preserves_signed_base() {
     assert_eq!(run_case(&registry, &mut NonceStore::default(), &case), "ok");
 }
 
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
 #[test]
 fn http_signature_sequences() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
@@ -291,6 +297,7 @@ fn http_signature_sequences() {
     }
 }
 
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
 #[test]
 fn channel_proof_cases() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
@@ -305,6 +312,7 @@ fn channel_proof_cases() {
     }
 }
 
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
 #[test]
 fn csr_cases() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
@@ -328,6 +336,7 @@ fn csr_cases() {
     }
 }
 
+// oracle: spec RFC 9421 §B.2.4
 #[test]
 fn rfc9421_b_2_4() {
     // The RFC response example checks the raw P-256 primitive, not the §6 request policy.
@@ -340,6 +349,7 @@ fn rfc9421_b_2_4() {
     assert_eq!(actual, case.expected_valid, "rfc9421_b_2_4");
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
 #[test]
 fn malformed_nonce_and_keyid_are_rejected() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");
@@ -376,6 +386,7 @@ fn malformed_nonce_and_keyid_are_rejected() {
     }
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
 #[test]
 fn duplicate_signature_parameter_is_rejected() {
     let vectors: Vectors = serde_json::from_str(VECTORS).expect("vectors parse");

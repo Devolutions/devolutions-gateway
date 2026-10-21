@@ -288,6 +288,7 @@ impl Parser<'_> {
 mod tests {
     use super::parse_dictionary;
 
+    // oracle: spec RFC 8941 §4.2.1.2
     #[test]
     fn inner_list_requires_space_between_items() {
         assert!(parse_dictionary("sig=(\"a\" \"b\")").is_some());
@@ -295,6 +296,7 @@ mod tests {
         assert!(parse_dictionary("sig=(\"a\"\t\"b\")").is_none());
     }
 
+    // oracle: spec RFC 8941 §4.2.3.2
     #[test]
     fn parameter_separator_rejects_horizontal_tab() {
         assert!(parse_dictionary("sig=(\"@method\"); created=1").is_some());

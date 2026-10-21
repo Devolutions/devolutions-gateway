@@ -247,6 +247,7 @@ mod tests {
         (status, body["error"].as_str().expect("error code").to_owned())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[rstest]
     #[case::enroll("enroll")]
     #[case::renew("renew")]
@@ -259,6 +260,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[tokio::test]
     async fn body_at_the_limit_reaches_authentication() -> anyhow::Result<()> {
         let response = post(&App::for_test()?, "enroll", &[], vec![b' '; BODY_LIMIT]).await;
@@ -266,6 +268,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[rstest]
     #[case::enroll("enroll", "token_invalid")]
     #[case::renew("renew", "signature_invalid")]
@@ -281,6 +284,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     #[rstest]
     #[case::single_header(1, (400, "invalid_request"))]
     #[case::repeated_header(2, (401, "token_invalid"))]
@@ -306,7 +310,7 @@ mod tests {
     /// CONTRACT.agent-identity.md §1: "A JSON request body with more than 64 nested objects and arrays, counting the
     /// top-level object, [...] → `invalid_request`", even when its CSR and metadata are valid.
     /// The refusal precedes enrollment, so it creates no identity.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[tokio::test]
     async fn enrollment_body_nested_past_64_levels_creates_no_identity() -> anyhow::Result<()> {
         let app = App::for_test()?;
@@ -330,6 +334,7 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §5.4: "an unexpected server failure → `500 unavailable`".
     /// Issuing from a root that has expired is such a failure.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[tokio::test]
     async fn unexpected_failure_is_500_unavailable() -> anyhow::Result<()> {
         let app = App::for_test()?;
@@ -356,6 +361,7 @@ mod tests {
     }
 
     /// The `fail_next_response` fault takes any §5.4 code, so tests can inject `unavailable` with a 5xx status.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[tokio::test]
     async fn injected_failure_can_carry_unavailable() -> anyhow::Result<()> {
         let app = App::for_test()?;
@@ -394,6 +400,7 @@ mod tests {
     }
 
     /// The control must reach the enrollment response, not only configs stored before it was set.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[tokio::test]
     async fn config_version_fault_overrides_the_enrollment_config() -> anyhow::Result<()> {
         let app = App::for_test()?;
@@ -420,6 +427,8 @@ mod tests {
     }
 
     /// Check-in must deliver the override, and clearing it must deliver version 1 at a higher revision.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     #[tokio::test]
     async fn config_version_fault_reaches_the_check_in_response() -> anyhow::Result<()> {
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
@@ -486,6 +495,7 @@ mod tests {
     }
 
     /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[rstest]
     #[case::issued_token(|token: &str| token.to_owned(), 200, Value::Null)]
     #[case::other_json_bag(|token: &str| with_bag(token, "e30"), 200, Value::Null)]
@@ -515,6 +525,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[rstest]
     #[case::negative(json!(-1))]
     #[case::fractional(json!(1.5))]
@@ -531,6 +542,8 @@ mod tests {
     /// enrollment token creates one ([DVLS intent][dvls], "Root CA").
     ///
     /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[tokio::test]
     async fn reset_without_root_publishes_a_root_only_after_the_first_token() -> anyhow::Result<()> {
         let app = App::for_test()?;

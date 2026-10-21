@@ -76,6 +76,7 @@ impl Default for MockClock {
 mod tests {
     use super::*;
 
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[test]
     fn frozen_clock_keeps_exact_seconds_until_reset() {
         let clock = MockClock::new();

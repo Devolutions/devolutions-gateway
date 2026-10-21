@@ -207,6 +207,7 @@ mod tests {
         .to_vec()
     }
 
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[rstest]
     #[case::ipv4("127.0.0.1:0")]
     #[case::ipv6("[::1]:0")]
@@ -215,6 +216,7 @@ mod tests {
         assert_eq!(args.listen.to_string(), listen);
     }
 
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[rstest]
     #[case::ipv4_unspecified("0.0.0.0:0")]
     #[case::ipv6_unspecified("[::]:0")]
