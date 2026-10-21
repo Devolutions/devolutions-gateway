@@ -1,5 +1,7 @@
 # Agent Identity — Contract
 
+<a id="agent-identity-parties"></a>
+
 ## Parties
 
 This contract defines what two independently built parties must agree on:
@@ -9,6 +11,8 @@ This contract defines what two independently built parties must agree on:
 
 Third-party relying parties may also read the published roots (§5.1).
 Each party's own realization (the agent's local files, configuration and CLI; an authority's storage, administration and hosting) is that party's intent, not contract.
+
+<a id="agent-identity-definitions"></a>
 
 ## Definitions
 
@@ -26,6 +30,8 @@ Each party's own realization (the agent's local files, configuration and CLI; an
 - `base64` means standard Base64 (RFC 4648 §4) with padding.
 - `base64url` means URL- and filename-safe Base64 alphabet (RFC 4648 §5) without padding.
 - SPKI means the DER-encoded X.509 `SubjectPublicKeyInfo` structure.
+
+<a id="agent-identity-conventions"></a>
 
 ## 1. Protocol conventions
 
@@ -63,6 +69,8 @@ Unless stated otherwise, implementations must follow these conventions.
 - Total length ≤ 4096 bytes.
   The agent rejects malformed tokens locally without contacting the server and treats the failure as permanent.
 
+<a id="agent-identity-token-rules"></a>
+
 ### 2.1 Authority behavior
 
 - A token has a use limit (`max_uses`), an expiry and an optional product-specific contribution to each enrolled identity's config (§5.2).
@@ -88,6 +96,8 @@ Unless stated otherwise, implementations must follow these conventions.
     Concurrent renewals with the same CSR key behave the same way (§5.3).
   - No certificate is issued by the old root after a root rotation starts.
 
+<a id="agent-identity-metadata"></a>
+
 ## 3. Metadata
 
 - JSON object of string → string.
@@ -98,6 +108,8 @@ Unless stated otherwise, implementations must follow these conventions.
 - Unknown keys within these limits are stored as-is and never used for authorization.
 - The server replaces stored metadata after each successful new enrollment, renewal, check-in or authenticated `Hello`.
   An idempotent enrollment replay does not update metadata.
+
+<a id="agent-identity-agent-metadata"></a>
 
 ### 3.1 Metadata sent by the agent
 
@@ -115,6 +127,8 @@ Unless stated otherwise, implementations must follow these conventions.
   - An optional key whose value is empty after that is omitted.
   - A required key that ends up empty gets the value `unknown`.
 
+<a id="agent-identity-certificates"></a>
+
 ## 4. Certificates
 
 - Chains are leaf-first, any length; the agent never assumes a tier count.
@@ -124,6 +138,8 @@ Unless stated otherwise, implementations must follow these conventions.
 - The server ignores the CSR's subject and attributes, including an `extensionRequest` with an empty `Extensions` list, which common CSR builders emit, and it does not require their contents in canonical DER form, such as a sorted `SET OF`, since nothing it decides depends on them; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
 - The agent's CSR carries an empty attribute set: the `[0]` field RFC 2986 requires is present and empty (`A0 00`), so that a strict PKCS#10 parser accepts it; an empty `extensionRequest` breaks RFC 5280's `SIZE (1..MAX)`.
+
+<a id="agent-identity-http-api"></a>
 
 ## 5. Agent-facing HTTP API (product-neutral)
 
@@ -137,6 +153,8 @@ Paths (identical for every product):
 | POST   | `{u}/api/agent-identity/v1/renew`        | RFC 9421, `tag="renew"`                                   |
 | POST   | `{u}/api/agent-identity/v1/confirm`      | RFC 9421, `tag="confirm"`, signed with the new key (§5.5) |
 | POST   | `{u}/api/agent-identity/v1/check-in`     | RFC 9421, `tag="check-in"` (§5.6)                         |
+
+<a id="agent-identity-trust-anchor"></a>
 
 ### 5.1 `GET trust-anchor`
 
@@ -157,6 +175,8 @@ Paths (identical for every product):
 
 The response contains one root normally and two during a rotation.
 Validating a chain against these roots does not establish that the identity has not been revoked.
+
+<a id="agent-identity-enroll"></a>
 
 ### 5.2 `POST enroll`
 
@@ -196,6 +216,8 @@ Request:
   Product-specific config fields, such as a PSU channel URL, may coexist with it.
 - The agent's identity HTTP client never follows redirects and treats a `3xx` response as transient.
   It validates the server certificate and host name against the OS trust store.
+
+<a id="agent-identity-renew"></a>
 
 ### 5.3 `POST renew`
 
@@ -255,6 +277,8 @@ Servers accept request bodies up to 64 KiB on these endpoints; a larger body →
 
 When several outcomes apply to one request, a body larger than 64 KiB returns `413 invalid_request` first; otherwise an authentication error (§2.1 for enroll, §6 for signed operations) wins over an invalid body, CSR or metadata.
 
+<a id="agent-identity-confirm"></a>
+
 ### 5.5 `POST confirm`
 
 - Authentication: §6, `tag="confirm"`, signed with the **pending** certificate's key; the body is empty, and a non-empty body → `invalid_request` with no state change.
@@ -262,6 +286,8 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 - Already current → no-op (idempotent retry after a lost response).
 - `204` in both cases.
 - `confirm` is the only operation that promotes a certificate; renew and channel connect never do.
+
+<a id="agent-identity-check-in"></a>
 
 ### 5.6 `POST check-in` (HTTP fallback)
 
@@ -330,11 +356,15 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 
 ## 7. Channel (gRPC)
 
+<a id="agent-identity-channel-service"></a>
+
 ### 7.1 Service
 
 The gRPC package is `devolutions.agent.channel.v1`, and its schema is [`crates/agent-channel-proto/proto/channel.proto`](../../crates/agent-channel-proto/proto/channel.proto) at this contract's revision.
 Every language binding, including the Rust `agent-channel-proto` crate and the .NET `Devolutions.Agent.Channel` package, is generated from that file.
 The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage` and `ServerMessage` envelopes.
+
+<a id="agent-identity-channel-url"></a>
 
 ### 7.2 URL and path prefix
 
@@ -342,6 +372,8 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
   With `agent_channel_url = https://host/dvls`, the `:path` is `/dvls/devolutions.agent.channel.v1.AgentChannel/Connect`; the agent prepends the URL path when constructing `:path`.
 - `agent_channel_url` is an absolute `https` URL without a query, a fragment or a trailing slash; the agent removes trailing slashes from one that has them before prepending its path, so that `https://host/dvls/` and `https://host/dvls` open the same `:path`.
 - The opening request carries `signature-input`, `signature` metadata with `tag="connect"`.
+
+<a id="agent-identity-channel-sequence"></a>
 
 ### 7.3 Sequence
 
@@ -370,6 +402,8 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
 - Unknown payloads are ignored.
 - Push is an optimization; `Hello`/`Welcome` reconciliation is authoritative.
 
+<a id="agent-identity-channel-termination"></a>
+
 ### 7.4 Termination
 
 - Auth failures at open: gRPC status `UNAUTHENTICATED` (or `PERMISSION_DENIED` for `identity_revoked`) with trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`.
@@ -380,7 +414,11 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
   A stream whose certificate is retired while it awaits `Hello` still completes the handshake, then gets the same treatment.
 - After a stream closes, the agent reconnects unless the identity is terminal (§5.4).
 
+<a id="agent-identity-renewal-and-rotation"></a>
+
 ## 8. Renewal and rotation
+
+<a id="agent-identity-agent-renewal"></a>
 
 ### 8.1 Agent renewal
 
@@ -403,12 +441,16 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
   Issuing the new pending certificate retires the previous pending certificate as specified in §5.3.
 - Otherwise, `identity_revoked` and `identity_unknown` are terminal (§5.4).
 
+<a id="agent-identity-server-certificate-state"></a>
+
 ### 8.2 Server certificate state
 
 - A `pending` certificate becomes `current` only through `confirm` (§5.5).
 - Renewal grace lasts for the certificate's own lifetime, as defined in §6.
 - The server sets an identity's request-renewal flag when it wants that identity to renew, for example at an administrator's request or at rotation start (§8.3).
 - The request-renewal flag is cleared when the identity confirms a certificate issued after the flag was set.
+
+<a id="agent-identity-root-rotation"></a>
 
 ### 8.3 Root rotation
 
