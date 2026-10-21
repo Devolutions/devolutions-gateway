@@ -988,10 +988,14 @@ mod tests {
 
         /// Sends one agent message.
         async fn send(&self, message: AgentMessage) -> anyhow::Result<()> {
-            let message = message.encode_to_vec();
+            self.send_encoded(&message.encode_to_vec()).await
+        }
+
+        /// Sends `message` as one gRPC message, whether or not it decodes.
+        async fn send_encoded(&self, message: &[u8]) -> anyhow::Result<()> {
             let mut framed = vec![0];
             framed.extend_from_slice(&u32::try_from(message.len())?.to_be_bytes());
-            framed.extend_from_slice(&message);
+            framed.extend_from_slice(message);
             // A stream the mock already closed has dropped its receiver; its trailers tell the outcome.
             let _ = self.agent.send(Ok(Frame::data(Bytes::from(framed)))).await;
             Ok(())
@@ -1061,6 +1065,54 @@ mod tests {
         #[case] expected: Vec<Seen>,
     ) -> anyhow::Result<()> {
         assert_eq!(open_at(from_not_after, offset).await?, expected);
+        Ok(())
+    }
+
+    /// Appends field 1 (`id`) holding a byte that never occurs in UTF-8: `0x0a` is the tag of field 1 with wire type 2
+    /// (length-delimited), `0x01` the length, and `0xff` the value.
+    fn append_invalid_utf8_id(encoded: &mut Vec<u8>) {
+        encoded.extend_from_slice(&[0x0a, 0x01, 0xff]);
+    }
+
+    /// Drops the last byte, which belongs to the message's last field, its payload, so that the payload claims one
+    /// byte more than the message holds.
+    fn truncate_payload(encoded: &mut Vec<u8>) {
+        encoded.pop();
+    }
+
+    /// CONTRACT.agent-identity.md §7.3 step 4: a first agent message "that cannot be decoded" is not a `Hello`, so the
+    /// server "closes the stream with `UNAUTHENTICATED` + `error-code: signature_invalid`" (gRPC code 16), and the
+    /// failure doesn't change the identity's state.
+    /// Each message corrupts a `Hello` the mock would accept, sent a minute after enrollment with new metadata, so that
+    /// a mock reading it would change the identity's metadata or last-seen time.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    #[rstest]
+    #[case::invalid_utf8_in_a_string_field(append_invalid_utf8_id)]
+    #[case::truncated(truncate_payload)]
+    #[tokio::test]
+    async fn undecodable_first_message_is_signature_invalid(#[case] corrupt: fn(&mut Vec<u8>)) -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let identity_state = |state: &State| {
+            let identity = &state.identities[&enrolled.identity_id];
+            (identity.metadata.clone(), identity.last_seen_at)
+        };
+        let enrolled_state = identity_state(&*enrolled.app.state.lock().await);
+        enrolled.app.clock.freeze_at(enrolled.app.now() + 60);
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        let mut hello = channel.hello(&enrolled.key)?;
+        let Some(agent_message::Payload::Hello(payload)) = &mut hello.payload else {
+            unreachable!("a Hello message");
+        };
+        payload.metadata.insert("hostname".to_owned(), "agent-host".to_owned());
+        let mut encoded = hello.encode_to_vec();
+        corrupt(&mut encoded);
+        channel.send_encoded(&encoded).await?;
+
+        let closure = Seen::Closed("16".to_owned(), "signature_invalid".to_owned());
+        assert_eq!(channel.drain(QUIET).await?, [closure]);
+        assert_eq!(identity_state(&*enrolled.app.state.lock().await), enrolled_state);
         Ok(())
     }
 
