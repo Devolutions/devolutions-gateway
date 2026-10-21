@@ -28,6 +28,7 @@ The mock implements the contract's agent-facing operations and channel independe
 - The `testsuite` crate builds the mock and the tester, runs the mock, runs the tester against it, and requires every test to pass.
   No dependency is added to `testsuite` for this.
 - The suite must pass on Linux with the file backend, and on Windows with the Windows software provider backend.
+- Without an explicit rotation window, the rotation tests ask for a deadline at most 75 % of the leaf lifetime ahead, rounded down and capped at 60 s, so that it falls before the rotation maximum of an authority issuing short-lived leaves; a lifetime too short to leave a whole second needs an explicit window.
 
 ## Coverage
 
