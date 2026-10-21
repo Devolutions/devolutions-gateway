@@ -46,6 +46,9 @@ const KNOWN_METADATA_KEYS: [&str; 8] = [
     "machine_id",
 ];
 const REQUIRED_METADATA_KEYS: [&str; 5] = ["hostname", "os_name", "os_version", "arch", "agent_version"];
+/// Each agent case's data directory, under the work directory, is this prefix and [`DATA_DIR_RANDOM_LEN`] random characters.
+pub(crate) const DATA_DIR_PREFIX: &str = "identity-agent-";
+pub(crate) const DATA_DIR_RANDOM_LEN: usize = 6;
 
 pub(crate) fn token_file_id(token: &str) -> String {
     Sha256::digest(token.as_bytes())
@@ -286,7 +289,8 @@ struct AgentCase {
 impl AgentCase {
     async fn new(ctx: Context, renewal_after_secs: Option<u64>, run: bool) -> anyhow::Result<Self> {
         let dir = tempfile::Builder::new()
-            .prefix("identity-agent-")
+            .prefix(DATA_DIR_PREFIX)
+            .rand_bytes(DATA_DIR_RANDOM_LEN)
             .tempdir_in(&ctx.work_dir)
             .context("create agent data dir")?;
         let metadata_hostname = "conformance-initial".to_owned();

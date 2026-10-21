@@ -899,17 +899,16 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         )?;
     }
     ctx.target.management().delete_identity(&identity.identity_id).await?;
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // Only a non-deleted identity's key is matched against its token, so a deleted identity's key gets `identity_revoked` whichever token presents it.
     for key in [&identity.key, &first_pending, &second_pending] {
-        expect_error(
-            &ctx.target.enroll(&other_token.text, key, &json!({})).await?,
-            400,
-            "invalid_request",
-        )?;
-        expect_error(
-            &ctx.target.enroll(&original_token.text, key, &json!({})).await?,
-            403,
-            "identity_revoked",
-        )?;
+        for bearer in [&other_token.text, &original_token.text] {
+            expect_error(
+                &ctx.target.enroll(bearer, key, &json!({})).await?,
+                403,
+                "identity_revoked",
+            )?;
+        }
     }
     ensure!(
         ctx.target.management().token(&other_token.id).await?.used_count == 0
@@ -5623,9 +5622,17 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
 
 pub(crate) async fn p_management_requires_auth(ctx: Context) -> anyhow::Result<()> {
     assert_management_routes_denied(&ctx, Credential::Absent, |_| true, Refusal::Unauthenticated).await?;
-    let invalid = format!("invalid-management-{}", uuid::Uuid::new_v4());
-    assert_management_routes_denied(&ctx, Credential::TokenId(&invalid), |_| true, Refusal::Unauthenticated).await?;
+    // oracle: spec DVLS public API contract §6
+    let unknown = unknown_token_id();
+    assert_management_routes_denied(&ctx, Credential::TokenId(&unknown), |_| true, Refusal::Unauthenticated).await?;
     Ok(())
+}
+
+/// A `tokenId` that names no session.
+///
+/// It is a GUID, so that DVLS refuses it as an invalid token, with a `PublicApiError`, rather than as a malformed one, with an empty 401 (DVLS's public API contract, "6. Errors").
+fn unknown_token_id() -> String {
+    uuid::Uuid::new_v4().to_string()
 }
 
 fn trust_anchor_snapshot(value: &Value) -> anyhow::Result<Vec<Value>> {
@@ -5752,11 +5759,12 @@ pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Resu
     );
     let before = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
     let rotation = ctx.target.management().rotation().await?;
-    let invalid = format!("invalid-management-{}", uuid::Uuid::new_v4());
+    // oracle: spec DVLS public API contract §6
+    let unknown = unknown_token_id();
     let lacking = dvls::session_lacking(&ctx, Permission::RotateRoot);
     let mut credentials = vec![
         (Credential::Absent, Refusal::Unauthenticated),
-        (Credential::TokenId(&invalid), Refusal::Unauthenticated),
+        (Credential::TokenId(&unknown), Refusal::Unauthenticated),
     ];
     credentials.extend(
         lacking

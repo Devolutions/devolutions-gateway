@@ -26,7 +26,8 @@ On the mock, the runner derives the keys of application identities with fewer pe
 Settings tests restore the original settings when they finish.
 The runner reaches each authority's management API only through the module for that authority: `src/dvls.rs` speaks DVLS's management API, as DVLS's OpenAPI document defines it and the mock replicates it.
 The disposable rotation checks require no other active identities on the published root; otherwise they report `SKIP` before rotating.
-`--dvls-rotation-window-secs` defaults to 60; `--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
+`--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
+DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead, so the rotation checks set their deadline `--dvls-rotation-window-secs` ahead, by default 60 seconds or 75% of `--leaf-lifetime-secs`, whichever is shorter.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
 Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
@@ -41,12 +42,15 @@ The final summary reports counts, per-category durations and the reason for ever
 
 The runner reports a unique `KEY NAME PREFIX` of `conformance-<32 lowercase hex digits>` for each run and writes it to `__debug__.identity.key_name_prefix` in every generated `agent.json`.
 Key names must be `<prefix>_<lowercase hyphenated UUID>`; file-backed keys live at `<data-dir>/identity/keys/<key_name>.p8`.
+Each agent test's `<data-dir>` is a new `identity-agent-XXXXXX` directory under `--work-dir`.
+Windows paths are limited to 259 characters without long-path support, so with the file backend on Windows the runner fails before any test when `--work-dir` is longer than 79 characters, which would leave too little room for a key file path.
 Only keys whose part before the first `_` equals the run prefix belong to that run.
 After each agent test, the runner fails if any key with that prefix is absent from `identity.json` or `<data-dir>/identity/pending/<hex>.in-progress.json`, then deletes only run-prefixed machine and file-backed keys on either target.
 It rejects unrecorded `*.p8` files and PKCS#8 private keys anywhere under `<data-dir>/identity`, plus leftover temporary siblings of pending and key files; other unknown files produce warnings.
 A temporary sibling of `identity.json` or of an in-progress record also produces a warning, because stopping the agent can cut that record's atomic write short.
 On Unix, file-backed keys must have mode `0600` and be owned by the agent's uid.
 Windows software provider keys must allow only the agent's account and SYSTEM, regardless of `acl_grant_current_user`; when the agent runs as SYSTEM, only SYSTEM is expected.
+The Windows software provider stores keys as machine keys, which only an elevated administrator can create, so in an unelevated run every test that starts the agent reports `SKIP`.
 The SYSTEM fixture requires an elevated administrator unless the suite already runs as SYSTEM; without this fixture, the Windows non-exportability case reports `SKIP`.
 `--authority-id` and `--second-authority-id` check server and stored authority IDs when supplied; they do not control cleanup.
 The runner stops after 14 minutes 30 seconds; the testsuite allows 15 minutes and terminates the runner's process tree on timeout.

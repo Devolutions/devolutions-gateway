@@ -44,6 +44,8 @@ struct Test {
     needs_second: bool,
     needs_channel: bool,
     needs_no_channel: bool,
+    /// Whether the test starts the agent, which then creates device keys.
+    starts_agent: bool,
     run: TestFn,
 }
 
@@ -56,6 +58,7 @@ impl Test {
             needs_second: false,
             needs_channel: false,
             needs_no_channel: false,
+            starts_agent: false,
             run,
         }
     }
@@ -68,6 +71,7 @@ impl Test {
             needs_second: false,
             needs_channel: false,
             needs_no_channel: false,
+            starts_agent: true,
             run,
         }
     }
@@ -84,6 +88,12 @@ impl Test {
 
     const fn without_channel(mut self) -> Self {
         self.needs_no_channel = true;
+        self
+    }
+
+    /// Marks an agent test that only runs the agent's CLI.
+    const fn cli_only(mut self) -> Self {
+        self.starts_agent = false;
         self
     }
 }
@@ -154,7 +164,8 @@ struct Options {
     filter: String,
     list: bool,
     disposable_dvls_target: bool,
-    dvls_rotation_window_secs: u64,
+    /// `None` derives the window from `leaf_lifetime_secs`.
+    dvls_rotation_window_secs: Option<u64>,
     leaf_lifetime_secs: u64,
     expect_channel: bool,
     allow_incomplete: bool,
@@ -187,7 +198,7 @@ impl Default for Options {
             filter: String::new(),
             list: false,
             disposable_dvls_target: false,
-            dvls_rotation_window_secs: 60,
+            dvls_rotation_window_secs: None,
             leaf_lifetime_secs: 90 * 24 * 3600,
             expect_channel: true,
             allow_incomplete: false,
@@ -260,13 +271,11 @@ impl Options {
                     ensure!(options.leaf_lifetime_secs > 0, "--leaf-lifetime-secs must be positive");
                 }
                 "--dvls-rotation-window-secs" => {
-                    options.dvls_rotation_window_secs = value()?
+                    let window: u64 = value()?
                         .parse()
                         .context("--dvls-rotation-window-secs must be a positive integer")?;
-                    ensure!(
-                        options.dvls_rotation_window_secs > 0,
-                        "--dvls-rotation-window-secs must be positive"
-                    );
+                    ensure!(window > 0, "--dvls-rotation-window-secs must be positive");
+                    options.dvls_rotation_window_secs = Some(window);
                 }
                 "--key-backend" => {
                     options.key_backend = match value()?.as_str() {
@@ -283,8 +292,33 @@ impl Options {
         Ok(options)
     }
 
+    /// The rotation window: `--dvls-rotation-window-secs`, or else 60 seconds, capped at 75% of the leaf lifetime.
+    ///
+    /// DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead ([DVLS intent], "Rotation").
+    ///
+    /// [DVLS intent]: ../../../docs/agent-identity/INTENT.DVLS.md
+    fn rotation_window_secs(&self) -> u64 {
+        self.dvls_rotation_window_secs
+            .unwrap_or_else(|| (self.leaf_lifetime_secs.saturating_mul(3) / 4).clamp(1, 60))
+    }
+
     async fn context(self) -> anyhow::Result<Context> {
         let kind = self.target.context("--target is required")?;
+        let dvls_rotation_window_secs = self.rotation_window_secs();
+        let key_name_prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
+        #[cfg(windows)]
+        if self.key_backend == KeyBackend::File {
+            use std::os::windows::ffi::OsStrExt as _;
+
+            let work_dir = std::path::absolute(&self.work_dir).context("resolve --work-dir")?;
+            let length = work_dir.as_os_str().encode_wide().count();
+            let longest = longest_file_backend_work_dir(&key_name_prefix);
+            ensure!(
+                length <= longest,
+                "--work-dir must be at most {longest} characters long with the file backend, so that its key paths fit the Windows path limit, but {} is {length}",
+                work_dir.display()
+            );
+        }
         let credential = app_credential(
             self.app_key,
             self.app_secret,
@@ -346,11 +380,11 @@ impl Options {
             second,
             target_kind: kind,
             disposable_dvls_target: self.disposable_dvls_target,
-            dvls_rotation_window_secs: self.dvls_rotation_window_secs,
+            dvls_rotation_window_secs,
             leaf_lifetime_secs: self.leaf_lifetime_secs,
             expect_channel: self.expect_channel,
             channel_available,
-            key_name_prefix: format!("conformance-{}", uuid::Uuid::new_v4().simple()),
+            key_name_prefix,
             agent_version: self.agent_version,
             unprivileged: unprivileged.map(|credential| Arc::new(dvls::Session::new(credential))),
             agent_bin: self.agent_bin.context("--agent-bin is required")?,
@@ -376,6 +410,29 @@ fn app_credential(
         .or_else(|| env::var(secret_variable).ok().filter(|secret| !secret.is_empty()))
         .with_context(|| format!("{key_flag} requires {secret_flag} or {secret_variable}"))?;
     Ok(Some(AppCredential::new(key, secret)))
+}
+
+/// The longest path that Windows file APIs accept without long-path support, in UTF-16 code units: `MAX_PATH` without its terminating NUL.
+#[cfg(any(windows, test))]
+const WINDOWS_MAX_PATH_LEN: usize = 259;
+
+/// The longest work directory, in UTF-16 code units, under which the file backend's key files stay within [`WINDOWS_MAX_PATH_LEN`].
+///
+/// A key file is `<work-dir>\<agent data dir>\identity\keys\<file name>`, for a key name `<key_name_prefix>_<UUID>`.
+/// The device-key intent ("Key name") keeps every file name the file backend derives from a key name within 255 characters for the longest key name, of 193 characters, so a derived file name is at most 62 characters longer than its key name.
+#[cfg(any(windows, test))]
+fn longest_file_backend_work_dir(key_name_prefix: &str) -> usize {
+    let file_name = key_name_prefix.len() + 1 /* _ */ + uuid::fmt::Hyphenated::LENGTH + 62 /* derived suffix */;
+    let below_work_dir = 1 /* \ */
+        + agent::DATA_DIR_PREFIX.len()
+        + agent::DATA_DIR_RANDOM_LEN
+        + 1 /* \ */
+        + 8 /* identity */
+        + 1 /* \ */
+        + 4 /* keys */
+        + 1 /* \ */
+        + file_name;
+    WINDOWS_MAX_PATH_LEN.saturating_sub(below_work_dir)
 }
 
 #[tokio::main]
@@ -420,6 +477,12 @@ async fn run() -> anyhow::Result<()> {
         .await
         .context("conformance setup exceeded the 14-minute-30-second deadline")??;
     println!("KEY NAME PREFIX {}", context.key_name_prefix);
+    // The Windows software provider keeps the agent's keys as machine keys, which only an elevated administrator can create.
+    #[cfg(windows)]
+    let machine_keys_denied =
+        context.key_backend == KeyBackend::WindowsSoftwareProvider && !windows::running_as_elevated_administrator()?;
+    #[cfg(not(windows))]
+    let machine_keys_denied = false;
     let mut totals = [0u32; 4];
     let mut protocol_elapsed = Duration::ZERO;
     let mut agent_elapsed = Duration::ZERO;
@@ -452,6 +515,11 @@ async fn run() -> anyhow::Result<()> {
             Outcome::Skip("requires --key-backend windows-software-provider")
         } else if test.name == "a_file_backend_permissions" && context.key_backend != KeyBackend::File {
             Outcome::Skip("requires --key-backend file")
+        } else if test.starts_agent && machine_keys_denied {
+            // UNTESTED: an unelevated run with the Windows software provider reports each test that starts the agent as SKIP.
+            // The agent fails to create its machine keys there, so a FAIL would blame the agent for the runner's missing privilege.
+            // CI runs elevated, so check this by hand from an unelevated shell when changing which tests start the agent.
+            Outcome::Skip("the Windows software provider's machine keys require an elevated administrator")
         } else {
             let result = async {
                 if context.mock() {
@@ -772,8 +840,8 @@ const TESTS: &[Test] = &[
     a!(a_same_token_rejected_identity_no_enrollment).channel(),
     a!(a_different_token_replaces_identity),
     a!(a_rejected_identity_replaced).channel(),
-    a!(a_cli_identity_enroll_writes_pending_file),
-    a!(a_cli_identity_enroll_stdin),
+    a!(a_cli_identity_enroll_writes_pending_file).cli_only(),
+    a!(a_cli_identity_enroll_stdin).cli_only(),
     a!(a_renewal_happy_path).channel(),
     a!(a_renewal_lost_response_retried, mock_only).channel(),
     a!(a_renewal_lost_confirm_response_retried, mock_only).channel(),
@@ -844,5 +912,32 @@ mod tests {
                 "{args:?} gave {error:?}"
             );
         }
+    }
+
+    /// A DVLS under test issues leaves of a few seconds, so the default window must stay below a short leaf lifetime, while an explicit window wins in either flag order.
+    #[test]
+    fn rotation_window_follows_a_short_leaf_lifetime_unless_explicit() -> anyhow::Result<()> {
+        let window = |args: &[&str]| -> anyhow::Result<u64> {
+            Ok(Options::parse(args.iter().map(|arg| (*arg).to_owned()))?.rotation_window_secs())
+        };
+        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
+        assert_eq!(window(&[])?, 60);
+        assert_eq!(window(&["--leaf-lifetime-secs", "20"])?, 15);
+        assert_eq!(
+            window(&["--dvls-rotation-window-secs", "18", "--leaf-lifetime-secs", "20"])?,
+            18
+        );
+        Ok(())
+    }
+
+    /// A key file path is `<work-dir>\identity-agent-XXXXXX\identity\keys\<file name>`: 22, 15 and at most 143 characters below the work directory for a run's 81-character key names, which leaves 79 of the 259.
+    #[test]
+    fn file_backend_work_dir_leaves_room_for_the_longest_key_file() {
+        // oracle: intent crates/device-key/INTENT.md §Key name
+        // oracle: spec Microsoft "Naming Files, Paths, and Namespaces" §Maximum Path Length Limitation
+        assert_eq!(
+            longest_file_backend_work_dir(&format!("conformance-{}", "0".repeat(32))),
+            79
+        );
     }
 }
