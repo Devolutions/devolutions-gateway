@@ -719,6 +719,8 @@ const TESTS: &[Test] = &[
     p!(p_friendly_name_format),
     p!(p_friendly_name_white_space_and_truncation),
     p!(p_duplicate_json_members_rejected),
+    p!(p_json_body_nesting_limit),
+    p!(p_invalid_unicode_json_strings_rejected),
     p!(p_noncanonical_base64_csr_rejected),
     p!(p_token_secret_must_match_exactly),
     p!(p_compressed_point_csr_rejected),

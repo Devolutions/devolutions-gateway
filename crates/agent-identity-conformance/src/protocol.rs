@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, ensure};
 use base64::Engine as _;
 use der::asn1::ObjectIdentifier;
+use der::oid::AssociatedOid as _;
 use der::{Decode as _, Encode as _};
 use http::Method;
 use p256::ecdsa::signature::{Signer as _, Verifier as _};
@@ -19,7 +20,9 @@ use tokio::sync::Barrier;
 use tonic::Code;
 use x509_cert::Certificate;
 use x509_cert::ext::pkix::name::GeneralName;
-use x509_cert::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAltName};
+use x509_cert::ext::pkix::{
+    AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAltName, SubjectKeyIdentifier,
+};
 
 use crate::client::{Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field};
 use crate::dvls::{
@@ -271,6 +274,7 @@ fn assert_leaf_profile(
         .get_extension::<KeyUsage>()?
         .context("leaf lacks key usage")?;
     ensure!(key_usage.digital_signature(), "leaf lacks digitalSignature key usage");
+    assert_leaf_extensions(&cert)?;
     let validity = cert.tbs_certificate().validity();
     ensure!(
         validity.not_before.to_unix_duration() < validity.not_after.to_unix_duration(),
@@ -285,6 +289,34 @@ fn assert_leaf_profile(
     ensure!(
         validity.not_after.to_unix_duration() == expected_end,
         "leaf lifetime is not {lifetime_secs} seconds capped at the issuing root"
+    );
+    Ok(())
+}
+
+/// CONTRACT.agent-identity.md §4: "The leaf carries no other extension except an authority key identifier and a subject key identifier; in particular it carries no basicConstraints".
+///
+/// The failure names each other extension's OID.
+fn assert_leaf_extensions(leaf: &Certificate) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    let allowed = [
+        SubjectAltName::OID,
+        ExtendedKeyUsage::OID,
+        KeyUsage::OID,
+        AuthorityKeyIdentifier::OID,
+        SubjectKeyIdentifier::OID,
+    ];
+    let others = leaf
+        .tbs_certificate()
+        .extensions()
+        .into_iter()
+        .flatten()
+        .filter(|extension| !allowed.contains(&extension.extn_id))
+        .map(|extension| extension.extn_id.to_string())
+        .collect::<Vec<_>>();
+    ensure!(
+        others.is_empty(),
+        "leaf carries extensions other than SAN, EKU, KeyUsage, AKI and SKI: {}",
+        others.join(", ")
     );
     Ok(())
 }
@@ -6534,6 +6566,150 @@ pub(crate) async fn p_duplicate_json_members_rejected(ctx: Context) -> anyhow::R
         .context("the repeated members' values were not themselves valid")
 }
 
+/// A body for `csr` whose unknown member `extra` nests arrays and objects until the body holds `depth` of them, counting the top-level object.
+///
+/// The nesting alternates arrays and objects, so a limit that counts only one kind accepts the deeper body.
+fn nested_body(csr: &str, depth: usize) -> String {
+    let mut extra = "0".to_owned();
+    for level in 1..depth {
+        extra = if level % 2 == 0 {
+            format!(r#"{{"n":{extra}}}"#)
+        } else {
+            format!("[{extra}]")
+        };
+    }
+    format!(r#"{{"csr":"{csr}","metadata":{{}},"extra":{extra}}}"#)
+}
+
+/// CONTRACT.agent-identity.md §1: "A JSON request body with more than 64 nested objects and arrays, counting the top-level object, [...] → `invalid_request`".
+pub(crate) async fn p_json_body_nesting_limit(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    let token = token(&ctx, 2).await?;
+    let (enrolled, renewed) = (KeyPair::generate()?, KeyPair::generate()?);
+    expect_error(
+        &enroll_raw(&ctx.target, &token, nested_body(&enrolled.csr, 65).as_bytes()).await?,
+        400,
+        "invalid_request",
+    )
+    .context("enroll body nested 65 deep")?;
+    let management = ctx.target.management();
+    ensure!(
+        management.token(&token.id).await?.used_count == 0 && management.identity_count(&token).await? == 0,
+        "an enrollment body nested 65 deep created an identity"
+    );
+    let identity = identity(&ctx.target, &token, "nesting").await?;
+    let before = identity_record(&ctx.target, &identity.identity_id).await?;
+    expect_error(
+        &signed_raw(
+            &ctx.target,
+            &identity,
+            "renew",
+            nested_body(&renewed.csr, 65).as_bytes(),
+        )
+        .await?,
+        400,
+        "invalid_request",
+    )
+    .context("renew body nested 65 deep")?;
+    assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &before)
+        .await
+        .context("a renew body nested 65 deep changed the identity")?;
+    expect_status(
+        &enroll_raw(&ctx.target, &token, nested_body(&enrolled.csr, 64).as_bytes()).await?,
+        200,
+    )
+    .context("enroll body nested 64 deep")?;
+    expect_status(
+        &signed_raw(
+            &ctx.target,
+            &identity,
+            "renew",
+            nested_body(&renewed.csr, 64).as_bytes(),
+        )
+        .await?,
+        200,
+    )
+    .context("renew body nested 64 deep")
+}
+
+/// Strings that are not valid Unicode, as JSON escapes and as raw bytes that are not UTF-8.
+const INVALID_UNICODE: [(&str, &[u8]); 6] = [
+    ("escaped lone high surrogate", br"\ud800"),
+    ("escaped lone low surrogate", br"\udc00"),
+    ("escaped reversed surrogate pair", br"\udc00\ud800"),
+    // oracle: spec RFC 3629 §1
+    ("raw byte 0xFF", b"\xff"),
+    // oracle: spec RFC 3629 §3
+    ("raw UTF-8 form of a surrogate", b"\xed\xa0\x80"),
+    // oracle: spec RFC 3629 §3
+    ("raw overlong encoding", b"\xc0\xaf"),
+];
+
+/// Bodies for `csr` holding `content` inside a string, in the unknown member `extra` and in the `hostname` metadata value, which takes any valid string.
+fn bodies_with_string(csr: &str, content: &[u8]) -> [(&'static str, Vec<u8>); 2] {
+    let unknown = format!(r#"{{"csr":"{csr}","metadata":{{}},"extra":""#);
+    let hostname = format!(r#"{{"csr":"{csr}","metadata":{{"hostname":"host"#);
+    [
+        (
+            "unknown member",
+            [unknown.as_bytes(), content, br#""}"#.as_slice()].concat(),
+        ),
+        (
+            "hostname metadata value",
+            [hostname.as_bytes(), content, br#""}}"#.as_slice()].concat(),
+        ),
+    ]
+}
+
+/// CONTRACT.agent-identity.md §1: "A JSON request body [...] holding a string that is not valid Unicode, such as an escaped lone surrogate, in any member, including an unknown one → `invalid_request`".
+pub(crate) async fn p_invalid_unicode_json_strings_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    let token = token(&ctx, 2).await?;
+    let (enrolled, renewed) = (KeyPair::generate()?, KeyPair::generate()?);
+    for (variant, content) in INVALID_UNICODE {
+        for (member, body) in bodies_with_string(&enrolled.csr, content) {
+            expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
+                .with_context(|| format!("enroll body with {variant} in the {member}"))?;
+        }
+    }
+    let management = ctx.target.management();
+    ensure!(
+        management.token(&token.id).await?.used_count == 0 && management.identity_count(&token).await? == 0,
+        "an enrollment body holding a string that is not valid Unicode created an identity"
+    );
+    let identity = identity(&ctx.target, &token, "unicode").await?;
+    let before = identity_record(&ctx.target, &identity.identity_id).await?;
+    for (variant, content) in INVALID_UNICODE {
+        for (member, body) in bodies_with_string(&renewed.csr, content) {
+            expect_error(
+                &signed_raw(&ctx.target, &identity, "renew", &body).await?,
+                400,
+                "invalid_request",
+            )
+            .with_context(|| format!("renew body with {variant} in the {member}"))?;
+        }
+    }
+    assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &before)
+        .await
+        .context("a renew body holding a string that is not valid Unicode changed the identity")?;
+    // oracle: spec RFC 8259 §7
+    // RFC 8259's example escapes U+1D11E as this surrogate pair, so the same members holding a valid escape are accepted and decoded.
+    let pair = br"\uD834\uDD1E";
+    let [_, (_, body)] = bodies_with_string(&enrolled.csr, pair);
+    let control = Identity::from_enrollment(enrolled, &enroll_raw(&ctx.target, &token, &body).await?)
+        .context("enroll body with an escaped surrogate pair in the hostname metadata value")?;
+    let [_, (_, body)] = bodies_with_string(&renewed.csr, pair);
+    expect_status(&signed_raw(&ctx.target, &identity, "renew", &body).await?, 200)
+        .context("renew body with an escaped surrogate pair in the hostname metadata value")?;
+    for id in [&control.identity_id, &identity.identity_id] {
+        ensure!(
+            identity_record(&ctx.target, id).await?.metadata_value("hostname") == Some("host\u{1D11E}"),
+            "an escaped surrogate pair in the hostname was not stored as U+1D11E"
+        );
+    }
+    Ok(())
+}
+
 /// A CSR whose canonical `base64` encoding has padding and uses both `+` or `/` characters, so that every non-canonical rewrite applies.
 fn key_with_rewritable_csr() -> anyhow::Result<KeyPair> {
     for _ in 0..64 {
@@ -6969,6 +7145,38 @@ mod tests {
         ensure!(
             verify_chain(&chain, &roots, now).is_err(),
             "a non-CA intermediate was accepted"
+        );
+        Ok(())
+    }
+
+    /// The conformance runs show the check passing a conforming leaf, but only a leaf with another extension shows it can fail.
+    #[test]
+    fn leaf_extensions_outside_the_profile_are_named() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        let issuer_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+        let mut issuer = rcgen::CertificateParams::new(Vec::<String>::new())?;
+        issuer.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
+        let issuer = issuer.self_signed(&issuer_key)?;
+        let leaf_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+        let leaf = |is_ca: rcgen::IsCa| -> anyhow::Result<Certificate> {
+            let mut params = rcgen::CertificateParams::new(vec!["leaf.local".to_owned()])?;
+            params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ClientAuth];
+            params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
+            params.use_authority_key_identifier_extension = true;
+            params.is_ca = is_ca;
+            Ok(Certificate::from_der(
+                params.signed_by(&leaf_key, &issuer, &issuer_key)?.der(),
+            )?)
+        };
+        assert_leaf_extensions(&leaf(rcgen::IsCa::NoCa)?).context("SAN, EKU, KeyUsage and AKI were refused")?;
+        // `ExplicitNoCa` adds a subject key identifier and a basicConstraints without cA.
+        let error = assert_leaf_extensions(&leaf(rcgen::IsCa::ExplicitNoCa)?)
+            .expect_err("a leaf with basicConstraints was accepted")
+            .to_string();
+        // oracle: spec RFC 5280 §4.2.1.9
+        ensure!(
+            error.ends_with(": 2.5.29.19"),
+            "the failure does not name basicConstraints alone: {error}"
         );
         Ok(())
     }
