@@ -56,7 +56,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - `bag`: `base64url` of a UTF-8 JSON object, unsigned and used only for routing.
   The agent ignores unknown fields.
   Fields:
-  - `u` (required): absolute `https` product base URL without a query or fragment, e.g. `https://host/dvls`.
+  - `u` (required): absolute `https` product base URL without a query, a fragment or a trailing slash, e.g. `https://host/dvls`; the agent removes trailing slashes from a `u` that has them, so that `https://host/` and `https://host` name the same authority.
 - `secret`: `base64url` of 32 random bytes; opaque to the agent beyond this format.
   The authority authenticates a token by its exact `secret` text alone and never checks the `bag`, which carries only routing data.
 - Total length ≤ 4096 bytes.
@@ -74,7 +74,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - When several outcomes apply to one enrollment, the earliest in this list wins: (1) `token_invalid` when the `Authorization` header is missing, repeated, not `Bearer`, or holds no token whose `SHA-256(secret)` matches; (2) `invalid_request` for an invalid body, CSR or metadata; (3) the result of the CSR public key lookup below, except that a deleted token gets `token_invalid` for anything but an idempotent replay; (4) `token_invalid` for a deleted token, then `token_expired` for an expired one; (5) `token_exhausted`; (6) a new identity.
 - The server matches the CSR public key against every certificate it has issued using the first matching rule below:
   - The key of the current certificate of a non-revoked identity enrolled with the same token → `200` with that identity and its current chain, without counting a use or changing metadata.
-  - The key of an identity enrolled with a different token → `invalid_request`.
+  - The key of a non-deleted identity enrolled with a different token → `invalid_request`; a deleted identity's key falls to the last rule, since the server keeps no token for it.
   - Any certificate key of a revoked identity → `identity_revoked`.
   - The key of a pending or retired certificate of a non-revoked identity → `invalid_request`.
     A public key belongs to exactly one certificate lineage and is never reused.
@@ -255,7 +255,7 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 
 ### 5.5 `POST confirm`
 
-- Authentication: §6, `tag="confirm"`, signed with the **pending** certificate's key; the body is empty.
+- Authentication: §6, `tag="confirm"`, signed with the **pending** certificate's key; the body is empty, and a non-empty body → `invalid_request` with no state change.
 - Pending → it becomes `current`, and the previous `current` becomes `retired`; §7.4 specifies what happens to streams opened with the retired certificate.
 - Already current → no-op (idempotent retry after a lost response).
 - `204` in both cases.
