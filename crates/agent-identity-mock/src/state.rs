@@ -1,7 +1,7 @@
 //! This module holds in-memory state for the [agent contract][contract], [DVLS management API][dvls] and [mock control][mock].
 //! One mutex around `State` serializes enrollment and rotation.
 //!
-//! [contract]: ../../../docs/agent-identity/CONTRACT.md
+//! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 //! [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#management-api
 //! [mock]: ../INTENT.md#mock-only-control
 
@@ -21,9 +21,9 @@ use crate::oracle::{
     AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, check_csr, unexpired, within_renewal_grace,
 };
 
-/// The only config schema version the contract defines ([CONTRACT.md][contract], "5.2 `POST enroll`").
+/// The only config schema version the contract defines ([CONTRACT.agent-identity.md][contract], "5.2 `POST enroll`").
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#52-post-enroll
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
 const CONFIG_VERSION: u64 = 1;
 
 /// Error with an HTTP status and a machine-readable code, mapped to the right body
@@ -95,10 +95,10 @@ pub(crate) struct Settings {
 }
 
 impl Default for Settings {
-    /// The channel is on, certificates last the contract's default 90 days ([CONTRACT.md][contract], "4. Certificates"),
+    /// The channel is on, certificates last the contract's default 90 days ([CONTRACT.agent-identity.md][contract], "4. Certificates"),
     /// and rotation notifies 10 identities per second ([DVLS intent][dvls], "Load").
     ///
-    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#4-certificates
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#4-certificates
     /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#load
     fn default() -> Self {
         Self {
@@ -283,9 +283,9 @@ impl Identity {
     }
 
     /// Returns the serialized config and its revision when a Hello reports an older applied revision.
-    /// The channel sends it as the `ConfigUpdate` that follows `Welcome` ([CONTRACT.md][contract], "7.3 Sequence", step 7).
+    /// The channel sends it as the `ConfigUpdate` that follows `Welcome` ([CONTRACT.agent-identity.md][contract], "7.3 Sequence", step 7).
     ///
-    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
     pub(crate) fn config_update_after(&self, applied_revision: u64) -> Option<(String, u64)> {
         let revision = self.config_revision();
         (applied_revision < revision).then(|| {
@@ -359,7 +359,7 @@ fn identity_status(revoked: bool, certs: impl IntoIterator<Item = (CertStatus, i
         if unexpired(not_after, now) {
             return IdentityStatus::Active;
         }
-        // CONTRACT.md §6 and §8.2: renewal grace lasts the certificate's own lifetime.
+        // CONTRACT.agent-identity.md §6 and §8.2: renewal grace lasts the certificate's own lifetime.
         if within_renewal_grace(not_before, not_after, now) {
             status = IdentityStatus::Grace;
         }
@@ -390,10 +390,10 @@ pub(crate) struct StreamHandle {
     pub(crate) retire_at: Option<i64>,
 }
 
-/// A stream closes no later than its certificate's `notAfter` ([CONTRACT.md][contract], "7.4 Termination"),
-/// so it closes at `notAfter` even though §6 still accepts the certificate then.
+/// A stream closes no later than its certificate's `notAfter` ([CONTRACT.agent-identity.md][contract], "7.4
+/// Termination"), so it closes at `notAfter` even though §6 still accepts the certificate then.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
 pub(crate) fn stream_expired(not_after: i64, now: i64) -> bool {
     now >= not_after
 }
@@ -1639,8 +1639,9 @@ mod tests {
 
     use super::*;
 
-    // Certificates live 100 s, so CONTRACT.md §6 grants each one 100 s of renewal grace after `notAfter`.
-    // CONTRACT.md §6: "A certificate is unexpired while `now ≤ notAfter`"; `notBefore` is not checked.
+    // Certificates live 100 s, so CONTRACT.agent-identity.md §6 grants each one 100 s of renewal grace after
+    // `notAfter`.
+    // CONTRACT.agent-identity.md §6: "A certificate is unexpired while `now ≤ notAfter`"; `notBefore` is not checked.
     const CURRENT: (CertStatus, i64, i64) = (CertStatus::Current, 900, 1000);
     const PENDING: (CertStatus, i64, i64) = (CertStatus::Pending, 1000, 1100);
 
@@ -1719,7 +1720,7 @@ mod tests {
     }
 
     /// The rotation status counts identities that still hold an unexpired old-root certificate ([DVLS intent][dvls], "Rotation"),
-    /// and CONTRACT.md §6 keeps a certificate unexpired while `now ≤ notAfter`.
+    /// and CONTRACT.agent-identity.md §6 keeps a certificate unexpired while `now ≤ notAfter`.
     ///
     /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#rotation
     #[test]
@@ -1822,7 +1823,8 @@ mod tests {
     }
 
     /// [DVLS intent][dvls] ("Root CA"): "When the root key cannot be decrypted, only the operations that need it fail:
-    /// enrollment, renewal and root rotation"; CONTRACT.md §5.4 maps such a failure to `500 unavailable`.
+    /// enrollment, renewal and root rotation"; CONTRACT.agent-identity.md §5.4 maps such a failure to `500
+    /// unavailable`.
     ///
     /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
     #[test]

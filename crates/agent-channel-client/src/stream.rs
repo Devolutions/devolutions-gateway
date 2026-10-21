@@ -89,12 +89,12 @@ async fn stream_once(
     }
 }
 
-/// Answers the challenge and waits for `Welcome` ([CONTRACT.md §7.3 "Sequence"][contract], steps 3–4).
+/// Answers the challenge and waits for `Welcome` ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], steps 3–4).
 ///
 /// Until `Welcome` answers the `Hello`, every other message is ignored, so that nothing counts before the
 /// authority has verified the proof.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
 async fn authenticate(target: &Target, opened: &mut Opened) -> Result<(), Closure> {
     if opened.challenge.len() != CHALLENGE_LEN {
         return Err(Closure::outage("challenge is not 32 bytes"));
@@ -174,9 +174,9 @@ async fn ended_with_ok(inbound: &mut Streaming<ServerMessage>, headers: &Metadat
     Closure::from_status(&Status::with_metadata(Code::Ok, reason, metadata))
 }
 
-/// Builds the `Hello` that answers a challenge ([CONTRACT.md §7.3 "Sequence"][contract], step 3).
+/// Builds the `Hello` that answers a challenge ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], step 3).
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
 fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> Result<AgentMessage, Closure> {
     let proof = target
         .key
@@ -196,9 +196,9 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
 }
 
 /// Opens and authenticates a stream, and retries once at the authority's time when it refuses the opening with
-/// `clock_skew` ([CONTRACT.md §6 "RFC 9421 profile"][contract]).
+/// `clock_skew` ([CONTRACT.agent-identity.md §6 "RFC 9421 profile"][contract]).
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#6-rfc-9421-profile
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#6-rfc-9421-profile
 async fn authenticated_stream(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
     match authenticated_stream_at(shared, target, 0).await {
         Err(closure) => match clock_offset(&closure) {
@@ -231,9 +231,9 @@ fn clock_offset(closure: &Closure) -> Option<i64> {
 }
 
 /// Sends the signed opening request, with its `created` time offset by `clock_offset` seconds, and waits for the
-/// `Challenge` ([CONTRACT.md §7.3 "Sequence"][contract], steps 1–2).
+/// `Challenge` ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], steps 1–2).
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
 async fn open(shared: &Shared, target: &Target, clock_offset: i64) -> Result<Opened, Closure> {
     let service = shared
         .transport
@@ -277,9 +277,9 @@ async fn open(shared: &Shared, target: &Target, clock_offset: i64) -> Result<Ope
     }
 }
 
-/// Returns the bytes a channel proof signs ([CONTRACT.md §7.3 "Sequence"][contract], step 3).
+/// Returns the bytes a channel proof signs ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], step 3).
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
 pub(crate) fn channel_proof_input(challenge: &[u8], connect_nonce: &str) -> Vec<u8> {
     let mut input =
         Vec::with_capacity(CHANNEL_PROOF_DOMAIN.len() + 1 /* separator */ + challenge.len() + connect_nonce.len());

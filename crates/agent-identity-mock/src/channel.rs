@@ -1,4 +1,4 @@
-//! Channel service (CONTRACT.md §7): tonic `AgentChannel/Connect` bidi stream with the
+//! Channel service (CONTRACT.agent-identity.md §7): tonic `AgentChannel/Connect` bidi stream with the
 //! opening-signature check (§6, `tag="connect"`), the challenge/proof handshake
 //! (§7.3), and contract-driven termination (§7.4).
 
@@ -37,9 +37,9 @@ pub(crate) struct ChannelService {
 }
 
 /// Builds a stream failure status with the `error-code` and `server-time` trailers
-/// ([CONTRACT.md][contract], "7.4 Termination").
+/// ([CONTRACT.agent-identity.md][contract], "7.4 Termination").
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
 fn error_status(code: Code, error_code: &'static str, now: i64) -> Status {
     let mut metadata = MetadataMap::new();
     metadata.insert("error-code", AsciiMetadataValue::from_static(error_code));
@@ -214,11 +214,11 @@ async fn close_rejected(
     .await;
 }
 
-/// Checks a stream awaiting `Hello` against the closures of [CONTRACT.md][contract] ("7.4 Termination"), on the
-/// identity first, then on the certificate that opened the stream, and returns that certificate's status when none
-/// applies.
+/// Checks a stream awaiting `Hello` against the closures of [CONTRACT.agent-identity.md][contract] ("7.4 Termination"),
+/// on the identity first, then on the certificate that opened the stream, and returns that certificate's status when
+/// none applies.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#74-termination
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
 fn awaiting_closure(
     state: &State,
     identity_id: Uuid,
@@ -782,7 +782,7 @@ mod tests {
             })
         }
 
-        /// Registers a pending certificate for `key`, as a renewal would (CONTRACT.md §5.3), and returns its thumbprint.
+        /// Registers a pending certificate for `key`, as a renewal would (CONTRACT.agent-identity.md §5.3), and returns its thumbprint.
         async fn add_pending(&self, key: &SigningKey) -> String {
             let mut state = self.app.state.lock().await;
             let thumbprint = crate::ca::thumbprint(b"pending certificate");
@@ -809,7 +809,7 @@ mod tests {
             thumbprint
         }
 
-        /// Sends `POST confirm` signed by `key` (CONTRACT.md §5.5) and returns the response status.
+        /// Sends `POST confirm` signed by `key` (CONTRACT.agent-identity.md §5.5) and returns the response status.
         async fn confirm(&self, key: &SigningKey, keyid: &str) -> anyhow::Result<http::StatusCode> {
             let (_, signature_input, signature) = sign(key, keyid, "confirm", self.app.now())?;
             let request = http::Request::post("/mock/api/agent-identity/v1/confirm")
@@ -830,8 +830,8 @@ mod tests {
         }
     }
 
-    /// Signs a `("@method")` request for `tag` at mock time `now` (CONTRACT.md §6), and returns its nonce and its
-    /// `signature-input` and `signature` header values.
+    /// Signs a `("@method")` request for `tag` at mock time `now` (CONTRACT.agent-identity.md §6), and returns its
+    /// nonce and its `signature-input` and `signature` header values.
     fn sign(key: &SigningKey, keyid: &str, tag: &str, now: i64) -> anyhow::Result<(String, String, String)> {
         let nonce = URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes());
         let params = format!(
@@ -844,7 +844,7 @@ mod tests {
         Ok((nonce, format!("sig={params}"), signature))
     }
 
-    /// The closing status in `headers`, which carry an RFC 3339 `server-time` with any status but `OK` (CONTRACT.md §7.4).
+    /// The closing status in `headers`, which carry an RFC 3339 `server-time` with any status but `OK` (CONTRACT.agent-identity.md §7.4).
     fn closed(headers: &http::HeaderMap) -> Option<Seen> {
         let value = |name: &str| {
             headers
@@ -862,7 +862,7 @@ mod tests {
         Some(Seen::Closed(status, value("error-code")))
     }
 
-    /// How the agent answers the `Challenge`; each answer fails CONTRACT.md §7.3 step 4.
+    /// How the agent answers the `Challenge`; each answer fails CONTRACT.agent-identity.md §7.3 step 4.
     #[derive(Clone, Copy, Debug)]
     enum Answer {
         Nothing,
@@ -883,7 +883,8 @@ mod tests {
     }
 
     impl Channel {
-        /// Opens a stream signed by the enrolled certificate at the current mock time (CONTRACT.md §7.3 step 1).
+        /// Opens a stream signed by the enrolled certificate at the current mock time (CONTRACT.agent-identity.md §7.3
+        /// step 1).
         async fn open(enrolled: &Enrolled) -> anyhow::Result<Self> {
             let (nonce, signature_input, signature) =
                 sign(&enrolled.key, &enrolled.keyid, "connect", enrolled.app.now())?;
@@ -985,7 +986,7 @@ mod tests {
             Ok(())
         }
 
-        /// A `Hello` answering the last `Challenge` with a proof by `key` (CONTRACT.md §7.3 step 3).
+        /// A `Hello` answering the last `Challenge` with a proof by `key` (CONTRACT.agent-identity.md §7.3 step 3).
         fn hello(&self, key: &SigningKey) -> anyhow::Result<AgentMessage> {
             let mut proven = b"devolutions-agent-identity/v1/channel-proof\0".to_vec();
             proven.extend_from_slice(&self.challenge.1);
@@ -1035,8 +1036,8 @@ mod tests {
         Channel::open(&enrolled).await?.drain(QUIET).await
     }
 
-    /// CONTRACT.md §6 accepts a `connect` signed by a certificate while `now ≤ notAfter`, whatever its `notBefore`,
-    /// and §7.3 step 2 then sends `Challenge`; §7.4 closes the stream no later than `notAfter`.
+    /// CONTRACT.agent-identity.md §6 accepts a `connect` signed by a certificate while `now ≤ notAfter`, whatever its
+    /// `notBefore`, and §7.3 step 2 then sends `Challenge`; §7.4 closes the stream no later than `notAfter`.
     #[rstest]
     #[case::before_not_before(false, -10, vec![Seen::Challenge])]
     #[case::before_not_after(true, -1, vec![Seen::Challenge])]
@@ -1066,7 +1067,7 @@ mod tests {
         enrolled.app.clock.freeze_at(enrolled.not_after + 1);
     }
 
-    /// CONTRACT.md §7.4: the revocation and `notAfter` closures "also apply to a stream still awaiting `Hello`, ahead of
+    /// CONTRACT.agent-identity.md §7.4: the revocation and `notAfter` closures "also apply to a stream still awaiting `Hello`, ahead of
     /// the failures of §7.3 step 4; an identity revoked and then deleted during that wait gets `UNAUTHENTICATED` +
     /// `error-code: identity_unknown`".
     /// gRPC codes: 7 is `PERMISSION_DENIED` and 16 is `UNAUTHENTICATED`.
@@ -1095,8 +1096,8 @@ mod tests {
         Ok(())
     }
 
-    /// CONTRACT.md §7.4: "A stream closes no later than its certificate's `notAfter`", which "also" applies "to a
-    /// stream still awaiting `Hello`", even when no request applies the clock to the mock.
+    /// CONTRACT.agent-identity.md §7.4: "A stream closes no later than its certificate's `notAfter`", which "also"
+    /// applies "to a stream still awaiting `Hello`", even when no request applies the clock to the mock.
     #[tokio::test(start_paused = true)]
     async fn stream_awaiting_hello_closes_at_not_after() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1112,7 +1113,7 @@ mod tests {
         Ok(())
     }
 
-    /// CONTRACT.md §7.4 applies revocation to a stream awaiting `Hello` as well as `notAfter`.
+    /// CONTRACT.agent-identity.md §7.4 applies revocation to a stream awaiting `Hello` as well as `notAfter`.
     /// The identity's state comes before its certificate's, since `identity_revoked` is terminal (§5.4) where
     /// `certificate_expired` asks for a renewal.
     #[tokio::test(start_paused = true)]
@@ -1152,8 +1153,9 @@ mod tests {
         channel.drain(Duration::from_secs(2)).await
     }
 
-    /// CONTRACT.md §7.4: a stream awaiting `Hello` closes "no later than its certificate's `notAfter`", and "an
-    /// identity revoked and then deleted during that wait gets `UNAUTHENTICATED` + `error-code: identity_unknown`".
+    /// CONTRACT.agent-identity.md §7.4: a stream awaiting `Hello` closes "no later than its certificate's `notAfter`",
+    /// and "an identity revoked and then deleted during that wait gets `UNAUTHENTICATED` + `error-code:
+    /// identity_unknown`".
     #[tokio::test(start_paused = true)]
     async fn deleted_identity_closes_a_stream_awaiting_hello_at_not_after() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1187,8 +1189,8 @@ mod tests {
         Ok(())
     }
 
-    /// CONTRACT.md §7.4: "A stream whose certificate is retired while it awaits `Hello` still completes the handshake,
-    /// then gets the same treatment" as the streams of a certificate `confirm` retires: they "get
+    /// CONTRACT.agent-identity.md §7.4: "A stream whose certificate is retired while it awaits `Hello` still completes
+    /// the handshake, then gets the same treatment" as the streams of a certificate `confirm` retires: they "get
     /// `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open".
     #[tokio::test(start_paused = true)]
     async fn certificate_retired_during_the_hello_wait_completes_the_handshake_then_rotates() -> anyhow::Result<()> {

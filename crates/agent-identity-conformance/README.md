@@ -50,5 +50,5 @@ The SYSTEM fixture requires an elevated administrator unless the suite already r
 `--authority-id` and `--second-authority-id` check server and stored authority IDs when supplied; they do not control cleanup.
 The runner stops after 14 minutes 30 seconds; the testsuite allows 15 minutes and terminates the runner's process tree on timeout.
 
-[Agent Identity V1 contract]: ../../docs/agent-identity/CONTRACT.md
+[Agent Identity V1 contract]: ../../docs/agent-identity/CONTRACT.agent-identity.md
 [mock README]: ../agent-identity-mock/README.md

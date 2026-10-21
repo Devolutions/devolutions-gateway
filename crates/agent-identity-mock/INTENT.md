@@ -2,7 +2,7 @@ This binary is a reference authority for the conformance tester.
 
 ## What it implements
 
-- The agent-facing operations and the agent channel, exactly as [CONTRACT.md](../../docs/agent-identity/CONTRACT.md) specifies.
+- The agent-facing operations and the agent channel, exactly as [CONTRACT.agent-identity.md](../../docs/agent-identity/CONTRACT.agent-identity.md) specifies.
 - DVLS's management API as it is, so that the same tests run against the mock and against DVLS.
   Its decisions are in DVLS's Agent Identity intent (`docs/agent-identity/INTENT.DVLS.md` until it moves to the RDM repository), and its exact shape is DVLS's OpenAPI document:
   - enrollment tokens: create (the full token is returned only then), list, read and delete; tokens are immutable after creation, and a friendly-name format with an unpaired brace or an unknown placeholder is rejected;

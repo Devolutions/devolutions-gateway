@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn config_with_a_version_other_than_1_is_transient() {
-        // `CONTRACT.md` §5.2: a config whose `version` is not 1 is a transient failure.
+        // `CONTRACT.agent-identity.md` §5.2: a config whose `version` is not 1 is a transient failure.
         assert_eq!(
             validate_config(&serde_json::json!({"version": 1, "revision": 1})),
             Ok(())

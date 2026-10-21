@@ -1,4 +1,4 @@
-//! CONTRACT.md §7.3 channel proof verification.
+//! CONTRACT.agent-identity.md §7.3 channel proof verification.
 
 use p256::ecdsa::VerifyingKey;
 

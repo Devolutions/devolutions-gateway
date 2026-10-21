@@ -44,7 +44,7 @@ Advancing or freezing the clock immediately closes expired streams and re-evalua
 
 All paths below are relative to `base_url` (i.e. they include the path prefix).
 
-### Agent-facing (CONTRACT.md §5), no management API credential
+### Agent-facing (CONTRACT.agent-identity.md §5), no management API credential
 
 | Method | Path | Notes |
 |---|---|---|
@@ -104,7 +104,7 @@ A request without one, even with an `Authorization` header, is 401 with no `Cont
 A repeated, unknown, expired or logged-out `tokenId` is 401 with `Content-Type: application/json; charset=utf-8` and exactly `{"message":"Missing or invalid token"}`.
 Invalid parameters are 400 with a `PublicApiValidationError` body, `{ "errors": [ { "field", "message" } ] }`, where `field` names the camelCase member or query parameter, `config.<key>` for a token config entry, or is `null` for a malformed body or query string.
 Every other error is 403, 404, 409 or 422 with a `PublicApiError` body, `{ "message" }`.
-A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth, as CONTRACT.md §1 requires of agent-facing bodies.
+A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth, as CONTRACT.agent-identity.md §1 requires of agent-facing bodies.
 Each operation requires the permission the table lists, and a session without it gets 403 before the request is processed.
 
 Enums are PascalCase.
@@ -168,7 +168,7 @@ The old root's signing key is discarded when rotation starts.
 
 ## Signature oracle
 
-`src/oracle/` is a test-only verifier of CONTRACT.md §4, §6 and §7.3, written independently of the agent's RFC 9421 library and implementation and not intended for production use.
+`src/oracle/` is a test-only verifier of CONTRACT.agent-identity.md §4, §6 and §7.3, written independently of the agent's RFC 9421 library and implementation and not intended for production use.
 For signed requests it checks, in order, (1) strict syntax, parameters, algorithm and covered components, (2) endpoint tag, (3) signature window, (4) certificate registration, status, revocation and validity, (5) renew/check-in content digest and P-256 signature, then (6) replay nonce insertion only after verification.
 For channels it verifies the P-256 proof over the §7.3 domain separator, zero byte, challenge and connect nonce; the channel service owns the handshake and state updates.
 For CSRs it checks the PKCS#10 structure, P-256 subject key, required signature algorithm and self-signature over the request info as received, while ignoring the subject and attributes, whose contents need not be canonical DER (§4).
@@ -184,6 +184,6 @@ X.509 and DER supply CSR structure types; P-256 performs signature verification.
 `cargo test -p agent-identity-mock` replays every signature, proof and CSR vector through the verifier and validators used by the server.
 It also pins the login, each management API operation, error class, paging bound, permission and setting effect to DVLS's OpenAPI documents.
 
-[contract]: ../../docs/agent-identity/CONTRACT.md
+[contract]: ../../docs/agent-identity/CONTRACT.agent-identity.md
 [dvls-management]: ../../docs/agent-identity/INTENT.DVLS.md#management-api
 [mock-control]: INTENT.md#mock-only-control

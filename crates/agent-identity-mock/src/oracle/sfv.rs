@@ -1,6 +1,6 @@
 //! Strict RFC 8941 structured-fields subset parser.
 //!
-//! Only what the CONTRACT.md §6 profile needs: dictionaries whose member values are
+//! Only what the CONTRACT.agent-identity.md §6 profile needs: dictionaries whose member values are
 //! inner lists of strings with parameters (`Signature-Input`) or byte sequences
 //! (`Signature`). Anything unparsable is rejected; the caller maps that to
 //! `signature_invalid`.

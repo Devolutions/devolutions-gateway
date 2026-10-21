@@ -127,7 +127,7 @@ async fn next_closure(channel: &mut Channel) -> (Closure, Option<Duration>) {
 
 const SERVER_TIME: &str = "2026-10-21T00:00:00Z";
 
-/// A gRPC status as the authority closes a stream with it ([CONTRACT.md] §7.4).
+/// A gRPC status as the authority closes a stream with it ([CONTRACT.agent-identity.md] §7.4).
 fn closing_status(code: Code, error_code: Option<&str>) -> Status {
     let mut status = Status::new(code, "closed by the test authority");
     if let Some(error_code) = error_code {
@@ -150,7 +150,8 @@ async fn opens_a_signed_stream_under_the_url_path_and_waits_for_the_challenge() 
     let identity = Identity::from_vectors("device-a")?;
     let _channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // CONTRACT.md §7.2: the URL path prefixes the RPC path, and the opening carries a `connect` signature.
+    // CONTRACT.agent-identity.md §7.2: the URL path prefixes the RPC path, and the opening carries a `connect`
+    // signature.
     let opening = authority.next_opening().await;
     assert_eq!(opening.path, "/dvls/devolutions.agent.channel.v1.AgentChannel/Connect");
     let signature_input = opening.signature_input().to_owned();
@@ -161,7 +162,7 @@ async fn opens_a_signed_stream_under_the_url_path_and_waits_for_the_challenge() 
     );
     assert!(opening.headers.contains_key("signature"));
 
-    // CONTRACT.md §7.3 step 1: the agent sends nothing until it receives `Challenge`.
+    // CONTRACT.agent-identity.md §7.3 step 1: the agent sends nothing until it receives `Challenge`.
     let mut stream = opening.accept();
     assert!(stream.receive_within(Duration::from_millis(300)).await.is_none());
     Ok(())
@@ -184,13 +185,13 @@ async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::
         client(&authority, Settings::default())?.connect(identity.target_with_hello(&authority.url, hello))?;
     let mut stream = authority.next_opening().await.accept();
 
-    // CONTRACT.md §3.1: metadata is collected when the `Hello` is sent.
+    // CONTRACT.agent-identity.md §3.1: metadata is collected when the `Hello` is sent.
     *hostname.lock().expect("hostname lock") = "at-hello".to_owned();
     let challenge = [0x5a; 32];
     let challenge_id = stream.challenge(&challenge).await;
     let message = stream.receive().await;
 
-    // CONTRACT.md §7.3 step 3.
+    // CONTRACT.agent-identity.md §7.3 step 3.
     assert_eq!(message.correlation_id.as_deref(), Some(challenge_id.as_str()));
     let Some(agent_message::Payload::Hello(hello)) = message.payload else {
         panic!("expected Hello, got {message:?}");
@@ -285,7 +286,7 @@ async fn reports_pushes_with_their_envelope_ids_and_ignores_unknown_payloads() -
     stream.authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
-    // CONTRACT.md §7.3: unknown payloads are ignored.
+    // CONTRACT.agent-identity.md §7.3: unknown payloads are ignored.
     stream.send_unknown(&new_id()).await;
     stream.send(&new_id(), Some(&new_id()), Payload::Ack(Ack {})).await;
     let (renew_id, reconnect_id, config_id) = (new_id(), new_id(), new_id());
@@ -364,11 +365,11 @@ async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
 
     channel.ack(&renew_id);
 
-    // CONTRACT.md §7.3 step 5: `Ack` with `correlation_id` = message `id`.
+    // CONTRACT.agent-identity.md §7.3 step 5: `Ack` with `correlation_id` = message `id`.
     let ack = stream.receive().await;
     assert_eq!(ack.correlation_id.as_deref(), Some(renew_id.as_str()));
     assert_eq!(ack.payload, Some(agent_message::Payload::Ack(Ack {})));
-    // CONTRACT.md §1 and §7.3: envelope IDs are lowercase hyphenated UUIDs.
+    // CONTRACT.agent-identity.md §1 and §7.3: envelope IDs are lowercase hyphenated UUIDs.
     for id in [&hello.id, &ack.id] {
         let uuid = uuid::Uuid::parse_str(id)?;
         assert_eq!(&uuid.hyphenated().to_string(), id);
@@ -435,7 +436,7 @@ async fn reports_a_refused_opening_with_its_status_trailers_and_class(
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // CONTRACT.md §7.4 and §5.4 classify the closure.
+    // CONTRACT.agent-identity.md §7.4 and §5.4 classify the closure.
     // A transient one is an outage: crates/agent-channel-client/INTENT.md caps the backoff at 5 min "after network
     // errors, server downtime, and any other transient refusal or closure of the stream".
     authority
@@ -493,7 +494,8 @@ async fn stops_after_a_terminal_or_expired_certificate_closure(
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // CONTRACT.md §7.4: the agent reconnects unless the identity is terminal; §5.4: it renews before retrying.
+    // CONTRACT.agent-identity.md §7.4: the agent reconnects unless the identity is terminal; §5.4: it renews before
+    // retrying.
     authority
         .next_opening()
         .await
@@ -557,7 +559,7 @@ async fn closes_without_hello_when_the_challenge_is_not_32_bytes() -> anyhow::Re
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
     let mut stream = authority.next_opening().await.accept();
 
-    // CONTRACT.md §7.3 step 3 proves a 32-byte challenge.
+    // CONTRACT.agent-identity.md §7.3 step 3 proves a 32-byte challenge.
     stream.challenge(&[1; 31]).await;
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
@@ -618,7 +620,8 @@ async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Resul
 
     authority.next_opening().await.refuse(clock_skew_refusal(server_time));
 
-    // CONTRACT.md §6: the retry offsets `created` by `server_time − local_time`, from the `server-time` trailer.
+    // CONTRACT.agent-identity.md §6: the retry offsets `created` by `server_time − local_time`, from the `server-time`
+    // trailer.
     let retry = authority.next_opening().await;
     let retry_created = created(&retry);
     let expected = server_time.unix_timestamp();
@@ -712,7 +715,8 @@ async fn opens_a_new_stream_while_the_current_one_stays_open() -> anyhow::Result
     current_stream.authenticate().await;
     assert_eq!(next_event(&mut current).await, Event::Authenticated);
 
-    // CONTRACT.md §7.3 step 6 and §8.1 step 4: the new stream, here for a renewed key, opens before the old one closes.
+    // CONTRACT.agent-identity.md §7.3 step 6 and §8.1 step 4: the new stream, here for a renewed key, opens before the
+    // old one closes.
     let mut next = client.connect(Identity::from_vectors("device-b")?.target(&authority.url))?;
     let mut next_stream = authority.next_opening().await.accept();
     next_stream.authenticate().await;
@@ -974,7 +978,7 @@ async fn reports_the_trailers_of_a_stream_closed_with_ok_after_welcome() -> anyh
     stream.authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
-    // CONTRACT.md §7.4: a retired certificate's streams are closed with OK.
+    // CONTRACT.agent-identity.md §7.4: a retired certificate's streams are closed with OK.
     stream.close(closing_status(Code::Ok, Some("future_code"))).await;
     assert_ok_closure_with_trailers(&next_closure(&mut channel).await.0);
     Ok(())

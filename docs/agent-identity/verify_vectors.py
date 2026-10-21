@@ -2,7 +2,7 @@
 
 Usage: python verify_vectors.py [--table] [--self-test] [path/to/test-vectors.json]
 
-Every http_signature case and sequence runs through a CONTRACT.md §6 evaluator written from the
+Every http_signature case and sequence runs through a CONTRACT.agent-identity.md §6 evaluator written from the
 contract text alone. It has its own parser for the RFC 8941 subset the profile uses, because a
 structured-field library keeps only the last of repeated keys and accepts non-canonical base64,
 which are exactly what §6 step 1 must reject. Each negative case is also checked for isolation:
@@ -46,7 +46,7 @@ def der_to_raw(der):
 
 
 def verify_raw(pub, msg, raw):
-    """ECDSA P-256 / SHA-256, raw 64-byte r||s (CONTRACT.md §6, §7.3)."""
+    """ECDSA P-256 / SHA-256, raw 64-byte r||s (CONTRACT.agent-identity.md §6, §7.3)."""
     if len(raw) != 64:
         return False
     try:
@@ -85,7 +85,7 @@ B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/
 
 
 def b64_canonical(text):
-    """Standard base64 with padding, in its canonical form (CONTRACT.md §6; RFC 4648 §3.2, §3.5, §4)."""
+    """Standard base64 with padding, in its canonical form (CONTRACT.agent-identity.md §6; RFC 4648 §3.2, §3.5, §4)."""
     data = text.rstrip("=")
     pad = len(text) - len(data)
     if any(c not in B64_ALPHABET for c in data):
@@ -352,7 +352,7 @@ URL_ALPHABET = B64_ALPHABET[:62] + "-_"
 
 
 def is_b64url(text, size):
-    """`base64url` (CONTRACT.md Definitions: RFC 4648 §5, no padding) of exactly `size` bytes, in canonical form."""
+    """`base64url` (CONTRACT.agent-identity.md Definitions: RFC 4648 §5, no padding) of exactly `size` bytes, in canonical form."""
     if not re.fullmatch(r"[A-Za-z0-9_-]*", text) or len(text) % 4 == 1:
         return False
     raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
@@ -373,7 +373,7 @@ def normalized_thumbprint(text):
     return None if raw is None else b64u(raw)
 
 
-# ---------------------------------------------------------------------------- CONTRACT.md §6 evaluator
+# ---------------------------------------------------------------------------- CONTRACT.agent-identity.md §6 evaluator
 
 SI = "signature_invalid"
 OPERATIONS = {  # §6 table: endpoint -> (tag, covered components, accepted statuses, validity rule)

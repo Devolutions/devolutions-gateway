@@ -1,4 +1,4 @@
-//! Agent-facing API (CONTRACT.md §5), under `<prefix>/api/agent-identity/v1`.
+//! Agent-facing API (CONTRACT.agent-identity.md §5), under `<prefix>/api/agent-identity/v1`.
 
 use std::sync::Arc;
 
@@ -102,11 +102,11 @@ async fn trust_anchor(AxumState(app): AxumState<Arc<App>>) -> Response {
 
 /// Parses `Authorization: Bearer <token>`; the token must be well-formed
 /// (`dvaet1.<bag>.<secret>` with a 32-byte secret) to even reach the lookup, and a repeated header is `token_invalid`
-/// ([CONTRACT.md][contract], "2.1 Authority behavior").
+/// ([CONTRACT.agent-identity.md][contract], "2.1 Authority behavior").
 /// The token authenticates by its exact `secret` text alone and the `bag` is never checked (§2); the engine decodes only
 /// the canonical encoding (§1), so another encoding of the same secret bytes is `token_invalid`.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#21-authority-behavior
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#21-authority-behavior
 fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
     if headers.get_all(AUTHORIZATION).iter().count() != 1 {
         return Err(ApiError::token_invalid());
@@ -124,9 +124,9 @@ fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
         .ok_or_else(ApiError::token_invalid)
 }
 
-/// Returns the enrollment token the mock issues for `secret`: `dvaet1.<bag>.<secret>` ([CONTRACT.md][contract], "2. Enrollment token").
+/// Returns the enrollment token the mock issues for `secret`: `dvaet1.<bag>.<secret>` ([CONTRACT.agent-identity.md][contract], "2. Enrollment token").
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#2-enrollment-token
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#2-enrollment-token
 pub(crate) fn enrollment_token(base_url: &str, secret: &[u8; 32]) -> String {
     let bag = URL_SAFE_NO_PAD.encode(json!({ "u": base_url }).to_string());
     format!("dvaet1.{bag}.{}", URL_SAFE_NO_PAD.encode(secret))
@@ -457,7 +457,8 @@ mod tests {
         result.map(|_| ()).map_err(|error| error.code)
     }
 
-    /// CONTRACT.md §1: "A JSON request body that repeats a member name at any depth [...] → `invalid_request`".
+    /// CONTRACT.agent-identity.md §1: "A JSON request body that repeats a member name at any depth [...] →
+    /// `invalid_request`".
     #[rstest]
     #[case::csr(r#"{"csr":"AAEC","csr":"AAEC","metadata":{}}"#)]
     #[case::metadata(r#"{"csr":"AAEC","metadata":{},"metadata":{}}"#)]
@@ -476,14 +477,16 @@ mod tests {
         assert_eq!(code(parse_check_in_body(body.as_bytes())), Err("invalid_request"));
     }
 
-    /// One name in several objects is not a repetition, and receivers ignore unknown fields (CONTRACT.md §1).
+    /// One name in several objects is not a repetition, and receivers ignore unknown fields (CONTRACT.agent-identity.md
+    /// §1).
     #[test]
     fn same_name_in_different_objects_is_accepted() {
         let body = r#"{"csr":"AAEC","metadata":{"csr":"a"},"x":{"csr":[1,true,null,{"csr":0.5}]}}"#;
         assert_eq!(code(parse_csr_body(body.as_bytes())), Ok(()));
     }
 
-    /// CONTRACT.md §1: "a request body holding another form [than the canonical `base64`] → `invalid_request`".
+    /// CONTRACT.agent-identity.md §1: "a request body holding another form [than the canonical `base64`] →
+    /// `invalid_request`".
     #[rstest]
     #[case::canonical("AAE=", Ok(()))]
     #[case::missing_padding("AAE", Err("invalid_request"))]
@@ -512,7 +515,7 @@ mod tests {
         format!("{prefix}.{bag}.{secret}")
     }
 
-    /// CONTRACT.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
+    /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
     #[rstest]
     #[case::issued_token(|token: &str| token.to_owned())]
     #[case::other_json_bag(|token: &str| with_bag(token, "e30"))]
@@ -523,7 +526,7 @@ mod tests {
         assert_eq!(parse_bearer(&bearer(&token)).ok(), Some([0; 32]));
     }
 
-    /// Any other secret text is another token, even a non-canonical `base64url` encoding of the same bytes (CONTRACT.md §1, §2).
+    /// Any other secret text is another token, even a non-canonical `base64url` encoding of the same bytes (CONTRACT.agent-identity.md §1, §2).
     #[rstest]
     #[case::padded_secret(|token: &str| format!("{token}="))]
     #[case::nonzero_pad_bits(|token: &str| format!("{}B", &token[..token.len() - 1]))]

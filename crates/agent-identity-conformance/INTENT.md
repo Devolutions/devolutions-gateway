@@ -1,7 +1,7 @@
 This is the independent conformance suite for Agent Identity.
 Its expectations derive only from these sources, never from the implementation under test:
 
-- [CONTRACT.md](../../docs/agent-identity/CONTRACT.md) and the shared test vectors;
+- [CONTRACT.agent-identity.md](../../docs/agent-identity/CONTRACT.agent-identity.md) and the shared test vectors;
 - `agent-channel-proto`;
 - DVLS's management API, as `agent-identity-mock` replicates it;
 - the agent's CLI, configuration and files, as `devolutions-agent/src/identity/INTENT.md` and `crates/agent-identity/INTENT.md` define them.

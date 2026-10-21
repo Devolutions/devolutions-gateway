@@ -1,5 +1,5 @@
 //! Mock server (conformance oracle) for the Agent Identity V1 contract
-//! (`docs/agent-identity/CONTRACT.md`).
+//! (`docs/agent-identity/CONTRACT.agent-identity.md`).
 
 mod api_admin;
 mod api_agent;

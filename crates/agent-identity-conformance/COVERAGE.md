@@ -1,6 +1,6 @@
 # Contract coverage
 
-Which tests check which rule of `docs/agent-identity/CONTRACT.md`.
+Which tests check which rule of `docs/agent-identity/CONTRACT.agent-identity.md`.
 The `p_*` tests check an authority and the `a_*` tests the agent; the tests named here check the contract, and the suite's other tests check each party's own intent (an authority's management API, the agent's files, configuration and CLI).
 
 | Rules                                                                | Checked by                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |

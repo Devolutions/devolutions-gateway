@@ -307,11 +307,11 @@ impl FieldErrors {
 
 /// Parses a JSON request body into its members.
 ///
-/// A member name repeated at any depth is refused, as for agent-facing bodies ([CONTRACT.md][contract], "1. Protocol
-/// conventions"), and so is a member the request schema does not define, since every schema in DVLS's OpenAPI document
-/// sets `additionalProperties: false`.
+/// A member name repeated at any depth is refused, as for agent-facing bodies ([CONTRACT.agent-identity.md][contract],
+/// "1. Protocol conventions"), and so is a member the request schema does not define, since every schema in DVLS's
+/// OpenAPI document sets `additionalProperties: false`.
 ///
-/// [contract]: ../../../../docs/agent-identity/CONTRACT.md#1-protocol-conventions
+/// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
 fn parse_body(body: &[u8], members: &[&str]) -> Result<Map<String, Value>, ManagementError> {
     let value = crate::json::parse_unique_members(body)
         .map_err(|error| ManagementError::invalid_request(format!("malformed JSON body: {error}")))?;

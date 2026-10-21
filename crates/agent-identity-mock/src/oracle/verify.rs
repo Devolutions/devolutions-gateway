@@ -1,4 +1,4 @@
-//! CONTRACT.md §6 ordered signature checks and nonce commits.
+//! CONTRACT.agent-identity.md §6 ordered signature checks and nonce commits.
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -152,7 +152,7 @@ const CLOCK_TOLERANCE_SECS: i64 = 60;
 const NONCE_KEEP_SECS: i64 = 60;
 const PROFILE_ALG: &str = "ecdsa-p256-sha256";
 
-/// Verifies an RFC 9421-signed request per CONTRACT.md §6, checks in exactly the
+/// Verifies an RFC 9421-signed request per CONTRACT.agent-identity.md §6, checks in exactly the
 /// contract's order.
 ///
 /// `lookup` resolves a `keyid` (certificate thumbprint) to a registered certificate.
@@ -422,7 +422,8 @@ mod tests {
         .err()
     }
 
-    /// CONTRACT.md §6: "A certificate is unexpired while `now ≤ notAfter`" and "`notBefore` is not checked".
+    /// CONTRACT.agent-identity.md §6: "A certificate is unexpired while `now ≤ notAfter`" and "`notBefore` is not
+    /// checked".
     #[rstest]
     #[case::connect_at_not_after(Endpoint::Connect, (900, 1000), Rejection::SignatureInvalid)]
     #[case::connect_after_not_after(Endpoint::Connect, (899, 999), Rejection::CertificateExpired)]
@@ -433,7 +434,7 @@ mod tests {
     #[case::check_in_at_not_after(Endpoint::CheckIn, (900, 1000), Rejection::SignatureInvalid)]
     #[case::check_in_after_not_after(Endpoint::CheckIn, (899, 999), Rejection::CertificateExpired)]
     #[case::check_in_before_not_before(Endpoint::CheckIn, (1001, 2000), Rejection::SignatureInvalid)]
-    // CONTRACT.md §6 table: renew accepts a certificate while `now < notAfter + (notAfter − notBefore)`.
+    // CONTRACT.agent-identity.md §6 table: renew accepts a certificate while `now < notAfter + (notAfter − notBefore)`.
     #[case::renew_last_grace_second(Endpoint::Renew, (899, 950), Rejection::SignatureInvalid)]
     #[case::renew_grace_end(Endpoint::Renew, (900, 950), Rejection::CertificateExpired)]
     #[case::renew_before_not_before(Endpoint::Renew, (1001, 2000), Rejection::SignatureInvalid)]

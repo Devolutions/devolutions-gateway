@@ -164,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
     });
     write_ready_file(&args.state_dir, &ready.to_string())?;
 
-    // Rotation deadlines (CONTRACT.md §8.3) and the rotation notification rate
+    // Rotation deadlines (CONTRACT.agent-identity.md §8.3) and the rotation notification rate
     // (INTENT.DVLS.md, "Load") are applied on each request.
     // The ticker covers idle servers with live streams.
     let ticker_app = Arc::clone(&app);

@@ -1,7 +1,7 @@
-//! Metadata limits ([CONTRACT.md][contract], "3. Metadata") and friendly-name format evaluation
+//! Metadata limits ([CONTRACT.agent-identity.md][contract], "3. Metadata") and friendly-name format evaluation
 //! ([shared intent][intent], "Enrollment").
 //!
-//! [contract]: ../../../docs/agent-identity/CONTRACT.md#3-metadata
+//! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#3-metadata
 //! [intent]: ../../../docs/agent-identity/INTENT.agent-identity.md#enrollment
 
 use serde_json::{Map, Value};

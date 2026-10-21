@@ -11,11 +11,11 @@ const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.84
 
 /// Creates the base64 DER PKCS#10 request for an on-device key.
 ///
-/// The request carries no attributes, as [CONTRACT.md §4 "Certificates"][contract] requires.
+/// The request carries no attributes, as [CONTRACT.agent-identity.md §4 "Certificates"][contract] requires.
 /// It is built by hand because x509-cert's `RequestBuilder` always adds an `extensionRequest` attribute,
 /// which is invalid when empty.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#4-certificates
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#4-certificates
 pub fn create(key: &dyn DeviceKey) -> anyhow::Result<String> {
     let info = CertReqInfo {
         version: Version::V1,
@@ -94,7 +94,7 @@ mod tests {
         Ok(())
     }
 
-    // `CONTRACT.md` §4: the agent's CSR carries no attributes.
+    // `CONTRACT.agent-identity.md` §4: the agent's CSR carries no attributes.
     // RFC 2986 §4.1 makes `attributes [0] IMPLICIT` mandatory,
     // so the empty set is the element `A0 00`, not an omitted field.
     #[test]

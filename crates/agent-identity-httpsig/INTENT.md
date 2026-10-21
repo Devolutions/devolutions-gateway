@@ -1,4 +1,4 @@
-This crate implements, on the agent side, the RFC 9421 profile of [CONTRACT.md](../../docs/agent-identity/CONTRACT.md).
+This crate implements, on the agent side, the RFC 9421 profile of [CONTRACT.agent-identity.md](../../docs/agent-identity/CONTRACT.agent-identity.md).
 
 ## Implementation decisions
 

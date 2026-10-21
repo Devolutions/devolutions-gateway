@@ -1,4 +1,4 @@
-//! Test-only signature and CSR oracle for CONTRACT.md §4, §6 and §7.3.
+//! Test-only signature and CSR oracle for CONTRACT.agent-identity.md §4, §6 and §7.3.
 //!
 //! This hand-written verifier is deliberately independent of the agent's RFC 9421 library and implementation.
 //! X.509, DER and SPKI provide CSR types; P-256 checks the signatures.

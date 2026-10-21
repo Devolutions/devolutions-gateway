@@ -1,8 +1,8 @@
 //! The HTTPS server serves REST (axum) and gRPC (tonic) on one port with ALPN `h2` and `http/1.1`.
-//! The dispatcher strips the path prefix defined by [CONTRACT.md][contract] ("7.2 URL and path prefix")
+//! The dispatcher strips the path prefix defined by [CONTRACT.agent-identity.md][contract] ("7.2 URL and path prefix")
 //! and the [mock intent][mock-intent] ("Mock-only control").
 //!
-//! [contract]: ../../../docs/agent-identity/CONTRACT.md#72-url-and-path-prefix
+//! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#72-url-and-path-prefix
 //! [mock-intent]: ../INTENT.md#mock-only-control
 
 use std::convert::Infallible;
@@ -228,7 +228,7 @@ mod tests {
     use crate::oracle::NonceStore;
     use crate::state::State;
 
-    /// CONTRACT.md §5.4: servers accept agent-facing request bodies up to 64 KiB.
+    /// CONTRACT.agent-identity.md §5.4: servers accept agent-facing request bodies up to 64 KiB.
     const BODY_LIMIT: usize = 64 * 1024;
 
     const FAULTS: &str = "/__mock__/faults";
@@ -306,7 +306,7 @@ mod tests {
         Ok(())
     }
 
-    /// CONTRACT.md §5.4: "an unexpected server failure → `500 unavailable`".
+    /// CONTRACT.agent-identity.md §5.4: "an unexpected server failure → `500 unavailable`".
     /// Issuing from a root that has expired is such a failure.
     #[tokio::test]
     async fn unexpected_failure_is_500_unavailable() -> anyhow::Result<()> {
@@ -463,7 +463,7 @@ mod tests {
         format!("{prefix}.{bag}.{secret}")
     }
 
-    /// CONTRACT.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
+    /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
     #[rstest]
     #[case::issued_token(|token: &str| token.to_owned(), 200, Value::Null)]
     #[case::other_json_bag(|token: &str| with_bag(token, "e30"), 200, Value::Null)]

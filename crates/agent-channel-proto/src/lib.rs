@@ -1,6 +1,6 @@
 //! Protobuf and gRPC definitions for the agent channel.
 //!
-//! The schema is `proto/channel.proto`, defined by `docs/agent-identity/CONTRACT.md` §7.1.
+//! The schema is `proto/channel.proto`, defined by `docs/agent-identity/CONTRACT.agent-identity.md` §7.1.
 
 #[allow(
     unused_qualifications,

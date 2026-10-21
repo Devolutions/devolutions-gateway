@@ -175,8 +175,8 @@ impl Runner {
             // UNTESTED: a latched terminal outcome sends no further signed request while its record fails to persist.
             // A local write failure must not let the runner retry the operation that drew the terminal outcome.
             // When changing this, keep the latch checked before any request and set before any persistence.
-            // `CONTRACT.md` §5.4: a terminal outcome ends the identity when it is received, so nothing else is sent
-            // while its record is retried.
+            // `CONTRACT.agent-identity.md` §5.4: a terminal outcome ends the identity when it is received, so nothing
+            // else is sent while its record is retried.
             store.reject_identity(&mut identity, code)?;
             warn!(
                 authority_id = %self.authority_id,
@@ -204,7 +204,8 @@ impl Runner {
             // was replaced and after a restart.
             // A check-in signed with a current key that an unconfirmed `confirm` retired draws a terminal
             // `identity_unknown`; when changing this, keep check-in behind every pending slot.
-            // `CONTRACT.md` §8.1: while the outcome of a `confirm` is unknown, the agent sends no other signed request.
+            // `CONTRACT.agent-identity.md` §8.1: while the outcome of a `confirm` is unknown, the agent sends no other
+            // signed request.
             // Any pending slot holds this barrier until a `confirm` succeeds: during pending-key recovery, and after an
             // unusable pending key was replaced, an earlier `confirm` may have retired the current key.
             if !self.renewal_retry.is_due() {
@@ -243,7 +244,7 @@ impl Runner {
     /// Sends renew for the pending key, recording a fresh one first when there is none or it is unusable.
     ///
     /// The request is signed with the current key, or during pending-key recovery with the expired pending key held
-    /// in `previous`, then with the current key once that draws `identity_unknown` (`CONTRACT.md` §8.1).
+    /// in `previous`, then with the current key once that draws `identity_unknown` (`CONTRACT.agent-identity.md` §8.1).
     async fn renew(&mut self, identity: &mut StoredIdentity, recovering: bool) -> anyhow::Result<()> {
         let store = &self.shared.store;
         let new_key = match &identity.keys.pending {
@@ -263,8 +264,8 @@ impl Runner {
                 .clone()
                 .context("pending-key recovery has no expired pending key")?;
             let Some(key) = self.open_usable(&expired) else {
-                // `CONTRACT.md` §8.1: without a usable pending key, renew with a fresh key signed by the current
-                // certificate.
+                // `CONTRACT.agent-identity.md` §8.1: without a usable pending key, renew with a fresh key signed by the
+                // current certificate.
                 store.remove_previous_key(identity)?;
                 return Ok(());
             };
@@ -302,15 +303,16 @@ impl Runner {
                 self.recovery_signs_with_current = false;
             }
             Err(ClientError::Terminal(TerminalCode::IdentityUnknown)) if signs_with_expired_pending => {
-                // `CONTRACT.md` §8.1: the server holds neither certificate, so retry the same renewal signed with
-                // the old current key.
+                // `CONTRACT.agent-identity.md` §8.1: the server holds neither certificate, so retry the same renewal
+                // signed with the old current key.
                 warn!(
                     authority_id = %self.authority_id,
                     "Agent Identity recovery renewal is unknown to the authority; retrying with the current key"
                 );
                 self.recovery_signs_with_current = true;
             }
-            // `CONTRACT.md` §5.4 and §8.1: on renew, `certificate_expired` means beyond grace, which is terminal.
+            // `CONTRACT.agent-identity.md` §5.4 and §8.1: on renew, `certificate_expired` means beyond grace, which is
+            // terminal.
             Err(ClientError::CertificateExpired) => self.reject("certificate_expired"),
             Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
             Err(error) => {
@@ -354,8 +356,8 @@ impl Runner {
                 store.remove_previous_key(identity)?;
             }
             Err(ClientError::CertificateExpired) => {
-                // `CONTRACT.md` §8.1: the pending certificate expired before it was confirmed; renew signed with
-                // the pending key, which `begin_recovery` moves to `previous`.
+                // `CONTRACT.agent-identity.md` §8.1: the pending certificate expired before it was confirmed; renew
+                // signed with the pending key, which `begin_recovery` moves to `previous`.
                 warn!(
                     authority_id = %self.authority_id,
                     "Agent Identity pending certificate expired before confirmation; recovering"
@@ -396,7 +398,7 @@ impl Runner {
                 self.next_check_in = Some(Instant::now() + self.check_in_interval());
             }
             Err(ClientError::CertificateExpired) => {
-                // `CONTRACT.md` §5.4: renew at once, and check in again only after `confirm`.
+                // `CONTRACT.agent-identity.md` §5.4: renew at once, and check in again only after `confirm`.
                 self.renewal_requested = true;
                 self.check_in_after_confirm = true;
                 self.next_check_in = None;

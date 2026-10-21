@@ -1,7 +1,7 @@
-//! Parses agent request bodies, rejecting a member name repeated at any depth ([CONTRACT.md][contract], "1. Protocol conventions").
+//! Parses agent request bodies, rejecting a member name repeated at any depth ([CONTRACT.agent-identity.md][contract], "1. Protocol conventions").
 //! `serde_json::Value` keeps the last of repeated members, so it can't detect them alone.
 //!
-//! [contract]: ../../../docs/agent-identity/CONTRACT.md#1-protocol-conventions
+//! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
 
 use std::fmt;
 

@@ -406,7 +406,8 @@ impl AgentCase {
         Ok(())
     }
 
-    /// Raises the agent's maximum retry delay, which also caps how long it honors `Retry-After` (CONTRACT.md §5.4).
+    /// Raises the agent's maximum retry delay, which also caps how long it honors `Retry-After`
+    /// (CONTRACT.agent-identity.md §5.4).
     fn set_backoff_max_secs(&mut self, secs: u64) -> anyhow::Result<()> {
         ensure!(
             self.child.is_none(),
@@ -2442,7 +2443,7 @@ pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: C
                     "injected renew {status} changed server or committed identity state"
                 );
                 if status == 429 {
-                    // The agent waits for `Retry-After` up to its maximum retry delay (CONTRACT.md §5.4), which `backoff_max_secs: 2` caps, so the retry comes after about two seconds.
+                    // The agent waits for `Retry-After` up to its maximum retry delay (CONTRACT.agent-identity.md §5.4), which `backoff_max_secs: 2` caps, so the retry comes after about two seconds.
                     tokio::time::sleep_until((failed_at + Duration::from_millis(1_500)).into()).await;
                     ensure!(
                         count(&target.requests(None).await?, "renew")? == attempts + 1,
@@ -2531,7 +2532,7 @@ pub(crate) async fn a_check_in_transient_failures_retry_without_state_change(ctx
                     "injected check-in {status} changed server or committed identity state"
                 );
                 if status == 429 {
-                    // The agent waits for `Retry-After` up to its maximum retry delay (CONTRACT.md §5.4), which `backoff_max_secs: 2` caps, so the retry comes after about two seconds.
+                    // The agent waits for `Retry-After` up to its maximum retry delay (CONTRACT.agent-identity.md §5.4), which `backoff_max_secs: 2` caps, so the retry comes after about two seconds.
                     tokio::time::sleep_until((failed_at + Duration::from_millis(1_500)).into()).await;
                     ensure!(
                         count(&target.requests(None).await?, "check_in")? == attempts + 1,

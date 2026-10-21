@@ -1,4 +1,4 @@
-//! PKCS#10 CSR checking per CONTRACT.md §4: uncompressed P-256 key required, self-signature verified, subject and attributes ignored.
+//! PKCS#10 CSR checking per CONTRACT.agent-identity.md §4: uncompressed P-256 key required, self-signature verified, subject and attributes ignored.
 //! X.509 and DER provide CSR types; the signature is checked with P-256.
 
 use der::asn1::{AnyRef, BitStringRef, ObjectIdentifier};
@@ -58,7 +58,7 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<VerifyingKey> {
     return Some(key);
 
     /// Reads a `CertificationRequestInfo` ([RFC 2986 §4, "Certification request syntax"][rfc]) and returns its `subjectPKInfo`.
-    /// Of the subject and attributes, only the tags are checked: the server ignores them and doesn't require their contents in canonical DER (CONTRACT.md §4).
+    /// Of the subject and attributes, only the tags are checked: the server ignores them and doesn't require their contents in canonical DER (CONTRACT.agent-identity.md §4).
     ///
     /// [rfc]: https://www.rfc-editor.org/rfc/rfc2986#section-4
     fn read_info<'a>(reader: &mut SliceReader<'a>) -> der::Result<SubjectPublicKeyInfoRef<'a>> {
@@ -148,7 +148,8 @@ mod tests {
     }
 
     impl Csr {
-        /// A CSR for `signer()`'s key with an empty subject and attribute set, as the agent sends it (CONTRACT.md §4).
+        /// A CSR for `signer()`'s key with an empty subject and attribute set, as the agent sends it
+        /// (CONTRACT.agent-identity.md §4).
         fn valid() -> Self {
             Self {
                 version: vec![0x02, 0x01, 0x00],
@@ -227,7 +228,8 @@ mod tests {
         [&[tlv[0], 0x81], &tlv[1..]].concat()
     }
 
-    /// CONTRACT.md §4: the CSR public key must be "an uncompressed P-256 point [...], else `invalid_request`".
+    /// CONTRACT.agent-identity.md §4: the CSR public key must be "an uncompressed P-256 point [...], else
+    /// `invalid_request`".
     #[rstest]
     #[case::uncompressed(false, true)]
     #[case::compressed(true, false)]
@@ -239,7 +241,7 @@ mod tests {
         assert_eq!(check_csr(&csr.encode()).is_some(), accepted);
     }
 
-    /// CONTRACT.md §4: the server ignores the CSR's subject and attributes and "does not require their contents in canonical DER form, such as a sorted `SET OF`".
+    /// CONTRACT.agent-identity.md §4: the server ignores the CSR's subject and attributes and "does not require their contents in canonical DER form, such as a sorted `SET OF`".
     #[rstest]
     #[case::unsorted_rdn(Csr { subject: UNSORTED_RDN.to_vec(), ..Csr::valid() })]
     #[case::non_minimal_length_in_subject(Csr { subject: NON_MINIMAL_LENGTH_RDN.to_vec(), ..Csr::valid() })]
@@ -249,7 +251,8 @@ mod tests {
         assert_eq!(check_csr(&csr.encode()).as_ref(), Some(signer().verifying_key()));
     }
 
-    /// CONTRACT.md §4: the server "verifies the CSR self-signature", which covers the request as received.
+    /// CONTRACT.agent-identity.md §4: the server "verifies the CSR self-signature", which covers the request as
+    /// received.
     /// This CSR carries `UNSORTED_RDN` but is signed over its re-encoding, so only a check that re-encoded the request would accept it.
     #[test]
     fn csr_signed_over_a_reencoded_request_is_invalid_request() {
@@ -264,7 +267,7 @@ mod tests {
         assert_eq!(check_csr(&received.encode_with(&reencoded.signature())), None);
     }
 
-    /// Each case breaks one rule of a valid CSR, which is then `invalid_request`: the key, self-signature and signature algorithm rules of CONTRACT.md §4, and the DER PKCS#10 structure (CONTRACT.md §1, RFC 2986 §4) outside the ignored subject and attributes.
+    /// Each case breaks one rule of a valid CSR, which is then `invalid_request`: the key, self-signature and signature algorithm rules of CONTRACT.agent-identity.md §4, and the DER PKCS#10 structure (CONTRACT.agent-identity.md §1, RFC 2986 §4) outside the ignored subject and attributes.
     #[rstest]
     #[case::wrong_curve(Csr { public_key: public_key(ID_EC_PUBLIC_KEY, SECP384R1, false), ..Csr::valid() })]
     #[case::wrong_key_algorithm(Csr { public_key: public_key(ID_EC_DH, SECP256R1, false), ..Csr::valid() })]

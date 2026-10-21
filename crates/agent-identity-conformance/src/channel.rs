@@ -152,9 +152,9 @@ pub(crate) fn expect_status(status: &Status, grpc_code: Code, error_code: &str) 
 
 /// Checks a channel opening refused before `Challenge`, whose trailers carry the §5.4 code and the authority's time.
 ///
-/// See [CONTRACT.md] §7.4 "Termination" and §1 "Protocol conventions".
+/// See [CONTRACT.agent-identity.md] §7.4 "Termination" and §1 "Protocol conventions".
 ///
-/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 pub(crate) fn expect_refused_opening(status: &Status, grpc_code: Code, error_code: &str) -> anyhow::Result<()> {
     expect_status(status, grpc_code, error_code)?;
     expect_server_time(status)
@@ -162,9 +162,9 @@ pub(crate) fn expect_refused_opening(status: &Status, grpc_code: Code, error_cod
 
 /// Checks that an authentication failure, at opening or while the stream awaits `Hello`, carries the authority's time.
 ///
-/// See [CONTRACT.md] §7.4 "Termination" and §1 "Protocol conventions".
+/// See [CONTRACT.agent-identity.md] §7.4 "Termination" and §1 "Protocol conventions".
 ///
-/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 pub(crate) fn expect_server_time(status: &Status) -> anyhow::Result<()> {
     let server_time = status
         .metadata()

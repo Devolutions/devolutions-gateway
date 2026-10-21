@@ -5,7 +5,7 @@ Nothing in this repository depends on it except the mock authority, which replic
 ## Overview
 
 This module makes DVLS an Agent Identity authority.
-Below, `CONTRACT.md` is `docs/agent-identity/CONTRACT.md` and "the shared intent" is `docs/agent-identity/INTENT.agent-identity.md`, both in the `Devolutions/devolutions-gateway` repository; read both before changing this module.
+Below, `CONTRACT.agent-identity.md` is `docs/agent-identity/CONTRACT.agent-identity.md` and "the shared intent" is `docs/agent-identity/INTENT.agent-identity.md`, both in the `Devolutions/devolutions-gateway` repository; read both before changing this module.
 The rules every authority applies the same way live in the `Devolutions.AgentIdentity` library, published from that repository; this module adds storage, hosting and management.
 
 ## Terminology
@@ -13,7 +13,7 @@ The rules every authority applies the same way live in the `Devolutions.AgentIde
 - **Management API**: the HTTP API that administrators and tools use to manage enrollment tokens, identities and root rotation.
   It is product-specific: DVLS's management API is a model that PSU may follow, with no obligation.
   Avoid "admin API".
-- **Identity status**: one of four values, distinct from the certificate statuses `pending`, `current` and `retired` that `CONTRACT.md` defines; their wire spelling follows DVLS's public API contract:
+- **Identity status**: one of four values, distinct from the certificate statuses `pending`, `current` and `retired` that `CONTRACT.agent-identity.md` defines; their wire spelling follows DVLS's public API contract:
   - `active`: not revoked, and holds an unexpired current or pending certificate, so it can authenticate;
   - `grace`: not revoked, and holds no unexpired certificate but one within renewal grace, so it can only renew;
   - `expired`: not revoked, and beyond renewal grace; only a new enrollment brings the device back;
@@ -81,10 +81,10 @@ It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONT
   A page walk returns every identity that existed when the walk started at least once, and exactly once when no enrollment overlaps the walk; only a deletion during the walk can make it miss one.
   An identity whose enrollment overlaps the walk may be missing from it or make the next page repeat one entry; clients deduplicate by `id`.
   Identity IDs remain UUIDs and are not used as the listing sort key.
-- An identity is `connected` while it has at least one live stream authenticated by its channel proof (`CONTRACT.md` §7.3 step 4); a stream counts only after that step succeeds.
+- An identity is `connected` while it has at least one live stream authenticated by its channel proof (`CONTRACT.agent-identity.md` §7.3 step 4); a stream counts only after that step succeeds.
 - The friendly name is 1 to 255 Unicode scalar values, and is readable and renamable only through this API.
 - An identity can be deleted only once revoked.
-- Requesting a renewal sets the request-renewal flag (`CONTRACT.md` §8.2) and sends `RenewRequested{reason:"admin"}` on each authenticated live stream.
+- Requesting a renewal sets the request-renewal flag (`CONTRACT.agent-identity.md` §8.2) and sends `RenewRequested{reason:"admin"}` on each authenticated live stream.
 
 ### Rotation
 
@@ -92,4 +92,4 @@ It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONT
 - An administrator may set the deadline; a deadline at or before the current time requests an emergency rotation.
   Without one, the deadline is the rotation maximum: the latest `notAfter` among unexpired current or pending certificates of non-revoked identities issued by the old root, or the current time when there are none.
   A deadline after the rotation maximum is refused.
-- The rotation status reports how many non-revoked identities still hold an unexpired current or pending certificate issued by the old root; rotation completes when that count reaches 0 (`CONTRACT.md` §8.3).
+- The rotation status reports how many non-revoked identities still hold an unexpired current or pending certificate issued by the old root; rotation completes when that count reaches 0 (`CONTRACT.agent-identity.md` §8.3).

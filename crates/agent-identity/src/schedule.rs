@@ -5,9 +5,9 @@ use std::time::{Duration, SystemTime};
 use serde_json::Value;
 use url::Url;
 
-/// The `agent_channel_url` of a config, classified by [CONTRACT.md §5.2 "`POST enroll`"][contract].
+/// The `agent_channel_url` of a config, classified by [CONTRACT.agent-identity.md §5.2 "`POST enroll`"][contract].
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#52-post-enroll
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChannelUrl {
     Absent,
@@ -116,8 +116,9 @@ mod tests {
 
     #[test]
     fn only_an_absolute_https_channel_url_without_query_or_fragment_is_usable() {
-        // `CONTRACT.md` §5.2: `agent_channel_url` must be an absolute `https` URL without a query or fragment, and any
-        // other value is treated as absent with a warning; §1 accepts `null` for an absent optional field.
+        // `CONTRACT.agent-identity.md` §5.2: `agent_channel_url` must be an absolute `https` URL without a query or
+        // fragment, and any other value is treated as absent with a warning; §1 accepts `null` for an absent optional
+        // field.
         let config = |url: Value| json!({"version": 1, "revision": 1, "agent_channel_url": url});
         assert_eq!(channel_url(&json!({"version": 1, "revision": 1})), ChannelUrl::Absent);
         assert_eq!(channel_url(&config(Value::Null)), ChannelUrl::Absent);

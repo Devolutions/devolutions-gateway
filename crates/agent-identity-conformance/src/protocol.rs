@@ -300,10 +300,10 @@ async fn chain_evaluation_time(ctx: &Context) -> anyhow::Result<i64> {
 
 /// Validates an issued chain against the published roots.
 ///
-/// The root profile and the number of CA tiers are each authority's choice ([CONTRACT.md] §4 "Certificates"), so only RFC 5280 path rules apply: intermediates must be CAs allowed to sign certificates, while the trust anchor needs no extensions.
+/// The root profile and the number of CA tiers are each authority's choice ([CONTRACT.agent-identity.md] §4 "Certificates"), so only RFC 5280 path rules apply: intermediates must be CAs allowed to sign certificates, while the trust anchor needs no extensions.
 /// An issuer signature algorithm this tester cannot verify makes the test incomplete rather than failed.
 ///
-/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()> {
     ensure!(chain.len() >= 2, "certificate chain has no issuer");
     let certs = chain
@@ -3153,9 +3153,9 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
     Ok(())
 }
 
-/// What a test sends on a stream that awaits `Hello`, to check that a closure of [CONTRACT.md] §7.4 comes ahead of every §7.3 step 4 failure.
+/// What a test sends on a stream that awaits `Hello`, to check that a closure of [CONTRACT.agent-identity.md] §7.4 comes ahead of every §7.3 step 4 failure.
 ///
-/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 #[derive(Clone, Copy, Debug)]
 enum AwaitedHello {
     /// A `Hello` whose proof verifies.
@@ -3240,11 +3240,11 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
     Ok(())
 }
 
-/// A stream awaiting `Hello` whose identity is revoked and then deleted closes as `identity_unknown` ([CONTRACT.md] §7.4).
+/// A stream awaiting `Hello` whose identity is revoked and then deleted closes as `identity_unknown` ([CONTRACT.agent-identity.md] §7.4).
 ///
 /// The authority checks revocation and deletion when `Hello` arrives, so both changes precede the check when the test sends `Hello` after them.
 ///
-/// [CONTRACT.md]: ../../../docs/agent-identity/CONTRACT.md
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Result<()> {
     let (_, identity) = issued(&ctx, "before-deletion").await?;
     let streams = streams_awaiting_hello(&ctx, &identity, &[AwaitedHello::Valid, AwaitedHello::BadProof]).await?;
@@ -4060,7 +4060,7 @@ pub(crate) async fn p_expired_certificate_refused_at_stream_open(ctx: Context) -
         .not_after()
         .context("identity has no current certificate")?
         .unix_timestamp();
-    // CONTRACT.md §6 accepts a connect while `now <= notAfter`, and §7.4 closes a stream no later than `notAfter`, so an opening at `notAfter` gets its Challenge and then closes.
+    // CONTRACT.agent-identity.md §6 accepts a connect while `now <= notAfter`, and §7.4 closes a stream no later than `notAfter`, so an opening at `notAfter` gets its Challenge and then closes.
     expect_status(
         &ctx.target.control("time/freeze", &json!({ "now": not_after })).await?,
         200,
@@ -4871,7 +4871,8 @@ pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context
         until_expiry > 0,
         "old-root certificate expired before the boundary test"
     );
-    // A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), so it expires one second after `notAfter`.
+    // A certificate is unexpired while `now <= notAfter` (CONTRACT.agent-identity.md §6), so it expires one second
+    // after `notAfter`.
     ctx.target.advance(until_expiry + 1).await?;
     let now = chain_evaluation_time(&ctx).await?;
     ensure!(
@@ -4932,7 +4933,7 @@ pub(crate) async fn p_rotation_completes_early_at_certificate_expiry_via_freeze(
     let deadline = started.deadline()?.unix_timestamp();
     ctx.target.management().revoke(&long.identity_id).await?;
 
-    // A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), so the rotation completes one second after `notAfter`.
+    // A certificate is unexpired while `now <= notAfter` (CONTRACT.agent-identity.md §6), so the rotation completes one second after `notAfter`.
     let at_expiry = ctx.target.control("time/freeze", &json!({ "now": expiry })).await?;
     expect_status(&at_expiry, 200)?;
     ensure!(
@@ -5233,7 +5234,7 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
     stream.hello(&identity, &[]).await?;
     let until_expiry = current_expiry - chain_evaluation_time(&ctx).await?;
     ensure!(until_expiry > 0, "current certificate expired before the boundary test");
-    // A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), so the current certificate expires one second after `notAfter`.
+    // A certificate is unexpired while `now <= notAfter` (CONTRACT.agent-identity.md §6), so the current certificate expires one second after `notAfter`.
     ctx.target.advance(until_expiry + 1).await?;
     let record = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
@@ -6455,7 +6456,7 @@ async fn signed_raw(target: &Target, identity: &Identity, endpoint: &str, body: 
     }
 }
 
-/// CONTRACT.md §1: "A JSON request body that repeats a member name at any depth, such as `csr` twice or one metadata key twice, → `invalid_request`".
+/// CONTRACT.agent-identity.md §1: "A JSON request body that repeats a member name at any depth, such as `csr` twice or one metadata key twice, → `invalid_request`".
 ///
 /// Every repeated member holds a valid value, so a parser that keeps either occurrence would accept the request.
 pub(crate) async fn p_duplicate_json_members_rejected(ctx: Context) -> anyhow::Result<()> {
@@ -6549,7 +6550,7 @@ fn noncanonical_base64(canonical: &str) -> anyhow::Result<Vec<(&'static str, Str
     ])
 }
 
-/// CONTRACT.md §1: "Senders use the canonical form of every `base64` and `base64url` value, so that each byte string has one encoding; a request body holding another form → `invalid_request`."
+/// CONTRACT.agent-identity.md §1: "Senders use the canonical form of every `base64` and `base64url` value, so that each byte string has one encoding; a request body holding another form → `invalid_request`."
 pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::Result<()> {
     let (token, identity) = issued(&ctx, "noncanonical-csr").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -6574,7 +6575,7 @@ pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::
         .context("the canonical CSR of the same key was not accepted")
 }
 
-/// CONTRACT.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`, which carries only routing data."
+/// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`, which carries only routing data."
 ///
 /// The rewritten secrets decode to the same 32 bytes, so only a comparison of the exact text refuses them.
 pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::Result<()> {
@@ -6657,7 +6658,7 @@ fn compressed_point_csr(key: &KeyPair) -> anyhow::Result<String> {
     Ok(base64::engine::general_purpose::STANDARD.encode(request.to_der()?))
 }
 
-/// CONTRACT.md §4: the server "only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256)".
+/// CONTRACT.agent-identity.md §4: the server "only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256)".
 pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Result<()> {
     let (token, identity) = issued(&ctx, "compressed-point").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -6710,7 +6711,7 @@ pub(crate) async fn p_friendly_name_white_space_and_truncation(ctx: Context) -> 
 
 /// DVLS's intent, "Terminology": an identity is `active` while it "holds an unexpired current or pending certificate", in `grace` while it "holds no unexpired certificate but one within renewal grace", `expired` "beyond renewal grace", or `revoked`.
 ///
-/// A certificate is unexpired while `now <= notAfter` (CONTRACT.md §6), and renewal grace lasts while `now < notAfter + (notAfter − notBefore)`.
+/// A certificate is unexpired while `now <= notAfter` (CONTRACT.agent-identity.md §6), and renewal grace lasts while `now < notAfter + (notAfter − notBefore)`.
 pub(crate) async fn p_identity_statuses(ctx: Context) -> anyhow::Result<()> {
     let management = ctx.target.management();
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;

@@ -1,4 +1,4 @@
-//! In-memory CA per CONTRACT.md §4: a P-256 root per rotation generation and
+//! In-memory CA per CONTRACT.agent-identity.md §4: a P-256 root per rotation generation and
 //! per-identity leaves (`CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU
 //! clientAuth, KU digitalSignature).
 

@@ -1598,7 +1598,7 @@ mod tests {
     fn startup_replaces_a_missing_certified_pending_key_with_a_fresh_one() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): a pending key missing from its store is unusable,
         // and the agent deletes it and its slot before renewing with a fresh key; the pending slot keeps the
-        // `confirm` barrier of `CONTRACT.md` §8.1 until that renewal is confirmed.
+        // `confirm` barrier of `CONTRACT.agent-identity.md` §8.1 until that renewal is confirmed.
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());
@@ -1735,7 +1735,8 @@ mod tests {
 
     #[test]
     fn config_with_a_version_other_than_1_keeps_the_stored_config() -> anyhow::Result<()> {
-        // `CONTRACT.md` §5.2: the agent keeps its stored config when it receives a config whose `version` is not 1.
+        // `CONTRACT.agent-identity.md` §5.2: the agent keeps its stored config when it receives a config whose
+        // `version` is not 1.
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());

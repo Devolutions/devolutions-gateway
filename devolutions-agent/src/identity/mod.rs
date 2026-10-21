@@ -471,7 +471,7 @@ mod tests {
 
     #[test]
     fn retry_after_is_capped_by_maximum_backoff() {
-        // `CONTRACT.md` §5.4 and `crates/agent-identity/INTENT.md` ("Schedules") cap `Retry-After` at the maximum delay.
+        // `CONTRACT.agent-identity.md` §5.4 and `crates/agent-identity/INTENT.md` ("Schedules") cap `Retry-After` at the maximum delay.
         // `devolutions-agent/src/identity/INTENT.md` ("Configuration") lets `backoff_max_secs` lower that maximum.
         let maximum = Duration::from_secs(17);
         assert_eq!(

@@ -548,7 +548,7 @@ async fn create_token_returns_the_full_token_only_once() -> anyhow::Result<()> {
     .await?;
     assert_eq!(status, 201);
     assert_eq!(created.as_object().map(serde_json::Map::len), Some(2));
-    // CONTRACT.md §2: an enrollment token is `dvaet1.<bag>.<secret>`.
+    // CONTRACT.agent-identity.md §2: an enrollment token is `dvaet1.<bag>.<secret>`.
     assert!(
         created["token"]
             .as_str()
@@ -699,10 +699,10 @@ async fn create_token_refuses_a_65_byte_config_key() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Management API bodies follow the agent-facing body rule ([CONTRACT.md][contract], "1. Protocol conventions"), which
-/// refuses a member name repeated at any depth, as the mock's README states.
+/// Management API bodies follow the agent-facing body rule ([CONTRACT.agent-identity.md][contract], "1. Protocol
+/// conventions"), which refuses a member name repeated at any depth, as the mock's README states.
 ///
-/// [contract]: ../../../../docs/agent-identity/CONTRACT.md#1-protocol-conventions
+/// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
 #[rstest]
 #[case::distinct_members(r#"{"flag":"first","other":"second"}"#, 201)]
 #[case::repeated_member(r#"{"flag":"first","flag":"second"}"#, 400)]
@@ -1303,7 +1303,7 @@ async fn rotation_deadline_is_utc_unless_an_offset_is_given(#[case] deadline: fn
 }
 
 /// `AgentIdentityRotationCreateDTO.deadlineOn`: "A time at or before now requests an emergency rotation", which
-/// completes at once and unpublishes the old root (CONTRACT.md §8.3).
+/// completes at once and unpublishes the old root (CONTRACT.agent-identity.md §8.3).
 #[rstest]
 #[case::now(0)]
 #[case::past(-60)]
@@ -1391,8 +1391,8 @@ async fn rotation_refuses_an_invalid_body(#[case] body: Option<Value>, #[case] f
 
 // ==== Settings ====
 
-/// `AgentIdentitySettings` by default: the channel enabled and offered, 90-day certificates (CONTRACT.md §4), and 10
-/// rotation notifications per second (INTENT.DVLS.md, "Load").
+/// `AgentIdentitySettings` by default: the channel enabled and offered, 90-day certificates (CONTRACT.agent-identity.md
+/// §4), and 10 rotation notifications per second (INTENT.DVLS.md, "Load").
 #[tokio::test]
 async fn settings_have_their_defaults() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1412,7 +1412,7 @@ async fn settings_have_their_defaults() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentitySettingsPatchDTO.isAgentChannelEnabled` switches the channel off and on: `config.agent_channel_url`
-/// leaves and returns (CONTRACT.md §5.2), each change bumping the config revision.
+/// leaves and returns (CONTRACT.agent-identity.md §5.2), each change bumping the config revision.
 #[tokio::test]
 async fn channel_setting_withdraws_and_restores_the_channel_url() -> anyhow::Result<()> {
     let app = App::for_test()?;

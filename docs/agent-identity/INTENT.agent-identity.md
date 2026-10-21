@@ -6,7 +6,7 @@ Enrollment must work unattended for N machines from one reusable token, typicall
 After enrollment, the agent authenticates to the authority with that identity, renews it automatically, and keeps a bidirectional channel open so that either side can send a message at any time.
 Features that need push, such as PEDM policies, require that channel.
 
-`docs/agent-identity/CONTRACT.md` defines what the agent and an authority must agree on, and `docs/agent-identity/test-vectors.json` holds their shared test data.
+`docs/agent-identity/CONTRACT.agent-identity.md` defines what the agent and an authority must agree on, and `docs/agent-identity/test-vectors.json` holds their shared test data.
 
 Agent Tunnel currently has its own enrollment, against a root owned by Gateway.
 Later, it is expected to move onto Agent Identity, and its current enrollment to be deprecated:
