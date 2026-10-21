@@ -1834,7 +1834,11 @@ mod tests {
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
 
-        assert!(state.enroll(&secret, &csr, Map::new(), now, base_url).is_err());
+        let error = state
+            .enroll(&secret, &csr, Map::new(), now, base_url)
+            .err()
+            .expect("enrollment fails");
+        assert_eq!(error.status, 500);
         assert!(state.identities.is_empty());
         assert_eq!(state.tokens[&token_id].used_count, 0);
         Ok(())
