@@ -106,6 +106,7 @@ The location and format of the files below are stable, because the conformance t
 - `rejected` is absent until the authority rejects the identity permanently or its current key is lost; `code` is the error code that rejected it, or `key_lost`.
 - `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists between a successful `confirm` and the deletion of the old key, for crash safety, and during pending-key recovery, when it holds the expired pending key until the next `confirm` succeeds.
 - `config` is stored as received, including unknown fields, and replaced only by a higher `revision`.
+- `base_url` is the enrollment token's `u` as received, without its trailing slashes, and request paths are joined onto it as text, so that a path prefix reaches the authority byte for byte, with no rewriting of host case, ports or percent-encoding.
 - Key names are device-key names `devolutions-agent-identity_<key_uuid>`: Agent Identity owns the prefix `devolutions-agent-identity`, and `key_uuid` is a random UUID generated with each key, because the authority isn't known when the enrollment key is created.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
 - The agent writes a key's name to its record (`identity.json` or the in-progress record) before creating the key, and deletes a key before removing its name from the record.
