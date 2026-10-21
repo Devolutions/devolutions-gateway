@@ -1,8 +1,8 @@
 #!/bin/env pwsh
 #Requires -Version 7.0
 
-# Checks the `// oracle:` markers defined in `.agents/skills/test-oracle-reviewer/SKILL.md`
-# in the tracked Rust and C# files of the working tree.
+# Checks the oracle markers defined in `.agents/skills/test-oracle-reviewer/SKILL.md`
+# in the tracked Rust, C#, and PowerShell files of the working tree, as `ci/check-oracle-markers.intent.md` requires.
 # With -Base, it also requires a marker on every test added since that revision.
 # With -DriftReport, it instead reports, for each marker pinned to a commit of a repository,
 # whether the cited section still reads the same on that repository's default branch.
@@ -42,8 +42,16 @@ $ProgressPreference = 'SilentlyContinue'
 $Root = (Resolve-Path -LiteralPath $Root).Path
 # Git writes UTF-8, and decoding it with another console code page breaks `§`.
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
-# A `//` inside a word, as in a URL, does not open a comment.
-$MarkerPattern = '(?:^|\s)//\s*oracle:(?<rest>.*)$'
+# A marker is a line comment of its language; a `//` or `#` inside a word, as in a URL, does not open one.
+$MarkerPatterns = @{
+    '.rs' = '(?:^|\s)//\s*oracle:(?<rest>.*)$'
+    '.cs' = '(?:^|\s)//\s*oracle:(?<rest>.*)$'
+    '.ps1' = '(?:^|\s)#\s*oracle:(?<rest>.*)$'
+}
+$GitMarkerPatterns = @{
+    '//' = @('(^|[[:space:]])//[[:space:]]*oracle:', '*.rs', '*.cs')
+    '#' = @('(^|[[:space:]])#[[:space:]]*oracle:', '*.ps1')
+}
 $Kinds = @('spec', 'contract', 'intent', 'regression', 'reference', 'property', 'mutant', 'scaffold')
 $Laws = @('round-trip', 'idempotent', 'involution', 'commutative', 'associative', 'monotonic')
 $AnchorPattern = '<a\s+id="(?<id>[^"]+)"\s*>\s*</a>'
@@ -53,14 +61,23 @@ $TestAttributePatterns = @{
     '.rs' = '^\s*#\[(?:test|tokio::test|rstest)\b'
     '.cs' = '^\s*\[(?:Fact|Theory)\b'
 }
-# A test is named by the function its attributes decorate; the git forms match the same declarations.
+# A Rust or C# test is named by the function its attributes decorate, and a Pester test by the name its `It` gives;
+# the git forms match the same declarations.
 $DeclarationPatterns = @{
     '.rs' = '\bfn\s+(?<name>\w+)'
     '.cs' = '\b(?:void|Task|ValueTask)\s+(?<name>\w+)\s*\('
+    '.ps1' = '^\s*It\s+(?:-Name\s+)?[''"](?<name>[^''"]*)'
 }
 $GitDeclarationPatterns = @{
     '.rs' = 'fn[[:space:]]+[A-Za-z0-9_]+'
     '.cs' = '(void|Task|ValueTask)[[:space:]]+[A-Za-z0-9_]+[[:space:]]*\('
+    '.ps1' = '^[[:space:]]*It[[:space:]]+(-Name[[:space:]]+)?[''"][^''"]*'
+}
+# Lines that can sit between a marker and the declaration it heads.
+$PrefixPatterns = @{
+    '.rs' = '^\s*(//|#\[)'
+    '.cs' = '^\s*(//|\[)'
+    '.ps1' = '^\s*#'
 }
 
 $Violations = [System.Collections.Generic.List[object]]::new()
@@ -85,7 +102,7 @@ function Invoke-Git {
 }
 
 # Only tracked files count, because an ignored or uncommitted file exists locally but not in CI.
-$TrackedFiles = [System.Collections.Generic.HashSet[string]]::new([string[]] ((Invoke-Git ls-files -z) -split "`0"))
+$TrackedFiles = [System.Collections.Generic.HashSet[string]]::new([string[]] @((Invoke-Git ls-files -z) -split "`0" -ne ''))
 
 function Test-RepositoryFile([string] $Path) {
     $TrackedFiles.Contains($Path) -and (Test-Path -LiteralPath (Join-Path $Root $Path) -PathType Leaf)
@@ -98,6 +115,8 @@ function Get-Outline([string[]] $Lines) {
     $Headings = [System.Collections.Generic.List[object]]::new()
     $Anchors = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::Ordinal)
     $Pending = [System.Collections.Generic.List[string]]::new()
+    $Seen = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::Ordinal)
+    $Duplicates = [System.Collections.Generic.List[object]]::new()
     $Fence = $null
     for ($Index = 0; $Index -lt $Lines.Count; $Index++) {
         $Line = $Lines[$Index]
@@ -114,7 +133,13 @@ function Get-Outline([string[]] $Lines) {
             continue
         }
         foreach ($Anchor in [regex]::Matches($Line, $AnchorPattern)) {
-            $Pending.Add($Anchor.Groups['id'].Value)
+            $Id = $Anchor.Groups['id'].Value
+            if ($Seen.ContainsKey($Id)) {
+                $Duplicates.Add([pscustomobject]@{ Id = $Id; Index = $Index; First = $Seen[$Id] })
+            } else {
+                $Seen[$Id] = $Index
+            }
+            $Pending.Add($Id)
         }
         if ($Line -match '^(?<level>#{1,6})\s+(?<text>.*?)(?:\s+#+)?\s*$') {
             $Text = ($Matches.text -replace $AnchorPattern, '').Trim() -replace '\s+', ' '
@@ -127,7 +152,7 @@ function Get-Outline([string[]] $Lines) {
             $Pending.Clear()
         }
     }
-    [pscustomobject]@{ Lines = $Lines; Headings = $Headings; Anchors = $Anchors }
+    [pscustomobject]@{ Lines = $Lines; Headings = $Headings; Anchors = $Anchors; Duplicates = $Duplicates }
 }
 
 # Resolves `§<section>`: an anchor whose id equals it, else a heading with the same text in any case,
@@ -252,7 +277,9 @@ function Test-CrossRepositoryReference([string] $File, [int] $Line, [string] $Ki
         'no-commit' { Add-Violation $File $Line "'$Pin' is not a commit of $Repository" }
         'no-file' { Add-Violation $File $Line "'$Path' does not exist in $Repository at $Pin" }
         'ok' {
-            if (-not (Find-Section $Remote.Outline $Section)) {
+            if ($Remote.Outline.Duplicates.Id -ccontains $Section.Trim()) {
+                Add-Violation $File $Line "'$Path' in $Repository at $Pin has more than one anchor '$Section'"
+            } elseif (-not (Find-Section $Remote.Outline $Section)) {
                 Add-Violation $File $Line "'$Path' in $Repository at $Pin has no section '$Section'"
             }
         }
@@ -331,14 +358,30 @@ function Test-Marker([string] $File, [int] $Line, [string] $Text) {
 }
 
 function Test-Markers {
-    $Output = & git -C $Root -c core.quotePath=false grep --null -n -I -E '(^|[[:space:]])//[[:space:]]*oracle:' -- '*.rs' '*.cs'
-    if ($LASTEXITCODE -gt 1) {
-        throw "git grep failed with exit code $LASTEXITCODE"
+    foreach ($Form in $GitMarkerPatterns.Values) {
+        $Pattern, $Globs = $Form
+        $Output = & git -C $Root -c core.quotePath=false grep --null -n -I -E $Pattern -- @Globs
+        if ($LASTEXITCODE -gt 1) {
+            throw "git grep failed with exit code $LASTEXITCODE"
+        }
+        foreach ($Entry in $Output) {
+            $File, $Line, $Content = $Entry -split "`0", 3
+            if ($Content -match $MarkerPatterns[[System.IO.Path]::GetExtension($File)]) {
+                Test-Marker $File ([int] $Line) $Matches.rest
+            }
+        }
     }
-    foreach ($Entry in $Output) {
-        $File, $Line, $Content = $Entry -split "`0", 3
-        if ($Content -match $MarkerPattern) {
-            Test-Marker $File ([int] $Line) $Matches.rest
+}
+
+# A file a marker may cite has each anchor id once, because a citation of a repeated id could resolve to either.
+function Test-Anchors {
+    $Citable = $TrackedFiles | Where-Object {
+        $Name = Split-Path -Leaf $_
+        $_.EndsWith('.md') -and ($_.StartsWith('docs/') -or $Name -clike 'CONTRACT*.md' -or $Name -clike 'INTENT*.md' -or $Name -clike '*.intent*.md')
+    }
+    foreach ($Path in $Citable | Sort-Object) {
+        foreach ($Duplicate in (Get-LocalOutline $Path).Duplicates) {
+            Add-Violation $Path ($Duplicate.Index + 1) "anchor '$($Duplicate.Id)' repeats the one on line $($Duplicate.First + 1)"
         }
     }
 }
@@ -437,10 +480,31 @@ function Get-Tests([string[]] $Lines, [string] $Extension) {
     $Tests
 }
 
-# A test is added when its function name is declared more often than at the base,
+# Lists the Pester tests of a file: each `It` command, from the comment lines directly above it to the end of its block,
+# so a marker on its line, above it, in its cases, or in its body belongs to it.
+# The PowerShell parser gives the extent, because the hashtables of `-ForEach` cases defeat brace counting.
+function Get-PesterTests([string[]] $Lines, [string] $Path) {
+    $Tokens = $null
+    $Errors = $null
+    $Ast = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $Root $Path), [ref] $Tokens, [ref] $Errors)
+    $Commands = $Ast.FindAll({
+            param($Node)
+            $Node -is [System.Management.Automation.Language.CommandAst] -and $Node.GetCommandName() -eq 'It'
+        }, $true)
+    foreach ($Command in $Commands) {
+        $Declaration = $Command.Extent.StartLineNumber - 1
+        $Start = $Declaration
+        while ($Start -gt 0 -and $Lines[$Start - 1] -match '^\s*#') {
+            $Start--
+        }
+        [pscustomobject]@{ Start = $Start; Attribute = $Declaration; Declaration = $Declaration; End = $Command.Extent.EndLineNumber - 1 }
+    }
+}
+
+# A test is added when its name is declared more often than at the base,
 # so moving a test, or editing its attributes or body, does not count.
 function Test-NewTests {
-    $ChangedFiles = @(Invoke-Git diff --name-only --diff-filter=AMR $Base -- '*.rs' '*.cs')
+    $ChangedFiles = @(Invoke-Git diff --name-only --diff-filter=AMR $Base -- '*.rs' '*.cs' '*.ps1')
     if ($ChangedFiles.Count -eq 0) {
         return
     }
@@ -451,7 +515,8 @@ function Test-NewTests {
         $Extension = [System.IO.Path]::GetExtension($File)
         $Lines = @(Get-Content -LiteralPath (Join-Path $Root $File))
 
-        foreach ($Test in @(Get-Tests $Lines $Extension)) {
+        $Tests = if ($Extension -eq '.ps1') { @(Get-PesterTests $Lines $File) } else { @(Get-Tests $Lines $Extension) }
+        foreach ($Test in $Tests) {
             $Declaration = @($Lines[$Test.Declaration..$Test.End] -match $DeclarationPatterns[$Extension])[0]
             # A test whose name cannot be found counts as added.
             if ($Declaration -match $DeclarationPatterns[$Extension]) {
@@ -460,9 +525,10 @@ function Test-NewTests {
                     continue
                 }
             }
-            $HasMarker = $Lines[$Test.Start..$Test.End] -match $MarkerPattern
+            $HasMarker = $Lines[$Test.Start..$Test.End] -match $MarkerPatterns[$Extension]
             if (-not $HasMarker) {
-                Add-Violation $File ($Test.Attribute + 1) "new test has no '// oracle:' marker"
+                $Form = if ($Extension -eq '.ps1') { '# oracle:' } else { '// oracle:' }
+                Add-Violation $File ($Test.Attribute + 1) "new test has no '$Form' marker"
             }
         }
     }
@@ -472,11 +538,13 @@ function Test-NewTests {
 # otherwise the nearest one above.
 function Get-TestName([string] $File, [int] $Line) {
     $Lines = @(Get-Content -LiteralPath (Join-Path $Root $File))
-    $Pattern = $DeclarationPatterns[[System.IO.Path]::GetExtension($File)]
+    $Extension = [System.IO.Path]::GetExtension($File)
+    $Pattern = $DeclarationPatterns[$Extension]
+    $Prefix = $PrefixPatterns[$Extension]
     $Marker = $Line - 1
-    if ($Lines[$Marker] -match '^\s*(//|#\[|\[)') {
+    if ($Lines[$Marker] -match $Prefix) {
         $Index = $Marker + 1
-        while ($Index -lt $Lines.Count -and $Lines[$Index] -match '^\s*(//|#\[|\[)') {
+        while ($Index -lt $Lines.Count -and $Lines[$Index] -match $Prefix) {
             $Index++
         }
         if ($Index -lt $Lines.Count -and $Lines[$Index] -match $Pattern) {
@@ -563,6 +631,8 @@ if ($DriftReport) {
     Write-DriftReport
     exit 0
 }
+
+Test-Anchors
 
 if ($Base) {
     Test-NewTests

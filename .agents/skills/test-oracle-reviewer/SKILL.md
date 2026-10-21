@@ -24,6 +24,7 @@ Unknown is an outcome, not a guess in either direction.
 ## Markers
 
 Mark where an expected value comes from with `// oracle: <kind> <reference>` on the test, on a case row, or on one assertion when a test mixes sources, so one search finds every test that rests on a source.
+In PowerShell the marker is `# oracle: <kind> <reference>`, and a Pester test is an `It` block whose case rows are its `-ForEach` or `-TestCases` entries.
 Strong kinds name an independent source, and a test, case, or assertion marked with one is deleted only when its source changes or is shown not to decide what it asserts:
 
 - `spec <document> §<section>`: normative text other than a contract or intent file, such as an RFC, a Microsoft open specification, or `docs/JMUX-spec.md`.
