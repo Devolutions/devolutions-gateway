@@ -8,7 +8,7 @@ The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolut
 - Enrollment tokens: `EnrollmentToken.Create` creates a token, `FriendlyNameFormat` parses and evaluates its friendly-name format, and `EnrollmentAuthorization.ReadBearerToken` reads it from an `enroll` request.
   The host stores the token's `SecretHash`, never its `Value`, which it shows once and never logs.
 - Request authentication: `RequestAuthenticator` verifies the signed `renew`, `confirm` and `check-in` requests and the signed opening of an agent channel stream (CONTRACT.agent-identity.md [§6]).
-- Request bodies: `EnrollRequestBody`, `RenewRequestBody` and `CheckInRequestBody` parse a body and validate its CSR (`CertificateSigningRequest`) and metadata (`AgentMetadata`).
+- Request bodies: `EnrollRequestBody`, `RenewRequestBody` and `CheckInRequestBody` parse a body and validate its CSR (`CertificateSigningRequest`) and metadata (`AgentMetadata`), and `ConfirmRequestBody` checks that a `confirm` body is empty.
 - Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the issued certificate that holds the CSR key.
 - Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of a new identity, or of the identity that a renew request proved.
 - Responses: `IdentityConfig` holds an identity's config, and `ResponseBodies` writes the bodies of the `trust-anchor`, `enroll`, `renew` and `check-in` responses.
@@ -72,7 +72,7 @@ Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normall
 1. Build a `SignedHttpRequest` from the method, the `Signature-Input`, `Signature` and `Content-Digest` field lines, and the body bytes, all as received.
 2. Pass it to `RequestAuthenticator.AuthenticateAsync` with `AgentOperation.Renew`, `AgentOperation.Confirm` or `AgentOperation.CheckIn`.
    It answers a body longer than `AgentIdentityProtocol.MaxRequestBodyBytes` with `AgentIdentityError.BodyTooLarge` before it checks the signature.
-3. Parse a `renew` body with `RenewRequestBody.Parse` and a `check-in` body with `CheckInRequestBody.Parse`; a `confirm` body is empty.
+3. Parse a `renew` body with `RenewRequestBody.Parse`, a `confirm` body with `ConfirmRequestBody.Parse` and a `check-in` body with `CheckInRequestBody.Parse`, and answer an invalid body with the `Error` of the parse result.
 
 Each then acts for the result's `Identity` only.
 
@@ -88,6 +88,7 @@ Each then acts for the result's `Identity` only.
 
 ### `confirm`
 
+Parse the body with `ConfirmRequestBody.Parse`, and answer a non-empty body with the result's `Error` before changing any state (CONTRACT.agent-identity.md [§5.5]).
 When `Identity.CertificateStatus` is `CertificateStatus.Pending`, make the certificate current, retire the previous current certificate, and clear the request-renewal flag if it was set before the certificate was issued (CONTRACT.agent-identity.md [§8.2]).
 Then send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)` on each stream that the retired certificate opened, and close those streams with `OK` 60 s later (CONTRACT.agent-identity.md [§7.4]).
 Answer `204`, also when the certificate was already current (CONTRACT.agent-identity.md [§5.5]).

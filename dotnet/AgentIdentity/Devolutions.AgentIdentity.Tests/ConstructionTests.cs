@@ -13,6 +13,7 @@ public class ConstructionTests
         typeof(EnrollRequestBody),
         typeof(RenewRequestBody),
         typeof(CheckInRequestBody),
+        typeof(ConfirmRequestBody),
     ];
 
     public static TheoryData<Type> ValidatedTypes => new(Validated);
