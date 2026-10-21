@@ -13,7 +13,7 @@ Inspect the diff, its stated goal, and repository guidance before selecting cond
 - Run `contract-review` when the diff changes a `CONTRACT*.md`.
 - Run `code-compressor` for every diff, limiting it to changed code.
 - Run `rust-style-reviewer` when Rust code changes, limiting it to changed lines.
-- Run `test-reviewer` when Rust tests change; it runs `test-oracle-reviewer` itself, so do not add that pass separately.
+- Run `test-reviewer` when Rust or C# tests change; it runs `test-oracle-reviewer` itself, so do not add that pass separately.
 - Run `dependency-reviewer` when a manifest or lockfile changes, limiting it to dependencies and features the diff adds or widens.
 - Run `docs-compressor` when documentation, rustdoc, explanatory comments, or instructional prose changes.
 - Run `prose-verifier` when hand-maintained prose changes in a format where source line breaks are stylistic.
