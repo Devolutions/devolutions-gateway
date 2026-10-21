@@ -14,6 +14,7 @@ use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
 use agent_identity::pending::{self, PendingRead};
 use agent_identity::state::{
     EnrollmentDiscardReason, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots, PendingDiscard, Store, StoredIdentity,
+    UntrustedAuthorityDirectory,
 };
 use agent_identity::token::Token;
 use agent_identity::{csr, metadata};
@@ -113,11 +114,25 @@ async fn run_identity(
                     return Ok(());
                 }
                 if log_is_due(&mut last_store_error) {
-                    error!(
-                        error = format!("{error:#}"),
-                        directory = %data_dir.join("identity"),
-                        "Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account"
-                    );
+                    if let Some(untrusted) = error
+                        .chain()
+                        .find_map(|cause| cause.downcast_ref::<UntrustedAuthorityDirectory>())
+                    {
+                        // UNTESTED: this log names the authority directory and how to fix it, because the agent never
+                        // repairs it and stays stopped until an administrator does.
+                        // No test captures service logs; when changing this, keep the directory and the fix in the log.
+                        error!(
+                            error = format!("{error:#}"),
+                            directory = %untrusted.path,
+                            "Agent Identity is stopped until this authority directory is a plain directory owned by the service account with no access for other users; the agent never repairs it"
+                        );
+                    } else {
+                        error!(
+                            error = format!("{error:#}"),
+                            directory = %data_dir.join("identity"),
+                            "Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account"
+                        );
+                    }
                 }
                 if wait_or_stop(&mut shutdown, poll_interval).await {
                     return Ok(());
@@ -163,8 +178,21 @@ async fn run_identity(
                 );
             }
         }
-        return run_pending_enrollments(&shared, &mut runners, &data_dir, poll_interval, &mut shutdown).await;
+        let stopped = run_pending_enrollments(&shared, &mut runners, &data_dir, poll_interval, &mut shutdown).await;
+        // Dropping the runners stops every identity and its streams.
+        drop(runners);
+        match stopped {
+            Stopped::Shutdown => return Ok(()),
+            Stopped::Untrusted => {}
+        }
     }
+}
+
+/// Why pending enrollment stopped.
+enum Stopped {
+    Shutdown,
+    /// An authority directory failed its check, which stops all identity processing until it is fixed.
+    Untrusted,
 }
 
 fn log_is_due(last: &mut Option<Instant>) -> bool {
@@ -274,7 +302,7 @@ async fn run_pending_enrollments(
     data_dir: &Utf8Path,
     poll_interval: Duration,
     shutdown: &mut ShutdownSignal,
-) -> anyhow::Result<()> {
+) -> Stopped {
     let Shared {
         store,
         client,
@@ -284,6 +312,11 @@ async fn run_pending_enrollments(
     let mut retries: HashMap<Utf8PathBuf, RetryState> = HashMap::new();
     let mut last_list_error = None;
     loop {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails its check stops all
+        // identity processing; start-up reports it and waits until it is fixed.
+        if store.check_authority_directories().is_err() {
+            return Stopped::Untrusted;
+        }
         match pending::list(data_dir) {
             Ok(paths) => {
                 let present: HashSet<&Utf8PathBuf> = paths.iter().collect();
@@ -294,7 +327,7 @@ async fn run_pending_enrollments(
                     }
                     let outcome = tokio::select! {
                         result = process_pending(store, client, &path, settings) => result,
-                        _ = shutdown.wait() => return Ok(()),
+                        _ = shutdown.wait() => return Stopped::Shutdown,
                     };
                     match outcome {
                         Ok(PendingOutcome::Completed) => {
@@ -328,7 +361,7 @@ async fn run_pending_enrollments(
             }
         }
         if wait_or_stop(shutdown, poll_interval).await {
-            return Ok(());
+            return Stopped::Shutdown;
         }
     }
 }
@@ -483,11 +516,9 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(not(windows))]
     #[derive(Default)]
     struct RecordingSink(parking_lot::Mutex<Vec<sysevent::Entry>>);
 
-    #[cfg(not(windows))]
     impl SystemEventSink for RecordingSink {
         fn emit(&self, entry: sysevent::Entry) -> Result<(), sysevent::SysEventError> {
             self.0.lock().push(entry);
@@ -497,6 +528,136 @@ mod tests {
         fn flush(&self) -> Result<(), sysevent::SysEventError> {
             Ok(())
         }
+    }
+
+    /// A data directory under the system temporary directory, whose short path keeps key files under the Windows path
+    /// limit wherever the repository is checked out.
+    struct TestDataDir(Utf8PathBuf);
+
+    impl TestDataDir {
+        fn new() -> anyhow::Result<Self> {
+            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
+                .join(format!("ai-{}", uuid::Uuid::new_v4().simple()));
+            std::fs::create_dir_all(&path)?;
+            Ok(Self(path))
+        }
+
+        fn store(&self) -> anyhow::Result<Store> {
+            Store::new(
+                self.0.clone(),
+                Store::file_backend(&self.0),
+                IDENTITY_KEY_PREFIX.to_owned(),
+                true,
+            )
+        }
+
+        /// Creates an authority directory with default permissions, which is not the form the agent provisions: it is
+        /// open to group and other users on Unix, and its DACL is inherited rather than protected on Windows.
+        fn put_untrusted_authority_directory(&self) -> anyhow::Result<Utf8PathBuf> {
+            let path = self
+                .0
+                .join("identity")
+                .join("authorities")
+                .join(uuid::Uuid::new_v4().to_string());
+            std::fs::create_dir(&path)?;
+            #[cfg(unix)]
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
+            Ok(path)
+        }
+    }
+
+    impl Drop for TestDataDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn test_conf() -> anyhow::Result<Conf> {
+        Conf::from_conf_file(&serde_json::from_value(serde_json::json!({
+            "Identity": { "KeyBackend": "File" },
+            "__debug__": { "identity": { "pending_poll_interval_ms": 10, "acl_grant_current_user": true } }
+        }))?)
+    }
+
+    #[tokio::test]
+    async fn an_untrusted_authority_directory_holds_pending_enrollment_until_it_is_fixed() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check stops all
+        // identity processing until it is fixed, so no pending file is processed meanwhile, and processing resumes
+        // without a restart.
+        use base64::Engine as _;
+
+        let data_dir = TestDataDir::new()?;
+        drop(data_dir.store()?);
+        let untrusted = data_dir.put_untrusted_authority_directory()?;
+        // A loopback authority that refuses connections keeps the enrollment local.
+        let token = Token::parse(&format!(
+            "dvaet1.{}.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"u":"https://127.0.0.1:9"}"#),
+            "A".repeat(43)
+        ))?;
+        pending::write(&data_dir.0, &token, true)?;
+        let in_progress = pending::in_progress_path(&data_dir.0, &token.sha256_hex())?;
+        let (shutdown_handle, shutdown) = devolutions_gateway_task::ShutdownHandle::new();
+        let task = tokio::spawn({
+            let conf = test_conf()?;
+            let data_dir = data_dir.0.clone();
+            async move { run_identity(&conf, data_dir, &RecordingSink::default(), shutdown).await }
+        });
+
+        sleep(Duration::from_millis(500)).await;
+        let processed_while_untrusted = in_progress.exists();
+        std::fs::remove_dir(&untrusted)?;
+        let resumed = tokio::time::timeout(Duration::from_secs(10), async {
+            while !in_progress.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        shutdown_handle.signal();
+        task.await??;
+
+        assert!(
+            !processed_while_untrusted,
+            "a pending file was processed while an authority directory was untrusted"
+        );
+        resumed.context("pending enrollment did not resume once the authority directory was fixed")?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn pending_poll_stops_identity_processing_once_an_authority_directory_fails_the_check() -> anyhow::Result<()>
+    {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check after start-up
+        // stops all identity processing too; the caller then stops every runner and its streams.
+        let data_dir = TestDataDir::new()?;
+        let conf = test_conf()?;
+        let settings = conf.debug.identity.clone().unwrap_or_default();
+        let shared = Arc::new(Shared {
+            store: data_dir.store()?,
+            client: Client::new(conf.proxy.to_proxy_config(), None)?,
+            channels: channel_client(&conf, &settings)?,
+            settings,
+        });
+        let (_shutdown_handle, mut shutdown) = devolutions_gateway_task::ShutdownHandle::new();
+        let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
+        data_dir.put_untrusted_authority_directory()?;
+
+        let stopped = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_pending_enrollments(
+                &shared,
+                &mut runners,
+                &data_dir.0,
+                Duration::from_millis(10),
+                &mut shutdown,
+            ),
+        )
+        .await
+        .context("pending poll kept running")?;
+
+        assert!(matches!(stopped, Stopped::Untrusted));
+        Ok(())
     }
 
     #[test]
