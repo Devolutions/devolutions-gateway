@@ -1003,15 +1003,28 @@ mod tests {
         /// Opens a stream signed by the enrolled certificate at the current mock time (CONTRACT.agent-identity.md §7.3
         /// step 1).
         async fn open(enrolled: &Enrolled) -> anyhow::Result<Self> {
+            Self::open_repeating(enrolled, None).await
+        }
+
+        /// Opens a stream like [`Self::open`], sending the header named `repeated`, if any, on two field lines.
+        async fn open_repeating(enrolled: &Enrolled, repeated: Option<&str>) -> anyhow::Result<Self> {
             let (nonce, signature_input, signature) =
                 sign(&enrolled.key, &enrolled.keyid, "connect", enrolled.app.now())?;
             let (agent, agent_messages) = mpsc::channel(4);
-            let request = http::Request::post(format!("/mock/{}/Connect", agent_channel_proto::SERVICE_NAME))
+            let mut request = http::Request::post(format!("/mock/{}/Connect", agent_channel_proto::SERVICE_NAME))
                 .header("content-type", "application/grpc")
                 .header("te", "trailers")
-                .header("signature-input", signature_input)
-                .header("signature", signature)
-                .body(StreamBody::new(ReceiverStream::new(agent_messages)))?;
+                .header("signature-input", &signature_input)
+                .header("signature", &signature);
+            if let Some(name) = repeated {
+                let value = if name == "signature-input" {
+                    &signature_input
+                } else {
+                    &signature
+                };
+                request = request.header(name, value);
+            }
+            let request = request.body(StreamBody::new(ReceiverStream::new(agent_messages)))?;
             let response = Dispatcher::new(Arc::clone(&enrolled.app))
                 .handle(request)
                 .await
@@ -1175,6 +1188,22 @@ mod tests {
         #[case] expected: Vec<Seen>,
     ) -> anyhow::Result<()> {
         assert_eq!(open_at(from_not_after, offset).await?, expected);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §6 step 1: `Signature-Input` and `Signature` each hold exactly one member, and a second
+    /// field line adds a member, so a channel opening that repeats either header is `signature_invalid`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    #[rstest]
+    #[case::signature_input("signature-input")]
+    #[case::signature("signature")]
+    #[tokio::test]
+    async fn opening_with_a_repeated_signature_header_is_signature_invalid(#[case] header: &str) -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let mut channel = Channel::open_repeating(&enrolled, Some(header)).await?;
+
+        let closure = Seen::Closed("16".to_owned(), "signature_invalid".to_owned());
+        assert_eq!(channel.drain(QUIET).await?, [closure]);
         Ok(())
     }
 
