@@ -6,7 +6,8 @@ namespace Devolutions.AgentIdentity;
 /// The outcome of parsing a request body: the validated body, or the error that rejects it.
 /// </summary>
 /// <typeparam name="TBody">
-/// The body type: <see cref="EnrollRequestBody"/>, <see cref="RenewRequestBody"/> or <see cref="CheckInRequestBody"/>.
+/// The body type: <see cref="EnrollRequestBody"/>, <see cref="RenewRequestBody"/>, <see cref="ConfirmRequestBody"/>
+/// or <see cref="CheckInRequestBody"/>.
 /// </typeparam>
 public sealed class RequestBodyParseResult<TBody>
     where TBody : class
