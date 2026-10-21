@@ -15,6 +15,19 @@ public class ChannelHandshakeTests
 {
     private const string UuidPattern = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$";
 
+    // Text that the metadata entry where a Hello fails holds in its key and in its value.
+    private const string LeakedKey = "leaked_key";
+    private const string LeakedValue = "leaked value";
+
+    // Metadata entries that CONTRACT.agent-identity.md §3 rejects, by name,
+    // each with a key holding LeakedKey and a value holding LeakedValue.
+    private static readonly Dictionary<string, KeyValuePair<string, string>> InvalidMetadataEntries = new()
+    {
+        ["a key outside the pattern"] = new($"{LeakedKey}\n", LeakedValue),
+        ["a value with a control character"] = new(LeakedKey, $"{LeakedValue}\u0007"),
+        ["a value of 1025 UTF-8 bytes"] = new(LeakedKey, LeakedValue + new string('a', 1025 - LeakedValue.Length)),
+    };
+
     // Messages that break exactly one rule of §7.3 step 4 that closes the stream with signature_invalid.
     private static readonly Dictionary<string, Func<ChannelOpening, AgentMessage>> SignatureFailures = new()
     {
@@ -99,6 +112,8 @@ public class ChannelHandshakeTests
         };
 
     public static TheoryData<string> SignatureFailureNames => new(SignatureFailures.Keys);
+
+    public static TheoryData<string> InvalidMetadataEntryNames => new(InvalidMetadataEntries.Keys);
 
     public static TheoryData<string> ScenarioNames => new(Scenarios.Keys);
 
@@ -287,6 +302,27 @@ public class ChannelHandshakeTests
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(hello);
 
         AssertFailed(result, AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument);
+    }
+
+    // The failure detail goes to host logs, so it holds no key or value of the metadata, valid or not,
+    // since an agent could otherwise write into the authority's logs.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Failure details
+    [Theory]
+    [MemberData(nameof(InvalidMetadataEntryNames))]
+    public async Task FailureDetailHoldsNoMetadataKeyOrValue(string entry)
+    {
+        ChannelOpening opening = await VectorChannel.OpenAsync();
+        AgentMessage hello = VectorChannel.ValidHelloMessage(opening);
+        (string key, string value) = InvalidMetadataEntries[entry];
+        hello.Hello.Metadata.Add(key, value);
+
+        ChannelHandshakeResult result = await opening.VerifyHelloAsync(hello);
+
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+        AssertFailed(result, AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument);
+        Assert.DoesNotContain(LeakedKey, result.FailureDetail);
+        Assert.DoesNotContain(LeakedValue, result.FailureDetail);
     }
 
     // The handshake checks its failures in an order, and a stream that fails two of them closes as it would for the

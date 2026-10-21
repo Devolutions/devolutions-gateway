@@ -22,6 +22,10 @@ public abstract class RequestBodyTests
 {
     protected const string ValidMetadata = """{"hostname": "host"}""";
 
+    // Text that the metadata entry where a body fails holds in its key and in its value.
+    private const string LeakedKey = "leaked_key";
+    private const string LeakedValue = "leaked value";
+
     /// <summary>
     /// A valid body of the type under test, with the given metadata member, omitted when null,
     /// and the given members after the others.
@@ -133,6 +137,36 @@ public abstract class RequestBodyTests
     public void RejectsMetadataBeyondTheLimits(string form, string metadata)
     {
         AssertInvalid(ParseText(Body(metadata, "")), form);
+    }
+
+    // Metadata that fails at an entry whose key holds LeakedKey and whose value holds LeakedValue, by name.
+    public static TheoryData<string, string> MetadataFailingAtAnEntry => new()
+    {
+        { "key outside the pattern", $$"""{"{{LeakedKey}}\n": "{{LeakedValue}}"}""" },
+        { "repeated key", $$"""{"{{LeakedKey}}": "first", "{{LeakedKey}}": "{{LeakedValue}}"}""" },
+        { "value with a control character", $$"""{"{{LeakedKey}}": "{{LeakedValue}}\u0007"}""" },
+        { "value that is not Unicode", $$"""{"{{LeakedKey}}": "{{LeakedValue}}\ud800"}""" },
+        {
+            "value of 1025 UTF-8 bytes",
+            $$"""{"{{LeakedKey}}": "{{LeakedValue + new string('a', 1025 - LeakedValue.Length)}}"}"""
+        },
+        { "value that is not a string", $$"""{"{{LeakedKey}}": ["{{LeakedValue}}"]}""" },
+    };
+
+    // The failure detail goes to host logs, so it holds no key or value of the metadata, valid or not,
+    // since an agent could otherwise write into the authority's logs.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Failure details
+    [Theory]
+    [MemberData(nameof(MetadataFailingAtAnEntry))]
+    public void FailureDetailHoldsNoMetadataKeyOrValue(string form, string metadata)
+    {
+        RequestBodyOutcome outcome = ParseText(Body(metadata, ""));
+
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+        AssertInvalid(outcome, form);
+        Assert.DoesNotContain(LeakedKey, outcome.FailureDetail);
+        Assert.DoesNotContain(LeakedValue, outcome.FailureDetail);
     }
 
     // A body that repeats a member name at any depth, such as one metadata key twice,

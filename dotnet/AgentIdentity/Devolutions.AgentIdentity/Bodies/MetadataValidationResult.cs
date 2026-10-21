@@ -39,7 +39,7 @@ public sealed class MetadataValidationResult
     /// Why the metadata is invalid, for the host's logs, when <see cref="Succeeded"/> is false.
     /// </summary>
     /// <remarks>
-    /// The detail quotes a key only when the key itself is valid, so it never repeats arbitrary agent input.
+    /// The detail never repeats a key or value of the metadata: it names an entry by its position.
     /// </remarks>
     public string? FailureDetail { get; }
 

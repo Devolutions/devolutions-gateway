@@ -69,20 +69,23 @@ public sealed class AgentMetadata : IReadOnlyDictionary<string, string>
                 return MetadataValidationResult.Failure($"The metadata has more than {MaxKeys} keys.");
             }
 
+            // A detail names an entry by its position, because the key comes from the request.
+            int position = validated.Count + 1;
+
             if (!IsValidKey(key))
             {
                 return MetadataValidationResult.Failure(
-                    $"Metadata key {validated.Count + 1} does not match ^[a-z][a-z0-9_]{{0,63}}$.");
+                    $"Metadata key {position} does not match ^[a-z][a-z0-9_]{{0,63}}$.");
             }
 
             if (validated.ContainsKey(key))
             {
-                return MetadataValidationResult.Failure($"The metadata repeats the key '{key}'.");
+                return MetadataValidationResult.Failure($"Metadata key {position} repeats an earlier key.");
             }
 
             if (CheckValue(value, out int valueBytes) is { } problem)
             {
-                return MetadataValidationResult.Failure($"The value of metadata key '{key}' {problem}.");
+                return MetadataValidationResult.Failure($"The value of metadata key {position} {problem}.");
             }
 
             // Keys are ASCII, so each character is one UTF-8 byte.
@@ -158,7 +161,7 @@ public sealed class AgentMetadata : IReadOnlyDictionary<string, string>
 
             if (rune.Value is <= 0x1F or (>= 0x7F and <= 0x9F))
             {
-                return $"holds the control character U+{rune.Value:X4}";
+                return "holds a control character";
             }
 
             utf8Length += rune.Utf8SequenceLength;

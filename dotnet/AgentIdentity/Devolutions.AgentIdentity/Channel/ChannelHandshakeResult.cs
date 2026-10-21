@@ -81,7 +81,7 @@ public sealed class ChannelHandshakeResult
     /// The rule that the handshake failed on, for host logs, when the handshake failed.
     /// </summary>
     /// <remarks>
-    /// It never repeats a value from the message, and quotes a metadata key only when the key itself is valid.
+    /// It never repeats a value from the message, not even a metadata key: it names a metadata entry by its position.
     /// </remarks>
     public string? FailureDetail { get; }
 
