@@ -1056,77 +1056,114 @@ impl AgentCase {
         self.check_key_protection_inner(authority_id, state, true)
     }
 
+    /// Checks every key that `state` names and that exists.
+    ///
+    /// The agent records a key's name before it creates the key, and deletes the key before it removes the name ([agent intent], "Stored identities"), so a record can name a key that does not exist.
+    /// A missing key fails only as the current key of a settled identity (`require_current`) that the stored identity still names as current.
+    /// When the stored identity names another current key, a renewal has retired the missing one, and the check runs again on the stored identity.
+    ///
+    /// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
     fn check_key_protection_inner(
         &self,
-        _authority_id: &str,
+        authority_id: &str,
         state: &Value,
         require_current: bool,
     ) -> anyhow::Result<()> {
-        if require_current {
-            ensure!(
-                state["keys"]["current"]["key_name"].is_string(),
-                "settled identity has no current key name"
-            );
-        }
-        for slot in ["current", "pending", "previous"] {
-            let Some(name) = state["keys"][slot]["key_name"].as_str() else {
-                continue;
+        // Each further read needs another renewal to have retired the current key meanwhile, and the agent renews at most every few seconds.
+        const READS: usize = 3;
+
+        let mut latest;
+        let mut state = state;
+        for _ in 0..READS {
+            if require_current {
+                ensure!(
+                    state["keys"]["current"]["key_name"].is_string(),
+                    "settled identity has no current key name"
+                );
+            }
+            let mut missing_current = None;
+            for slot in ["current", "pending", "previous"] {
+                let Some(name) = state["keys"][slot]["key_name"].as_str() else {
+                    continue;
+                };
+                let exists = self.check_key_if_exists(slot, name, &state["keys"][slot])?;
+                if !exists && require_current && slot == "current" {
+                    missing_current = Some(name.to_owned());
+                }
+            }
+            let Some(missing) = missing_current else {
+                return Ok(());
             };
-            validate_key_name(&self.ctx.key_name_prefix, name)?;
-            let expected_spki = state["keys"][slot]["certificate_chain"]
-                .as_array()
-                .map(|chain| -> anyhow::Result<Vec<u8>> {
-                    let leaf = chain
-                        .first()
-                        .and_then(Value::as_str)
-                        .context("stored certificate chain is empty")?;
-                    let certificate = Certificate::from_der(&decoded_certificate(leaf)?)?;
-                    Ok(certificate.tbs_certificate().subject_public_key_info().to_der()?)
-                })
-                .transpose()?;
-            // A record can briefly name a key that has not been created yet or was already deleted (C15).
-            #[cfg(windows)]
-            if self.ctx.key_backend == KeyBackend::WindowsSoftwareProvider {
-                let exists = crate::windows::machine_key_exists(name)?;
-                ensure!(
-                    exists || !require_current || slot != "current",
-                    "settled current machine key is missing"
-                );
-                if exists {
-                    crate::windows::assert_non_exportable(name)?;
-                    crate::windows::assert_machine_key_acl(name)?;
-                    if let Some(expected) = &expected_spki {
-                        let key = VerifyingKey::from_sec1_bytes(&crate::windows::machine_public_key(name)?)?;
-                        ensure!(
-                            key.to_public_key_der()?.as_bytes() == expected,
-                            "{slot} machine key does not match its leaf SPKI"
-                        );
-                    }
-                }
-            }
-            #[cfg(any(unix, windows))]
-            if self.ctx.key_backend == KeyBackend::File {
-                let path = self.key_file_path(name);
-                ensure!(
-                    path.exists() || !require_current || slot != "current",
-                    "settled current file-backed key is missing"
-                );
-                if path.exists() {
-                    #[cfg(unix)]
-                    assert_file_key_access(&path)?;
-                    if let Some(expected) = &expected_spki {
-                        let key = SigningKey::from_pkcs8_der(&std::fs::read(&path)?)?;
-                        ensure!(
-                            key.verifying_key().to_public_key_der()?.as_bytes() == expected,
-                            "{slot} file key does not match its leaf SPKI"
-                        );
-                    }
-                }
-            }
-            #[cfg(not(any(unix, windows)))]
-            let _ = expected_spki;
+            latest = self.state(authority_id)?;
+            ensure!(
+                latest["keys"]["current"]["key_name"] != missing,
+                "settled current key {missing} is missing"
+            );
+            state = &latest;
         }
-        Ok(())
+        anyhow::bail!("settled current key changed on each of {READS} reads of the stored identity")
+    }
+
+    /// Checks the key `name` that `slot` stores, and returns `false` if the key does not exist.
+    fn check_key_if_exists(&self, slot: &str, name: &str, stored: &Value) -> anyhow::Result<bool> {
+        validate_key_name(&self.ctx.key_name_prefix, name)?;
+        let expected_spki = stored["certificate_chain"]
+            .as_array()
+            .map(|chain| -> anyhow::Result<Vec<u8>> {
+                let leaf = chain
+                    .first()
+                    .and_then(Value::as_str)
+                    .context("stored certificate chain is empty")?;
+                let certificate = Certificate::from_der(&decoded_certificate(leaf)?)?;
+                Ok(certificate.tbs_certificate().subject_public_key_info().to_der()?)
+            })
+            .transpose()?;
+        match self.check_key(slot, name, expected_spki.as_deref()) {
+            // UNTESTED: a key deleted during its checks counts as missing, not as a failed check.
+            // Each check opens the key again, and a key deleted in between fails that check in a backend-specific way; the agent deletes keys during every renewal.
+            // When changing the checks, keep attributing a failure to the deletion only when the key is gone afterwards.
+            Err(_) if !key_exists(self, name)? => Ok(false),
+            checked => checked,
+        }
+    }
+
+    fn check_key(&self, slot: &str, name: &str, expected_spki: Option<&[u8]>) -> anyhow::Result<bool> {
+        #[cfg(windows)]
+        if self.ctx.key_backend == KeyBackend::WindowsSoftwareProvider {
+            if !crate::windows::machine_key_exists(name)? {
+                return Ok(false);
+            }
+            crate::windows::assert_non_exportable(name)?;
+            crate::windows::assert_machine_key_acl(name)?;
+            if let Some(expected) = expected_spki {
+                let key = VerifyingKey::from_sec1_bytes(&crate::windows::machine_public_key(name)?)?;
+                ensure!(
+                    key.to_public_key_der()?.as_bytes() == expected,
+                    "{slot} machine key does not match its leaf SPKI"
+                );
+            }
+            return Ok(true);
+        }
+        #[cfg(any(unix, windows))]
+        if self.ctx.key_backend == KeyBackend::File {
+            let path = self.key_file_path(name);
+            if !path.exists() {
+                return Ok(false);
+            }
+            #[cfg(unix)]
+            assert_file_key_access(&path)?;
+            if let Some(expected) = expected_spki {
+                let key = SigningKey::from_pkcs8_der(&std::fs::read(&path)?)?;
+                ensure!(
+                    key.verifying_key().to_public_key_der()?.as_bytes() == expected,
+                    "{slot} file key does not match its leaf SPKI"
+                );
+            }
+            return Ok(true);
+        }
+        #[cfg(not(any(unix, windows)))]
+        let _ = (slot, name, expected_spki);
+        Ok(true)
     }
 
     fn audit_tokens(&self) -> anyhow::Result<()> {
@@ -6070,6 +6107,51 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn settled_key_check_accepts_a_current_key_retired_after_the_snapshot() -> anyhow::Result<()> {
+        let case = file_backend_case().await?;
+        let authority = uuid::Uuid::new_v4().to_string();
+        let (retired, retired_key) = new_file_key(&case)?;
+        let (renewed, renewed_key) = new_file_key(&case)?;
+        let snapshot = json!({ "keys": { "current": key_slot(&retired, &retired_key)? } });
+        // After `confirm`, the retired key moves to `previous` and is deleted before its name leaves the record.
+        write_identity(
+            &case,
+            &authority,
+            &json!({ "keys": {
+                "current": key_slot(&renewed, &renewed_key)?,
+                "previous": key_slot(&retired, &retired_key)?
+            } }),
+        )?;
+        std::fs::remove_file(case.key_file_path(&retired))?;
+        case.check_key_protection(&authority, &snapshot)
+    }
+
+    #[tokio::test]
+    async fn settled_key_check_still_checks_the_current_key_of_the_latest_record() -> anyhow::Result<()> {
+        let case = file_backend_case().await?;
+        let authority = uuid::Uuid::new_v4().to_string();
+        let (retired, retired_key) = new_file_key(&case)?;
+        let (renewed, _) = new_file_key(&case)?;
+        let other_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+        let snapshot = json!({ "keys": { "current": key_slot(&retired, &retired_key)? } });
+        write_identity(
+            &case,
+            &authority,
+            &json!({ "keys": { "current": key_slot(&renewed, &other_key)? } }),
+        )?;
+        std::fs::remove_file(case.key_file_path(&retired))?;
+        let error = case
+            .check_key_protection(&authority, &snapshot)
+            .err()
+            .context("a current key that does not match the latest record's leaf was accepted")?;
+        ensure!(
+            format!("{error:#}").contains("does not match its leaf SPKI"),
+            "unexpected failure: {error:#}"
+        );
+        Ok(())
+    }
+
     #[test]
     fn agent_metadata_requires_c14_fields_and_stable_platform_values() -> anyhow::Result<()> {
         let mut metadata = json!({
@@ -6108,6 +6190,75 @@ mod tests {
             validate_agent_metadata(&metadata, Some("different-version")).is_err(),
             "wrong agent version was accepted"
         );
+        Ok(())
+    }
+
+    /// An agent case on the file backend whose agent never starts.
+    async fn file_backend_case() -> anyhow::Result<AgentCase> {
+        let work_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("target")
+            .join("agent-identity-conformance-tests");
+        std::fs::create_dir_all(&work_dir)?;
+        let target = Target::new(
+            "https://localhost/mock".to_owned(),
+            crate::dvls::AppCredential::new("test".to_owned(), "test".to_owned()),
+            None,
+            None,
+        )?;
+        AgentCase::new(
+            Context {
+                target,
+                second: None,
+                target_kind: crate::TargetKind::Mock,
+                disposable_dvls_target: false,
+                dvls_rotation_window_secs: 60,
+                leaf_lifetime_secs: 90 * 24 * 3600,
+                expect_channel: true,
+                channel_available: true,
+                key_name_prefix: format!("conformance-{}", uuid::Uuid::new_v4().simple()),
+                agent_version: None,
+                unprivileged: None,
+                agent_bin: PathBuf::new(),
+                key_backend: KeyBackend::File,
+                work_dir,
+            },
+            None,
+            false,
+        )
+        .await
+    }
+
+    /// Stores a new P-256 file key with an owner-only mode, under a new name with the case's run prefix.
+    fn new_file_key(case: &AgentCase) -> anyhow::Result<(String, rcgen::KeyPair)> {
+        use std::io::Write as _;
+
+        let name = format!("{}_{}", case.ctx.key_name_prefix, uuid::Uuid::new_v4());
+        let key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+        let path = case.key_file_path(&name);
+        std::fs::create_dir_all(path.parent().context("key directory")?)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+        options.open(path)?.write_all(&key.serialize_der())?;
+        Ok((name, key))
+    }
+
+    /// A stored key slot that names `name` and holds a self-signed leaf for `key`.
+    fn key_slot(name: &str, key: &rcgen::KeyPair) -> anyhow::Result<Value> {
+        let leaf = rcgen::CertificateParams::new(Vec::<String>::new())?.self_signed(key)?;
+        Ok(json!({
+            "key_name": name,
+            "certificate_chain": [base64::engine::general_purpose::STANDARD.encode(leaf.der())]
+        }))
+    }
+
+    fn write_identity(case: &AgentCase, authority_id: &str, state: &Value) -> anyhow::Result<()> {
+        let path = case.identity_path(authority_id);
+        std::fs::create_dir_all(path.parent().context("authority directory")?)?;
+        std::fs::write(path, serde_json::to_vec(state)?)?;
         Ok(())
     }
 }
