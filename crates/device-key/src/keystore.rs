@@ -431,7 +431,14 @@ pub(super) fn list(prefix: &str) -> anyhow::Result<Vec<String>> {
                 // SAFETY: NCryptEnumKeys returned a valid name structure in this live buffer.
                 let pointer = unsafe { (*key_name.0).pszName };
                 // SAFETY: The name is NUL-terminated and remains live until the buffer is freed.
-                let name = unsafe { pointer.to_string() }.context("decode machine key name")?;
+                let decoded = unsafe { pointer.to_string() };
+                // UNTESTED: a machine-key name that is not valid UTF-16 is skipped instead of failing the listing.
+                // Every program on the machine shares this store, so one foreign name must not hide the crate's keys.
+                // Creating such a key needs elevation, and whether the provider keeps the name is unverified.
+                // When changing this decoding, keep skipping a name that does not decode.
+                let Ok(name) = decoded else {
+                    continue;
+                };
                 if name_matches_prefix(&name, prefix) {
                     names.push(name);
                 }

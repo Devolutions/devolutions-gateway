@@ -17,6 +17,8 @@ use crate::{DeviceKey, name_matches_prefix, validate_name};
 
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
+/// A P-256 key file takes about 140 bytes, so a file past this bound is not a key the crate wrote.
+const MAX_KEY_FILE_LEN: u64 = 64 * 1024;
 
 struct FileKey {
     name: String,
@@ -99,7 +101,9 @@ pub(super) fn open(dir: &Utf8Path, name: &str) -> anyhow::Result<Option<Box<dyn 
     {
         use std::os::unix::fs::OpenOptionsExt as _;
 
-        options.custom_flags(libc::O_NOFOLLOW);
+        // O_NONBLOCK keeps a FIFO or device at the key's name from blocking the open.
+        // Reads from a regular file ignore it.
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
     #[cfg(windows)]
     {
@@ -109,7 +113,7 @@ pub(super) fn open(dir: &Utf8Path, name: &str) -> anyhow::Result<Option<Box<dyn 
 
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0);
     }
-    let mut file = match options.open(&path) {
+    let file = match options.open(&path) {
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error).with_context(|| format!("open key file {path}")),
@@ -123,9 +127,18 @@ pub(super) fn open(dir: &Utf8Path, name: &str) -> anyhow::Result<Option<Box<dyn 
     crate::macos_acl::ensure_private_file(&file)?;
     #[cfg(windows)]
     ensure_private_file(&file)?;
-    let mut pkcs8 = Zeroizing::new(Vec::new());
-    file.read_to_end(&mut pkcs8)
+    // UNTESTED: reading stops one byte past the bound, into a buffer that never reallocates.
+    // An unbounded read lets a large file exhaust memory.
+    // A reallocation leaves an unzeroized copy of the key in freed memory.
+    // When changing this read, keep the `take` limit and a capacity that holds all it can read.
+    let mut pkcs8 = Zeroizing::new(Vec::with_capacity(usize::try_from(MAX_KEY_FILE_LEN + 1)?));
+    file.take(MAX_KEY_FILE_LEN + 1)
+        .read_to_end(&mut pkcs8)
         .with_context(|| format!("read key file {path}"))?;
+    ensure!(
+        u64::try_from(pkcs8.len())? <= MAX_KEY_FILE_LEN,
+        "key file is larger than {MAX_KEY_FILE_LEN} bytes"
+    );
     let key = SigningKey::from_pkcs8_der(&pkcs8).context("decode device key")?;
     let public_key = *key.verifying_key();
     let mut bytes = [0u8; 32];
@@ -409,6 +422,9 @@ fn link_count(file: &File) -> anyhow::Result<u64> {
 #[cfg(unix)]
 fn delete_key(dir: &Utf8Path, name: &str) -> anyhow::Result<()> {
     let path = key_path(dir, name);
+    if !listed_with_exact_name(dir, &path)? {
+        return Ok(());
+    }
     match fs::remove_file(&path) {
         Ok(()) => sync_directory(dir),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
@@ -419,14 +435,24 @@ fn delete_key(dir: &Utf8Path, name: &str) -> anyhow::Result<()> {
 #[cfg(windows)]
 fn delete_key(dir: &Utf8Path, name: &str) -> anyhow::Result<()> {
     let path = key_path(dir, name);
-    match fs::symlink_metadata(&path) {
-        Ok(_) => {}
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error).with_context(|| format!("inspect key file {path}")),
+    if !listed_with_exact_name(dir, &path)? {
+        return Ok(());
     }
     let tombstone = dir.join(format!(".{name}-{}.deleted", Uuid::new_v4()));
     rename_new(&path, &tombstone).with_context(|| format!("retire key file {path}"))?;
     fs::remove_file(&tombstone).with_context(|| format!("delete retired key file {tombstone}"))
+}
+
+/// Reports whether `dir` lists `path`'s file name spelled exactly as given.
+/// A case-insensitive file system, such as NTFS or APFS, also resolves `path` to a name that differs in case.
+fn listed_with_exact_name(dir: &Utf8Path, path: &Utf8Path) -> anyhow::Result<bool> {
+    let file_name = path.file_name().context("key path has no file name")?;
+    for entry in fs::read_dir(dir).with_context(|| format!("list key directory {dir}"))? {
+        if entry.context("read key directory entry")?.file_name() == file_name {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 #[cfg(unix)]
@@ -1228,6 +1254,111 @@ mod tests {
 
         assert!(open(&backend, &name).is_err());
         Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_at_a_key_name_neither_blocks_open_nor_holds_the_lock() -> anyhow::Result<()> {
+        use std::ffi::CString;
+
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        let fifo = CString::new(key_path(&directory.0, &name).as_str())?;
+        // SAFETY: The path is NUL-terminated.
+        let status = unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) };
+        ensure!(status == 0, "create FIFO: {}", std::io::Error::last_os_error());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let opener_backend = backend.clone();
+        // A blocked opener never finishes, so the test does not join it.
+        std::thread::spawn(move || sender.send(open(&opener_backend, &name).map(|key| key.is_some())));
+
+        // A blocked open would make every later operation wait out the five-second lock, so one second is ample.
+        let opened = receiver.recv_timeout(Duration::from_secs(1));
+        assert!(matches!(opened, Ok(Ok(false) | Err(_))), "{opened:?}");
+        assert!(list(&backend, TEST_PREFIX)?.is_empty());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_key_file_name_with_an_uppercase_key_name_survives_delete() -> anyhow::Result<()> {
+        let name = new_key_name(TEST_PREFIX);
+        case_alias_survives_delete_and_list(&name, &format!("{}.p8", name.to_uppercase()))
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_key_file_name_with_an_uppercase_extension_survives_delete() -> anyhow::Result<()> {
+        let name = new_key_name(TEST_PREFIX);
+        case_alias_survives_delete_and_list(&name, &format!("{name}.P8"))
+    }
+
+    /// Leaves an alias, a file named like `name`'s key file but for case.
+    /// A case-insensitive file system, such as NTFS or APFS, resolves the key file's path to the alias.
+    fn case_alias_survives_delete_and_list(name: &str, alias: &str) -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let alias = directory.0.join(alias);
+        create_restricted_file(&alias)?;
+
+        // An operation may skip an unexpected entry or fail, so only what it leaves behind is checked.
+        let _ = delete(&backend, name);
+
+        assert!(alias.is_file());
+        assert!(list(&backend, TEST_PREFIX)?.is_empty());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_valid_key_file_padded_past_the_size_bound_is_refused() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        let pkcs8 = SigningKey::generate_from_rng(&mut rand::rng()).to_pkcs8_der()?;
+        let pkcs8 = pkcs8.as_bytes();
+        // The key is a version 1 PrivateKeyInfo, whose optional attributes come last (RFC 5208 §5).
+        // An attribute appended to its fields therefore keeps it a valid key.
+        let header_len = match pkcs8.get(1) {
+            Some(&length) if length < 0x80 => 2,
+            Some(&length) => 2 + usize::from(length & 0x7F),
+            None => anyhow::bail!("PKCS#8 key has no length"),
+        };
+        let fields = pkcs8.get(header_len..).context("PKCS#8 key is truncated")?;
+        // An attribute is a SEQUENCE of a type OID and a SET of values (X.501); this one holds a 64 KiB OCTET STRING.
+        let attribute = der(
+            0x30,
+            &[
+                der(0x06, &[0x2A, 0x03, 0x04])?,
+                der(0x31, &der(0x04, &vec![0; 64 * 1024])?)?,
+            ]
+            .concat(),
+        )?;
+        let padded = der(0x30, &[fields, der(0xA0, &attribute)?.as_slice()].concat())?;
+        let mut file = create_restricted_file(&key_path(&directory.0, &name))?;
+        file.write_all(&padded)?;
+        drop(file);
+
+        // An operation may skip an unexpected entry or fail, but never returns it as a key.
+        assert!(!matches!(open(&backend, &name), Ok(Some(_))));
+        Ok(())
+    }
+
+    /// Encodes one DER element with the definite, minimal length that X.690 §10.1 requires.
+    fn der(tag: u8, content: &[u8]) -> anyhow::Result<Vec<u8>> {
+        let mut element = vec![tag];
+        if let Ok(length @ 0..0x80) = u8::try_from(content.len()) {
+            element.push(length);
+        } else {
+            let length = content.len().to_be_bytes();
+            let significant = &length[length.iter().take_while(|&&byte| byte == 0).count()..];
+            element.push(0x80 | u8::try_from(significant.len())?);
+            element.extend_from_slice(significant);
+        }
+        element.extend_from_slice(content);
+        Ok(element)
     }
 
     // oracle: intent crates/device-key/INTENT.md §Operations
