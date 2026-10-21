@@ -28,9 +28,11 @@ const MAX_SCANNED_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_LINE_BYTES: usize = 256 * 1024;
 
 /// What to search for, and in which recordings.
+///
+/// Unknown fields are rejected, so that an option added later is never silently ignored by a Gateway that predates it.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RecordingSearchRequest {
     /// Text to search for, ignoring case; leading and trailing spaces are part of it.
     #[cfg_attr(feature = "openapi", schema(min_length = 1))]
@@ -93,6 +95,7 @@ impl<'__s> utoipa::ToSchema<'__s> for RecordingSelection {
 /// A missing end leaves that side of the range open.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct StartTimeRange {
     /// Earliest start time searched.
     #[serde(default, with = "time::serde::rfc3339::option")]
@@ -803,5 +806,12 @@ mod tests {
     #[case::all_in_a_list(r#"["all"]"#)]
     fn rejects_other_recording_selections(#[case] recordings: &str) {
         assert!(parse_request(&format!(r#""recordings":{recordings}"#)).is_err());
+    }
+
+    #[rstest]
+    #[case::in_the_request(r#""recordings":"all","mode":"regex""#)]
+    #[case::in_the_start_time(r#""recordings":"all","startTime":{"until":"2026-10-10T00:00:00Z"}"#)]
+    fn rejects_unknown_fields(#[case] fields: &str) {
+        assert!(parse_request(fields).is_err());
     }
 }
