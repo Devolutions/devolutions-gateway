@@ -33,8 +33,8 @@ use super::runner::{Attempt, DynProvisionerTaskJobQueue, ProvisionerTask};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
-use crate::provisioning::ProvisioningStore;
 use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender, RemuxJob, remux_pending};
+use crate::secret_store::{SecretId, SecretStore};
 use crate::token::AccessScope;
 
 pub const KIND: &str = "recording-ai-analysis";
@@ -215,8 +215,8 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         .create::<RecordingAiAnalysis>(task_id, target, &params, |record| {
             // The job may run as soon as it is queued, so the key must be in place first.
             state
-                .provisioning
-                .insert_task_secret(record.id, &access.to_secret()?, record.deadline_at)
+                .secrets
+                .insert(SecretId(record.id), &access.to_secret()?, record.deadline_at)
         })
         .await
         .map_err(StartError::Internal)?;
@@ -238,7 +238,7 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
 pub struct RecordingAiAnalysis {
     conf_handle: ConfHandle,
     recordings: RecordingMessageSender,
-    provisioning: ProvisioningStore,
+    secrets: SecretStore,
     job_queue: DynProvisionerTaskJobQueue,
     attempt_timeout: std::time::Duration,
 }
@@ -247,13 +247,13 @@ impl RecordingAiAnalysis {
     pub fn new(
         conf_handle: ConfHandle,
         recordings: RecordingMessageSender,
-        provisioning: ProvisioningStore,
+        secrets: SecretStore,
         job_queue: DynProvisionerTaskJobQueue,
     ) -> Self {
         Self {
             conf_handle,
             recordings,
-            provisioning,
+            secrets,
             job_queue,
             attempt_timeout: ATTEMPT_TIMEOUT,
         }
@@ -305,8 +305,8 @@ impl ProvisionerTask for RecordingAiAnalysis {
         self.clear_earlier_analysis(attempt, session_id).await?;
 
         let secret = self
-            .provisioning
-            .task_secret(attempt.task_id)
+            .secrets
+            .get(SecretId(attempt.task_id))
             .map_err(|error| AttemptError::Permanent(format!("{error:#}")))?;
 
         let Some(secret) = secret else {
@@ -331,7 +331,7 @@ impl ProvisionerTask for RecordingAiAnalysis {
     }
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) {
-        self.provisioning.remove_task_secret(record.id);
+        self.secrets.remove(SecretId(record.id));
 
         let Ok(session_id) = Uuid::parse_str(&record.target) else {
             return;

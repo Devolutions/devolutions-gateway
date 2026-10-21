@@ -186,9 +186,9 @@ impl Harness {
 
     fn access(&self, task_id: Uuid) -> Option<AiAccess> {
         self.state
-            .provisioning
-            .task_secret(task_id)
-            .expect("read the task secret")
+            .secrets
+            .get(SecretId(task_id))
+            .expect("read the secret")
             .map(|secret| AiAccess::from_secret(&secret).expect("AI access"))
     }
 
@@ -203,9 +203,9 @@ impl Harness {
             base_url,
         };
         self.state
-            .provisioning
-            .insert_task_secret(task_id, &access.to_secret().expect("secret"), expires_at)
-            .expect("insert the task secret");
+            .secrets
+            .insert(SecretId(task_id), &access.to_secret().expect("secret"), expires_at)
+            .expect("insert the secret");
     }
 
     /// Writes a finished session with a short terminal recording.
@@ -691,7 +691,7 @@ async fn slow_attempt_is_retried() {
     let mut task = RecordingAiAnalysis::new(
         harness.state.conf_handle.clone(),
         harness.state.recordings.clone(),
-        harness.state.provisioning.clone(),
+        harness.state.secrets.clone(),
         Arc::new(harness.state.job_queue_handle.clone()),
     );
     task.attempt_timeout = Duration::from_millis(500);
@@ -749,7 +749,7 @@ async fn lost_key_fails_the_task() {
     std::fs::create_dir_all(harness.workspace(session_id)).expect("workspace");
 
     // A restart keeps `gateway.db` and the job queue, but not the keys held in memory.
-    harness.state.provisioning.remove_task_secret(task_id);
+    harness.state.secrets.remove(SecretId(task_id));
 
     harness.run(task_id).await.expect("no retry");
 
@@ -851,7 +851,7 @@ async fn analysis_waits_for_the_remux_of_the_session() {
             .register(RecordingAiAnalysis::new(
                 harness.state.conf_handle.clone(),
                 harness.state.recordings.clone(),
-                harness.state.provisioning.clone(),
+                harness.state.secrets.clone(),
                 queue,
             ))
             .build();
@@ -943,7 +943,7 @@ async fn a_new_task_that_fails_still_removes_the_earlier_analysis() {
     harness.run(first).await.expect("first analysis");
 
     let second = harness.start_created(session_id, settings).await;
-    harness.state.provisioning.remove_task_secret(second);
+    harness.state.secrets.remove(SecretId(second));
     harness.run(second).await.expect("no retry");
 
     let task = harness.task(second).await;
@@ -966,7 +966,7 @@ async fn a_retry_of_an_attempt_that_never_got_the_session_removes_the_earlier_an
     let mut task = RecordingAiAnalysis::new(
         harness.state.conf_handle.clone(),
         harness.state.recordings.clone(),
-        harness.state.provisioning.clone(),
+        harness.state.secrets.clone(),
         Arc::new(harness.state.job_queue_handle.clone()),
     );
     task.attempt_timeout = Duration::from_millis(500);
@@ -1108,7 +1108,7 @@ async fn an_ended_task_leaves_the_working_files_of_another_task() {
     let task = RecordingAiAnalysis::new(
         harness.state.conf_handle.clone(),
         harness.state.recordings.clone(),
-        harness.state.provisioning.clone(),
+        harness.state.secrets.clone(),
         Arc::new(harness.state.job_queue_handle.clone()),
     );
 
