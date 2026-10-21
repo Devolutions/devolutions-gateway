@@ -76,7 +76,8 @@ mod tests {
             fail: false,
         };
         let csr = CertReq::from_der(&STANDARD.decode(create(&key)?)?)?;
-        assert_eq!(csr.algorithm.oid, ECDSA_WITH_SHA256);
+        // oracle: spec RFC 5758 §3.2
+        assert_eq!(csr.algorithm.oid.to_string(), "1.2.840.10045.4.3.2");
         assert_eq!(
             VerifyingKey::from_sec1_bytes(
                 csr.info

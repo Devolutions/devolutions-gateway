@@ -126,9 +126,10 @@ mod tests {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
         assert_eq!(token.base_url(), "https://example.test/dvls");
         // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
-        assert_eq!(token.sha256_hex(), hex::encode(Sha256::digest(raw.as_bytes())));
-        assert_eq!(sha256_hex(&raw), token.sha256_hex());
-        assert_eq!(token.sha256_hex().len(), 64);
+        // The SHA-256 of `raw`'s UTF-8 bytes in lowercase hexadecimal, computed with Python's `hashlib`.
+        let expected = "65d386f45a2f8e2e11db4e8cc316eff1d7f59faba77130b092e006221d52c007";
+        assert_eq!(token.sha256_hex(), expected);
+        assert_eq!(sha256_hex(&raw), expected);
         // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
         assert!(!format!("{token:?} {token}").contains(&raw));
         assert!(!format!("{token:?} {token}").contains(&raw[..12]));
