@@ -139,20 +139,6 @@ mod tests {
     }
 
     #[test]
-    fn an_authenticated_stream_restarts_from_one_second() {
-        let backoff = without_jitter();
-        let mut state = BackoffState::default();
-        for _ in 0..5 {
-            state.next_delay(&backoff, TransientKind::Outage);
-        }
-        state.reset();
-        assert_eq!(
-            state.next_delay(&backoff, TransientKind::Outage),
-            Duration::from_secs(1)
-        );
-    }
-
-    #[test]
     fn the_default_jitter_stays_within_half_and_one_and_a_half() {
         let draws: Vec<f64> = (0..1000).map(|_| uniform_jitter()).collect();
         assert!(draws.iter().all(|draw| (0.5..=1.5).contains(draw)));

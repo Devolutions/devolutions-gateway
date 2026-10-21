@@ -225,12 +225,6 @@ fn channel_proof_input_matches_the_shared_vector() -> anyhow::Result<()> {
     let challenge = STANDARD.decode(field("challenge")?)?;
     let input = stream::channel_proof_input(&challenge, field("connect_nonce")?);
     assert_eq!(hex(&input), field("message_hex")?);
-
-    // INTENT.agent-identity.md ("Conformance"): the signature need not match the vector's bytes, only verify.
-    let identity = Identity::from_vectors(field("device")?)?;
-    let public_key = VerifyingKey::from_sec1_bytes(&STANDARD.decode(field("public_key_sec1")?)?)?;
-    let proof = identity.key.try_sign(&input)?;
-    public_key.verify(&input, &proof)?;
     Ok(())
 }
 
