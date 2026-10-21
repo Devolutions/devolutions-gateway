@@ -350,12 +350,14 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
             .context("failed to initialize the provisioner task store")?,
     );
 
+    let secrets = devolutions_gateway::secret_store::SecretStore::default();
+
     let provisioner_tasks = devolutions_gateway::provisioner_tasks::task_runner(
         task_store,
         Arc::new(job_queue_ctx.durable()),
         conf_handle.clone(),
         recording_manager_handle.clone(),
-        provisioning.clone(),
+        secrets.clone(),
     );
 
     // Before the job runner starts, so no job queued earlier runs an attempt meanwhile.
@@ -382,6 +384,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
         provisioner_tasks: provisioner_tasks.clone(),
+        secrets: secrets.clone(),
     };
 
     for listener in &conf.listeners {
@@ -414,6 +417,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     tasks.register(devolutions_gateway::token::CleanupTask { token_cache });
 
     tasks.register(devolutions_gateway::provisioning::CleanupTask { handle: provisioning });
+
+    tasks.register(devolutions_gateway::secret_store::CleanupTask { handle: secrets });
 
     tasks.register(devolutions_gateway::credential_injection::CleanupTask {
         handle: synthetic_kdc_registry,
