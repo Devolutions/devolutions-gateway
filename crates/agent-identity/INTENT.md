@@ -37,7 +37,7 @@ The location and format of the files below are stable, because the conformance t
 - The agent provisions its identity directories and, at start-up, resets a wrong owner or wrong permissions on them.
 - Before it uses stored identities, the agent checks that every `<data-dir>/identity/authorities/<authority_id>/` directory is owned by its account and protected from other users.
   One that fails the check is never repaired, and stops all identity processing until it is fixed, because skipping it would let a local attacker hide or forge an identity, for example hide a rejected identity so that its token enrolls again.
-- Every state change holds the exclusive lock `<data-dir>/identity/.agent-identity.lock`; on Windows, a busy lock is retried for 30 s.
+- Every state change holds an exclusive lock on the identity directory: the file `<data-dir>/identity/.agent-identity.lock` on Linux and macOS, and on Windows an unshared handle on `<data-dir>/identity` itself; on Windows, a busy lock is retried for 30 s.
 - Size limits: a pending file holds at most 16 KiB of plaintext, an in-progress record 16 KiB, `identity.json` 2 MiB, and a rejection marker 1 KiB.
 
 ### Pending-enrollment files
