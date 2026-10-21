@@ -125,6 +125,7 @@ fn signs_all_four_profile_tags_exactly_as_vectored() -> anyhow::Result<()> {
             "{}",
             case.name
         );
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
         assert_eq!(
             headers.signature_input.to_str()?,
             field(&vector["headers"], "signature-input")?,
@@ -153,7 +154,7 @@ fn signs_all_four_profile_tags_exactly_as_vectored() -> anyhow::Result<()> {
             created,
             &headers.nonce,
         )?;
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
         assert_eq!(base.to_string(), field(vector, "signature_base")?, "{}", case.name);
         let encoded_signature = headers
             .signature
@@ -409,6 +410,7 @@ fn confirm_covers_only_the_method_when_given_a_body() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
 #[test]
 fn signature_expiry_stays_within_structured_field_integers() -> anyhow::Result<()> {
     let vectors = vectors()?;
