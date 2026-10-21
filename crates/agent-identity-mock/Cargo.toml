@@ -31,6 +31,7 @@ hyper-util = { version = "0.1", features = [
 # Pinned to the RC: `picky` pins `=0.14.0-rc.14` and the resolver cannot hold two
 # semver-compatible p256 versions.
 p256 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }
+prost = "0.13"
 prost-types = "0.13"
 rand = "0.10"
 rcgen = "0.13"
@@ -50,13 +51,12 @@ tokio = { version = "1.52", features = [
 ] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
-tonic = { version = "0.12", default-features = false, features = ["codegen", "prost"] }
+tonic = { version = "0.12", default-features = false, features = ["prost"] }
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
 x509-cert = { version = "0.3", features = ["builder"] }
 
 [dev-dependencies]
-prost = "0.13"
 rstest = "0.25"
 tokio = { version = "1.52", features = ["test-util"] }

@@ -72,6 +72,7 @@ Only confirm promotes a pending certificate: old streams receive `Reconnect{reas
 A stream awaiting `Hello` closes once the clock reaches its certificate's `notAfter`, and for revocation or deletion when its `Hello` arrives or times out (§7.4).
 These closures come ahead of any handshake failure, and revocation or deletion wins over expiry.
 A stream whose certificate is retired during that wait completes the handshake, then receives the same `Reconnect` and closes with `OK` 60 mock-clock seconds after it.
+An agent message that cannot be decoded closes an authenticated stream with `INVALID_ARGUMENT` + `invalid_request` (§7.4).
 The channel gRPC method is `POST <prefix>/devolutions.agent.channel.v1.AgentChannel/Connect` with `signature-input`/`signature` metadata (`tag="connect"`); open failures are gRPC statuses with `error-code` and `server-time` trailers (§7.4).
 
 ### Login

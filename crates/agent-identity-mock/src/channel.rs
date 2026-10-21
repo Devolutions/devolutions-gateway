@@ -6,16 +6,18 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use agent_channel_proto::agent_channel_server::AgentChannel;
 use agent_channel_proto::{
     AgentMessage, Challenge, ConfigUpdate, Reconnect, RenewRequested, ServerMessage, Welcome, agent_message,
     server_message,
 };
 use futures::StreamExt as _;
+use prost::Message as _;
+use prost::bytes::Buf as _;
 use rand::RngExt as _;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+use tonic::codec::{BufferSettings, Codec, DecodeBuf, Decoder, ProstCodec};
 use tonic::metadata::{AsciiMetadataValue, MetadataMap};
 use tonic::{Code, Request, Response, Status, Streaming};
 use uuid::Uuid;
@@ -34,6 +36,47 @@ const EXPIRY_CHECK_PERIOD: Duration = Duration::from_millis(250);
 #[derive(Clone)]
 pub(crate) struct ChannelService {
     pub(crate) app: Arc<App>,
+}
+
+/// An agent message as the channel receives it: decoded, or the error that kept it from decoding.
+pub(crate) type Received = Result<AgentMessage, prost::DecodeError>;
+
+/// The channel's gRPC codec: it encodes server messages as tonic's prost codec does, and passes each agent message to
+/// the stream whether or not it decodes.
+/// tonic's prost codec fails the stream alike for a message that cannot be decoded and for a broken transport, while
+/// [CONTRACT.agent-identity.md][contract] ("7.4 Termination") closes an authenticated stream with `invalid_request`
+/// only for the former.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-termination
+pub(crate) struct ChannelCodec;
+
+impl Codec for ChannelCodec {
+    type Encode = ServerMessage;
+    type Decode = Received;
+    type Encoder = <ProstCodec<ServerMessage, AgentMessage> as Codec>::Encoder;
+    type Decoder = ReceivedDecoder;
+
+    fn encoder(&mut self) -> Self::Encoder {
+        ProstCodec::<ServerMessage, AgentMessage>::raw_encoder(BufferSettings::default())
+    }
+
+    fn decoder(&mut self) -> Self::Decoder {
+        ReceivedDecoder
+    }
+}
+
+pub(crate) struct ReceivedDecoder;
+
+impl Decoder for ReceivedDecoder {
+    type Item = Received;
+    type Error = Status;
+
+    fn decode(&mut self, buf: &mut DecodeBuf<'_>) -> Result<Option<Received>, Status> {
+        // UNTESTED: a message that fails to decode is consumed whole, so that the next one is read from its header.
+        // No stream reads past an undecodable message, so no test sees a message left half-read.
+        // When changing this decoder, keep consuming all `buf.remaining()` bytes whatever the outcome.
+        Ok(Some(AgentMessage::decode(buf.copy_to_bytes(buf.remaining()))))
+    }
 }
 
 /// Builds a stream failure status with the `error-code` and `server-time` trailers
@@ -56,15 +99,13 @@ fn rejection_status(rejection: Rejection, now: i64) -> Status {
     error_status(code, rejection.code(), now)
 }
 
-#[tonic::async_trait]
-impl AgentChannel for ChannelService {
-    type ConnectStream = ReceiverStream<Result<ServerMessage, Status>>;
-
-    async fn connect(
-        &self,
-        request: Request<Streaming<AgentMessage>>,
-    ) -> Result<Response<Self::ConnectStream>, Status> {
-        let app = Arc::clone(&self.app);
+impl ChannelService {
+    /// Serves one `AgentChannel/Connect` call.
+    pub(crate) async fn connect(
+        self,
+        request: Request<Streaming<Received>>,
+    ) -> Result<Response<ReceiverStream<Result<ServerMessage, Status>>>, Status> {
+        let app = self.app;
         let metadata = request.metadata();
         let duplicate_signature = metadata.get_all("signature-input").iter().count() != 1
             || metadata.get_all("signature").iter().count() != 1;
@@ -287,7 +328,7 @@ async fn run_stream(
     app: Arc<App>,
     stream_id: Uuid,
     opening: Opening,
-    mut client: Streaming<AgentMessage>,
+    mut client: Streaming<Received>,
     push_tx: mpsc::UnboundedSender<StreamPush>,
     mut push_rx: mpsc::UnboundedReceiver<StreamPush>,
     out: mpsc::Sender<Result<ServerMessage, Status>>,
@@ -328,7 +369,8 @@ async fn run_stream(
         loop {
             tokio::select! {
                 result = &mut hello_wait => break match result {
-                    Ok(Some(Ok(message))) => Some(message),
+                    // §7.3 step 4: a first message that cannot be decoded is no `Hello`.
+                    Ok(Some(Ok(received))) => received.ok(),
                     Ok(Some(Err(_))) | Ok(None) | Err(_) => None,
                 },
                 push = push_rx.recv() => {
@@ -423,7 +465,7 @@ async fn run_stream(
                     return;
                 }
                 message = client.next() => {
-                    if message.is_none_or(|message| message.is_err()) {
+                    if !matches!(message, Some(Ok(Ok(_)))) {
                         finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
                         return;
                     }
@@ -562,7 +604,7 @@ async fn run_stream(
         tokio::select! {
             message = client.next() => {
                 match message {
-                    Some(Ok(message)) => {
+                    Some(Ok(Ok(message))) => {
                         let now = app.now();
                         let mut state = app.state.lock().await;
                         // UNTESTED: any authenticated message, even an unknown payload, refreshes `last_seen_at`.
@@ -580,6 +622,12 @@ async fn run_stream(
                         {
                             state.requests.correlated_acks += 1;
                         }
+                    }
+                    // §7.4: a message that cannot be decoded closes an authenticated stream.
+                    Some(Ok(Err(_))) => {
+                        close_with(&out, error_status(Code::InvalidArgument, "invalid_request", app.now())).await;
+                        termination = ("INVALID_ARGUMENT", Some("invalid_request"));
+                        break;
                     }
                     Some(Err(_)) | None => break,
                 }
@@ -689,7 +737,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use agent_channel_proto::{AgentMessage, Hello, ServerMessage, agent_message, server_message};
+    use agent_channel_proto::{Ack, AgentMessage, Hello, ServerMessage, agent_message, server_message};
     use axum::body::Bytes;
     use axum::http;
     use base64::Engine as _;
@@ -1074,8 +1122,8 @@ mod tests {
         encoded.extend_from_slice(&[0x0a, 0x01, 0xff]);
     }
 
-    /// Drops the last byte, which belongs to the message's last field, its payload, so that the payload claims one
-    /// byte more than the message holds.
+    /// Drops the last byte, which belongs to the message's last field, its payload, so that the message ends inside
+    /// that field.
     fn truncate_payload(encoded: &mut Vec<u8>) {
         encoded.pop();
     }
@@ -1113,6 +1161,49 @@ mod tests {
         let closure = Seen::Closed("16".to_owned(), "signature_invalid".to_owned());
         assert_eq!(channel.drain(QUIET).await?, [closure]);
         assert_eq!(identity_state(&*enrolled.app.state.lock().await), enrolled_state);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §7.4: "A message that cannot be decoded on an authenticated stream closes that stream
+    /// with `INVALID_ARGUMENT` + `error-code: invalid_request`" (gRPC code 3), and the mock's event log records that
+    /// closure.
+    /// Each message corrupts an `Ack`, which the mock otherwise reads and ignores.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
+    #[rstest]
+    #[case::invalid_utf8_in_a_string_field(append_invalid_utf8_id)]
+    #[case::truncated(truncate_payload)]
+    #[tokio::test]
+    async fn undecodable_message_on_an_authenticated_stream_is_invalid_request(
+        #[case] corrupt: fn(&mut Vec<u8>),
+    ) -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+        channel.send(channel.hello(&enrolled.key)?).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Welcome));
+
+        let mut encoded = AgentMessage {
+            id: Uuid::new_v4().to_string(),
+            correlation_id: None,
+            payload: Some(agent_message::Payload::Ack(Ack {})),
+        }
+        .encode_to_vec();
+        corrupt(&mut encoded);
+        channel.send_encoded(&encoded).await?;
+
+        let closure = Seen::Closed("3".to_owned(), "invalid_request".to_owned());
+        assert_eq!(channel.drain(QUIET).await?, [closure]);
+        let state = enrolled.app.state.lock().await;
+        let closed = state
+            .events
+            .iter()
+            .rev()
+            .find(|event| event.body["type"] == "stream_closed")
+            .map(|event| (&event.body["status"], &event.body["error_code"]));
+        assert_eq!(
+            closed,
+            Some((&Value::from("INVALID_ARGUMENT"), &Value::from("invalid_request")))
+        );
         Ok(())
     }
 

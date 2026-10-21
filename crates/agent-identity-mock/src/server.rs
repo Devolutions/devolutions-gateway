@@ -12,7 +12,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use agent_channel_proto::agent_channel_server::AgentChannelServer;
 use axum::body::Bytes;
 use axum::response::IntoResponse as _;
 use axum::{Json, Router, http};
@@ -27,7 +26,7 @@ use tower::{Service, ServiceExt as _};
 
 use crate::api_agent::{DROP_HEADER, INJECTED_HEADER};
 use crate::app::App;
-use crate::channel::ChannelService;
+use crate::channel::{ChannelCodec, ChannelService};
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type OutBody = http_body_util::combinators::UnsyncBoxBody<Bytes, BoxError>;
@@ -51,7 +50,7 @@ impl std::error::Error for ConnectionAborted {}
 pub struct Dispatcher {
     prefix: Arc<String>,
     app: Arc<App>,
-    grpc: AgentChannelServer<ChannelService>,
+    channel: ChannelService,
     rest: Router,
 }
 
@@ -77,7 +76,7 @@ impl Dispatcher {
         Self {
             prefix: Arc::new(app.prefix.clone()),
             app: Arc::clone(&app),
-            grpc: AgentChannelServer::new(ChannelService { app }),
+            channel: ChannelService { app },
             rest,
         }
     }
@@ -114,11 +113,9 @@ impl Dispatcher {
 
         let grpc_path = format!("/{}/Connect", agent_channel_proto::SERVICE_NAME);
         if stripped == *grpc_path {
-            let response = self
-                .grpc
-                .oneshot(request)
-                .await
-                .unwrap_or_else(|never: Infallible| match never {});
+            let channel = self.channel;
+            let connect = tower::service_fn(move |request| channel.clone().connect(request));
+            let response = tonic::server::Grpc::new(ChannelCodec).streaming(connect, request).await;
             return Ok(response.map(|body| body.map_err(|e| -> BoxError { Box::new(e) }).boxed_unsync()));
         }
 
