@@ -61,6 +61,7 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::DeleteManyResult,
         crate::api::jrec::search::RecordingSearchRequest,
         crate::api::jrec::search::RecordingSelection,
+        crate::api::jrec::search::StartTimeRange,
         crate::api::jrec::search::RecordingSearchResponse,
         crate::api::jrec::search::RecordingSearchHit,
         crate::token::AccessScope,
