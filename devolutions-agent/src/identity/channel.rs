@@ -1,7 +1,7 @@
-//! The agent channel of one identity ([CONTRACT.md §7 "Channel (gRPC)"][contract]): the stream in use, and the stream
-//! that replaces it.
+//! The agent channel of one identity ([CONTRACT.agent-identity.md §7 "Channel (gRPC)"][contract]): the stream in use,
+//! and the stream that replaces it.
 //!
-//! [contract]: ../../../docs/agent-identity/CONTRACT.md#7-channel-grpc
+//! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#7-channel-grpc
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -17,9 +17,9 @@ pub(super) enum Want {
     /// No stream.
     Nothing,
     /// No stream opens, because the outcome of a `confirm` may be unknown, and an authenticated stream stays in use
-    /// ([CONTRACT.md §8.1 "Agent renewal"][contract], steps 3–4).
+    /// ([CONTRACT.agent-identity.md §8.1 "Agent renewal"][contract], steps 3–4).
     ///
-    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#81-agent-renewal
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#81-agent-renewal
     Hold,
     /// A stream to `url`, opened with the key `key_name`.
     Stream { url: Url, key_name: String },
@@ -239,17 +239,18 @@ pub(super) struct Links<C> {
     want: Want,
     /// The stream in use.
     active: Option<Link<C>>,
-    /// The stream that replaces `active` once it authenticates ([CONTRACT.md §7.3 "Sequence"][contract], step 6).
+    /// The stream that replaces `active` once it authenticates ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract],
+    /// step 6).
     ///
     /// INVARIANT: exists only while `active` is authenticated, so that an authenticated replacement always takes the
     /// place of a stream that was in use.
     ///
-    /// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
     replacement: Option<Link<C>>,
     /// Whether the authority ended the identity: a stream closed with a terminal outcome, so no stream opens again
-    /// ([CONTRACT.md §5.4 "Errors"][errors]).
+    /// ([CONTRACT.agent-identity.md §5.4 "Errors"][errors]).
     ///
-    /// [errors]: ../../../docs/agent-identity/CONTRACT.md#54-errors
+    /// [errors]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#54-errors
     ended: bool,
     /// Whether the authority asked for a stream to replace `active`.
     reconnect: bool,
@@ -424,7 +425,7 @@ impl<C: LinkChannel> Links<C> {
             }
             Some(Event::Authenticated) => {
                 if role == Role::Replacement {
-                    // `CONTRACT.md` §7.3 step 6: the new stream is open, so the old one closes.
+                    // `CONTRACT.agent-identity.md` §7.3 step 6: the new stream is open, so the old one closes.
                     self.active = self.replacement.take();
                     self.reconnect = false;
                 }
@@ -497,7 +498,8 @@ impl<C: LinkChannel> Links<C> {
             _ => self.remove(role),
         }
         if let ClosureClass::Terminal(_) = closure.class {
-            // `CONTRACT.md` §5.4: the identity is over, so every other stream closes too, and none opens again.
+            // `CONTRACT.agent-identity.md` §5.4: the identity is over, so every other stream closes too, and none opens
+            // again.
             self.ended = true;
             self.reconcile(Want::Nothing);
         }
@@ -647,7 +649,7 @@ mod tests {
         .expect("no terminal notice in time");
     }
 
-    // `CONTRACT.md` §5.4: after a terminal outcome, the agent never reconnects for the identity.
+    // `CONTRACT.agent-identity.md` §5.4: after a terminal outcome, the agent never reconnects for the identity.
     // The runner learns of the outcome from a notice only once it isn't busy, so the streams' task holds this rule.
     #[tokio::test]
     async fn after_a_terminal_closure_no_stream_opens_even_before_the_runner_acts_on_it() -> anyhow::Result<()> {
@@ -692,9 +694,9 @@ mod tests {
         Ok(())
     }
 
-    // A stream that reopens with a retired key draws the terminal `identity_unknown` (`CONTRACT.md` §6 step 4), and
-    // no stream opens while the outcome of a `confirm` may be unknown (§8.1 step 3), so a stream that closes in either
-    // state must be dropped before its channel reopens it.
+    // A stream that reopens with a retired key draws the terminal `identity_unknown` (`CONTRACT.agent-identity.md` §6
+    // step 4), and no stream opens while the outcome of a `confirm` may be unknown (§8.1 step 3), so a stream that
+    // closes in either state must be dropped before its channel reopens it.
     #[rstest]
     #[case::its_key_was_replaced(stream("renewed"))]
     #[case::the_streams_are_held(Want::Hold)]
@@ -713,8 +715,8 @@ mod tests {
 
     #[test]
     fn a_reconnect_request_wakes_the_runner_and_the_old_stream_closes_once_the_new_one_authenticates() {
-        // `CONTRACT.md` §7.3 step 6: the agent opens the new stream, then closes the old one; only the runner can open
-        // a stream, so the request reaches it as a notice.
+        // `CONTRACT.agent-identity.md` §7.3 step 6: the agent opens the new stream, then closes the old one; only the
+        // runner can open a stream, so the request reaches it as a notice.
         let now = Instant::now();
         let mut links = Links::new();
         links.reconcile(stream("current"));
@@ -743,7 +745,7 @@ mod tests {
 
     #[test]
     fn holding_drops_a_stream_that_has_not_authenticated() {
-        // `CONTRACT.md` §8.1 step 3: once `confirm` is sent, no stream may be opening.
+        // `CONTRACT.agent-identity.md` §8.1 step 3: once `confirm` is sent, no stream may be opening.
         let now = Instant::now();
         let mut links = Links::new();
         links.reconcile(stream("current"));
@@ -773,8 +775,8 @@ mod tests {
 
     #[test]
     fn a_stream_is_opening_until_it_authenticates_and_again_once_its_reopening_starts() {
-        // The runner sends `confirm` only while no stream is opening (`CONTRACT.md` §8.1 step 3), and a stream waiting
-        // to reopen sends nothing until its backoff ends.
+        // The runner sends `confirm` only while no stream is opening (`CONTRACT.agent-identity.md` §8.1 step 3), and a
+        // stream waiting to reopen sends nothing until its backoff ends.
         let opened_at = Instant::now();
         let mut links = Links::new();
         links.reconcile(stream("current"));

@@ -545,10 +545,10 @@ pub fn leaf_certificate_der(chain: &[String]) -> anyhow::Result<Vec<u8>> {
     STANDARD.decode(leaf).context("decode stored leaf certificate")
 }
 
-/// Parses a config pushed on the agent channel ([CONTRACT.md §7.3 "Sequence"][contract], step 7) and checks it as a
-/// check-in config.
+/// Parses a config pushed on the agent channel ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], step 7) and
+/// checks it as a check-in config.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
 pub fn parse_pushed_config(config_json: &str) -> ClientResult<Value> {
     let config = serde_json::from_str(config_json).map_err(|_| ClientError::invalid_response("invalid config JSON"))?;
     validate_config(&config)?;

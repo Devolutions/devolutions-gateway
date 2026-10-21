@@ -118,9 +118,9 @@ async fn dropped(acks: &mut mpsc::UnboundedReceiver<String>) {
 /// the authority end its side, for at most [`CLOSE_TIMEOUT`].
 ///
 /// Dropping the response first would reset the stream, which discards the messages still queued, such as an
-/// acknowledgement the caller sent just before ([CONTRACT.md §7.3 "Sequence"][contract], step 7).
+/// acknowledgement the caller sent just before ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], step 7).
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
 async fn close(opened: Opened) {
     let Opened {
         outbound, mut inbound, ..
@@ -132,7 +132,7 @@ async fn close(opened: Opened) {
     .await;
 }
 
-/// Answers the challenge and waits for `Welcome` ([CONTRACT.md §7.3 "Sequence"][contract], steps 3–4).
+/// Answers the challenge and waits for `Welcome` ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], steps 3–4).
 ///
 /// Until `Welcome` answers the `Hello`, every other message is ignored, so that nothing counts before the
 /// authority has verified the proof.

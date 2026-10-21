@@ -894,7 +894,8 @@ fn the_default_timings_are_the_documented_ones() {
 
 #[tokio::test]
 async fn sends_the_acknowledgements_queued_before_the_channel_is_dropped() -> anyhow::Result<()> {
-    // CONTRACT.md §7.3 step 7: the agent stores a config, replies `Ack`, then applies it, which may close the stream.
+    // CONTRACT.agent-identity.md §7.3 step 7: the agent stores a config, replies `Ack`, then applies it, which may
+    // close the stream.
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
@@ -927,8 +928,8 @@ async fn sends_the_acknowledgements_queued_before_the_channel_is_dropped() -> an
 
 #[tokio::test]
 async fn dropping_the_channel_stops_an_opening_at_once() -> anyhow::Result<()> {
-    // An opening signed with a key that a `confirm` retired draws the terminal `identity_unknown` (CONTRACT.md §6
-    // step 4), so the caller's drop must end it.
+    // An opening signed with a key that a `confirm` retired draws the terminal `identity_unknown`
+    // (CONTRACT.agent-identity.md §6 step 4), so the caller's drop must end it.
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
     let channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;

@@ -243,9 +243,9 @@ impl Runner {
                 return Ok(self.renewal_retry.next_attempt);
             }
             if confirming && !self.confirm_unknown && self.streams.opening(now) {
-                // `CONTRACT.md` §8.1 step 3: once `confirm` is sent, no stream opens until its outcome is known, so a
-                // stream that is opening completes first; the client's opening timeout bounds the wait, and the
-                // stream's next event wakes the runner.
+                // `CONTRACT.agent-identity.md` §8.1 step 3: once `confirm` is sent, no stream opens until its outcome
+                // is known, so a stream that is opening completes first; the client's opening timeout bounds the wait,
+                // and the stream's next event wakes the runner.
                 return Ok(Some(now + MAX_WAIT));
             }
             if confirming {
@@ -380,8 +380,8 @@ impl Runner {
         // UNTESTED: `confirm` is sent only after the streams are held, which drops every stream that hasn't
         // authenticated; an opening that reaches the authority after `confirm` retired its key draws the terminal
         // `identity_unknown`. When changing this, hold the streams before every `confirm`.
-        // `CONTRACT.md` §8.1 step 3: from now until a `204`, the outcome of a `confirm` may be unknown, so no stream
-        // opens.
+        // `CONTRACT.agent-identity.md` §8.1 step 3: from now until a `204`, the outcome of a `confirm` may be unknown,
+        // so no stream opens.
         self.confirm_unknown = true;
         self.streams.reconcile(Want::Hold).await;
         let result = self.shared.client.confirm(&identity.base_url, &signer, None).await;
@@ -405,8 +405,8 @@ impl Runner {
                     identity_id = %self.identity_id,
                     "Agent Identity certificate renewed"
                 );
-                // `CONTRACT.md` §8.1 step 4: a stream with the new key opens at once, and the old stream closes once
-                // it authenticates.
+                // `CONTRACT.agent-identity.md` §8.1 step 4: a stream with the new key opens at once, and the old stream
+                // closes once it authenticates.
                 self.reconcile_channel(identity).await?;
                 self.shared.store.remove_previous_key(identity)?;
             }
@@ -487,8 +487,8 @@ impl Runner {
                 Notice::Terminal(code) => self.reject(code.as_str()),
                 Notice::CertificateExpired { key_name } => {
                     if *key_name == identity.keys.current.key_name {
-                        // `CONTRACT.md` §5.4: renew at once, signing with the expired certificate, and connect again
-                        // only after `confirm`.
+                        // `CONTRACT.agent-identity.md` §5.4: renew at once, signing with the expired certificate, and
+                        // connect again only after `confirm`.
                         warn!(
                             authority_id = %self.authority_id,
                             "Agent Identity certificate expired; renewing before the agent channel reconnects"
@@ -519,7 +519,7 @@ impl Runner {
     }
 
     /// Stores a config pushed on the stream `link` if its revision is higher, then acknowledges it; the step applies
-    /// it to the streams afterwards (`CONTRACT.md` §7.3 step 7).
+    /// it to the streams afterwards (`CONTRACT.agent-identity.md` §7.3 step 7).
     fn store_pushed_config(
         &mut self,
         identity: &mut StoredIdentity,
@@ -530,8 +530,8 @@ impl Runner {
         let config = match client::parse_pushed_config(config_json) {
             Ok(config) => config,
             Err(error) => {
-                // `CONTRACT.md` §5.2: a config with another version is a transient failure, and the stored config
-                // stays; the authority sends it again after the next `Hello`.
+                // `CONTRACT.agent-identity.md` §5.2: a config with another version is a transient failure, and the
+                // stored config stays; the authority sends it again after the next `Hello`.
                 warn!(
                     authority_id = %self.authority_id,
                     %error,
@@ -547,16 +547,18 @@ impl Runner {
         Ok(())
     }
 
-    /// Opens, keeps or drops the identity's streams for its state ([CONTRACT.md §7.3 "Sequence"][sequence] and
+    /// Opens, keeps or drops the identity's streams for its state ([CONTRACT.agent-identity.md §7.3
+    /// "Sequence"][sequence] and
     /// [§8.1 "Agent renewal"][renewal]).
     ///
-    /// [sequence]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
-    /// [renewal]: ../../../docs/agent-identity/CONTRACT.md#81-agent-renewal
+    /// [sequence]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
+    /// [renewal]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#81-agent-renewal
     async fn reconcile_channel(&mut self, identity: &StoredIdentity) -> anyhow::Result<()> {
         let current = &identity.keys.current;
         let url = self.channel_url.clone().filter(|_| !self.channel_after_confirm);
         let want = match url {
-            // `CONTRACT.md` §8.1 step 3: no stream opens while the outcome of a `confirm` may be unknown.
+            // `CONTRACT.agent-identity.md` §8.1 step 3: no stream opens while the outcome of a `confirm` may be
+            // unknown.
             _ if self.confirm_unknown => Want::Hold,
             Some(url) => Want::Stream {
                 url,
@@ -588,7 +590,7 @@ impl Runner {
     }
 
     /// Returns what each `Hello` carries: the metadata collected when it is sent, and the stored config revision
-    /// (`CONTRACT.md` §3.1 and §7.3 step 7).
+    /// (`CONTRACT.agent-identity.md` §3.1 and §7.3 step 7).
     fn hello_fields(&self) -> Arc<dyn Fn() -> HelloFields + Send + Sync> {
         let config_revision = Arc::clone(&self.config_revision);
         let override_path = self.shared.settings.metadata_override_path.clone();
