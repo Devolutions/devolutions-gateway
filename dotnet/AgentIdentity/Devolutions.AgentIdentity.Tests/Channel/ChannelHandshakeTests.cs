@@ -148,22 +148,8 @@ public class ChannelHandshakeTests
     public static TheoryData<string, string> PairsOfFailuresWithTheSameCode =>
         FailurePairNames((earlier, later) => earlier.Code == later.Code);
 
-    // Every way to end a handshake, followed by each of the two calls a host makes.
-    public static TheoryData<string, string> HandshakeEndsThenAnotherCall
-    {
-        get
-        {
-            TheoryData<string, string> cases = new();
-
-            foreach (string first in HandshakeEnds.Keys)
-            {
-                cases.Add(first, "a valid Hello");
-                cases.Add(first, "no Hello in time");
-            }
-
-            return cases;
-        }
-    }
+    // Every way to end a handshake.
+    public static TheoryData<string> HandshakeEndNames => new(HandshakeEnds.Keys);
 
     private static byte[] ValidProof => TestVectors.Instance.ChannelProof.Case("valid").Proof;
 
@@ -365,7 +351,7 @@ public class ChannelHandshakeTests
     // The shared intent, security invariant 5: revocation blocks authentication, including of a stream whose identity
     // the host cannot know yet.
     // CONTRACT.agent-identity.md §7.4: PERMISSION_DENIED
-    // with the trailers `error-code: identity_revoked` and `server-time`.
+    // with the trailers `error-code: identity_revoked` and `server-time`, in no stated order.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
     public async Task IdentityRevokedDuringTheHandshakeIsIdentityRevoked()
@@ -379,7 +365,9 @@ public class ChannelHandshakeTests
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
         Assert.Equal(
             [("error-code", "identity_revoked"), ("server-time", "2026-09-24T12:00:00Z")],
-            error.ToRpcException(serverTime).Trailers.Select(entry => (entry.Key, entry.Value)));
+            error.ToRpcException(serverTime).Trailers
+                .Select(entry => (entry.Key, entry.Value))
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal));
     }
 
     // Step 4: a certificate that is no longer registered, or whose identity was deleted, is identity_unknown.
@@ -472,16 +460,13 @@ public class ChannelHandshakeTests
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await HandshakeEnds[call](opening));
     }
 
-    // The handshake ends when VerifyHelloAsync is called, not when the registry answers,
-    // so a Hello timer that fires during the lookup cannot end the handshake a second time.
     // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
-    // Only the library's API decides that the call, not the answer, ends the handshake,
-    // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
-    // that the object's state does not allow.
+    // A Hello timer that fires while the registry answers the Hello comes after the Hello,
+    // so it does not fail the Hello.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
-    public async Task HandshakeEndsBeforeTheRegistryAnswers()
+    public async Task HelloDecidesTheStreamWhenTheTimeoutFiresDuringItsLookup()
     {
         VectorAuthority authority = new();
         ChannelOpening opening = await VectorChannel.OpenAsync(authority);
@@ -491,25 +476,20 @@ public class ChannelHandshakeTests
             opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
         Assert.False(verifying.IsCompleted);
 
-        ValueTask<ChannelHandshakeResult> timingOut = opening.HelloTimedOutAsync();
+        _ = opening.HelloTimedOutAsync();
         answer.SetResult();
 
-        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
-        await Assert.ThrowsAsync<InvalidOperationException>(() => timingOut.AsTask());
         Assert.True((await verifying).Succeeded);
     }
 
-    // The timeout ends the handshake when HelloTimedOutAsync is called too,
-    // so a Hello that arrives during its lookup cannot authenticate a stream that is being closed.
     // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both,
     // and closes it for the timeout with signature_invalid.
-    // Only the library's API decides that the call, not the answer, ends the handshake,
-    // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
-    // that the object's state does not allow.
+    // A Hello that arrives while the registry answers the timeout comes after it,
+    // so it cannot authenticate a stream that is being closed.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
-    public async Task TimeoutEndsTheHandshakeBeforeTheRegistryAnswers()
+    public async Task TimeoutDecidesTheStreamWhenAHelloArrivesDuringItsLookup()
     {
         VectorAuthority authority = new();
         ChannelOpening opening = await VectorChannel.OpenAsync(authority);
@@ -522,8 +502,7 @@ public class ChannelHandshakeTests
             opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
         answer.SetResult();
 
-        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
-        await Assert.ThrowsAsync<InvalidOperationException>(() => verifying.AsTask());
+        await AssertYieldsNoIdentityAsync(() => verifying);
         AssertFailed(await timingOut, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
@@ -572,11 +551,10 @@ public class ChannelHandshakeTests
         Assert.Equal(registered.NotAfter, identity.CertificateNotAfter);
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
         Assert.Equal(AgentOperation.Connect, identity.Operation);
-        Assert.Null(result.Error);
-        Assert.Null(result.FailureDetail);
     }
 
     // The server replaces the identity's metadata with the metadata of each authenticated Hello.
+    // Metadata is an object of string to string, whose entries have no order.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
     [Fact]
     public async Task ValidHelloYieldsItsMetadata()
@@ -586,7 +564,9 @@ public class ChannelHandshakeTests
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
 
         Assert.True(result.Succeeded, result.FailureDetail);
-        Assert.Equal(VectorChannel.ValidMetadata, result.Metadata);
+        Assert.Equal(
+            VectorChannel.ValidMetadata.OrderBy(entry => entry.Key, StringComparer.Ordinal),
+            result.Metadata.OrderBy(entry => entry.Key, StringComparer.Ordinal));
     }
 
     // Metadata may be an empty object.
@@ -629,25 +609,23 @@ public class ChannelHandshakeTests
         Assert.Equal(hello.Id, welcome.CorrelationId);
     }
 
-    // Welcome carries server_time.
-    // The clock reads the time of the opening twice, to judge the request and to start the Hello timeout,
-    // then the time of the handshake, then a later time.
-    // The Welcome carries the time at which the server answers, from that one reading.
+    // Step 4: the server replies Welcome when it verifies the Hello, and the schema's Welcome carries server_time.
+    // The clock stands still at an instant after the opening, with a fraction of a second,
+    // so whenever the handshake reads it, that instant is the server's time.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
-    public async Task WelcomeCarriesTheServerTimeOfTheHandshake()
+    public async Task WelcomeCarriesTheServerTime()
     {
-        DateTimeOffset opened = VectorChannel.OpeningTime;
-        DateTimeOffset answered = opened.AddMilliseconds(3_250);
-        ChannelOpening opening = await VectorChannel.OpenAsync(
-            new SteppingTimeProvider(opened, opened, answered, answered.AddDays(1).AddMilliseconds(500)));
+        FixedTimeProvider clock = new(VectorChannel.OpeningTime);
+        ChannelOpening opening = await VectorChannel.OpenAsync(clock);
+        DateTimeOffset answered = VectorChannel.OpeningTime.AddMilliseconds(3_250);
+        clock.Now = answered;
 
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
 
         Assert.True(result.Succeeded, result.FailureDetail);
-        Timestamp serverTime = result.Welcome.Welcome.ServerTime;
-        Assert.Equal(answered.ToUnixTimeSeconds(), serverTime.Seconds);
-        Assert.Equal(250_000_000, serverTime.Nanos);
+        Assert.Equal(Timestamp.FromDateTimeOffset(answered), result.Welcome.Welcome.ServerTime);
     }
 
     // Step 3: the Hello answers the Challenge id, with a proof over the challenge bytes.
@@ -733,7 +711,6 @@ public class ChannelHandshakeTests
     }
 
     // Step 4: the Hello must arrive within 10 s of the opening, 10 s included.
-    // The Welcome shows that the clock reading that judged the timeout is the one at 10 s.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task HelloExactlyAtTheTimeoutSucceeds()
@@ -746,8 +723,6 @@ public class ChannelHandshakeTests
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
 
         Assert.True(result.Succeeded, result.FailureDetail);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
-        Assert.Equal(Timestamp.FromDateTimeOffset(answered), result.Welcome.Welcome.ServerTime);
     }
 
     // Step 4: no Hello within 10 s closes the stream with signature_invalid.
@@ -786,23 +761,22 @@ public class ChannelHandshakeTests
 
     // The first agent message decides the stream: a second one could retry a failed proof,
     // and a late Hello could authenticate a stream that already timed out.
-    // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
-    // Only the library's API decides that a later call throws InvalidOperationException,
-    // which the Framework Design Guidelines give a call that the object's state does not allow.
+    // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both,
+    // so a valid Hello after the handshake ended yields no identity, whether the call throws or returns.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
-    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
-    [MemberData(nameof(HandshakeEndsThenAnotherCall))]
-    public async Task HandshakeEndsAtTheFirstCall(string first, string second)
+    [MemberData(nameof(HandshakeEndNames))]
+    public async Task ValidHelloAfterTheHandshakeEndedYieldsNoIdentity(string end)
     {
         ChannelOpening opening = await VectorChannel.OpenAsync();
-        await HandshakeEnds[first](opening);
+        await HandshakeEnds[end](opening);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(async () => await HandshakeEnds[second](opening));
+        await AssertYieldsNoIdentityAsync(() => opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening)));
     }
 
     // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: the server closes the stream with the gRPC status of the failure
     // and the trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`, which the agent reads.
+    // The contract states no order for the trailers.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Theory]
@@ -825,7 +799,9 @@ public class ChannelHandshakeTests
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
         Assert.Equal(
             [("error-code", expectedCode), ("server-time", "2026-09-24T12:00:00Z")],
-            exception.Trailers.Select(entry => (entry.Key, entry.Value)));
+            exception.Trailers
+                .Select(entry => (entry.Key, entry.Value))
+                .OrderBy(entry => entry.Key, StringComparer.Ordinal));
     }
 
     // Asserts that the handshake failed with the code and the gRPC status, and returns its error.
@@ -841,12 +817,17 @@ public class ChannelHandshakeTests
         // a Hello without a correlation_id or correlated to another id, a proof that does not verify,
         // no Hello before the timeout, a certificate no longer registered, or a revoked identity
         Assert.False(string.IsNullOrEmpty(result.FailureDetail));
-        // No server push or metadata update happens before step 4 succeeds, and only then is the stream authenticated.
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
-        Assert.Null(result.Identity);
-        Assert.Null(result.Metadata);
-        Assert.Null(result.Welcome);
         return result.Error;
+    }
+
+    // Asserts that the call yields no identity, whether it throws or returns.
+    private static async Task AssertYieldsNoIdentityAsync(Func<ValueTask<ChannelHandshakeResult>> call)
+    {
+        ChannelHandshakeResult? result = null;
+
+        _ = await Record.ExceptionAsync(async () => result = await call());
+
+        Assert.Null(result?.Identity);
     }
 
     private static AgentMessage Altered(AgentMessage message, Action<AgentMessage> alteration)

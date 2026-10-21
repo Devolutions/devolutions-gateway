@@ -93,21 +93,19 @@ public class IdentityConfigTests
         Assert.Equal("agentChannelUrl", exception.ParamName);
     }
 
-    // The agent prepends the URL path to `/devolutions.agent.channel.v1.AgentChannel/Connect`,
-    // so a URL ending in a slash would put two slashes in the gRPC path.
+    // `agent_channel_url` is an absolute `https` URL without a query or fragment, which the config carries as the host
+    // gave it.
+    // Whether a URL ending in a slash is rejected or written without the slash is the library's choice.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
     [Theory]
-    [InlineData("https://host/dvls", "https://host/dvls")]
-    [InlineData("https://host/dvls/", "https://host/dvls")]
-    [InlineData("https://host/", "https://host")]
-    [InlineData("https://host", "https://host")]
-    public void AgentChannelUrlEndsWithoutASlash(string agentChannelUrl, string expected)
+    [InlineData("https://host/dvls")]
+    [InlineData("https://host")]
+    public void AgentChannelUrlIsWrittenAsGiven(string agentChannelUrl)
     {
         IdentityConfig config = IdentityConfig.Create(1, agentChannelUrl);
 
-        Assert.Equal(expected, TestJson.Members(config.ToUtf8Json())["agent_channel_url"].GetString());
-        Assert.Equal(expected, config.AgentChannelUrl);
+        Assert.Equal(agentChannelUrl, TestJson.Members(config.ToUtf8Json())["agent_channel_url"].GetString());
+        Assert.Equal(agentChannelUrl, config.AgentChannelUrl);
     }
 
     // Product-specific config fields, such as a PSU channel URL, may coexist with the others.

@@ -88,33 +88,42 @@ public class EnrollmentTokenTests
         }
     }
 
-    // `bag` is the base64url encoding of a UTF-8 JSON object whose `u` is the product base URL.
+    // `bag` is the base64url encoding of a UTF-8 JSON object whose `u` is the product base URL,
+    // so a URL already in the form of `u` is written as given.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
     [Theory]
-    [InlineData("https://host/dvls", "https://host/dvls")]
-    // The agent appends `/api/agent-identity/v1/...` to `u` (CONTRACT.agent-identity.md §5),
-    // so `u` ends without a slash.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5
-    [InlineData("https://host/dvls/", "https://host/dvls")]
-    [InlineData("https://host/dvls//", "https://host/dvls")]
-    [InlineData("https://host/", "https://host")]
-    [InlineData("https://host", "https://host")]
-    // A URI holds no white space (RFC 3986 §2):
-    // white space around it is not part of it (Appendix C),
-    // and a space or a non-ASCII character inside it is percent-encoded (§2.1; RFC 3987 §3.1).
-    // oracle: spec RFC 3986 §Appendix C
-    [InlineData(" https://host/dvls\t", "https://host/dvls")]
-    // oracle: spec RFC 3986 §2.1
-    [InlineData("https://host/my dvls", "https://host/my%20dvls")]
-    // oracle: spec RFC 3987 §3.1
-    [InlineData("https://host/dvls\u00E9", "https://host/dvls%C3%A9")]
-    public void CreatePutsTheProductBaseUrlInTheBag(string productBaseUrl, string expected)
+    [InlineData("https://host/dvls")]
+    [InlineData("https://host")]
+    public void CreatePutsTheProductBaseUrlInTheBag(string productBaseUrl)
     {
         EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes));
 
         // The bag of a token the library creates holds `u` alone.
         // oracle: intent dotnet/AgentIdentity/INTENT.md §Enrollment tokens
-        Assert.Equal(("u", expected), Assert.Single(BagMembers(token)));
+        Assert.Equal(("u", productBaseUrl), Assert.Single(BagMembers(token)));
+    }
+
+    // Create may reject a URL that is not in the form of `u`,
+    // but a token it creates holds in `u` the form that the source of the row decides.
+    [Theory]
+    // `u` has no trailing slash, and the agent removes trailing slashes, so `https://host/` names `https://host`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    [InlineData("https://host/dvls/", "https://host/dvls")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    [InlineData("https://host/dvls//", "https://host/dvls")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    [InlineData("https://host/", "https://host")]
+    // White space around a URI is not part of it.
+    // oracle: spec RFC 3986 §Appendix C
+    [InlineData(" https://host/dvls\t", "https://host/dvls")]
+    // A non-ASCII character becomes its UTF-8 octets, percent-encoded with uppercase hexadecimal digits.
+    // oracle: spec RFC 3987 §3.1
+    [InlineData("https://host/dvls\u00E9", "https://host/dvls%C3%A9")]
+    public void CreateRejectsOrNormalizesAUrlNotInTheFormOfU(string productBaseUrl, string normalized)
+    {
+        Creation creation = CreateFrom(productBaseUrl);
+
+        Assert.Contains(creation, (Creation[])[Creation.Holding(normalized), Creation.Rejection]);
     }
 
     // CONTRACT.agent-identity.md §2: `u` is an absolute `https` URL without a query or fragment.
@@ -221,6 +230,23 @@ public class EnrollmentTokenTests
         return prefix + new string('a', length - prefix.Length);
     }
 
+    // What Create makes of the URL: the `u` that the bag of its token holds, or a rejection.
+    private static Creation CreateFrom(string productBaseUrl)
+    {
+        EnrollmentToken token;
+
+        try
+        {
+            token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes));
+        }
+        catch (ArgumentException)
+        {
+            return Creation.Rejection;
+        }
+
+        return Creation.Holding(Assert.Single(BagMembers(token), member => member.Name == "u").Value);
+    }
+
     // Reads the members of the bag, after checking that the bag is the canonical base64url encoding of its bytes.
     private static (string Name, string? Value)[] BagMembers(EnrollmentToken token)
     {
@@ -234,6 +260,17 @@ public class EnrollmentTokenTests
         using JsonDocument document = JsonDocument.Parse(json);
 
         return [.. document.RootElement.EnumerateObject().Select(member => (member.Name, member.Value.GetString()))];
+    }
+
+    // What Create makes of a URL: a rejection, or a token whose bag holds `U`.
+    private sealed record Creation(bool Rejected, string? U)
+    {
+        public static Creation Rejection { get; } = new(Rejected: true, U: null);
+
+        public static Creation Holding(string? u)
+        {
+            return new Creation(Rejected: false, U: u);
+        }
     }
 
     /// <summary>

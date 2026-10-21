@@ -31,6 +31,17 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
     private static readonly TimeSpan Lifetime = TimeSpan.FromDays(30);
 
+    // What the injected generator draws for a serial number, by name:
+    // all ones, which as drawn would encode a negative INTEGER,
+    // and the top bit alone, which is zero once that bit is cleared, followed by a second draw.
+    private static readonly Dictionary<string, byte[][]> SerialNumberDraws = new()
+    {
+        ["all ones"] = [[.. Enumerable.Repeat((byte)0xFF, 16)]],
+        ["the top bit alone, then all 01"] = [[0x80, .. new byte[15]], [.. Enumerable.Repeat((byte)0x01, 16)]],
+    };
+
+    public static TheoryData<string> SerialNumberDrawNames => new(SerialNumberDraws.Keys);
+
     private readonly ECDsa _rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     private readonly ECDsa _agentKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     private readonly RandomNumberGenerator _random = RandomNumberGenerator.Create();
@@ -175,9 +186,24 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(3, leaf.Version);
     }
 
-    // A positive INTEGER of at most 20 octets.
-    // The serial number is 16 octets from the injected generator with the top bit cleared.
+    // A positive INTEGER, so never zero, of at most 20 octets, whatever the injected generator draws.
     // oracle: spec RFC 5280 §4.1.2.2
+    [Theory]
+    [MemberData(nameof(SerialNumberDrawNames))]
+    public void SerialNumberIsAPositiveIntegerOfAtMost20Octets(string draws)
+    {
+        using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(SerialNumberDraws[draws]));
+
+        byte[] serialNumber = SerialNumber(leaf);
+        Assert.True(new BigInteger(serialNumber, isUnsigned: false, isBigEndian: true) > 0);
+        Assert.InRange(serialNumber.Length, 1, 20);
+    }
+
+    // The serial number is the 16 octets drawn with their top bit cleared.
+    // RFC 5280 allows any positive encoding, and .NET writes a set top bit with a leading zero octet,
+    // so only the library chooses to clear the top bit of the 16 octets drawn.
+    // oracle: mutant a serial number whose first octet keeps its top bit while its other bits are kept,
+    // set or flipped
     [Fact]
     public void SerialNumberIsTheRandomOctetsWithTheTopBitCleared()
     {
@@ -185,34 +211,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(draw));
 
-        byte[] serialNumber = SerialNumber(leaf);
-        // Only this test and SerialNumberIsDrawnAgainWhenItWouldBeZero catch this fault.
-        // RFC 5280 allows any positive encoding, and .NET writes a set top bit with a leading zero octet,
-        // so only the library chooses to clear the top bit of the 16 octets drawn.
-        // oracle: mutant a serial number whose first octet keeps its top bit while its other bits are kept,
-        // set or flipped
-        Assert.Equal([0x7F, .. draw[1..]], serialNumber);
-        Assert.True(new BigInteger(serialNumber, isUnsigned: false, isBigEndian: true) > 0);
-        Assert.InRange(serialNumber.Length, 1, 20);
-    }
-
-    // RFC 5280 §4.1.2.2: the serial number is positive, so never zero.
-    // Clearing the top bit of 80 00 … 00 leaves zero, which is not a positive serial number.
-    // Only this test and SerialNumberIsTheRandomOctetsWithTheTopBitCleared catch this fault.
-    // oracle: mutant a serial number whose first octet keeps its top bit while its other bits are kept,
-    // set or flipped
-    [Fact]
-    public void SerialNumberIsDrawnAgainWhenItWouldBeZero()
-    {
-        byte[] topBitOnly = new byte[16];
-        topBitOnly[0] = 0x80;
-        byte[] second = [.. Enumerable.Repeat((byte)0x01, 16)];
-
-        using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(topBitOnly, second));
-
-        // That 80 00 … 00 becomes zero, and that the next draw becomes the serial number as drawn,
-        // follow from the library's own way of making the 16 octets positive.
-        Assert.Equal(second, SerialNumber(leaf));
+        Assert.Equal([0x7F, .. draw[1..]], SerialNumber(leaf));
     }
 
     // The lifetime is a server setting.

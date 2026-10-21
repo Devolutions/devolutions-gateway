@@ -44,10 +44,12 @@ public class AuthenticationTypeTests
         Assert.Empty(reachable);
     }
 
-    // Any other public member producing one of these types would be a factory that bypasses the signature check.
-    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+    // A new public member producing one of these types could be a factory that bypasses the signature check.
+    // The intent forbids creating an identity outside that check but not forwarding one that it created,
+    // so the list of members allowed to produce one is the library's own.
+    // oracle: mutant a public member that builds an AuthenticatedIdentity outside the signature check
     [Fact]
-    public void OnlyAuthenticationProducesTheseTypes()
+    public void NoOtherPublicMemberProducesTheseTypes()
     {
         const BindingFlags declared = BindingFlags.Public | BindingFlags.NonPublic
             | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
