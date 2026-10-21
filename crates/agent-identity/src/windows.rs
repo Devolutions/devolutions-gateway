@@ -1154,10 +1154,22 @@ pub(crate) fn unprotect(contents: &[u8]) -> anyhow::Result<Zeroizing<Vec<u8>>> {
 
 #[cfg(test)]
 mod tests {
+    use camino::Utf8PathBuf;
     use win_api_wrappers::security::acl::set_named_security_info;
     use win_api_wrappers::str::U16CString;
 
     use super::*;
+
+    /// Creates an empty data directory under the system temporary directory.
+    fn test_data_dir() -> anyhow::Result<Utf8PathBuf> {
+        // The system temporary directory keeps test paths under Windows' 260-character limit wherever the repository is
+        // checked out.
+        let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
+            .join(format!("ai-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&path)?;
+        Ok(path)
+    }
 
     #[test]
     fn replacing_a_file_waits_for_a_reader_to_close_it() -> anyhow::Result<()> {
@@ -1255,11 +1267,7 @@ mod tests {
     fn drop_box_writer_cannot_reopen_its_file_and_replays_succeed() -> anyhow::Result<()> {
         use std::os::windows::fs::OpenOptionsExt as _;
 
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("drop-box-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         crate::private_file::prepare_directories(&data_dir, true)?;
         let path = data_dir
             .join("identity")
@@ -1280,11 +1288,7 @@ mod tests {
 
     #[test]
     fn interrupted_staging_does_not_block_a_replayed_enrollment() -> anyhow::Result<()> {
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("drop-box-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         crate::private_file::prepare_directories(&data_dir, true)?;
         let name = format!("{}.dat", "e".repeat(64));
         let long_dir = fs::canonicalize(&data_dir)?.join("identity").join("pending");
@@ -1304,11 +1308,7 @@ mod tests {
 
     #[test]
     fn drop_box_writer_can_traverse_an_identity_directory_without_read_access() -> anyhow::Result<()> {
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("drop-box-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         crate::private_file::prepare_directories(&data_dir, true)?;
         let identity = data_dir.join("identity");
         let pending = identity.join("pending");
@@ -1361,11 +1361,7 @@ mod tests {
         if current_user_is_administrator()? {
             return Ok(());
         }
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("drop-box-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         crate::private_file::prepare_directories(&data_dir, true)?;
         let pending = data_dir.join("identity").join("pending");
         let name = U16CString::from_os_str(fs::canonicalize(&pending)?.as_os_str())?;
@@ -1389,11 +1385,7 @@ mod tests {
     fn drop_box_rejects_reparse_redirects_before_writing() -> anyhow::Result<()> {
         use std::os::windows::fs::symlink_dir;
 
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("drop-box-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         crate::private_file::prepare_directories(&data_dir, true)?;
         let pending = data_dir.join("identity").join("pending");
         fs::remove_dir(&pending)?;
@@ -1419,11 +1411,7 @@ mod tests {
 
     #[test]
     fn administrator_writer_requires_system_provisioned_directories() -> anyhow::Result<()> {
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("drop-box-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         let missing = verify_system_provisioned_drop_box(&data_dir, Instant::now())
             .expect_err("missing identity directory was accepted");
         assert_eq!(missing.to_string(), ENROLLMENT_DIRECTORY_NOT_READY);
@@ -1598,11 +1586,7 @@ mod tests {
 
     #[test]
     fn system_style_pending_file_without_owner_rights_is_readable() -> anyhow::Result<()> {
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("pending-acl-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         crate::private_file::prepare_directories(&data_dir, true)?;
         let path = data_dir
             .join("identity")
@@ -1632,11 +1616,7 @@ mod tests {
 
     #[test]
     fn repairs_a_directory_with_an_extra_allow_principal() -> anyhow::Result<()> {
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("identity-acl-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
+        let data_dir = test_data_dir()?;
         let directory = data_dir.join("identity");
         fs::create_dir(&directory)?;
         let system = system_sid()?;
@@ -1648,6 +1628,25 @@ mod tests {
         let name = U16CString::from_os_str(fs::canonicalize(&directory)?.as_os_str())?;
         let dacl = protected_dacl(&expected_aces(&broad, inheritance))?;
         set_named_security_info(&name, SE_FILE_OBJECT, None, None, Some(&dacl), None)?;
+        // `crates/agent-identity/INTENT.md` ("Local state"): start-up resets the directory's permissions, so the
+        // identities and keys stored beneath it must survive the repair.
+        let state = [
+            (
+                directory
+                    .join("authorities")
+                    .join(uuid::Uuid::new_v4().to_string())
+                    .join("identity.json"),
+                br#"{"version":1}"#.as_slice(),
+            ),
+            (
+                directory.join("keys").join("devolutions-agent-identity_test.p8"),
+                b"device key".as_slice(),
+            ),
+        ];
+        for (path, contents) in &state {
+            fs::create_dir_all(path.parent().context("test state file has no parent")?)?;
+            fs::write(path, contents)?;
+        }
 
         create_protected_directory(&directory, true, false)?;
         let (owner, descriptor) = named_owner_and_dacl(&directory)?;
@@ -1656,6 +1655,10 @@ mod tests {
             descriptor.0,
             expected_aces(&allowed_principals(&system, &user, true), inheritance),
         )?;
+        for (path, contents) in &state {
+            let actual = fs::read(path).with_context(|| format!("read {path} after the repair"))?;
+            assert_eq!(actual, *contents, "{path}");
+        }
         fs::remove_dir_all(data_dir)?;
         Ok(())
     }
