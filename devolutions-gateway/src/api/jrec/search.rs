@@ -153,8 +153,9 @@ pub(crate) struct RecordingSearchHit {
 /// In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
 /// once unescaped, so field names, numbers, booleans and null never match.
 /// Any other line, such as one still being written, is matched as raw text.
-/// Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched,
-/// and a line longer than 256 KiB is matched on its first 256 KiB only.
+/// A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is
+/// usually matched as raw text.
+/// Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched.
 /// Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
@@ -641,12 +642,13 @@ mod tests {
 
     #[tokio::test]
     async fn matches_a_cut_line_by_its_string_values_when_what_was_read_parses() {
-        let mut line = br#"{"description":"x"}"#.to_vec();
+        let mut line = br#"{"description":"DOMAIN\\user"}"#.to_vec();
         line.resize(MAX_LINE_BYTES + 1, b' ');
 
-        let search = search_log("description", &line).await;
+        let search = search_log(r"DOMAIN\user", &line).await;
 
-        assert!(search.hits.is_empty());
+        assert_eq!(search.hits.len(), 1);
+        assert!(search.hits[0].truncated);
     }
 
     #[rstest]
