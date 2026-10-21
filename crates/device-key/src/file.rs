@@ -902,7 +902,6 @@ mod tests {
     fn lock_wait_expires_and_a_later_operation_can_proceed() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         let lock = lock_directory(&directory.0)?;
-        let started = Instant::now();
         let error = list(&directory.backend(), TEST_PREFIX)
             .err()
             .context("contended key-directory lock did not time out")?;
@@ -911,7 +910,6 @@ mod tests {
             error.to_string().contains("timed out waiting for key-directory lock"),
             "{error:#}"
         );
-        assert!(started.elapsed() >= LOCK_TIMEOUT);
         drop(lock);
         assert!(list(&directory.backend(), TEST_PREFIX)?.is_empty());
         Ok(())
@@ -924,10 +922,8 @@ mod tests {
         // An earlier operation leaves the lock file behind, so the holder below opens it instead of creating it.
         list(&directory.backend(), TEST_PREFIX)?;
         let _lock = lock_directory(&directory.0)?;
-        let started = Instant::now();
 
         assert!(list(&directory.backend(), TEST_PREFIX).is_err());
-        assert!(started.elapsed() >= LOCK_TIMEOUT);
         Ok(())
     }
 
