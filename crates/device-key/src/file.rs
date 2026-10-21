@@ -859,7 +859,8 @@ mod tests {
         };
         // The crate names a temporary `.{key name}-{lowercase version 4 UUID}.tmp`; each name differs in one part.
         let foreign_files = [
-            format!(".{name}-{}.tmp", uuid().to_uppercase()),
+            // A letter in the first digit, which encodes neither version nor variant, makes the uppercase form differ.
+            format!(".{name}-{}.tmp", uuid_with_digit(0, "a").to_uppercase()),
             format!(".{name}-{}.tmp", uuid_with_digit(14, "1")),
             format!(".{name}-{}.tmp", uuid_with_digit(19, "c")),
             format!(".{}-{}.tmp", name.to_uppercase(), uuid()),
