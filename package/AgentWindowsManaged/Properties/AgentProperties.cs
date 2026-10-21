@@ -47,6 +47,13 @@ namespace DevolutionsAgent.Properties
         public static string AgentTunnelIncludeDetectedDomainEncoded = "AGENT_TUNNEL_INCLUDE_DETECTED_DOMAIN_ENCODED";
         public static string AgentTunnelDetectedDomainEncoded = "AGENT_TUNNEL_DETECTED_DOMAIN_ENCODED";
 
+        /// <summary>
+        /// Agent Identity enrollment token, handed to `identity enroll -`
+        /// </summary>
+        public static string IdentityEnrollmentToken = "IDENTITY_ENROLLMENT_TOKEN";
+
+        public static string IdentityEnrollmentTokenEncoded = "IDENTITY_ENROLLMENT_TOKEN_ENCODED";
+
         public AgentProperties(ISession runtimeSession)
         {
             this.runtimeSession = runtimeSession;

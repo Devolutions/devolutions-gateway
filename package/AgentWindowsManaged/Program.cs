@@ -385,6 +385,7 @@ internal class Program
         projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseDomainsEncoded, "") { Secure = true });
         projectProperties.Add(new Property(AgentProperties.AgentTunnelIncludeDetectedDomainEncoded, "") { Secure = true });
         projectProperties.Add(new Property(AgentProperties.AgentTunnelDetectedDomainEncoded, "") { Secure = true });
+        projectProperties.AddRange(CreateIdentityEnrollmentProperties());
 
         project.Properties = projectProperties.ToArray();
         project.ManagedUI = new ManagedUI();
@@ -432,6 +433,19 @@ internal class Program
             msi.SetPackageLanguages(string.Join(",", Languages.Keys).ToLcidList());
         }
     }
+
+    /// <summary>
+    /// The Agent Identity enrollment token property and its encoded copy.
+    /// </summary>
+    /// <remarks>
+    /// Both hold the token, so both are hidden to keep it out of the MSI log.
+    /// They are also secure, so that a value given on the command line reaches the elevated execute sequence.
+    /// </remarks>
+    internal static Property[] CreateIdentityEnrollmentProperties() =>
+    [
+        new(AgentProperties.IdentityEnrollmentToken, "") { Hidden = true, Secure = true },
+        new(AgentProperties.IdentityEnrollmentTokenEncoded, "") { Hidden = true, Secure = true },
+    ];
 
     internal static RegValue CreateEventLogSourceRegistryValue(bool win64) =>
         new(

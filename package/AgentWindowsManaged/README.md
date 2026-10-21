@@ -34,6 +34,24 @@ The installer neither installs nor changes that policy.
 An upgrade without `ADDLOCAL` or `REMOVE` keeps the previous feature selection.
 When upgrading from a release without the UniGetUI Package Broker option, setup selects `F.PackageBroker` if `agent.json` already enables the broker.
 
+## Agent Identity
+
+Set `IDENTITY_ENROLLMENT_TOKEN` to enroll the device with Agent Identity during an install or a major upgrade:
+
+```powershell
+$Token = (Get-Content -Raw 'C:\Secure\enrollment-token.txt').Trim()
+msiexec /i DevolutionsAgent.msi /qn "IDENTITY_ENROLLMENT_TOKEN=$Token"
+```
+
+Take the token from a protected file or a secure channel, such as your deployment tool's secret store, never from a literal in a shared script or command line.
+The installer keeps the token out of its log and passes it to the agent through standard input.
+msiexec's own command line still holds the token while the install runs, so run it elevated or from your deployment tool, where only administrators can read it.
+The install fails if the agent rejects the token's format or can't store it.
+The agent then enrolls in the background once its service starts, and re-running the same command later, for example on an upgrade, is a no-op.
+
+A full uninstall deletes the device's Agent Identity state and keys without contacting the authority, so a later install enrolls the device as new and uses up a token use.
+A major upgrade, a repair or a maintenance run keeps them.
+
 ## Build
 
 ### MSBuild
