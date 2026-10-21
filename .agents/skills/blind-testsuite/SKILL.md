@@ -1,6 +1,6 @@
 ---
 name: blind-testsuite
-description: Write or extend a conformance suite from a CONTRACT.md and published sources only, by an author who never sees an implementation, kept read-only while implementations are built against it. Use when a contract has or will have several implementations, or a wrong expected value would be invisible to the implementer, as in cryptography, codecs, and wire protocols.
+description: Write or extend a conformance suite from a CONTRACT*.md and published sources only, by an author who never sees an implementation, kept read-only while implementations are built against it. Use when a contract has or will have several implementations, or a wrong expected value would be invisible to the implementer, as in cryptography, codecs, and wire protocols.
 ---
 
 # Blind test suite
@@ -10,7 +10,7 @@ The suite is independent evidence derived from the contract, not the definition 
 
 ## What the author sees
 
-The `CONTRACT.md`, the interface it is written against (the contract crate or module, its types and documentation), and published sources: specifications, vendored vectors, captures.
+The contract file, the interface it is written against (the contract crate or module, its types and documentation), and published sources: specifications, vendored vectors, captures.
 Not an implementation, an earlier implementation, or the pull request that produced the contract, because each carries a reading of the contract the suite would then confirm rather than test.
 When an implementation exists, the author is a fresh context in a worktree at a commit without it; a do-not-read list supplements that and does not replace it, since a context that has seen the implementation cannot unsee it.
 
