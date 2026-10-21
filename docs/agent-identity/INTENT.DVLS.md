@@ -100,4 +100,4 @@ It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONT
 - The rotation status reports how many non-revoked identities still hold an unexpired current or pending certificate issued by the old root; rotation completes when that count reaches 0 (`CONTRACT.agent-identity.md` §8.3).
 - Completion is checked whenever DVLS serves the trust anchors during a rotation and after every accepted agent request, so the old root leaves the trust anchors on time without waiting for a background job.
   A refused agent request runs no completion check, so that unauthenticated traffic costs no query, and a failed check is logged while the request it followed is still answered.
-- A rotation's completion is recorded in DVLS's activity log, whatever caused it: the count reaching 0, the deadline passing, or an emergency.
+- A rotation's completion is recorded in DVLS's activity log exactly once, whatever caused it (the count reaching 0, the deadline passing, or an emergency) and however many checks find it due at the same time, so that the log counts rotations, not checks.
