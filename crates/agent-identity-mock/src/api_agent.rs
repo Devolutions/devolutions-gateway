@@ -477,6 +477,30 @@ mod tests {
         assert_eq!(code(parse_check_in_body(body.as_bytes())), Err("invalid_request"));
     }
 
+    /// CONTRACT.agent-identity.md §1: "A JSON request body with more than 64 nested objects and arrays, counting the
+    /// top-level object, [...] → `invalid_request`".
+    /// The unknown member `x` nests `wrappers` containers around `innermost`, so each `_64` case holds 64 objects and
+    /// arrays and each `_65` case 65, counting the top-level object and an empty innermost one.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    #[rstest]
+    #[case::arrays_64(63, "[", "0", "]", Ok(()))]
+    #[case::arrays_65(64, "[", "0", "]", Err("invalid_request"))]
+    #[case::objects_64(63, r#"{"y":"#, "0", "}", Ok(()))]
+    #[case::objects_65(64, r#"{"y":"#, "0", "}", Err("invalid_request"))]
+    #[case::empty_array_65(63, r#"{"y":"#, "[]", "}", Err("invalid_request"))]
+    #[case::empty_object_65(63, "[", "{}", "]", Err("invalid_request"))]
+    fn csr_body_nests_at_most_64_objects_and_arrays(
+        #[case] wrappers: usize,
+        #[case] open: &str,
+        #[case] innermost: &str,
+        #[case] close: &str,
+        #[case] expected: Result<(), &'static str>,
+    ) {
+        let nested = format!("{}{innermost}{}", open.repeat(wrappers), close.repeat(wrappers));
+        let body = format!(r#"{{"csr":"AAEC","metadata":{{}},"x":{nested}}}"#);
+        assert_eq!(code(parse_csr_body(body.as_bytes())), expected);
+    }
+
     /// One name in several objects is not a repetition, and receivers ignore unknown fields (CONTRACT.agent-identity.md
     /// §1).
     #[test]

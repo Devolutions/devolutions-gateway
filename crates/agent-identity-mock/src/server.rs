@@ -306,6 +306,31 @@ mod tests {
         Ok(())
     }
 
+    /// CONTRACT.agent-identity.md §1: "A JSON request body with more than 64 nested objects and arrays, counting the
+    /// top-level object, [...] → `invalid_request`", even when its CSR and metadata are valid.
+    /// The refusal precedes enrollment, so it creates no identity.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    #[tokio::test]
+    async fn enrollment_body_nested_past_64_levels_creates_no_identity() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let now = app.now();
+        let (_, secret) =
+            app.state
+                .lock()
+                .await
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
+        let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
+        let csr = &vectors["csr"]["valid"]["csr"];
+        let nested = format!("{}0{}", "[".repeat(64), "]".repeat(64));
+        let body = format!(r#"{{"csr":{csr},"metadata":{{}},"x":{nested}}}"#);
+        let (status, refused) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
+        assert_eq!((status, &refused["error"]), (400, &json!("invalid_request")));
+        assert!(app.state.lock().await.identities.is_empty());
+        Ok(())
+    }
+
     /// CONTRACT.agent-identity.md §5.4: "an unexpected server failure → `500 unavailable`".
     /// Issuing from a root that has expired is such a failure.
     #[tokio::test]

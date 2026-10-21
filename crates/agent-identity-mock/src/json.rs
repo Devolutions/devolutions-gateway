@@ -1,29 +1,57 @@
-//! Parses agent request bodies, rejecting a member name repeated at any depth ([CONTRACT.agent-identity.md][contract], "1. Protocol conventions").
-//! `serde_json::Value` keeps the last of repeated members, so it can't detect them alone.
+//! Parses agent request bodies, rejecting a member name repeated at any depth and more than [`MAX_NESTING`] nested
+//! objects and arrays ([CONTRACT.agent-identity.md][contract], "1. Protocol conventions").
+//! `serde_json::Value` keeps the last of repeated members, so it can't detect them alone, and its own nesting limit is
+//! 128.
 //!
 //! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
 
 use std::fmt;
 
-use serde::de::{self, Deserializer, MapAccess, SeqAccess, Visitor};
+use serde::de::{self, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_json::{Map, Number, Value};
 
-/// Parses `body` as JSON, failing on syntax errors and on a repeated member name in any object.
+/// The most objects and arrays a body may nest, counting the top-level one.
+const MAX_NESTING: usize = 64;
+
+/// Parses `body` as JSON, failing on syntax errors, on a repeated member name in any object, and on more than
+/// [`MAX_NESTING`] nested objects and arrays.
 pub(crate) fn parse_unique_members(body: &[u8]) -> serde_json::Result<Value> {
-    serde_json::from_slice::<UniqueMembers>(body).map(|parsed| parsed.0)
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let value = ValueSeed { enclosing: 0 }.deserialize(&mut deserializer)?;
+    deserializer.end()?;
+    Ok(value)
 }
 
-struct UniqueMembers(Value);
+/// Deserializes one value that `enclosing` objects and arrays contain.
+#[derive(Clone, Copy)]
+struct ValueSeed {
+    enclosing: usize,
+}
 
-impl<'de> de::Deserialize<'de> for UniqueMembers {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(UniqueMembersVisitor).map(UniqueMembers)
+impl<'de> DeserializeSeed<'de> for ValueSeed {
+    type Value = Value;
+
+    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserializer.deserialize_any(self)
     }
 }
 
-struct UniqueMembersVisitor;
+impl ValueSeed {
+    /// Returns the seed for the values inside the object or array that this seed's value opens.
+    ///
+    /// An object or array calls it on opening, before reading any member, because an empty one is nested too.
+    fn nested<E: de::Error>(self) -> Result<Self, E> {
+        let enclosing = self.enclosing + 1;
+        if MAX_NESTING < enclosing {
+            return Err(E::custom(format_args!(
+                "more than {MAX_NESTING} nested objects and arrays"
+            )));
+        }
+        Ok(Self { enclosing })
+    }
+}
 
-impl<'de> Visitor<'de> for UniqueMembersVisitor {
+impl<'de> Visitor<'de> for ValueSeed {
     type Value = Value;
 
     fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -59,17 +87,19 @@ impl<'de> Visitor<'de> for UniqueMembersVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        let element = self.nested()?;
         let mut values = Vec::new();
-        while let Some(UniqueMembers(value)) = seq.next_element()? {
+        while let Some(value) = seq.next_element_seed(element)? {
             values.push(value);
         }
         Ok(Value::Array(values))
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        let member = self.nested()?;
         let mut members = Map::new();
         while let Some(name) = map.next_key::<String>()? {
-            let UniqueMembers(value) = map.next_value()?;
+            let value = map.next_value_seed(member)?;
             if members.contains_key(&name) {
                 return Err(de::Error::custom(format_args!("repeated member name {name:?}")));
             }
