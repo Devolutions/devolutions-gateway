@@ -251,7 +251,13 @@ async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<
 
     for request in [&first, &second] {
         assert_eq!(request.uri().path(), format!("/dvls{CONNECT_RPC_PATH}"));
-        assert!(request.headers().get("signature-input").is_some());
+        let signature_input = request
+            .headers()
+            .get("signature-input")
+            .ok_or_else(|| anyhow!("missing signature input"))?
+            .to_str()?;
+        assert!(signature_input.starts_with(r#"sig=("@method");"#), "{signature_input}");
+        assert!(signature_input.contains(r#";tag="connect""#), "{signature_input}");
         assert!(request.headers().get("signature").is_some());
     }
     assert_eq!(
