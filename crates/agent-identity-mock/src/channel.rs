@@ -695,7 +695,7 @@ mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
     use http_body_util::combinators::UnsyncBoxBody;
-    use http_body_util::{BodyExt as _, Empty, StreamBody};
+    use http_body_util::{BodyExt as _, Full, StreamBody};
     use hyper::body::Frame;
     use p256::ecdsa::signature::Signer as _;
     use p256::ecdsa::{Signature, SigningKey};
@@ -809,18 +809,29 @@ mod tests {
             thumbprint
         }
 
-        /// Sends `POST confirm` signed by `key` (CONTRACT.agent-identity.md §5.5) and returns the response status.
-        async fn confirm(&self, key: &SigningKey, keyid: &str) -> anyhow::Result<http::StatusCode> {
+        /// Sends `POST confirm` with `body`, signed by `key` (CONTRACT.agent-identity.md §5.5), and returns the response
+        /// status with its §5.4 error code, if any.
+        async fn confirm(
+            &self,
+            key: &SigningKey,
+            keyid: &str,
+            body: &'static str,
+        ) -> anyhow::Result<(http::StatusCode, Option<String>)> {
             let (_, signature_input, signature) = sign(key, keyid, "confirm", self.app.now())?;
             let request = http::Request::post("/mock/api/agent-identity/v1/confirm")
                 .header("signature-input", signature_input)
                 .header("signature", signature)
-                .body(Empty::<Bytes>::new())?;
+                .body(Full::new(Bytes::from_static(body.as_bytes())))?;
             let response = Dispatcher::new(Arc::clone(&self.app))
                 .handle(request)
                 .await
                 .expect("the mock answers");
-            Ok(response.status())
+            let status = response.status();
+            let body = response.into_body().collect().await.expect("readable body").to_bytes();
+            let code = serde_json::from_slice::<Value>(&body)
+                .ok()
+                .and_then(|body| body["error"].as_str().map(str::to_owned));
+            Ok((status, code))
         }
 
         /// Moves the mock clock to `now` and applies it, as `__mock__/time/advance` does.
@@ -1192,6 +1203,7 @@ mod tests {
     /// CONTRACT.agent-identity.md §7.4: "A stream whose certificate is retired while it awaits `Hello` still completes
     /// the handshake, then gets the same treatment" as the streams of a certificate `confirm` retires: they "get
     /// `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     #[tokio::test(start_paused = true)]
     async fn certificate_retired_during_the_hello_wait_completes_the_handshake_then_rotates() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1203,8 +1215,8 @@ mod tests {
         let pending_key = SigningKey::from_slice(&[8; 32]).expect("valid P-256 scalar");
         let pending_keyid = enrolled.add_pending(&pending_key).await;
         assert_eq!(
-            enrolled.confirm(&pending_key, &pending_keyid).await?,
-            http::StatusCode::NO_CONTENT
+            enrolled.confirm(&pending_key, &pending_keyid, "").await?,
+            (http::StatusCode::NO_CONTENT, None)
         );
 
         // The 60 s run from the `Reconnect`, which comes 30 s after the `confirm`.
@@ -1221,6 +1233,27 @@ mod tests {
             channel.drain(QUIET).await?,
             [Seen::Closed("0".to_owned(), String::new())]
         );
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.5
+    #[tokio::test]
+    async fn confirm_with_a_body_is_invalid_request_and_promotes_nothing() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let pending_key = SigningKey::from_slice(&[8; 32]).expect("valid P-256 scalar");
+        let pending_keyid = enrolled.add_pending(&pending_key).await;
+
+        assert_eq!(
+            enrolled.confirm(&pending_key, &pending_keyid, "{}").await?,
+            (http::StatusCode::BAD_REQUEST, Some("invalid_request".to_owned()))
+        );
+        let state = enrolled.app.state.lock().await;
+        let statuses = state.identities[&enrolled.identity_id]
+            .certs
+            .iter()
+            .map(|cert| cert.status)
+            .collect::<Vec<_>>();
+        assert_eq!(statuses, [CertStatus::Current, CertStatus::Pending]);
         Ok(())
     }
 }
