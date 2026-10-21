@@ -26,6 +26,8 @@ This binary is a reference authority for the conformance tester.
 
 The mock listens on loopback addresses only, because its control surface is unauthenticated.
 
+On its management API, an application key `<app-key>.<scope>` holds only the permissions its scope names, so the tester can exercise every permission check without provisioning application identities.
+
 A separate, unauthenticated control surface under `{u}/__mock__/` lets the tester:
 
 - drop the next response to an operation after processing its request, or fail it without processing it, either with a contract error body or with an empty body to exercise the agent's handling of a nonconforming error;
@@ -34,7 +36,7 @@ A separate, unauthenticated control surface under `{u}/__mock__/` lets the teste
 - make the channel unavailable, which removes `agent_channel_url` from every identity's config and pushes the change, or break it without changing any config;
 - set the rotation notification rate;
 - inject product-specific config fields into every identity's effective config, which bumps revisions and pushes the change;
-- reset all mutable state;
+- reset all mutable authority state, keeping management API login sessions so that the tester stays logged in;
 - read an identity's ordered channel and certificate events, each with a monotonic sequence number, so that make-before-break ordering can be checked without polling.
 
 The control surface may also offer other test-only controls and observations that the tester needs, such as per-operation request counters, pausing the channel handshake or a retry, a redirect target, a server-initiated reconnect, or a stale config; none of them changes agent-facing protocol behavior.
