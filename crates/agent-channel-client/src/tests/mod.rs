@@ -702,6 +702,116 @@ async fn closes_without_hello_when_the_challenge_is_not_32_bytes(#[case] length:
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+#[rstest]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+#[case::empty_id(encoded_challenge(""))]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+#[case::upper_case_id(encoded_challenge("0F5D2C8E-3B1A-4C6D-9E7F-1A2B3C4D5E6F"))]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+#[case::id_without_hyphens(encoded_challenge("0f5d2c8e3b1a4c6d9e7f1a2b3c4d5e6f"))]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+#[case::id_longer_than_a_reply_may_echo(encoded_challenge(&long_id()))]
+#[case::undecodable(truncated(encoded_challenge(&new_id())))]
+#[tokio::test]
+async fn closes_without_hello_on_a_challenge_it_cannot_trust(#[case] message: Vec<u8>) -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    assert!(message.len() <= 65_536, "the authority may send this message");
+    stream.send_encoded(&message);
+
+    assert!(!matches!(stream.receive_within(WAIT).await, Some(Ok(Some(_)))));
+    let (closure, reopen_after) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(reopen_after, Some(Duration::from_micros(15_625)));
+    authority.next_opening().await;
+    Ok(())
+}
+
+/// Settings whose backoff jitter of 1/64 keeps the delays short and exact: 1 s becomes 15.625 ms.
+fn quick_reopening() -> Settings {
+    Settings {
+        backoff: Backoff {
+            jitter: Arc::new(|| 1.0 / 64.0),
+            ..Backoff::default()
+        },
+        ..Settings::default()
+    }
+}
+
+/// An `id` that fills a `Challenge` envelope to the 65,536 bytes an envelope may take, which a reply that echoes it
+/// would exceed ([CONTRACT.agent-identity.md] §7.1).
+///
+/// The `Challenge` takes 1 (key of `id`) + 3 (length) + 65,496 (`id`) + 36 (`challenge` record of 32 bytes) bytes.
+/// An `Ack` that echoes it takes 38 (`id` record of a UUID) + 1 (key of `correlation_id`) + 3 (length) + 65,496
+/// (`correlation_id`) + 2 (empty `ack` record) = 65,540 bytes, and a `Hello` more.
+fn long_id() -> String {
+    "a".repeat(65_496)
+}
+
+/// Encodes a `Challenge` of 32 bytes under the envelope `id`.
+fn encoded_challenge(id: &str) -> Vec<u8> {
+    let mut message = length_delimited(1 /* id */, id.as_bytes());
+    message.extend(length_delimited(
+        14, /* challenge */
+        &length_delimited(1 /* challenge */, &[1; 32]),
+    ));
+    message
+}
+
+/// Removes the last byte of an encoded message, which leaves its last record shorter than its length says.
+fn truncated(mut message: Vec<u8>) -> Vec<u8> {
+    message.pop();
+    message
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+#[rstest]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+#[case::empty_id(encoded_renewal(""))]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+#[case::upper_case_id(encoded_renewal("0F5D2C8E-3B1A-4C6D-9E7F-1A2B3C4D5E6F"))]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+#[case::id_without_hyphens(encoded_renewal("0f5d2c8e3b1a4c6d9e7f1a2b3c4d5e6f"))]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+#[case::id_longer_than_an_ack_may_echo(encoded_renewal(&long_id()))]
+#[case::undecodable(truncated(encoded_renewal(&new_id())))]
+#[tokio::test]
+async fn closes_without_reporting_a_message_it_cannot_trust(#[case] message: Vec<u8>) -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    assert!(message.len() <= 65_536, "the authority may send this message");
+    stream.send_encoded(&message);
+
+    // Without a `RenewRequested` event, the caller has nothing to acknowledge.
+    let (closure, reopen_after) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(reopen_after, Some(Duration::from_micros(15_625)));
+    assert!(!matches!(stream.receive_within(WAIT).await, Some(Ok(Some(_)))));
+    authority.next_opening().await;
+    Ok(())
+}
+
+/// Encodes a `RenewRequested` under the envelope `id`.
+fn encoded_renewal(id: &str) -> Vec<u8> {
+    let mut message = length_delimited(1 /* id */, id.as_bytes());
+    message.extend(length_delimited(
+        12, /* renew_requested */
+        &length_delimited(1 /* reason */, b"admin"),
+    ));
+    message
+}
+
 // oracle: intent crates/device-key/INTENT.md §Signing
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection

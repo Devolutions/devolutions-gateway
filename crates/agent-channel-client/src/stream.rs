@@ -94,7 +94,7 @@ async fn stream_once(
                 // A stream that can't take the acknowledgement has closed, which its next message reports.
                 let _ = opened.outbound.send(ack).await;
             }
-            message = opened.inbound.message() => match message {
+            message = opened.inbound.message() => match trusted(message) {
                 Ok(Some(message)) => {
                     if let Some(event) = push_event(message) {
                         // Without a caller the event is lost, and the caller's drop also closes the acknowledgement
@@ -103,7 +103,7 @@ async fn stream_once(
                     }
                 }
                 Ok(None) => return Some(ended_with_ok(&mut opened.inbound, &opened.headers, "stream ended").await),
-                Err(status) => return Some(Closure::from_status(&status)),
+                Err(closure) => return Some(closure),
             },
         }
     }
@@ -199,11 +199,31 @@ async fn next_message(
     headers: &MetadataMap,
     awaited: &str,
 ) -> Result<ServerMessage, Closure> {
-    match inbound.message().await {
-        Ok(Some(message)) => Ok(message),
-        Ok(None) => Err(ended_with_ok(inbound, headers, &format!("stream ended before {awaited}")).await),
+    match trusted(inbound.message().await)? {
+        Some(message) => Ok(message),
+        None => Err(ended_with_ok(inbound, headers, &format!("stream ended before {awaited}")).await),
+    }
+}
+
+/// Returns what a stream received, or the closure of a stream whose message the client can't trust.
+///
+/// A message that can't be decoded, or whose `id` is not a UUID ([CONTRACT.agent-identity.md §1 "Protocol
+/// conventions"][conventions]), closes the stream, so that no reply echoes an unchecked `id` or grows past the
+/// envelope limit ([§7.1 "Service"][service]).
+///
+/// [conventions]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
+/// [service]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#71-service
+fn trusted(received: Result<Option<ServerMessage>, Status>) -> Result<Option<ServerMessage>, Closure> {
+    match received {
+        Ok(Some(message)) if !is_uuid(&message.id) => Err(Closure::outage("message id is not a UUID")),
+        Ok(message) => Ok(message),
         Err(status) => Err(Closure::from_status(&status)),
     }
+}
+
+/// Returns whether `id` is a UUID in lowercase hyphenated form.
+fn is_uuid(id: &str) -> bool {
+    Uuid::try_parse(id).is_ok_and(|uuid| *uuid.hyphenated().encode_lower(&mut Uuid::encode_buffer()) == *id)
 }
 
 /// Classifies a stream that ended with gRPC status OK, with the trailers it ended with.

@@ -82,6 +82,9 @@ pub struct HelloFields {
 }
 
 /// What a channel reports to its caller.
+///
+/// Each `id` an event carries is a lowercase hyphenated UUID: the channel closes a stream on a message whose `id` is
+/// not.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Event {
     /// The authority answered the `Hello` with `Welcome`: the stream is authenticated.
