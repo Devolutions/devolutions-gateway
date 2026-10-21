@@ -1,12 +1,12 @@
 ---
 name: intent-files
-description: Discipline for INTENT.md and *.intent.md files - the durable design decisions and rationale behind a component; what belongs there versus CONTRACT.md or AGENTS.md, where they go, how to word statements so they stay true. Use when drafting or revising intent files, or when another intent skill needs the vocabulary.
+description: Discipline for INTENT.md and *.intent.md files - the durable design decisions and rationale behind a component; what belongs there versus CONTRACT*.md or AGENTS.md, where they go, how to word statements so they stay true. Use when drafting or revising intent files, or when another intent skill needs the vocabulary.
 ---
 
 # Intent files
 
 An intent file holds the design commitments a human has made durable: each one rules out a plausible, locally correct change that was deliberately rejected.
-It is authoritative where present and optional everywhere; `AGENTS.md` constrains how contributors work, `CONTRACT.md` exists only for a surface that two independently built parties must agree on.
+It is authoritative where present and optional everywhere; `AGENTS.md` constrains how contributors work, `CONTRACT.md` or `CONTRACT.<name>.md` exists only for a surface that two independently built parties must agree on.
 A component's own interface (its CLI, config, storage) with the reason it is shaped so is intent, not contract, until a named second party depends on it.
 If the repository has `docs/intent-files.md`, it is the house convention.
 
@@ -32,7 +32,7 @@ Default to no file: create one only when at least one commitment passes.
 `INTENT.md` at the narrowest directory covering all governed code; `<name>.intent.md` beside one file when a single module carries a policy its component does not.
 Applicable files are the `INTENT*.md` in the directory and its ancestors plus the `<name>.intent*.md` beside the module itself, cumulative, and a specific file never overrides a broader one, so a narrowing is a contradiction a review catches rather than a silent exception; nothing follows a link, since a link breaks on rename and confers no applicability.
 A design shared by several components is a part file, `INTENT.<feature>.md` or `<module>.intent.<feature>.md`, present in each governed directory; a symlink to one source keeps the parts identical, and where a symlink is not possible the copies are one text and a difference between them is a defect.
-A part is read from several directories, so it names repository paths as code (`docs/agent-identity/CONTRACT.md`) rather than relative links.
+A part is read from several directories, so it names repository paths as code (`docs/agent-identity/CONTRACT.agent-identity.md`) rather than relative links.
 A file per source file is the exception, never the default, and never mechanical.
 
 ## Shape
