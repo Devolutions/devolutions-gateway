@@ -62,6 +62,8 @@ pub(crate) struct Authority {
     pub(crate) profile: Profile,
     /// Whether the authority offers the agent channel: assumed when the profile expects it, and probed otherwise.
     pub(crate) channel_available: bool,
+    /// Whether the profile's leaf lifetime is the authority's certificate lifetime setting, which the runner reads only on a disposable DVLS target.
+    pub(crate) lifetime_from_settings: bool,
     pub(crate) rotation_window_secs: u64,
 }
 
@@ -149,8 +151,8 @@ pub(crate) enum Need {
     Disposable,
     /// The authority issues leaves of at most 30 seconds; the mock does with a fault.
     ShortLeaves,
-    /// The authority issues leaves of whole days, as its certificate lifetime setting says, rather than a test lifetime in seconds.
-    LeavesInDays,
+    /// The authority issues leaves of its certificate lifetime setting, which the profile's leaf lifetime matches, rather than a test lifetime in seconds.
+    SettingsLifetime,
     /// The management API can change a config, so that an identity's stored revision becomes stale; the mock changes one with a control.
     ConfigChange,
 }
@@ -161,7 +163,7 @@ impl Need {
         Self::NoChannel,
         Self::Disposable,
         Self::ShortLeaves,
-        Self::LeavesInDays,
+        Self::SettingsLifetime,
         Self::ConfigChange,
     ];
 
@@ -176,7 +178,7 @@ impl Need {
             Self::NoChannel => mock || !authority.channel_available,
             Self::Disposable => mock || profile.disposable,
             Self::ShortLeaves => mock || profile.leaf_lifetime_secs <= 30,
-            Self::LeavesInDays => mock || profile.leaf_lifetime_secs.is_multiple_of(DAY_SECS),
+            Self::SettingsLifetime => mock || authority.lifetime_from_settings,
             // DVLS's management API changes a config only through the agent channel switch, which needs both.
             Self::ConfigChange => mock || profile.disposable && authority.channel_available,
         }
@@ -189,8 +191,8 @@ impl Need {
             Self::NoChannel => "requires a naturally channelless DVLS target",
             Self::Disposable => "rotation and settings changes require --disposable-dvls-target",
             Self::ShortLeaves => "real-target stream expiry requires --leaf-lifetime-secs <= 30",
-            Self::LeavesInDays => {
-                "requires a DVLS target without a test leaf lifetime, whose --leaf-lifetime-secs is a whole number of days"
+            Self::SettingsLifetime => {
+                "requires a disposable DVLS target without a test leaf lifetime, whose --leaf-lifetime-secs is its certificate lifetime in days"
             }
             Self::ConfigChange => {
                 "a stale Hello requires a disposable DVLS target that offers the agent channel, whose switch changes the config"
@@ -234,7 +236,7 @@ mod tests {
     use super::*;
     use crate::dvls::AppCredential;
 
-    fn authority(profile: Profile, channel_available: bool) -> anyhow::Result<Authority> {
+    fn authority(profile: Profile, channel_available: bool, lifetime_from_settings: bool) -> anyhow::Result<Authority> {
         Ok(Authority {
             name: "--authority".to_owned(),
             target: Target::new(
@@ -245,16 +247,21 @@ mod tests {
             )?,
             profile,
             channel_available,
+            lifetime_from_settings,
             rotation_window_secs: profile.rotation_window_secs()?,
         })
     }
 
-    /// A DVLS run with two authorities issuing 20-second test leaves with the channel, and a third without either, as a harness sets them up.
+    /// A DVLS run with two authorities issuing 20-second test leaves with the channel, a third issuing one-day test leaves, and a fourth with neither test leaves nor the channel.
     fn dvls_run() -> anyhow::Result<Vec<Authority>> {
         let short = Profile {
             leaf_lifetime_secs: 20,
             disposable: true,
             ..Profile::default()
+        };
+        let day = Profile {
+            leaf_lifetime_secs: DAY_SECS,
+            ..short
         };
         let plain = Profile {
             expect_channel: false,
@@ -262,9 +269,10 @@ mod tests {
             ..Profile::default()
         };
         Ok(vec![
-            authority(short, true)?,
-            authority(short, true)?,
-            authority(plain, false)?,
+            authority(short, true, false)?,
+            authority(short, true, false)?,
+            authority(day, true, false)?,
+            authority(plain, false, true)?,
         ])
     }
 
@@ -275,10 +283,19 @@ mod tests {
         let authorities = dvls_run()?;
         assert_eq!(pick(&authorities, &[], false, false), Ok((0, None)));
         assert_eq!(
-            pick(&authorities, &[Need::Disposable, Need::LeavesInDays], false, false),
-            Ok((2, None))
+            pick(&authorities, &[Need::Disposable, Need::SettingsLifetime], false, false),
+            Ok((3, None))
         );
-        assert_eq!(pick(&authorities, &[Need::NoChannel], false, false), Ok((2, None)));
+        assert_eq!(
+            pick(
+                &authorities[2..],
+                &[Need::Disposable, Need::SettingsLifetime],
+                false,
+                false
+            ),
+            Ok((1, None))
+        );
+        assert_eq!(pick(&authorities, &[Need::NoChannel], false, false), Ok((3, None)));
         assert_eq!(
             pick(&authorities, &[Need::Channel, Need::ConfigChange], false, false),
             Ok((0, None))
@@ -298,7 +315,16 @@ mod tests {
             Err(Need::NoChannel.missing())
         );
         assert_eq!(
-            pick(&authorities[2..], &[Need::Channel, Need::ConfigChange], false, false),
+            pick(
+                &authorities[..3],
+                &[Need::Disposable, Need::SettingsLifetime],
+                false,
+                false
+            ),
+            Err(Need::SettingsLifetime.missing())
+        );
+        assert_eq!(
+            pick(&authorities[3..], &[Need::Channel, Need::ConfigChange], false, false),
             Err(Need::Channel.missing())
         );
         assert_eq!(pick(&authorities, &[Need::NoChannel], true, false), Err(SECOND_MISSING));
@@ -310,11 +336,11 @@ mod tests {
     fn the_mock_meets_every_need_but_an_absent_channel() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         // oracle: spec crates/agent-identity-conformance/README.md §Several authorities
-        let mock = [authority(Profile::default(), true)?];
+        let mock = [authority(Profile::default(), true, false)?];
         for need in Need::ALL {
             assert_eq!(pick(&mock, &[need], false, true), Ok((0, None)), "{need:?}");
         }
-        let channelless = [authority(Profile::default(), false)?];
+        let channelless = [authority(Profile::default(), false, false)?];
         assert_eq!(
             pick(&channelless, &[Need::Channel], false, true),
             Err(Need::Channel.missing())
@@ -350,7 +376,7 @@ mod tests {
     /// A usage error lands in CI logs, so an `--authority` item that holds a secret in a form the runner does not take must not appear in it.
     #[test]
     fn authority_spec_errors_never_echo_a_value() {
-        // oracle: spec crates/agent-identity-conformance/README.md §Several authorities
+        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
         let secret = "synthetic-credential";
         let variable = |_: &str| None;
         for spec in [

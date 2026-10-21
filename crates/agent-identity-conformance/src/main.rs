@@ -456,11 +456,17 @@ impl Options {
                 target.reset().await?;
             }
             let channel_available = profile.expect_channel || target.channel_available().await?;
+            // A test leaf lifetime can be a whole number of days too, so only the settings show whether the leaves follow them.
+            let lifetime_from_settings = kind == TargetKind::Dvls && profile.disposable && {
+                let days = target.management().settings().await?.certificate_lifetime_days;
+                days.checked_mul(authority::DAY_SECS) == Some(profile.leaf_lifetime_secs)
+            };
             authorities.push(Authority {
                 name,
                 target,
                 profile,
                 channel_available,
+                lifetime_from_settings,
                 rotation_window_secs,
             });
         }
@@ -909,7 +915,7 @@ const TESTS: &[Test] = &[
     p!(p_settings_change_bounds).need(Need::Disposable),
     p!(p_settings_certificate_lifetime_applies_to_new_certificates)
         .need(Need::Disposable)
-        .need(Need::LeavesInDays),
+        .need(Need::SettingsLifetime),
     p!(p_settings_channel_switch_withdraws_and_restores_channel_url)
         .channel()
         .need(Need::Disposable),
@@ -986,6 +992,7 @@ mod tests {
     /// A usage error lands in CI logs, so a credential given in a form the runner does not take, such as `--app-secret=<secret>` or a stray argument, must not appear in it.
     #[test]
     fn usage_errors_never_echo_a_credential() {
+        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
         let secret = "synthetic-credential";
         let mut cases: Vec<Vec<String>> = [
             "--app-key",

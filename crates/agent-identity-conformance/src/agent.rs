@@ -25,7 +25,9 @@ use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
 use crate::client::{Target, Token, count, decoded_certificate, expect_status, field};
-use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
+use crate::dvls::{
+    CertificateRecord, CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline,
+};
 use crate::{Context, KeyBackend};
 
 #[cfg(windows)]
@@ -1636,10 +1638,10 @@ async fn wait_key_deleted(case: &mut AgentCase, name: &str) -> anyhow::Result<()
     Ok(())
 }
 
-/// The earliest moment the agent's schedule renews a certificate issued after `issued_after` with `lifetime`, or `None` beyond the clock's range.
+/// The earliest moment the agent's schedule may renew a certificate issued after `issued_after` with `lifetime`, or `None` beyond the clock's range.
 ///
-/// The agent renews `2/3 × lifetime` after the certificate's anchor, the earlier of its `notBefore` and the moment the agent stored or loaded it ([agent intent], "Schedules"), and `disable_jitter` removes the jitter.
-/// This assumes that the authority dates `notBefore` at the issuance, by a clock that agrees with the runner's, so that the anchor comes after `issued_after`.
+/// The agent renews `2/3 × lifetime` after the certificate's anchor ([agent intent], "Schedules"), and `disable_jitter` removes the jitter.
+/// It sizes waits only, so it takes the anchor to be the issuance.
 ///
 /// [agent intent]: ../../agent-identity/INTENT.md#schedules
 fn earliest_renewal(issued_after: Instant, lifetime: Duration) -> Option<Instant> {
@@ -1659,13 +1661,39 @@ fn renewal_aware_wait(issued_after: Instant, lifetime: Duration) -> Duration {
     }
 }
 
-/// Whether a certificate issued after `issued_after` with `lifetime` is surely unexpired now, under [`earliest_renewal`]'s assumption.
+/// Whether no certificate that `record` lists had expired when the caller last read the authority, by the authority's clock read afterwards.
 ///
-/// A leaf's `notAfter` is one leaf lifetime after its `notBefore` ([contract] §4).
+/// The authority closes a stream no later than its certificate's `notAfter` ([contract] §7.4), so until the earliest one passes, none of the identity's streams has closed for expiry.
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
-fn surely_unexpired(issued_after: Instant, lifetime: Duration) -> bool {
-    issued_after.elapsed() < lifetime
+async fn none_expired(target: &Target, record: &IdentityRecord) -> anyhow::Result<bool> {
+    let earliest = record
+        .certificates()
+        .iter()
+        .map(|certificate| certificate.not_after)
+        .chain(record.not_after())
+        .min()
+        .context("identity has no certificate")?;
+    Ok(target.server_now().await? < earliest)
+}
+
+/// How far the authority's clock is behind the runner's, or zero when it is not.
+async fn authority_lag(target: &Target) -> anyhow::Result<time::Duration> {
+    let sent = time::OffsetDateTime::now_utc();
+    let authority = target.server_now().await?;
+    Ok((sent - authority).max(time::Duration::ZERO))
+}
+
+/// Whether the agent's schedule may have renewed `persisted` by the time the authority issued `later`.
+///
+/// The agent renews `2/3 × (notAfter − notBefore)` after the anchor, the earlier of `notBefore` and the moment it stored or loaded the certificate ([agent intent], "Schedules"), and `disable_jitter` removes the jitter.
+/// The agent shares the runner's clock, so the anchor comes `lag` before `persisted`'s `notBefore` at the earliest, `lag` being how far the authority's clock is behind.
+/// This assumes that the authority dates `notBefore` at the issuance, and allows 2 seconds for certificate times, which have whole seconds (RFC 5280 §4.1.2.5).
+///
+/// [agent intent]: ../../agent-identity/INTENT.md#schedules
+fn renewed_when_due(persisted: &CertificateRecord, later: &CertificateRecord, lag: time::Duration) -> bool {
+    let due = (persisted.not_after - persisted.not_before) * 2 / 3;
+    due <= later.not_before - persisted.not_before + lag + time::Duration::seconds(2)
 }
 
 /// Waits until the agent has stored a renewal that replaced `old_key`, holds no pending or previous key, and has deleted `old_key`.
@@ -3401,7 +3429,7 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
             // oracle: intent crates/agent-identity/INTENT.md §Schedules
             // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
             // The authority accepts a renewal signed only with the key of the identity's current or pending certificate (§6), and only the agent's persisted keys are those, so a later certificate also shows that the restarted agent loaded them.
-            // The agent's schedule renews only once a certificate is due, which a short leaf lifetime brings within the restart.
+            // The agent's schedule renews the persisted certificate only once it is due, which a short leaf lifetime brings within the restart.
             let resumed = case
                 .until_identity_within(
                     &target,
@@ -3411,11 +3439,24 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
                     |record| record.connected && current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb),
                 )
                 .await?;
-            ensure!(
-                current_thumbprint(&resumed)? == new_thumb
-                    || earliest_renewal(issued_after, lifetime).is_some_and(|due| due <= Instant::now()),
-                "restarted agent renewed its persisted certificate before it was due"
-            );
+            let resumed_thumb = current_thumbprint(&resumed)?;
+            if resumed_thumb != new_thumb {
+                let certificate = |thumbprint: &str| {
+                    resumed
+                        .certificates()
+                        .iter()
+                        .find(|certificate| certificate.thumbprint == thumbprint)
+                        .with_context(|| format!("identity does not list certificate {thumbprint}"))
+                };
+                ensure!(
+                    renewed_when_due(
+                        certificate(&new_thumb)?,
+                        certificate(resumed_thumb)?,
+                        authority_lag(&target).await?
+                    ),
+                    "restarted agent renewed its persisted certificate before it was due"
+                );
+            }
             ensure!(
                 resumed.issuer() == renewed.issuer(),
                 "agent changed issuer while loading the persisted key"
@@ -4456,13 +4497,13 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
                     },
                 )
                 .await?;
-            if surely_unexpired(issued_after, lifetime) {
+            if none_expired(&target, &record).await? {
                 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-agent-renewal
-                // The original certificate was unexpired at the confirm, so its stream stayed open until the agent opened the next one (§8.1 step 4).
+                // No stream of the identity had closed for expiry when the authority reported the renewal, and the agent opens its next stream before closing the old one (§8.1 step 4).
                 ensure!(renewed.connected, "requested renewal broke the channel");
             } else {
                 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
-                // The original certificate may have expired before the confirm, which closes its stream (§7.4); the agent then connects with the new one.
+                // A certificate expired before then, which may have closed the stream it authenticated (§7.4); the agent then connects with the new one.
                 case.until_identity_within(
                     &target,
                     &id,
@@ -5394,14 +5435,15 @@ pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
             case.write_pending(&first_token.text)?;
             let (first_id, first_state) = case.enrolled(&first, &first_token).await?;
             let first_authority = field(&first_state, "authority_id")?.to_owned();
-            case.until_identity_within(
-                &first,
-                &first_id,
-                "first connection",
-                renewal_aware_wait(first_issued_after, first_lifetime),
-                |record| record.connected,
-            )
-            .await?;
+            let first_connected = case
+                .until_identity_within(
+                    &first,
+                    &first_id,
+                    "first connection",
+                    renewal_aware_wait(first_issued_after, first_lifetime),
+                    |record| record.connected,
+                )
+                .await?;
             let second_issued_after = Instant::now();
             let second_token = second
                 .management()
@@ -5422,14 +5464,12 @@ pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
                 |record| record.connected,
             )
             .await?;
-            if surely_unexpired(first_issued_after, first_lifetime) {
-                ensure!(
-                    case.identity_record(&first, &first_id).await?.connected,
-                    "first authority was disconnected"
-                );
+            let first_record = case.identity_record(&first, &first_id).await?;
+            if none_expired(&first, &first_connected).await? {
+                ensure!(first_record.connected, "first authority was disconnected");
             } else {
                 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
-                // The first certificate may have expired before its renewal was confirmed, which closes its stream (§7.4); the agent then connects with the new one.
+                // A first certificate expired before then, which may have closed the stream it authenticated (§7.4); the agent then connects with the new one.
                 case.until_identity_within(
                     &first,
                     &first_id,

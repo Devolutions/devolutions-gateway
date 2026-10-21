@@ -17,6 +17,7 @@ Use `--filter p_` for protocol-only checks or `--list` to inspect test names.
 Use `--key-backend windows-software-provider|file` to select `Identity.KeyBackend` (`WindowsSoftwareProvider` or `File`); the default is Windows software provider on Windows and file elsewhere.
 The runner calls each authority's management API as an application identity, with its key and secret: `--app-key` and `--app-secret` name one holding every Agent Identity permission, and `--second-app-key` and `--second-app-secret` one on the second authority; on the mock, they are the mock's own `--app-key` and `--app-secret`.
 A key requires its secret, which the `AGENT_IDENTITY_CONFORMANCE_APP_SECRET`, `AGENT_IDENTITY_CONFORMANCE_SECOND_APP_SECRET` and `AGENT_IDENTITY_CONFORMANCE_UNPRIVILEGED_APP_SECRET` environment variables can supply instead, to keep secrets off the command line.
+Usage errors name only known flags, known `--authority` keys and argument positions, never values, because a misplaced value may be a secret.
 The runner logs in with `POST /api/v1/login` on first use and sends the `tokenId` it returns.
 It logs in again before the `tokenId` lifetime elapses, assuming DVLS's 7 minutes until the API refuses a younger `tokenId`, and when the API refuses a `tokenId` it logs in once more and retries that request once.
 Each re-login is logged at info level, without the `tokenId`, key or secret, and the run ends with `POST /api/v1/logout`.
@@ -73,7 +74,8 @@ $env:C_APP_SECRET = '<app-secret>'
 
 A spec is comma-separated `<key>=<value>` items, and values cannot contain commas.
 Its keys are the names, without `--`, of the flags above and of `--base-url`, `--app-key`, `--authority-id` and `--extra-trusted-root`, with the same values, plus the required `app-secret-env`, which names the environment variable that holds the application secret, to keep it off the command line.
-Each test runs on the first authority, in the order of their flags, that offers what the test needs: the agent channel or none, a disposable target, leaves of at most 30 seconds, leaves of whole days rather than a test lifetime in seconds, or a config change.
+Each test runs on the first authority, in the order of their flags, that offers what the test needs: the agent channel or none, a disposable target, leaves of at most 30 seconds, leaves of the certificate lifetime setting rather than a test lifetime, or a config change.
+The runner reads the settings of each disposable DVLS target at the start, and counts its leaves as following the setting when its leaf lifetime equals the setting in seconds.
 DVLS's management API changes a config only by switching the agent channel off and on, so a config change needs a disposable target that offers the channel.
 A test that needs two authorities also takes the next one that offers what it needs.
 When no authority does, the test reports `SKIP` with the first need that the first authority lacks.
