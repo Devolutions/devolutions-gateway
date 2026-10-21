@@ -581,9 +581,9 @@ impl Runner {
             leaf_certificate_der: client::leaf_certificate_der(certificate_chain(current)?)?,
             hello: self.hello_fields(),
         };
-        let channel = self.shared.channels.connect(target)?;
-        debug!(authority_id = %self.authority_id, %url, %key_name, "Agent channel stream opening");
-        self.streams.open(url, key_name, channel);
+        let shared = Arc::clone(&self.shared);
+        self.streams
+            .open(url, key_name, move || shared.channels.connect(target));
         Ok(())
     }
 

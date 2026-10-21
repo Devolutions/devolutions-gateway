@@ -78,10 +78,23 @@ pub(super) struct Streams<C = Channel> {
     task: JoinHandle<()>,
 }
 
+/// Starts a stream's channel.
+type Connect<C> = Box<dyn FnOnce() -> anyhow::Result<C> + Send>;
+
 enum Command<C> {
-    Reconcile { want: Want, open: oneshot::Sender<bool> },
-    Open { url: Url, key_name: String, channel: C },
-    Ack { link: LinkId, correlation_id: String },
+    Reconcile {
+        want: Want,
+        open: oneshot::Sender<bool>,
+    },
+    Open {
+        url: Url,
+        key_name: String,
+        connect: Connect<C>,
+    },
+    Ack {
+        link: LinkId,
+        correlation_id: String,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -97,9 +110,6 @@ impl<C: LinkChannel + Send + 'static> Streams<C> {
         let (commands, command_receiver) = mpsc::unbounded_channel();
         let (notice_sender, notices) = mpsc::unbounded_channel();
         let (status_sender, status) = watch::channel(Status::default());
-        // UNTESTED: stream events are handled in their own task, so that a stream that must not reopen is dropped
-        // while the runner is blocked, for example on a state lock; otherwise its channel reopens it with a retired key.
-        // When changing this, keep `Links::handle` off the runner's task.
         let task = tokio::spawn(run_streams(
             Links::new(),
             command_receiver,
@@ -133,9 +143,19 @@ impl<C: LinkChannel + Send + 'static> Streams<C> {
         opened.await.unwrap_or(false)
     }
 
-    /// Adds the stream that `channel` opens to `url` with the key `key_name`, as [`Links::open`] does.
-    pub(super) fn open(&self, url: Url, key_name: String, channel: C) {
-        let _ = self.commands.send(Command::Open { url, key_name, channel });
+    /// Opens a stream to `url` with the key `key_name` through `connect`, unless the streams no longer need one when
+    /// the task handles the request, for example after a terminal closure.
+    pub(super) fn open(
+        &self,
+        url: Url,
+        key_name: String,
+        connect: impl FnOnce() -> anyhow::Result<C> + Send + 'static,
+    ) {
+        let _ = self.commands.send(Command::Open {
+            url,
+            key_name,
+            connect: Box::new(connect),
+        });
     }
 
     /// Acknowledges the message `correlation_id` on the stream `link`, if it is still open.
@@ -179,8 +199,19 @@ async fn run_streams<C: LinkChannel>(
                 Some(Command::Reconcile { want, open }) => {
                     let _ = open.send(links.reconcile(want));
                 }
-                Some(Command::Open { url, key_name, channel }) => {
-                    links.open(url, key_name, channel, Instant::now());
+                Some(Command::Open { url, key_name, connect }) => {
+                    // The streams may no longer need this stream, for example after a terminal closure.
+                    if links.needs_open() {
+                        match connect() {
+                            Ok(channel) => {
+                                debug!(%url, %key_name, "Agent channel stream opening");
+                                links.open(url, key_name, channel, Instant::now());
+                            }
+                            Err(error) => {
+                                warn!(error = format!("{error:#}"), "Cannot open an agent channel stream");
+                            }
+                        }
+                    }
                 }
                 Some(Command::Ack { link, correlation_id }) => links.ack(link, &correlation_id),
                 None => return,
@@ -215,6 +246,11 @@ pub(super) struct Links<C> {
     ///
     /// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
     replacement: Option<Link<C>>,
+    /// Whether the authority ended the identity: a stream closed with a terminal outcome, so no stream opens again
+    /// ([CONTRACT.md §5.4 "Errors"][errors]).
+    ///
+    /// [errors]: ../../../docs/agent-identity/CONTRACT.md#54-errors
+    ended: bool,
     /// Whether the authority asked for a stream to replace `active`.
     reconnect: bool,
     next_id: u64,
@@ -250,6 +286,7 @@ impl<C: LinkChannel> Links<C> {
             want: Want::Nothing,
             active: None,
             replacement: None,
+            ended: false,
             reconnect: false,
             next_id: 0,
             notices: VecDeque::new(),
@@ -277,8 +314,10 @@ impl<C: LinkChannel> Links<C> {
     }
 
     /// Drops the streams `want` doesn't allow, and returns whether [`Links::open`] must open a stream for it.
+    ///
+    /// Once the authority ended the identity, nothing is wanted.
     pub(super) fn reconcile(&mut self, want: Want) -> bool {
-        self.want = want;
+        self.want = if self.ended { Want::Nothing } else { want };
         if !matches!(self.want, Want::Stream { .. }) {
             self.replacement = None;
             if self.want == Want::Nothing || !self.authenticated() {
@@ -457,6 +496,11 @@ impl<C: LinkChannel> Links<C> {
             (Some(delay), Some(link)) => link.state = LinkState::Opening { at: now + delay },
             _ => self.remove(role),
         }
+        if let ClosureClass::Terminal(_) = closure.class {
+            // `CONTRACT.md` §5.4: the identity is over, so every other stream closes too, and none opens again.
+            self.ended = true;
+            self.reconcile(Want::Nothing);
+        }
     }
 
     fn link(&self, role: Role) -> Option<&Link<C>> {
@@ -502,21 +546,35 @@ mod tests {
 
     use super::*;
 
-    /// A channel whose events the test hands to [`Links::handle`]; it records whether it was dropped.
-    struct TestChannel(Arc<AtomicBool>);
+    /// A channel whose events the test sends; it records whether it was dropped.
+    struct TestChannel {
+        events: mpsc::UnboundedReceiver<Event>,
+        dropped: Arc<AtomicBool>,
+    }
 
     impl LinkChannel for TestChannel {
         fn ack(&self, _correlation_id: &str) {}
 
         fn next_event(&mut self) -> impl Future<Output = Option<Event>> + Send {
-            std::future::pending()
+            self.events.recv()
         }
     }
 
     impl Drop for TestChannel {
         fn drop(&mut self) {
-            self.0.store(true, Ordering::SeqCst);
+            self.dropped.store(true, Ordering::SeqCst);
         }
+    }
+
+    /// Returns a channel, the sender of its events, and the flag it sets once dropped.
+    fn test_channel() -> (TestChannel, mpsc::UnboundedSender<Event>, Arc<AtomicBool>) {
+        let (events, receiver) = mpsc::unbounded_channel();
+        let dropped = Arc::new(AtomicBool::new(false));
+        let channel = TestChannel {
+            events: receiver,
+            dropped: Arc::clone(&dropped),
+        };
+        (channel, events, dropped)
     }
 
     fn url() -> Url {
@@ -532,26 +590,106 @@ mod tests {
 
     /// Opens a stream with the key `key_name`, and returns it with the flag its channel sets once dropped.
     fn open(links: &mut Links<TestChannel>, key_name: &str, now: Instant) -> (LinkId, Arc<AtomicBool>) {
-        let dropped = Arc::new(AtomicBool::new(false));
-        let link = links.open(url(), key_name.to_owned(), TestChannel(Arc::clone(&dropped)), now);
+        let (channel, _events, dropped) = test_channel();
+        let link = links.open(url(), key_name.to_owned(), channel, now);
         (link, dropped)
     }
 
-    fn closed_transiently(reopen_after: Duration) -> Option<Event> {
-        Some(Event::Closed {
+    fn closed(class: ClosureClass, reopen_after: Option<Duration>) -> Event {
+        Event::Closed {
             closure: Closure {
-                class: ClosureClass::Transient(TransientKind::Outage),
+                class,
                 grpc_code: None,
                 error_code: None,
                 server_time: None,
-                reason: "connection reset".to_owned(),
+                reason: "closed by the test".to_owned(),
             },
-            reopen_after: Some(reopen_after),
-        })
+            reopen_after,
+        }
+    }
+
+    fn closed_transiently(reopen_after: Duration) -> Option<Event> {
+        Some(closed(
+            ClosureClass::Transient(TransientKind::Outage),
+            Some(reopen_after),
+        ))
     }
 
     fn notices(links: &mut Links<TestChannel>) -> Vec<Notice> {
         std::iter::from_fn(|| links.next_notice()).collect()
+    }
+
+    /// Opens a stream through `streams`, as the runner does, and returns the sender of its events and the flag its
+    /// channel sets once dropped.
+    fn open_stream(streams: &Streams<TestChannel>, key_name: &str) -> (mpsc::UnboundedSender<Event>, Arc<AtomicBool>) {
+        let (channel, events, dropped) = test_channel();
+        streams.open(url(), key_name.to_owned(), move || Ok(channel));
+        (events, dropped)
+    }
+
+    /// Waits until the streams report an authenticated stream.
+    async fn wait_until_authenticated(streams: &mut Streams<TestChannel>) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !streams.authenticated() {
+                streams.wait().await;
+            }
+        })
+        .await
+        .expect("no stream authenticated in time");
+    }
+
+    /// Waits for a terminal notice, which the test, unlike a runner, doesn't act on.
+    async fn wait_for_terminal(streams: &mut Streams<TestChannel>) {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !matches!(streams.wait().await, Some(Notice::Terminal(_))) {}
+        })
+        .await
+        .expect("no terminal notice in time");
+    }
+
+    // `CONTRACT.md` §5.4: after a terminal outcome, the agent never reconnects for the identity.
+    // The runner learns of the outcome from a notice only once it isn't busy, so the streams' task holds this rule.
+    #[tokio::test]
+    async fn after_a_terminal_closure_no_stream_opens_even_before_the_runner_acts_on_it() -> anyhow::Result<()> {
+        let mut streams = Streams::spawn();
+        assert!(streams.reconcile(stream("current")).await);
+        let (events, _dropped) = open_stream(&streams, "current");
+        events.send(Event::Authenticated)?;
+        wait_until_authenticated(&mut streams).await;
+        events.send(closed(ClosureClass::Terminal(TerminalCode::IdentityRevoked), None))?;
+        wait_for_terminal(&mut streams).await;
+
+        let wants_stream = streams.reconcile(stream("current")).await;
+        let connected = Arc::new(AtomicBool::new(false));
+        let connecting = Arc::clone(&connected);
+        streams.open(url(), "current".to_owned(), move || {
+            connecting.store(true, Ordering::SeqCst);
+            Ok(test_channel().0)
+        });
+        // The task handles commands in order, so this reply follows the handling of the open.
+        streams.reconcile(stream("current")).await;
+
+        assert!(!wants_stream);
+        assert!(!connected.load(Ordering::SeqCst));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_terminal_refusal_of_a_new_stream_closes_the_stream_in_use_before_the_runner_acts_on_it()
+    -> anyhow::Result<()> {
+        let mut streams = Streams::spawn();
+        assert!(streams.reconcile(stream("current")).await);
+        let (current_events, current_dropped) = open_stream(&streams, "current");
+        current_events.send(Event::Authenticated)?;
+        wait_until_authenticated(&mut streams).await;
+        assert!(streams.reconcile(stream("renewed")).await);
+        let (renewed_events, _renewed_dropped) = open_stream(&streams, "renewed");
+
+        renewed_events.send(closed(ClosureClass::Terminal(TerminalCode::IdentityUnknown), None))?;
+        wait_for_terminal(&mut streams).await;
+
+        assert!(current_dropped.load(Ordering::SeqCst));
+        Ok(())
     }
 
     // A stream that reopens with a retired key draws the terminal `identity_unknown` (`CONTRACT.md` §6 step 4), and
