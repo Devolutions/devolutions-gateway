@@ -1300,6 +1300,7 @@ mod tests {
         #[cfg(unix)]
         fs::set_permissions(&record_path, fs::Permissions::from_mode(0o644))?;
 
+        // oracle: scaffold
         let (record, _key) = store
             .begin_enrollment(&token)?
             .context("untrusted marker rejected the pending token")?;
@@ -1318,6 +1319,7 @@ mod tests {
         fs::write(&identity_path, b"not a stored identity")?;
         #[cfg(unix)]
         fs::set_permissions(&identity_path, fs::Permissions::from_mode(0o644))?;
+        // oracle: scaffold
         assert!(store.read_identity(authority_id)?.is_none());
         let replacement = StoredIdentity {
             version: 1,
@@ -1336,11 +1338,13 @@ mod tests {
                 previous: None,
             },
         };
+        // oracle: scaffold
         assert!(store.write_identity(&replacement).is_err());
         assert!(
             store.reconcile().is_err(),
             "untrusted identity file did not stop reconciliation"
         );
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
         fs::remove_file(&identity_path)?;
 
@@ -1350,6 +1354,7 @@ mod tests {
         #[cfg(unix)]
         fs::set_permissions(&pending_path, fs::Permissions::from_mode(0o644))?;
         store.reconcile()?;
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         assert!(pending::read_in_progress(&directory.0, &hash)?.is_some());
         assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
         Ok(())

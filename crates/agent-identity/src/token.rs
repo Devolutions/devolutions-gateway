@@ -123,10 +123,13 @@ mod tests {
     fn accepts_valid_token_and_hashes_the_entire_string() -> anyhow::Result<()> {
         let raw = token_with_bag(r#"{"u":"https://example.test/dvls","extra":true}"#);
         let token = Token::parse(&raw)?;
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
         assert_eq!(token.base_url(), "https://example.test/dvls");
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         assert_eq!(token.sha256_hex(), hex::encode(Sha256::digest(raw.as_bytes())));
         assert_eq!(sha256_hex(&raw), token.sha256_hex());
         assert_eq!(token.sha256_hex().len(), 64);
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
         assert!(!format!("{token:?} {token}").contains(&raw));
         assert!(!format!("{token:?} {token}").contains(&raw[..12]));
         Ok(())
