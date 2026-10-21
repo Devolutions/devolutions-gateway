@@ -318,6 +318,27 @@ async fn channel_layer_prefixes_an_rpc_path_that_matches_the_base_path() -> anyh
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+#[tokio::test]
+async fn channel_layer_ignores_every_trailing_slash_of_the_url_path() -> anyhow::Result<()> {
+    let vectors = vectors()?;
+    let (signer, _) = vector_signer(&vectors, "device-a")?;
+    for (base_url, path) in [
+        ("https://example.test//", CONNECT_RPC_PATH.to_owned()),
+        ("https://example.test/dvls//", format!("/dvls{CONNECT_RPC_PATH}")),
+    ] {
+        let service = ChannelLayer::new(signer.clone(), &url::Url::parse(base_url)?).layer(tower::service_fn(
+            |request: Request<()>| async move { Ok::<_, std::io::Error>(request) },
+        ));
+        let (handoff, _nonce) = OpeningNonce::new();
+        let mut opening = Request::builder().method(Method::POST).uri(CONNECT_RPC_PATH).body(())?;
+        opening.extensions_mut().insert(handoff);
+        let request = service.oneshot(opening).await.map_err(|error| anyhow!("{error}"))?;
+        assert_eq!(request.uri().path(), path, "{base_url}");
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn channel_layer_preserves_root_path_and_applies_clock_offset() -> anyhow::Result<()> {
     let vectors = vectors()?;

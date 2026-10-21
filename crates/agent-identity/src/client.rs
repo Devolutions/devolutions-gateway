@@ -27,7 +27,7 @@ use uuid::Uuid;
 use x509_cert::Certificate;
 
 use crate::metadata::Metadata;
-use crate::token::Token;
+use crate::token::{self, Token};
 
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
@@ -417,8 +417,13 @@ impl Client {
     }
 }
 
+/// Joins an operation's path to `base_url` without its trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment
+/// token"][contract]).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
 fn operation_url(base_url: &Url, operation: &str) -> ClientResult<Url> {
     let mut url = base_url.clone();
+    token::trim_trailing_slashes(&mut url);
     let mut segments = url
         .path_segments_mut()
         .map_err(|()| ClientError::local("invalid authority URL"))?;
@@ -667,6 +672,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
     #[test]
     fn joins_path_prefix_without_duplicate_slashes() {
         for (base, expected) in [
@@ -679,6 +686,10 @@ mod tests {
                 "https://example.test/api/agent-identity/v1/enroll",
             ),
             (
+                "https://example.test//",
+                "https://example.test/api/agent-identity/v1/enroll",
+            ),
+            (
                 "https://example.test/mock",
                 "https://example.test/mock/api/agent-identity/v1/enroll",
             ),
@@ -686,9 +697,17 @@ mod tests {
                 "https://example.test/mock/",
                 "https://example.test/mock/api/agent-identity/v1/enroll",
             ),
+            (
+                "https://example.test/mock//",
+                "https://example.test/mock/api/agent-identity/v1/enroll",
+            ),
         ] {
             let base = Url::parse(base).expect("valid test URL");
-            assert_eq!(operation_url(&base, "enroll").expect("join URL").as_str(), expected);
+            assert_eq!(
+                operation_url(&base, "enroll").expect("join URL").as_str(),
+                expected,
+                "{base}"
+            );
         }
     }
 

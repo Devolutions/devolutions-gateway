@@ -5,7 +5,7 @@ use std::io::{ErrorKind, Read as _};
 use anyhow::{Context as _, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use device_key::{self as keys, DeviceKey, KeyBackend};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
@@ -13,7 +13,7 @@ use url::Url;
 use uuid::{Uuid, Variant};
 
 pub use crate::private_file::UntrustedAuthorityDirectory;
-use crate::token::Token;
+use crate::token::{self, Token};
 use crate::{pending, private_file, rejected, state_lock};
 
 const MAX_IDENTITY_BYTES: u64 = 2 * 1024 * 1024;
@@ -26,6 +26,11 @@ pub struct StoredIdentity {
     pub version: u8,
     pub authority_id: Uuid,
     pub identity_id: Uuid,
+    /// The token's `u` without trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]),
+    /// including when read from a file written with them.
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
+    #[serde(serialize_with = "serialize_base_url", deserialize_with = "deserialize_base_url")]
     pub base_url: Url,
     pub config: Value,
     pub token_sha256: String,
@@ -830,6 +835,16 @@ fn config_revision(config: &Value) -> anyhow::Result<u64> {
         .context("config is missing its revision")
 }
 
+fn serialize_base_url<S: Serializer>(url: &Url, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(url.as_str().trim_end_matches('/'))
+}
+
+fn deserialize_base_url<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Url, D::Error> {
+    let mut url = Url::deserialize(deserializer)?;
+    token::trim_trailing_slashes(&mut url);
+    Ok(url)
+}
+
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
@@ -905,11 +920,35 @@ mod tests {
     }
 
     fn test_token() -> anyhow::Result<Token> {
+        token_for("https://example.test")
+    }
+
+    fn token_for(base_url: &str) -> anyhow::Result<Token> {
         Token::parse(&format!(
             "dvaet1.{}.{}",
-            URL_SAFE_NO_PAD.encode(r#"{"u":"https://example.test"}"#),
+            URL_SAFE_NO_PAD.encode(json!({ "u": base_url }).to_string()),
             "A".repeat(43)
         ))
+    }
+
+    fn identity_at(base_url: Url) -> StoredIdentity {
+        StoredIdentity {
+            version: 1,
+            authority_id: Uuid::new_v4(),
+            identity_id: Uuid::new_v4(),
+            base_url,
+            config: json!({"version": 1, "revision": 7}),
+            token_sha256: hex::encode([1u8; 32]),
+            rejected: None,
+            keys: KeySlots {
+                current: KeyRecord {
+                    key_name: keys::new_key_name(IDENTITY_KEY_PREFIX),
+                    certificate_chain: Some(vec!["YWJj".into()]),
+                },
+                pending: None,
+                previous: None,
+            },
+        }
     }
 
     fn enroll_locally(store: &Store, data_dir: &Utf8Path) -> anyhow::Result<StoredIdentity> {
@@ -981,6 +1020,44 @@ mod tests {
         assert!(encoded["keys"]["pending"].get("certificate_chain").is_none());
         let rebuilt: StoredIdentity = serde_json::from_value(encoded)?;
         assert_eq!(rebuilt, identity);
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    #[test]
+    fn stores_the_token_base_url_without_trailing_slashes() -> anyhow::Result<()> {
+        for (u, stored) in [
+            ("https://example.test", "https://example.test"),
+            ("https://example.test/", "https://example.test"),
+            ("https://example.test//", "https://example.test"),
+            ("https://example.test/dvls/", "https://example.test/dvls"),
+            ("https://example.test/dvls//", "https://example.test/dvls"),
+        ] {
+            let identity = identity_at(token_for(u)?.base_url().clone());
+            assert_eq!(serde_json::to_value(&identity)?["base_url"], stored, "{u}");
+        }
+        Ok(())
+    }
+
+    // The store updates an identity only while its snapshot equals the file read back.
+    // oracle: property round-trip
+    #[test]
+    fn base_urls_with_trailing_slashes_read_back_as_written() -> anyhow::Result<()> {
+        for u in [
+            "https://example.test/",
+            "https://example.test//",
+            "https://example.test/dvls/",
+            "https://example.test/dvls//",
+        ] {
+            let from_token = identity_at(token_for(u)?.base_url().clone());
+            let mut json = serde_json::to_value(identity_at(Url::parse(u)?))?;
+            json["base_url"] = json!(u);
+            let from_file: StoredIdentity = serde_json::from_value(json)?;
+            for identity in [from_token, from_file] {
+                let reread: StoredIdentity = serde_json::from_value(serde_json::to_value(&identity)?)?;
+                assert_eq!(reread, identity, "{u}");
+            }
+        }
         Ok(())
     }
 
@@ -1061,7 +1138,7 @@ mod tests {
         }
         let store = directory.store()?;
         let raw = "not a token";
-        let hash_hex = crate::token::sha256_hex(raw);
+        let hash_hex = token::sha256_hex(raw);
         let path = pending::file_path(&directory.0, &hash_hex)?;
         let malformed = serde_json::to_vec(&json!({"version": 1, "token": raw}))?;
         #[cfg(windows)]

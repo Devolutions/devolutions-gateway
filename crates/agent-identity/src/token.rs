@@ -43,7 +43,7 @@ impl Token {
         );
         let fields: serde_json::Value =
             serde_json::from_slice(&decoded_bag).map_err(|_| anyhow::anyhow!("invalid enrollment token bag"))?;
-        let base_url = fields
+        let mut base_url = fields
             .as_object()
             .and_then(|fields| fields.get("u"))
             .and_then(serde_json::Value::as_str)
@@ -52,6 +52,7 @@ impl Token {
                 url.scheme() == "https" && url.has_host() && url.query().is_none() && url.fragment().is_none()
             })
             .context("invalid enrollment authority URL")?;
+        trim_trailing_slashes(&mut base_url);
         Ok(Self {
             value: Zeroizing::new(value.to_owned()),
             base_url,
@@ -74,6 +75,16 @@ impl Token {
 /// Hashes the full UTF-8 token text, including when parsing rejects its format.
 pub fn sha256_hex(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
+}
+
+/// Removes the trailing slashes of a base URL's path ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]).
+///
+/// The path of a site root stays `/`, because an `https` URL always has one.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
+pub(crate) fn trim_trailing_slashes(url: &mut Url) {
+    let path = url.path().trim_end_matches('/').to_owned();
+    url.set_path(&path);
 }
 
 fn is_base64url(byte: u8) -> bool {
