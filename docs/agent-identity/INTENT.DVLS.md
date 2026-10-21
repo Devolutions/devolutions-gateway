@@ -77,8 +77,9 @@ It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONT
 - A token allows from 1 to 1,000,000 uses.
 - A token's friendly-name format follows the shared intent, "Enrollment"; a format with an unpaired brace or an unknown placeholder is rejected.
 - A token's config contributes the product-specific fields of each identity enrolled with it.
-- A token is refused when the config it would give an identity does not fit the channel's size limit (`CONTRACT.agent-identity.md` §7.1).
+- A token or a change to Agent Identity's settings is refused when a config it would give an identity does not fit the channel's size limit (`CONTRACT.agent-identity.md` §7.1).
 - If a later change outside the module, such as a longer Access URI, leaves an identity's effective config too large to rebuild within that limit, the identity keeps its last config while the others are still updated, and administrators are warned with the affected identities until a token or setting change resolves it, so that no server-wide setting depends on Agent Identity.
+  An enrollment whose config cannot be built then answers `unavailable` and creates nothing, so the agent, which did nothing wrong, retries until an administrator resolves it.
 - Tokens are immutable after creation; deletion is the only change.
 
 ### Identities
