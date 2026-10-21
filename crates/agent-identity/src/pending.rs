@@ -330,6 +330,62 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn state_paths_take_only_a_lowercase_hex_token_hash() {
+        let dir = Utf8Path::new("data");
+        let hash = "0123456789abcdef".repeat(4);
+        assert!(file_path(dir, &hash).is_ok());
+        assert!(in_progress_path(dir, &hash).is_ok());
+        for invalid in [hash.to_uppercase(), hash[..63].to_owned(), format!("../{}", &hash[3..])] {
+            assert!(file_path(dir, &invalid).is_err(), "{invalid}");
+            assert!(in_progress_path(dir, &invalid).is_err(), "{invalid}");
+        }
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn a_pending_payload_of_exactly_16_kib_is_read() -> anyhow::Result<()> {
+        let token = Token::parse(&format!(
+            "dvaet1.{}.{}",
+            URL_SAFE_NO_PAD.encode(r#"{"u":"https://example.test"}"#),
+            "A".repeat(43)
+        ))?;
+        let dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("pending-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir_all(&dir)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            if fs::metadata(&dir)?.permissions().mode() & 0o022 != 0 {
+                fs::remove_dir_all(&dir)?;
+                return Ok(());
+            }
+        }
+        private_file::prepare_directories(&dir, true)?;
+        let path = file_path(&dir, &token.sha256_hex())?;
+        let body = format!(r#"{{"version":1,"token":"{}"}}"#, token.as_str());
+        // JSON allows trailing white space, which pads the payload to an exact size.
+        for (size, readable) in [(16 * 1024, true), (16 * 1024 + 1, false)] {
+            let padded = format!("{body}{}", " ".repeat(size - body.len()));
+            #[cfg(windows)]
+            let contents = crate::windows::protect(padded.as_bytes())?;
+            #[cfg(not(windows))]
+            let contents = padded.into_bytes();
+            private_file::write_atomic(&dir, &path, &contents, true)?;
+            assert_eq!(
+                matches!(read(&path, true)?, PendingRead::Ready(found) if found.as_str() == token.as_str()),
+                readable,
+                "{size}"
+            );
+        }
+        fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Local state
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]

@@ -1462,6 +1462,228 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[cfg(windows)]
+    #[test]
+    fn a_rejection_marker_that_cannot_be_read_keeps_its_token_from_enrolling() -> anyhow::Result<()> {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let directory = TestDir::new()?;
+        let store = directory.store()?;
+        let token = test_token()?;
+        let hash_hex = token.sha256_hex();
+        pending::write(&directory.0, &token, true)?;
+        store.discard_enrollment(&hash_hex, EnrollmentDiscardReason::TokenInvalid)?;
+        let marker_path = directory
+            .0
+            .join("identity")
+            .join("rejected")
+            .join(format!("{hash_hex}.json"));
+        // A reader that shares nothing makes the agent's own marker unreadable without making it untrusted.
+        let held_marker = fs::OpenOptions::new().read(true).share_mode(0).open(&marker_path)?;
+        let path = pending::write(&directory.0, &token, true)?;
+
+        let result = store.begin_enrollment(&token).map(|progress| progress.is_some());
+        drop(held_marker);
+
+        assert!(
+            result.is_err(),
+            "an unreadable rejection marker was read as absent: {result:?}"
+        );
+        assert!(path.exists());
+        assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    #[test]
+    fn a_crash_after_removing_a_finished_pending_file_keeps_the_identity_key() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        pending::write(&directory.0, &token, true)?;
+        let (progress, _key) = store
+            .begin_enrollment(&token)?
+            .context("new token was already processed")?;
+        let mut identity = identity_at(token.base_url());
+        identity.token_sha256 = token.sha256_hex();
+        identity.keys.current.key_name = progress.key_name.clone();
+        store.write_identity(&identity)?;
+        pending::remove_file(&directory.0, &token.sha256_hex(), true)?;
+
+        store.reconcile()?;
+
+        assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
+        assert!(keys::open(store.key_backend(), &progress.key_name)?.is_some());
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    #[test]
+    fn an_identity_outside_the_stored_format_is_never_written() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let valid = || {
+            let mut identity = identity_at("https://example.test/dvls");
+            identity.keys.current.key_name = keys::new_key_name("ai");
+            identity
+        };
+        store.write_identity(&valid())?;
+        let invalid: [(&str, fn(&mut StoredIdentity)); 5] = [
+            ("version 2", |identity| identity.version = 2),
+            ("http base URL", |identity| {
+                identity.base_url = "http://example.test/dvls".to_owned()
+            }),
+            ("upper-case token hash", |identity| {
+                identity.token_sha256 = "AB".repeat(32)
+            }),
+            ("current key without a chain", |identity| {
+                identity.keys.current.certificate_chain = None
+            }),
+            ("key name without the agent's prefix", |identity| {
+                identity.keys.current.key_name = keys::new_key_name("other")
+            }),
+        ];
+        for (case, change) in invalid {
+            let mut identity = valid();
+            change(&mut identity);
+            assert!(store.write_identity(&identity).is_err(), "{case}");
+            assert_eq!(store.read_identity(identity.authority_id)?, None, "{case}");
+        }
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn a_restart_before_an_enrollment_finishes_keeps_the_stored_identity_s_key() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let path = pending::write(&directory.0, &token, true)?;
+        let (progress, _key) = store
+            .begin_enrollment(&token)?
+            .context("new token was already processed")?;
+        let mut identity = identity_at(token.base_url());
+        identity.token_sha256 = token.sha256_hex();
+        identity.keys.current.key_name = progress.key_name.clone();
+        store.write_identity(&identity)?;
+
+        let restarted = directory.store()?;
+
+        assert!(restarted.begin_enrollment(&token)?.is_none());
+        assert!(!path.exists());
+        assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
+        assert!(keys::open(restarted.key_backend(), &progress.key_name)?.is_some());
+        assert_eq!(restarted.read_identity(identity.authority_id)?, Some(identity));
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn an_identity_file_of_exactly_2_mib_is_read() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        let path = store.identity_path(identity.authority_id);
+        let json = serde_json::to_vec(&identity)?;
+        // JSON allows leading white space, which pads the file to an exact size.
+        for (size, readable) in [(2 * 1024 * 1024, true), (2 * 1024 * 1024 + 1, false)] {
+            let mut padded = vec![b' '; size - json.len()];
+            padded.extend_from_slice(&json);
+            private_file::write_atomic(&directory.0, &path, &padded, true)?;
+            assert_eq!(
+                store
+                    .read_identity(identity.authority_id)
+                    .is_ok_and(|read| read.as_ref() == Some(&identity)),
+                readable,
+                "{size}"
+            );
+        }
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn a_new_enrollment_replaces_its_authority_s_identity_whatever_its_config_revision() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let old = enroll_locally(&store, &directory.0)?;
+        let token = token_for("https://other.test")?;
+        pending::write(&directory.0, &token, true)?;
+        let (progress, _key) = store
+            .begin_enrollment(&token)?
+            .context("new token was already processed")?;
+        let new = StoredIdentity {
+            version: 1,
+            authority_id: old.authority_id,
+            identity_id: Uuid::new_v4(),
+            base_url: token.base_url().to_owned(),
+            config: json!({"version": 1, "revision": 1}),
+            token_sha256: token.sha256_hex(),
+            rejected: None,
+            keys: KeySlots {
+                current: KeyRecord {
+                    key_name: progress.key_name,
+                    certificate_chain: Some(vec!["bmV3".into()]),
+                },
+                pending: None,
+                previous: None,
+            },
+        };
+
+        store.replace_identity(&old, &new)?;
+
+        assert_eq!(store.read_identity(old.authority_id)?, Some(new));
+        assert!(keys::open(store.key_backend(), &old.keys.current.key_name)?.is_none());
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn an_identity_cannot_take_the_key_of_another_pending_enrollment() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let other = token_for("https://other.test")?;
+        for pending_token in [&token, &other] {
+            pending::write(&directory.0, pending_token, true)?;
+        }
+        store
+            .begin_enrollment(&token)?
+            .context("new token was already processed")?;
+        let (other_progress, _key) = store
+            .begin_enrollment(&other)?
+            .context("new token was already processed")?;
+        let mut identity = identity_at(token.base_url());
+        identity.token_sha256 = token.sha256_hex();
+        identity.keys.current.key_name = other_progress.key_name.clone();
+
+        assert!(store.write_identity(&identity).is_err());
+
+        assert_eq!(store.read_identity(identity.authority_id)?, None);
+        assert!(keys::open(store.key_backend(), &other_progress.key_name)?.is_some());
+        Ok(())
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn stale_config_and_key_snapshots_cannot_destroy_a_promoted_key() -> anyhow::Result<()> {

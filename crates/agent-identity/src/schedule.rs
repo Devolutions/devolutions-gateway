@@ -117,6 +117,26 @@ mod tests {
         );
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
+    #[test]
+    fn after_a_restart_the_anchor_is_the_load_time_but_never_past_not_before() {
+        // The moment the agent stored the certificate is not persisted, so after a restart the agent passes the moment
+        // it loaded the certificate.
+        let stored_at = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        let not_before = stored_at + 10 * DAY;
+        let not_after = not_before + 90 * DAY;
+        let loaded_before_not_before = stored_at + 4 * DAY;
+        assert_eq!(
+            renewal_time(not_before, not_after, loaded_before_not_before, None, 0.0),
+            loaded_before_not_before + 60 * DAY
+        );
+        let loaded_after_not_before = not_before + 20 * DAY;
+        assert_eq!(
+            renewal_time(not_before, not_after, loaded_after_not_before, None, 0.0),
+            not_before + 60 * DAY
+        );
+    }
+
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     #[test]
     fn only_an_absolute_https_channel_url_without_query_or_fragment_is_usable() {

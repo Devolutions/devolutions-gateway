@@ -138,6 +138,18 @@ mod tests {
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[test]
+    fn accepts_dashes_and_underscores_in_the_bag_and_secret() -> anyhow::Result<()> {
+        // The bag is the base64url of `{"u":"https://example.test/dvls","x":"???~~~"}`.
+        let bag = "eyJ1IjoiaHR0cHM6Ly9leGFtcGxlLnRlc3QvZHZscyIsIngiOiI_Pz9-fn4ifQ";
+        // The secret is the base64url of `fb f0` followed by 30 zero bytes.
+        let secret = format!("-_{}", "A".repeat(41));
+        let raw = format!("dvaet1.{bag}.{secret}");
+        assert_eq!(Token::parse(&raw)?.base_url(), "https://example.test/dvls");
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    #[test]
     fn rejects_every_malformed_token_locally_without_exposing_it() {
         let valid = token_with_bag(r#"{"u":"https://example.test/dvls"}"#);
         let invalid = [
