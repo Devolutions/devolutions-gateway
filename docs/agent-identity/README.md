@@ -122,9 +122,9 @@ While no channel works, the agent checks in instead: an HTTPS request that fetch
 ### When an identity ends
 
 An identity ends when the authority revokes or deletes it, or refuses a renewal because the certificate expired beyond its grace.
-The agent learns of it from the authority's answer to its next request.
+The agent learns of it from the authority's answer to its next request or, for a revocation, from the authority closing an open channel stream.
 It then records the identity as rejected, logs `The Agent Identity is rejected; it stops renewing and checking in` with the reason in `code`, and never contacts the authority for that identity again.
-The same happens, with the code `key_lost`, when the identity's current device key no longer exists.
+The agent also ends an identity whose current device key no longer exists, recording it as rejected with the code `key_lost`.
 
 Revocation is final.
 Running the same token again is a no-op, and only an enrollment with a different token brings the device back, as a new identity.
