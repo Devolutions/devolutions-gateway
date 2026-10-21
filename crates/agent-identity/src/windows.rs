@@ -17,8 +17,7 @@ use win_api_wrappers::security::privilege;
 use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE,
-    HANDLE, HLOCAL,
-    LUID, LocalFree,
+    HANDLE, HLOCAL, LUID, LocalFree,
 };
 use windows::Win32::Security::Authorization::{
     AUTHZ_CLIENT_CONTEXT_HANDLE, AUTHZ_RESOURCE_MANAGER_HANDLE, AUTHZ_RM_FLAG_NO_AUDIT, AuthzContextInfoGroupsSids,
