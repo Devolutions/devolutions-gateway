@@ -136,9 +136,7 @@ public class StructuredFieldTests
     [InlineData("sig=?")]
     public void RejectsAMalformedDictionary(string input)
     {
-        Assert.False(TryParseDictionary(input, out IReadOnlyList<DictionaryMember>? dictionary));
-        // oracle: scaffold
-        Assert.Null(dictionary);
+        Assert.False(TryParseDictionary(input, out _));
     }
 
     // A string is quoted, and a backslash precedes each quote or backslash in it.

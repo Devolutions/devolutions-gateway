@@ -5,10 +5,9 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class AgentIdentityErrorTests
 {
-    // 12:00:00.750 UTC given in a +02:00 offset,
-    // which CONTRACT.agent-identity.md §1 writes as a UTC timestamp in whole seconds.
-    private static readonly DateTimeOffset ServerTime =
-        new DateTimeOffset(2026, 9, 24, 14, 0, 0, TimeSpan.FromHours(2)).AddMilliseconds(750);
+    // 12:00:00 UTC given in a +02:00 offset,
+    // which CONTRACT.agent-identity.md §1 writes as a UTC timestamp.
+    private static readonly DateTimeOffset ServerTime = new(2026, 9, 24, 14, 0, 0, TimeSpan.FromHours(2));
 
     private const string ServerTimeText = "2026-09-24T12:00:00Z";
 

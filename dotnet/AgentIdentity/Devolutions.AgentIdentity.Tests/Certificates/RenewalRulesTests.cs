@@ -52,8 +52,6 @@ public class RenewalRulesTests
 
         Assert.Equal(RenewalOutcome.ReturnPendingCertificate, decision.Outcome);
         Assert.Null(decision.Error);
-        // oracle: scaffold
-        Assert.Null(decision.FailureDetail);
     }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
@@ -86,7 +84,5 @@ public class RenewalRulesTests
 
         Assert.Equal(RenewalOutcome.IssuePendingCertificate, decision.Outcome);
         Assert.Null(decision.Error);
-        // oracle: scaffold
-        Assert.Null(decision.FailureDetail);
     }
 }

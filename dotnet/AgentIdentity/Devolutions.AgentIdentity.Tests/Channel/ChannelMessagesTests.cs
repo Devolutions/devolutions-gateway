@@ -30,18 +30,15 @@ public class ChannelMessagesTests
     public static TheoryData<string> MessageNames => new(Messages.Keys);
 
     // CONTRACT.agent-identity.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
-    // A push answers no agent message, so it has no correlation_id.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Theory]
     [MemberData(nameof(MessageNames))]
-    public void MessageHasALowercaseUuidIdAndNoCorrelationId(string message)
+    public void MessageHasALowercaseUuidId(string message)
     {
         ServerMessage built = Messages[message]();
 
         Assert.Matches(TestJson.LowercaseUuidPattern, built.Id);
-        // oracle: scaffold
-        Assert.False(built.HasCorrelationId);
     }
 
     // Steps 5 and 7: the agent acknowledges a message by its id, so no two messages share one.

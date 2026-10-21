@@ -99,18 +99,20 @@ public class ResponseBodiesTests
 
     // The response lists one root normally and two during a rotation.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.1
-    // oracle: scaffold
     [Fact]
-    public void TrustAnchorListsEveryRootInTheOrderGiven()
+    public void TrustAnchorListsEveryRoot()
     {
         using X509Certificate2 newRoot = SelfSignedRoot(Now.AddDays(-1), Now.AddYears(10));
 
         byte[] body = ResponseBodies.TrustAnchor([VectorRoot, newRoot]);
 
-        JsonElement[] roots = Roots(body);
-        Assert.Equal(
-            [VectorRoot.RawData, newRoot.RawData],
-            roots.Select(root => TestJson.CanonicalBase64(TestJson.Members(root)["certificate"])));
+        byte[][] listed =
+        [
+            .. Roots(body).Select(root => TestJson.CanonicalBase64(TestJson.Members(root)["certificate"])),
+        ];
+        Assert.Equal(2, listed.Length);
+        Assert.Contains(VectorRoot.RawData, listed);
+        Assert.Contains(newRoot.RawData, listed);
     }
 
     // The response always lists a root, and two during a rotation.

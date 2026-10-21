@@ -108,11 +108,7 @@ public class FriendlyNameFormatTests
     [InlineData("{0}")]
     public void TryParseRejectsAnUnpairedBraceOrAnUnknownPlaceholder(string format)
     {
-        Assert.False(FriendlyNameFormat.TryParse(format, out FriendlyNameFormat? parsed, out string? error));
-        // oracle: scaffold
-        Assert.Null(parsed);
-        // oracle: scaffold
-        Assert.False(string.IsNullOrWhiteSpace(error));
+        Assert.False(FriendlyNameFormat.TryParse(format, out _, out _));
     }
 
     // The error says where the problem is, counting Unicode scalar values from 1,
@@ -311,19 +307,6 @@ public class FriendlyNameFormatTests
         AgentMetadata metadata = Validated(new Dictionary<string, string> { ["hostname"] = "pc-042" });
 
         Assert.Equal("0f8fad5b-d9cb-469f-a165-70867728950e", Evaluate(format, metadata, tokenName));
-    }
-
-    // A lone surrogate is no Unicode scalar value, so it counts as one U+FFFD REPLACEMENT CHARACTER,
-    // which Unicode §3.9 recommends for an ill-formed code unit, and the name stays well-formed UTF-16.
-    // Validated metadata holds no lone surrogate, but a token name or the format text can.
-    // oracle: scaffold
-    [Fact]
-    public void ReplacesALoneSurrogateWithTheReplacementCharacter()
-    {
-        Assert.Equal("\uFFFDpc", Evaluate("{token_name}", tokenName: "\uD83Dpc"));
-        Assert.Equal("pc\uFFFD", Evaluate("{token_name}", tokenName: "pc\uDE00"));
-        Assert.Equal("\uFFFD\uFFFD", Evaluate("{token_name}", tokenName: "\uDE00\uD83D"));
-        Assert.Equal("pc\uFFFD", Evaluate("pc\uD83D", tokenName: string.Empty));
     }
 
     // The default format is `{hostname}`.

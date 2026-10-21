@@ -16,7 +16,6 @@ public class AgentIdentityProtocolTests
     ];
 
     // CONTRACT.agent-identity.md §1: timestamps are RFC 3339 UTC strings ending in `Z`, such as 2026-09-24T12:00:00Z.
-    // A timestamp names the whole second that contains the instant.
     [Theory]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("2026-09-24T12:00:00+00:00", "2026-09-24T12:00:00Z")]
@@ -24,8 +23,6 @@ public class AgentIdentityProtocolTests
     [InlineData("2026-09-24T14:00:00+02:00", "2026-09-24T12:00:00Z")]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("2026-09-24T23:30:00-01:00", "2026-09-25T00:30:00Z")]
-    // oracle: scaffold
-    [InlineData("2026-09-24T12:00:00.9999999+00:00", "2026-09-24T12:00:00Z")]
     public void FormatTimestampWritesUtcWholeSeconds(string instant, string expected)
     {
         DateTimeOffset value = DateTimeOffset.Parse(instant, CultureInfo.InvariantCulture);

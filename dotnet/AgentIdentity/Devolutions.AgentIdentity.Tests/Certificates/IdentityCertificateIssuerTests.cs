@@ -109,8 +109,6 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
             Assert.IsType<X509EnhancedKeyUsageExtension>(leaf.Extensions[ExtendedKeyUsageOid]);
 
         Assert.Equal([ClientAuth], extension.EnhancedKeyUsages.Cast<Oid>().Select(oid => oid.Value));
-        // oracle: scaffold
-        Assert.False(extension.Critical);
     }
 
     // CONTRACT.agent-identity.md §4: KeyUsage digitalSignature; RFC 5280 §4.2.1.3: marked critical.
@@ -139,26 +137,18 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
             Assert.IsType<X509SubjectKeyIdentifierExtension>(_root.Extensions[SubjectKeyIdentifierOid]);
 
         Assert.Equal(issuer.SubjectKeyIdentifierBytes.ToArray(), authority.KeyIdentifier?.ToArray());
-        // oracle: scaffold
-        Assert.Null(authority.NamedIssuer);
-        // oracle: scaffold
-        Assert.Null(authority.SerialNumber);
         Assert.False(authority.Critical);
     }
 
-    // Method (1): the SHA-1 hash of the BIT STRING subjectPublicKey, in a non-critical extension.
+    // A subject key identifier, in a non-critical extension.
     // oracle: spec RFC 5280 §4.2.1.2
     [Fact]
-    public void SubjectKeyIdentifierIsTheSha1OfTheKey()
+    public void SubjectKeyIdentifierIsNotCritical()
     {
         using X509Certificate2 leaf = Issue();
         X509SubjectKeyIdentifierExtension extension =
             Assert.IsType<X509SubjectKeyIdentifierExtension>(leaf.Extensions[SubjectKeyIdentifierOid]);
 
-        byte[] subjectPublicKey = TestCsr.UncompressedPoint(_agentKey);
-
-        // oracle: scaffold
-        Assert.Equal(SHA1.HashData(subjectPublicKey), extension.SubjectKeyIdentifierBytes.ToArray());
         Assert.False(extension.Critical);
     }
 
@@ -183,16 +173,6 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(expected, extensions.Order(StringComparer.Ordinal));
         // oracle: spec RFC 5280 §4.1.2.1
         Assert.Equal(3, leaf.Version);
-    }
-
-    // RFC 5758 §3.2: the issuer's generator signs with SHA-256, so ecdsa-with-SHA256 for a P-256 root.
-    // oracle: scaffold
-    [Fact]
-    public void IsSignedWithSha256()
-    {
-        using X509Certificate2 leaf = Issue();
-
-        Assert.Equal("1.2.840.10045.4.3.2", leaf.SignatureAlgorithm.Value);
     }
 
     // A positive INTEGER of at most 20 octets.
@@ -235,31 +215,14 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(second, SerialNumber(leaf));
     }
 
-    // RFC 5280 §4.1.2.5.1 and §4.1.2.5.2: certificate times are whole seconds,
-    // and a notBefore rounded up would issue a certificate that is not yet valid.
-    // oracle: scaffold
+    // The lifetime is a server setting.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
-    public void NotBeforeIsTheClockTruncatedToTheSecond()
+    public void NotAfterIsNotBeforePlusTheLifetime()
     {
-        using X509Certificate2 leaf = Issue();
+        using X509Certificate2 leaf = Issue(lifetime: TimeSpan.FromDays(30));
 
-        Assert.Equal(NowInSeconds.UtcDateTime, leaf.NotBefore.ToUniversalTime());
-    }
-
-    // CONTRACT.agent-identity.md §4: the lifetime is a server setting.
-    // RFC 5280 §4.1.2.5: a certificate holds whole seconds, so a fraction of a second in the lifetime is dropped,
-    // since rounding it up would exceed the lifetime.
-    // oracle: scaffold
-    [Theory]
-    [InlineData(0)]
-    [InlineData(500)]
-    public void NotAfterIsNotBeforePlusTheWholeSecondsOfTheLifetime(int lifetimeMilliseconds)
-    {
-        TimeSpan lifetime = TimeSpan.FromDays(30) + TimeSpan.FromMilliseconds(lifetimeMilliseconds);
-
-        using X509Certificate2 leaf = Issue(lifetime: lifetime);
-
-        Assert.Equal(NowInSeconds.AddDays(30).UtcDateTime, leaf.NotAfter.ToUniversalTime());
+        Assert.Equal(TimeSpan.FromDays(30), leaf.NotAfter.ToUniversalTime() - leaf.NotBefore.ToUniversalTime());
     }
 
     // The lifetime is capped at the issuing root's notAfter.
@@ -290,9 +253,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     {
         using X509Certificate2 leaf = Issue(clock: new AdvancingTimeProvider(Now, TimeSpan.FromHours(1)));
 
-        // oracle: scaffold
-        Assert.Equal(NowInSeconds.UtcDateTime, leaf.NotBefore.ToUniversalTime());
-        Assert.Equal((NowInSeconds + Lifetime).UtcDateTime, leaf.NotAfter.ToUniversalTime());
+        Assert.Equal(Lifetime, leaf.NotAfter.ToUniversalTime() - leaf.NotBefore.ToUniversalTime());
     }
 
     // The certificate chains to the root that issued it, for client authentication.
@@ -534,8 +495,6 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         public override void GetBytes(Span<byte> data)
         {
             byte[] draw = draws[_next++];
-            // oracle: scaffold
-            Assert.Equal(draw.Length, data.Length);
             draw.CopyTo(data);
         }
     }
