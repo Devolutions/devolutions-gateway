@@ -446,7 +446,6 @@ pub(crate) struct Event {
 
 struct IssuedKey {
     identity_id: Uuid,
-    token_id: Uuid,
     thumbprint: String,
     /// Records the original issuance time in Unix seconds, even after identity deletion.
     issued_at: i64,
@@ -459,7 +458,7 @@ pub struct State {
     pub(crate) identities: HashMap<Uuid, Identity>,
     /// Certificate thumbprint → identity.
     pub(crate) cert_index: HashMap<String, Uuid>,
-    /// INVARIANT: each issued SPKI key retains its token and issuance time after identity deletion.
+    /// INVARIANT: each issued SPKI key retains its issuance time after identity deletion.
     issued_keys: HashMap<[u8; 32], IssuedKey>,
     /// All known roots; the issuing root is the last one, `published` gates
     /// `trust-anchor` listing.
@@ -883,14 +882,13 @@ impl State {
         let token = self.tokens.get(&token_id).expect("hash index consistent");
         if let Some(issued) = self.issued_keys.get(&csr_key_hash) {
             let identity = self.identities.get(&issued.identity_id);
-            if issued.token_id == token_id
-                && identity.is_some_and(|identity| {
-                    !identity.revoked()
-                        && identity
-                            .current_cert()
-                            .is_some_and(|cert| cert.thumbprint == issued.thumbprint)
-                })
-            {
+            if identity.is_some_and(|identity| {
+                identity.token_id == token_id
+                    && !identity.revoked()
+                    && identity
+                        .current_cert()
+                        .is_some_and(|cert| cert.thumbprint == issued.thumbprint)
+            }) {
                 let chain = self.chain_for_current(issued.identity_id)?;
                 return Ok(EnrollOutcome {
                     identity_id: issued.identity_id,
@@ -900,8 +898,8 @@ impl State {
             if token.deleted_at.is_some() {
                 return Err(ApiError::token_invalid());
             }
-            // A deleted identity's key gets `identity_revoked` whatever the token (§2.1).
-            if identity.is_some() && issued.token_id != token_id {
+            // No token is kept for a deleted identity's key, so it gets `identity_revoked` whatever the token (§2.1).
+            if identity.is_some_and(|identity| identity.token_id != token_id) {
                 return Err(ApiError::invalid_request("CSR key belongs to another enrollment token"));
             }
             if identity.is_none_or(Identity::revoked) {
@@ -998,7 +996,6 @@ impl State {
                     csr_key_hash,
                     IssuedKey {
                         identity_id,
-                        token_id,
                         thumbprint: cert_thumbprint.clone(),
                         issued_at: leaf.not_before,
                     },
@@ -1099,7 +1096,6 @@ impl State {
         for thumbprint in retired {
             self.cert_status_changed(identity_id, &thumbprint, Some(CertStatus::Pending), CertStatus::Retired);
         }
-        let token_id = self.identities[&identity_id].token_id;
         // UNTESTED: a renewed key keeps its original issuance time after identity deletion.
         // Deleted identities must never make issued keys reusable or erase their issuance history.
         // When changing renewal, issue a pending key, delete its identity, and inspect `issued_keys`.
@@ -1109,7 +1105,6 @@ impl State {
                     csr_key_hash,
                     IssuedKey {
                         identity_id,
-                        token_id,
                         thumbprint: leaf.thumbprint.clone(),
                         issued_at: leaf.not_before,
                     },
@@ -1584,7 +1579,6 @@ impl State {
             issued_key_hash(&public_key),
             IssuedKey {
                 identity_id,
-                token_id,
                 thumbprint: thumbprint.clone(),
                 issued_at: now,
             },
@@ -1895,7 +1889,6 @@ mod tests {
         assert_eq!(reject(&mut state, &other_secret), "identity_revoked");
         let issued = &state.issued_keys[&key_hash];
         assert_eq!(issued.identity_id, identity_id);
-        assert_eq!(issued.token_id, owner_token_id);
         assert_eq!(issued.issued_at, now);
         Ok(())
     }
