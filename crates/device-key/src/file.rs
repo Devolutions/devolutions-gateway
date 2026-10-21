@@ -823,6 +823,17 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Key name
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn leftovers_of_the_longest_key_name_are_recognized() {
+        let name = format!("{}_{}", "a".repeat(64), "b".repeat(128));
+        let uuid = Uuid::new_v4();
+
+        assert_eq!(abandoned_name(&format!(".{name}-{uuid}.tmp")), Some(name.as_str()));
+        assert_eq!(abandoned_name(&format!(".{name}-{uuid}.deleted")), Some(name.as_str()));
+    }
+
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn listing_requires_the_exact_prefix_and_a_well_formed_name() -> anyhow::Result<()> {
