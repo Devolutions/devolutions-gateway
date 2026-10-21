@@ -83,13 +83,7 @@ impl Identity {
     }
 
     fn target(&self, url: &Url) -> Target {
-        self.target_with_hello(
-            url,
-            Arc::new(|| HelloFields {
-                metadata: HashMap::from([("hostname".to_owned(), "test-host".to_owned())]),
-                config_revision: 7,
-            }),
-        )
+        self.target_with_hello(url, hello_fields())
     }
 
     fn target_with_hello(&self, url: &Url, hello: Arc<dyn Fn() -> HelloFields + Send + Sync>) -> Target {
@@ -104,6 +98,25 @@ impl Identity {
 
 fn client(authority: &TestAuthority, settings: Settings) -> anyhow::Result<ChannelClient> {
     ChannelClient::new(ProxyConfig::Off, std::slice::from_ref(&authority.ca), settings)
+}
+
+fn hello_fields() -> Arc<dyn Fn() -> HelloFields + Send + Sync> {
+    Arc::new(|| HelloFields {
+        metadata: HashMap::from([("hostname".to_owned(), "test-host".to_owned())]),
+        config_revision: 7,
+    })
+}
+
+/// Waits until `condition` holds, for at most [`WAIT`].
+async fn wait_until(what: &str, condition: impl Fn() -> bool) {
+    let polled = async {
+        while !condition() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    };
+    tokio::time::timeout(WAIT, polled)
+        .await
+        .unwrap_or_else(|_| panic!("{what} did not happen in time"));
 }
 
 fn new_id() -> String {
@@ -520,6 +533,14 @@ async fn stops_after_a_terminal_or_expired_certificate_closure(
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+#[rstest]
+#[case::identity_revoked(TerminalCode::IdentityRevoked, "identity_revoked")]
+#[case::identity_unknown(TerminalCode::IdentityUnknown, "identity_unknown")]
+fn names_each_terminal_code_as_the_contract_does(#[case] code: TerminalCode, #[case] name: &str) {
+    assert_eq!(code.as_str(), name);
+}
+
 #[tokio::test]
 async fn a_refused_connection_is_an_outage() -> anyhow::Result<()> {
     let authority = TestAuthority::start(Mode::Grpc).await?;
@@ -550,7 +571,9 @@ async fn an_untrusted_server_certificate_is_an_outage() -> anyhow::Result<()> {
 }
 
 #[rstest]
-#[case::html_over_http2(Mode::HtmlOverHttp2)]
+#[case::html_over_http2(Mode::Http2Page("text/html"))]
+// oracle: spec gRPC Web (grpc/grpc doc/PROTOCOL-WEB.md) §Protocol differences vs gRPC over HTTP2
+#[case::grpc_web_over_http2(Mode::Http2Page("application/grpc-web"))]
 #[case::http1_without_alpn(Mode::Http1WithoutAlpn)]
 #[case::http1_alpn(Mode::Http1Alpn)]
 #[tokio::test]
@@ -565,15 +588,37 @@ async fn a_path_that_cannot_carry_grpc_is_reported_as_such(#[case] mode: Mode) -
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+#[rstest]
+// oracle: spec gRPC over HTTP2 (grpc/grpc doc/PROTOCOL-HTTP2.md) §Requests
+#[case::with_a_message_format("application/grpc+proto")]
+// oracle: spec RFC 9110 §8.3.1
+#[case::in_upper_case("Application/GRPC")]
 #[tokio::test]
-async fn closes_without_hello_when_the_challenge_is_not_32_bytes() -> anyhow::Result<()> {
+async fn authenticates_whatever_form_the_grpc_content_type_takes(
+    #[case] content_type: &'static str,
+) -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::GrpcAs(content_type)).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+
+    authority.next_opening().await.accept().authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    Ok(())
+}
+
+#[rstest]
+#[case::shorter(31)]
+#[case::longer(33)]
+#[tokio::test]
+async fn closes_without_hello_when_the_challenge_is_not_32_bytes(#[case] length: usize) -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
     let mut stream = authority.next_opening().await.accept();
 
     // CONTRACT.agent-identity.md §7.3 step 3 proves a 32-byte challenge.
-    stream.challenge(&[1; 31]).await;
+    stream.challenge(&vec![1; length]).await;
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert!(!matches!(stream.receive_within(WAIT).await, Some(Ok(Some(_)))));
@@ -775,13 +820,20 @@ fn authority_address(authority: &TestAuthority) -> String {
     format!("127.0.0.1:{}", authority.url.port().expect("authority port"))
 }
 
+#[rstest]
+// The user info decodes to `agent@corp` and `p:ss`.
+#[case::user_and_password("agent%40corp:p%3Ass", "agent@corp:p:ss")]
+// oracle: reference hyper-util 0.1.20 `test_parse_http_auth_without_password`, the proxy parser of reqwest
+#[case::user_only("Aladdin", "Aladdin:")]
 #[tokio::test]
-async fn tunnels_through_an_http_proxy_with_the_credentials_of_its_url() -> anyhow::Result<()> {
+async fn tunnels_through_an_http_proxy_with_the_credentials_of_its_url(
+    #[case] user_info: &str,
+    #[case] credentials: &str,
+) -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let proxy = TestProxy::start(None).await?;
     let identity = Identity::from_vectors("device-a")?;
-    // The user info decodes to `agent@corp` and `p:ss`.
-    let proxy_config = manual_proxy(&format!("http://agent%40corp:p%3Ass@{}", proxy.host), &[])?;
+    let proxy_config = manual_proxy(&format!("http://{user_info}@{}", proxy.host), &[])?;
     let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
     let mut channel = client.connect(identity.target(&authority.url))?;
     authority.next_opening().await.accept().authenticate().await;
@@ -794,11 +846,9 @@ async fn tunnels_through_an_http_proxy_with_the_credentials_of_its_url() -> anyh
         head.starts_with(&format!("CONNECT {} HTTP/1.1\r\n", authority_address(&authority))),
         "{head}"
     );
-    let credentials = STANDARD.encode("agent@corp:p:ss");
-    assert_eq!(
-        header(head, "proxy-authorization"),
-        Some(format!("Basic {credentials}").as_str())
-    );
+    // RFC 7617 §2: Basic credentials are the Base64 of the user ID, a colon and the password.
+    let authorization = format!("Basic {}", STANDARD.encode(credentials));
+    assert_eq!(header(head, "proxy-authorization"), Some(authorization.as_str()));
     Ok(())
 }
 
@@ -868,6 +918,30 @@ async fn tunnels_through_a_socks5_proxy_resolving_the_name_where_its_scheme_says
         domain: domain.map(str::to_owned),
     };
     assert_eq!(proxy.requests(), [expected]);
+    Ok(())
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+// oracle: reference reqwest 0.12.28 `connect_socks`, which resolves the name locally for `socks4`
+#[tokio::test]
+async fn sends_a_socks4_proxy_the_address_of_the_authority() -> anyhow::Result<()> {
+    let authority = TestAuthority::start(Mode::Grpc).await?;
+    let proxy = TestSocksProxy::start().await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut url = authority.url.clone();
+    url.set_host(Some("localhost"))?;
+    let proxy_config = manual_proxy(&format!("socks4://{}", proxy.host), &[])?;
+    let client = ChannelClient::new(proxy_config, std::slice::from_ref(&authority.ca), Settings::default())?;
+    let _channel = client.connect(identity.target(&url))?;
+
+    // Only the request counts: the NUL that hyper-util adds after the user ID reaches the authority through the tunnel,
+    // as the known limitation in `Transport::tunnel` says.
+    wait_until("a SOCKS request", || !proxy.requests().is_empty()).await;
+    let expected = SocksRequest {
+        credentials: None,
+        domain: None,
+    };
+    assert_eq!(proxy.requests().first(), Some(&expected));
     Ok(())
 }
 
@@ -986,6 +1060,55 @@ async fn dropping_the_channel_stops_it_from_reopening() -> anyhow::Result<()> {
     drop(channel);
 
     assert!(authority.opening_within(Duration::from_secs(2)).await.is_none());
+    Ok(())
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
+#[tokio::test]
+async fn dropping_the_channel_ends_its_wait_to_reopen_at_once() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    // A jitter of 1000 makes the first wait 1000 s, which the cap shortens to 5 min, far beyond the test's wait.
+    let settings = Settings {
+        backoff: Backoff {
+            jitter: Arc::new(|| 1000.0),
+            ..Backoff::default()
+        },
+        ..Settings::default()
+    };
+    let hello = hello_fields();
+    let target = identity.target_with_hello(&authority.url, Arc::clone(&hello));
+    let mut channel = client(&authority, settings)?.connect(target)?;
+    authority
+        .next_opening()
+        .await
+        .refuse(closing_status(Code::Unavailable, Some("unavailable")));
+    let (_, reopen_after) = next_closure(&mut channel).await;
+    assert_eq!(reopen_after, Some(Duration::from_secs(300)));
+
+    drop(channel);
+
+    // A stopped channel no longer holds its target.
+    wait_until("the release of the target", || Arc::strong_count(&hello) == 1).await;
+    Ok(())
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
+#[tokio::test]
+async fn a_dropped_channel_stops_waiting_for_an_authority_that_keeps_its_side_open() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let hello = hello_fields();
+    let target = identity.target_with_hello(&authority.url, Arc::clone(&hello));
+    let mut channel = client(&authority, Settings::default())?.connect(target)?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    drop(channel);
+
+    // The authority's side stays open while `stream` lives; the channel gives it 5 s, less than `WAIT`.
+    wait_until("the release of the target", || Arc::strong_count(&hello) == 1).await;
     Ok(())
 }
 

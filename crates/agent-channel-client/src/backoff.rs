@@ -138,6 +138,16 @@ mod tests {
         assert_eq!(delays(&backoff, kind, 4), seconds(&[1.0, 2.0, 3.0, 3.0]));
     }
 
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
+    #[test]
+    fn stays_at_its_cap_however_many_closures_follow() {
+        let delays = delays(&without_jitter(), TransientKind::NoGrpcPath, 100);
+        assert!(
+            delays[12..].iter().all(|delay| *delay == Duration::from_secs(3600)),
+            "{delays:?}"
+        );
+    }
+
     #[test]
     fn the_default_jitter_stays_within_half_and_one_and_a_half() {
         let draws: Vec<f64> = (0..1000).map(|_| uniform_jitter()).collect();

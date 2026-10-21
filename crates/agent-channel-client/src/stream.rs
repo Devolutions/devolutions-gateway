@@ -25,9 +25,9 @@ use crate::{Event, Shared, Target};
 const CHANNEL_PROOF_DOMAIN: &[u8] = b"devolutions-agent-identity/v1/channel-proof";
 const CHALLENGE_LEN: usize = 32;
 /// How long a stream the caller dropped waits for the authority to end its side.
-// UNTESTED: a dropped channel's stream releases its connection once the authority ends its side or this time passes.
-// It bounds how long a closed channel holds a connection to an authority that keeps its side open.
-// When changing `close`, keep the wait bounded.
+// UNTESTED: a dropped channel's stream releases its connection as soon as the authority ends its side.
+// Waiting out the whole timeout would hold a connection that the authority has already finished with.
+// When changing `close`, keep reading until the authority's side ends.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) async fn run(

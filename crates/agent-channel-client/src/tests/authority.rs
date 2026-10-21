@@ -33,8 +33,10 @@ const URL_PATH: &str = "/dvls";
 pub(super) enum Mode {
     /// A gRPC authority over HTTP/2.
     Grpc,
-    /// HTTP/2 that answers every request with an HTML page, like a reverse proxy without a gRPC route.
-    HtmlOverHttp2,
+    /// A gRPC authority over HTTP/2 whose responses carry this content type.
+    GrpcAs(&'static str),
+    /// HTTP/2 that answers every request with a page of this content type, like a reverse proxy without a gRPC route.
+    Http2Page(&'static str),
     /// HTTP/1.1 without ALPN, like a reverse proxy that ignores the offer of HTTP/2.
     Http1WithoutAlpn,
     /// A server whose only ALPN protocol is `http/1.1`.
@@ -93,7 +95,7 @@ impl TestAuthority {
     pub(super) async fn start(mode: Mode) -> anyhow::Result<Self> {
         let pki = Pki::generate()?;
         let alpn: &[&[u8]] = match mode {
-            Mode::Grpc | Mode::HtmlOverHttp2 => &[b"h2"],
+            Mode::Grpc | Mode::GrpcAs(_) | Mode::Http2Page(_) => &[b"h2"],
             Mode::Http1WithoutAlpn => &[],
             Mode::Http1Alpn => &[b"http/1.1"],
         };
@@ -117,8 +119,9 @@ impl TestAuthority {
                     };
                     let io = PingCounter::new(tls, pings);
                     match mode {
-                        Mode::Grpc => serve_grpc(io, grpc).await,
-                        Mode::HtmlOverHttp2 => serve_html(io).await,
+                        Mode::Grpc => serve_grpc(io, grpc, None).await,
+                        Mode::GrpcAs(content_type) => serve_grpc(io, grpc, Some(content_type)).await,
+                        Mode::Http2Page(content_type) => serve_page(io, content_type).await,
                         Mode::Http1WithoutAlpn | Mode::Http1Alpn => answer_http1(io).await,
                     }
                 });
@@ -316,7 +319,8 @@ impl AgentChannel for Handler {
     }
 }
 
-async fn serve_grpc<IO>(io: IO, grpc: AgentChannelServer<Handler>)
+/// Serves the authority's gRPC service, replacing the content type of its responses with `content_type` if any.
+async fn serve_grpc<IO>(io: IO, grpc: AgentChannelServer<Handler>, content_type: Option<&'static str>)
 where
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
@@ -328,7 +332,13 @@ where
                 *request.uri_mut() = rpc_path.parse().expect("valid RPC path");
             }
             request.extensions_mut().insert(OriginalPath(path));
-            grpc.call(request).await
+            let mut response = grpc.call(request).await?;
+            if let Some(content_type) = content_type {
+                response
+                    .headers_mut()
+                    .insert(http::header::CONTENT_TYPE, http::HeaderValue::from_static(content_type));
+            }
+            Ok::<_, Infallible>(response)
         }
     });
     let _ = hyper::server::conn::http2::Builder::new(TokioExecutor::new())
@@ -336,14 +346,14 @@ where
         .await;
 }
 
-async fn serve_html<IO>(io: IO)
+async fn serve_page<IO>(io: IO, content_type: &'static str)
 where
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let service = hyper::service::service_fn(|_request: http::Request<hyper::body::Incoming>| async {
+    let service = hyper::service::service_fn(move |_request: http::Request<hyper::body::Incoming>| async move {
         let response = http::Response::builder()
             .status(http::StatusCode::NOT_FOUND)
-            .header(http::header::CONTENT_TYPE, "text/html")
+            .header(http::header::CONTENT_TYPE, content_type)
             .body(tonic::body::empty_body())
             .expect("valid response");
         Ok::<_, Infallible>(response)

@@ -1,4 +1,5 @@
-//! A SOCKS5 proxy for the channel tests (RFC 1928, with RFC 1929 user/password authentication).
+//! A SOCKS proxy for the channel tests: SOCKS5 (RFC 1928, with RFC 1929 user/password authentication), and SOCKS4
+//! with its 4A extension for names.
 
 use std::net::Ipv4Addr;
 use std::sync::{Arc, Mutex};
@@ -16,7 +17,7 @@ pub(super) struct SocksRequest {
     pub(super) domain: Option<String>,
 }
 
-/// A SOCKS5 proxy listening on loopback that connects every request to its port on `127.0.0.1`.
+/// A SOCKS proxy listening on loopback that connects every request to its port on `127.0.0.1`.
 pub(super) struct TestSocksProxy {
     /// The `host:port` the proxy listens on.
     pub(super) host: String,
@@ -53,7 +54,9 @@ impl Drop for TestSocksProxy {
 }
 
 const VERSION: u8 = 5;
+const SOCKS4_VERSION: u8 = 4;
 const CONNECT: u8 = 1;
+const SOCKS4_GRANTED: u8 = 90;
 const NO_AUTHENTICATION: u8 = 0x00;
 const USER_PASSWORD: u8 = 0x02;
 const IPV4: u8 = 0x01;
@@ -61,7 +64,11 @@ const DOMAIN: u8 = 0x03;
 const IPV6: u8 = 0x04;
 
 async fn serve(mut client: TcpStream, requests: &Mutex<Vec<SocksRequest>>) -> anyhow::Result<()> {
-    anyhow::ensure!(client.read_u8().await? == VERSION, "not SOCKS5");
+    match client.read_u8().await? {
+        VERSION => {}
+        SOCKS4_VERSION => return serve_socks4(client, requests).await,
+        version => anyhow::bail!("unknown SOCKS version {version}"),
+    }
     let mut methods = vec![0; usize::from(client.read_u8().await?)];
     client.read_exact(&mut methods).await?;
     let credentials = if methods.contains(&USER_PASSWORD) {
@@ -106,4 +113,37 @@ async fn read_length_prefixed(client: &mut TcpStream) -> anyhow::Result<String> 
     let mut bytes = vec![0; usize::from(client.read_u8().await?)];
     client.read_exact(&mut bytes).await?;
     Ok(String::from_utf8(bytes)?)
+}
+
+/// Serves a SOCKS4 `CONNECT` whose version byte `serve` has read; an address `0.0.0.x` with a nonzero `x` announces a
+/// SOCKS4A name after the user ID.
+async fn serve_socks4(mut client: TcpStream, requests: &Mutex<Vec<SocksRequest>>) -> anyhow::Result<()> {
+    anyhow::ensure!(client.read_u8().await? == CONNECT, "not a CONNECT request");
+    let port = client.read_u16().await?;
+    let mut address = [0; 4];
+    client.read_exact(&mut address).await?;
+    let user = read_null_terminated(&mut client).await?;
+    let domain = match address {
+        [0, 0, 0, last] if last != 0 => Some(read_null_terminated(&mut client).await?),
+        _ => None,
+    };
+    let credentials = (!user.is_empty()).then(|| (user, String::new()));
+    requests
+        .lock()
+        .expect("SOCKS requests lock")
+        .push(SocksRequest { credentials, domain });
+    let mut upstream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await?;
+    client.write_all(&[0, SOCKS4_GRANTED, 0, 0, 0, 0, 0, 0]).await?;
+    tokio::io::copy_bidirectional(&mut client, &mut upstream).await?;
+    Ok(())
+}
+
+async fn read_null_terminated(client: &mut TcpStream) -> anyhow::Result<String> {
+    let mut bytes = Vec::new();
+    loop {
+        match client.read_u8().await? {
+            0 => return Ok(String::from_utf8(bytes)?),
+            byte => bytes.push(byte),
+        }
+    }
 }
