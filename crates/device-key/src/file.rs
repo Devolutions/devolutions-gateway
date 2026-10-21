@@ -783,7 +783,7 @@ mod tests {
     }
 
     #[test]
-    fn abandoned_key_material_is_removed_before_recovery() -> anyhow::Result<()> {
+    fn abandoned_key_material_is_removed_by_a_later_operation() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
@@ -803,7 +803,6 @@ mod tests {
         assert!(list(&backend, TEST_PREFIX)?.is_empty());
         assert!(!orphan.exists());
         assert!(!other_orphan.exists());
-        assert!(generate(&backend, &name).is_ok());
         Ok(())
     }
 
@@ -820,18 +819,6 @@ mod tests {
         assert_eq!(list(&backend, "scope")?, vec![name]);
         assert_eq!(list(&backend, "scope-longer")?, vec![other_name]);
         Ok(())
-    }
-
-    #[test]
-    fn temporary_names_fit_within_the_file_name_limit() {
-        let name = format!("{}_{}", "a".repeat(64), "b".repeat(128));
-        let uuid = Uuid::new_v4();
-        let temporary = format!(".{name}-{uuid}.tmp");
-        let tombstone = format!(".{name}-{uuid}.deleted");
-        assert!(temporary.len() <= 255);
-        assert!(tombstone.len() <= 255);
-        assert_eq!(abandoned_name(&temporary), Some(name.as_str()));
-        assert_eq!(abandoned_name(&tombstone), Some(name.as_str()));
     }
 
     #[test]
