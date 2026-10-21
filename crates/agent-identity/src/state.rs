@@ -1536,7 +1536,8 @@ mod tests {
             identity
         };
         store.write_identity(&valid())?;
-        let invalid: [(&str, fn(&mut StoredIdentity)); 5] = [
+        type Change = fn(&mut StoredIdentity);
+        let invalid: [(&str, Change); 5] = [
             ("version 2", |identity| identity.version = 2),
             ("http base URL", |identity| {
                 identity.base_url = "http://example.test/dvls".to_owned()
