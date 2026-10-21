@@ -126,3 +126,5 @@ The location and format of the files below are stable, because the conformance t
 - If a pending key is unusable locally (missing from its store, refused when opened, or not matching the pending certificate's public key), the agent deletes the key and its slot before renewing with a fresh key.
   A failure to sign is not unusable: it is transient and retried.
 - Writes are atomic: write a temporary file, then rename it.
+  An interrupted write leaves the previous file and at most a temporary named after it; start-up and reconciliation remove such temporaries, and that cleanup removes only files whose names follow the agent's own scheme for them.
+  On Windows, replacing a file that another process holds open, such as an antivirus scanner, is retried for a bounded time before it fails.
