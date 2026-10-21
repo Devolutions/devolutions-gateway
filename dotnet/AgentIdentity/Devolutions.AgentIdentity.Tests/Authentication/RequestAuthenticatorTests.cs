@@ -80,6 +80,13 @@ public class RequestAuthenticatorTests
         ["when grace ends"] = () => DeviceACertificate.NotAfter + DeviceALifetime,
     };
 
+    private static readonly Dictionary<string, Func<byte[]>> RegisteredBytesOtherThanAP256Certificate = new()
+    {
+        ["a P-384 certificate"] = SelfSignedP384Certificate,
+        ["an RSA certificate"] = SelfSignedRsaCertificate,
+        ["bytes that are not a certificate"] = () => [0x30, 0x00],
+    };
+
     public static TheoryData<AgentOperation> Operations => new(Enum.GetValues<AgentOperation>());
 
     public static TheoryData<AgentOperation, CertificateStatus> OperationsWithAcceptedStatuses
@@ -99,6 +106,9 @@ public class RequestAuthenticatorTests
     }
 
     public static TheoryData<string> OversizedRequestNames => new(OversizedRequests.Keys);
+
+    public static TheoryData<string> RegisteredBytesOtherThanAP256CertificateNames =>
+        new(RegisteredBytesOtherThanAP256Certificate.Keys);
 
     private static KeyVector DeviceA => TestVectors.Instance.Key("device-a");
 
@@ -406,17 +416,10 @@ public class RequestAuthenticatorTests
     // CONTRACT.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
     // The keyid is the thumbprint of those bytes, so the registry answers with what it was asked for.
     [Theory]
-    [InlineData("a P-384 certificate")]
-    [InlineData("an RSA certificate")]
-    [InlineData("bytes that are not a certificate")]
+    [MemberData(nameof(RegisteredBytesOtherThanAP256CertificateNames))]
     public async Task RegistryReturningSomethingOtherThanAP256CertificateThrows(string registered)
     {
-        byte[] der = registered switch
-        {
-            "a P-384 certificate" => SelfSignedP384Certificate(),
-            "an RSA certificate" => SelfSignedRsaCertificate(),
-            _ => [0x30, 0x00],
-        };
+        byte[] der = RegisteredBytesOtherThanAP256Certificate[registered]();
         string thumbprint = Base64Forms.Base64Url(SHA256.HashData(der));
         TestAuthority authority = new(Now);
         authority.Registry.Register(
