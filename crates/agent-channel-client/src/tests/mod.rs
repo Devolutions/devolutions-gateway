@@ -19,7 +19,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tonic::{Code, Status};
 
-use self::authority::{Mode, Pki, TestAuthority, WAIT, vectors};
+use self::authority::{Mode, Pki, ServerStream, TestAuthority, WAIT, vectors};
 use self::proxy::TestProxy;
 use self::socks::{SocksRequest, TestSocksProxy};
 use super::*;
@@ -237,10 +237,28 @@ async fn authenticates_only_on_the_welcome_answering_its_hello() -> anyhow::Resu
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
     let mut stream = authority.next_opening().await.accept();
+    send_unexpected(&stream).await;
     stream.challenge(&[1; 32]).await;
     let hello = stream.receive().await;
 
     // INTENT.agent-identity.md, invariant 7: nothing counts before the challenge succeeds.
+    send_unexpected(&stream).await;
+    assert_no_event(&mut channel).await;
+
+    stream
+        .send(
+            &new_id(),
+            Some(&hello.id),
+            Payload::Welcome(Welcome { server_time: None }),
+        )
+        .await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    assert_no_event(&mut channel).await;
+    Ok(())
+}
+
+/// Sends a renewal request and a `Welcome` that answers no `Hello`, neither of which counts before the handshake ends.
+async fn send_unexpected(stream: &ServerStream) {
     stream
         .send(
             &new_id(),
@@ -257,18 +275,6 @@ async fn authenticates_only_on_the_welcome_answering_its_hello() -> anyhow::Resu
             Payload::Welcome(Welcome { server_time: None }),
         )
         .await;
-    assert_no_event(&mut channel).await;
-
-    stream
-        .send(
-            &new_id(),
-            Some(&hello.id),
-            Payload::Welcome(Welcome { server_time: None }),
-        )
-        .await;
-    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
-    assert_no_event(&mut channel).await;
-    Ok(())
 }
 
 #[tokio::test]
@@ -368,7 +374,9 @@ async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
         let uuid = uuid::Uuid::parse_str(id)?;
         assert_eq!(&uuid.hyphenated().to_string(), id);
     }
-    assert_ne!(hello.id, ack.id);
+    // RFC 9562 §1: a UUID is unique, so the acknowledgement's ID is neither the Hello's nor the acknowledged message's.
+    assert_ne!(ack.id, hello.id);
+    assert_ne!(ack.id, renew_id);
     Ok(())
 }
 
@@ -385,10 +393,21 @@ async fn pings_the_connection_at_the_keepalive_interval() -> anyhow::Result<()> 
     stream.authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
+    let start = tokio::time::Instant::now();
     let before = authority.pings();
     tokio::time::sleep(Duration::from_secs(1)).await;
     let pings = authority.pings() - before;
-    assert!((5..=12).contains(&pings), "{pings} pings in 1 s at a 100 ms interval");
+    let window = start.elapsed();
+    // The hyper client schedules each ping one interval after the last frame it read (hyper 1.10
+    // `src/proto/h2/ping.rs`), so pings are at least 100 ms apart and the window holds at most one more ping than whole
+    // intervals.
+    let most = usize::try_from(window.as_millis() / 100)? + 1;
+    // A timer only promises not to fire early (`tokio::time::sleep`), so the lower bound lets each ping run up to one
+    // interval late; the 30 s default would send none.
+    assert!(
+        (5..=most).contains(&pings),
+        "{pings} pings in {window:?} at a 100 ms interval"
+    );
     Ok(())
 }
 
@@ -610,18 +629,22 @@ async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Resul
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
-    let server_time = OffsetDateTime::now_utc() + Duration::from_secs(7200);
+    let local_time = OffsetDateTime::now_utc();
+    let server_time = local_time + Duration::from_secs(7200);
 
     authority.next_opening().await.refuse(clock_skew_refusal(server_time));
 
     // CONTRACT.agent-identity.md §6: the retry offsets `created` by `server_time − local_time`, from the `server-time`
     // trailer.
+    // The agent reads its clock after `local_time` and signs before the retry arrives, so `created` exceeds the server
+    // time by at most the whole seconds that passed meanwhile.
     let retry = authority.next_opening().await;
+    let elapsed = OffsetDateTime::now_utc().unix_timestamp() - local_time.unix_timestamp();
     let retry_created = created(&retry);
     let expected = server_time.unix_timestamp();
     assert!(
-        (expected..=expected + 5).contains(&retry_created),
-        "created {retry_created}, server time {expected}"
+        (expected..=expected + elapsed).contains(&retry_created),
+        "created {retry_created}, server time {expected}, {elapsed} s elapsed"
     );
     retry.accept().authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
@@ -783,7 +806,8 @@ async fn tunnels_through_an_http_proxy_with_the_credentials_of_its_url() -> anyh
 async fn tunnels_through_an_https_proxy() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let proxy_pki = Pki::generate()?;
-    let proxy = TestProxy::start(Some(proxy_pki.server_config(&[])?)).await?;
+    // RFC 7301 §3.2: a proxy that also offers HTTP/2 would select it if the agent offered it, and then expect HTTP/2.
+    let proxy = TestProxy::start(Some(proxy_pki.server_config(&[b"h2", b"http/1.1"])?)).await?;
     let identity = Identity::from_vectors("device-a")?;
     let proxy_config = manual_proxy(&format!("https://{}", proxy.host), &[])?;
     let roots = [authority.ca.clone(), proxy_pki.ca.clone()];
@@ -916,7 +940,10 @@ async fn sends_the_acknowledgements_queued_before_the_channel_is_dropped() -> an
         matches!(&ack, Some(Ok(Some(message))) if message.correlation_id.as_deref() == Some(update_id.as_str())),
         "{ack:?}"
     );
-    assert!(matches!(stream.receive_within(WAIT).await, Some(Ok(None) | Err(_))));
+    // crates/agent-channel-client/INTENT.md: the agent then ends its side, which the authority reads as the end of the
+    // stream rather than a reset.
+    let end = stream.receive_within(WAIT).await;
+    assert!(matches!(end, Some(Ok(None))), "{end:?}");
     Ok(())
 }
 

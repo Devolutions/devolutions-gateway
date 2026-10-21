@@ -17,6 +17,9 @@ pub(super) struct TestProxy {
 
 impl TestProxy {
     /// Starts a proxy; with `tls`, clients reach it over TLS, as an `https://` proxy.
+    ///
+    /// Over TLS, a client that negotiates HTTP/2 through ALPN gets no tunnel, since its HTTP/1.1 `CONNECT` is not the
+    /// HTTP/2 the proxy then expects.
     pub(super) async fn start(tls: Option<rustls::ServerConfig>) -> anyhow::Result<Self> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let host = listener.local_addr()?.to_string();
@@ -30,7 +33,9 @@ impl TestProxy {
                 tokio::spawn(async move {
                     match acceptor {
                         Some(acceptor) => {
-                            if let Ok(tls) = acceptor.accept(tcp).await {
+                            if let Ok(tls) = acceptor.accept(tcp).await
+                                && tls.get_ref().1.alpn_protocol() != Some(b"h2".as_slice())
+                            {
                                 tunnel(tls, &recorded).await;
                             }
                         }
