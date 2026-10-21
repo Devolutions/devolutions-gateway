@@ -324,7 +324,7 @@ function Test-Marker([string] $File, [int] $Line, [string] $Text) {
             $IsIssue = $Token -cmatch '^(?:[A-Z][A-Z0-9]+-\d+|(?:[\w.-]+/[\w.-]+)?#\d+)$'
             $IsCrashFile = $Token.StartsWith('fuzz/') -and (Test-RepositoryFile $Token)
             if (-not $IsIssue -and -not $IsCrashFile) {
-                Add-Violation $File $Line "regression reference '$Token' is not a Jira key, an issue such as '#123', or a tracked file under 'fuzz/'"
+                Add-Violation $File $Line "regression reference '$Token' is not a Jira key, an issue such as '#123', or a tracked file under 'fuzz/'; fuzz/.gitignore ignores crash files, so commit one with 'git add -f'"
             }
         }
     }
