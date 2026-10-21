@@ -101,6 +101,7 @@ public class ChannelHandshakeTests
             ["a Hello with invalid metadata"] = opening => opening.VerifyHelloAsync(
                 Altered(VectorChannel.ValidHelloMessage(opening), LaterFailures["a Hello with invalid metadata"])),
             ["no Hello in time"] = opening => opening.HelloTimedOutAsync(),
+            ["the first message could not be decoded"] = opening => opening.FirstMessageUnreadableAsync(),
         };
 
     // The calls that end the handshake of a stream that OpenBeforeNotAfterAsync opens.
@@ -109,6 +110,7 @@ public class ChannelHandshakeTests
         {
             ["a valid Hello"] = (opening, hello) => opening.VerifyHelloAsync(hello),
             ["no Hello in time"] = (opening, _) => opening.HelloTimedOutAsync(),
+            ["the first message could not be decoded"] = (opening, _) => opening.FirstMessageUnreadableAsync(),
         };
 
     public static TheoryData<string> SignatureFailureNames => new(SignatureFailures.Keys);
@@ -117,11 +119,12 @@ public class ChannelHandshakeTests
 
     public static TheoryData<string> ScenarioNames => new(Scenarios.Keys);
 
-    // No Hello in time, alone and after each closure.
+    // Each end with no Hello, alone and after each closure.
     public static TheoryData<string> NoHelloNames =>
-        new(Closures.Keys.Select(WithoutHello).Prepend("no Hello in time"));
+        new(NoHelloEnds.Keys.SelectMany(
+            end => Closures.Keys.Select(closure => WithClosure(end, closure)).Prepend(end)));
 
-    // Each wrong answer of the registry, to each of the two calls that read it.
+    // Each wrong answer of the registry, to each of the calls that read it.
     public static TheoryData<string, string> WrongRegistryAnswersAndCalls
     {
         get
@@ -132,6 +135,7 @@ public class ChannelHandshakeTests
             {
                 cases.Add(answer, "a valid Hello");
                 cases.Add(answer, "no Hello in time");
+                cases.Add(answer, "the first message could not be decoded");
             }
 
             return cases;
@@ -206,20 +210,30 @@ public class ChannelHandshakeTests
                     StatusCode.InvalidArgument)))
             .ToDictionary();
 
-    // No first message arrives, and the host ends the handshake for the timeout.
-    private static Scenario NoHello => new() { FirstMessage = null };
+    // The ways a handshake ends with no Hello to verify, by name.
+    private static Dictionary<string, Scenario> NoHelloEnds => new()
+    {
+        // No first message arrives, and the host ends the handshake for the timeout.
+        ["no Hello in time"] = new() { FirstMessage = null },
+
+        // Step 4: a first message that cannot be decoded is not a Hello, since no proof can be read from it.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+        ["the first message could not be decoded"] = new() { FirstMessageUnreadable = true },
+    };
 
     // Every failure by name: each early failure, each message failure,
-    // and the timeout, alone with signature_invalid (§7.3 step 4) and after each closure, which §7.4 applies first.
+    // and each end with no Hello, alone with signature_invalid (§7.3 step 4) and after each closure,
+    // which §7.4 applies first.
     private static Dictionary<string, Failure> Failures =>
         EarlyFailures
             .Concat(MessageFailures)
-            .Append(KeyValuePair.Create(
-                "no Hello in time",
-                new Failure(NoHello, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated)))
-            .Concat(Closures.Select(closure => KeyValuePair.Create(
-                WithoutHello(closure.Key),
-                closure.Value with { Scenario = closure.Value.Scenario.And(NoHello) })))
+            .Concat(NoHelloEnds.SelectMany(end => Closures
+                .Select(closure => KeyValuePair.Create(
+                    WithClosure(end.Key, closure.Key),
+                    closure.Value with { Scenario = closure.Value.Scenario.And(end.Value) }))
+                .Prepend(KeyValuePair.Create(
+                    end.Key,
+                    new Failure(end.Value, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated)))))
             .ToDictionary();
 
     // Every scenario by name: a valid handshake and each failure.
@@ -231,7 +245,7 @@ public class ChannelHandshakeTests
 
     // Each pair of failures that the handshake checks one after the other, by name, with the scenario failing both:
     // a message breaking two rules of §7.3 step 4, a failure decided before the message with each failure checked
-    // after it, and a closure of a stream without Hello with each closure checked after it and with the timeout.
+    // after it, and for each end with no Hello, a closure with each closure checked after it and with that end alone.
     private static Dictionary<(string Earlier, string Later), Scenario> FailurePairs
     {
         get
@@ -245,7 +259,12 @@ public class ChannelHandshakeTests
                 });
 
             AddOrderedPairs(pairs, [.. EarlyFailures.Keys], MessageFailures.Keys);
-            AddOrderedPairs(pairs, [.. Closures.Keys.Select(WithoutHello)], ["no Hello in time"]);
+
+            foreach (string end in NoHelloEnds.Keys)
+            {
+                AddOrderedPairs(pairs, [.. Closures.Keys.Select(closure => WithClosure(end, closure))], [end]);
+            }
+
             return pairs;
         }
     }
@@ -672,6 +691,10 @@ public class ChannelHandshakeTests
     [InlineData("no Hello in time", 0, AgentIdentityErrorCode.SignatureInvalid)]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData("no Hello in time", 1, AgentIdentityErrorCode.CertificateExpired)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    [InlineData("the first message could not be decoded", 0, AgentIdentityErrorCode.SignatureInvalid)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+    [InlineData("the first message could not be decoded", 1, AgentIdentityErrorCode.CertificateExpired)]
     public async Task HandshakeIsCertificateExpiredOnlyAfterTheNotAfter(
         string end,
         long ticksAfterNotAfter,
@@ -685,7 +708,8 @@ public class ChannelHandshakeTests
         AssertFailed(result, expectedCode, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
+    // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid,
+    // and so does a first message that cannot be decoded, which is not a Hello.
     // CONTRACT.agent-identity.md §7.4: revocation and expiry close a stream still awaiting its Hello ahead of the
     // failures of §7.3 step 4, the timeout included, and so does a deletion, which leaves the certificate unregistered.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
@@ -693,7 +717,7 @@ public class ChannelHandshakeTests
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Theory]
     [MemberData(nameof(NoHelloNames))]
-    public async Task NoHelloInTimeIsSignatureInvalidUnlessAClosureApplies(string noHello)
+    public async Task NoHelloIsSignatureInvalidUnlessAClosureApplies(string noHello)
     {
         (Scenario scenario, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[noHello];
 
@@ -774,6 +798,23 @@ public class ChannelHandshakeTests
         await AssertYieldsNoIdentityAsync(() => opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening)));
     }
 
+    // The first call that ends the handshake takes its single-use slot,
+    // so a later call to FirstMessageUnreadableAsync refuses instead of returning a result.
+    // oracle: mutant a call to FirstMessageUnreadableAsync after the handshake ended that returns a result
+    // instead of refusing
+    [Theory]
+    [MemberData(nameof(HandshakeEndNames))]
+    public async Task FirstMessageUnreadableAfterTheHandshakeEndedYieldsNoResult(string end)
+    {
+        ChannelOpening opening = await VectorChannel.OpenAsync();
+        await HandshakeEnds[end](opening);
+        ChannelHandshakeResult? result = null;
+
+        _ = await Record.ExceptionAsync(async () => result = await opening.FirstMessageUnreadableAsync());
+
+        Assert.Null(result);
+    }
+
     // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: the server closes the stream with the gRPC status of the failure
     // and the trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`, which the agent reads.
     // The contract states no order for the trailers.
@@ -783,6 +824,7 @@ public class ChannelHandshakeTests
     [InlineData("a Hello with the proof of another device", StatusCode.Unauthenticated, "signature_invalid")]
     [InlineData("a Hello with invalid metadata", StatusCode.InvalidArgument, "invalid_request")]
     [InlineData("no Hello in time", StatusCode.Unauthenticated, "signature_invalid")]
+    [InlineData("the first message could not be decoded", StatusCode.Unauthenticated, "signature_invalid")]
     public async Task FailureClosesTheStreamWithTheContractStatusAndTrailers(
         string end,
         StatusCode expectedStatus,
@@ -815,7 +857,8 @@ public class ChannelHandshakeTests
         Assert.Equal(expectedStatus, result.Error.ToRpcException(DateTimeOffset.UnixEpoch).StatusCode);
         // oracle: mutant an empty failure detail for a late Hello, a first message that is not a Hello,
         // a Hello without a correlation_id or correlated to another id, a proof that does not verify,
-        // no Hello before the timeout, a certificate no longer registered, or a revoked identity
+        // no Hello before the timeout, a first message that could not be decoded, a certificate no longer registered,
+        // or a revoked identity
         Assert.False(string.IsNullOrEmpty(result.FailureDetail));
         return result.Error;
     }
@@ -852,10 +895,10 @@ public class ChannelHandshakeTests
         }
     }
 
-    // The name of the failure of a stream that the closure ends before any message arrives.
-    private static string WithoutHello(string closure)
+    // The name of the failure of a stream that ends with no Hello, and that the closure ends first.
+    private static string WithClosure(string end, string closure)
     {
-        return $"no Hello in time, and {closure}";
+        return $"{end}, and {closure}";
     }
 
     // The names of the pairs of failures whose two failures the predicate accepts.
@@ -881,7 +924,8 @@ public class ChannelHandshakeTests
         return HandshakeAsync(new Scenario { FirstMessage = firstMessage });
     }
 
-    // Opens the vector stream, changes the registry and the clock as the scenario says, then verifies its message.
+    // Opens the vector stream, changes the registry and the clock as the scenario says,
+    // then ends the handshake with its first message.
     private static async Task<ChannelHandshakeResult> HandshakeAsync(
         Scenario scenario,
         VectorAuthority? authority = null)
@@ -899,6 +943,11 @@ public class ChannelHandshakeTests
         else
         {
             VectorChannel.RegisterDevice(authority.Registry, scenario.Status, scenario.IdentityRevoked);
+        }
+
+        if (scenario.FirstMessageUnreadable)
+        {
+            return await opening.FirstMessageUnreadableAsync();
         }
 
         return scenario.FirstMessage is { } firstMessage
@@ -952,6 +1001,9 @@ public class ChannelHandshakeTests
         // When null, no message arrives and the host ends the handshake for the timeout.
         public Func<ChannelOpening, AgentMessage>? FirstMessage { get; init; } = VectorChannel.ValidHelloMessage;
 
+        // When true, the first message arrives but cannot be decoded, and FirstMessage is not used.
+        public bool FirstMessageUnreadable { get; init; }
+
         // This scenario with the changes of a later one to the registry and the clock, and with its first message.
         // The only clock readings combined are after notAfter and after the timeout, and the first is after both.
         public Scenario And(Scenario later)
@@ -963,6 +1015,7 @@ public class ChannelHandshakeTests
                 Status = Status,
                 HandshakeTime = HandshakeTime ?? later.HandshakeTime,
                 FirstMessage = later.FirstMessage,
+                FirstMessageUnreadable = later.FirstMessageUnreadable,
             };
         }
     }

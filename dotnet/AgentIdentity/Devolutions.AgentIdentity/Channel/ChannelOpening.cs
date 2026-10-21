@@ -19,6 +19,7 @@ namespace Devolutions.AgentIdentity;
 /// and the stream is authenticated only once the agent signs that challenge.
 /// The identity stays hidden until then, so that nothing acts for it on the strength of the headers alone.
 /// The host passes the first agent message to <see cref="VerifyHelloAsync"/>,
+/// calls <see cref="FirstMessageUnreadableAsync"/> when it cannot decode that message,
 /// or calls <see cref="HelloTimedOutAsync"/> when none arrives within <see cref="ChannelHandshake.HelloTimeout"/>.
 /// </remarks>
 public sealed class ChannelOpening
@@ -40,7 +41,7 @@ public sealed class ChannelOpening
     private readonly TimeProvider _timeProvider;
     private readonly ICertificateRegistry _certificateRegistry;
 
-    // Set by the first call to VerifyHelloAsync or HelloTimedOutAsync.
+    // Set by the first call to VerifyHelloAsync, HelloTimedOutAsync or FirstMessageUnreadableAsync.
     private int _handshakeEnded;
 
     internal ChannelOpening(
@@ -141,7 +142,8 @@ public sealed class ChannelOpening
     /// Only then is the metadata checked, and metadata that CONTRACT.agent-identity.md §3 rejects fails the handshake
     /// with <see cref="AgentIdentityErrorCode.InvalidRequest"/>.
     /// The <c>Welcome</c> of a successful handshake carries the time of the clock reading.
-    /// The first call to this method or to <see cref="HelloTimedOutAsync"/> ends the handshake, whatever its outcome,
+    /// The first call to this method, to <see cref="HelloTimedOutAsync"/>
+    /// or to <see cref="FirstMessageUnreadableAsync"/> ends the handshake, whatever its outcome,
     /// including an exception from the registry, which propagates.
     /// </remarks>
     /// <param name="firstMessage">The first message that the agent sent on the stream.</param>
@@ -231,7 +233,8 @@ public sealed class ChannelOpening
     /// <see cref="CertificateNotAfter"/>.
     /// Otherwise it fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
     /// The host also calls it when the agent ends the stream without sending a message.
-    /// The first call to this method or to <see cref="VerifyHelloAsync"/> ends the handshake, whatever its outcome,
+    /// The first call to this method, to <see cref="VerifyHelloAsync"/>
+    /// or to <see cref="FirstMessageUnreadableAsync"/> ends the handshake, whatever its outcome,
     /// including an exception from the registry, which propagates.
     /// </remarks>
     /// <param name="cancellationToken">A token that cancels the registry lookup.</param>
@@ -243,12 +246,38 @@ public sealed class ChannelOpening
     {
         EndHandshake();
 
-        (DateTimeOffset now, RegisteredCertificate? registered) =
-            await ReadClockAndRegistryAsync(cancellationToken).ConfigureAwait(false);
+        return await FailWithoutHelloAsync("No Hello arrived before the timeout.", cancellationToken)
+            .ConfigureAwait(false);
+    }
 
-        return IsClosed(registered, now, out ChannelHandshakeResult? closure)
-            ? closure
-            : ChannelHandshakeResult.Failure(SignatureInvalid, "No Hello arrived before the timeout.");
+    /// <summary>
+    /// Ends the handshake of a stream whose first agent message could not be decoded.
+    /// </summary>
+    /// <remarks>
+    /// The host calls it when the transport cannot decode the first <c>AgentMessage</c>,
+    /// for example because a protobuf <c>string</c> holds invalid UTF-8, so that no message exists to pass to
+    /// <see cref="VerifyHelloAsync"/>.
+    /// No proof can be read from such a message, so CONTRACT.agent-identity.md §7.3 step 4 counts it as not a
+    /// <c>Hello</c>.
+    /// Like <see cref="HelloTimedOutAsync"/>, the method reads the clock once, then the certificate registry once,
+    /// and fails the handshake for the certificate and its identity as that method does.
+    /// Otherwise it fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
+    /// The first call to this method, to <see cref="VerifyHelloAsync"/>
+    /// or to <see cref="HelloTimedOutAsync"/> ends the handshake, whatever its outcome,
+    /// including an exception from the registry, which propagates.
+    /// </remarks>
+    /// <param name="cancellationToken">A token that cancels the registry lookup.</param>
+    /// <exception cref="InvalidOperationException">
+    /// The handshake has already ended,
+    /// or the registry returned another certificate, or the certificate for another identity.
+    /// </exception>
+    public async ValueTask<ChannelHandshakeResult> FirstMessageUnreadableAsync(
+        CancellationToken cancellationToken = default)
+    {
+        EndHandshake();
+
+        return await FailWithoutHelloAsync("The first message on the stream could not be decoded.", cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private void EndHandshake()
@@ -282,6 +311,20 @@ public sealed class ChannelOpening
             .ConfigureAwait(false);
 
         return (now, registered);
+    }
+
+    // The outcome of a handshake with no Hello to verify: the closure that applies, if any,
+    // and otherwise signature_invalid with the detail, as CONTRACT.agent-identity.md §7.3 step 4 specifies.
+    private async ValueTask<ChannelHandshakeResult> FailWithoutHelloAsync(
+        string detail,
+        CancellationToken cancellationToken)
+    {
+        (DateTimeOffset now, RegisteredCertificate? registered) =
+            await ReadClockAndRegistryAsync(cancellationToken).ConfigureAwait(false);
+
+        return IsClosed(registered, now, out ChannelHandshakeResult? closure)
+            ? closure
+            : ChannelHandshakeResult.Failure(SignatureInvalid, detail);
     }
 
     // CONTRACT.agent-identity.md §7.4: a deletion, a revocation and the certificate's notAfter close a stream even
