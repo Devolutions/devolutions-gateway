@@ -151,7 +151,7 @@ pub(crate) struct RecordingSearchHit {
 ///
 /// The query is a case-insensitive substring.
 /// In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
-/// once unescaped, so field names, numbers and booleans never match.
+/// once unescaped, so field names, numbers, booleans and null never match.
 /// Any other line, such as one still being written, is matched as raw text.
 /// Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched,
 /// and a line longer than 256 KiB is matched on its first 256 KiB only.
@@ -225,7 +225,7 @@ pub(crate) async fn search_recordings(
     Ok(Json(search.into_response()))
 }
 
-/// Search text in the lowercase form text is compared in.
+/// The query, lowercased the same way as the text it is compared with.
 struct SearchText(String);
 
 impl SearchText {
@@ -586,9 +586,10 @@ mod tests {
     #[case::value_in_another_case("created USER")]
     #[case::event_name("session.action")]
     #[case::nested_value("ottawa/hull")]
+    #[case::value_in_an_array("audit trail")]
     #[tokio::test]
     async fn matches_the_string_values_of_a_json_line(#[case] query: &str) {
-        let line = r#"{"seq":1,"event":"session.action","description":"Created User","parameters":{"New name":"Help Desk Ottawa/Hull"}}"#;
+        let line = r#"{"seq":1,"event":"session.action","description":"Created User","parameters":{"New name":"Help Desk Ottawa/Hull"},"tags":["Audit trail"]}"#;
 
         let search = search_log(query, line.as_bytes()).await;
 
@@ -600,9 +601,10 @@ mod tests {
     #[case::nested_field_name("new name")]
     #[case::number("12")]
     #[case::boolean("true")]
+    #[case::null("null")]
     #[tokio::test]
     async fn does_not_match_the_field_names_or_other_values_of_a_json_line(#[case] query: &str) {
-        let line = r#"{"seq":12,"done":true,"description":"Created User","parameters":{"New name":"Bob"}}"#;
+        let line = r#"{"seq":12,"done":true,"actor":null,"description":"Created User","parameters":{"New name":"Bob"}}"#;
 
         let search = search_log(query, line.as_bytes()).await;
 
@@ -612,7 +614,7 @@ mod tests {
     #[rstest]
     #[case::backslash(r"IT-HELP\Administrator", r#"{"description":"Reset IT-HELP\\Administrator"}"#)]
     #[case::quote(r#""net user""#, r#"{"description":"Ran \"net user\""}"#)]
-    #[case::unicode_escape("créé", r#"{"description":"Utilisateur créé"}"#)]
+    #[case::unicode_escape("créé", r#"{"description":"Utilisateur cr\u00e9\u00e9"}"#)]
     #[tokio::test]
     async fn matches_the_text_of_a_json_string_once_unescaped(#[case] query: &str, #[case] line: &str) {
         let search = search_log(query, line.as_bytes()).await;
