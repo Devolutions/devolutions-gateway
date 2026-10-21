@@ -42,6 +42,7 @@ STYLE.md     loaded by a reviewer skill when a rule's intent is unclear
 The root file enters every context, so about 40 lines is the rule of thumb; a nested file loads for fewer tasks and may run longer; past the mark, flag it for the human rather than cut a gotcha to fit.
 Load each file at the latest point where it pays for itself; an always-loaded file pointing at a 700-line guide is a cost on every task, while a skill pointing at the one it depends on keeps both small.
 A directory with its own policy gets a nested `AGENTS.md` and one pointer from the root.
+Every `AGENTS.md` gets a sibling `CLAUDE.md` symlink to it, because Claude Code reads only `CLAUDE.md`.
 
 ## Keeping it true
 

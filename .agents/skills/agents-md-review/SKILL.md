@@ -23,7 +23,7 @@ Check each block against reality before judging it; one piece of evidence per ve
 
 A block can earn more than one verdict, each with its own evidence; lead with the one that needs no human confirmation, so pruning can start before the maintainer answers.
 
-Also look for what is **Missing**: policy the organisation applies elsewhere (intent-file rules, writing conventions, comment markers) and non-standard layouts with no pointer.
+Also look for what is **Missing**: policy the organisation applies elsewhere (intent-file rules, writing conventions, comment markers), non-standard layouts with no pointer, and an `AGENTS.md` with no sibling `CLAUDE.md` symlink.
 `agents-md/references/before-after.md` is one repository's worked answer; re-verify every row against the repository in front of you, never paste it.
 
 ## Report
