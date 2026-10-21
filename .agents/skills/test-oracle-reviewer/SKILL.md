@@ -56,6 +56,8 @@ When it checks a property or intention no document states, ask whether and where
 Mark a strong source whenever one decides the value, so a test found through a mutant but decided by a spec is `spec`, because whether a test may go depends on whether a source still requires it, not on how it was found.
 An unmarked test starts as unknown: verify it as above, and turn a citation in another form into the marker it supports.
 A marker is a claim: verify it like any other origin.
+`ci/check-oracle-markers.ps1` enforces the grammar and resolves every reference above, so a cited file must be committed, a fuzz crash file force-added past `fuzz/.gitignore`; a pin into a repository its token cannot read gets only a syntax check.
+With `-Base origin/master` it also requires a marker on each test whose function name is declared more often than at that base, so a renamed test needs one and a moved one does not, and with `-DriftReport`, run weekly, it lists the pinned sections that changed upstream.
 
 ## Review
 
