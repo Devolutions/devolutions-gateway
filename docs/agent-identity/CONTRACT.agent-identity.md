@@ -414,6 +414,7 @@ An authority never holds an effective config whose `ConfigUpdate` envelope would
 - A message that cannot be decoded on an authenticated stream closes that stream with `INVALID_ARGUMENT` + `error-code: invalid_request`, so a broken peer shows in logs instead of looking like a clean close; the agent then reconnects as after any closure.
 - A stream closes no later than its certificate's `notAfter` (`UNAUTHENTICATED` + `certificate_expired`).
 - These two closures also apply to a stream still awaiting `Hello`, ahead of the failures of §7.3 step 4: the server closes it at its certificate's `notAfter`, and checks revocation and deletion when `Hello` arrives or the wait times out; an identity revoked and then deleted before that check gets `UNAUTHENTICATED` + `identity_unknown`.
+  When that check finds the identity revoked or deleted and its certificate also past `notAfter`, revocation or deletion wins.
 - When `confirm` promotes a pending certificate (§5.5), the previous `current` certificate is retired; its streams get `Reconnect{reason:"certificate_rotated"}` and are closed with `OK` 60 s later if still open.
   A stream whose certificate is retired while it awaits `Hello` still completes the handshake, then gets the same treatment.
 - After a stream closes, the agent reconnects unless the identity is terminal (§5.4).
