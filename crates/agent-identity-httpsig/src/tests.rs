@@ -353,6 +353,102 @@ async fn channel_layer_preserves_root_path_and_applies_clock_offset() -> anyhow:
     Ok(())
 }
 
+#[test]
+fn signature_covers_the_request_method() -> anyhow::Result<()> {
+    let vectors = vectors()?;
+    let (signer, public_key) = vector_signer(&vectors, "device-a")?;
+    let headers = signer.sign(Tag::Connect, &Method::PUT, None, 1_790_000_000)?;
+    let params = headers
+        .signature_input
+        .to_str()?
+        .strip_prefix("sig=")
+        .ok_or_else(|| anyhow!("unlabelled signature input"))?;
+    let base = format!("\"@method\": PUT\n\"@signature-params\": {params}");
+    let encoded_signature = headers
+        .signature
+        .to_str()?
+        .strip_prefix("sig=:")
+        .and_then(|value| value.strip_suffix(':'))
+        .ok_or_else(|| anyhow!("invalid signed test header"))?;
+    let signature = Signature::from_slice(&general_purpose::STANDARD.decode(encoded_signature)?)?;
+    public_key.verify(base.as_bytes(), &signature)?;
+    Ok(())
+}
+
+#[test]
+fn confirm_covers_only_the_method_when_given_a_body() -> anyhow::Result<()> {
+    let vectors = vectors()?;
+    let (signer, _) = vector_signer(&vectors, "device-g")?;
+    let headers = signer.sign(Tag::Confirm, &Method::POST, Some(b"".as_slice()), 1_790_000_000)?;
+    let signature_input = headers.signature_input.to_str()?;
+    assert!(signature_input.starts_with(r#"sig=("@method");"#), "{signature_input}");
+    Ok(())
+}
+
+#[test]
+fn signature_expiry_stays_within_structured_field_integers() -> anyhow::Result<()> {
+    let vectors = vectors()?;
+    let (signer, _) = vector_signer(&vectors, "device-a")?;
+    let last = signer.sign(Tag::Connect, &Method::POST, None, 999_999_999_999_939)?;
+    let signature_input = last.signature_input.to_str()?;
+    assert!(
+        signature_input.contains(";expires=999999999999999"),
+        "{signature_input}"
+    );
+    assert!(
+        signer
+            .sign(Tag::Connect, &Method::POST, None, 999_999_999_999_940)
+            .is_err()
+    );
+    Ok(())
+}
+
+#[test]
+fn channel_service_is_not_ready_before_its_inner_service() -> anyhow::Result<()> {
+    struct NotReady;
+
+    impl Service<Request<()>> for NotReady {
+        type Response = Request<()>;
+        type Error = std::io::Error;
+        type Future = std::future::Ready<Result<Request<()>, std::io::Error>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Pending
+        }
+
+        fn call(&mut self, request: Request<()>) -> Self::Future {
+            std::future::ready(Ok(request))
+        }
+    }
+
+    let vectors = vectors()?;
+    let (signer, _) = vector_signer(&vectors, "device-a")?;
+    let base_url = url::Url::parse("https://example.test/dvls")?;
+    let mut service = ChannelLayer::new(signer, &base_url).layer(NotReady);
+    let mut cx = Context::from_waker(std::task::Waker::noop());
+    assert!(service.poll_ready(&mut cx).is_pending());
+    Ok(())
+}
+
+#[tokio::test]
+async fn channel_opening_is_not_sent_when_signing_fails() -> anyhow::Result<()> {
+    let key = TestKey {
+        name: "failing".to_owned(),
+        key: P256SigningKey::from_slice(&[1; 32])?,
+        fail_signing: true,
+    };
+    let signer = RequestSigner::new(Arc::new(key), b"leaf certificate");
+    let base_url = url::Url::parse("https://example.test/dvls")?;
+    let service = ChannelLayer::new(signer, &base_url).layer(tower::service_fn(|request: Request<()>| async move {
+        Ok::<_, std::io::Error>(request)
+    }));
+    let (handoff, _received_nonce) = OpeningNonce::new();
+    let mut opening = Request::builder().method(Method::POST).uri(CONNECT_RPC_PATH).body(())?;
+    opening.extensions_mut().insert(handoff);
+    assert!(service.oneshot(opening).await.is_err());
+    Ok(())
+}
+
 fn nonce(input: &HeaderValue) -> anyhow::Result<&str> {
     input
         .to_str()?
