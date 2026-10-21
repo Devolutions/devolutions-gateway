@@ -7,7 +7,7 @@ use anyhow::{Context as _, ensure};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
 
-use super::{AgentCase, POLL, WAIT, new_token};
+use super::{AgentCase, POLL, WAIT, new_token, reset_mocks};
 use crate::Context;
 use crate::client::{Target, Token};
 use crate::dvls::IdentityQuery;
@@ -705,6 +705,7 @@ pub(super) async fn run(mut ctx: Context) -> anyhow::Result<()> {
     if let Some(path) = ctx.second.as_mut().and_then(|target| target.ca_path.as_mut()) {
         *path = absolute(path)?;
     }
+    reset_mocks(&ctx).await?;
     let mut case = AgentCase::new(ctx, None, false).await?;
     case.set_acl_grant_current_user(false)?;
     case.cleaned = true;

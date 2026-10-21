@@ -1163,10 +1163,16 @@ impl Drop for AgentCase {
     }
 }
 
+/// Runs `work` as one agent sub-case, with a new agent data directory that is audited once the agent stops.
+///
+/// On the mock, every sub-case starts from reset authorities, so it inherits no fault, setting, clock offset, barrier, token or identity from an earlier sub-case of the same test.
+/// A sub-case therefore sets only the faults it needs and relies on the reset for every default.
+/// DVLS has no reset, so an agent sub-case that runs on it changes no settings.
 async fn with_agent<F>(ctx: Context, renewal_after_secs: Option<u64>, run: bool, work: F) -> anyhow::Result<()>
 where
     F: for<'a> FnOnce(&'a mut AgentCase) -> CaseFuture<'a>,
 {
+    reset_mocks(&ctx).await?;
     let mut case = AgentCase::new(ctx, renewal_after_secs, run).await?;
     let result = work(&mut case).await;
     let audit = case.finish().await;
@@ -1176,6 +1182,17 @@ where
         (Ok(()), Err(error)) => Err(error),
         (Err(error), Err(audit)) => anyhow::bail!("{error:#}; cleanup/audit: {audit:#}"),
     }
+}
+
+/// Resets each mock authority, the second one included, as `__mock__/reset` describes.
+async fn reset_mocks(ctx: &Context) -> anyhow::Result<()> {
+    if ctx.mock() {
+        ctx.target.reset().await?;
+        if let Some(second) = &ctx.second {
+            second.reset().await?;
+        }
+    }
+    Ok(())
 }
 
 async fn new_token(case: &AgentCase, uses: u64) -> anyhow::Result<Token> {
@@ -4569,6 +4586,10 @@ pub(crate) async fn a_signed_rejection_without_live_stream(ctx: Context) -> anyh
             let (id, state) = case.enrolled(&target, &token).await?;
             let authority = field(&state, "authority_id")?.to_owned();
             ensure!(
+                state["config"]["agent_channel_url"] == target.base_url,
+                "channel-open rejection fixture offers no channel"
+            );
+            ensure!(
                 !case.identity_record(&target, &id).await?.connected,
                 "channel-open rejection fixture authenticated prematurely"
             );
@@ -4687,9 +4708,7 @@ async fn no_channel_for_malformed_url(
     with_agent(ctx, None, false, move |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
-            target
-                .faults(&json!({ "channel_available": true, "malformed_channel_url": fault }))
-                .await?;
+            target.faults(&json!({ "malformed_channel_url": fault })).await?;
             let config_path = case.path().join("agent.json");
             let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path)?)?;
             config["__debug__"]["identity"]["channel_failure_check_in_after_secs"] = json!(120);
