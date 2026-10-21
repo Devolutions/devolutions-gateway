@@ -22,15 +22,16 @@ use windows::Win32::Foundation::{
 use windows::Win32::Security::Authorization::{
     AUTHZ_CLIENT_CONTEXT_HANDLE, AUTHZ_RESOURCE_MANAGER_HANDLE, AUTHZ_RM_FLAG_NO_AUDIT, AuthzContextInfoGroupsSids,
     AuthzFreeContext, AuthzFreeResourceManager, AuthzGetInformationFromContext, AuthzInitializeContextFromSid,
-    AuthzInitializeResourceManager, GetNamedSecurityInfoW, GetSecurityInfo, SE_FILE_OBJECT, SetSecurityInfo,
+    AuthzInitializeResourceManager, GetNamedSecurityInfoW, GetSecurityInfo, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::Cryptography::{
     CRYPT_INTEGER_BLOB, CRYPTPROTECT_LOCAL_MACHINE, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
 };
 use windows::Win32::Security::{
     self, ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl,
-    GetSecurityDescriptorDacl, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
-    SE_DACL_PROTECTED, SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_QUERY,
+    GetSecurityDescriptorDacl, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
+    SecurityImpersonation, SetKernelObjectSecurity, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE,
+    TOKEN_QUERY,
 };
 use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, DELETE, FILE_ADD_FILE, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
@@ -206,25 +207,23 @@ pub(crate) fn create_protected_directory(
             );
             directory = reopened;
         }
-        let dacl = protected_dacl(&expected)?;
-        let mut security_info = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+        let attributes = SecurityAttributesInit {
+            owner: (!owner_is_trusted).then(|| user.clone()),
+            dacl: Some(protected_dacl(&expected)?),
+            ..Default::default()
+        }
+        .init();
+        // SAFETY: `attributes` owns the security attributes it points to.
+        let descriptor = PSECURITY_DESCRIPTOR(unsafe { (*attributes.as_ptr()).lpSecurityDescriptor });
+        let mut security_info = DACL_SECURITY_INFORMATION;
         if !owner_is_trusted {
             security_info |= OWNER_SECURITY_INFORMATION;
         }
-        // SAFETY: The directory handle, optional owner SID, and protected DACL remain live for the call.
-        unsafe {
-            SetSecurityInfo(
-                HANDLE(directory.as_raw_handle()),
-                SE_FILE_OBJECT,
-                security_info,
-                (!owner_is_trusted).then_some(user.as_psid_const()),
-                None,
-                Some(dacl.acl.as_ptr().cast()),
-                None,
-            )
-            .ok()
-        }
-        .context("protect identity directory")?;
+        // Unlike SetSecurityInfo, SetKernelObjectSecurity doesn't propagate inheritable entries to existing children, so
+        // repairing this directory never changes an untrusted authority directory under it.
+        // SAFETY: The directory handle and the protected security descriptor remain live for the call.
+        unsafe { SetKernelObjectSecurity(HANDLE(directory.as_raw_handle()), security_info, descriptor) }
+            .context("protect identity directory")?;
         let (repaired_owner, repaired) = owner_and_dacl(&directory)?;
         ensure!(
             repaired_owner == system || repaired_owner == user,
@@ -864,21 +863,32 @@ fn test_wide_path(path: &Utf8Path) -> anyhow::Result<win_api_wrappers::str::U16C
     Ok(win_api_wrappers::str::U16CString::from_os_str(full_path.as_os_str())?)
 }
 
-/// The owner and DACL entries of a test path.
+/// Returns the owner and DACL of a test path in SDDL, which shows inherited entries and DACL protection.
 #[cfg(test)]
-#[derive(Debug, PartialEq)]
-pub(crate) struct TestSecurity {
-    owner: Sid,
-    dacl: Vec<(Sid, u32, u32)>,
-}
+pub(crate) fn test_security(path: &Utf8Path) -> anyhow::Result<String> {
+    use windows::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::core::PWSTR;
 
-#[cfg(test)]
-pub(crate) fn test_security(path: &Utf8Path) -> anyhow::Result<TestSecurity> {
-    let (owner, descriptor) = named_owner_and_dacl(path)?;
-    Ok(TestSecurity {
-        owner,
-        dacl: read_dacl(descriptor.0)?,
-    })
+    let (_, descriptor) = named_owner_and_dacl(path)?;
+    let mut sddl = PWSTR::null();
+    // SAFETY: The descriptor stays live through the call and the output pointer is writable.
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor.0,
+            SDDL_REVISION_1,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut sddl,
+            None,
+        )
+    }
+    .context("convert test security descriptor")?;
+    // SAFETY: The conversion returned a NUL-terminated string.
+    let text = unsafe { sddl.to_string() };
+    // SAFETY: The conversion allocated the string with LocalAlloc.
+    unsafe { LocalFree(Some(HLOCAL(sddl.0.cast()))) };
+    Ok(text?)
 }
 
 /// How long a replacement of an identity file waits for other processes to close the file it replaces.

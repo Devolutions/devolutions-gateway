@@ -1793,7 +1793,7 @@ mod tests {
     }
 
     #[cfg(windows)]
-    fn protection(path: &Utf8Path) -> anyhow::Result<crate::windows::TestSecurity> {
+    fn protection(path: &Utf8Path) -> anyhow::Result<String> {
         crate::windows::test_security(path)
     }
 
@@ -1976,6 +1976,29 @@ mod tests {
 
         assert_eq!(untrusted_directory(&error), Some(authority.as_path()));
         assert_eq!(protection(&authority)?, owned);
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn repairing_the_authorities_directory_leaves_an_untrusted_authority_directory_unchanged() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Local state"): start-up resets wrong permissions on the agent's own
+        // directories, but never repairs an authority directory, including the entries it inherits from them.
+        let directory = TestDir::new()?;
+        drop(directory.store()?);
+        let authorities = directory.0.join("identity").join("authorities");
+        crate::windows::grant_test_directory_access(&authorities, ::windows::Win32::Security::WinBuiltinUsersSid)?;
+        let authority = directory.authority(Uuid::new_v4());
+        fs::create_dir(&authority)?;
+        let inherited = protection(&authority)?;
+
+        let error = directory
+            .store()
+            .err()
+            .context("start-up accepted an authority directory with inherited access")?;
+
+        assert_eq!(untrusted_directory(&error), Some(authority.as_path()));
+        assert_eq!(protection(&authority)?, inherited);
         Ok(())
     }
 }
