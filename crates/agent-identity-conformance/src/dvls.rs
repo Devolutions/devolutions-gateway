@@ -127,7 +127,7 @@ struct Login {
     at: Instant,
 }
 
-// UNTESTED: no log line or error carries a token, key or secret.
+// UNTESTED: no log line carries a token, key or secret, and no error does beyond the login response a test checks.
 // The run's output ends up in CI logs and reports, where a token would open the management API until it expires.
 // When changing a message here, report only the target's URL, ages, lifetimes and HTTP statuses.
 impl Session {
@@ -194,10 +194,14 @@ impl Session {
             .context("send the management API login")?;
         let status = response.status().as_u16();
         ensure!(status == 200, "the management API refused the login with HTTP {status}");
-        let result: LoginResult = response
-            .json()
+        let bytes = response
+            .bytes()
             .await
-            .context("decode the management API login response")?;
+            .context("read the management API login response")?;
+        // The decoding error would quote the response, which may hold a token, so it is dropped.
+        let result = serde_json::from_slice::<LoginResult>(&bytes)
+            .ok()
+            .context("the management API login response is not a LoginResult")?;
         let token_id = result
             .token_id
             .filter(|token_id| !token_id.is_empty())
@@ -882,6 +886,7 @@ impl<'a> Management<'a> {
     /// Sends a request and returns its JSON body, or the refusal when the status is not `success`.
     ///
     /// When the target refuses a session's token, the session logs in again and the request is sent once more.
+    /// That first refusal must still have the error body every refusal of a token has.
     async fn request(&self, method: Method, path: &str, body: Option<&[u8]>, success: u16) -> anyhow::Result<Value> {
         let (status, bytes) = match self.credential {
             Credential::Absent => {
@@ -898,7 +903,10 @@ impl<'a> Management<'a> {
                 let (status, bytes) = self.send(&method, path, body, Some(&token_id)).await?;
                 if status == 401 {
                     let token_id = session.token_id(self.target, Some(&token_id)).await?;
-                    self.send(&method, path, body, Some(&token_id)).await?
+                    let retried = self.send(&method, path, body, Some(&token_id)).await?;
+                    refusal_from(status, &bytes)
+                        .with_context(|| format!("{method} {path} refusal before logging in again"))?;
+                    retried
                 } else {
                     (status, bytes)
                 }
@@ -1435,24 +1443,46 @@ mod tests {
         Ok(())
     }
 
-    /// DVLS answers a request with a token it refuses with a `PublicApiError`, so a body-less 401 to one is malformed, though a session still logs in again on it first.
+    /// DVLS answers a request with a token it refuses with a `PublicApiError`, so a body-less 401 to one is malformed even when the session's retry then succeeds.
     #[tokio::test]
-    async fn session_logs_in_again_on_a_bodyless_401_then_rejects_it() -> anyhow::Result<()> {
+    async fn bodyless_401_to_a_session_fails_even_when_the_retry_succeeds() -> anyhow::Result<()> {
         let stub = Stub::default();
-        stub.refuse_every_token();
         stub.refuse_without_body();
         let target = stub.start().await?;
+        let management = target.management();
+        management.settings().await?;
+        stub.expire_tokens();
         assert!(
-            refusal(target.management().settings().await).is_err(),
-            "a body-less 401 to a request with a token was taken as a refusal"
+            management.settings().await.is_err(),
+            "a body-less 401 to a request with a token was accepted"
         );
         assert_eq!(
             stub.counts(),
             Counts {
                 logins: 2,
-                reads: 2,
-                refused: 2
-            }
+                reads: 3,
+                refused: 1
+            },
+            "the session did not log in again and retry once"
+        );
+        Ok(())
+    }
+
+    /// A login response is a credential, so an error about a malformed one must not repeat it.
+    #[tokio::test]
+    async fn malformed_login_response_error_omits_the_token() -> anyhow::Result<()> {
+        let stub = Stub::default();
+        stub.answer_logins_with_a_bare_token();
+        let target = stub.start().await?;
+        let error = target
+            .management()
+            .settings()
+            .await
+            .err()
+            .map(|error| format!("{error:#}"));
+        assert!(
+            error.as_ref().is_some_and(|error| !error.contains("stub-token-1")),
+            "{error:?}"
         );
         Ok(())
     }
@@ -1467,6 +1497,8 @@ mod tests {
         open: Vec<String>,
         refuse_every_token: bool,
         refuse_without_body: bool,
+        /// Whether a login returns its token as a bare JSON string instead of a `LoginResult`.
+        bare_login_token: bool,
         /// How far the test moved the clock of the session under test.
         elapsed: Duration,
     }
@@ -1524,6 +1556,10 @@ mod tests {
 
         fn refuse_without_body(&self) {
             self.state().refuse_without_body = true;
+        }
+
+        fn answer_logins_with_a_bare_token(&self) {
+            self.state().bare_login_token = true;
         }
 
         fn counts(&self) -> Counts {
@@ -1584,8 +1620,11 @@ mod tests {
                     return (401, json!({ "message": "wrong key or secret" }).to_string());
                 }
                 state.counts.logins += 1;
-                let token_id = format!("token-{}", state.counts.logins);
+                let token_id = format!("stub-token-{}", state.counts.logins);
                 state.open.push(token_id.clone());
+                if state.bare_login_token {
+                    return (200, json!(token_id).to_string());
+                }
                 return (200, json!({ "tokenId": token_id }).to_string());
             }
             if request_line.starts_with(&format!("GET {BASE_PATH}/settings ")) {
