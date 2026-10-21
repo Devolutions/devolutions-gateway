@@ -750,6 +750,16 @@ pub(crate) fn verify_trusted_state_file(file: &File) -> anyhow::Result<()> {
     verify_trusted_owner_and_dacl(&owner, descriptor.0)
 }
 
+/// Checks, without changing it, that an open `identity.json` has the owner and the protected DACL the agent provisions.
+///
+/// UNTESTED: an `identity.json` owned by another account fails this check, because that owner can always rewrite its
+/// DACL.
+/// Only an elevated token can give a test file another owner; when changing this, keep the owner in the check.
+pub(crate) fn verify_identity_file(file: &File, grant_current_user: bool) -> anyhow::Result<()> {
+    ensure_acl_volume(file)?;
+    verify_installed_file(file, grant_current_user, false)
+}
+
 pub(crate) fn verify_trusted_state_path(path: &Utf8Path) -> anyhow::Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     ensure!(
@@ -802,7 +812,7 @@ pub(crate) fn assert_pending_protection(path: &Utf8Path, grant_current_user: boo
 
 #[cfg(test)]
 pub(crate) fn set_test_directory_access(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
-    set_test_directory_dacl(
+    set_test_dacl(
         path,
         &directory_aces(
             &system_sid()?,
@@ -823,11 +833,34 @@ pub(crate) fn grant_test_directory_access(path: &Utf8Path, other: Security::WELL
         FILE_ALL_ACCESS.0,
         (Security::CONTAINER_INHERIT_ACE | Security::OBJECT_INHERIT_ACE).0,
     ));
-    set_test_directory_dacl(path, &entries)
+    set_test_dacl(path, &entries)
+}
+
+/// Gives a test file the protected DACL the agent provisions for its state files, plus full control for `others`.
+#[cfg(test)]
+pub(crate) fn set_test_file_access(path: &Utf8Path, others: &[Security::WELL_KNOWN_SID_TYPE]) -> anyhow::Result<()> {
+    let mut entries = expected_aces(
+        &allowed_principals(&system_sid()?, &user_sid()?, true),
+        Security::NO_INHERITANCE,
+    );
+    for other in others {
+        entries.push((
+            Sid::from_well_known(*other, None)?,
+            FILE_ALL_ACCESS.0,
+            Security::NO_INHERITANCE.0,
+        ));
+    }
+    set_test_dacl(path, &entries)
+}
+
+/// Gives a test file a protected DACL that grants full control to the current user only.
+#[cfg(test)]
+pub(crate) fn set_test_file_access_for_current_user_only(path: &Utf8Path) -> anyhow::Result<()> {
+    set_test_dacl(path, &expected_aces(&[user_sid()?], Security::NO_INHERITANCE))
 }
 
 #[cfg(test)]
-fn set_test_directory_dacl(path: &Utf8Path, entries: &[(Sid, u32, u32)]) -> anyhow::Result<()> {
+fn set_test_dacl(path: &Utf8Path, entries: &[(Sid, u32, u32)]) -> anyhow::Result<()> {
     use win_api_wrappers::security::acl::set_named_security_info;
 
     set_named_security_info(

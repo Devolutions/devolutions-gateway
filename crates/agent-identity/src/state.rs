@@ -143,18 +143,19 @@ impl Store {
             .join("identity.json")
     }
 
-    /// Checks, without changing anything, that every authority directory is owned by the agent's account and protected
-    /// from other users.
+    /// Checks, without changing anything, that every authority directory and its `identity.json` are owned by the agent's
+    /// account and protected from other users.
     ///
-    /// [`crates/agent-identity/INTENT.md`] ("Local state"): one that fails the check is never repaired, and stops all
-    /// identity processing until it is fixed, so every read and state change of the store runs this check first.
+    /// [`crates/agent-identity/INTENT.md`] ("Local state"): one that fails the check is never repaired or read as absent,
+    /// and stops all identity processing until it is fixed, so every read and state change of the store runs this check
+    /// first.
     ///
     /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
     pub fn check_stored_identities(&self) -> anyhow::Result<()> {
         private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user).map(drop)
     }
 
-    /// Takes the state lock once every authority directory passes [`Store::check_stored_identities`].
+    /// Takes the state lock once every stored identity passes [`Store::check_stored_identities`].
     fn lock(&self) -> anyhow::Result<fs::File> {
         let lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
         self.check_stored_identities()?;
@@ -166,7 +167,7 @@ impl Store {
         self.read_stored_identity(authority_id)
     }
 
-    /// Reads an identity once every authority directory has passed [`Store::check_stored_identities`].
+    /// Reads an identity once every stored identity has passed [`Store::check_stored_identities`].
     fn read_stored_identity(&self, authority_id: Uuid) -> anyhow::Result<Option<StoredIdentity>> {
         let path = self.identity_path(authority_id);
         if !private_file::check_authority_directory(
@@ -175,11 +176,8 @@ impl Store {
         )? {
             return Ok(None);
         }
-        let file = match private_file::open_read(&path) {
-            Ok(file) => file,
-            Err(error) if is_not_found(&error) => return Ok(None),
-            Err(error) if private_file::is_untrusted(&error) => return Ok(None),
-            Err(error) => return Err(error),
+        let Some(file) = private_file::open_identity_file(&path, self.acl_grant_current_user)? else {
+            return Ok(None);
         };
         ensure!(
             file.metadata()?.len() <= MAX_IDENTITY_BYTES,
@@ -1300,7 +1298,7 @@ mod tests {
         #[cfg(unix)]
         fs::set_permissions(&record_path, fs::Permissions::from_mode(0o644))?;
 
-        // oracle: scaffold
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         let (record, _key) = store
             .begin_enrollment(&token)?
             .context("untrusted marker rejected the pending token")?;
@@ -1319,8 +1317,12 @@ mod tests {
         fs::write(&identity_path, b"not a stored identity")?;
         #[cfg(unix)]
         fs::set_permissions(&identity_path, fs::Permissions::from_mode(0o644))?;
-        // oracle: scaffold
-        assert!(store.read_identity(authority_id)?.is_none());
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        let read = store
+            .read_identity(authority_id)
+            .err()
+            .context("an untrusted identity file read as absent")?;
+        assert_eq!(untrusted_path(&read), Some(identity_path.as_path()));
         let replacement = StoredIdentity {
             version: 1,
             authority_id,
@@ -1338,12 +1340,18 @@ mod tests {
                 previous: None,
             },
         };
-        // oracle: scaffold
-        assert!(store.write_identity(&replacement).is_err());
-        assert!(
-            store.reconcile().is_err(),
-            "untrusted identity file did not stop reconciliation"
-        );
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        let write = store
+            .write_identity(&replacement)
+            .err()
+            .context("an untrusted identity file was replaced")?;
+        let reconciliation = store
+            .reconcile()
+            .err()
+            .context("an untrusted identity file did not stop reconciliation")?;
+        assert_eq!(untrusted_path(&write), Some(identity_path.as_path()));
+        assert_eq!(untrusted_path(&reconciliation), Some(identity_path.as_path()));
+        assert_eq!(fs::read(&identity_path)?, b"not a stored identity");
         // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         assert!(keys::open(store.key_backend(), &record.key_name)?.is_some());
         fs::remove_file(&identity_path)?;
@@ -1927,6 +1935,110 @@ mod tests {
         Ok(())
     }
 
+    /// Opens a file to its group on Unix, and to the Users group on Windows.
+    fn open_file_to_group(path: &Utf8Path) -> anyhow::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(path, fs::Permissions::from_mode(0o640))?;
+        }
+        #[cfg(windows)]
+        crate::windows::set_test_file_access(path, &[::windows::Win32::Security::WinBuiltinUsersSid])?;
+        Ok(())
+    }
+
+    fn close_file_to_other_users(path: &Utf8Path) -> anyhow::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+        }
+        #[cfg(windows)]
+        crate::windows::set_test_file_access(path, &[])?;
+        Ok(())
+    }
+
+    #[test]
+    fn an_identity_file_open_to_other_users_stops_every_store_use_until_it_is_fixed() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let hidden = enroll_locally(&store, &directory.0)?;
+        let mut trusted = hidden.clone();
+        trusted.authority_id = Uuid::new_v4();
+        trusted.identity_id = Uuid::new_v4();
+        trusted.token_sha256 = hex::encode([7u8; 32]);
+        trusted.keys.current.key_name = keys::new_key_name("ai");
+        store.write_identity(&trusted)?;
+        let untrusted = store.identity_path(hidden.authority_id);
+        open_file_to_group(&untrusted)?;
+        let opened = (protection(&untrusted)?, fs::read(&untrusted)?);
+        // Read as absent, the hidden identity would let its own token enroll again.
+        let token = test_token()?;
+        let pending_path = pending::write(&directory.0, &token, true)?;
+
+        for (operation, result) in [
+            ("starting up", directory.store().map(drop)),
+            (
+                "reading another identity",
+                store.read_identity(trusted.authority_id).map(drop),
+            ),
+            ("listing identities", store.list_identities().map(drop)),
+            (
+                "beginning the hidden identity's enrollment again",
+                store.begin_enrollment(&token).map(drop),
+            ),
+            (
+                "updating another identity's config",
+                store
+                    .update_config(&mut trusted, json!({"version": 1, "revision": 8}))
+                    .map(drop),
+            ),
+            ("reconciling", store.reconcile()),
+        ] {
+            let error = result
+                .err()
+                .with_context(|| format!("{operation} ignored an untrusted identity file"))?;
+            assert_eq!(untrusted_path(&error), Some(untrusted.as_path()), "{operation}");
+        }
+        assert!(pending_path.exists());
+        assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
+        assert_eq!((protection(&untrusted)?, fs::read(&untrusted)?), opened);
+
+        close_file_to_other_users(&untrusted)?;
+        assert_eq!(store.read_identity(hidden.authority_id)?, Some(hidden));
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_identity_file_closed_to_other_users_still_needs_the_dacl_the_agent_provisions() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        if crate::windows::is_system()? {
+            // For SYSTEM, the current user alone is the DACL the agent provisions.
+            return Ok(());
+        }
+        let directory = TestDir::new()?;
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        let path = store.identity_path(identity.authority_id);
+        // Without SYSTEM, no other user can access the file, but the agent provisions SYSTEM too.
+        crate::windows::set_test_file_access_for_current_user_only(&path)?;
+
+        let error = store
+            .read_identity(identity.authority_id)
+            .err()
+            .context("an identity file without the DACL the agent provisions passed the check")?;
+
+        assert_eq!(untrusted_path(&error), Some(path.as_path()));
+        Ok(())
+    }
+
     #[test]
     fn an_authority_directory_named_in_upper_case_is_checked_too() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Local state"): every authority directory is checked; on a case-insensitive
@@ -2011,6 +2123,28 @@ mod tests {
             assert_eq!(untrusted_path(&read), Some(authority.as_path()), "{replacement:?}");
             assert_eq!(untrusted_path(&start_up), Some(authority.as_path()), "{replacement:?}");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_directory_in_place_of_an_identity_file_is_never_an_absent_identity() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        let path = store.identity_path(identity.authority_id);
+        fs::remove_file(&path)?;
+        fs::create_dir(&path)?;
+
+        let error = store
+            .read_identity(identity.authority_id)
+            .err()
+            .context("a directory in place of identity.json read as an absent identity")?;
+
+        assert_eq!(untrusted_path(&error), Some(path.as_path()));
         Ok(())
     }
 

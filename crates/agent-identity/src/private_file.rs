@@ -19,10 +19,10 @@ impl fmt::Display for UntrustedStateFile {
 
 impl Error for UntrustedStateFile {}
 
-/// An `<data-dir>/identity/authorities/<authority_id>/` directory that fails the trust check.
+/// An `<data-dir>/identity/authorities/<authority_id>/` directory or its `identity.json` that fails the trust check.
 ///
-/// [`crates/agent-identity/INTENT.md`] ("Local state"): such a directory is never repaired, and stops all identity
-/// processing until it is fixed.
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): such a directory or file is never repaired or read as absent,
+/// and stops all identity processing until it is fixed.
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 #[derive(Debug)]
@@ -33,7 +33,7 @@ pub struct UntrustedStoredIdentity {
 
 impl fmt::Display for UntrustedStoredIdentity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "untrusted authority directory {}", self.path)
+        write!(formatter, "untrusted stored identity {}", self.path)
     }
 }
 
@@ -129,8 +129,8 @@ pub(crate) fn prepare_directories(data_dir: &Utf8Path, grant_current_user: bool)
     Ok(())
 }
 
-/// Checks, without changing anything, that every authority directory is owned by the agent's account and protected
-/// from other users, and returns the authority IDs of those that exist.
+/// Checks, without changing anything, that every authority directory and its `identity.json` are owned by the agent's
+/// account and protected from other users, and returns the authority IDs of the directories that exist.
 pub(crate) fn check_stored_identities(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Vec<Uuid>> {
     let authorities = data_dir.join("identity").join("authorities");
     let entries = match fs::read_dir(&authorities) {
@@ -153,6 +153,7 @@ pub(crate) fn check_stored_identities(data_dir: &Utf8Path, grant_current_user: b
         };
         let path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| anyhow::anyhow!("non-UTF-8 authority path"))?;
         if check_authority_directory(&path, grant_current_user)? {
+            open_identity_file(&path.join("identity.json"), grant_current_user)?;
             authority_ids.push(authority_id);
         }
     }
@@ -223,6 +224,79 @@ fn verify_unix_directory_access(mode: u32, owner: libc::uid_t, user: libc::uid_t
     ensure!(owner == user, "authority directory owner is not the agent's account");
     ensure!(mode & 0o077 == 0, "authority directory is accessible to other users");
     Ok(())
+}
+
+/// Opens an authority directory's `identity.json`, without changing it, once it passes the trust check, and returns
+/// `None` when it doesn't exist.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): the file must pass the check of its authority directory, so it is
+/// a regular file owned by the agent's account and is, on Unix, closed to group and other, or on Windows, protected by
+/// exactly the DACL the agent provisions for it.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+pub(crate) fn open_identity_file(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Option<File>> {
+    match open_trusted_identity_file(path, grant_current_user) {
+        Ok(file) => Ok(Some(file)),
+        Err(error)
+            if error
+                .downcast_ref::<std::io::Error>()
+                .is_some_and(|error| error.kind() == ErrorKind::NotFound) =>
+        {
+            Ok(None)
+        }
+        Err(source) => Err(anyhow::Error::new(UntrustedStoredIdentity {
+            path: path.to_owned(),
+            source,
+        })),
+    }
+}
+
+fn open_trusted_identity_file(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<File> {
+    let metadata = fs::symlink_metadata(path).context("inspect identity file")?;
+    ensure!(metadata.file_type().is_file(), "identity path is not a regular file");
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        use windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+
+        ensure!(
+            !crate::windows::is_reparse_point(&metadata),
+            "identity file is a reparse point"
+        );
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0);
+    }
+    let file = options.open(path).context("open identity file")?;
+    let metadata = file.metadata()?;
+    ensure!(metadata.file_type().is_file(), "identity path is not a regular file");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+
+        let _ = grant_current_user;
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        let user = unsafe { libc::geteuid() };
+        verify_unix_file_permissions(metadata.permissions().mode(), metadata.uid(), Some(user))?;
+        #[cfg(target_os = "macos")]
+        crate::macos_acl::ensure_private_file(&file)?;
+    }
+    #[cfg(windows)]
+    {
+        ensure!(
+            !crate::windows::is_reparse_point(&metadata),
+            "identity file is a reparse point"
+        );
+        crate::windows::verify_identity_file(&file, grant_current_user)?;
+    }
+    Ok(file)
 }
 
 /// Creates a missing authority directory, and only checks an existing one, which is never repaired.

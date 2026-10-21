@@ -118,13 +118,13 @@ async fn run_identity(
                         .chain()
                         .find_map(|cause| cause.downcast_ref::<UntrustedStoredIdentity>())
                     {
-                        // UNTESTED: this log names the authority directory and how to fix it, because the agent never
-                        // repairs it and stays stopped until an administrator does.
-                        // No test captures service logs; when changing this, keep the directory and the fix in the log.
+                        // UNTESTED: this log names the authority directory or identity file and how to fix it, because
+                        // the agent never repairs it and stays stopped until an administrator does.
+                        // No test captures service logs; when changing this, keep the path and the fix in the log.
                         error!(
                             error = format!("{error:#}"),
-                            directory = %untrusted.path,
-                            "Agent Identity is stopped until this authority directory is a plain directory owned by the service account with no access for other users; the agent never repairs it"
+                            path = %untrusted.path,
+                            "Agent Identity is stopped until this authority directory or identity.json is a plain directory or file owned by the service account with no access for other users; the agent never repairs it"
                         );
                     } else {
                         error!(
@@ -193,7 +193,8 @@ async fn run_identity(
 /// Why pending enrollment stopped.
 enum Stopped {
     Shutdown,
-    /// An authority directory failed its check, which stops all identity processing until it is fixed.
+    /// An authority directory or `identity.json` failed its check, which stops all identity processing until it is
+    /// fixed.
     Untrusted,
 }
 
@@ -314,8 +315,8 @@ async fn run_pending_enrollments(
     let mut retries: HashMap<Utf8PathBuf, RetryState> = HashMap::new();
     let mut last_list_error = None;
     loop {
-        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails its check stops all
-        // identity processing; start-up reports it and waits until it is fixed.
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory or `identity.json` that fails its
+        // check stops all identity processing; start-up reports it and waits until it is fixed.
         if store.check_stored_identities().is_err() {
             return Stopped::Untrusted;
         }
@@ -567,6 +568,38 @@ mod tests {
             std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
             Ok(path)
         }
+
+        /// Stores an identity, then gives its `identity.json` default permissions, which is not the form the agent
+        /// provisions: it is open to group and other users on Unix, and its DACL is inherited rather than protected on
+        /// Windows.
+        fn put_untrusted_identity_file(&self) -> anyhow::Result<Utf8PathBuf> {
+            let store = self.store()?;
+            let identity = StoredIdentity {
+                version: 1,
+                authority_id: uuid::Uuid::new_v4(),
+                identity_id: uuid::Uuid::new_v4(),
+                base_url: "https://127.0.0.1:9".to_owned(),
+                config: serde_json::json!({ "version": 1, "revision": 1 }),
+                token_sha256: "1".repeat(64),
+                rejected: None,
+                keys: KeySlots {
+                    current: KeyRecord {
+                        key_name: device_key::new_key_name(IDENTITY_KEY_PREFIX),
+                        certificate_chain: Some(vec!["YWJj".to_owned()]),
+                    },
+                    pending: None,
+                    previous: None,
+                },
+            };
+            store.write_identity(&identity)?;
+            let path = store.identity_path(identity.authority_id);
+            let contents = std::fs::read(&path)?;
+            std::fs::remove_file(&path)?;
+            std::fs::write(&path, contents)?;
+            #[cfg(unix)]
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644))?;
+            Ok(path)
+        }
     }
 
     impl Drop for TestDataDir {
@@ -627,11 +660,16 @@ mod tests {
         Ok(())
     }
 
+    #[rstest::rstest]
+    #[case::authority_directory(TestDataDir::put_untrusted_authority_directory)]
+    #[case::identity_file(TestDataDir::put_untrusted_identity_file)]
     #[tokio::test]
-    async fn pending_poll_stops_identity_processing_once_an_authority_directory_fails_the_check() -> anyhow::Result<()>
-    {
-        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check after start-up
-        // stops all identity processing too; the caller then stops every runner and its streams.
+    async fn pending_poll_stops_identity_processing_once_a_stored_identity_fails_the_check(
+        #[case] put_untrusted: fn(&TestDataDir) -> anyhow::Result<Utf8PathBuf>,
+    ) -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        // A stored identity that fails the check after start-up stops all identity processing too; the caller then
+        // stops every runner and its streams.
         let data_dir = TestDataDir::new()?;
         let conf = test_conf()?;
         let settings = conf.debug.identity.clone().unwrap_or_default();
@@ -643,7 +681,7 @@ mod tests {
         });
         let (_shutdown_handle, mut shutdown) = devolutions_gateway_task::ShutdownHandle::new();
         let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
-        data_dir.put_untrusted_authority_directory()?;
+        put_untrusted(&data_dir)?;
 
         let stopped = tokio::time::timeout(
             Duration::from_secs(10),

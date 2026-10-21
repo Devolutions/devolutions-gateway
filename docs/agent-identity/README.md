@@ -96,7 +96,7 @@ Leave everything in the `identity` folder to the agent; `identity enroll` and, o
 - Don't create device keys whose names start with `devolutions-agent-identity_`.
   The agent owns that prefix and, at start-up, deletes every such key it hasn't recorded.
 - Don't change owners or permissions.
-  The agent resets them on its directories at start-up, and while it can't trust a stored identity's directory, it stops all identity processing.
+  The agent resets them on its directories at start-up, and while it can't trust a stored identity's directory or `identity.json`, it stops all identity processing.
 
 ## After enrollment
 
@@ -152,6 +152,7 @@ The service logs Agent Identity events in the agent's log files, in its data dir
 | `Agent Identity renewal will retry`, `Agent Identity confirmation will retry`, `Agent Identity check-in will retry` | The request failed for the transient `error` shown; the agent retries. |
 | `The Agent Identity is rejected; it stops renewing and checking in` | The identity ended for the reason in `code`; see [When an identity ends](#when-an-identity-ends). |
 | `Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account` | The agent can't trust its state in `directory`, typically after an owner or permission change there. Restore the service account as its owner with exclusive access; the agent retries on its own. |
+| `Agent Identity is stopped until this authority directory or identity.json is a plain directory or file owned by the service account with no access for other users; the agent never repairs it` | The agent can't trust the authority directory or `identity.json` in `path`; it never repairs it, and processes no identity or pending enrollment until an administrator fixes its owner and access. Make it a plain directory or file again, owned by the service account, with access for that account only and, on Windows, no inherited permissions; the agent resumes on its own. |
 | `Agent Identity key backend is unavailable; Agent Identity is stopped` | See [Key backend unavailable](#key-backend-unavailable). |
 | `Agent Identity debug settings are enabled; remove __debug__.identity for production` | Remove the `__debug__.identity` section from `agent.json`. |
 
