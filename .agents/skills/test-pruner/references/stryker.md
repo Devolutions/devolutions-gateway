@@ -15,6 +15,8 @@ Run the clean suite first with a TRX log, because the report names tests by id a
 dotnet test <TestProject>.csproj --logger "trx;LogFileName=clean.trx" --results-directory <scratch-dir>/trx
 ```
 
+Confirm the TRX lists the tests you expect before trusting any result, because `dotnet test` passes when it discovers none, as with a wrong project or filter.
+
 Then, from the test project directory:
 
 ```powershell
@@ -49,7 +51,6 @@ $report.files.PSObject.Properties | Where-Object Name -like '*<Module>*' | ForEa
 }
 ```
 
-A unique kill is a mutant whose `killedBy` has one entry.
 Read kills only from `killedBy`; `coveredBy` lists the tests that ran against a mutant, not those that failed.
 The script lists `Killed` mutants only; attribute a `Timeout` by applying it by hand, as below, and running its `coveredBy` tests one at a time before counting it caught.
 One row with an argument xUnit cannot serialize makes the whole theory one test id, so the matrix cannot tell its rows apart; `test-writer`'s C# forms avoid this.

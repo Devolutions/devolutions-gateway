@@ -16,7 +16,7 @@ Look for a property before writing example tests, because a property holds acros
 Candidates are a round-trip through encode and decode, a size computation matching the bytes written, and an invariant from the applicable intent or contract file that speaks of inputs or state, such as one that must survive any sequence of operations.
 Reuse the existing generator for each type and add new ones beside it, so each type's generator is written once.
 With no property that must hold across many inputs, write example tests; a property whose assertion re-implements the code under test checks the code against itself.
-A parser of untrusted input gets a fuzz target rather than a never-panics property, because the fuzzer is coverage-guided and keeps a corpus, which a few hundred random cases are not.
+A parser of untrusted input gets a fuzz target rather than a never-panics property, because the fuzzer is coverage-guided and keeps a corpus, which a few hundred random cases are not; where no fuzz harness covers the code, the language reference gives the fallback.
 
 ## Snapshots
 

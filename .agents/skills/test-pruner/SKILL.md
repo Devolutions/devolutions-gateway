@@ -11,7 +11,7 @@ Mutation testing alone cannot tell a test that matches itself from a correct one
 Tool mechanics: `references/cargo-mutants.md` for Rust, `references/stryker.md` for C#; load only the language in scope.
 
 Editing mode is for tests you own, such as a change's diff before its pull request opens: commit the changes yourself and hand the evidence tables (oracle table, kill matrix, challenge results, survivors, and found bugs) to whoever posts them as a pull request comment.
-Review mode is for another's pull request: post a review and edit nothing.
+Review mode is for another's pull request: post a review and change nothing in its branch, applying mutants and challenge patches only in the clone below.
 Run mutants in a clone of their own and address its files by absolute path, since a relative path resolves against whichever checkout the shell starts in, and an applied mutant left in a shared checkout corrupts every other run there.
 
 ## Measure
@@ -19,7 +19,8 @@ Run mutants in a clone of their own and address its files by absolute path, sinc
 Invoke `test-oracle-reviewer` on every test in scope and record independent, self-derived, or unknown with evidence.
 Run the mutation tool as the reference describes, adding domain mutants from `references/domain-mutants.md` because generic mutants miss most domain faults.
 Build the kill matrix of mutant by test from the tool's outputs; only the cases the reference names need per-test reruns.
-Make no deletion decision on an empty or near-empty viable sample; with nothing to catch, every test has zero unique kills and the invariant passes trivially.
+A unique kill is a mutant caught by exactly one test in scope.
+Make no deletion decision about a test until some mutant of the code it exercises is caught, by it or another test, since zero unique kills over nothing caught measures nothing and the invariant then passes trivially; challenge such a test instead.
 For tests with several assertions, record which assertion fails for each kill.
 Run the scoped suite repeatedly on the clean tree, for example 15 times, to find flaky tests before trusting any kill.
 
@@ -28,7 +29,7 @@ Run the scoped suite repeatedly on the clean tree, for example 15 times, to find
 Keep independent tests; merge them into cases of one parametrized test only when they check the same property and differ only in data.
 Never delete an independent test on mutant evidence: the mutant sample is tiny next to the real fault space, and a spec vector costs nothing to keep.
 Strengthen a self-derived test with unique kills by replacing its expected value with an independent one; if none exists, keep it and mark it `// oracle: self-derived; sole guard for <faults>`, naming each fault in words, since mutant ids and line numbers change between runs.
-A strengthened or gap test that fails is a finding, never a task to make it pass: report the test, the independent expected value and its source, and the code's actual output to whoever owns the decision, and change neither test nor code meanwhile, since whichever is edited first becomes the specification.
+A strengthened or gap test that fails is a finding, never a task to make it pass: report the test, the independent expected value and its source, and the code's actual output to whoever assigned the run in editing mode, or to the author in review mode, and change neither test nor code meanwhile, since whichever is edited first becomes the specification.
 Delete a self-derived test with no unique kills.
 A test of unknown oracle with unique kills has already passed the challenge; strengthen it.
 Challenge a test of unknown oracle without unique kills, unless it is protected below, since its fate does not depend on the answer.
@@ -46,7 +47,7 @@ Report flaky tests separately; deleting one hides a bug.
 
 Give a fresh-context agent the test, the code under test, and the mutants the rest of the suite already catches, and ask for one mutant that this test catches and the others miss, as a patch only.
 Apply and run the patch yourself; arguments do not count.
-Add any mutant it finds to the domain catalog regardless of the verdict.
+Record any mutant it finds in the evidence regardless of the verdict, and propose a reusable one for `references/domain-mutants.md` in a separate pull request, since neither mode edits skills.
 If it finds none, ask the human who wrote or prompted the test for the source of its expected value, and accept a source you can check, never a confirmation.
 Without one, delete the test.
 
@@ -61,9 +62,9 @@ Do not add a never-panics or never-throws property where a fuzz target already c
 
 The caught-mutant set never shrinks except through deletions a human approves in a pull request.
 Rerun the caught set after every deletion set and every consolidation, verify by rerunning rather than reasoning, and revert on any loss; compare runs made with identical tool settings over the same scope.
-Triage surviving mutants as equivalent, unconstrained (it changes only text that no requirement pins, such as a log or error message), coverage gap, or bug lead; a mutant that survives because its code is unreachable is a bug lead.
-Close each coverage gap with a test whose expected value is independent, written with `test-writer`; a gap no independent source decides is reported instead.
-A suite of independent tests yields few deletions, so expect most of a pass's change to be consolidations and gap tests.
+After ruling out the scoping errors and tool artifacts the reference names, triage each survivor as equivalent (no observable change), unconstrained (an observable change no independent requirement decides, such as a log message's wording), coverage gap (a change an independent requirement rejects), or bug lead (the original code looks wrong, or is unreachable in every supported configuration).
+Close each coverage gap with a test whose expected value comes from that requirement, written with `test-writer`.
+A suite of independent tests yields few deletions; a pass may end in consolidations and gap tests only, or in no change.
 
 In editing mode, commit deletions, consolidations, strengthenings, and gap tests separately, each as soon as it is verified, so an interrupted run loses little; they are different reviews.
 Change only tests and source comments; never modify non-test source otherwise.

@@ -1,7 +1,6 @@
 # cargo-mutants mechanics
 
-cargo-mutants reports whether the suite caught each mutant.
-It keeps per-test results only in its logs, so the kill matrix is parsed from them.
+cargo-mutants keeps per-test results only in its logs, so the kill matrix is parsed from them.
 These notes target cargo-mutants 27.1.
 
 ## Run
@@ -55,7 +54,6 @@ $expected = Select-String -Path <clean-run-log> -Pattern '^test (\S+)(?: - shoul
     }
 ```
 
-A unique kill is a mutant caught by exactly one test in scope.
 For assertion-level evidence, read the `panicked at <file>:<line>` location of each failure; an assertion whose line never appears across its test's kills catches nothing the others miss.
 
 ## Rerun
