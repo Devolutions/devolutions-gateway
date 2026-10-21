@@ -264,6 +264,7 @@ async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<
     let second_nonce = second_nonce.await?;
 
     for request in [&first, &second] {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
         assert_eq!(request.uri().path(), format!("/dvls{CONNECT_RPC_PATH}"));
         let signature_input = request
             .headers()
@@ -370,7 +371,7 @@ async fn channel_layer_preserves_root_path_and_applies_clock_offset() -> anyhow:
         .await
         .map_err(|error| anyhow!("{error}"))?;
     let after = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3_600;
-    // oracle: intent crates/agent-identity-httpsig/INTENT.md §Implementation decisions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
     assert_eq!(request.uri().path(), CONNECT_RPC_PATH);
     let signature_input = request
         .headers()
