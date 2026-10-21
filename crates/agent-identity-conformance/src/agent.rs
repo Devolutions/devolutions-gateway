@@ -284,6 +284,8 @@ struct AgentCase {
     tokens: Vec<String>,
     metadata_hostname: String,
     cleaned: bool,
+    /// Whether dropping the case keeps its directory, with the agent's logs, as evidence: until the case passes, since a timeout drops it mid-test.
+    keep: bool,
 }
 
 impl AgentCase {
@@ -312,7 +314,7 @@ impl AgentCase {
             identity_debug["renewal_after_secs"] = json!(seconds);
         }
         let first_root = ctx.target.ca_path.as_deref();
-        let second_root = ctx.second.as_ref().and_then(|target| target.ca_path.as_deref());
+        let second_root = ctx.second.as_ref().and_then(|second| second.target.ca_path.as_deref());
         match (first_root, second_root) {
             (Some(first), Some(second)) => {
                 let mut roots = std::fs::read(first)?;
@@ -350,6 +352,7 @@ impl AgentCase {
             tokens: Vec::new(),
             metadata_hostname,
             cleaned: false,
+            keep: true,
         };
         if run {
             case.start().await?;
@@ -684,6 +687,21 @@ impl AgentCase {
     where
         F: Fn(&IdentityRecord) -> bool,
     {
+        self.until_identity_within(target, identity_id, what, WAIT, check).await
+    }
+
+    /// Like [`Self::until_identity`], but waits up to `wait`.
+    async fn until_identity_within<F>(
+        &mut self,
+        target: &Target,
+        identity_id: &str,
+        what: &str,
+        wait: Duration,
+        check: F,
+    ) -> anyhow::Result<IdentityRecord>
+    where
+        F: Fn(&IdentityRecord) -> bool,
+    {
         let start = Instant::now();
         loop {
             if let Some(record) = self.find_identity_record(target, identity_id).await?
@@ -692,7 +710,11 @@ impl AgentCase {
                 return Ok(record);
             }
             self.check_running()?;
-            ensure!(start.elapsed() < WAIT, "agent did not reach {what} within 20 seconds");
+            ensure!(
+                start.elapsed() < wait,
+                "agent did not reach {what} within {} seconds",
+                wait.as_secs()
+            );
             tokio::time::sleep(POLL).await;
         }
     }
@@ -1225,6 +1247,11 @@ impl Drop for AgentCase {
                 eprintln!("agent-case key cleanup failed: {error:#}");
             }
         }
+        if self.keep {
+            // The run's keys are deleted above or by `finish`, and the path holds no secret.
+            self.dir.disable_cleanup(true);
+            println!("KEPT {} {}", self.ctx.test, self.path().display());
+        }
     }
 }
 
@@ -1233,6 +1260,7 @@ impl Drop for AgentCase {
 /// On the mock, every sub-case starts from reset authorities, so it inherits no fault, setting, clock offset, barrier, token or identity from an earlier sub-case of the same test.
 /// A sub-case therefore sets only the faults it needs and relies on the reset for every default.
 /// DVLS has no reset, so an agent sub-case that runs on it changes no settings.
+/// A sub-case that fails or times out keeps its directory, which [`AgentCase`]'s drop reports.
 async fn with_agent<F>(ctx: Context, renewal_after_secs: Option<u64>, run: bool, work: F) -> anyhow::Result<()>
 where
     F: for<'a> FnOnce(&'a mut AgentCase) -> CaseFuture<'a>,
@@ -1241,6 +1269,7 @@ where
     let mut case = AgentCase::new(ctx, renewal_after_secs, run).await?;
     let result = work(&mut case).await;
     let audit = case.finish().await;
+    case.keep = result.is_err() || audit.is_err();
     match (result, audit) {
         (Ok(()), Ok(())) => Ok(()),
         (Err(error), Ok(())) => Err(error),
@@ -1254,7 +1283,7 @@ async fn reset_mocks(ctx: &Context) -> anyhow::Result<()> {
     if ctx.mock() {
         ctx.target.reset().await?;
         if let Some(second) = &ctx.second {
-            second.reset().await?;
+            second.target.reset().await?;
         }
     }
     Ok(())
@@ -1607,6 +1636,38 @@ async fn wait_key_deleted(case: &mut AgentCase, name: &str) -> anyhow::Result<()
     Ok(())
 }
 
+/// The earliest moment the agent's schedule renews a certificate issued after `issued_after` with `lifetime`, or `None` beyond the clock's range.
+///
+/// The agent renews `2/3 × lifetime` after the certificate's anchor, the earlier of its `notBefore` and the moment the agent stored or loaded it ([agent intent], "Schedules"), and `disable_jitter` removes the jitter.
+/// This assumes that the authority dates `notBefore` at the issuance, by a clock that agrees with the runner's, so that the anchor comes after `issued_after`.
+///
+/// [agent intent]: ../../agent-identity/INTENT.md#schedules
+fn earliest_renewal(issued_after: Instant, lifetime: Duration) -> Option<Instant> {
+    issued_after.checked_add(lifetime.checked_mul(2)? / 3)
+}
+
+/// How long a step may take when the agent's schedule may renew a certificate issued after `issued_after` with `lifetime` during it.
+///
+/// The step gets [`WAIT`], plus another [`WAIT`] for a renewal when [`earliest_renewal`] comes before the first one ends: `WAIT × (1 + [issued_after + 2/3 × lifetime < now + WAIT])`.
+/// A short leaf lifetime makes that renewal precede what the step waits for: a certificate that expired meanwhile opens no stream ([contract] §7.4) until the agent renews it within grace (§6).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+fn renewal_aware_wait(issued_after: Instant, lifetime: Duration) -> Duration {
+    match earliest_renewal(issued_after, lifetime) {
+        Some(renewal) if renewal < Instant::now() + WAIT => 2 * WAIT,
+        _ => WAIT,
+    }
+}
+
+/// Whether a certificate issued after `issued_after` with `lifetime` is surely unexpired now, under [`earliest_renewal`]'s assumption.
+///
+/// A leaf's `notAfter` is one leaf lifetime after its `notBefore` ([contract] §4).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+fn surely_unexpired(issued_after: Instant, lifetime: Duration) -> bool {
+    issued_after.elapsed() < lifetime
+}
+
 /// Waits until the agent has stored a renewal that replaced `old_key`, holds no pending or previous key, and has deleted `old_key`.
 ///
 /// The authority answers `confirm` before the agent stores its outcome and deletes the old key (`crates/agent-identity/INTENT.md`, "Stored identities"), so stopping the agent right after the `204` could interrupt those writes.
@@ -1846,7 +1907,12 @@ pub(crate) async fn a_untrusted_tls_server_keeps_pending_token(ctx: Context) -> 
     with_agent(ctx, None, false, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
-            let second = case.ctx.second.as_ref().context("second mock authority required")?;
+            let second = &case
+                .ctx
+                .second
+                .as_ref()
+                .context("second mock authority required")?
+                .target;
             let root = second.ca_path.as_ref().context("second mock TLS CA required")?;
             let path = case.path().join("agent.json");
             let mut config: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
@@ -2018,7 +2084,7 @@ pub(crate) async fn a_two_pending_tokens_different_authorities_progress_independ
             case.set_backoff_max_secs(10)?;
             case.start().await?;
             let first = case.ctx.target.clone();
-            let second = case.ctx.second.clone().context("second authority required")?;
+            let second = case.ctx.second.clone().context("second authority required")?.target;
             let first_token = first
                 .management()
                 .create_token(1, Duration::from_secs(3600), None)
@@ -3237,6 +3303,9 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, Some(2), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
+            let lifetime = case.ctx.leaf_lifetime();
+            // Every certificate of this identity is issued after its token is created.
+            let issued_after = Instant::now();
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
             let (id, initial) = case.enrolled(&target, &token).await?;
@@ -3328,11 +3397,25 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
             // The restarted agent would renew at once, since its certificate is older than `renewal_after_secs`.
             case.clear_renewal_after_secs()?;
             case.start().await?;
+            // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+            // oracle: intent crates/agent-identity/INTENT.md §Schedules
+            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+            // The authority accepts a renewal signed only with the key of the identity's current or pending certificate (§6), and only the agent's persisted keys are those, so a later certificate also shows that the restarted agent loaded them.
+            // The agent's schedule renews only once a certificate is due, which a short leaf lifetime brings within the restart.
             let resumed = case
-                .until_identity(&target, &id, "reconnected with persisted key", |record| {
-                    record.connected && current_thumbprint(record).is_ok_and(|thumb| thumb == new_thumb)
-                })
+                .until_identity_within(
+                    &target,
+                    &id,
+                    "reconnected with its persisted key, or with a certificate it renewed",
+                    renewal_aware_wait(issued_after, lifetime),
+                    |record| record.connected && current_thumbprint(record).is_ok_and(|thumb| thumb != old_thumb),
+                )
                 .await?;
+            ensure!(
+                current_thumbprint(&resumed)? == new_thumb
+                    || earliest_renewal(issued_after, lifetime).is_some_and(|due| due <= Instant::now()),
+                "restarted agent renewed its persisted certificate before it was due"
+            );
             ensure!(
                 resumed.issuer() == renewed.issuer(),
                 "agent changed issuer while loading the persisted key"
@@ -4340,11 +4423,20 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
+            let lifetime = case.ctx.leaf_lifetime();
+            // Every certificate of this identity is issued after its token is created.
+            let issued_after = Instant::now();
             let token = new_token(case, 1).await?;
             case.write_pending(&token.text)?;
             let (id, state) = case.enrolled(&target, &token).await?;
             let record = case
-                .until_identity(&target, &id, "connected channel", |record| record.connected)
+                .until_identity_within(
+                    &target,
+                    &id,
+                    "connected channel",
+                    renewal_aware_wait(issued_after, lifetime),
+                    |record| record.connected,
+                )
                 .await?;
             let original = current_thumbprint(&record)?.to_owned();
             let acknowledgments = if case.ctx.mock() {
@@ -4354,11 +4446,32 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
             };
             target.management().request_renewal(&id).await?;
             let renewed = case
-                .until_identity(&target, &id, "requested renewal", |record| {
-                    current_thumbprint(record).is_ok_and(|thumb| thumb != original) && !record.renewal_requested
-                })
+                .until_identity_within(
+                    &target,
+                    &id,
+                    "requested renewal",
+                    renewal_aware_wait(issued_after, lifetime),
+                    |record| {
+                        current_thumbprint(record).is_ok_and(|thumb| thumb != original) && !record.renewal_requested
+                    },
+                )
                 .await?;
-            ensure!(renewed.connected, "requested renewal broke the channel");
+            if surely_unexpired(issued_after, lifetime) {
+                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-agent-renewal
+                // The original certificate was unexpired at the confirm, so its stream stayed open until the agent opened the next one (§8.1 step 4).
+                ensure!(renewed.connected, "requested renewal broke the channel");
+            } else {
+                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
+                // The original certificate may have expired before the confirm, which closes its stream (§7.4); the agent then connects with the new one.
+                case.until_identity_within(
+                    &target,
+                    &id,
+                    "a channel after the requested renewal",
+                    renewal_aware_wait(issued_after, lifetime),
+                    |record| record.connected,
+                )
+                .await?;
+            }
             if let Some(before) = acknowledgments {
                 let start = Instant::now();
                 loop {
@@ -5266,8 +5379,14 @@ pub(crate) async fn a_config_unsupported_version_on_enroll_keeps_pending(ctx: Co
 pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
+            // oracle: intent crates/agent-identity/INTENT.md §Identities
             let first = case.ctx.target.clone();
+            let first_lifetime = case.ctx.leaf_lifetime();
             let second = case.ctx.second.clone().context("second authority required")?;
+            let second_lifetime = second.leaf_lifetime();
+            let second = second.target;
+            // Every certificate of an identity is issued after its token is created.
+            let first_issued_after = Instant::now();
             let first_token = first
                 .management()
                 .create_token(1, Duration::from_secs(3600), None)
@@ -5275,8 +5394,15 @@ pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
             case.write_pending(&first_token.text)?;
             let (first_id, first_state) = case.enrolled(&first, &first_token).await?;
             let first_authority = field(&first_state, "authority_id")?.to_owned();
-            case.until_identity(&first, &first_id, "first connection", |record| record.connected)
-                .await?;
+            case.until_identity_within(
+                &first,
+                &first_id,
+                "first connection",
+                renewal_aware_wait(first_issued_after, first_lifetime),
+                |record| record.connected,
+            )
+            .await?;
+            let second_issued_after = Instant::now();
             let second_token = second
                 .management()
                 .create_token(1, Duration::from_secs(3600), None)
@@ -5288,12 +5414,31 @@ pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
                 first_authority != second_authority,
                 "two mocks returned the same authority ID"
             );
-            case.until_identity(&second, &second_id, "second connection", |record| record.connected)
+            case.until_identity_within(
+                &second,
+                &second_id,
+                "second connection",
+                renewal_aware_wait(second_issued_after, second_lifetime),
+                |record| record.connected,
+            )
+            .await?;
+            if surely_unexpired(first_issued_after, first_lifetime) {
+                ensure!(
+                    case.identity_record(&first, &first_id).await?.connected,
+                    "first authority was disconnected"
+                );
+            } else {
+                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
+                // The first certificate may have expired before its renewal was confirmed, which closes its stream (§7.4); the agent then connects with the new one.
+                case.until_identity_within(
+                    &first,
+                    &first_id,
+                    "first connection after its renewal",
+                    renewal_aware_wait(first_issued_after, first_lifetime),
+                    |record| record.connected,
+                )
                 .await?;
-            ensure!(
-                case.identity_record(&first, &first_id).await?.connected,
-                "first authority was disconnected"
-            );
+            }
             ensure!(
                 case.identity_path(&first_authority).exists(),
                 "first identity not stored"
@@ -5315,13 +5460,21 @@ pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
             })
             .await?;
             case.start().await?;
-            case.until_identity(&first, &first_id, "first authority reconnected", |record| {
-                record.connected
-            })
+            case.until_identity_within(
+                &first,
+                &first_id,
+                "first authority reconnected",
+                renewal_aware_wait(first_issued_after, first_lifetime),
+                |record| record.connected,
+            )
             .await?;
-            case.until_identity(&second, &second_id, "second authority reconnected", |record| {
-                record.connected
-            })
+            case.until_identity_within(
+                &second,
+                &second_id,
+                "second authority reconnected",
+                renewal_aware_wait(second_issued_after, second_lifetime),
+                |record| record.connected,
+            )
             .await?;
             ensure!(
                 case.state(&first_authority)?["token_sha256"] == first_state["token_sha256"]
@@ -6124,6 +6277,25 @@ mod tests {
         Ok(())
     }
 
+    /// A failed or timed-out case must leave its directory, with the agent's logs, for diagnosis, while a passing one must not leave clutter.
+    #[tokio::test]
+    async fn a_case_keeps_its_directory_only_until_it_passes() -> anyhow::Result<()> {
+        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
+        let mut failed = file_backend_case().await?;
+        failed.keep = true;
+        let kept = failed.path().to_path_buf();
+        std::fs::write(kept.join("agent-stdout.log"), b"evidence")?;
+        drop(failed);
+        let survived = std::fs::read(kept.join("agent-stdout.log"));
+        std::fs::remove_dir_all(&kept)?;
+        assert_eq!(survived?, b"evidence");
+        let passed = file_backend_case().await?;
+        let removed = passed.path().to_path_buf();
+        drop(passed);
+        assert!(!removed.exists(), "a passing case left {}", removed.display());
+        Ok(())
+    }
+
     #[test]
     fn agent_metadata_requires_c14_fields_and_stable_platform_values() -> anyhow::Result<()> {
         let mut metadata = json!({
@@ -6179,8 +6351,9 @@ mod tests {
             None,
             None,
         )?;
-        AgentCase::new(
+        let mut case = AgentCase::new(
             Context {
+                test: "harness",
                 target,
                 second: None,
                 target_kind: crate::TargetKind::Mock,
@@ -6199,7 +6372,9 @@ mod tests {
             None,
             false,
         )
-        .await
+        .await?;
+        case.keep = false;
+        Ok(case)
     }
 
     /// Stores a new P-256 file key with an owner-only mode, under a new name with the case's run prefix.

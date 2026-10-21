@@ -702,7 +702,7 @@ pub(super) async fn run(mut ctx: Context) -> anyhow::Result<()> {
     if let Some(path) = ctx.target.ca_path.as_mut() {
         *path = absolute(path)?;
     }
-    if let Some(path) = ctx.second.as_mut().and_then(|target| target.ca_path.as_mut()) {
+    if let Some(path) = ctx.second.as_mut().and_then(|second| second.target.ca_path.as_mut()) {
         *path = absolute(path)?;
     }
     reset_mocks(&ctx).await?;
@@ -716,6 +716,7 @@ pub(super) async fn run(mut ctx: Context) -> anyhow::Result<()> {
     if let Err(error) = &audit {
         eprintln!("SYSTEM fixture token audit failed: {error:#}");
     }
+    fixture.case.keep = result.is_err() || cleanup.is_err() || audit.is_err();
     match (result, cleanup, audit) {
         (Err(error), _, _) => Err(error),
         (Ok(()), Err(error), _) => Err(error),

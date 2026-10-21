@@ -5,6 +5,7 @@
 )]
 
 mod agent;
+mod authority;
 mod channel;
 mod client;
 mod dvls;
@@ -24,6 +25,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, ensure};
 
+use crate::authority::{Authority, AuthoritySpec, Need, Profile};
 use crate::client::Target;
 use crate::dvls::AppCredential;
 
@@ -42,8 +44,8 @@ struct Test {
     kind: Kind,
     mock_only: bool,
     needs_second: bool,
-    needs_channel: bool,
-    needs_no_channel: bool,
+    /// The [`Need::bit`] of each need, beyond rotation's, that the test has of its authority.
+    needs: u8,
     /// Whether the test starts the agent, which then creates device keys.
     starts_agent: bool,
     run: TestFn,
@@ -56,8 +58,7 @@ impl Test {
             kind: Kind::Protocol,
             mock_only,
             needs_second: false,
-            needs_channel: false,
-            needs_no_channel: false,
+            needs: 0,
             starts_agent: false,
             run,
         }
@@ -69,8 +70,7 @@ impl Test {
             kind: Kind::Agent,
             mock_only,
             needs_second: false,
-            needs_channel: false,
-            needs_no_channel: false,
+            needs: 0,
             starts_agent: true,
             run,
         }
@@ -81,20 +81,32 @@ impl Test {
         self
     }
 
-    const fn channel(mut self) -> Self {
-        self.needs_channel = true;
+    const fn need(mut self, need: Need) -> Self {
+        self.needs |= need.bit();
         self
     }
 
-    const fn without_channel(mut self) -> Self {
-        self.needs_no_channel = true;
-        self
+    const fn channel(self) -> Self {
+        self.need(Need::Channel)
+    }
+
+    const fn without_channel(self) -> Self {
+        self.need(Need::NoChannel)
     }
 
     /// Marks an agent test that only runs the agent's CLI.
     const fn cli_only(mut self) -> Self {
         self.starts_agent = false;
         self
+    }
+
+    /// What the test needs of its authority; every rotation test needs a disposable one.
+    fn needs(&self) -> Vec<Need> {
+        let rotation = self.name.starts_with("p_rotation_") || self.name.starts_with("a_rotation_");
+        Need::ALL
+            .into_iter()
+            .filter(|need| self.needs & need.bit() != 0 || rotation && *need == Need::Disposable)
+            .collect()
     }
 }
 
@@ -119,10 +131,13 @@ impl KeyBackend {
     }
 }
 
+/// What one test runs with: the authority it runs on, the second one when it needs two, and the run's settings.
 #[derive(Clone)]
 struct Context {
+    /// The name of the test.
+    test: &'static str,
     target: Target,
-    second: Option<Target>,
+    second: Option<Authority>,
     target_kind: TargetKind,
     disposable_dvls_target: bool,
     dvls_rotation_window_secs: u64,
@@ -142,6 +157,55 @@ impl Context {
     fn mock(&self) -> bool {
         self.target_kind == TargetKind::Mock
     }
+
+    fn leaf_lifetime(&self) -> Duration {
+        Duration::from_secs(self.leaf_lifetime_secs)
+    }
+}
+
+/// The authorities and settings of a run.
+struct Suite {
+    /// The authority that `--base-url` names, then the one `--second-base-url` names, then each `--authority` in order.
+    authorities: Vec<Authority>,
+    target_kind: TargetKind,
+    key_name_prefix: String,
+    agent_version: Option<String>,
+    /// On DVLS, a session of an application identity without any Agent Identity permission on the first authority.
+    unprivileged: Option<Arc<dvls::Session>>,
+    agent_bin: PathBuf,
+    key_backend: KeyBackend,
+    work_dir: PathBuf,
+}
+
+impl Suite {
+    fn mock(&self) -> bool {
+        self.target_kind == TargetKind::Mock
+    }
+
+    /// The context of `test` on the authorities at `primary` and `second`.
+    fn context(&self, test: &'static str, primary: usize, second: Option<usize>) -> Context {
+        let authority = &self.authorities[primary];
+        Context {
+            test,
+            target: authority.target.clone(),
+            second: second.map(|index| self.authorities[index].clone()),
+            target_kind: self.target_kind,
+            disposable_dvls_target: authority.profile.disposable,
+            dvls_rotation_window_secs: authority.rotation_window_secs,
+            leaf_lifetime_secs: authority.profile.leaf_lifetime_secs,
+            expect_channel: authority.profile.expect_channel,
+            channel_available: authority.channel_available,
+            key_name_prefix: self.key_name_prefix.clone(),
+            agent_version: self.agent_version.clone(),
+            // UNTESTED: a test that runs on another authority than the first gets no unprivileged session.
+            // `--unprivileged-app-key` names an application identity of the first authority, which another authority refuses at login, so its permission tests would fail instead of skipping.
+            // When changing which authority a test runs on, keep this session on the first one.
+            unprivileged: if primary == 0 { self.unprivileged.clone() } else { None },
+            agent_bin: self.agent_bin.clone(),
+            key_backend: self.key_backend,
+            work_dir: self.work_dir.clone(),
+        }
+    }
 }
 
 struct Options {
@@ -157,6 +221,8 @@ struct Options {
     second_app_secret: Option<String>,
     second_authority_id: Option<String>,
     second_ca_path: Option<PathBuf>,
+    /// Each `--authority` value, as given.
+    authorities: Vec<String>,
     unprivileged_app_key: Option<String>,
     unprivileged_app_secret: Option<String>,
     key_backend: KeyBackend,
@@ -174,6 +240,7 @@ struct Options {
 
 impl Default for Options {
     fn default() -> Self {
+        let profile = Profile::default();
         Self {
             target: None,
             base_url: None,
@@ -187,6 +254,7 @@ impl Default for Options {
             second_app_secret: None,
             second_authority_id: None,
             second_ca_path: None,
+            authorities: Vec::new(),
             unprivileged_app_key: None,
             unprivileged_app_secret: None,
             key_backend: if cfg!(windows) {
@@ -197,10 +265,10 @@ impl Default for Options {
             work_dir: PathBuf::from("target").join("agent-identity-conformance"),
             filter: String::new(),
             list: false,
-            disposable_dvls_target: false,
-            dvls_rotation_window_secs: None,
-            leaf_lifetime_secs: 90 * 24 * 3600,
-            expect_channel: true,
+            disposable_dvls_target: profile.disposable,
+            dvls_rotation_window_secs: profile.rotation_window_secs,
+            leaf_lifetime_secs: profile.leaf_lifetime_secs,
+            expect_channel: profile.expect_channel,
             allow_incomplete: false,
             agent_version: None,
         }
@@ -286,33 +354,26 @@ impl Options {
                 }
                 "--work-dir" => options.work_dir = value()?.into(),
                 "--filter" => options.filter = value()?,
+                "--authority" => options.authorities.push(value()?),
                 _ => anyhow::bail!("argument {position} is not a known flag"),
             }
         }
         Ok(options)
     }
 
-    /// The rotation window: `--dvls-rotation-window-secs`, or else 60 seconds, capped at 75% of the leaf lifetime in whole seconds.
-    ///
-    /// DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead ([DVLS intent], "Rotation").
-    /// A leaf lifetime of one second leaves no whole second within that cap, so it requires an explicit window.
-    ///
-    /// [DVLS intent]: ../../../docs/agent-identity/INTENT.DVLS.md
-    fn rotation_window_secs(&self) -> anyhow::Result<u64> {
-        if let Some(window) = self.dvls_rotation_window_secs {
-            return Ok(window);
+    /// The profile that the run's flags declare for the authorities `--base-url` and `--second-base-url` name.
+    fn profile(&self) -> Profile {
+        Profile {
+            leaf_lifetime_secs: self.leaf_lifetime_secs,
+            expect_channel: self.expect_channel,
+            disposable: self.disposable_dvls_target,
+            rotation_window_secs: self.dvls_rotation_window_secs,
         }
-        let window = (self.leaf_lifetime_secs.saturating_mul(3) / 4).min(60);
-        ensure!(
-            window > 0,
-            "--leaf-lifetime-secs must be at least 2 for a default rotation window, or pass --dvls-rotation-window-secs"
-        );
-        Ok(window)
     }
 
-    async fn context(self) -> anyhow::Result<Context> {
+    async fn suite(self) -> anyhow::Result<Suite> {
         let kind = self.target.context("--target is required")?;
-        let dvls_rotation_window_secs = self.rotation_window_secs()?;
+        let profile = self.profile();
         let key_name_prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
         #[cfg(windows)]
         if self.key_backend == KeyBackend::File {
@@ -339,6 +400,7 @@ impl Options {
             self.ca_path.as_deref(),
             self.authority_id.as_deref(),
         )?;
+        let mut targets = vec![("--base-url".to_owned(), target, profile)];
         let second_credential = app_credential(
             self.second_app_key,
             self.second_app_secret,
@@ -348,20 +410,33 @@ impl Options {
                 "AGENT_IDENTITY_CONFORMANCE_SECOND_APP_SECRET",
             ],
         )?;
-        let second = match (self.second_base_url, second_credential) {
-            (Some(url), Some(credential)) => Some(Target::new(
-                url,
-                credential,
-                self.second_ca_path.as_deref(),
-                self.second_authority_id.as_deref(),
-            )?),
-            (None, None) => None,
+        match (self.second_base_url, second_credential) {
+            (Some(url), Some(credential)) => targets.push((
+                "--second-base-url".to_owned(),
+                Target::new(
+                    url,
+                    credential,
+                    self.second_ca_path.as_deref(),
+                    self.second_authority_id.as_deref(),
+                )?,
+                profile,
+            )),
+            (None, None) => ensure!(
+                self.second_authority_id.is_none(),
+                "--second-authority-id requires a second target"
+            ),
             _ => anyhow::bail!("--second-base-url and --second-app-key must be supplied together"),
-        };
-        ensure!(
-            second.is_some() || self.second_authority_id.is_none(),
-            "--second-authority-id requires a second target"
-        );
+        }
+        for (spec, position) in self.authorities.iter().zip(1..) {
+            let spec = AuthoritySpec::parse(spec, &|name| env::var(name).ok())?;
+            let target = Target::new(
+                spec.base_url,
+                AppCredential::new(spec.app_key, spec.app_secret),
+                spec.ca_path.as_deref(),
+                spec.authority_id.as_deref(),
+            )?;
+            targets.push((format!("--authority {position}"), target, spec.profile));
+        }
         let unprivileged = app_credential(
             self.unprivileged_app_key,
             self.unprivileged_app_secret,
@@ -371,27 +446,28 @@ impl Options {
                 "AGENT_IDENTITY_CONFORMANCE_UNPRIVILEGED_APP_SECRET",
             ],
         )?;
-        if kind == TargetKind::Mock {
-            target.reset().await?;
-            if let Some(other) = &second {
-                other.reset().await?;
+        let rotation_windows = targets
+            .iter()
+            .map(|(_, _, profile)| profile.rotation_window_secs())
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let mut authorities = Vec::with_capacity(targets.len());
+        for ((name, target, profile), rotation_window_secs) in targets.into_iter().zip(rotation_windows) {
+            if kind == TargetKind::Mock {
+                target.reset().await?;
             }
+            let channel_available = profile.expect_channel || target.channel_available().await?;
+            authorities.push(Authority {
+                name,
+                target,
+                profile,
+                channel_available,
+                rotation_window_secs,
+            });
         }
-        let channel_available = if self.expect_channel {
-            true
-        } else {
-            target.channel_available().await?
-        };
         tokio::fs::create_dir_all(&self.work_dir).await?;
-        Ok(Context {
-            target,
-            second,
+        Ok(Suite {
+            authorities,
             target_kind: kind,
-            disposable_dvls_target: self.disposable_dvls_target,
-            dvls_rotation_window_secs,
-            leaf_lifetime_secs: self.leaf_lifetime_secs,
-            expect_channel: self.expect_channel,
-            channel_available,
             key_name_prefix,
             agent_version: self.agent_version,
             unprivileged: unprivileged.map(|credential| Arc::new(dvls::Session::new(credential))),
@@ -481,14 +557,14 @@ async fn run() -> anyhow::Result<()> {
     let allow_incomplete = options.allow_incomplete;
     let start = Instant::now();
     let deadline = start + RUN_DEADLINE;
-    let context = tokio::time::timeout(RUN_DEADLINE, options.context())
+    let suite = tokio::time::timeout(RUN_DEADLINE, options.suite())
         .await
         .context("conformance setup exceeded the 14-minute-30-second deadline")??;
-    println!("KEY NAME PREFIX {}", context.key_name_prefix);
+    println!("KEY NAME PREFIX {}", suite.key_name_prefix);
     // The Windows software provider keeps the agent's keys as machine keys, which only an elevated administrator can create.
     #[cfg(windows)]
     let machine_keys_denied =
-        context.key_backend == KeyBackend::WindowsSoftwareProvider && !windows::running_as_elevated_administrator()?;
+        suite.key_backend == KeyBackend::WindowsSoftwareProvider && !windows::running_as_elevated_administrator()?;
     #[cfg(not(windows))]
     let machine_keys_denied = false;
     let mut totals = [0u32; 4];
@@ -504,76 +580,39 @@ async fn run() -> anyhow::Result<()> {
             Outcome::NotApplicable("Windows software provider test")
         } else if test.name == "a_file_backend_permissions" && !cfg!(unix) {
             Outcome::NotApplicable("Unix file-backend test")
-        } else if let Some(reason) = dvls::unsupported(context.target_kind, test.mock_only) {
+        } else if let Some(reason) = dvls::unsupported(suite.target_kind, test.mock_only) {
             Outcome::NotApplicable(reason)
-        } else if test.needs_channel && !context.expect_channel && !context.channel_available {
-            Outcome::Skip("config.agent_channel_url absent and --expect-channel=false")
-        } else if test.needs_no_channel && !context.mock() && context.channel_available {
-            Outcome::Skip("requires a naturally channelless DVLS target")
-        } else if context.target_kind == TargetKind::Dvls
-            && !context.disposable_dvls_target
-            && (test.name.starts_with("p_rotation_") || test.name.starts_with("a_rotation_"))
-        {
-            Outcome::Skip("rotation requires --disposable-dvls-target")
-        } else if test.name == "p_stream_closes_at_not_after" && !context.mock() && context.leaf_lifetime_secs > 30 {
-            Outcome::Skip("real-target stream expiry requires --leaf-lifetime-secs <= 30")
-        } else if test.needs_second && context.second.is_none() {
-            Outcome::Skip("requires a second authority (--second-base-url and --second-app-key)")
-        } else if test.name == "a_key_non_exportable" && context.key_backend != KeyBackend::WindowsSoftwareProvider {
-            Outcome::Skip("requires --key-backend windows-software-provider")
-        } else if test.name == "a_file_backend_permissions" && context.key_backend != KeyBackend::File {
-            Outcome::Skip("requires --key-backend file")
-        } else if test.starts_agent && machine_keys_denied {
-            // UNTESTED: an unelevated run with the Windows software provider reports each test that starts the agent as SKIP.
-            // The agent fails to create its machine keys there, so a FAIL would blame the agent for the runner's missing privilege.
-            // CI runs elevated, so check this by hand from an unelevated shell when changing which tests start the agent.
-            Outcome::Skip("the Windows software provider's machine keys require an elevated administrator")
         } else {
-            let result = async {
-                if context.mock() {
-                    context.target.reset().await?;
-                    if test.needs_second {
-                        context
-                            .second
-                            .as_ref()
-                            .context("missing second target")?
-                            .reset()
-                            .await?;
+            match authority::pick(&suite.authorities, &test.needs(), test.needs_second, suite.mock()) {
+                Err(reason) => Outcome::Skip(reason),
+                Ok(_)
+                    if test.name == "a_key_non_exportable"
+                        && suite.key_backend != KeyBackend::WindowsSoftwareProvider =>
+                {
+                    Outcome::Skip("requires --key-backend windows-software-provider")
+                }
+                Ok(_) if test.name == "a_file_backend_permissions" && suite.key_backend != KeyBackend::File => {
+                    Outcome::Skip("requires --key-backend file")
+                }
+                // UNTESTED: an unelevated run with the Windows software provider reports each test that starts the agent as SKIP.
+                // The agent fails to create its machine keys there, so a FAIL would blame the agent for the runner's missing privilege.
+                // CI runs elevated, so check this by hand from an unelevated shell when changing which tests start the agent.
+                Ok(_) if test.starts_agent && machine_keys_denied => {
+                    Outcome::Skip("the Windows software provider's machine keys require an elevated administrator")
+                }
+                Ok((primary, second)) => {
+                    if 0 < primary || second.is_some_and(|second| second != 1) {
+                        let names = [Some(primary), second]
+                            .into_iter()
+                            .flatten()
+                            .map(|index| suite.authorities[index].name.as_str())
+                            .collect::<Vec<_>>();
+                        println!("AUTHORITY {} {}", test.name, names.join(" "));
                     }
+                    let (outcome, exceeded) = run_test(test, suite.context(test.name, primary, second), deadline).await;
+                    deadline_exceeded = exceeded;
+                    outcome
                 }
-                (test.run)(context.clone()).await
-            };
-            let timeout = if test.name == "p_channel_no_hello_timeout" {
-                Duration::from_secs(20)
-            } else if test.name == "a_key_non_exportable" && cfg!(windows) {
-                Duration::from_secs(240)
-            } else if test.name == "a_rotation_migrates_on_schedule" {
-                Duration::from_secs(120)
-            } else if !context.mock() && test.name.starts_with("a_rotation_") {
-                Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(60))
-            } else if !context.mock() && test.name.starts_with("p_rotation_") {
-                Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(30))
-            } else {
-                Duration::from_secs(90)
-            };
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            let allowed = timeout.min(remaining);
-            match tokio::time::timeout(allowed, result).await {
-                Ok(Ok(())) => Outcome::Pass,
-                Ok(Err(error)) => {
-                    if let Some(inapplicable) = error.downcast_ref::<NotApplicable>() {
-                        Outcome::NotApplicable(inapplicable.0)
-                    } else if let Some(incomplete) = error.downcast_ref::<Incomplete>() {
-                        Outcome::Skip(incomplete.0)
-                    } else {
-                        Outcome::Fail(format!("{error:#}"))
-                    }
-                }
-                Err(_) if allowed == remaining => {
-                    deadline_exceeded = true;
-                    Outcome::Fail("global 14-minute-30-second deadline exceeded".to_owned())
-                }
-                Err(_) => Outcome::Fail("timed out".to_owned()),
             }
         };
         let elapsed = test_start.elapsed();
@@ -615,7 +654,7 @@ async fn run() -> anyhow::Result<()> {
         println!("NON-PASS {label} {name}: {reason}");
     }
     // Logging out only closes sessions that would expire anyway, so its failure never fails the run.
-    if tokio::time::timeout(Duration::from_secs(5), log_out(&context))
+    if tokio::time::timeout(Duration::from_secs(5), log_out(&suite))
         .await
         .is_err()
     {
@@ -632,18 +671,66 @@ async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Closes the run's management API sessions on every target.
-async fn log_out(context: &Context) {
-    let unprivileged = context
-        .unprivileged
-        .as_deref()
-        .map(|session| context.target.management_as(dvls::Credential::Session(session)));
-    let managements = [
-        Some(context.target.management()),
-        context.second.as_ref().map(Target::management),
-        unprivileged,
-    ];
-    for management in managements.into_iter().flatten() {
+/// Runs `test` with `context` within its timeout, which the global `deadline` shortens; the flag reports whether the deadline ended it.
+async fn run_test(test: &Test, context: Context, deadline: Instant) -> (Outcome, bool) {
+    let result = async {
+        if context.mock() {
+            context.target.reset().await?;
+            if let Some(second) = &context.second {
+                second.target.reset().await?;
+            }
+        }
+        (test.run)(context.clone()).await
+    };
+    let timeout = if test.name == "p_channel_no_hello_timeout" {
+        Duration::from_secs(20)
+    } else if test.name == "a_key_non_exportable" && cfg!(windows) {
+        Duration::from_secs(240)
+    } else if test.name == "a_rotation_migrates_on_schedule" {
+        Duration::from_secs(120)
+    } else if !context.mock() && test.name.starts_with("a_rotation_") {
+        Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(60))
+    } else if !context.mock() && test.name.starts_with("p_rotation_") {
+        Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(30))
+    } else {
+        Duration::from_secs(90)
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let allowed = timeout.min(remaining);
+    match tokio::time::timeout(allowed, result).await {
+        Ok(Ok(())) => (Outcome::Pass, false),
+        Ok(Err(error)) => {
+            let outcome = if let Some(inapplicable) = error.downcast_ref::<NotApplicable>() {
+                Outcome::NotApplicable(inapplicable.0)
+            } else if let Some(incomplete) = error.downcast_ref::<Incomplete>() {
+                Outcome::Skip(incomplete.0)
+            } else {
+                Outcome::Fail(format!("{error:#}"))
+            };
+            (outcome, false)
+        }
+        Err(_) if allowed == remaining => (
+            Outcome::Fail("global 14-minute-30-second deadline exceeded".to_owned()),
+            true,
+        ),
+        Err(_) => (Outcome::Fail("timed out".to_owned()), false),
+    }
+}
+
+/// Closes the run's management API sessions on every authority.
+async fn log_out(suite: &Suite) {
+    let unprivileged = suite.unprivileged.as_deref().and_then(|session| {
+        suite
+            .authorities
+            .first()
+            .map(|first| first.target.management_as(dvls::Credential::Session(session)))
+    });
+    let managements = suite
+        .authorities
+        .iter()
+        .map(|authority| authority.target.management())
+        .chain(unprivileged);
+    for management in managements {
         if let Err(error) = management.log_out().await {
             eprintln!("WARN Failed to log out of the management API: {error:#}");
         }
@@ -777,14 +864,16 @@ const TESTS: &[Test] = &[
     p!(p_channel_unavailable_no_channel_url, mock_only),
     p!(p_mock_malformed_https_channel_urls, mock_only),
     p!(p_config_revision_monotonic_changes, mock_only).channel(),
-    p!(p_config_hello_reconciles_stale_revision).channel(),
+    p!(p_config_hello_reconciles_stale_revision)
+        .channel()
+        .need(Need::ConfigChange),
     p!(p_config_update_pushes_higher_revision, mock_only).channel(),
     p!(p_request_renewal_connected_and_on_connect).channel(),
     p!(p_request_renewal_flag_cleared_only_on_confirm),
     p!(p_request_renewal_flag_cleared_after_new_cert).channel(),
     p!(p_reconnect_push_and_handoff, mock_only).channel(),
     p!(p_revocation_closes_stream).channel(),
-    p!(p_stream_closes_at_not_after).channel(),
+    p!(p_stream_closes_at_not_after).channel().need(Need::ShortLeaves),
     p!(p_expired_certificate_refused_at_stream_open, mock_only).channel(),
     p!(p_challenged_stream_expires_on_advance, mock_only).channel(),
     p!(p_pending_cert_auth_does_not_promote).channel(),
@@ -817,9 +906,13 @@ const TESTS: &[Test] = &[
     p!(p_rotation_without_root_conflicts, mock_only),
     p!(p_root_key_unavailable_conflicts, mock_only),
     p!(p_settings_read),
-    p!(p_settings_change_bounds),
-    p!(p_settings_certificate_lifetime_applies_to_new_certificates),
-    p!(p_settings_channel_switch_withdraws_and_restores_channel_url).channel(),
+    p!(p_settings_change_bounds).need(Need::Disposable),
+    p!(p_settings_certificate_lifetime_applies_to_new_certificates)
+        .need(Need::Disposable)
+        .need(Need::LeavesInDays),
+    p!(p_settings_channel_switch_withdraws_and_restores_channel_url)
+        .channel()
+        .need(Need::Disposable),
     p!(p_error_body_shape),
     p!(p_authentication_error_precedes_invalid_body),
     p!(p_oversized_body_precedes_authentication),
@@ -901,6 +994,7 @@ mod tests {
             "--second-app-secret",
             "--unprivileged-app-key",
             "--unprivileged-app-secret",
+            "--authority",
         ]
         .into_iter()
         .flat_map(|flag| {
@@ -926,7 +1020,9 @@ mod tests {
 
     /// The rotation window that `args` select.
     fn rotation_window(args: &[&str]) -> anyhow::Result<u64> {
-        Options::parse(args.iter().map(|arg| (*arg).to_owned()))?.rotation_window_secs()
+        Options::parse(args.iter().map(|arg| (*arg).to_owned()))?
+            .profile()
+            .rotation_window_secs()
     }
 
     /// A DVLS under test issues leaves of a few seconds, so the default window must stay below a short leaf lifetime, while an explicit window wins in either flag order.

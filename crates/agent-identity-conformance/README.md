@@ -21,7 +21,7 @@ The runner logs in with `POST /api/v1/login` on first use and sends the `tokenId
 It logs in again before the `tokenId` lifetime elapses, assuming DVLS's 7 minutes until the API refuses a younger `tokenId`, and when the API refuses a `tokenId` it logs in once more and retries that request once.
 Each re-login is logged at info level, without the `tokenId`, key or secret, and the run ends with `POST /api/v1/logout`.
 On DVLS, the harness provisions the application identities, which DVLS's public API cannot create.
-Supply `--disposable-dvls-target` only when rotation and settings changes are safe, and provide `--unprivileged-app-key` and `--unprivileged-app-secret`, an application identity without any Agent Identity permission, to check permission denials.
+Supply `--disposable-dvls-target` only when rotation and settings changes, including switching the agent channel off and on, are safe, and provide `--unprivileged-app-key` and `--unprivileged-app-secret`, an application identity without any Agent Identity permission, to check permission denials.
 On the mock, the runner derives the keys of application identities with fewer permissions from `--app-key`, as the [mock README] describes.
 Settings tests restore the original settings when they finish.
 The runner reaches each authority's management API only through the module for that authority: `src/dvls.rs` speaks DVLS's management API, as DVLS's OpenAPI document defines it and the mock replicates it.
@@ -33,8 +33,9 @@ Pass `--agent-version <version>` to require the agent's reported version to matc
 Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
 The DVLS expiry-boundary test needs a configured leaf lifetime of roughly 10–30 seconds.
+`a_renewal_happy_path`, `a_request_renewal_connected` and `a_multi_authority` wait twice as long for the agent channel or a renewal when the leaf lifetime lets the agent's schedule renew meanwhile, so that a short lifetime slows them down rather than failing them.
 `--expect-channel` defaults to `true`; use `--expect-channel false` when the server intentionally omits `config.agent_channel_url`.
-When the URL is absent, gRPC-dependent checks report `SKIP`; HTTP confirm checks and channelless renewal still run.
+When no authority offers the channel, gRPC-dependent checks report `SKIP`; HTTP confirm checks and channelless renewal still run.
 
 `PASS` and `FAIL` report assertions, and `N/A` marks a test that does not apply to the platform or that the authority's module declares unsupported, so mock-only tests report `N/A` on DVLS.
 `SKIP` means the target lacks a required fixture, privilege or channel.
@@ -47,6 +48,9 @@ Each agent test's `<data-dir>` is a new `identity-agent-XXXXXX` directory under 
 Windows paths are limited to 259 characters without long-path support, so with the file backend on Windows the runner fails before any test when `--work-dir` is longer than 79 characters, which would leave too little room for a key file path.
 Only keys whose part before the first `_` equals the run prefix belong to that run.
 After each agent test, the runner fails if any key with that prefix is absent from `identity.json` or `<data-dir>/identity/pending/<hex>.in-progress.json`, then deletes only run-prefixed machine and file-backed keys on either target.
+When an agent test fails or times out, the runner keeps the `<data-dir>` of the agent run that failed, with the agent's `agent-stdout.log` and `agent-stderr.log`, and prints `KEPT <test> <data-dir>`; it deletes the `<data-dir>` of a run that passed.
+A kept `<data-dir>` holds no run-prefixed key, but may hold the test's pending enrollment tokens.
+When the runner fails, the testsuite keeps its work directory, which holds the runner's `--work-dir`.
 It rejects unrecorded `*.p8` files and PKCS#8 private keys anywhere under `<data-dir>/identity`, plus leftover temporary siblings of pending and key files; other unknown files produce warnings.
 A temporary sibling of `identity.json` or of an in-progress record also produces a warning, because stopping the agent can cut that record's atomic write short.
 On Unix, file-backed keys must have mode `0600` and be owned by the agent's uid.
@@ -55,6 +59,27 @@ The Windows software provider stores keys as machine keys, which only an elevate
 The SYSTEM fixture requires an elevated administrator unless the suite already runs as SYSTEM; without this fixture, the Windows non-exportability case reports `SKIP`.
 `--authority-id` and `--second-authority-id` check server and stored authority IDs when supplied; they do not control cleanup.
 The runner stops after 14 minutes 30 seconds; the testsuite allows 15 minutes and terminates the runner's process tree on timeout.
+
+## Several authorities
+
+`--leaf-lifetime-secs`, `--expect-channel`, `--disposable-dvls-target` and `--dvls-rotation-window-secs` declare the profile of the authorities that `--base-url` and `--second-base-url` name.
+Each `--authority <spec>` adds an authority with its own profile, so that one DVLS run can cover checks that need differently configured authorities:
+
+```powershell
+$env:C_APP_SECRET = '<app-secret>'
+.\target\debug\agent-identity-conformance.exe --target dvls <first and second authority flags> `
+  --authority "base-url=https://localhost:15512,app-key=<app-key>,app-secret-env=C_APP_SECRET,extra-trusted-root=c.pem,leaf-lifetime-secs=7776000,expect-channel=false,disposable-dvls-target=true"
+```
+
+A spec is comma-separated `<key>=<value>` items, and values cannot contain commas.
+Its keys are the names, without `--`, of the flags above and of `--base-url`, `--app-key`, `--authority-id` and `--extra-trusted-root`, with the same values, plus the required `app-secret-env`, which names the environment variable that holds the application secret, to keep it off the command line.
+Each test runs on the first authority, in the order of their flags, that offers what the test needs: the agent channel or none, a disposable target, leaves of at most 30 seconds, leaves of whole days rather than a test lifetime in seconds, or a config change.
+DVLS's management API changes a config only by switching the agent channel off and on, so a config change needs a disposable target that offers the channel.
+A test that needs two authorities also takes the next one that offers what it needs.
+When no authority does, the test reports `SKIP` with the first need that the first authority lacks.
+The mock offers everything but an absent channel through its controls, so on the mock every test runs on the first authority, and on the second when it needs two.
+A test that runs on other authorities prints `AUTHORITY <test>` and the flags that declare them, such as `--authority 1` for the first `--authority`, before its result.
+`--unprivileged-app-key` names an application identity of the first authority, so a test that runs on another one runs without it.
 
 [Agent Identity V1 contract]: ../../docs/agent-identity/CONTRACT.agent-identity.md
 [mock README]: ../agent-identity-mock/README.md

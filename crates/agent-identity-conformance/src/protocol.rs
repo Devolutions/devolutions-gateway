@@ -3599,27 +3599,58 @@ pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow:
     Ok(())
 }
 
+/// On DVLS, the identity's revision goes stale through the only config change DVLS's management API makes: switching the agent channel off and on.
+/// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`, which the switch withdraws and restores.
 pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> anyhow::Result<()> {
-    if !ctx.mock() {
-        return Err(crate::Incomplete("DVLS has no config-change fixture for a stale Hello").into());
+    if ctx.mock() {
+        return stale_hello_reconciled(&ctx).await;
     }
-    let (_, mut identity) = issued(&ctx, "stale-config").await?;
-    if count(&identity.config, "revision")? == 0 {
-        expect_status(
-            &ctx.target
-                .control("config", &json!({ "fields": { "conformance_stale_hello": true } }))
-                .await?,
-            200,
-        )?;
+    require_settings_changes(&ctx)?;
+    let original = ctx.target.management().settings().await?;
+    restoring_settings(&ctx, &original, stale_hello_reconciled(&ctx)).await
+}
+
+async fn stale_hello_reconciled(ctx: &Context) -> anyhow::Result<()> {
+    let (_, mut identity) = issued(ctx, "stale-config").await?;
+    let announced_revision = if ctx.mock() {
+        if count(&identity.config, "revision")? == 0 {
+            expect_status(
+                &ctx.target
+                    .control("config", &json!({ "fields": { "conformance_stale_hello": true } }))
+                    .await?,
+                200,
+            )?;
+            let updated = check_in_config(&ctx.target, &identity).await?;
+            ensure!(
+                count(&updated, "revision")? > 0,
+                "mock did not raise revision zero before the stale-Hello probe"
+            );
+            identity.config = updated;
+        }
+        count(&identity.config, "revision")? - 1
+    } else {
+        let enrolled_revision = count(&identity.config, "revision")?;
+        let management = ctx.target.management();
+        for enabled in [false, true] {
+            management
+                .change_settings(&SettingsChange {
+                    channel_enabled: Some(enabled),
+                    ..SettingsChange::default()
+                })
+                .await?;
+        }
         let updated = check_in_config(&ctx.target, &identity).await?;
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enroll
+        // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
         ensure!(
-            count(&updated, "revision")? > 0,
-            "mock did not raise revision zero before the stale-Hello probe"
+            count(&updated, "revision")? > enrolled_revision && updated.get("agent_channel_url").is_some(),
+            "switching the agent channel off and on did not raise the config revision"
         );
         identity.config = updated;
-    }
+        enrolled_revision
+    };
     let current_revision = count(&identity.config, "revision")?;
-    let announced_revision = current_revision - 1;
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-sequence
     let mut stale = channel::open(&ctx.target, &identity).await?;
     let challenge = stale.challenge().await?;
     let hello_id = stale
