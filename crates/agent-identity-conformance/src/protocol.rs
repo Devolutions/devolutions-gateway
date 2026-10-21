@@ -899,7 +899,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         )?;
     }
     ctx.target.management().delete_identity(&identity.identity_id).await?;
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
     // Only a non-deleted identity's key is matched against its token, so a deleted identity's key gets `identity_revoked` whichever token presents it.
     for key in [&identity.key, &first_pending, &second_pending] {
         for bearer in [&other_token.text, &original_token.text] {

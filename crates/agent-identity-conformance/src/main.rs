@@ -292,19 +292,27 @@ impl Options {
         Ok(options)
     }
 
-    /// The rotation window: `--dvls-rotation-window-secs`, or else 60 seconds, capped at 75% of the leaf lifetime.
+    /// The rotation window: `--dvls-rotation-window-secs`, or else 60 seconds, capped at 75% of the leaf lifetime in whole seconds.
     ///
     /// DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead ([DVLS intent], "Rotation").
+    /// A leaf lifetime of one second leaves no whole second within that cap, so it requires an explicit window.
     ///
     /// [DVLS intent]: ../../../docs/agent-identity/INTENT.DVLS.md
-    fn rotation_window_secs(&self) -> u64 {
-        self.dvls_rotation_window_secs
-            .unwrap_or_else(|| (self.leaf_lifetime_secs.saturating_mul(3) / 4).clamp(1, 60))
+    fn rotation_window_secs(&self) -> anyhow::Result<u64> {
+        if let Some(window) = self.dvls_rotation_window_secs {
+            return Ok(window);
+        }
+        let window = (self.leaf_lifetime_secs.saturating_mul(3) / 4).min(60);
+        ensure!(
+            window > 0,
+            "--leaf-lifetime-secs must be at least 2 for a default rotation window, or pass --dvls-rotation-window-secs"
+        );
+        Ok(window)
     }
 
     async fn context(self) -> anyhow::Result<Context> {
         let kind = self.target.context("--target is required")?;
-        let dvls_rotation_window_secs = self.rotation_window_secs();
+        let dvls_rotation_window_secs = self.rotation_window_secs()?;
         let key_name_prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
         #[cfg(windows)]
         if self.key_backend == KeyBackend::File {
@@ -914,20 +922,30 @@ mod tests {
         }
     }
 
+    /// The rotation window that `args` select.
+    fn rotation_window(args: &[&str]) -> anyhow::Result<u64> {
+        Options::parse(args.iter().map(|arg| (*arg).to_owned()))?.rotation_window_secs()
+    }
+
     /// A DVLS under test issues leaves of a few seconds, so the default window must stay below a short leaf lifetime, while an explicit window wins in either flag order.
     #[test]
     fn rotation_window_follows_a_short_leaf_lifetime_unless_explicit() -> anyhow::Result<()> {
-        let window = |args: &[&str]| -> anyhow::Result<u64> {
-            Ok(Options::parse(args.iter().map(|arg| (*arg).to_owned()))?.rotation_window_secs())
-        };
         // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
-        assert_eq!(window(&[])?, 60);
-        assert_eq!(window(&["--leaf-lifetime-secs", "20"])?, 15);
+        assert_eq!(rotation_window(&[])?, 60);
+        assert_eq!(rotation_window(&["--leaf-lifetime-secs", "20"])?, 15);
+        assert_eq!(rotation_window(&["--leaf-lifetime-secs", "2"])?, 1);
         assert_eq!(
-            window(&["--dvls-rotation-window-secs", "18", "--leaf-lifetime-secs", "20"])?,
+            rotation_window(&["--dvls-rotation-window-secs", "18", "--leaf-lifetime-secs", "20"])?,
             18
         );
         Ok(())
+    }
+
+    /// 75% of a one-second leaf lifetime holds no whole second, and rounding the window up to one second would ask DVLS for a deadline it refuses.
+    #[test]
+    fn one_second_leaf_lifetime_requires_an_explicit_rotation_window() {
+        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
+        assert!(rotation_window(&["--leaf-lifetime-secs", "1"]).is_err());
     }
 
     /// A key file path is `<work-dir>\identity-agent-XXXXXX\identity\keys\<file name>`: 22, 15 and at most 143 characters below the work directory for a run's 81-character key names, which leaves 79 of the 259.

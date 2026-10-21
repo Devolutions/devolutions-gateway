@@ -27,7 +27,8 @@ Settings tests restore the original settings when they finish.
 The runner reaches each authority's management API only through the module for that authority: `src/dvls.rs` speaks DVLS's management API, as DVLS's OpenAPI document defines it and the mock replicates it.
 The disposable rotation checks require no other active identities on the published root; otherwise they report `SKIP` before rotating.
 `--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
-DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead, so the rotation checks set their deadline `--dvls-rotation-window-secs` ahead, by default 60 seconds or 75% of `--leaf-lifetime-secs`, whichever is shorter.
+DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead, so the rotation checks set their deadline `--dvls-rotation-window-secs` ahead, by default 60 seconds or 75% of `--leaf-lifetime-secs` rounded down to whole seconds, whichever is shorter.
+A one-second leaf lifetime leaves no whole second for that default, so the runner then refuses to start without `--dvls-rotation-window-secs`.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
 Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
