@@ -57,7 +57,8 @@ All paths below are relative to `base_url` (i.e. they include the path prefix).
 Non-2xx agent-facing responses carry `{ "error", "message", "server_time" }` with the §5.4 codes.
 An unexpected failure, such as issuing from an expired root or a handler panic, is `500 unavailable`.
 Enrollment, renewal and check-in require a `metadata` object, which may be empty.
-A body that repeats a member name at any depth or holds more than 64 nested objects and arrays, counting the top-level object, is `invalid_request` (§1), and so is a `csr` that is not canonical `base64` or a CSR key that is not an uncompressed P-256 point (§1, §4).
+A body that repeats a member name at any depth, holds more than 64 nested objects and arrays, counting the top-level object, or holds a string that is not valid Unicode, such as an escaped lone surrogate, is `invalid_request` (§1).
+So is a `csr` that is not canonical `base64` or a CSR key that is not an uncompressed P-256 point (§1, §4).
 A token authenticates by its exact secret text alone: the bag is never checked, and another encoding of the same secret bytes is `token_invalid` (§2).
 Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are limited to 64 KiB.
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).
@@ -104,7 +105,7 @@ A request without one, even with an `Authorization` header, is 401 with no `Cont
 A repeated, unknown, expired or logged-out `tokenId` is 401 with `Content-Type: application/json; charset=utf-8` and exactly `{"message":"Missing or invalid token"}`.
 Invalid parameters are 400 with a `PublicApiValidationError` body, `{ "errors": [ { "field", "message" } ] }`, where `field` names the camelCase member or query parameter, `config.<key>` for a token config entry, or is `null` for a malformed body or query string.
 Every other error is 403, 404, 409 or 422 with a `PublicApiError` body, `{ "message" }`.
-A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth or more than 64 nested objects and arrays, as CONTRACT.agent-identity.md §1 requires of agent-facing bodies.
+A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth, more than 64 nested objects and arrays, or a string that is not valid Unicode, as CONTRACT.agent-identity.md §1 requires of agent-facing bodies.
 Each operation requires the permission the table lists, and a session without it gets 403 before the request is processed.
 
 Enums are PascalCase.

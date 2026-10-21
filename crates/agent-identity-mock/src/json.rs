@@ -1,7 +1,8 @@
-//! Parses agent request bodies, rejecting a member name repeated at any depth and more than [`MAX_NESTING`] nested
-//! objects and arrays ([CONTRACT.agent-identity.md][contract], "1. Protocol conventions").
+//! Parses agent request bodies, rejecting a member name repeated at any depth, more than [`MAX_NESTING`] nested
+//! objects and arrays, and a string that is not valid Unicode ([CONTRACT.agent-identity.md][contract], "1. Protocol
+//! conventions").
 //! `serde_json::Value` keeps the last of repeated members, so it can't detect them alone, and its own nesting limit is
-//! 128.
+//! 128, but serde_json refuses invalid Unicode itself, whether raw or escaped as a lone surrogate.
 //!
 //! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
 
@@ -13,8 +14,8 @@ use serde_json::{Map, Number, Value};
 /// The most objects and arrays a body may nest, counting the top-level one.
 const MAX_NESTING: usize = 64;
 
-/// Parses `body` as JSON, failing on syntax errors, on a repeated member name in any object, and on more than
-/// [`MAX_NESTING`] nested objects and arrays.
+/// Parses `body` as JSON, failing on syntax errors, on a string that is not valid Unicode, on a repeated member name in
+/// any object, and on more than [`MAX_NESTING`] nested objects and arrays.
 pub(crate) fn parse_unique_members(body: &[u8]) -> serde_json::Result<Value> {
     let mut deserializer = serde_json::Deserializer::from_slice(body);
     let value = ValueSeed { enclosing: 0 }.deserialize(&mut deserializer)?;

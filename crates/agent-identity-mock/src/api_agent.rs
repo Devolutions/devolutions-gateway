@@ -501,6 +501,29 @@ mod tests {
         assert_eq!(code(parse_csr_body(body.as_bytes())), expected);
     }
 
+    /// CONTRACT.agent-identity.md §1: a body "holding a string that is not valid Unicode, such as an escaped lone
+    /// surrogate, in any member, including an unknown one → `invalid_request`".
+    /// `hostname` is a known metadata key and `x` an unknown member; a surrogate pair in order escapes one scalar
+    /// value, U+1F600, and `ED A0 80` is U+D800 encoded as if it were a scalar value, which UTF-8 forbids.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    #[rstest]
+    #[case::escaped_surrogate_pair(br#"{"csr":"AAEC","metadata":{"hostname":"\ud83d\ude00"}}"#, Ok(()))]
+    #[case::escaped_lone_leading_surrogate(
+        br#"{"csr":"AAEC","metadata":{"hostname":"\ud800"}}"#,
+        Err("invalid_request")
+    )]
+    #[case::escaped_lone_trailing_surrogate(br#"{"csr":"AAEC","metadata":{},"x":"\udc00"}"#, Err("invalid_request"))]
+    #[case::escaped_reversed_surrogate_pair(
+        br#"{"csr":"AAEC","metadata":{},"x":"\ude00\ud83d"}"#,
+        Err("invalid_request")
+    )]
+    #[case::escaped_lone_surrogate_in_a_name(br#"{"csr":"AAEC","metadata":{},"\ud800":0}"#, Err("invalid_request"))]
+    #[case::raw_invalid_byte(b"{\"csr\":\"AAEC\",\"metadata\":{\"hostname\":\"\xff\"}}", Err("invalid_request"))]
+    #[case::raw_encoded_surrogate(b"{\"csr\":\"AAEC\",\"metadata\":{},\"x\":\"\xed\xa0\x80\"}", Err("invalid_request"))]
+    fn csr_body_strings_must_be_valid_unicode(#[case] body: &[u8], #[case] expected: Result<(), &'static str>) {
+        assert_eq!(code(parse_csr_body(body)), expected);
+    }
+
     /// One name in several objects is not a repetition, and receivers ignore unknown fields (CONTRACT.agent-identity.md
     /// §1).
     #[test]
