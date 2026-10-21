@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use agent_channel_proto::agent_channel_client::AgentChannelClient;
 use agent_channel_proto::server_message::Payload;
@@ -23,6 +24,11 @@ use crate::{Event, Shared, Target};
 
 const CHANNEL_PROOF_DOMAIN: &[u8] = b"devolutions-agent-identity/v1/channel-proof";
 const CHALLENGE_LEN: usize = 32;
+/// How long a stream the caller dropped waits for the authority to end its side.
+// UNTESTED: a dropped channel's stream releases its connection once the authority ends its side or this time passes.
+// It bounds how long a closed channel holds a connection to an authority that keeps its side open.
+// When changing `close`, keep the wait bounded.
+const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) async fn run(
     shared: Arc<Shared>,
@@ -45,7 +51,10 @@ pub(crate) async fn run(
         let Some(delay) = reopen_after else {
             return;
         };
-        tokio::time::sleep(delay).await;
+        tokio::select! {
+            () = tokio::time::sleep(delay) => {}
+            () = dropped(&mut acks) => return,
+        }
     }
 }
 
@@ -57,9 +66,12 @@ async fn stream_once(
     acks: &mut mpsc::UnboundedReceiver<String>,
     backoff: &mut BackoffState,
 ) -> Option<Closure> {
-    let mut opened = match authenticated_stream(shared, target).await {
-        Ok(opened) => opened,
-        Err(closure) => return Some(closure),
+    let mut opened = tokio::select! {
+        opened = authenticated_stream(shared, target) => match opened {
+            Ok(opened) => opened,
+            Err(closure) => return Some(closure),
+        },
+        () = dropped(acks) => return None,
     };
     backoff.reset();
     // Acknowledgements sent before this stream authenticated answer an earlier stream's messages.
@@ -67,16 +79,13 @@ async fn stream_once(
     events.send(Event::Authenticated).await.ok()?;
     loop {
         tokio::select! {
-            message = opened.inbound.message() => match message {
-                Ok(Some(message)) => {
-                    if let Some(event) = push_event(message) {
-                        events.send(event).await.ok()?;
-                    }
-                }
-                Ok(None) => return Some(ended_with_ok(&mut opened.inbound, &opened.headers, "stream ended").await),
-                Err(status) => return Some(Closure::from_status(&status)),
-            },
-            Some(correlation_id) = acks.recv() => {
+            // Acknowledgements come first, so that those queued before the caller dropped the channel are sent.
+            biased;
+            correlation_id = acks.recv() => {
+                let Some(correlation_id) = correlation_id else {
+                    close(opened).await;
+                    return None;
+                };
                 let ack = AgentMessage {
                     id: Uuid::new_v4().to_string(),
                     correlation_id: Some(correlation_id),
@@ -85,11 +94,45 @@ async fn stream_once(
                 // A stream that can't take the acknowledgement has closed, which its next message reports.
                 let _ = opened.outbound.send(ack).await;
             }
+            message = opened.inbound.message() => match message {
+                Ok(Some(message)) => {
+                    if let Some(event) = push_event(message) {
+                        // Without a caller the event is lost, and the caller's drop also closes the acknowledgement
+                        // queue, which closes the stream once its acknowledgements are sent.
+                        let _ = events.send(event).await;
+                    }
+                }
+                Ok(None) => return Some(ended_with_ok(&mut opened.inbound, &opened.headers, "stream ended").await),
+                Err(status) => return Some(Closure::from_status(&status)),
+            },
         }
     }
 }
 
-/// Answers the challenge and waits for `Welcome` ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract], steps 3–4).
+/// Waits until the caller drops the channel, discarding the acknowledgements it queued, which no stream carries now.
+async fn dropped(acks: &mut mpsc::UnboundedReceiver<String>) {
+    while acks.recv().await.is_some() {}
+}
+
+/// Closes an authenticated stream that the caller dropped: ends the agent's side after its queued messages, then lets
+/// the authority end its side, for at most [`CLOSE_TIMEOUT`].
+///
+/// Dropping the response first would reset the stream, which discards the messages still queued, such as an
+/// acknowledgement the caller sent just before ([CONTRACT.md §7.3 "Sequence"][contract], step 7).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+async fn close(opened: Opened) {
+    let Opened {
+        outbound, mut inbound, ..
+    } = opened;
+    drop(outbound);
+    let _ = tokio::time::timeout(CLOSE_TIMEOUT, async {
+        while let Ok(Some(_)) = inbound.message().await {}
+    })
+    .await;
+}
+
+/// Answers the challenge and waits for `Welcome` ([CONTRACT.md §7.3 "Sequence"][contract], steps 3–4).
 ///
 /// Until `Welcome` answers the `Hello`, every other message is ignored, so that nothing counts before the
 /// authority has verified the proof.

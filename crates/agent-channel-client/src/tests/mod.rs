@@ -893,6 +893,81 @@ fn the_default_timings_are_the_documented_ones() {
 }
 
 #[tokio::test]
+async fn sends_the_acknowledgements_queued_before_the_channel_is_dropped() -> anyhow::Result<()> {
+    // CONTRACT.md §7.3 step 7: the agent stores a config, replies `Ack`, then applies it, which may close the stream.
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    let update_id = new_id();
+    stream
+        .send(
+            &update_id,
+            None,
+            Payload::ConfigUpdate(ConfigUpdate {
+                config_json: r#"{"version":1,"revision":2}"#.to_owned(),
+            }),
+        )
+        .await;
+    next_event(&mut channel).await;
+
+    channel.ack(&update_id);
+    drop(channel);
+
+    let ack = stream.receive_within(WAIT).await;
+    assert!(
+        matches!(&ack, Some(Ok(Some(message))) if message.correlation_id.as_deref() == Some(update_id.as_str())),
+        "{ack:?}"
+    );
+    assert!(matches!(stream.receive_within(WAIT).await, Some(Ok(None) | Err(_))));
+    Ok(())
+}
+
+#[tokio::test]
+async fn dropping_the_channel_stops_an_opening_at_once() -> anyhow::Result<()> {
+    // An opening signed with a key that a `confirm` retired draws the terminal `identity_unknown` (CONTRACT.md §6
+    // step 4), so the caller's drop must end it.
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+
+    drop(channel);
+
+    assert!(matches!(stream.receive_within(WAIT).await, Some(Ok(None) | Err(_))));
+    Ok(())
+}
+
+#[tokio::test]
+async fn dropping_the_channel_stops_it_from_reopening() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let settings = Settings {
+        backoff: Backoff {
+            jitter: Arc::new(|| 0.5),
+            ..Backoff::default()
+        },
+        ..Settings::default()
+    };
+    let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    stream
+        .close(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+    let (_, reopen_after) = next_closure(&mut channel).await;
+    assert_eq!(reopen_after, Some(Duration::from_millis(500)));
+
+    drop(channel);
+
+    assert!(authority.opening_within(Duration::from_secs(2)).await.is_none());
+    Ok(())
+}
+
+#[tokio::test]
 async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;

@@ -14,7 +14,6 @@ use device_key::DeviceKey;
 use http_client_proxy::ProxyConfig;
 use rustls::pki_types::CertificateDer;
 use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use url::Url;
 
 use crate::transport::Transport;
@@ -104,11 +103,12 @@ pub enum Event {
 
 /// One channel: a stream that is reopened after each transient closure.
 ///
-/// Dropping the channel closes its stream.
+/// Dropping the channel closes it: an opening, or a wait to reopen, stops at once, and an authenticated stream ends
+/// once the acknowledgements queued before are sent.
 pub struct Channel {
     events: mpsc::Receiver<Event>,
+    /// Dropping it tells the stream task to stop.
     acks: mpsc::UnboundedSender<String>,
-    task: JoinHandle<()>,
 }
 
 impl ChannelClient {
@@ -134,13 +134,13 @@ impl ChannelClient {
         transport::endpoint(&target.url)?;
         let (event_sender, events) = mpsc::channel(16);
         let (acks, ack_receiver) = mpsc::unbounded_channel();
-        let task = tokio::spawn(stream::run(
+        tokio::spawn(stream::run(
             Arc::clone(&self.shared),
             target,
             event_sender,
             ack_receiver,
         ));
-        Ok(Channel { events, acks, task })
+        Ok(Channel { events, acks })
     }
 }
 
@@ -158,12 +158,6 @@ impl Channel {
     /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
     pub fn ack(&self, correlation_id: &str) {
         let _ = self.acks.send(correlation_id.to_owned());
-    }
-}
-
-impl Drop for Channel {
-    fn drop(&mut self) {
-        self.task.abort();
     }
 }
 
