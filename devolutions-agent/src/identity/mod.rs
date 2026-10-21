@@ -179,7 +179,9 @@ async fn run_identity(
             }
         }
         let stopped = run_pending_enrollments(&shared, &mut runners, &data_dir, poll_interval, &mut shutdown).await;
-        // Dropping the runners stops every identity and its streams.
+        // UNTESTED: dropping the runners aborts every runner task and, with it, its agent channel streams.
+        // Tests check that the pending poll returns, not that a live runner stops; when changing this, stop every runner
+        // and its streams before returning to start-up.
         drop(runners);
         match stopped {
             Stopped::Shutdown => return Ok(()),
