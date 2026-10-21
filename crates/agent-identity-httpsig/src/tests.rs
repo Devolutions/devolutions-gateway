@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use p256::ecdsa::{Signature, SigningKey as P256SigningKey, VerifyingKey};
 use p256::pkcs8::{DecodePrivateKey as _, DecodePublicKey as _};
 use serde_json::Value;
@@ -465,13 +467,19 @@ async fn channel_opening_is_not_sent_when_signing_fails() -> anyhow::Result<()> 
     };
     let signer = RequestSigner::new(Arc::new(key), b"leaf certificate");
     let base_url = url::Url::parse("https://example.test/dvls")?;
-    let service = ChannelLayer::new(signer, &base_url).layer(tower::service_fn(|request: Request<()>| async move {
-        Ok::<_, std::io::Error>(request)
+    let forwarded = Arc::new(AtomicBool::new(false));
+    let service = ChannelLayer::new(signer, &base_url).layer(tower::service_fn({
+        let forwarded = Arc::clone(&forwarded);
+        move |request: Request<()>| {
+            forwarded.store(true, Ordering::SeqCst);
+            async move { Ok::<_, std::io::Error>(request) }
+        }
     }));
     let (handoff, _received_nonce) = OpeningNonce::new();
     let mut opening = Request::builder().method(Method::POST).uri(CONNECT_RPC_PATH).body(())?;
     opening.extensions_mut().insert(handoff);
     assert!(service.oneshot(opening).await.is_err());
+    assert!(!forwarded.load(Ordering::SeqCst));
     Ok(())
 }
 
