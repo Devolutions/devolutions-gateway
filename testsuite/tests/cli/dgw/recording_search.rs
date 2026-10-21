@@ -42,9 +42,25 @@ fn write_recording(root: &Path, id: Uuid, manifest: serde_json::Value, files: &[
     Ok(())
 }
 
-/// Two recordings: an older one recorded as a log next to a video, and a newer one whose log is an AI analysis artifact.
-/// The video, and a log outside the recording folder that the older manifest points to, hold the searched text too,
-/// to show that only the logs of the recording are searched.
+/// A recording whose only log is the AI analysis artifact `ai-analysis-0.slog` holding `log`.
+fn write_analysis_recording(root: &Path, id: Uuid, start_time: i64, log: &str) -> anyhow::Result<()> {
+    write_recording(
+        root,
+        id,
+        serde_json::json!({
+            "sessionId": id.to_string(),
+            "startTime": start_time,
+            "duration": 10,
+            "files": [{ "fileName": "recording-0.webm", "startTime": start_time, "duration": 10 }],
+            "artifacts": { "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] },
+        }),
+        &[("ai-analysis-0.slog", log)],
+    )
+}
+
+/// Two recordings whose AI analysis logs hold the searched text.
+/// The older one also holds it in a recorded `.slog`, in its video, and in a log outside the recording folder that
+/// its manifest points to, to show that only the `.slog` artifacts of a recording are searched.
 fn write_recordings(root: &Path) -> anyhow::Result<()> {
     std::fs::write(
         root.join("outside.slog"),
@@ -61,12 +77,19 @@ fn write_recordings(root: &Path) -> anyhow::Result<()> {
             "files": [
                 { "fileName": "recording-0.slog", "startTime": 100, "duration": 10 },
                 { "fileName": "recording-1.webm", "startTime": 100, "duration": 10 },
-                { "fileName": "../outside.slog", "startTime": 100, "duration": 10 },
             ],
+            "artifacts": {
+                "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }, { "fileName": "../outside.slog" }],
+            },
         }),
         &[
             (
                 "recording-0.slog",
+                r#"{"timestamp":"2026-07-15T16:15:41.054Z","seq":1,"event":"session.action","description":"Created User"}"#,
+            ),
+            ("recording-1.webm", "Created User"),
+            (
+                "ai-analysis-0.slog",
                 concat!(
                     r#"{"timestamp":"2026-07-15T16:15:35.140Z","seq":0,"event":"session.start","description":"Session started"}"#,
                     "\n",
@@ -74,32 +97,21 @@ fn write_recordings(root: &Path) -> anyhow::Result<()> {
                     "\n",
                 ),
             ),
-            ("recording-1.webm", "Created User"),
         ],
     )?;
 
-    write_recording(
+    write_analysis_recording(
         root,
         NEWER_RECORDING,
-        serde_json::json!({
-            "sessionId": NEWER_RECORDING.to_string(),
-            "startTime": 200,
-            "duration": 10,
-            "files": [{ "fileName": "recording-0.webm", "startTime": 200, "duration": 10 }],
-            "artifacts": { "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }] },
-        }),
-        &[(
-            "ai-analysis-0.slog",
-            r#"{"timestamp":"2026-07-16T09:00:01.000Z","seq":1,"event":"session.action","description":"Opened Users","parameters":{"Created user":"Bob"}}"#,
-        )],
+        200,
+        r#"{"timestamp":"2026-07-16T09:00:01.000Z","seq":1,"event":"session.action","description":"Opened Users","parameters":{"Created user":"Bob"}}"#,
     )
 }
 
-/// Starts Gateway on the recordings above; the returned folder and process must outlive the test requests.
-async fn start_with_recordings() -> anyhow::Result<(tempfile::TempDir, DgwConfigHandle, tokio::process::Child)> {
-    let recordings = tempfile::tempdir()?;
-    write_recordings(recordings.path())?;
-
+/// Starts Gateway on `recordings`; the returned folder and process must outlive the test requests.
+async fn start_on(
+    recordings: tempfile::TempDir,
+) -> anyhow::Result<(tempfile::TempDir, DgwConfigHandle, tokio::process::Child)> {
     let config_handle = DgwConfig::builder()
         .disable_token_validation(true)
         .recording_path(recordings.path().to_owned())
@@ -108,6 +120,14 @@ async fn start_with_recordings() -> anyhow::Result<(tempfile::TempDir, DgwConfig
     let process = start_dgw(&config_handle).await?;
 
     Ok((recordings, config_handle, process))
+}
+
+/// Starts Gateway on the recordings above.
+async fn start_with_recordings() -> anyhow::Result<(tempfile::TempDir, DgwConfigHandle, tokio::process::Child)> {
+    let recordings = tempfile::tempdir()?;
+    write_recordings(recordings.path())?;
+
+    start_on(recordings).await
 }
 
 async fn search(http_port: u16, scope: &str, request: serde_json::Value) -> anyhow::Result<reqwest::Response> {
@@ -120,7 +140,7 @@ async fn search(http_port: u16, scope: &str, request: serde_json::Value) -> anyh
         .context("send search request")
 }
 
-/// `(recordingId, fileName, entry.seq)` of each hit.
+/// `(recordingId, fileName, lineNumber)` of each hit.
 fn hit_summaries(body: &serde_json::Value) -> anyhow::Result<Vec<(String, String, u64)>> {
     body["hits"]
         .as_array()
@@ -130,14 +150,14 @@ fn hit_summaries(body: &serde_json::Value) -> anyhow::Result<Vec<(String, String
             Ok((
                 hit["recordingId"].as_str().context("recordingId")?.to_owned(),
                 hit["fileName"].as_str().context("fileName")?.to_owned(),
-                hit["entry"]["seq"].as_u64().context("entry.seq")?,
+                hit["lineNumber"].as_u64().context("lineNumber")?,
             ))
         })
         .collect()
 }
 
 #[tokio::test]
-async fn searches_the_logs_of_every_recording_newest_first() -> anyhow::Result<()> {
+async fn searches_the_slog_artifacts_of_every_recording_newest_first() -> anyhow::Result<()> {
     let (_recordings, config_handle, _process) = start_with_recordings().await?;
 
     let response = search(
@@ -153,7 +173,7 @@ async fn searches_the_logs_of_every_recording_newest_first() -> anyhow::Result<(
         hit_summaries(&body)?,
         [
             (NEWER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 1),
-            (OLDER_RECORDING.to_string(), "recording-0.slog".to_owned(), 1),
+            (OLDER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 2),
         ]
     );
     assert_eq!(body["limitReached"], false);
@@ -179,7 +199,37 @@ async fn searches_each_listed_recording_once() -> anyhow::Result<()> {
     let body: serde_json::Value = response.json().await?;
     assert_eq!(
         hit_summaries(&body)?,
-        [(OLDER_RECORDING.to_string(), "recording-0.slog".to_owned(), 1)]
+        [(OLDER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 2)]
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn searches_only_the_recordings_started_in_the_time_range() -> anyhow::Result<()> {
+    let recordings = tempfile::tempdir()?;
+    for (id, start_time) in [(1, 100), (2, 200), (3, 300)] {
+        write_analysis_recording(recordings.path(), Uuid::from_u128(id), start_time, "Created User")?;
+    }
+    let (_recordings, config_handle, _process) = start_on(recordings).await?;
+
+    // From the start time 200 up to, but not including, 300.
+    let response = search(
+        config_handle.http_port(),
+        "gateway.recordings.search",
+        serde_json::json!({
+            "query": "created user",
+            "recordings": "all",
+            "startTime": { "from": "1970-01-01T00:03:20Z", "to": "1970-01-01T00:05:00Z" },
+        }),
+    )
+    .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+
+    let body: serde_json::Value = response.json().await?;
+    assert_eq!(
+        hit_summaries(&body)?,
+        [(Uuid::from_u128(2).to_string(), "ai-analysis-0.slog".to_owned(), 1)]
     );
 
     Ok(())
