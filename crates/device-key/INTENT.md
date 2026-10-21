@@ -56,7 +56,7 @@ Opening a key that any other account can access fails, so a key created by a les
 - Deleting is idempotent: deleting a key that is already gone succeeds.
 - Listing under a prefix returns only well-formed names whose part before the first `_` equals that prefix, and never a link.
 - No leftover copy of a private key survives a later operation in the same key store.
-  Another process's work in progress is never taken for a leftover, and a file the crate did not create is never removed.
+  Another process's work in progress is never taken for a leftover, and the crate removes only files whose names follow its scheme for keys and their temporary and deleted copies, never anything else in the key store; within the key store the caller chose, a name in that scheme counts as the crate's own, whatever its prefix.
 - An unexpected entry in a key store makes an operation skip it or fail, never panic.
 - Waiting for another process has a time limit; when it runs out, the operation fails.
 
