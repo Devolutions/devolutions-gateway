@@ -40,6 +40,9 @@ Weak kinds name a self-derived source, which detects change rather than bugs, so
 - `mutant <faults in words>`: a test or assertion kept to catch mutants that no strong source decides.
 - `scaffold`: a test or assertion written for feedback while implementing that no strong source decides.
 
+No `scaffold` marker merges: before the pull request does, give what it marks a strong source, keep it as `mutant` when `test-pruner` finds it alone catches a fault, or delete it.
+When it checks a property or intention no document states, ask whether and where to specify it, and mark it with that source once specified, since a confirmation alone is not a source; a protected test takes this path rather than deletion.
+
 Mark a strong source whenever one decides the value, so a test found through a mutant but decided by a spec is `spec`, because whether a test may go depends on whether a source still requires it, not on how it was found.
 An unmarked test starts as unknown: verify it as above, and turn a citation in another form into the marker it supports.
 A marker is a claim: verify it like any other origin.

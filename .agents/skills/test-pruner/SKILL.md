@@ -33,7 +33,7 @@ A strengthened or gap test that fails is a finding, never a task to make it pass
 Delete a self-derived test with no unique kills.
 A test of unknown oracle with unique kills has already passed the challenge; strengthen it.
 Challenge a test of unknown oracle without unique kills, unless it is protected below, since its fate does not depend on the answer.
-No `scaffold` marker outlives the pass unreported: these rules replace it with the verified source or `mutant`, or delete what it marks, and a protected test they leave keeps it and is listed as unresolved in the oracle table.
+No `scaffold` marker outlives the pass: resolve each as `test-oracle-reviewer` requires, sending its questions to whoever assigned the run, or to the author in review mode.
 
 Deletion is a set decision, not a per-test verdict.
 Two tests that both catch mutant M each have zero unique kills, and deleting both loses M.
