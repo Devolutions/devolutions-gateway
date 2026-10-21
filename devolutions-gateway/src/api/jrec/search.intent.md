@@ -7,13 +7,13 @@ A line holding a JSON object is matched case-insensitively against the object's 
 Any other line is matched case-insensitively against its raw text, so that any kind of artifact, present or future, can be searched.
 A line cut at 256 KiB follows the same rule: what was read is matched by its string values when it parses as a JSON object, and as raw text otherwise.
 
-Values are matched rather than raw text because users search the text they see: raw matching made a field name such as `description` match every line, and missed text that JSON escapes, such as `DOMAIN\user` stored as `DOMAIN\\user`.
+Values are matched rather than raw text because users search the text they see: raw matching would make a field name such as `description` match every line, and would miss text that JSON escapes, such as `DOMAIN\user` stored as `DOMAIN\\user`.
 The rule never depends on field names, so a producer can change the fields it writes without any change to search.
 Per-field search, such as matching an entry's `description` only, is not supported: the fields a producer writes are unknown to Gateway, which only cares about values.
 
 ## Hits
 
-A hit is a line that holds the query.
+A hit is a line that matches the query.
 A hit carries the recording ID, the file name, the line number counting from 1, the byte offset of the line, and the raw line itself as a string.
 Line numbers count from 1 like the slog package in `webapp/packages/session-recording-log`, so that a hit and that package's own search give a line the same number.
 Gateway does not require a line to be JSON: a `.slog` is NDJSON by format, but a line holds whatever its producer pushed, such as a half-written last line while the push is live.
