@@ -23,6 +23,7 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::app::{App, nanos, parse_date_time, rfc3339, rfc3339_nanos};
+use crate::channel::config_fits_envelope;
 use crate::oracle::CertStatus;
 use crate::state::{ApiError, Cert, Identity, IdentityStatus, State, Token};
 
@@ -604,6 +605,12 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
     let max_uses = max_uses.expect("a missing maxUses is a field error");
 
     let mut state = app.state.lock().await;
+    if !config_fits_envelope(&state.enrollment_config(config, &app.base_url)) {
+        return Err(ManagementError::invalid(
+            "config",
+            "config would not fit a 64 KiB agent channel envelope",
+        ));
+    }
     state.ensure_root(now)?;
     let (id, secret) = state.create_token(
         name.to_owned(),
@@ -1005,7 +1012,9 @@ async fn patch_settings(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Man
 
     let mut state = app.state.lock().await;
     if let Some(enabled) = channel_enabled {
-        state.update_agent_channel_enabled(enabled, &app.base_url);
+        state
+            .update_agent_channel_enabled(enabled, &app.base_url)
+            .map_err(|error| ManagementError::invalid("isAgentChannelEnabled", error.message))?;
     }
     if let Some(days) = lifetime_days {
         state.settings.certificate_lifetime_days = u32::try_from(days).expect("certificateLifetimeDays is in range");

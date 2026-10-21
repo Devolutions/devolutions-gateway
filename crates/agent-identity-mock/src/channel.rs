@@ -10,7 +10,7 @@ use agent_channel_proto::{
     AgentMessage, Challenge, ConfigUpdate, Reconnect, RenewRequested, ServerMessage, Welcome, agent_message,
     server_message,
 };
-use futures::StreamExt as _;
+use futures::{Stream, StreamExt as _};
 use prost::Message as _;
 use prost::bytes::Buf as _;
 use rand::RngExt as _;
@@ -33,13 +33,60 @@ const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
 /// How often a stream awaiting `Hello` checks its certificate's `notAfter`, well within one mock-clock second.
 const EXPIRY_CHECK_PERIOD: Duration = Duration::from_millis(250);
 
+/// The largest envelope either side accepts or sends, in bytes of serialized protobuf without gRPC's 5-byte message
+/// prefix ([CONTRACT.agent-identity.md][contract], "7.1 Service").
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+pub(crate) const ENVELOPE_LIMIT: usize = 64 * 1024;
+
 #[derive(Clone)]
 pub(crate) struct ChannelService {
     pub(crate) app: Arc<App>,
 }
 
-/// An agent message as the channel receives it: decoded, or the error that kept it from decoding.
-pub(crate) type Received = Result<AgentMessage, prost::DecodeError>;
+/// An agent message as the channel receives it: decoded, or [`Undecodable`].
+pub(crate) type Received = Result<AgentMessage, Undecodable>;
+
+/// An agent message that cannot be decoded: malformed protobuf, or an envelope larger than [`ENVELOPE_LIMIT`], which
+/// [CONTRACT.agent-identity.md][contract] ("7.1 Service") treats alike.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+pub(crate) struct Undecodable;
+
+/// The channel's gRPC server, which reads and writes envelopes of at most [`ENVELOPE_LIMIT`] bytes.
+pub(crate) fn grpc() -> tonic::server::Grpc<ChannelCodec> {
+    // UNTESTED: tonic sends no envelope larger than `ENVELOPE_LIMIT`, and ends the stream with `OUT_OF_RANGE` instead.
+    // Every config the mock holds or replays fits one envelope and its other messages are small, so no test builds one.
+    // When changing this builder, keep the encoding limit at `ENVELOPE_LIMIT`.
+    tonic::server::Grpc::new(ChannelCodec)
+        .max_decoding_message_size(ENVELOPE_LIMIT)
+        .max_encoding_message_size(ENVELOPE_LIMIT)
+}
+
+/// Whether `config` fits the `ConfigUpdate` envelope that carries it ([CONTRACT.agent-identity.md][contract], "7.1
+/// Service"), serialized as the channel sends it, with the 36-character UUID `id` of every server message.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+pub(crate) fn config_fits_envelope(config: &Value) -> bool {
+    let envelope = server_message(
+        Uuid::nil().to_string(),
+        None,
+        server_message::Payload::ConfigUpdate(ConfigUpdate {
+            config_json: serde_json::to_string(config).expect("identity config is serializable"),
+        }),
+    );
+    envelope.encoded_len() <= ENVELOPE_LIMIT
+}
+
+/// The agent's messages, where a message larger than [`ENVELOPE_LIMIT`] is [`Undecodable`].
+/// tonic refuses such a message with `OUT_OF_RANGE` once it reads the message's length prefix, and fails the stream
+/// with another code for every other error, such as a broken transport.
+fn agent_messages(client: Streaming<Received>) -> impl Stream<Item = Result<Received, Status>> + Unpin + Send {
+    client.map(|message| match message {
+        Err(status) if status.code() == Code::OutOfRange => Ok(Err(Undecodable)),
+        message => message,
+    })
+}
 
 /// The channel's gRPC codec: it encodes server messages as tonic's prost codec does, and passes each agent message to
 /// the stream whether or not it decodes.
@@ -75,7 +122,9 @@ impl Decoder for ReceivedDecoder {
         // UNTESTED: a message that fails to decode is consumed whole, so that the next one is read from its header.
         // No stream reads past an undecodable message, so no test sees a message left half-read.
         // When changing this decoder, keep consuming all `buf.remaining()` bytes whatever the outcome.
-        Ok(Some(AgentMessage::decode(buf.copy_to_bytes(buf.remaining()))))
+        Ok(Some(
+            AgentMessage::decode(buf.copy_to_bytes(buf.remaining())).map_err(|_| Undecodable),
+        ))
     }
 }
 
@@ -182,7 +231,7 @@ impl ChannelService {
             app,
             stream_id,
             opening,
-            request.into_inner(),
+            agent_messages(request.into_inner()),
             push_tx,
             push_rx,
             out_tx,
@@ -328,7 +377,7 @@ async fn run_stream(
     app: Arc<App>,
     stream_id: Uuid,
     opening: Opening,
-    mut client: Streaming<Received>,
+    mut client: impl Stream<Item = Result<Received, Status>> + Unpin,
     push_tx: mpsc::UnboundedSender<StreamPush>,
     mut push_rx: mpsc::UnboundedReceiver<StreamPush>,
     out: mpsc::Sender<Result<ServerMessage, Status>>,
@@ -767,6 +816,10 @@ mod tests {
     /// How long a stream stays silent before a test reads it as waiting.
     const QUIET: Duration = Duration::from_millis(500);
 
+    /// CONTRACT.agent-identity.md §7.1: "Each side accepts envelopes up to 64 KiB (65,536 bytes) of serialized
+    /// protobuf, not counting gRPC's 5-byte message prefix, and sends none larger".
+    const ENVELOPE_LIMIT: usize = 65_536;
+
     #[test]
     fn stream_failure_carries_error_code_and_server_time_trailers() {
         let status = error_status(Code::Unauthenticated, "clock_skew", 1_790_000_000);
@@ -783,6 +836,10 @@ mod tests {
         Challenge,
         Welcome,
         Reconnect(String),
+        /// A `ConfigUpdate` and the length of its envelope, from its gRPC message prefix.
+        ConfigUpdate {
+            envelope_len: usize,
+        },
         /// The `grpc-status` and `error-code` trailers.
         Closed(String, String),
     }
@@ -1014,7 +1071,8 @@ mod tests {
         /// the message.
         fn decode_received(&mut self) -> anyhow::Result<()> {
             while let Some(&[_, a, b, c, d]) = self.received.get(..5) {
-                let end = 5 + usize::try_from(u32::from_be_bytes([a, b, c, d]))?;
+                let len = usize::try_from(u32::from_be_bytes([a, b, c, d]))?;
+                let end = 5 + len;
                 let Some(bytes) = self.received.get(5..end) else {
                     break;
                 };
@@ -1027,6 +1085,7 @@ mod tests {
                     }
                     Some(server_message::Payload::Welcome(_)) => Seen::Welcome,
                     Some(server_message::Payload::Reconnect(reconnect)) => Seen::Reconnect(reconnect.reason),
+                    Some(server_message::Payload::ConfigUpdate(_)) => Seen::ConfigUpdate { envelope_len: len },
                     other => anyhow::bail!("unexpected server message {other:?}"),
                 };
                 self.seen.push_back(seen);
@@ -1128,15 +1187,86 @@ mod tests {
         encoded.pop();
     }
 
+    /// Appends field 1000, which no channel message defines, as a byte string, so that the message is `len` bytes long
+    /// and still decodes, since protobuf skips unknown fields.
+    fn pad_to(encoded: &mut Vec<u8>, len: usize) {
+        // Field 1000 with wire type 2 (length-delimited).
+        prost::encoding::encode_varint(1000 << 3 | 2, encoded);
+        let padding = len - encoded.len();
+        let varint_len =
+            |value: usize| prost::encoding::encoded_len_varint(u64::try_from(value).expect("usize fits u64"));
+        let value_len = (1..=10)
+            .map(|length_len| padding - length_len)
+            .find(|&value_len| varint_len(value_len) + value_len == padding)
+            .expect("a value length fills the padding");
+        prost::encoding::encode_varint(u64::try_from(value_len).expect("usize fits u64"), encoded);
+        encoded.extend(std::iter::repeat_n(0, value_len));
+        assert_eq!(encoded.len(), len);
+        assert!(
+            AgentMessage::decode(encoded.as_slice()).is_ok(),
+            "the padded message decodes"
+        );
+    }
+
+    /// Pads the message to one byte more than CONTRACT.agent-identity.md §7.1 lets a side accept.
+    fn pad_past_the_envelope_limit(encoded: &mut Vec<u8>) {
+        pad_to(encoded, ENVELOPE_LIMIT + 1);
+    }
+
+    /// CONTRACT.agent-identity.md §7.1: each side accepts an envelope of exactly 64 KiB, so a `Hello` of that size gets
+    /// its `Welcome` (§7.3 step 4).
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[tokio::test]
+    async fn hello_at_the_envelope_limit_is_welcomed() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        let mut encoded = channel.hello(&enrolled.key)?.encode_to_vec();
+        pad_to(&mut encoded, ENVELOPE_LIMIT);
+        channel.send_encoded(&encoded).await?;
+
+        assert_eq!(channel.drain(QUIET).await?, [Seen::Welcome]);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §7.1: each side sends envelopes up to 64 KiB, and §7.3 step 7 sends `ConfigUpdate` on
+    /// the identity's live streams when its effective config changes, so a config whose `ConfigUpdate` envelope is
+    /// exactly 64 KiB reaches the agent.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[tokio::test]
+    async fn config_update_at_the_envelope_limit_reaches_the_agent() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+        channel.send(channel.hello(&enrolled.key)?).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Welcome));
+
+        {
+            let mut state = enrolled.app.state.lock().await;
+            let fields = state.identities[&enrolled.identity_id].fields_for_envelope(ENVELOPE_LIMIT);
+            assert!(state.merge_config_fields(&fields).is_ok());
+        }
+
+        let config_update = Seen::ConfigUpdate {
+            envelope_len: ENVELOPE_LIMIT,
+        };
+        assert_eq!(channel.drain(QUIET).await?, [config_update]);
+        Ok(())
+    }
+
     /// CONTRACT.agent-identity.md §7.3 step 4: a first agent message "that cannot be decoded" is not a `Hello`, so the
     /// server "closes the stream with `UNAUTHENTICATED` + `error-code: signature_invalid`" (gRPC code 16), and the
     /// failure doesn't change the identity's state.
-    /// Each message corrupts a `Hello` the mock would accept, sent a minute after enrollment with new metadata, so that
-    /// a mock reading it would change the identity's metadata or last-seen time.
+    /// §7.1 treats a message larger than 64 KiB as one that cannot be decoded.
+    /// Each message corrupts or oversizes a `Hello` the mock would accept, sent a minute after enrollment with new
+    /// metadata, so that a mock reading it would change the identity's metadata or last-seen time.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     #[rstest]
     #[case::invalid_utf8_in_a_string_field(append_invalid_utf8_id)]
     #[case::truncated(truncate_payload)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[case::past_the_envelope_limit(pad_past_the_envelope_limit)]
     #[tokio::test]
     async fn undecodable_first_message_is_signature_invalid(#[case] corrupt: fn(&mut Vec<u8>)) -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1167,11 +1297,14 @@ mod tests {
     /// CONTRACT.agent-identity.md §7.4: "A message that cannot be decoded on an authenticated stream closes that stream
     /// with `INVALID_ARGUMENT` + `error-code: invalid_request`" (gRPC code 3), and the mock's event log records that
     /// closure.
-    /// Each message corrupts an `Ack`, which the mock otherwise reads and ignores.
+    /// §7.1 treats a message larger than 64 KiB as one that cannot be decoded.
+    /// Each message corrupts or oversizes an `Ack`, which the mock otherwise reads and ignores.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
     #[rstest]
     #[case::invalid_utf8_in_a_string_field(append_invalid_utf8_id)]
     #[case::truncated(truncate_payload)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[case::past_the_envelope_limit(pad_past_the_envelope_limit)]
     #[tokio::test]
     async fn undecodable_message_on_an_authenticated_stream_is_invalid_request(
         #[case] corrupt: fn(&mut Vec<u8>),

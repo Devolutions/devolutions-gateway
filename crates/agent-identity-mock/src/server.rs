@@ -26,7 +26,7 @@ use tower::{Service, ServiceExt as _};
 
 use crate::api_agent::{DROP_HEADER, INJECTED_HEADER};
 use crate::app::App;
-use crate::channel::{ChannelCodec, ChannelService};
+use crate::channel::ChannelService;
 
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 type OutBody = http_body_util::combinators::UnsyncBoxBody<Bytes, BoxError>;
@@ -115,7 +115,7 @@ impl Dispatcher {
         if stripped == *grpc_path {
             let channel = self.channel;
             let connect = tower::service_fn(move |request| channel.clone().connect(request));
-            let response = tonic::server::Grpc::new(ChannelCodec).streaming(connect, request).await;
+            let response = crate::channel::grpc().streaming(connect, request).await;
             return Ok(response.map(|body| body.map_err(|e| -> BoxError { Box::new(e) }).boxed_unsync()));
         }
 

@@ -177,8 +177,10 @@ async fn update_config(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Resp
         return control_error(&ApiError::invalid_request("config fields cannot replace reserved keys"));
     }
     let mut state = app.state.lock().await;
-    let updated = state.merge_config_fields(fields);
-    Json(json!({ "updatedIdentities": updated })).into_response()
+    match state.merge_config_fields(fields) {
+        Ok(updated) => Json(json!({ "updatedIdentities": updated })).into_response(),
+        Err(error) => control_error(&error),
+    }
 }
 
 #[derive(Deserialize)]
@@ -334,7 +336,11 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                 _ => return invalid("leaf_lifetime_secs must be a positive integer or null"),
             },
             "channel_available" => match value {
-                Value::Bool(b) => state.update_channel_available(*b, &app.base_url),
+                Value::Bool(b) => {
+                    if let Err(error) = state.update_channel_available(*b, &app.base_url) {
+                        return control_error(&error);
+                    }
+                }
                 _ => return invalid("channel_available must be a boolean"),
             },
             "channel_broken" => match value {
@@ -363,14 +369,19 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                 },
                 _ => return invalid("rotation_rate_limit_per_sec must be a positive integer or null"),
             },
-            "config_version" => match value {
-                Value::Null => state.update_config_version(None),
-                Value::Number(n) => match n.as_u64() {
-                    Some(version) => state.update_config_version(Some(version)),
-                    None => return invalid("config_version must be an unsigned integer or null"),
-                },
-                _ => return invalid("config_version must be an unsigned integer or null"),
-            },
+            "config_version" => {
+                let version = match value {
+                    Value::Null => None,
+                    Value::Number(n) => match n.as_u64() {
+                        Some(version) => Some(version),
+                        None => return invalid("config_version must be an unsigned integer or null"),
+                    },
+                    _ => return invalid("config_version must be an unsigned integer or null"),
+                };
+                if let Err(error) = state.update_config_version(version) {
+                    return control_error(&error);
+                }
+            }
             "root_key_unavailable" => match value {
                 Value::Bool(b) => state.faults.root_key_unavailable = *b,
                 _ => return invalid("root_key_unavailable must be a boolean"),

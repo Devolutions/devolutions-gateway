@@ -17,11 +17,15 @@ use uuid::Uuid;
 
 use super::{BASE_PATH, Permission, Permissions, TOKEN_ID_HEADER, key_permissions, router};
 use crate::app::{App, nanos, rfc3339};
-use crate::state::{State, StreamPush};
+use crate::state::{State, StreamPush, config_update_len};
 
 const APP_KEY: &str = "admin";
 const APP_SECRET: &str = "secret";
 const DAY: i64 = 24 * 3600;
+
+/// CONTRACT.agent-identity.md §7.1: each side sends channel envelopes "up to 64 KiB (65,536 bytes) of serialized
+/// protobuf".
+const ENVELOPE_LIMIT: usize = 65_536;
 
 /// Returns an app whose clock is frozen at its current second, and that second.
 fn frozen_app() -> anyhow::Result<(Arc<App>, i64)> {
@@ -696,6 +700,60 @@ async fn create_token_refuses_a_65_byte_config_key() -> anyhow::Result<()> {
     let (status, refused) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
     assert_eq!(status, 400);
     assert_eq!(error_fields(&refused), [json!(format!("config.{key}"))]);
+    Ok(())
+}
+
+/// Returns a token config whose identities, enrolled with `base_url` offering the channel, start with a config that
+/// travels in a `ConfigUpdate` envelope of `envelope_len` bytes.
+/// It stays within `AgentIdentityEnrollmentTokenCreateDTO.config`'s limits, 32 entries of at most 1024 bytes, since an
+/// escaped `"` takes two bytes of JSON.
+fn token_config_for_envelope(base_url: &str, envelope_len: usize) -> Value {
+    // CONTRACT.agent-identity.md §5.2: the server adds `version`, `revision` and `agent_channel_url` to the token's
+    // fields.
+    let identity_config_len = |token_config: &serde_json::Map<String, Value>| {
+        let mut config = token_config.clone();
+        config.insert("version".to_owned(), json!(1));
+        config.insert("revision".to_owned(), json!(1));
+        config.insert("agent_channel_url".to_owned(), json!(base_url));
+        config_update_len(&Value::Object(config))
+    };
+    let mut config: serde_json::Map<String, Value> = (0..31)
+        .map(|i| (format!("quotes_{i}"), json!("\"".repeat(1024))))
+        .collect();
+    config.insert("last".to_owned(), json!("x".repeat(1024)));
+    let quotes = envelope_len - identity_config_len(&config);
+    let last = format!("{}{}", "\"".repeat(quotes), "x".repeat(1024 - quotes));
+    config.insert("last".to_owned(), json!(last));
+    assert_eq!(identity_config_len(&config), envelope_len);
+    Value::Object(config)
+}
+
+/// CONTRACT.agent-identity.md §7.1 holds no effective config past one channel envelope, so a token whose identities
+/// would start with a config one byte past it is refused on `config`, in a `PublicApiValidationError`, and not
+/// created.
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+#[tokio::test]
+async fn create_token_refuses_a_config_past_the_envelope_limit() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let config = token_config_for_envelope(&app.base_url, ENVELOPE_LIMIT + 1);
+    let body = json!({ "name": "t", "maxUses": 1, "config": config });
+    let (status, refused) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
+    assert_eq!(status, 400);
+    assert_eq!(error_fields(&refused), [json!("config")]);
+    assert!(app.state.lock().await.tokens.is_empty());
+    Ok(())
+}
+
+/// CONTRACT.agent-identity.md §7.1 accepts envelopes up to 64 KiB, so a token whose identities start with a config
+/// whose `ConfigUpdate` envelope is exactly that size is created.
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+#[tokio::test]
+async fn create_token_accepts_a_config_at_the_envelope_limit() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let config = token_config_for_envelope(&app.base_url, ENVELOPE_LIMIT);
+    let body = json!({ "name": "t", "maxUses": 1, "config": config });
+    let (status, created) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
+    assert_eq!(status, 201, "{created}");
     Ok(())
 }
 
@@ -1446,7 +1504,8 @@ async fn channel_setting_withdraws_and_restores_the_channel_url() -> anyhow::Res
 #[tokio::test]
 async fn channel_is_unavailable_without_hosting_support() -> anyhow::Result<()> {
     let app = App::for_test()?;
-    app.state.lock().await.update_channel_available(false, &app.base_url);
+    let turned_off = app.state.lock().await.update_channel_available(false, &app.base_url);
+    assert!(turned_off.is_ok());
     let (_, settings) = call(&app, Method::GET, "/settings", None).await?;
     assert_eq!(
         (&settings["isAgentChannelEnabled"], &settings["isAgentChannelAvailable"]),

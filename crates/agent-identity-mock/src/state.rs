@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::app::nanos;
 use crate::ca::{self, RootCa};
+use crate::channel::config_fits_envelope;
 use crate::name_eval;
 use crate::oracle::{
     AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, check_csr, unexpired, within_renewal_grace,
@@ -280,6 +281,11 @@ impl Identity {
         self.config["revision"]
             .as_u64()
             .expect("identity config has a revision")
+    }
+
+    /// Returns the revision of this identity's next effective config.
+    fn next_revision(&self) -> u64 {
+        self.config_revision().checked_add(1).expect("config revision fits u64")
     }
 
     /// Returns the serialized config and its revision when a Hello reports an older applied revision.
@@ -556,88 +562,111 @@ impl State {
     }
 
     /// Sets whether the hosting supports the agent channel.
-    pub(crate) fn update_channel_available(&mut self, available: bool, base_url: &str) {
-        self.update_channel_offer(base_url, |state| state.faults.channel_available = available);
+    pub(crate) fn update_channel_available(&mut self, available: bool, base_url: &str) -> Result<(), ApiError> {
+        self.update_channel_offer(self.settings.agent_channel_enabled && available, base_url)?;
+        self.faults.channel_available = available;
+        Ok(())
     }
 
     /// Sets the `isAgentChannelEnabled` setting.
-    pub(crate) fn update_agent_channel_enabled(&mut self, enabled: bool, base_url: &str) {
-        self.update_channel_offer(base_url, |state| state.settings.agent_channel_enabled = enabled);
+    pub(crate) fn update_agent_channel_enabled(&mut self, enabled: bool, base_url: &str) -> Result<(), ApiError> {
+        self.update_channel_offer(enabled && self.faults.channel_available, base_url)?;
+        self.settings.agent_channel_enabled = enabled;
+        Ok(())
     }
 
-    /// Applies `change`, then adds or removes `agent_channel_url` in every config when the channel offer changed.
-    fn update_channel_offer(&mut self, base_url: &str, change: impl FnOnce(&mut Self)) {
-        let offered = self.channel_offered();
-        change(self);
-        let now_offered = self.channel_offered();
-        if offered == now_offered {
-            return;
+    /// Adds or removes `agent_channel_url` in every config when the channel offer changes to `offered`.
+    fn update_channel_offer(&mut self, offered: bool, base_url: &str) -> Result<(), ApiError> {
+        if offered == self.channel_offered() {
+            return Ok(());
         }
         self.change_every_config(|config| {
-            if now_offered {
+            if offered {
                 config.insert("agent_channel_url".to_owned(), json!(base_url));
             } else {
                 config.remove("agent_channel_url");
             }
-        });
+        })
     }
 
     /// Sets or clears the `config.version` override.
     /// A change bumps every identity's revision so agents treat the delivered config as newer than their stored one.
-    pub(crate) fn update_config_version(&mut self, version: Option<u64>) {
-        let previous = self.faults.config_version.unwrap_or(CONFIG_VERSION);
+    pub(crate) fn update_config_version(&mut self, version: Option<u64>) -> Result<(), ApiError> {
+        let delivered = version.unwrap_or(CONFIG_VERSION);
+        if delivered != self.faults.config_version.unwrap_or(CONFIG_VERSION) {
+            self.change_every_config(|config| {
+                config.insert("version".to_owned(), json!(delivered));
+            })?;
+        }
         self.faults.config_version = version;
-        let version = version.unwrap_or(CONFIG_VERSION);
-        if version == previous {
-            return;
-        }
-        self.change_every_config(|config| {
-            config.insert("version".to_owned(), json!(version));
-        });
+        Ok(())
     }
 
-    /// Applies `change` to every identity's config, bumps its revision and pushes it to live streams.
-    fn change_every_config(&mut self, change: impl Fn(&mut Map<String, Value>)) {
-        let mut changed = Vec::new();
-        for identity in self.identities.values_mut() {
-            let revision = identity
-                .config_revision()
-                .checked_add(1)
-                .expect("config revision fits u64");
-            let config = identity.config.as_object_mut().expect("identity config is an object");
-            change(config);
-            config.insert("revision".to_owned(), json!(revision));
-            changed.push(identity.id);
-        }
-        for identity_id in changed {
-            self.push_config_update(identity_id);
-        }
+    /// Applies `change` to every identity's config, bumps its revision and pushes it to live streams, unless one
+    /// config would not fit its envelope, as [`Self::replace_configs`] says.
+    fn change_every_config(&mut self, change: impl Fn(&mut Map<String, Value>)) -> Result<(), ApiError> {
+        let configs = self
+            .identities
+            .values()
+            .map(|identity| {
+                let mut config = identity.config.clone();
+                let entries = config.as_object_mut().expect("identity config is an object");
+                change(entries);
+                entries.insert("revision".to_owned(), json!(identity.next_revision()));
+                (identity.id, config)
+            })
+            .collect();
+        self.replace_configs(configs)?;
+        Ok(())
     }
 
-    pub(crate) fn merge_config_fields(&mut self, fields: &Map<String, Value>) -> usize {
-        let mut changed = Vec::new();
-        for identity in self.identities.values_mut() {
-            let effective_change = fields
-                .iter()
-                .any(|(name, value)| identity.config.get(name) != Some(value));
-            if effective_change {
-                let revision = identity
-                    .config_revision()
-                    .checked_add(1)
-                    .expect("config revision fits u64");
-                identity
-                    .config
+    /// Merges `fields` into the config of every identity they change, bumps its revision and pushes it to live streams,
+    /// and returns how many identities changed.
+    pub(crate) fn merge_config_fields(&mut self, fields: &Map<String, Value>) -> Result<usize, ApiError> {
+        let configs = self
+            .identities
+            .values()
+            .filter(|identity| {
+                fields
+                    .iter()
+                    .any(|(name, value)| identity.config.get(name) != Some(value))
+            })
+            .map(|identity| {
+                let mut config = identity.config.clone();
+                config
                     .as_object_mut()
                     .expect("identity config is an object")
                     .extend(fields.clone());
-                identity.config["revision"] = json!(revision);
-                changed.push(identity.id);
-            }
+                config["revision"] = json!(identity.next_revision());
+                (identity.id, config)
+            })
+            .collect();
+        self.replace_configs(configs)
+    }
+
+    /// Replaces the effective config of each identity in `configs` and pushes it to the identity's live streams, and
+    /// returns how many identities changed.
+    /// When one config would not fit the `ConfigUpdate` envelope that carries it ([CONTRACT.agent-identity.md][contract],
+    /// "7.1 Service"), it replaces none of them.
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+    fn replace_configs(&mut self, configs: Vec<(Uuid, Value)>) -> Result<usize, ApiError> {
+        if !configs.iter().all(|(_, config)| config_fits_envelope(config)) {
+            return Err(ApiError::invalid_request(
+                "config would not fit a 64 KiB agent channel envelope",
+            ));
         }
+        let changed = configs
+            .into_iter()
+            .map(|(identity_id, config)| {
+                self.identities.get_mut(&identity_id).expect("identity exists").config = config;
+                identity_id
+            })
+            .collect::<Vec<_>>();
         for identity_id in &changed {
             self.push_config_update(*identity_id);
         }
-        changed.len()
+        Ok(changed.len())
     }
 
     fn push_config_update(&mut self, identity_id: Uuid) {
@@ -662,6 +691,11 @@ impl State {
         let mut config = identity.config.clone();
         config["revision"] = json!(revision);
         config["mock_stale_marker"] = json!("ignore-me");
+        if !config_fits_envelope(&config) {
+            return Err(ApiError::invalid_request(
+                "stale config would not fit a 64 KiB agent channel envelope",
+            ));
+        }
         let config_json = serde_json::to_string(&config).expect("mock config is serializable");
         Ok(self.send_config_update(identity_id, &config_json, revision, "stale_config_update_sent"))
     }
@@ -863,6 +897,33 @@ impl State {
         self.complete_rotation_if_ready(now);
     }
 
+    /// Returns the effective config of an identity enrolled now with a token whose config is `token_config`: the token's
+    /// fields, `version`, `revision` 1 and, while the channel is offered, `agent_channel_url`
+    /// ([CONTRACT.agent-identity.md][contract], "5.2 `POST enroll`").
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
+    pub(crate) fn enrollment_config(&self, token_config: Option<&Value>, base_url: &str) -> Value {
+        let mut config = token_config
+            .map(|config| config.as_object().expect("token config is an object").clone())
+            .unwrap_or_default();
+        config.insert(
+            "version".to_owned(),
+            json!(self.faults.config_version.unwrap_or(CONFIG_VERSION)),
+        );
+        config.insert("revision".to_owned(), json!(1));
+        config.remove("agent_channel_url");
+        if self.channel_offered() {
+            let url = match self.faults.malformed_channel_url {
+                Some(MalformedChannelUrl::Http) => base_url.replacen("https://", "http://", 1),
+                Some(MalformedChannelUrl::Query) => format!("{base_url}?identity_probe=1"),
+                Some(MalformedChannelUrl::Fragment) => format!("{base_url}#identity_probe"),
+                None => base_url.to_owned(),
+            };
+            config.insert("agent_channel_url".to_owned(), json!(url));
+        }
+        Value::Object(config)
+    }
+
     /// §5.2 enroll. `secret` is the 32-byte token secret; only its SHA-256 is matched.
     pub(crate) fn enroll(
         &mut self,
@@ -919,6 +980,13 @@ impl State {
         if token.used_count >= token.max_uses {
             return Err(ApiError::token_exhausted());
         }
+        let config = self.enrollment_config(token.config.as_ref(), base_url);
+        if !config_fits_envelope(&config) {
+            // The channel offer and the version override can grow a token's config after the token is created.
+            return Err(ApiError::internal(
+                "token config would not fit a 64 KiB agent channel envelope",
+            ));
+        }
 
         // Both issuance and token consumption happen under the identity-creating state lock.
         let identity_id = Uuid::new_v4();
@@ -956,26 +1024,6 @@ impl State {
         self.last_created_at = created_at;
         let created_seq = self.next_identity_seq;
         self.next_identity_seq += 1;
-        let mut config = self.tokens[&token_id]
-            .config
-            .as_ref()
-            .map(|config| config.as_object().expect("token config is an object").clone())
-            .unwrap_or_default();
-        config.insert(
-            "version".to_owned(),
-            json!(self.faults.config_version.unwrap_or(CONFIG_VERSION)),
-        );
-        config.insert("revision".to_owned(), json!(1));
-        config.remove("agent_channel_url");
-        if self.channel_offered() {
-            let url = match self.faults.malformed_channel_url {
-                Some(MalformedChannelUrl::Http) => base_url.replacen("https://", "http://", 1),
-                Some(MalformedChannelUrl::Query) => format!("{base_url}?identity_probe=1"),
-                Some(MalformedChannelUrl::Fragment) => format!("{base_url}#identity_probe"),
-                None => base_url.to_owned(),
-            };
-            config.insert("agent_channel_url".to_owned(), json!(url));
-        }
         let identity = Identity {
             id: identity_id,
             friendly_name,
@@ -985,7 +1033,7 @@ impl State {
             last_seen_at: Some(now),
             revoked_at: None,
             renewal_requested: None,
-            config: Value::Object(config),
+            config,
             token_id,
             token_name,
             certs: vec![cert],
@@ -1627,6 +1675,48 @@ impl State {
     }
 }
 
+/// Returns the length of the `ConfigUpdate` envelope that carries `config`, in bytes of serialized protobuf, with the
+/// 36-character `id` of a UUID.
+#[cfg(test)]
+pub(crate) fn config_update_len(config: &Value) -> usize {
+    use agent_channel_proto::{ConfigUpdate, ServerMessage, server_message};
+    use prost::Message as _;
+
+    ServerMessage {
+        id: Uuid::new_v4().to_string(),
+        correlation_id: None,
+        payload: Some(server_message::Payload::ConfigUpdate(ConfigUpdate {
+            config_json: config.to_string(),
+        })),
+    }
+    .encoded_len()
+}
+
+/// Sets `config["pad"]` to the string that makes the `ConfigUpdate` envelope carrying `config` exactly `envelope_len`
+/// bytes long, as [`config_update_len`] measures it.
+#[cfg(test)]
+pub(crate) fn pad_config(config: &mut Value, envelope_len: usize) {
+    config["pad"] = json!("");
+    // Each round moves the size by the difference; the second round corrects the lengths' varints, which grow with it.
+    for _ in 0..3 {
+        let pad_len = config["pad"].as_str().expect("pad is a string").len();
+        config["pad"] = json!("x".repeat(pad_len + envelope_len - config_update_len(config)));
+    }
+    assert_eq!(config_update_len(config), envelope_len);
+}
+
+#[cfg(test)]
+impl Identity {
+    /// Config fields that make this identity's config, once [`State::merge_config_fields`] merges them and bumps its
+    /// revision, travel in a `ConfigUpdate` envelope of exactly `envelope_len` bytes.
+    pub(crate) fn fields_for_envelope(&self, envelope_len: usize) -> Map<String, Value> {
+        let mut config = self.config.clone();
+        config["revision"] = json!(self.config_revision() + 1);
+        pad_config(&mut config, envelope_len);
+        Map::from_iter([("pad".to_owned(), config["pad"].clone())])
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use base64::Engine as _;
@@ -1639,6 +1729,131 @@ mod tests {
     // CONTRACT.agent-identity.md §6: "A certificate is unexpired while `now ≤ notAfter`"; `notBefore` is not checked.
     const CURRENT: (CertStatus, i64, i64) = (CertStatus::Current, 900, 1000);
     const PENDING: (CertStatus, i64, i64) = (CertStatus::Pending, 1000, 1100);
+
+    /// CONTRACT.agent-identity.md §7.1: each side sends channel envelopes "up to 64 KiB (65,536 bytes) of serialized
+    /// protobuf".
+    const ENVELOPE_LIMIT: usize = 65_536;
+
+    /// CONTRACT.agent-identity.md §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope
+    /// would exceed that limit", so config fields that would make it one byte larger are refused, and the identity
+    /// keeps its config, which no stream receives.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn config_fields_past_the_envelope_limit_are_refused() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let (identity_id, mut stream) = state.insert_connected_identity(now, 3600);
+        let config = state.identities[&identity_id].config.clone();
+        let fields = state.identities[&identity_id].fields_for_envelope(ENVELOPE_LIMIT + 1);
+
+        assert!(state.merge_config_fields(&fields).is_err());
+        assert_eq!(state.identities[&identity_id].config, config);
+        assert!(stream.try_recv().is_err());
+        Ok(())
+    }
+
+    fn disable_agent_channel(state: &mut State) {
+        state.settings.agent_channel_enabled = false;
+    }
+
+    fn enable_agent_channel(state: &mut State) -> Result<(), ApiError> {
+        state.update_agent_channel_enabled(true, "https://localhost/mock")
+    }
+
+    fn withdraw_hosting_support(state: &mut State) {
+        state.faults.channel_available = false;
+    }
+
+    fn restore_hosting_support(state: &mut State) -> Result<(), ApiError> {
+        state.update_channel_available(true, "https://localhost/mock")
+    }
+
+    fn keep_defaults(_: &mut State) {}
+
+    fn override_config_version(state: &mut State) -> Result<(), ApiError> {
+        state.update_config_version(Some(u64::MAX))
+    }
+
+    /// CONTRACT.agent-identity.md §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope
+    /// would exceed that limit", so a setting or mock control that would grow a config at the limit is refused, keeps
+    /// its value and the config, and sends no stream a config.
+    /// Offering the channel adds `agent_channel_url` to every config, and the version override lengthens `version`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[rstest]
+    #[case::agent_channel_enabled(disable_agent_channel, enable_agent_channel)]
+    #[case::hosting_support(withdraw_hosting_support, restore_hosting_support)]
+    #[case::config_version(keep_defaults, override_config_version)]
+    fn config_growth_past_the_envelope_limit_is_refused(
+        #[case] setup: fn(&mut State),
+        #[case] grow: fn(&mut State) -> Result<(), ApiError>,
+    ) -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        setup(&mut state);
+        let (identity_id, mut stream) = state.insert_connected_identity(now, 3600);
+        let identity = state.identities.get_mut(&identity_id).expect("inserted identity");
+        pad_config(&mut identity.config, ENVELOPE_LIMIT);
+        let snapshot = |state: &State| {
+            (
+                state.identities[&identity_id].config.clone(),
+                state.settings.agent_channel_enabled,
+                state.faults.channel_available,
+                state.faults.config_version,
+            )
+        };
+        let before = snapshot(&state);
+
+        assert!(grow(&mut state).is_err());
+        assert_eq!(snapshot(&state), before);
+        assert!(stream.try_recv().is_err());
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope
+    /// would exceed that limit", so an enrollment whose config would be one byte larger creates no identity, and §5.4
+    /// counts a token's uses by the identities it created.
+    /// The management API refuses such a token config, but the channel offer and the version override can grow one
+    /// after the token is created.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    #[test]
+    fn enrollment_past_the_envelope_limit_creates_no_identity() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let base_url = "https://localhost/mock";
+        let mut state = State::with_root(now)?;
+        // CONTRACT.agent-identity.md §5.2: the server adds `version`, `revision` and `agent_channel_url` to the token's
+        // fields.
+        let mut config = json!({ "version": 1, "revision": 1, "agent_channel_url": base_url });
+        pad_config(&mut config, ENVELOPE_LIMIT + 1);
+        let token_config = json!({ "pad": config["pad"] });
+        let (token_id, secret) =
+            state.create_token("test".to_owned(), 1, nanos(now + 3600), None, Some(token_config), now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let csr = base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+
+        assert!(state.enroll(&secret, &csr, Map::new(), now, base_url).is_err());
+        assert!(state.identities.is_empty());
+        assert_eq!(state.tokens[&token_id].used_count, 0);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §7.1: the server sends no envelope larger than 64 KiB, so replaying a stale config,
+    /// which adds `mock_stale_marker` to a config at the limit, sends no stream anything.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn stale_config_past_the_envelope_limit_is_not_sent() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let (identity_id, mut stream) = state.insert_connected_identity(now, 3600);
+        let identity = state.identities.get_mut(&identity_id).expect("inserted identity");
+        identity.config["revision"] = json!(2);
+        pad_config(&mut identity.config, ENVELOPE_LIMIT);
+
+        assert!(state.replay_stale_config(identity_id, 1).is_err());
+        assert!(stream.try_recv().is_err());
+        Ok(())
+    }
 
     #[rstest]
     #[case::current_unexpired(&[CURRENT], 999, IdentityStatus::Active)]
@@ -1773,7 +1988,7 @@ mod tests {
         );
         for marker in 0..128 {
             let fields = json!({ "marker": marker }).as_object().cloned().expect("fields");
-            assert_eq!(state.merge_config_fields(&fields), 1);
+            assert_eq!(state.merge_config_fields(&fields).ok(), Some(1));
         }
         assert!(state.is_connected(identity_id));
         state.push_to_identity(identity_id, &PushKind::CloseRevoked);
@@ -1925,9 +2140,9 @@ mod tests {
             .as_object()
             .cloned()
             .expect("config fields");
-        assert_eq!(state.merge_config_fields(&fields), 0);
+        assert_eq!(state.merge_config_fields(&fields).ok(), Some(0));
         assert_eq!(state.identities[&identity_id].config_revision(), 1);
-        state.update_channel_available(false, "https://localhost/mock");
+        assert!(state.update_channel_available(false, "https://localhost/mock").is_ok());
         assert_eq!(state.identities[&identity_id].config_revision(), 2);
         assert!(state.identities[&identity_id].config.get("agent_channel_url").is_none());
         Ok(())
@@ -1965,7 +2180,7 @@ mod tests {
         let mut stored_revision = state.identities[&identity_id].config_revision();
 
         for (control, expected_version) in [(Some(2), 2), (Some(0), 0), (None, 1)] {
-            state.update_config_version(control);
+            assert!(state.update_config_version(control).is_ok());
 
             let StreamPush::ConfigUpdate(pushed) = rx.try_recv()? else {
                 panic!("expected a config update for {control:?}");
