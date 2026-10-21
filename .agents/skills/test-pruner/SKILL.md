@@ -19,6 +19,7 @@ Run mutants in a clone of their own and address its files by absolute path, sinc
 Invoke `test-oracle-reviewer` on every test in scope and record independent, self-derived, or unknown with evidence.
 Run the mutation tool as the reference describes, adding domain mutants from `references/domain-mutants.md` because generic mutants miss most domain faults.
 Build the kill matrix of mutant by test from the tool's outputs; only the cases the reference names need per-test reruns.
+Make no deletion decision on an empty or near-empty viable sample; with nothing to catch, every test has zero unique kills and the invariant passes trivially.
 For tests with several assertions, record which assertion fails for each kill.
 Run the scoped suite repeatedly on the clean tree, for example 15 times, to find flaky tests before trusting any kill.
 
