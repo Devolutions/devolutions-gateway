@@ -66,8 +66,9 @@ $GitDeclarationPatterns = @{
 $Violations = [System.Collections.Generic.List[object]]::new()
 $PinnedMarkers = [System.Collections.Generic.List[object]]::new()
 $SkippedReferences = [System.Collections.Generic.SortedSet[string]]::new()
-$OutlineCache = @{}
-$RemoteFileCache = @{}
+# Paths are case-sensitive, so these caches compare keys ordinally, unlike `@{}`.
+$OutlineCache = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
+$RemoteFileCache = [System.Collections.Generic.Dictionary[string, object]]::new([System.StringComparer]::Ordinal)
 $ReadableRepositories = @{}
 $DefaultHeads = @{}
 
@@ -90,26 +91,40 @@ function Test-RepositoryFile([string] $Path) {
     $TrackedFiles.Contains($Path) -and (Test-Path -LiteralPath (Join-Path $Root $Path) -PathType Leaf)
 }
 
-# Lists the headings and anchors of a Markdown file, skipping fenced code.
+# Lists the headings of a Markdown file, skipping fenced code, and maps each anchor to the heading it names:
+# the heading on its line, or the next one when only blank lines and other anchors separate them.
+# An anchor followed by anything else names no section.
 function Get-Outline([string[]] $Lines) {
     $Headings = [System.Collections.Generic.List[object]]::new()
     $Anchors = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::Ordinal)
-    $InFence = $false
+    $Pending = [System.Collections.Generic.List[string]]::new()
+    $Fence = $null
     for ($Index = 0; $Index -lt $Lines.Count; $Index++) {
         $Line = $Lines[$Index]
-        if ($Line -match '^\s*(```|~~~)') {
-            $InFence = -not $InFence
+        # A fence closes only on its own character, repeated at least as often, so a shorter or other fence inside stays code.
+        if ($Fence) {
+            if ($Line -match '^ {0,3}(?<fence>`{3,}|~{3,})\s*$' -and $Matches.fence[0] -eq $Fence[0] -and $Matches.fence.Length -ge $Fence.Length) {
+                $Fence = $null
+            }
             continue
         }
-        if ($InFence) {
+        if ($Line -match '^ {0,3}(?<fence>`{3,}|~{3,})') {
+            $Fence = $Matches.fence
+            $Pending.Clear()
             continue
         }
         foreach ($Anchor in [regex]::Matches($Line, $AnchorPattern)) {
-            $Anchors.TryAdd($Anchor.Groups['id'].Value, $Index) | Out-Null
+            $Pending.Add($Anchor.Groups['id'].Value)
         }
         if ($Line -match '^(?<level>#{1,6})\s+(?<text>.*?)(?:\s+#+)?\s*$') {
             $Text = ($Matches.text -replace $AnchorPattern, '').Trim() -replace '\s+', ' '
             $Headings.Add([pscustomobject]@{ Index = $Index; Level = $Matches.level.Length; Text = $Text })
+            foreach ($Id in $Pending) {
+                $Anchors.TryAdd($Id, $Index) | Out-Null
+            }
+            $Pending.Clear()
+        } elseif (($Line -replace $AnchorPattern, '').Trim()) {
+            $Pending.Clear()
         }
     }
     [pscustomobject]@{ Lines = $Lines; Headings = $Headings; Anchors = $Anchors }
@@ -121,12 +136,8 @@ function Find-Section($Outline, [string] $Section) {
     $Section = $Section.Trim() -replace '\s+', ' '
     $Heading = $null
     if ($Outline.Anchors.ContainsKey($Section)) {
-        $AnchorIndex = $Outline.Anchors[$Section]
-        # The anchor is placed before the heading it names.
-        $Heading = $Outline.Headings | Where-Object { $_.Index -ge $AnchorIndex } | Select-Object -First 1
-        if (-not $Heading) {
-            $Heading = [pscustomobject]@{ Index = $AnchorIndex; Level = 7; Text = '' }
-        }
+        $HeadingIndex = $Outline.Anchors[$Section]
+        $Heading = $Outline.Headings | Where-Object { $_.Index -eq $HeadingIndex } | Select-Object -First 1
     }
     if (-not $Heading) {
         $Heading = $Outline.Headings | Where-Object { $_.Text -ieq $Section } | Select-Object -First 1
@@ -358,10 +369,76 @@ function Get-Count($Counts, [string] $Key) {
     if ($Counts.ContainsKey($Key)) { $Counts[$Key] } else { 0 }
 }
 
+# Blanks string and character literals and drops a line comment, so brackets and braces in them are not counted.
+function Get-CodeText([string] $Line) {
+    $Line -replace 'r#*"[^"]*"#*', '""' -replace '"(?:\\.|[^"\\])*"', '""' -replace "'(?:\\.|[^'\\])'", "''" -replace '//.*$', ''
+}
+
+# Returns the line on which the item declared at $From ends: where its braces balance again,
+# or its first `;` when it has no body, such as an expression-bodied member.
+function Get-ItemEnd([string[]] $Lines, [int] $From) {
+    $Depth = 0
+    $Opened = $false
+    for ($Index = $From; $Index -lt $Lines.Count; $Index++) {
+        $Code = Get-CodeText $Lines[$Index]
+        foreach ($Token in [regex]::Matches($Code, '[{};]')) {
+            switch ($Token.Value) {
+                '{' { $Depth++; $Opened = $true }
+                '}' { $Depth-- }
+                ';' { if (-not $Opened) { return $Index } }
+            }
+            if ($Opened -and $Depth -eq 0) {
+                return $Index
+            }
+        }
+    }
+    $Lines.Count - 1
+}
+
+# Lists the tests of a file. A test is a block of comments and attributes, an attribute spanning
+# several lines included, that holds a test attribute; it runs to the end of the item the block decorates,
+# so a marker in its comments, attributes, or body belongs to it and one in a later item does not.
+function Get-Tests([string[]] $Lines, [string] $Extension) {
+    $Pattern = $TestAttributePatterns[$Extension]
+    $Tests = [System.Collections.Generic.List[object]]::new()
+    $Start = -1
+    $Attribute = -1
+    $Depth = 0
+    for ($Index = 0; $Index -lt $Lines.Count; $Index++) {
+        $Line = $Lines[$Index]
+        if ($Depth -gt 0 -or $Line -match '^\s*(#\[|\[)') {
+            if ($Start -lt 0) {
+                $Start = $Index
+            }
+            if ($Depth -eq 0 -and $Attribute -lt 0 -and $Line -match $Pattern) {
+                $Attribute = $Index
+            }
+            $Code = Get-CodeText $Line
+            $Depth += ([regex]::Matches($Code, '\[')).Count - ([regex]::Matches($Code, '\]')).Count
+            continue
+        }
+        if ($Line -match '^\s*//') {
+            if ($Start -lt 0) {
+                $Start = $Index
+            }
+            continue
+        }
+        if ($Attribute -ge 0 -and $Line -match '^\s*$') {
+            continue
+        }
+        if ($Attribute -ge 0) {
+            $End = Get-ItemEnd $Lines $Index
+            $Tests.Add([pscustomobject]@{ Start = $Start; Attribute = $Attribute; Declaration = $Index; End = $End })
+            $Index = $End
+        }
+        $Start = -1
+        $Attribute = -1
+    }
+    $Tests
+}
+
 # A test is added when its function name is declared more often than at the base,
 # so moving a test, or editing its attributes or body, does not count.
-# A test's lines run from the attributes and comments directly above its first test attribute
-# to the line before the next test's, so a marker above, between, or inside them belongs to it.
 function Test-NewTests {
     $ChangedFiles = @(Invoke-Git diff --name-only --diff-filter=AMR $Base -- '*.rs' '*.cs')
     if ($ChangedFiles.Count -eq 0) {
@@ -373,26 +450,9 @@ function Test-NewTests {
     foreach ($File in $ChangedFiles) {
         $Extension = [System.IO.Path]::GetExtension($File)
         $Lines = @(Get-Content -LiteralPath (Join-Path $Root $File))
-        $Pattern = $TestAttributePatterns[$Extension]
 
-        $Tests = [System.Collections.Generic.List[object]]::new()
-        for ($Index = 0; $Index -lt $Lines.Count; $Index++) {
-            if ($Lines[$Index] -match $Pattern) {
-                $Start = $Index
-                while ($Start -gt 0 -and $Lines[$Start - 1] -match '^\s*(//|#\[|\[)') {
-                    $Start--
-                }
-                # Stacked test attributes, such as `#[rstest]` over `#[tokio::test]`, open one test.
-                if ($Tests.Count -eq 0 -or $Tests[$Tests.Count - 1].Start -ne $Start) {
-                    $Tests.Add([pscustomobject]@{ Start = $Start; Attribute = $Index })
-                }
-            }
-        }
-
-        for ($Position = 0; $Position -lt $Tests.Count; $Position++) {
-            $Test = $Tests[$Position]
-            $To = if ($Position + 1 -lt $Tests.Count) { $Tests[$Position + 1].Start } else { $Lines.Count }
-            $Declaration = @($Lines[$Test.Attribute..($To - 1)] -match $DeclarationPatterns[$Extension])[0]
+        foreach ($Test in @(Get-Tests $Lines $Extension)) {
+            $Declaration = @($Lines[$Test.Declaration..$Test.End] -match $DeclarationPatterns[$Extension])[0]
             # A test whose name cannot be found counts as added.
             if ($Declaration -match $DeclarationPatterns[$Extension]) {
                 $Key = "${Extension}:$($Matches.name)"
@@ -400,7 +460,7 @@ function Test-NewTests {
                     continue
                 }
             }
-            $HasMarker = $Lines[$Test.Start..($To - 1)] -match $MarkerPattern
+            $HasMarker = $Lines[$Test.Start..$Test.End] -match $MarkerPattern
             if (-not $HasMarker) {
                 Add-Violation $File ($Test.Attribute + 1) "new test has no '// oracle:' marker"
             }

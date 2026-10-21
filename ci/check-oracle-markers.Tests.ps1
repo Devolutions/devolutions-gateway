@@ -47,6 +47,8 @@ BeforeAll {
         Set-RepoFile $Repo 'src/recording.intent.md' "# Artifacts`n"
         Set-RepoFile $Repo 'api/CONTRACT.md' "# API`n`n<a id=`"framing`"></a>`n## 3.2 Framing`n"
         Set-RepoFile $Repo 'api/README.md' "# Framing`n"
+        Set-RepoFile $Repo 'docs/fences.md' "# Fences`n`n````````md`n``````text`n## Nested`n`````````n`n~~~`n``````text`n## Mixed`n~~~`n`n## Real`n"
+        Set-RepoFile $Repo 'docs/anchors.md' "# Anchors`n`n<a id=`"spaced`"></a>`n`n## Spaced`n`n<a id=`"stray`"></a>`nA paragraph.`n`n## Later`n`n<a id=`"orphan`"></a>`n"
         Set-RepoFile $Repo 'fuzz/.gitignore' "artifacts`n"
         Set-RepoFile $Repo 'fuzz/artifacts/jmux/crash-1' 'crash'
         Set-RepoFile $Repo 'fuzz/artifacts/jmux/crash-ignored' 'crash'
@@ -85,7 +87,7 @@ BeforeAll {
             if ($Rest -match '^/contents/(?<path>.+)\?ref=(?<sha>[0-9a-f]{40})$') {
                 $Files = $Repository.Commits[$Matches.sha]
                 $Path = [uri]::UnescapeDataString($Matches.path)
-                if ($Files -and $Files.ContainsKey($Path)) {
+                if ($Files -and $Files.Keys -ccontains $Path) {
                     return [pscustomobject]@{ Status = 200; Body = $Files[$Path] }
                 }
             }
@@ -118,6 +120,8 @@ Describe 'Marker grammar and references' {
         @{ Name = 'a contract section by number'; Marker = 'contract api/CONTRACT.md §3.2' }
         @{ Name = 'a contract section by title in another case'; Marker = 'contract api/CONTRACT.md §3.2 framing' }
         @{ Name = 'a contract section by anchor'; Marker = 'contract api/CONTRACT.md §framing' }
+        @{ Name = 'an anchor a blank line above its heading'; Marker = 'spec docs/anchors.md §spaced' }
+        @{ Name = 'a heading after code fences'; Marker = 'spec docs/fences.md §Real' }
         @{ Name = 'an INTENT.md section'; Marker = 'intent crates/x/INTENT.md §Invariants' }
         @{ Name = 'a .intent.md section'; Marker = 'intent src/recording.intent.md §Artifacts' }
         @{ Name = 'a Jira regression'; Marker = 'regression DGW-123 empty header' }
@@ -163,6 +167,10 @@ Describe 'Marker grammar and references' {
         @{ Name = 'an anchor in another case'; Marker = 'contract api/CONTRACT.md §FRAMING'; Message = "has no section 'FRAMING'" }
         @{ Name = 'a missing intent section'; Marker = 'intent crates/x/INTENT.md §Goals'; Message = "intent file 'crates/x/INTENT.md' has no section 'Goals'" }
         @{ Name = 'a heading inside a code fence'; Marker = 'intent crates/x/INTENT.md §Fenced'; Message = "has no section 'Fenced'" }
+        @{ Name = 'a heading after a shorter fence inside a longer one'; Marker = 'spec docs/fences.md §Nested'; Message = "has no section 'Nested'" }
+        @{ Name = 'a heading after a backtick fence inside a tilde one'; Marker = 'spec docs/fences.md §Mixed'; Message = "has no section 'Mixed'" }
+        @{ Name = 'an anchor followed by a paragraph'; Marker = 'spec docs/anchors.md §stray'; Message = "has no section 'stray'" }
+        @{ Name = 'an anchor with no heading after it'; Marker = 'spec docs/anchors.md §orphan'; Message = "has no section 'orphan'" }
         @{ Name = 'an intent that is not an intent file'; Marker = 'intent docs/JMUX-spec.md §Channels'; Message = "is not an INTENT*.md or *.intent*.md file" }
         @{ Name = 'a regression in words'; Marker = 'regression the crash from last week'; Message = "regression reference 'the' is not a Jira key" }
         @{ Name = 'a missing fuzz crash file'; Marker = 'regression fuzz/artifacts/jmux/crash-2'; Message = "regression reference 'fuzz/artifacts/jmux/crash-2'" }
@@ -286,6 +294,19 @@ Describe 'Pinned references to other repositories' {
         { Invoke-Check $Repo -GitHubApi $Failing } | Should -Throw "*returned ${Status}*"
     }
 
+    It 'Rejects a pinned path in another case, <Name>' -ForEach @(
+        @{ Name = 'cited after the real path'; Paths = @('docs/CONTRACT.specs.md', 'Docs/CONTRACT.specs.md') }
+        @{ Name = 'cited before the real path'; Paths = @('Docs/CONTRACT.specs.md', 'docs/CONTRACT.specs.md') }
+    ) {
+        $Lines = $Paths | ForEach-Object { "fn f() {} // oracle: contract Org/specs@43958682a1b2:$_ §6" }
+        Set-RepoFile $Repo 'src/lib.rs' (($Lines -join "`n") + "`n")
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo -GitHubApi $GitHub
+
+        $Result.Output | Should -Be @("src/lib.rs:$([array]::IndexOf($Paths, 'Docs/CONTRACT.specs.md') + 1): 'Docs/CONTRACT.specs.md' does not exist in Org/specs at 43958682a1b2")
+    }
+
     It 'Fetches a pinned file once for several markers' {
         Set-RepoFile $Repo 'src/lib.rs' "fn f() {} // oracle: contract Org/specs@43958682a1b2:docs/CONTRACT.specs.md §6`nfn g() {} // oracle: contract Org/specs@43958682a1b2:docs/CONTRACT.specs.md §7`n"
         Invoke-Git $Repo add -A
@@ -372,6 +393,8 @@ Describe 'New tests' {
         @{ Name = 'rstest with a tokio test'; Path = 'src/a.rs'; Content = "#[rstest]`n#[tokio::test]`nasync fn a() {}`n"; Line = 1 }
         @{ Name = 'xUnit fact'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A() { }`n}`n"; Line = 3 }
         @{ Name = 'xUnit theory'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Theory]`n    [InlineData(1)]`n    public void A(int x) { }`n}`n"; Line = 3 }
+        @{ Name = 'Rust test followed by a marked helper'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = `"}`";`n}`n`nfn helper() {`n    // oracle: property round-trip`n}`n"; Line = 1 }
+        @{ Name = 'xUnit fact followed by a marked helper'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n    }`n`n    void Helper() { } // oracle: property round-trip`n}`n"; Line = 3 }
     ) {
         Set-RepoFile $Repo $Path $Content
         Invoke-Git $Repo add -A
@@ -386,6 +409,7 @@ Describe 'New tests' {
         @{ Name = 'above its attributes'; Content = "// oracle: property round-trip`n#[test]`nfn a() {}`n" }
         @{ Name = 'in its body'; Content = "#[test]`nfn a() {`n    // oracle: property round-trip`n}`n" }
         @{ Name = 'on a case row'; Content = "#[rstest]`n#[case::empty(0)] // oracle: property round-trip`nfn a(#[case] n: u8) {}`n" }
+        @{ Name = 'in its body after a case spanning lines'; Content = "#[rstest]`n#[case::one(`n    `"]`",`n)]`n#[tokio::test]`nasync fn a(#[case] s: &str) {`n    // oracle: property round-trip`n}`n" }
     ) {
         Set-RepoFile $Repo 'src/a.rs' $Content
         Invoke-Git $Repo add -A
