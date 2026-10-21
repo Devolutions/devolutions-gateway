@@ -299,6 +299,22 @@ async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<
     assert_ne!(first_nonce, second_nonce);
     assert_eq!(general_purpose::URL_SAFE_NO_PAD.decode(&first_nonce)?.len(), 16);
     assert_eq!(general_purpose::URL_SAFE_NO_PAD.decode(&second_nonce)?.len(), 16);
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+    for (base_url, expected_path) in [
+        ("https://example.test/dvls//", format!("/dvls{CONNECT_RPC_PATH}")),
+        ("https://example.test//", CONNECT_RPC_PATH.to_owned()),
+    ] {
+        let (signer, _) = vector_signer(&vectors, "device-a")?;
+        let service = ChannelLayer::new(signer, &url::Url::parse(base_url)?).layer(tower::service_fn(
+            |request: Request<()>| async move { Ok::<_, std::io::Error>(request) },
+        ));
+        let (handoff, _received_nonce) = OpeningNonce::new();
+        let mut opening = Request::builder().method(Method::POST).uri(CONNECT_RPC_PATH).body(())?;
+        opening.extensions_mut().insert(handoff);
+        let request = service.oneshot(opening).await.map_err(|error| anyhow!("{error}"))?;
+        assert_eq!(request.uri().path(), expected_path, "{base_url}");
+    }
     Ok(())
 }
 
