@@ -12,8 +12,8 @@ use provisioner_task::DynProvisionerTaskStore;
 use self::recording_ai_analysis::RecordingAiAnalysis;
 use self::runner::{DynProvisionerTaskJobQueue, ProvisionerTaskRunner};
 use crate::config::ConfHandle;
-use crate::provisioning::ProvisioningStore;
 use crate::recording::RecordingMessageSender;
+use crate::secret_store::SecretStore;
 
 /// The provisioner task runner, with every provisioner task Gateway knows.
 pub fn task_runner(
@@ -21,15 +21,10 @@ pub fn task_runner(
     job_queue: DynProvisionerTaskJobQueue,
     conf_handle: ConfHandle,
     recordings: RecordingMessageSender,
-    provisioning: ProvisioningStore,
+    secrets: SecretStore,
 ) -> ProvisionerTaskRunner {
     ProvisionerTaskRunner::builder(store, Arc::clone(&job_queue))
-        .register(RecordingAiAnalysis::new(
-            conf_handle,
-            recordings,
-            provisioning,
-            job_queue,
-        ))
+        .register(RecordingAiAnalysis::new(conf_handle, recordings, secrets, job_queue))
         .build()
 }
 
