@@ -2229,4 +2229,30 @@ mod tests {
         }
         Ok(())
     }
+
+    /// CONTRACT.agent-identity.md §2.1 returns the existing identity only to re-enrollment with the same CSR public
+    /// key, so a token with two uses enrolls two keys as two identities.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    #[test]
+    fn token_enrolls_each_csr_key_as_its_own_identity() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let (token_id, secret) = state.create_token("test".to_owned(), 2, nanos(now + 3600), None, None, now);
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let mut enroll = |vector: &str| -> anyhow::Result<Uuid> {
+            let csr = base64::engine::general_purpose::STANDARD
+                .decode(vectors["csr"][vector]["csr"].as_str().expect("valid CSR vector"))?;
+            Ok(state
+                .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+                .expect("enrollment succeeds")
+                .identity_id)
+        };
+
+        let first = enroll("valid")?;
+        let second = enroll("valid_with_empty_extension_request")?;
+
+        assert_ne!(first, second);
+        assert_eq!(state.tokens[&token_id].used_count, 2);
+        Ok(())
+    }
 }

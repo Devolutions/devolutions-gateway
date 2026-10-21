@@ -592,4 +592,71 @@ mod tests {
         assert_eq!(status, 201);
         Ok(())
     }
+
+    /// CONTRACT.agent-identity.md §5.1 lists each root as its `base64` DER `certificate` and its `thumbprint`, which
+    /// §1 defines as `base64url(SHA-256(certificate DER))`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    #[tokio::test]
+    async fn trust_anchor_certificate_hashes_to_its_thumbprint() -> anyhow::Result<()> {
+        use sha2::Digest as _;
+
+        let app = App::for_test()?;
+        let request = http::Request::get("/mock/api/agent-identity/v1/trust-anchor").body(Full::new(Bytes::new()))?;
+        let response = Dispatcher::new(Arc::clone(&app))
+            .handle(request)
+            .await
+            .expect("the mock answers");
+        let body = response.into_body().collect().await.expect("readable body").to_bytes();
+        let body: Value = serde_json::from_slice(&body)?;
+
+        let root = &body["roots"][0];
+        let der = STANDARD.decode(root["certificate"].as_str().unwrap_or_default())?;
+        let thumbprint = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(&der));
+        assert_eq!(root["thumbprint"], json!(thumbprint));
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §5.4: under `{u}/api/agent-identity/v1/`, an unknown route is `404 invalid_request`
+    /// and a wrong method `405 invalid_request`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    #[rstest]
+    #[case::unknown_route(http::Method::POST, "unknown", 404)]
+    #[case::wrong_method(http::Method::GET, "enroll", 405)]
+    #[tokio::test]
+    async fn framework_failure_is_invalid_request(
+        #[case] method: http::Method,
+        #[case] endpoint: &str,
+        #[case] expected_status: u16,
+    ) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let request = http::Request::builder()
+            .method(method)
+            .uri(format!("/mock/api/agent-identity/v1/{endpoint}"))
+            .body(Full::new(Bytes::new()))?;
+        let response = Dispatcher::new(Arc::clone(&app))
+            .handle(request)
+            .await
+            .expect("the mock answers");
+        let status = response.status().as_u16();
+        let body = response.into_body().collect().await.expect("readable body").to_bytes();
+        let body: Value = serde_json::from_slice(&body)?;
+        assert_eq!((status, &body["error"]), (expected_status, &json!("invalid_request")));
+        Ok(())
+    }
+
+    /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken` reports invalid parameters in a
+    /// `PublicApiValidationError`, which names each refused member, also when the mock serves the management API beside
+    /// the agent-facing one.
+    // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
+    #[tokio::test]
+    async fn management_api_error_keeps_its_public_api_shape() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let token_id = login(&app).await;
+        let admin = [("tokenId", token_id.as_str())];
+        let token = json!({ "name": "t" }).to_string();
+        let (status, refused) = post_json(&app, "/api/v1/agent-identity/enrollment-token", &admin, token).await;
+        assert_eq!((status, &refused["errors"][0]["field"]), (400, &json!("maxUses")));
+        Ok(())
+    }
 }

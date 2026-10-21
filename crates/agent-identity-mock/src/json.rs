@@ -109,3 +109,17 @@ impl<'de> Visitor<'de> for ValueSeed {
         Ok(Value::Object(members))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::parse_request_body;
+
+    /// RFC 8259 §6 lets a number carry a minus sign, so a negative member keeps its value.
+    // oracle: spec RFC 8259 §6
+    #[test]
+    fn negative_number_keeps_its_value() {
+        assert_eq!(parse_request_body(br#"{"n":-1}"#).ok(), Some(json!({ "n": -1 })));
+    }
+}

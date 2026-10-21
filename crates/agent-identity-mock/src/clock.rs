@@ -97,4 +97,20 @@ mod tests {
         .expect("Unix time fits i64");
         assert!((clock.now() - real).abs() <= 1);
     }
+
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[test]
+    fn running_clock_adds_the_advance_and_the_skew_to_real_time() {
+        let clock = MockClock::new();
+        clock.advance_by(100);
+        clock.set_skew(Some(20));
+        let real = i64::try_from(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_secs(),
+        )
+        .expect("Unix time fits i64");
+        assert!((clock.now() - (real + 120)).abs() <= 1);
+    }
 }

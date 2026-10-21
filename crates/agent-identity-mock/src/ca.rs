@@ -201,6 +201,7 @@ mod tests {
     use der::Decode as _;
     use der::asn1::ObjectIdentifier;
     use p256::ecdsa::SigningKey;
+    use x509_cert::ext::pkix::KeyUsage;
 
     use super::{RootCa, issue_leaf};
 
@@ -242,6 +243,43 @@ mod tests {
             "missing a required extension: {extensions:?}"
         );
         assert!(allowed.is_superset(&extensions), "unlisted extension: {extensions:?}");
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §4 names the leaf `CN=<identity_id>`.
+    /// RFC 5280 §4.1.2.4 requires a non-empty issuer name, which matches the subject of the certificate that issued it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: spec RFC 5280 §4.1.2.4
+    #[test]
+    fn leaf_names_its_identity_under_the_root_subject() -> anyhow::Result<()> {
+        let now = 1_800_000_000;
+        let root = RootCa::generate(1, now)?;
+        let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
+        let identity_id = uuid::Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
+
+        let leaf = issue_leaf(&root, identity_id, key.verifying_key(), 2, now, 3600)?;
+
+        let leaf = x509_cert::Certificate::from_der(&leaf.der)?;
+        let root = x509_cert::Certificate::from_der(&root.cert_der)?;
+        assert_eq!(
+            leaf.tbs_certificate().subject().to_string(),
+            "CN=01234567-89ab-cdef-0123-456789abcdef"
+        );
+        assert!(!root.tbs_certificate().subject().is_empty());
+        assert_eq!(leaf.tbs_certificate().issuer(), root.tbs_certificate().subject());
+        Ok(())
+    }
+
+    /// RFC 5280 §4.2.1.3: a CA certificate whose key verifies certificate signatures carries a key usage extension
+    /// asserting `keyCertSign`.
+    // oracle: spec RFC 5280 §4.2.1.3
+    #[test]
+    fn root_key_usage_asserts_certificate_signing() -> anyhow::Result<()> {
+        let root = RootCa::generate(1, 1_800_000_000)?;
+
+        let root = x509_cert::Certificate::from_der(&root.cert_der)?;
+        let key_usage = root.tbs_certificate().get_extension::<KeyUsage>()?;
+        assert_eq!(key_usage.map(|(_, key_usage)| key_usage.key_cert_sign()), Some(true));
         Ok(())
     }
 }

@@ -146,7 +146,52 @@ mod tests {
     use rstest::rstest;
     use serde_json::{Map, Value};
 
-    use super::render_friendly_name;
+    use super::{render_friendly_name, validate_metadata};
+
+    /// `count` entries `k00`, `k01`… whose values are `value_len` bytes.
+    fn entries(count: usize, value_len: usize) -> Map<String, Value> {
+        (0..count)
+            .map(|i| (format!("k{i:02}"), Value::String("v".repeat(value_len))))
+            .collect()
+    }
+
+    /// 16 entries of 3-byte keys and 1021-byte values, 16 × 1024 = 16,384 bytes, with one value a byte longer.
+    fn one_byte_past_16_kib() -> Map<String, Value> {
+        let mut metadata = entries(16, 1021);
+        metadata.insert("k00".to_owned(), Value::String("v".repeat(1022)));
+        metadata
+    }
+
+    fn with_key(key: &str) -> Map<String, Value> {
+        Map::from_iter([(key.to_owned(), Value::String("v".to_owned()))])
+    }
+
+    fn with_value(value: &str) -> Map<String, Value> {
+        Map::from_iter([("hostname".to_owned(), Value::String(value.to_owned()))])
+    }
+
+    /// CONTRACT.agent-identity.md §3 limits: at most 32 keys, each matching `^[a-z][a-z0-9_]{0,63}$`, each value at
+    /// most 1024 UTF-8 bytes without a C0, DEL or C1 control character, and at most 16 KiB of keys and values in all.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    #[rstest]
+    #[case::keys_32(entries(32, 1), true)]
+    #[case::keys_33(entries(33, 1), false)]
+    #[case::key_64_bytes(with_key(&"k".repeat(64)), true)]
+    #[case::key_65_bytes(with_key(&"k".repeat(65)), false)]
+    #[case::key_leading_digit(with_key("1k"), false)]
+    #[case::key_uppercase(with_key("kK"), false)]
+    #[case::value_1024_bytes(with_value(&"é".repeat(512)), true)]
+    #[case::value_1025_bytes(with_value(&format!("{}x", "é".repeat(512))), false)]
+    #[case::space(with_value(" "), true)]
+    #[case::c0_unit_separator(with_value("\u{1f}"), false)]
+    #[case::del(with_value("\u{7f}"), false)]
+    #[case::c1_application_program_command(with_value("\u{9f}"), false)]
+    #[case::no_break_space(with_value("\u{a0}"), true)]
+    #[case::total_16_kib(entries(16, 1021), true)]
+    #[case::total_past_16_kib(one_byte_past_16_kib(), false)]
+    fn metadata_limits_follow_the_contract(#[case] metadata: Map<String, Value>, #[case] accepted: bool) {
+        assert_eq!(validate_metadata(&metadata).is_ok(), accepted);
+    }
 
     /// [Shared intent][intent] ("Enrollment"): "The result is trimmed, truncated to 255 Unicode scalar values without splitting one,
     /// and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`);
