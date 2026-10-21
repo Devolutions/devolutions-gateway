@@ -1867,6 +1867,7 @@ mod tests {
 
     #[test]
     fn an_authority_directory_open_to_other_users_stops_every_store_use_until_it_is_fixed() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check is never
         // repaired, and stops all identity processing, for every authority, until it is fixed.
         let directory = TestDir::new()?;
@@ -2026,6 +2027,7 @@ mod tests {
 
     #[test]
     fn an_authority_directory_named_in_upper_case_is_checked_too() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): every authority directory is checked; on a case-insensitive
         // file system, such as Windows', an upper-case name is the same directory, and skipping it would let its token
         // enroll again.
@@ -2077,6 +2079,7 @@ mod tests {
 
     #[test]
     fn a_link_or_file_in_place_of_an_authority_directory_is_never_an_absent_identity() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check stops all
         // identity processing; reading it as absent would let a local attacker hide an identity, so that its token
         // enrolls again.
@@ -2135,6 +2138,7 @@ mod tests {
 
     #[test]
     fn start_up_stops_on_an_authority_directory_open_to_other_users_and_leaves_it_unchanged() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that is not protected from other
         // users is never repaired, and stops all identity processing until it is fixed.
         for others in [OtherUsers::Group, OtherUsers::Everyone] {
@@ -2161,6 +2165,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn start_up_stops_on_a_foreign_owned_authority_directory_and_leaves_it_unchanged() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory owned by another account is never
         // repaired, and stops all identity processing until it is fixed.
         let directory = TestDir::new()?;
@@ -2186,6 +2191,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn repairing_the_authorities_directory_leaves_an_untrusted_authority_directory_unchanged() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): start-up resets wrong permissions on the agent's own
         // directories, but never repairs an authority directory, including the entries it inherits from them.
         let directory = TestDir::new()?;
