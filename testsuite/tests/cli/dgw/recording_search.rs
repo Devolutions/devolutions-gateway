@@ -111,7 +111,7 @@ fn write_recordings(root: &Path) -> anyhow::Result<()> {
         root,
         NEWER_RECORDING,
         200,
-        r#"{"timestamp":"2026-07-16T09:00:01.000Z","seq":1,"event":"session.action","description":"Opened Users","parameters":{"Created user":"Bob"}}"#,
+        r#"{"timestamp":"2026-07-16T09:00:01.000Z","seq":1,"event":"session.action","description":"Opened Users","parameters":{"Action":"Created user"}}"#,
     )
 }
 

@@ -4,6 +4,7 @@ use std::io;
 use axum::Json;
 use axum::extract::State;
 use camino::{Utf8Path, Utf8PathBuf};
+use serde_json::Value;
 use time::OffsetDateTime;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
@@ -148,8 +149,10 @@ pub(crate) struct RecordingSearchHit {
 
 /// Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
 ///
-/// The query is a case-insensitive substring, matched against the raw text of each line.
-/// Gateway does not interpret the logs, so any part of a line can match, field names included.
+/// The query is a case-insensitive substring.
+/// In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
+/// once unescaped, so field names, numbers and booleans never match.
+/// Any other line, such as one still being written, is matched as raw text.
 /// Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched,
 /// and a line longer than 256 KiB is matched on its first 256 KiB only.
 /// Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
@@ -222,7 +225,7 @@ pub(crate) async fn search_recordings(
     Ok(Json(search.into_response()))
 }
 
-/// Search text in the lowercase form lines are compared in.
+/// Search text in the lowercase form text is compared in.
 struct SearchText(String);
 
 impl SearchText {
@@ -230,8 +233,30 @@ impl SearchText {
         (!query.is_empty()).then(|| Self(lowercase_for_matching(query)))
     }
 
-    fn is_in(&self, line: &str) -> bool {
-        lowercase_for_matching(line).contains(&self.0)
+    /// Whether `line` holds the search text.
+    ///
+    /// In a JSON object, only the string values count, once unescaped, so that a field name never matches and
+    /// `DOMAIN\user` matches the `"DOMAIN\\user"` a JSON writer stores.
+    /// Any other line is compared as raw text, so that a line of plain text that happens to parse as JSON, such as
+    /// `2026`, still matches.
+    fn is_in(&self, line: &[u8]) -> bool {
+        match serde_json::from_slice(line) {
+            Ok(object @ Value::Object(_)) => self.is_in_strings_of(&object),
+            _ => self.is_in_text(&String::from_utf8_lossy(line)),
+        }
+    }
+
+    fn is_in_strings_of(&self, value: &Value) -> bool {
+        match value {
+            Value::String(text) => self.is_in_text(text),
+            Value::Array(values) => values.iter().any(|value| self.is_in_strings_of(value)),
+            Value::Object(fields) => fields.values().any(|value| self.is_in_strings_of(value)),
+            Value::Null | Value::Bool(_) | Value::Number(_) => false,
+        }
+    }
+
+    fn is_in_text(&self, text: &str) -> bool {
+        lowercase_for_matching(text).contains(&self.0)
     }
 }
 
@@ -293,8 +318,7 @@ impl Search {
             let line_offset = offset;
             offset += read.bytes;
 
-            let text = String::from_utf8_lossy(&line);
-            if self.text.is_in(&text) {
+            if self.text.is_in(&line) {
                 if MAX_HITS <= self.hits.len() {
                     self.limit_reached = true;
                     return Ok(());
@@ -305,7 +329,7 @@ impl Search {
                     file_name: file_name.to_owned(),
                     line_number,
                     offset: line_offset,
-                    line: text.into_owned(),
+                    line: String::from_utf8_lossy(&line).into_owned(),
                     truncated: read.truncated,
                 });
             }
@@ -560,15 +584,57 @@ mod tests {
 
     #[rstest]
     #[case::value_in_another_case("created USER")]
-    #[case::field_name("description")]
     #[case::event_name("session.action")]
+    #[case::nested_value("ottawa/hull")]
     #[tokio::test]
-    async fn matches_any_part_of_the_raw_line(#[case] query: &str) {
-        let line = r#"{"seq":1,"event":"session.action","description":"Created User"}"#;
+    async fn matches_the_string_values_of_a_json_line(#[case] query: &str) {
+        let line = r#"{"seq":1,"event":"session.action","description":"Created User","parameters":{"New name":"Help Desk Ottawa/Hull"}}"#;
 
         let search = search_log(query, line.as_bytes()).await;
 
         assert_eq!(hit_lines(&search), [(1, line)]);
+    }
+
+    #[rstest]
+    #[case::field_name("description")]
+    #[case::nested_field_name("new name")]
+    #[case::number("12")]
+    #[case::boolean("true")]
+    #[tokio::test]
+    async fn does_not_match_the_field_names_or_other_values_of_a_json_line(#[case] query: &str) {
+        let line = r#"{"seq":12,"done":true,"description":"Created User","parameters":{"New name":"Bob"}}"#;
+
+        let search = search_log(query, line.as_bytes()).await;
+
+        assert!(search.hits.is_empty());
+    }
+
+    #[rstest]
+    #[case::backslash(r"IT-HELP\Administrator", r#"{"description":"Reset IT-HELP\\Administrator"}"#)]
+    #[case::quote(r#""net user""#, r#"{"description":"Ran \"net user\""}"#)]
+    #[case::unicode_escape("créé", r#"{"description":"Utilisateur créé"}"#)]
+    #[tokio::test]
+    async fn matches_the_text_of_a_json_string_once_unescaped(#[case] query: &str, #[case] line: &str) {
+        let search = search_log(query, line.as_bytes()).await;
+
+        assert_eq!(hit_lines(&search), [(1, line)]);
+    }
+
+    #[tokio::test]
+    async fn matches_a_line_of_plain_text_that_parses_as_a_json_number() {
+        let search = search_log("2026", b"2026").await;
+
+        assert_eq!(hit_lines(&search), [(1, "2026")]);
+    }
+
+    #[tokio::test]
+    async fn matches_a_json_object_cut_at_the_line_limit_as_raw_text() {
+        let line = format!(r#"{{"description":"{}"}}"#, "x".repeat(MAX_LINE_BYTES));
+
+        let search = search_log("description", line.as_bytes()).await;
+
+        assert_eq!(search.hits.len(), 1);
+        assert!(search.hits[0].truncated);
     }
 
     #[rstest]
