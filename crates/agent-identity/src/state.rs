@@ -856,10 +856,11 @@ mod tests {
 
     impl TestDir {
         fn new() -> anyhow::Result<Self> {
-            let path = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("target")
-                .join("state-tests")
-                .join(Uuid::new_v4().to_string());
+            // The system temporary directory keeps the deepest state path, a deleted key's tombstone, under Windows'
+            // 260-character limit wherever the repository is checked out.
+            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
+                .join(format!("ai-{}", Uuid::new_v4().simple()));
             fs::create_dir_all(&path)?;
             Ok(Self(path))
         }
