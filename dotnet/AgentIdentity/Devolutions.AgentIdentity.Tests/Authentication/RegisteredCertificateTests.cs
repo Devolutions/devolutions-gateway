@@ -8,6 +8,8 @@ public class RegisteredCertificateTests
     // CONTRACT.agent-identity.md Definitions: a certificate is pending, current or retired;
     // §5.4: identity_unknown is terminal.
     // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
     [InlineData(default(CertificateStatus))]
     [InlineData((CertificateStatus)4)]

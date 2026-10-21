@@ -31,34 +31,45 @@ public class AgentIdentityErrorTests
         .. FrameworkLevelErrorNames.Select(name => (name, FrameworkLevelError(name))),
     ];
 
-    // CONTRACT.agent-identity.md §5.4, column "HTTP".
+    // Column "HTTP".
     [Theory]
     [MemberData(nameof(AgentIdentityErrorCodeTests.HttpStatusCodes), MemberType = typeof(AgentIdentityErrorCodeTests))]
     public void FromCarriesTheCodeWithItsContractStatus(AgentIdentityErrorCode code, int expectedStatus)
     {
         AgentIdentityError error = AgentIdentityError.From(code);
 
+        // The body's `error` is the code.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         Assert.Equal(code, error.Code);
         Assert.Equal(expectedStatus, error.HttpStatusCode);
     }
 
     // CONTRACT.agent-identity.md §5.4 has no code for the default value of the enum.
     // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Fact]
     public void FromRejectsAnUndefinedCode()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => AgentIdentityError.From(default));
     }
 
-    // CONTRACT.agent-identity.md §5.4: malformed JSON or body → 400 invalid_request;
+    // Malformed JSON or body → 400 invalid_request;
     // unknown route → 404 invalid_request; wrong method → 405 invalid_request; body too large → 413 invalid_request;
     // an unexpected server failure → 500 unavailable; overload or a missing dependency → 503 unavailable.
     [Theory]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [InlineData(nameof(AgentIdentityError.MalformedBody), 400, AgentIdentityErrorCode.InvalidRequest)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [InlineData(nameof(AgentIdentityError.UnknownRoute), 404, AgentIdentityErrorCode.InvalidRequest)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [InlineData(nameof(AgentIdentityError.MethodNotAllowed), 405, AgentIdentityErrorCode.InvalidRequest)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [InlineData(nameof(AgentIdentityError.BodyTooLarge), 413, AgentIdentityErrorCode.InvalidRequest)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [InlineData(nameof(AgentIdentityError.UnexpectedFailure), 500, AgentIdentityErrorCode.Unavailable)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+    // oracle: spec RFC 9110 §15.6.4
     [InlineData(nameof(AgentIdentityError.ServiceUnavailable), 503, AgentIdentityErrorCode.Unavailable)]
     public void FrameworkLevelErrorHasItsContractStatusAndCode(
         string name,
@@ -71,9 +82,9 @@ public class AgentIdentityErrorTests
         Assert.Equal(expectedCode, error.Code);
     }
 
-    // CONTRACT.agent-identity.md §5.4: every error body, framework-level failures included,
-    // carries a `message` of human text.
+    // Every error body, framework-level failures included, carries a `message` of human text.
     // The contract leaves its wording free, so only its presence is checked.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [Theory]
     [MemberData(nameof(PublicErrorNames))]
     public void ErrorHasAHumanMessage(string name)
@@ -85,6 +96,9 @@ public class AgentIdentityErrorTests
 
     // CONTRACT.agent-identity.md §5.4 body, with the snake_case keys and the timestamp format of §1.
     // Parsing the raw bytes also rejects a byte order mark, which RFC 8259 §8.1 forbids in a JSON text.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: spec RFC 8259 §8.1
     [Fact]
     public void JsonBodyHasExactlyTheContractMembers()
     {
@@ -103,9 +117,13 @@ public class AgentIdentityErrorTests
     // CONTRACT.agent-identity.md §7.4: a refused channel opening carries the code's status.
     // §7.3 step 4: invalid `Hello` metadata gets INVALID_ARGUMENT.
     [Theory]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData(AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData(AgentIdentityErrorCode.IdentityRevoked, StatusCode.PermissionDenied)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [InlineData(AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument)]
+    // oracle: spec gRPC status codes §Status codes and their use in gRPC
     [InlineData(AgentIdentityErrorCode.Unavailable, StatusCode.Unavailable)]
     public void RpcExceptionHasTheChannelStatus(AgentIdentityErrorCode code, StatusCode expected)
     {
@@ -114,8 +132,9 @@ public class AgentIdentityErrorTests
         Assert.Equal(expected, exception.StatusCode);
     }
 
-    // CONTRACT.agent-identity.md §7.4: trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`,
-    // in no stated order.
+    // Trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`, in no stated order.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Fact]
     public void RpcExceptionHasExactlyTheContractTrailers()
     {

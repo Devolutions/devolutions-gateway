@@ -31,6 +31,8 @@ public class ChannelMessagesTests
 
     // CONTRACT.agent-identity.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
     // A push answers no agent message, so it has no correlation_id.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Theory]
     [MemberData(nameof(MessageNames))]
     public void MessageHasALowercaseUuidIdAndNoCorrelationId(string message)
@@ -38,11 +40,13 @@ public class ChannelMessagesTests
         ServerMessage built = Messages[message]();
 
         Assert.Matches(TestJson.LowercaseUuidPattern, built.Id);
+        // oracle: scaffold
         Assert.False(built.HasCorrelationId);
     }
 
-    // CONTRACT.agent-identity.md §7.3 steps 5 and 7: the agent acknowledges a message by its id,
-    // so no two messages share one.
+    // Steps 5 and 7: the agent acknowledges a message by its id, so no two messages share one.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Theory]
     [MemberData(nameof(MessageNames))]
     public void EachMessageHasItsOwnId(string message)
@@ -52,6 +56,9 @@ public class ChannelMessagesTests
 
     // CONTRACT.agent-identity.md §7.3 step 7 and channel.proto: ConfigUpdate carries the config, in the shape of §5.2,
     // as a UTF-8 JSON object.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [Fact]
     public void ConfigUpdateCarriesTheConfigJson()
     {
@@ -68,8 +75,10 @@ public class ChannelMessagesTests
 
     // channel.proto: the reason of RenewRequested is "admin" or "rotation";
     // CONTRACT.agent-identity.md §8.3 sends "rotation" at the start of a root rotation.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
     [Theory]
     [InlineData(RenewalRequestReason.Admin, "admin")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §8.3
     [InlineData(RenewalRequestReason.Rotation, "rotation")]
     public void RenewRequestedCarriesItsReason(RenewalRequestReason reason, string expected)
     {
@@ -79,8 +88,8 @@ public class ChannelMessagesTests
         Assert.Equal(expected, message.RenewRequested.Reason);
     }
 
-    // CONTRACT.agent-identity.md §7.4: the streams of a retired certificate get
-    // Reconnect{reason:"certificate_rotated"}.
+    // The streams of a retired certificate get Reconnect{reason:"certificate_rotated"}.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
     public void ReconnectCarriesItsReason()
     {
@@ -93,6 +102,8 @@ public class ChannelMessagesTests
     // Reasons start at 1, so a reason that the host never set is not a valid one,
     // and a value after the last reason is not one either.
     // Framework Design Guidelines: validate enum arguments, and throw the most derived ArgumentException naming them.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
     [InlineData("RenewRequested", 0)]
     [InlineData("RenewRequested", 3)]

@@ -53,7 +53,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         _random.Dispose();
     }
 
-    // CONTRACT.agent-identity.md §4: the certificate is for the P-256 key of the CSR.
+    // The certificate is for the P-256 key of the CSR.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void CertifiesTheKeyOfTheCsr()
     {
@@ -62,7 +63,9 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(_agentKey.ExportSubjectPublicKeyInfo(), leaf.PublicKey.ExportSubjectPublicKeyInfo());
     }
 
-    // CONTRACT.agent-identity.md §4: CN=<identity_id>, and the root's subject as the issuer.
+    // CN=<identity_id>, and the root's subject as the issuer.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Fact]
     public void SubjectIsTheCommonNameOfTheIdentity()
     {
@@ -71,12 +74,16 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         X500RelativeDistinguishedName name = Assert.Single(leaf.SubjectName.EnumerateRelativeDistinguishedNames());
         Assert.Equal("2.5.4.3", name.GetSingleElementType().Value);
         Assert.Equal(IdentityIdText, name.GetSingleElementValue());
+        // oracle: spec RFC 5280 §4.1.2.4
         Assert.Equal(_root.SubjectName.RawData, leaf.IssuerName.RawData);
     }
 
     // CONTRACT.agent-identity.md §4: SAN URI urn:uuid:<identity_id>.
     // RFC 5280 §4.2.1.6: GeneralNames is a SEQUENCE OF GeneralName, and a URI is [6] IA5String;
     // with a subject present, the extension is not critical.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: spec RFC 5280 §4.2.1.6
     [Fact]
     public void AlternativeNameIsTheUrnUuidOfTheIdentity()
     {
@@ -92,7 +99,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.False(extension.Critical);
     }
 
-    // CONTRACT.agent-identity.md §4: EKU clientAuth.
+    // EKU clientAuth.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void ExtendedKeyUsageIsClientAuthenticationOnly()
     {
@@ -101,10 +109,12 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
             Assert.IsType<X509EnhancedKeyUsageExtension>(leaf.Extensions[ExtendedKeyUsageOid]);
 
         Assert.Equal([ClientAuth], extension.EnhancedKeyUsages.Cast<Oid>().Select(oid => oid.Value));
+        // oracle: scaffold
         Assert.False(extension.Critical);
     }
 
     // CONTRACT.agent-identity.md §4: KeyUsage digitalSignature; RFC 5280 §4.2.1.3: marked critical.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void KeyUsageIsCriticalDigitalSignatureOnly()
     {
@@ -112,10 +122,13 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         X509KeyUsageExtension extension = Assert.IsType<X509KeyUsageExtension>(leaf.Extensions[KeyUsageOid]);
 
         Assert.Equal(X509KeyUsageFlags.DigitalSignature, extension.KeyUsages);
+        // oracle: spec RFC 5280 §4.2.1.3
         Assert.True(extension.Critical);
     }
 
-    // RFC 5280 §4.2.1.1: the key identifier of the issuer's subject key identifier, in a non-critical extension.
+    // The key identifier of the issuer's subject key identifier, in a non-critical extension.
+    // oracle: spec RFC 5280 §4.2.1.1
+    // oracle: spec RFC 5280 §4.2.1.2
     [Fact]
     public void AuthorityKeyIdentifierIsTheSubjectKeyIdentifierOfTheIssuer()
     {
@@ -126,12 +139,15 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
             Assert.IsType<X509SubjectKeyIdentifierExtension>(_root.Extensions[SubjectKeyIdentifierOid]);
 
         Assert.Equal(issuer.SubjectKeyIdentifierBytes.ToArray(), authority.KeyIdentifier?.ToArray());
+        // oracle: scaffold
         Assert.Null(authority.NamedIssuer);
+        // oracle: scaffold
         Assert.Null(authority.SerialNumber);
         Assert.False(authority.Critical);
     }
 
-    // RFC 5280 §4.2.1.2, method (1): the SHA-1 hash of the BIT STRING subjectPublicKey, in a non-critical extension.
+    // Method (1): the SHA-1 hash of the BIT STRING subjectPublicKey, in a non-critical extension.
+    // oracle: spec RFC 5280 §4.2.1.2
     [Fact]
     public void SubjectKeyIdentifierIsTheSha1OfTheKey()
     {
@@ -141,11 +157,14 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         byte[] subjectPublicKey = TestCsr.UncompressedPoint(_agentKey);
 
+        // oracle: scaffold
         Assert.Equal(SHA1.HashData(subjectPublicKey), extension.SubjectKeyIdentifierBytes.ToArray());
         Assert.False(extension.Critical);
     }
 
-    // RFC 5280 §4.2.1.9: an end-entity certificate may omit basic constraints, and this profile does.
+    // The leaf carries SAN, EKU and KeyUsage, and no other extension except an authority key identifier and a subject
+    // key identifier, so no basicConstraints.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void HasExactlyTheProfileExtensions()
     {
@@ -162,10 +181,12 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         ];
 
         Assert.Equal(expected, extensions.Order(StringComparer.Ordinal));
+        // oracle: spec RFC 5280 §4.1.2.1
         Assert.Equal(3, leaf.Version);
     }
 
     // RFC 5758 §3.2: the issuer's generator signs with SHA-256, so ecdsa-with-SHA256 for a P-256 root.
+    // oracle: scaffold
     [Fact]
     public void IsSignedWithSha256()
     {
@@ -174,8 +195,9 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal("1.2.840.10045.4.3.2", leaf.SignatureAlgorithm.Value);
     }
 
-    // RFC 5280 §4.1.2.2: a positive INTEGER of at most 20 octets.
+    // A positive INTEGER of at most 20 octets.
     // The serial number is 16 octets from the injected generator with the top bit cleared.
+    // oracle: spec RFC 5280 §4.1.2.2
     [Fact]
     public void SerialNumberIsTheRandomOctetsWithTheTopBitCleared()
     {
@@ -184,10 +206,11 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(draw));
 
         byte[] serialNumber = SerialNumber(leaf);
-        // oracle: self-derived; sole guard, with SerialNumberIsDrawnAgainWhenItWouldBeZero,
-        // for a serial number whose first octet keeps its top bit while its other bits are kept, set or flipped.
+        // Only this test and SerialNumberIsDrawnAgainWhenItWouldBeZero catch this fault.
         // RFC 5280 allows any positive encoding, and .NET writes a set top bit with a leading zero octet,
         // so only the library chooses to clear the top bit of the 16 octets drawn.
+        // oracle: mutant a serial number whose first octet keeps its top bit while its other bits are kept,
+        // set or flipped
         Assert.Equal([0x7F, .. draw[1..]], serialNumber);
         Assert.True(new BigInteger(serialNumber, isUnsigned: false, isBigEndian: true) > 0);
         Assert.InRange(serialNumber.Length, 1, 20);
@@ -195,6 +218,9 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
     // RFC 5280 §4.1.2.2: the serial number is positive, so never zero.
     // Clearing the top bit of 80 00 … 00 leaves zero, which is not a positive serial number.
+    // Only this test and SerialNumberIsTheRandomOctetsWithTheTopBitCleared catch this fault.
+    // oracle: mutant a serial number whose first octet keeps its top bit while its other bits are kept,
+    // set or flipped
     [Fact]
     public void SerialNumberIsDrawnAgainWhenItWouldBeZero()
     {
@@ -204,8 +230,6 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(topBitOnly, second));
 
-        // oracle: self-derived; sole guard, with SerialNumberIsTheRandomOctetsWithTheTopBitCleared,
-        // for a serial number whose first octet keeps its top bit while its other bits are kept, set or flipped.
         // That 80 00 … 00 becomes zero, and that the next draw becomes the serial number as drawn,
         // follow from the library's own way of making the 16 octets positive.
         Assert.Equal(second, SerialNumber(leaf));
@@ -213,6 +237,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
     // RFC 5280 §4.1.2.5.1 and §4.1.2.5.2: certificate times are whole seconds,
     // and a notBefore rounded up would issue a certificate that is not yet valid.
+    // oracle: scaffold
     [Fact]
     public void NotBeforeIsTheClockTruncatedToTheSecond()
     {
@@ -224,6 +249,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     // CONTRACT.agent-identity.md §4: the lifetime is a server setting.
     // RFC 5280 §4.1.2.5: a certificate holds whole seconds, so a fraction of a second in the lifetime is dropped,
     // since rounding it up would exceed the lifetime.
+    // oracle: scaffold
     [Theory]
     [InlineData(0)]
     [InlineData(500)]
@@ -236,7 +262,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(NowInSeconds.AddDays(30).UtcDateTime, leaf.NotAfter.ToUniversalTime());
     }
 
-    // CONTRACT.agent-identity.md §4: the lifetime is capped at the issuing root's notAfter.
+    // The lifetime is capped at the issuing root's notAfter.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void NotAfterIsCappedAtTheNotAfterOfTheIssuer()
     {
@@ -247,26 +274,31 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(NowInSeconds.AddDays(10).UtcDateTime, leaf.NotAfter.ToUniversalTime());
     }
 
-    // CONTRACT.agent-identity.md §4: the lifetime is a server setting with a default of 90 days.
+    // The lifetime is a server setting with a default of 90 days.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void DefaultLifetimeIs90Days()
     {
         Assert.Equal(TimeSpan.FromDays(90), IdentityCertificateIssuer.DefaultLifetime);
     }
 
-    // CONTRACT.agent-identity.md §4: the lifetime is a server setting,
+    // The lifetime is a server setting,
     // and reading a moving clock twice would give the certificate a validity other than its lifetime.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void ReadsTheClockOnce()
     {
         using X509Certificate2 leaf = Issue(clock: new AdvancingTimeProvider(Now, TimeSpan.FromHours(1)));
 
+        // oracle: scaffold
         Assert.Equal(NowInSeconds.UtcDateTime, leaf.NotBefore.ToUniversalTime());
         Assert.Equal((NowInSeconds + Lifetime).UtcDateTime, leaf.NotAfter.ToUniversalTime());
     }
 
     // The certificate chains to the root that issued it, for client authentication.
     // RFC 5280 §6 path validation, as X509Chain runs it, with the CONTRACT.agent-identity.md §4 EKU clientAuth.
+    // oracle: spec RFC 5280 §6
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
     [Fact]
     public void ChainsToTheIssuer()
     {
@@ -285,6 +317,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // Security invariant 2: the authority mints the subject, and a CSR supplies only a verified public key.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Fact]
     public void IgnoresTheSubjectAndExtensionsOfTheCsr()
     {
@@ -297,14 +331,17 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         using X509Certificate2 leaf = Issue(csr: csr);
 
         Assert.Equal($"CN={IdentityIdText}", leaf.Subject);
+        // The leaf carries no basicConstraints, so a leaf can never act as a CA.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
         Assert.Null(leaf.Extensions[BasicConstraintsOid]);
         X509EnhancedKeyUsageExtension usage =
             Assert.IsType<X509EnhancedKeyUsageExtension>(leaf.Extensions[ExtendedKeyUsageOid]);
         Assert.Equal([ClientAuth], usage.EnhancedKeyUsages.Cast<Oid>().Select(oid => oid.Value));
     }
 
-    // RFC 5280 §4.1.2.5: a certificate holds whole seconds,
-    // so a lifetime under one second would end in the second it begins.
+    // A certificate holds whole seconds, so a lifetime under one second would end in the second it begins.
+    // oracle: spec RFC 5280 §4.1.2.5
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
     [InlineData(0)]
     [InlineData(-1_000)]
@@ -314,8 +351,9 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Throws<ArgumentOutOfRangeException>(() => Issue(lifetime: TimeSpan.FromMilliseconds(milliseconds)));
     }
 
-    // CONTRACT.agent-identity.md §4: notAfter is at most the issuer's notAfter,
-    // so an issuer that expires by notBefore leaves no validity.
+    // notAfter is at most the issuer's notAfter, so an issuer that expires by notBefore leaves no validity.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -326,7 +364,10 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Throws<ArgumentException>(() => Issue(root: root));
     }
 
-    // RFC 5280 §4.2.1.1: the authority key identifier repeats the issuer's subject key identifier.
+    // A conforming CA certificate carries a subject key identifier,
+    // which the authority key identifier of each certificate it issues repeats.
+    // oracle: spec RFC 5280 §4.2.1.2
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [Fact]
     public void ThrowsWhenTheIssuerHasNoSubjectKeyIdentifier()
     {
@@ -335,11 +376,15 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Throws<ArgumentException>(() => Issue(root: root));
     }
 
-    // INTENT.md: code that acts for an identity takes the identity that the signature check produced.
+    // Code that acts for an identity takes the identity that the signature check produced.
     // The renew request is signed by device-a, whose identity ID the vector file gives.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Fact]
     public async Task RenewalCertifiesTheKeyOfTheCsrForTheIdentityThatSignedTheRenewRequest()
     {
+        // oracle: reference docs/agent-identity/test-vectors.json keys.device-a
         Assert.Equal(Guid.Parse(IdentityIdText), TestVectors.Instance.Key("device-a").IdentityId);
         AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
 
@@ -349,9 +394,12 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(_agentKey.ExportSubjectPublicKeyInfo(), leaf.PublicKey.ExportSubjectPublicKeyInfo());
     }
 
-    // INTENT.md: code that acts for an identity takes the identity that the signature check produced,
+    // Code that acts for an identity takes the identity that the signature check produced,
     // and only a renew request proves the identity that a renewal acts for.
     // An identity that proved its key for another operation never had a renew request accepted for it.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
     [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.Confirm)]
     [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.CheckIn)]
@@ -367,11 +415,14 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         ArgumentException exception = Assert.Throws<ArgumentException>(() => Renewals[renewal](identity));
 
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("renewing", exception.ParamName);
     }
 
     // INTENT.md: a renewal acts for the identity that a renew request proved, and null is no identity;
     // the .NET Framework Design Guidelines throw ArgumentNullException for a null argument that is not allowed.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
     [InlineData(nameof(IdentityCertificateIssuer))]
     [InlineData(nameof(RenewalRules))]
@@ -379,6 +430,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => Renewals[renewal](null!));
 
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("renewing", exception.ParamName);
     }
 
@@ -482,6 +534,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         public override void GetBytes(Span<byte> data)
         {
             byte[] draw = draws[_next++];
+            // oracle: scaffold
             Assert.Equal(draw.Length, data.Length);
             draw.CopyTo(data);
         }

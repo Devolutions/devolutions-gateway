@@ -121,8 +121,8 @@ public class RequestAuthenticatorTests
 
     private static TimeSpan DeviceALifetime => DeviceACertificate.NotAfter - DeviceACertificate.NotBefore;
 
-    // CONTRACT.agent-identity.md §5.4: a body larger than 64 KiB returns 413 invalid_request
-    // before any authentication outcome.
+    // A body larger than 64 KiB returns 413 invalid_request before any authentication outcome.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [Theory]
     [MemberData(nameof(OversizedRequestNames))]
     public async Task BodyOverTheLimitIsRejectedWith413First(string request)
@@ -136,11 +136,14 @@ public class RequestAuthenticatorTests
         Assert.False(result.Succeeded);
         Assert.Equal(AgentIdentityErrorCode.InvalidRequest, result.Error.Code);
         Assert.Equal(413, result.Error.HttpStatusCode);
+        // oracle: scaffold
         Assert.Empty(authority.Registry.Lookups);
+        // oracle: scaffold
         Assert.Empty(authority.Nonces.Calls);
     }
 
-    // CONTRACT.agent-identity.md §5.4: servers accept request bodies up to 64 KiB.
+    // Servers accept request bodies up to 64 KiB.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [Fact]
     public async Task BodyOfExactlyTheLimitIsAccepted()
     {
@@ -155,8 +158,9 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(request));
     }
 
-    // CONTRACT.agent-identity.md §6: the earliest failing step decides,
+    // The earliest failing step decides,
     // so the identity's state is reported even when the signature or the digest would not verify.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [InlineData("revoked identity, wrong key", "identity_revoked")]
     [InlineData("retired certificate, wrong key", "identity_unknown")]
@@ -170,7 +174,8 @@ public class RequestAuthenticatorTests
     }
 
     // CONTRACT.agent-identity.md §6 step 4 resolves the certificate before it reads the identity's revocation,
-    // and reads revocation before validity, so a revoked identity always draws the terminal identity_revoked.
+    // and reads revocation before validity, so an expired certificate of a revoked identity draws identity_revoked.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [InlineData("retired certificate, revoked identity", "identity_unknown")]
     [InlineData("expired certificate, revoked identity", "identity_revoked")]
@@ -181,7 +186,8 @@ public class RequestAuthenticatorTests
         Assert.Equal(expected, await authority.OutcomeAsync(failing));
     }
 
-    // CONTRACT.agent-identity.md §6 table: every operation accepts a current or pending certificate.
+    // Table: every operation accepts a current or pending certificate.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(OperationsWithAcceptedStatuses))]
     public async Task PendingOrCurrentCertificateIsAccepted(AgentOperation operation, CertificateStatus status)
@@ -192,7 +198,8 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.agent-identity.md §6 step 4: a certificate that is neither current nor pending draws identity_unknown.
+    // Step 4: a certificate that is neither current nor pending draws identity_unknown.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task RetiredCertificateIsIdentityUnknown(AgentOperation operation)
@@ -203,9 +210,10 @@ public class RequestAuthenticatorTests
         Assert.Equal("identity_unknown", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.agent-identity.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
+    // A certificate is unexpired while now ≤ notAfter, compared to the exact instant.
     // A clock truncated to the second would still accept the certificate one tick after its notAfter.
     // Renew has no row one tick after, because its grace still accepts the certificate then.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [InlineData(AgentOperation.Renew, 0, "ok")]
     [InlineData(AgentOperation.Confirm, 0, "ok")]
@@ -224,8 +232,8 @@ public class RequestAuthenticatorTests
         Assert.Equal(expected, await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.agent-identity.md §6: notBefore is not checked,
-    // so a certificate dated by a fast authority clock does not lock devices out.
+    // notBefore is not checked, so a certificate dated by a fast authority clock does not lock devices out.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task CertificateIsAcceptedBeforeItsNotBefore(AgentOperation operation)
@@ -235,7 +243,8 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.agent-identity.md §6 table: renew accepts a certificate while now < notAfter + (notAfter − notBefore).
+    // Table: renew accepts a certificate while now < notAfter + (notAfter − notBefore).
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [InlineData(CertificateStatus.Pending, "one tick after notAfter", "ok")]
     [InlineData(CertificateStatus.Current, "one tick after notAfter", "ok")]
@@ -258,6 +267,7 @@ public class RequestAuthenticatorTests
     // against the same `now`.
     // A second reading of the clock between the window and the certificate check
     // would judge the certificate a day later, after it expired.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Fact]
     public async Task WindowAndCertificateAreJudgedAtOneReadingOfTheClock()
     {
@@ -267,7 +277,8 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(AgentOperation.Confirm)));
     }
 
-    // CONTRACT.agent-identity.md §6 step 3: 0 < expires − created ≤ 300.
+    // Step 3: 0 < expires − created ≤ 300.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Fact]
     public async Task SignatureLifetimeOf300SecondsIsAccepted()
     {
@@ -283,6 +294,9 @@ public class RequestAuthenticatorTests
     // RFC 8941 §3.3.1: an integer may be negative, and RFC 9421 §2.3 serializes it with its sign.
     // At the Unix epoch, all three inequalities of CONTRACT.agent-identity.md §6 step 3 hold,
     // and the certificate of device-a, whose notBefore is later, is accepted because §6 does not check notBefore.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: spec RFC 8941 §3.3.1
+    // oracle: spec RFC 9421 §2.3
     [Fact]
     public async Task CreatedBeforeTheUnixEpochIsAccepted()
     {
@@ -297,6 +311,8 @@ public class RequestAuthenticatorTests
     // CONTRACT.agent-identity.md §6: the earliest failing step decides.
     // RFC 8941 §3.3.5 allows a byte sequence of no bytes, in its canonical base64 of no characters,
     // so the signature passes step 1 and its length fails only step 5, after the window of step 3.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: spec RFC 8941 §3.3.5
     [Fact]
     public async Task SignatureOfNoBytesIsJudgedAfterTheWindow()
     {
@@ -311,7 +327,8 @@ public class RequestAuthenticatorTests
         Assert.Equal("clock_skew", outcome);
     }
 
-    // CONTRACT.agent-identity.md §6 step 6: a pair the store already holds fails, whichever request recorded it.
+    // Step 6: a pair the store already holds fails, whichever request recorded it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task NonceAlreadyRecordedIsSignatureInvalid(AgentOperation operation)
@@ -321,8 +338,8 @@ public class RequestAuthenticatorTests
         Assert.Equal("signature_invalid", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.agent-identity.md §6: a header the operation does not cover, such as Content-Digest on confirm,
-    // is ignored.
+    // A header the operation does not cover, such as Content-Digest on confirm, is ignored.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Fact]
     public async Task ConfirmIgnoresContentDigest()
     {
@@ -336,7 +353,10 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", outcome);
     }
 
-    // RFC 9110 §9.1: a method is a token, and anything else could put a line break of its own into the signature base.
+    // A method is a token, and anything else could put a line break of its own into the signature base.
+    // oracle: spec RFC 9110 §9.1
+    // oracle: spec RFC 9110 §5.6.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [InlineData("")]
     [InlineData("PO ST")]
@@ -352,6 +372,8 @@ public class RequestAuthenticatorTests
 
     // A method that is not a token gives @method no value, so no signature base exists to verify,
     // not even an empty one: RFC 9421 §2.5 ends every base with its @signature-params line.
+    // oracle: spec RFC 9421 §2.5
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Fact]
     public async Task MethodThatIsNotATokenCannotVerifyASignatureOverNoBytes()
     {
@@ -371,7 +393,10 @@ public class RequestAuthenticatorTests
         Assert.Equal("signature_invalid", outcome);
     }
 
-    // RFC 9110 §5.6.2: a token may hold any of these punctuation characters, besides letters and digits.
+    // A token may hold any of these punctuation characters, besides letters and digits.
+    // oracle: spec RFC 9110 §5.6.2
+    // oracle: spec RFC 9110 §9.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Fact]
     public async Task MethodWithEveryTokenPunctuationCharacterIsAccepted()
     {
@@ -386,9 +411,13 @@ public class RequestAuthenticatorTests
     // The shared intent, security invariant 7: signed opening headers never authenticate a stream on their own.
     // An uninitialized operation names no endpoint, so it authenticates nothing either.
     // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
     [InlineData(AgentOperation.Connect)]
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [InlineData((AgentOperation)0)]
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [InlineData((AgentOperation)5)]
     public async Task AuthenticateAsyncRefusesAnOperationThatIsNotASignedHttpRequest(AgentOperation operation)
     {
@@ -397,12 +426,16 @@ public class RequestAuthenticatorTests
 
         await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
             () => authority.Authenticator.AuthenticateAsync(operation, request).AsTask());
+        // oracle: scaffold
         Assert.Empty(authority.Nonces.Calls);
     }
 
     // The registry answers by thumbprint, so another certificate is a host bug,
     // which must fail as a server error rather than draw an outcome the agent acts on.
     // CONTRACT.agent-identity.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+    // oracle: spec Framework Design Guidelines §Exception Throwing
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Fact]
     public async Task RegistryReturningACertificateWithAnotherThumbprintThrows()
     {
@@ -420,6 +453,10 @@ public class RequestAuthenticatorTests
     // so any other registered bytes are a host bug.
     // CONTRACT.agent-identity.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
     // The keyid is the thumbprint of those bytes, so the registry answers with what it was asked for.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+    // oracle: spec Framework Design Guidelines §Exception Throwing
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
     [MemberData(nameof(RegisteredBytesOtherThanAP256CertificateNames))]
     public async Task RegistryReturningSomethingOtherThanAP256CertificateThrows(string registered)

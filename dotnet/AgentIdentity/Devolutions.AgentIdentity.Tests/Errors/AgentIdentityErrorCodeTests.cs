@@ -19,6 +19,7 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.Unavailable, "unavailable" },
     };
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [Theory]
     [MemberData(nameof(WireValues))]
     public void WireValueIsTheContractCode(AgentIdentityErrorCode code, string expected)
@@ -30,15 +31,26 @@ public class AgentIdentityErrorCodeTests
     // The table gives `unavailable` 5xx, and an unexpected failure gets 500.
     public static TheoryData<AgentIdentityErrorCode, int> HttpStatusCodes => new()
     {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.TokenInvalid, 401 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.TokenExhausted, 403 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.TokenExpired, 401 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.IdentityRevoked, 403 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.IdentityUnknown, 401 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.CertificateExpired, 401 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.SignatureInvalid, 401 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.ClockSkew, 401 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.InvalidRequest, 400 },
+        // An unexpected server failure → `500 unavailable`.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
         { AgentIdentityErrorCode.Unavailable, 500 },
     };
 
@@ -55,15 +67,25 @@ public class AgentIdentityErrorCodeTests
     // `unavailable` gets UNAVAILABLE, which gRPC defines as a transient condition.
     public static TheoryData<AgentIdentityErrorCode, StatusCode> GrpcStatusCodes => new()
     {
+        // oracle: mutant the gRPC mapping throws for token_invalid as for an undefined code
         { AgentIdentityErrorCode.TokenInvalid, StatusCode.Unauthenticated },
+        // oracle: mutant the gRPC mapping throws for token_exhausted as for an undefined code
         { AgentIdentityErrorCode.TokenExhausted, StatusCode.Unauthenticated },
+        // oracle: mutant the gRPC mapping throws for token_expired as for an undefined code
         { AgentIdentityErrorCode.TokenExpired, StatusCode.Unauthenticated },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
         { AgentIdentityErrorCode.IdentityRevoked, StatusCode.PermissionDenied },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
         { AgentIdentityErrorCode.IdentityUnknown, StatusCode.Unauthenticated },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
         { AgentIdentityErrorCode.CertificateExpired, StatusCode.Unauthenticated },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
         { AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
         { AgentIdentityErrorCode.ClockSkew, StatusCode.Unauthenticated },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
         { AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument },
+        // oracle: spec gRPC status codes §Status codes and their use in gRPC
         { AgentIdentityErrorCode.Unavailable, StatusCode.Unavailable },
     };
 
@@ -76,6 +98,7 @@ public class AgentIdentityErrorCodeTests
 
     // CONTRACT.agent-identity.md §5.4 lists exactly these ten codes.
     // A code added without a contract row would otherwise go untested in every table above.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [Fact]
     public void EveryCodeHasAContractRow()
     {
@@ -88,6 +111,8 @@ public class AgentIdentityErrorCodeTests
 
     // The default value of the enum is not a code, so a mapping must not turn it into one.
     // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Fact]
     public void UndefinedCodeHasNoMapping()
     {
