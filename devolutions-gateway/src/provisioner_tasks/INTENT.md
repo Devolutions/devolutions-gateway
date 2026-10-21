@@ -21,7 +21,7 @@ Jobs doesn't have state, tasks do.
 
 ## Secrets
 Secrets a Task needs, such as an API key, never reach the disk: not `gateway.db`, not the job, not the logs.
-They are kept encrypted in memory, in the provisioning store, until the Task ends or reaches its deadline.
+They are kept encrypted in memory, in the `SecretStore`, until the Task ends or reaches its deadline.
 After a Gateway restart they are gone, and the Tasks that needed them fail; this is accepted.
 
 ## AI analysis
