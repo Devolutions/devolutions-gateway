@@ -340,6 +340,7 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
 
 - gRPC path: `<agent_channel_url path>/devolutions.agent.channel.v1.AgentChannel/Connect`.
   With `agent_channel_url = https://host/dvls`, the `:path` is `/dvls/devolutions.agent.channel.v1.AgentChannel/Connect`; the agent prepends the URL path when constructing `:path`.
+- `agent_channel_url` is an absolute `https` URL without a query, a fragment or a trailing slash; the agent removes trailing slashes from one that has them before prepending its path, so that `https://host/dvls/` and `https://host/dvls` open the same `:path`.
 - The opening request carries `signature-input`, `signature` metadata with `tag="connect"`.
 
 ### 7.3 Sequence
