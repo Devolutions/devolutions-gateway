@@ -11,7 +11,7 @@ import { RecordingSearchHit } from './recordingSearchHit';
 
 
 /**
- * The lines that hold the search text.
+ * The lines that match the search text.
  */
 export interface RecordingSearchResponse { 
     /**

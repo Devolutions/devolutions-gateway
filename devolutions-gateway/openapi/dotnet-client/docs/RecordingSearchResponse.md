@@ -1,5 +1,5 @@
 # Devolutions.Gateway.Client.Model.RecordingSearchResponse
-The lines that hold the search text.
+The lines that match the search text.
 
 ## Properties
 

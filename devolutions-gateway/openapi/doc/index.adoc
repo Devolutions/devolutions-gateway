@@ -1435,7 +1435,7 @@ Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored o
 
 ===== Description
 
-The query is a case-insensitive substring, matched against the raw text of each line. Gateway does not interpret the logs, so any part of a line can match, field names included. Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched, and a line longer than 256 KiB is matched on its first 256 KiB only. Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same `query`, `recordings` and `startTime` again, with the `nextCursor` of the previous page as `cursor`. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
+The query is a case-insensitive substring. In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read once unescaped, so field names, numbers, booleans and null never match. Any other line, such as one still being written, is matched as raw text. A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually matched as raw text. Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched. Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same `query`, `recordings` and `startTime` again, with the `nextCursor` of the previous page as `cursor`. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
 
 
 // markup not found, no include::{specDir}jet/jrec/search/POST/spec.adoc[opts=optional]
@@ -5303,7 +5303,7 @@ Current auto-update schedule for Devolutions Agent.
 [#RecordingSearchHit]
 === _RecordingSearchHit_ 
 
-A line that holds the search text.
+A line that matches the search text.
 
 
 [.fields-RecordingSearchHit]
@@ -5412,7 +5412,7 @@ Unknown fields are rejected, so that an option added later is never silently ign
 [#RecordingSearchResponse]
 === _RecordingSearchResponse_ 
 
-The lines that hold the search text.
+The lines that match the search text.
 
 
 [.fields-RecordingSearchResponse]

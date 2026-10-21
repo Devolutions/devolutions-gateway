@@ -352,10 +352,13 @@ paths:
       - Jrec
       summary: Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
       description: |-
-        The query is a case-insensitive substring, matched against the raw text of each line.
-        Gateway does not interpret the logs, so any part of a line can match, field names included.
-        Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched,
-        and a line longer than 256 KiB is matched on its first 256 KiB only.
+        The query is a case-insensitive substring.
+        In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
+        once unescaped, so field names, numbers, booleans and null never match.
+        Any other line, such as one still being written, is matched as raw text.
+        A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually
+        matched as raw text.
+        Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched.
         Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
 
         Results come in pages.
@@ -2240,7 +2243,7 @@ components:
       - Pkcs1
     RecordingSearchHit:
       type: object
-      description: A line that holds the search text.
+      description: A line that matches the search text.
       required:
       - recordingId
       - fileName
@@ -2308,7 +2311,7 @@ components:
       additionalProperties: false
     RecordingSearchResponse:
       type: object
-      description: The lines that hold the search text.
+      description: The lines that match the search text.
       required:
       - hits
       properties:

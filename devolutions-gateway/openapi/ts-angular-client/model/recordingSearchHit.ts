@@ -10,7 +10,7 @@
 
 
 /**
- * A line that holds the search text.
+ * A line that matches the search text.
  */
 export interface RecordingSearchHit { 
     /**

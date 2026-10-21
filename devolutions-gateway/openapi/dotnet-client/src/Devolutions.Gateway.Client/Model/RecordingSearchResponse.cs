@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// The lines that hold the search text.
+    /// The lines that match the search text.
     /// </summary>
     [DataContract(Name = "RecordingSearchResponse")]
     public partial class RecordingSearchResponse : IValidatableObject
