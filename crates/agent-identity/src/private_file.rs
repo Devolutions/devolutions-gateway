@@ -653,6 +653,7 @@ fn sync_directory(path: &Utf8Path) -> anyhow::Result<()> {
 mod tests {
     use super::*;
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[cfg(unix)]
     #[test]
     fn pending_files_do_not_require_service_ownership() {
@@ -660,9 +661,11 @@ mod tests {
         let service_user = unsafe { libc::geteuid() };
         let other_owner = service_user.wrapping_add(1);
         assert!(verify_unix_file_permissions(0o600, other_owner, None).is_ok());
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         assert!(verify_unix_file_permissions(0o600, other_owner, Some(service_user)).is_err());
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[cfg(unix)]
     #[test]
     fn pending_files_still_require_owner_only_permissions() {
@@ -672,6 +675,7 @@ mod tests {
         assert!(verify_unix_file_permissions(0o600, 1, None).is_ok());
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[cfg(unix)]
     #[test]
     fn an_authority_directory_owned_by_another_account_fails_the_check() {

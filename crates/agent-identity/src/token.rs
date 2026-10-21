@@ -123,7 +123,7 @@ mod tests {
     fn accepts_valid_token_and_hashes_the_entire_string() -> anyhow::Result<()> {
         let raw = token_with_bag(r#"{"u":"https://example.test/dvls","extra":true}"#);
         let token = Token::parse(&raw)?;
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
         assert_eq!(token.base_url(), "https://example.test/dvls");
         // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         assert_eq!(token.sha256_hex(), hex::encode(Sha256::digest(raw.as_bytes())));
@@ -135,6 +135,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[test]
     fn rejects_every_malformed_token_locally_without_exposing_it() {
         let valid = token_with_bag(r#"{"u":"https://example.test/dvls"}"#);
@@ -157,6 +158,7 @@ mod tests {
         ];
         for raw in invalid {
             let error = Token::parse(&raw).expect_err("malformed token was accepted");
+            // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
             assert!(!error.to_string().contains(&raw), "{error}");
         }
     }

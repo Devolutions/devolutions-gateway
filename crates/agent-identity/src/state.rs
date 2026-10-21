@@ -865,6 +865,7 @@ mod tests {
         }
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
     #[cfg(not(windows))]
     #[test]
     fn unavailable_backend_reaches_store_initialization_without_touching_state() -> anyhow::Result<()> {
@@ -949,6 +950,8 @@ mod tests {
         Ok(identity)
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[test]
     fn identity_json_preserves_config_and_accepts_null_optionals() -> anyhow::Result<()> {
         let json = json!({
@@ -991,7 +994,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[test]
     fn stores_the_token_base_url_without_trailing_slashes() -> anyhow::Result<()> {
         for (u, stored) in [
@@ -1018,6 +1021,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn interrupted_permanent_cleanup_does_not_regenerate_an_enrollment_key() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1039,6 +1043,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn revoked_token_cannot_enroll_again_after_a_replayed_install() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1087,6 +1092,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn malformed_token_marks_only_its_matching_hash() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1120,6 +1126,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn unusable_pending_keeps_its_record_until_reconciliation() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1167,6 +1174,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn unusable_read_cannot_discard_a_rewritten_valid_pending_token() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1206,6 +1214,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn wrong_filename_is_deleted_without_a_marker() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1353,6 +1362,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn untrusted_lock_file_is_never_used_for_state_changes() -> anyhow::Result<()> {
         #[cfg(unix)]
@@ -1394,6 +1404,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[cfg(windows)]
     #[test]
     fn directory_inspection_failure_preserves_recorded_identity_key() -> anyhow::Result<()> {
@@ -1414,6 +1425,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn permanent_token_errors_create_markers_and_skip_replayed_pending_files() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1450,6 +1462,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn stale_config_and_key_snapshots_cannot_destroy_a_promoted_key() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1515,6 +1528,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn missing_current_key_rejects_the_identity_as_key_lost() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Identities", "Stored identities"): a missing current key records
@@ -1552,6 +1567,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn recovery_keeps_the_expired_pending_key_as_previous_until_the_fresh_key_is_confirmed() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): during pending-key recovery the expired pending key
@@ -1596,6 +1612,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn repeated_recovery_keeps_the_newest_expired_pending_key_and_deletes_the_older() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): if recovery must start again before a `confirm`
@@ -1640,6 +1657,7 @@ mod tests {
         directory.0.join("identity").join("keys").join(format!("{key_name}.p8"))
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn startup_replaces_a_missing_certified_pending_key_with_a_fresh_one() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): a pending key missing from its store is unusable,
@@ -1669,6 +1687,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn startup_leaves_a_refused_pending_key_to_its_runner() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): a pending key refused when opened is unusable and is
@@ -1690,6 +1709,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
     #[test]
     fn startup_leaves_a_rejected_identity_s_slots_unchanged() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Identities"): a rejected identity keeps its keys and slots until a new
@@ -1711,6 +1731,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn restart_resumes_recovery_when_the_fresh_pending_key_is_missing() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): a restart resumes pending-key recovery from the file,
@@ -1746,6 +1767,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn promotion_keeps_the_old_key_as_previous_until_it_is_deleted() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): when `confirm` succeeds, `pending` becomes `current`
@@ -1779,6 +1801,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     #[test]
     fn config_with_a_version_other_than_1_keeps_the_stored_config() -> anyhow::Result<()> {
         // `CONTRACT.agent-identity.md` §5.2: the agent keeps its stored config when it receives a config whose
@@ -1865,9 +1888,9 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn an_authority_directory_open_to_other_users_stops_every_store_use_until_it_is_fixed() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check is never
         // repaired, and stops all identity processing, for every authority, until it is fixed.
         let directory = TestDir::new()?;
@@ -1946,9 +1969,9 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn an_identity_file_open_to_other_users_stops_every_store_use_until_it_is_fixed() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());
@@ -2001,10 +2024,10 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[cfg(windows)]
     #[test]
     fn an_identity_file_closed_to_other_users_still_needs_the_dacl_the_agent_provisions() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         if crate::windows::is_system()? {
             // For SYSTEM, the current user alone is the DACL the agent provisions.
             return Ok(());
@@ -2025,9 +2048,9 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn an_authority_directory_named_in_upper_case_is_checked_too() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): every authority directory is checked; on a case-insensitive
         // file system, such as Windows', an upper-case name is the same directory, and skipping it would let its token
         // enroll again.
@@ -2077,9 +2100,9 @@ mod tests {
         }
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn a_link_or_file_in_place_of_an_authority_directory_is_never_an_absent_identity() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check stops all
         // identity processing; reading it as absent would let a local attacker hide an identity, so that its token
         // enrolls again.
@@ -2114,9 +2137,9 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn a_directory_in_place_of_an_identity_file_is_never_an_absent_identity() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());
@@ -2136,9 +2159,9 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn start_up_stops_on_an_authority_directory_open_to_other_users_and_leaves_it_unchanged() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that is not protected from other
         // users is never repaired, and stops all identity processing until it is fixed.
         for others in [OtherUsers::Group, OtherUsers::Everyone] {
@@ -2162,10 +2185,10 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[cfg(windows)]
     #[test]
     fn start_up_stops_on_a_foreign_owned_authority_directory_and_leaves_it_unchanged() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory owned by another account is never
         // repaired, and stops all identity processing until it is fixed.
         let directory = TestDir::new()?;
@@ -2188,10 +2211,10 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[cfg(windows)]
     #[test]
     fn repairing_the_authorities_directory_leaves_an_untrusted_authority_directory_unchanged() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Local state
         // `crates/agent-identity/INTENT.md` ("Local state"): start-up resets wrong permissions on the agent's own
         // directories, but never repairs an authority directory, including the entries it inherits from them.
         let directory = TestDir::new()?;

@@ -627,6 +627,7 @@ mod tests {
         Ok(STANDARD.encode(certificate.to_der()?))
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[test]
     fn leaf_validity_reads_the_first_certificate_of_the_chain() -> anyhow::Result<()> {
         let leaf = self_signed_leaf(&SigningKey::from_slice(&[7u8; 32])?, 1_800_000_000, 1_800_086_400)?;
@@ -641,6 +642,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[test]
     fn enrollment_leaf_must_match_the_pending_key() -> anyhow::Result<()> {
         let key = SigningKey::from_slice(&[7u8; 32])?;
@@ -662,8 +664,8 @@ mod tests {
         Ok(())
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §http-api
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[test]
     fn joins_path_prefix_without_duplicate_slashes() {
         for (base, expected) in [
@@ -705,6 +707,7 @@ mod tests {
         );
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[test]
     fn classifies_only_valid_status_code_pairs() {
         let body =
@@ -768,9 +771,12 @@ mod tests {
         let suspicious = br#"{"error":"dvaet1.fake.secret","server_time":"2026-09-24T12:00:00Z"}"#;
         let error = classify_error(StatusCode::BAD_REQUEST, suspicious, None);
         assert_eq!(error, ClientError::invalid_response("invalid server error code"));
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
         assert!(!error.to_string().contains("dvaet1"));
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[test]
     fn classifies_error_codes_when_message_is_absent_or_null() {
         let server_time = OffsetDateTime::parse("2026-09-24T12:00:00Z", &Rfc3339).expect("valid server time");
@@ -818,10 +824,12 @@ mod tests {
         }
     }
 
+    // oracle: spec RFC 9110 §10.2.3
     #[test]
     fn parses_retry_after_seconds_and_http_date() {
         let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
         assert_eq!(parse_retry_after(" 15 ", now), Some(Duration::from_secs(15)));
+        // oracle: intent crates/agent-identity/INTENT.md §Schedules
         assert_eq!(
             parse_retry_after("18446744073709551616", now),
             Some(Duration::from_secs(u64::MAX))
@@ -837,6 +845,8 @@ mod tests {
         assert_eq!(parse_retry_after("never", now), None);
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[test]
     fn accepts_null_optional_config_fields_without_losing_unknown_values() {
         let response: EnrollResponse = parse_response(
@@ -848,6 +858,7 @@ mod tests {
         assert_eq!(response.config["revision"], 4);
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     #[test]
     fn config_with_a_version_other_than_1_is_transient() {
         // `CONTRACT.agent-identity.md` §5.2: a config whose `version` is not 1 is a transient failure.

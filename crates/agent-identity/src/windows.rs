@@ -1336,6 +1336,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
     #[test]
     fn directory_acl_policy_grants_only_system_and_optional_current_user() -> anyhow::Result<()> {
         let system = system_sid()?;
@@ -1377,6 +1379,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn pending_file_acl_denies_implicit_owner_access() -> anyhow::Result<()> {
         let system = system_sid()?;
@@ -1400,6 +1403,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn drop_box_writer_cannot_reopen_its_file_and_replays_succeed() -> anyhow::Result<()> {
         use std::os::windows::fs::OpenOptionsExt as _;
@@ -1423,6 +1427,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn interrupted_staging_does_not_block_a_replayed_enrollment() -> anyhow::Result<()> {
         let data_dir = test_data_dir()?;
@@ -1443,6 +1448,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn drop_box_writer_can_traverse_an_identity_directory_without_read_access() -> anyhow::Result<()> {
         let data_dir = test_data_dir()?;
@@ -1493,6 +1499,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn drop_box_denies_a_token_without_administrators_membership() -> anyhow::Result<()> {
         if current_user_is_administrator()? {
@@ -1518,6 +1525,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn drop_box_rejects_reparse_redirects_before_writing() -> anyhow::Result<()> {
         use std::os::windows::fs::symlink_dir;
@@ -1546,6 +1554,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
     #[test]
     fn administrator_writer_requires_system_provisioned_directories() -> anyhow::Result<()> {
         let data_dir = test_data_dir()?;
@@ -1565,6 +1574,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
     #[test]
     fn retries_only_sharing_violations() -> anyhow::Result<()> {
         let sharing = anyhow::Error::new(std::io::Error::from_raw_os_error(i32::try_from(
@@ -1605,6 +1616,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn pending_reader_accepts_only_the_two_exact_acl_forms() -> anyhow::Result<()> {
         let system = system_sid()?;
@@ -1688,6 +1700,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn distinct_administrator_owner_requires_zero_access_owner_rights() -> anyhow::Result<()> {
         let system = system_sid()?;
@@ -1721,6 +1734,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn system_style_pending_file_without_owner_rights_is_readable() -> anyhow::Result<()> {
         let data_dir = test_data_dir()?;
@@ -1742,6 +1756,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn owner_membership_distinguishes_administrators_from_local_service() -> anyhow::Result<()> {
         let administrators = administrators_sid()?;
@@ -1751,6 +1766,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn repairs_a_directory_with_an_extra_allow_principal() -> anyhow::Result<()> {
         let data_dir = test_data_dir()?;

@@ -192,6 +192,7 @@ fn machine_id() -> Option<String> {
 mod tests {
     use super::*;
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     #[test]
     fn sanitizes_all_values_with_utf8_limits_and_required_fallback() {
         let mut values = Metadata::new();
@@ -213,6 +214,7 @@ mod tests {
         assert!(actual.values().all(|value| !value.chars().any(char::is_control)));
     }
 
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
     #[test]
     fn replaces_known_values_on_each_call() -> anyhow::Result<()> {
         let dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -228,10 +230,12 @@ mod tests {
         let first = collect("version", Some(&path));
         assert_eq!(first["hostname"], "one");
         assert_eq!(first["agent_version"], "override");
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
         assert!(!first.contains_key("fqdn"));
         assert!(!first.contains_key("unexpected"));
         std::fs::write(&path, r#"{"hostname":"two\u007f"}"#)?;
         let second = collect("version", Some(&path));
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
         assert_eq!(second["hostname"], "two");
         assert_eq!(second["agent_version"], "version");
         std::fs::remove_file(&path)?;
@@ -240,6 +244,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: spec DMTF DSP0134 §7.2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     #[cfg(windows)]
     #[test]
     fn parses_the_smbios_system_uuid_in_canonical_byte_order() {

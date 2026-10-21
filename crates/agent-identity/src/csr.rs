@@ -68,6 +68,7 @@ mod tests {
         }
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[test]
     fn csr_signatures_are_der_and_signing_failures_are_returned() -> anyhow::Result<()> {
         let mut key = TestKey {
@@ -90,6 +91,7 @@ mod tests {
         key.public_key().verify(&csr.info.to_der()?, &signature)?;
 
         key.fail = true;
+        // oracle: intent crates/device-key/INTENT.md §Signing
         assert!(create(&key).is_err());
         Ok(())
     }
@@ -97,6 +99,8 @@ mod tests {
     // `CONTRACT.agent-identity.md` §4: the agent's CSR carries no attributes.
     // RFC 2986 §4.1 makes `attributes [0] IMPLICIT` mandatory,
     // so the empty set is the element `A0 00`, not an omitted field.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: spec RFC 2986 §4.1
     #[test]
     fn csr_carries_no_attributes() -> anyhow::Result<()> {
         let key = TestKey {

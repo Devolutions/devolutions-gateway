@@ -68,6 +68,7 @@ mod tests {
 
     const DAY: Duration = Duration::from_secs(86_400);
 
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
     #[test]
     fn renewal_is_due_two_thirds_into_the_lifetime_plus_up_to_a_twelfth() {
         // `crates/agent-identity/INTENT.md` ("Schedules"): renew `2/3 × lifetime` after the anchor plus a jitter
@@ -85,6 +86,7 @@ mod tests {
         );
     }
 
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
     #[test]
     fn renewal_after_replaces_the_scheduled_time_without_jitter() {
         // `devolutions-agent/src/identity/INTENT.md` ("Configuration"): `renewal_after_secs` replaces the scheduled
@@ -97,6 +99,7 @@ mod tests {
         );
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
     #[test]
     fn an_authority_clock_ahead_of_the_agent_does_not_delay_renewal() {
         // `crates/agent-identity/INTENT.md` ("Schedules"): the anchor is the earlier of `notBefore` and the moment the
@@ -114,6 +117,7 @@ mod tests {
         );
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     #[test]
     fn only_an_absolute_https_channel_url_without_query_or_fragment_is_usable() {
         // `CONTRACT.agent-identity.md` §5.2: `agent_channel_url` must be an absolute `https` URL without a query or
@@ -121,6 +125,7 @@ mod tests {
         // field.
         let config = |url: Value| json!({"version": 1, "revision": 1, "agent_channel_url": url});
         assert_eq!(channel_url(&json!({"version": 1, "revision": 1})), ChannelUrl::Absent);
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         assert_eq!(channel_url(&config(Value::Null)), ChannelUrl::Absent);
         assert_eq!(
             channel_url(&config(json!("https://host/dvls"))),
@@ -141,6 +146,7 @@ mod tests {
         }
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
     #[test]
     fn check_in_interval_varies_by_ten_percent() {
         // `crates/agent-identity/INTENT.md` ("Schedules"): check-in runs every 24 h ±10%.

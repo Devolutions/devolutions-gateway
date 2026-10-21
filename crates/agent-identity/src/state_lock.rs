@@ -128,6 +128,7 @@ mod tests {
 
     use super::*;
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn trusted_lock_serializes_concurrent_writers() -> anyhow::Result<()> {
         let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))

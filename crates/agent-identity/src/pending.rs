@@ -282,6 +282,7 @@ mod tests {
 
     use super::*;
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn only_matching_version_one_tokens_can_be_malformed() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Local state") permits markers only for matching hash-named files.
@@ -329,6 +330,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn oversized_pending_payload_is_unusable() -> anyhow::Result<()> {
         let token = format!(
@@ -388,6 +391,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn derives_pending_names_and_handles_malformed_content() -> anyhow::Result<()> {
         #[cfg(unix)]
