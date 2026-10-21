@@ -16,7 +16,8 @@ use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::security::privilege;
 use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{
-    ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE, HANDLE, HLOCAL,
+    ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE,
+    HANDLE, HLOCAL,
     LUID, LocalFree,
 };
 use windows::Win32::Security::Authorization::{
@@ -787,6 +788,15 @@ pub(crate) fn set_test_directory_access(path: &Utf8Path, grant_current_user: boo
     set_named_security_info(&wide, SE_FILE_OBJECT, None, None, Some(&dacl), None)
 }
 
+/// How long a replacement of an identity file waits for other processes to close the file it replaces.
+const REPLACE_TIMEOUT: Duration = Duration::from_secs(5);
+const REPLACE_RETRY_INTERVAL: Duration = Duration::from_millis(25);
+
+/// Replaces `destination` with `source`.
+///
+/// While another process has `destination` open, even sharing deletion, the replacement fails with
+/// `ERROR_ACCESS_DENIED`, so it is retried until [`REPLACE_TIMEOUT`]; a reader such as a backup or an antivirus scan
+/// holds the file only briefly.
 pub(crate) fn replace_file(source: &Utf8Path, destination: &Utf8Path) -> anyhow::Result<()> {
     use std::os::windows::ffi::OsStrExt as _;
 
@@ -802,15 +812,23 @@ pub(crate) fn replace_file(source: &Utf8Path, destination: &Utf8Path) -> anyhow:
     };
     let source = full_path(source)?;
     let destination = full_path(destination)?;
-    // SAFETY: Both extended-length paths are NUL-terminated and remain live for this call.
-    unsafe {
-        MoveFileExW(
-            PCWSTR::from_raw(source.as_ptr()),
-            PCWSTR::from_raw(destination.as_ptr()),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
+    let started = Instant::now();
+    loop {
+        // SAFETY: Both extended-length paths are NUL-terminated and remain live for this call.
+        let replaced = unsafe {
+            MoveFileExW(
+                PCWSTR::from_raw(source.as_ptr()),
+                PCWSTR::from_raw(destination.as_ptr()),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        match replaced {
+            Err(error) if error.code() == ERROR_ACCESS_DENIED.to_hresult() && started.elapsed() < REPLACE_TIMEOUT => {
+                std::thread::sleep(REPLACE_RETRY_INTERVAL);
+            }
+            replaced => return replaced.context("atomically replace identity file"),
+        }
     }
-    .context("atomically replace identity file")
 }
 
 fn protected_dacl(entries: &[(Sid, u32, u32)]) -> anyhow::Result<InheritableAcl> {
@@ -1143,6 +1161,34 @@ mod tests {
     use super::*;
 
     #[test]
+    fn replacing_a_file_waits_for_a_reader_to_close_it() -> anyhow::Result<()> {
+        // A reader holding the destination open, even one sharing deletion as the standard library does, makes
+        // `MoveFileExW` fail with `ERROR_ACCESS_DENIED` until it closes the file.
+        let directory = camino::Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
+            .join(format!("ai-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&directory)?;
+        let destination = directory.join("identity.json");
+        let source = directory.join("identity.json.new");
+        fs::write(&destination, b"old")?;
+        fs::write(&source, b"new")?;
+        let reader = File::open(&destination)?;
+        let closer = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            drop(reader);
+        });
+
+        let replaced = replace_file(&source, &destination);
+        let _ = closer.join();
+        let contents = fs::read(&destination);
+        fs::remove_dir_all(&directory)?;
+
+        replaced?;
+        assert_eq!(contents?, b"new");
+        Ok(())
+    }
+
+    #[test]
     fn directory_acl_policy_grants_only_system_and_optional_current_user() -> anyhow::Result<()> {
         let system = system_sid()?;
         let other = Sid::from_well_known(Security::WinBuiltinUsersSid, None)?;
@@ -1414,7 +1460,7 @@ mod tests {
         })?;
         assert_eq!(attempts, 2);
 
-        let other = windows::core::Error::from_hresult(windows::Win32::Foundation::ERROR_ACCESS_DENIED.to_hresult());
+        let other = windows::core::Error::from_hresult(ERROR_ACCESS_DENIED.to_hresult());
         assert!(!is_sharing_violation(&anyhow::Error::new(other)));
         let inaccessible = explain_unprepared_drop_box(
             anyhow::Error::new(std::io::Error::from(ErrorKind::PermissionDenied))
