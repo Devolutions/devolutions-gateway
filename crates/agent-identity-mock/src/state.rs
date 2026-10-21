@@ -900,7 +900,8 @@ impl State {
             if token.deleted_at.is_some() {
                 return Err(ApiError::token_invalid());
             }
-            if issued.token_id != token_id {
+            // A deleted identity's key gets `identity_revoked` whatever the token (§2.1).
+            if identity.is_some() && issued.token_id != token_id {
                 return Err(ApiError::invalid_request("CSR key belongs to another enrollment token"));
             }
             if identity.is_none_or(Identity::revoked) {
@@ -1845,6 +1846,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     #[test]
     fn issued_key_origin_and_time_survive_identity_deletion() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -1890,7 +1892,7 @@ mod tests {
 
         state.delete_identity(identity_id, now).expect("deletion succeeds");
         assert_eq!(reject(&mut state, &owner_secret), "identity_revoked");
-        assert_eq!(reject(&mut state, &other_secret), "invalid_request");
+        assert_eq!(reject(&mut state, &other_secret), "identity_revoked");
         let issued = &state.issued_keys[&key_hash];
         assert_eq!(issued.identity_id, identity_id);
         assert_eq!(issued.token_id, owner_token_id);
