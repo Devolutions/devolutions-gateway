@@ -8,7 +8,7 @@ public class EnrollmentRulesTests
 
     public static TheoryData<string> KeysButTheReplayNames => new(KeysButTheReplay.Keys);
 
-    // The issued keys that each key rule of CONTRACT.md §2.1 matches, except the replay, by name.
+    // The issued keys that each key rule of CONTRACT.agent-identity.md §2.1 matches, except the replay, by name.
     private static Dictionary<string, IssuedKeyMatch> KeysButTheReplay => new()
     {
         ["the key of another token's identity"] =
@@ -21,8 +21,8 @@ public class EnrollmentRulesTests
         ["the key of a deleted identity"] = IssuedKeyMatch.ForDeletedIdentity(),
     };
 
-    // CONTRACT.md §2.1: a token creates an identity when it exists, has not been deleted, has not expired,
-    // and fewer than `max_uses` identities have been created with it; (6) a new identity.
+    // CONTRACT.agent-identity.md §2.1: a token creates an identity when it exists, has not been deleted,
+    // has not expired, and fewer than `max_uses` identities have been created with it; (6) a new identity.
     // The rows are a usable token, one that expires one tick after now, and one that can create one more identity.
     [Theory]
     [InlineData(TimeSpan.TicksPerDay, 3)]
@@ -39,23 +39,23 @@ public class EnrollmentRulesTests
         Assert.Null(decision.Error);
     }
 
-    // CONTRACT.md §2.1: when several outcomes apply, the earliest wins:
+    // CONTRACT.agent-identity.md §2.1: when several outcomes apply, the earliest wins:
     // (4) `token_invalid` for a deleted token, then `token_expired` for an expired one; (5) `token_exhausted`.
     [Theory]
-    // CONTRACT.md §5.4: `token_expired` when `now ≥ expires_at`.
+    // CONTRACT.agent-identity.md §5.4: `token_expired` when `now ≥ expires_at`.
     [InlineData(false, 0L, 10, 3, AgentIdentityErrorCode.TokenExpired)]
-    // CONTRACT.md §2.1: a token creates an identity only while fewer than `max_uses` identities have been created
-    // with it.
+    // CONTRACT.agent-identity.md §2.1: a token creates an identity only while fewer than `max_uses` identities
+    // have been created with it.
     [InlineData(false, TimeSpan.TicksPerDay, 10, 10, AgentIdentityErrorCode.TokenExhausted)]
     [InlineData(false, TimeSpan.TicksPerDay, 10, 11, AgentIdentityErrorCode.TokenExhausted)]
     [InlineData(false, TimeSpan.TicksPerDay, 0, 0, AgentIdentityErrorCode.TokenExhausted)]
-    // CONTRACT.md §2.1: a deleted token authenticates only for an idempotent replay;
+    // CONTRACT.agent-identity.md §2.1: a deleted token authenticates only for an idempotent replay;
     // every other use returns `token_invalid`, whether or not the token has also expired or been exhausted.
     [InlineData(true, TimeSpan.TicksPerDay, 10, 3, AgentIdentityErrorCode.TokenInvalid)]
     [InlineData(true, 0L, 10, 3, AgentIdentityErrorCode.TokenInvalid)]
     [InlineData(true, TimeSpan.TicksPerDay, 10, 10, AgentIdentityErrorCode.TokenInvalid)]
     [InlineData(true, 0L, 10, 10, AgentIdentityErrorCode.TokenInvalid)]
-    // CONTRACT.md §2.1: (4) `token_expired` comes before (5) `token_exhausted`.
+    // CONTRACT.agent-identity.md §2.1: (4) `token_expired` comes before (5) `token_exhausted`.
     [InlineData(false, 0L, 10, 10, AgentIdentityErrorCode.TokenExpired)]
     public void RejectsANewKeyWithTheEarliestTokenOutcome(
         bool deleted,
@@ -71,8 +71,8 @@ public class EnrollmentRulesTests
         AssertRejected(expected, decision);
     }
 
-    // CONTRACT.md §2.1: the key of the current certificate of a non-revoked identity enrolled with the same token
-    // → 200 with that identity, without counting a use.
+    // CONTRACT.agent-identity.md §2.1: the key of the current certificate of a non-revoked identity enrolled with the
+    // same token → 200 with that identity, without counting a use.
     // The key lookup (3) comes before (4) and (5), and a deleted token authenticates for this replay,
     // so the replay wins whether the token is deleted, expired or exhausted.
     [Theory]
@@ -92,7 +92,7 @@ public class EnrollmentRulesTests
         Assert.Null(decision.Error);
     }
 
-    // CONTRACT.md §2.1: the first matching key rule decides.
+    // CONTRACT.agent-identity.md §2.1: the first matching key rule decides.
     // The key of an identity enrolled with a different token → `invalid_request`, before the revocation rule;
     // any certificate key of a revoked identity → `identity_revoked`, before the pending-or-retired rule
     // and instead of the replay, which needs a non-revoked identity;
@@ -108,7 +108,8 @@ public class EnrollmentRulesTests
     [InlineData(true, true, CertificateStatus.Retired, false, false, AgentIdentityErrorCode.IdentityRevoked)]
     [InlineData(true, false, CertificateStatus.Pending, false, false, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(true, false, CertificateStatus.Retired, false, false, AgentIdentityErrorCode.InvalidRequest)]
-    // CONTRACT.md §2.1: (3) the result of the key lookup comes before (4) `token_expired` and (5) `token_exhausted`.
+    // CONTRACT.agent-identity.md §2.1: (3) the result of the key lookup comes
+    // before (4) `token_expired` and (5) `token_exhausted`.
     [InlineData(false, false, CertificateStatus.Current, true, false, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(false, false, CertificateStatus.Current, false, true, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(true, true, CertificateStatus.Current, true, false, AgentIdentityErrorCode.IdentityRevoked)]
@@ -131,7 +132,7 @@ public class EnrollmentRulesTests
         AssertRejected(expected, decision);
     }
 
-    // CONTRACT.md §2.1: the key of a certificate of a deleted identity → `identity_revoked`,
+    // CONTRACT.agent-identity.md §2.1: the key of a certificate of a deleted identity → `identity_revoked`,
     // and (3) the result of the key lookup comes before (4) `token_expired` and (5) `token_exhausted`.
     // The authority keeps only the SPKI SHA-256 and issuance time of a deleted identity's keys,
     // so no other key rule applies to them.
@@ -148,7 +149,7 @@ public class EnrollmentRulesTests
         AssertRejected(AgentIdentityErrorCode.IdentityRevoked, decision);
     }
 
-    // CONTRACT.md §2.1 (3): a deleted token gets `token_invalid` for anything but an idempotent replay,
+    // CONTRACT.agent-identity.md §2.1 (3): a deleted token gets `token_invalid` for anything but an idempotent replay,
     // whatever the CSR public key matches.
     [Theory]
     [MemberData(nameof(KeysButTheReplayNames))]

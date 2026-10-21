@@ -82,7 +82,7 @@ public static class EnrollmentAuthorization
     }
 
     // Matches the entire token, with nothing after the secret,
-    // against the pattern of CONTRACT.md §2: ^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$.
+    // against the pattern of CONTRACT.agent-identity.md §2: ^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$.
     private static bool TryReadSecret(ReadOnlySpan<char> token, out ReadOnlySpan<char> secret)
     {
         secret = default;

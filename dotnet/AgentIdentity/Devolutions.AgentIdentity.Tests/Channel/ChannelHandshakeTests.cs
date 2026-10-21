@@ -8,7 +8,8 @@ using Grpc.Core;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The channel handshake of CONTRACT.md §7.3 steps 3 and 4: the first agent message and the Welcome that answers it.
+/// The channel handshake of CONTRACT.agent-identity.md §7.3 steps 3 and 4:
+/// the first agent message and the Welcome that answers it.
 /// </summary>
 public class ChannelHandshakeTests
 {
@@ -151,8 +152,8 @@ public class ChannelHandshakeTests
 
     private static byte[] ValidProof => TestVectors.Instance.ChannelProof.Case("valid").Proof;
 
-    // CONTRACT.md §7.4: the closures that apply to a stream even while it awaits its Hello, in the order the
-    // handshake checks them, with the code and the gRPC status that close the stream.
+    // CONTRACT.agent-identity.md §7.4: the closures that apply to a stream even while it awaits its Hello,
+    // in the order the handshake checks them, with the code and the gRPC status that close the stream.
     // The certificate of device-a expires 70 days after the vector opening, so a reading after its notAfter is also
     // after the Hello timeout.
     private static OrderedDictionary<string, Failure> Closures => new()
@@ -181,7 +182,7 @@ public class ChannelHandshakeTests
             StatusCode.Unauthenticated),
     };
 
-    // CONTRACT.md §7.3 step 4: every message that breaks one of its rules,
+    // CONTRACT.agent-identity.md §7.3 step 4: every message that breaks one of its rules,
     // each of SignatureFailures with signature_invalid, and invalid metadata in a valid Hello with invalid_request.
     private static Dictionary<string, Failure> MessageFailures =>
         SignatureFailures
@@ -260,7 +261,7 @@ public class ChannelHandshakeTests
     private static DateTimeOffset DeviceANotAfter =>
         TestVectors.Instance.HttpSignature.RegisteredCertificate("device-a").NotAfter;
 
-    // CONTRACT.md §7.3 step 4 and §7.4: UNAUTHENTICATED with error-code signature_invalid.
+    // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: UNAUTHENTICATED with error-code signature_invalid.
     [Theory]
     [MemberData(nameof(SignatureFailureNames))]
     public async Task FirstMessageFailingTheProofRulesIsSignatureInvalid(string failure)
@@ -270,7 +271,7 @@ public class ChannelHandshakeTests
         AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.md §7.3 step 4: a Hello that proves the key but carries metadata violating §3 is
+    // CONTRACT.agent-identity.md §7.3 step 4: a Hello that proves the key but carries metadata violating §3 is
     // INVALID_ARGUMENT with error-code invalid_request.
     [Fact]
     public async Task HelloWithInvalidMetadataIsInvalidRequest()
@@ -286,12 +287,13 @@ public class ChannelHandshakeTests
 
     // The handshake checks its failures in an order, and a stream that fails two of them closes as it would for the
     // earlier one alone.
-    // CONTRACT.md §6 step 4 and §7.4: the registry and the clock decide before the message, in this order:
+    // CONTRACT.agent-identity.md §6 step 4 and §7.4: the registry and the clock decide before the message,
+    // in this order:
     // a certificate no longer registered, a revoked identity, an expired certificate, then a late Hello.
     // A stream that fails one of them is closed for that reason, whatever the message holds, and so is a stream
     // without Hello, which gets identity_unknown for an identity revoked and then deleted.
     // The late Hello is signature_invalid like the message failures, and comes before all of them, metadata included.
-    // CONTRACT.md §7.3 step 4 then checks the payload, the correlation_id, the proof, then the metadata,
+    // CONTRACT.agent-identity.md §7.3 step 4 then checks the payload, the correlation_id, the proof, then the metadata,
     // so an agent that has not proved the key never learns whether its metadata would pass.
     [Theory]
     [MemberData(nameof(PairsOfFailuresWithDifferentCodes))]
@@ -306,7 +308,7 @@ public class ChannelHandshakeTests
 
     // Two failures that both close the stream with signature_invalid differ only in their failure detail,
     // so the detail shows that the earlier one closed it.
-    // oracle: self-derived; CONTRACT.md §7.3 step 4 fixes no failure detail,
+    // oracle: self-derived; CONTRACT.agent-identity.md §7.3 step 4 fixes no failure detail,
     // so the expected one is the handshake's own for the earlier failure alone.
     [Theory]
     [MemberData(nameof(PairsOfFailuresWithTheSameCode))]
@@ -325,7 +327,8 @@ public class ChannelHandshakeTests
 
     // The shared intent, security invariant 5: revocation blocks authentication, including of a stream whose identity
     // the host cannot know yet.
-    // CONTRACT.md §7.4: PERMISSION_DENIED with the trailers `error-code: identity_revoked` and `server-time`.
+    // CONTRACT.agent-identity.md §7.4: PERMISSION_DENIED
+    // with the trailers `error-code: identity_revoked` and `server-time`.
     [Fact]
     public async Task IdentityRevokedDuringTheHandshakeIsIdentityRevoked()
     {
@@ -340,7 +343,7 @@ public class ChannelHandshakeTests
             error.ToRpcException(serverTime).Trailers.Select(entry => (entry.Key, entry.Value)));
     }
 
-    // CONTRACT.md §6 step 4: a certificate that is no longer registered, or whose identity was deleted,
+    // CONTRACT.agent-identity.md §6 step 4: a certificate that is no longer registered, or whose identity was deleted,
     // is identity_unknown.
     [Fact]
     public async Task CertificateRemovedDuringTheHandshakeIsIdentityUnknown()
@@ -351,10 +354,11 @@ public class ChannelHandshakeTests
     }
 
     // The identity reports the status that the registry holds for the opening certificate when the handshake ends.
-    // CONTRACT.md §6 table: a channel opening accepts a pending certificate as well as a current one.
-    // CONTRACT.md §5.5: a confirm during the handshake makes a pending certificate current.
-    // CONTRACT.md §7.4: a stream whose certificate is retired while it awaits its Hello still completes the handshake,
-    // then gets the treatment of every stream of a retired certificate, so the result reports the retirement.
+    // CONTRACT.agent-identity.md §6 table: a channel opening accepts a pending certificate as well as a current one.
+    // CONTRACT.agent-identity.md §5.5: a confirm during the handshake makes a pending certificate current.
+    // CONTRACT.agent-identity.md §7.4: a stream whose certificate is retired while it awaits its Hello still completes
+    // the handshake, then gets the treatment of every stream of a retired certificate,
+    // so the result reports the retirement.
     // Failing it would send a healthy agent the terminal identity_unknown.
     [Theory]
     [InlineData(CertificateStatus.Pending, CertificateStatus.Pending)]
@@ -375,7 +379,7 @@ public class ChannelHandshakeTests
     }
 
     // A retired certificate passes the handshake, but the revocation of its identity still blocks it.
-    // CONTRACT.md §7.4: revocation closes a stream still awaiting its Hello, with PERMISSION_DENIED and
+    // CONTRACT.agent-identity.md §7.4: revocation closes a stream still awaiting its Hello, with PERMISSION_DENIED and
     // identity_revoked.
     [Fact]
     public async Task RevocationWinsOverARetiredCertificate()
@@ -387,8 +391,8 @@ public class ChannelHandshakeTests
     }
 
     // Whatever the outcome, the handshake reads the registry once, for the certificate that opened the stream.
-    // CONTRACT.md §7.4 applies a deletion or a revocation since the opening to a stream awaiting its Hello,
-    // so the handshake reads the registry again; that it reads it exactly once is the library's API.
+    // CONTRACT.agent-identity.md §7.4 applies a deletion or a revocation since the opening to a stream awaiting its
+    // Hello, so the handshake reads the registry again; that it reads it exactly once is the library's API.
     [Theory]
     [MemberData(nameof(ScenarioNames))]
     public async Task HandshakeReadsTheRegistryOnce(string scenario)
@@ -403,7 +407,7 @@ public class ChannelHandshakeTests
 
     // The registry answers a thumbprint with the certificate issued under it, for its one identity,
     // so another answer is a host bug, which must fail as a server error rather than draw an outcome the agent acts on.
-    // CONTRACT.md §5.4: an unexpected server failure is the transient `500 unavailable`,
+    // CONTRACT.agent-identity.md §5.4: an unexpected server failure is the transient `500 unavailable`,
     // whereas identity_unknown and identity_revoked are terminal; the exception type is the library's API.
     [Theory]
     [MemberData(nameof(WrongRegistryAnswersAndCalls))]
@@ -418,7 +422,7 @@ public class ChannelHandshakeTests
 
     // The handshake ends when VerifyHelloAsync is called, not when the registry answers,
     // so a Hello timer that fires during the lookup cannot end the handshake a second time.
-    // CONTRACT.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
+    // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
     // Only the library's API decides that the call, not the answer, ends the handshake,
     // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
     // that the object's state does not allow.
@@ -442,7 +446,7 @@ public class ChannelHandshakeTests
 
     // The timeout ends the handshake when HelloTimedOutAsync is called too,
     // so a Hello that arrives during its lookup cannot authenticate a stream that is being closed.
-    // CONTRACT.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both,
+    // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both,
     // and closes it for the timeout with signature_invalid.
     // Only the library's API decides that the call, not the answer, ends the handshake,
     // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
@@ -465,7 +469,7 @@ public class ChannelHandshakeTests
         AssertFailed(await timingOut, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.md §6 reads the clock before the registry, and so does the handshake,
+    // CONTRACT.agent-identity.md §6 reads the clock before the registry, and so does the handshake,
     // so a Hello that arrives in time stays in time however long the registry takes to answer.
     [Fact]
     public async Task SlowRegistryDoesNotMakeAHelloLate()
@@ -486,8 +490,8 @@ public class ChannelHandshakeTests
         Assert.True(result.Succeeded, result.FailureDetail);
     }
 
-    // CONTRACT.md §7.3 step 4: the server verifies the proof with the key of the certificate that authenticated the
-    // opening request, so the stream is authenticated for that certificate and its identity.
+    // CONTRACT.agent-identity.md §7.3 step 4: the server verifies the proof with the key of the certificate that
+    // authenticated the opening request, so the stream is authenticated for that certificate and its identity.
     // The vector file states the facts of the certificate, in Unix seconds, independently of any time zone.
     [Fact]
     public async Task ValidHelloAuthenticatesTheIdentityOfTheOpeningCertificate()
@@ -510,7 +514,8 @@ public class ChannelHandshakeTests
         Assert.Null(result.FailureDetail);
     }
 
-    // CONTRACT.md §3: the server replaces the identity's metadata with the metadata of each authenticated Hello.
+    // CONTRACT.agent-identity.md §3: the server replaces the identity's metadata
+    // with the metadata of each authenticated Hello.
     [Fact]
     public async Task ValidHelloYieldsItsMetadata()
     {
@@ -522,7 +527,7 @@ public class ChannelHandshakeTests
         Assert.Equal(VectorChannel.ValidMetadata, result.Metadata);
     }
 
-    // CONTRACT.md §3: metadata may be an empty object.
+    // CONTRACT.agent-identity.md §3: metadata may be an empty object.
     // A protobuf map without entries is also how a Hello without metadata arrives,
     // so the rule that rejects a JSON body without metadata cannot apply here.
     [Fact]
@@ -538,8 +543,8 @@ public class ChannelHandshakeTests
         Assert.Empty(result.Metadata);
     }
 
-    // CONTRACT.md §7.3 step 4: Welcome has correlation_id = Hello id.
-    // CONTRACT.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
+    // CONTRACT.agent-identity.md §7.3 step 4: Welcome has correlation_id = Hello id.
+    // CONTRACT.agent-identity.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
     // The Hello id is in uppercase, so a Welcome that normalized it would no longer match what the agent sent.
     [Fact]
     public async Task WelcomeAnswersTheHello()
@@ -579,7 +584,8 @@ public class ChannelHandshakeTests
         Assert.Equal(250_000_000, serverTime.Nanos);
     }
 
-    // CONTRACT.md §7.3 step 3: the Hello answers the Challenge id, with a proof over the challenge bytes.
+    // CONTRACT.agent-identity.md §7.3 step 3: the Hello answers the Challenge id,
+    // with a proof over the challenge bytes.
     // The agent answers the Challenge it received, so the handshake holds the Hello to the id and bytes as sent,
     // even if the host later edits the message object it sent.
     [Fact]
@@ -595,7 +601,7 @@ public class ChannelHandshakeTests
         Assert.True(result.Succeeded, result.FailureDetail);
     }
 
-    // CONTRACT.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
+    // CONTRACT.agent-identity.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
     // The Welcome shows that the clock reading that judged the certificate is the one at notAfter.
     [Fact]
     public async Task HandshakeSucceedsAtTheCertificateNotAfter()
@@ -608,9 +614,9 @@ public class ChannelHandshakeTests
         Assert.Equal(Timestamp.FromDateTimeOffset(DeviceANotAfter), result.Welcome.Welcome.ServerTime);
     }
 
-    // CONTRACT.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
-    // CONTRACT.md §7.4 and the shared intent, security invariant 8: a stream closes no later than the notAfter of the
-    // certificate that opened it, with UNAUTHENTICATED and error-code certificate_expired,
+    // CONTRACT.agent-identity.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
+    // CONTRACT.agent-identity.md §7.4 and the shared intent, security invariant 8: a stream closes no later than the
+    // notAfter of the certificate that opened it, with UNAUTHENTICATED and error-code certificate_expired,
     // even while it waits for its Hello, so the timeout fails as a timeout only until then.
     [Theory]
     [InlineData("a valid Hello", 1, AgentIdentityErrorCode.CertificateExpired)]
@@ -629,9 +635,9 @@ public class ChannelHandshakeTests
         AssertFailed(result, expectedCode, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
-    // CONTRACT.md §7.4: revocation and expiry close a stream still awaiting its Hello ahead of the failures of §7.3
-    // step 4, the timeout included, and so does a deletion, which leaves the certificate unregistered.
+    // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
+    // CONTRACT.agent-identity.md §7.4: revocation and expiry close a stream still awaiting its Hello ahead of the
+    // failures of §7.3 step 4, the timeout included, and so does a deletion, which leaves the certificate unregistered.
     [Theory]
     [MemberData(nameof(NoHelloNames))]
     public async Task NoHelloInTimeIsSignatureInvalidUnlessAClosureApplies(string noHello)
@@ -643,14 +649,14 @@ public class ChannelHandshakeTests
         AssertFailed(result, expectedCode, expectedStatus);
     }
 
-    // CONTRACT.md §7.3 step 4: the server waits 10 s for the Hello.
+    // CONTRACT.agent-identity.md §7.3 step 4: the server waits 10 s for the Hello.
     [Fact]
     public void HelloTimeoutIs10Seconds()
     {
         Assert.Equal(TimeSpan.FromSeconds(10), ChannelHandshake.HelloTimeout);
     }
 
-    // CONTRACT.md §7.3 step 4: the Hello must arrive within 10 s of the opening, 10 s included.
+    // CONTRACT.agent-identity.md §7.3 step 4: the Hello must arrive within 10 s of the opening, 10 s included.
     // The Welcome shows that the clock reading that judged the timeout is the one at 10 s.
     [Fact]
     public async Task HelloExactlyAtTheTimeoutSucceeds()
@@ -666,7 +672,7 @@ public class ChannelHandshakeTests
         Assert.Equal(Timestamp.FromDateTimeOffset(answered), result.Welcome.Welcome.ServerTime);
     }
 
-    // CONTRACT.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
+    // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
     // A Hello that the host passes on after the timeout fails, so a late host timer cannot let it through.
     [Fact]
     public async Task HelloOneTickAfterTheTimeoutIsSignatureInvalid()
@@ -680,7 +686,7 @@ public class ChannelHandshakeTests
         AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.md §7.3 steps 1 and 2: the agent sends nothing until it receives the Challenge,
+    // CONTRACT.agent-identity.md §7.3 steps 1 and 2: the agent sends nothing until it receives the Challenge,
     // which the server sends once it has verified the opening request.
     // The agent can answer only once the opening is verified and its challenge sent,
     // so the 10 s run from the end of verification, not from the earlier reading that judged the request.
@@ -700,7 +706,7 @@ public class ChannelHandshakeTests
 
     // The first agent message decides the stream: a second one could retry a failed proof,
     // and a late Hello could authenticate a stream that already timed out.
-    // CONTRACT.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
+    // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
     // Only the library's API decides that a later call throws InvalidOperationException,
     // which the Framework Design Guidelines give a call that the object's state does not allow.
     [Theory]
@@ -713,7 +719,7 @@ public class ChannelHandshakeTests
         await Assert.ThrowsAsync<InvalidOperationException>(async () => await HandshakeEnds[second](opening));
     }
 
-    // CONTRACT.md §7.3 step 4 and §7.4: the server closes the stream with the gRPC status of the failure
+    // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: the server closes the stream with the gRPC status of the failure
     // and the trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`, which the agent reads.
     [Theory]
     [InlineData("a Hello with the proof of another device", StatusCode.Unauthenticated, "signature_invalid")]

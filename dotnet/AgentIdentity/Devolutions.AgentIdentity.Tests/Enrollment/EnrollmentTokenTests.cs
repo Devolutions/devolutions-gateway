@@ -11,7 +11,7 @@ public class EnrollmentTokenTests
     private static readonly byte[] SecretBytes = [.. Enumerable.Range(0, 32).Select(i => (byte)i)];
     private const string SecretText = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
-    // CONTRACT.md §2: `<prefix>.<bag>.<secret>`, where `secret` is base64url of 32 random bytes.
+    // CONTRACT.agent-identity.md §2: `<prefix>.<bag>.<secret>`, where `secret` is base64url of 32 random bytes.
     [Fact]
     public void CreateEncodesTheGeneratorBytesAsTheSecret()
     {
@@ -21,7 +21,7 @@ public class EnrollmentTokenTests
         Assert.EndsWith("." + SecretText, token.Value, StringComparison.Ordinal);
     }
 
-    // CONTRACT.md §2: the authority matches the `secret` text exactly,
+    // CONTRACT.agent-identity.md §2: the authority matches the `secret` text exactly,
     // so it hashes the 43 characters rather than the bytes they encode.
     [Fact]
     public void SecretHashIsTheSha256OfTheSecretText()
@@ -31,7 +31,7 @@ public class EnrollmentTokenTests
         Assert.Equal(SHA256.HashData(Encoding.ASCII.GetBytes(SecretText)), token.SecretHash.ToArray());
     }
 
-    // CONTRACT.md §2: a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`,
+    // CONTRACT.agent-identity.md §2: a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`,
     // and its secret is the canonical base64url encoding of the 32 random bytes.
     // The random values are seeded, so a failure reproduces.
     [Fact]
@@ -55,7 +55,7 @@ public class EnrollmentTokenTests
 
     // The authority stores SecretHash when it creates a token,
     // and finds the token of an enroll request by the hash that ReadBearerToken returns.
-    // CONTRACT.md §2: the authority matches the `secret` text exactly,
+    // CONTRACT.agent-identity.md §2: the authority matches the `secret` text exactly,
     // so both hashes are the SHA-256 of the 43 ASCII characters of the token's secret.
     [Fact]
     public void ReadBearerTokenReturnsTheSecretHashOfEveryCreatedToken()
@@ -81,10 +81,12 @@ public class EnrollmentTokenTests
         }
     }
 
-    // CONTRACT.md §2: `bag` is the base64url encoding of a UTF-8 JSON object whose `u` is the product base URL.
+    // CONTRACT.agent-identity.md §2: `bag` is the base64url encoding of a UTF-8 JSON object
+    // whose `u` is the product base URL.
     [Theory]
     [InlineData("https://host/dvls", "https://host/dvls")]
-    // The agent appends `/api/agent-identity/v1/...` to `u` (CONTRACT.md §5), so `u` ends without a slash.
+    // The agent appends `/api/agent-identity/v1/...` to `u` (CONTRACT.agent-identity.md §5),
+    // so `u` ends without a slash.
     [InlineData("https://host/dvls/", "https://host/dvls")]
     [InlineData("https://host/dvls//", "https://host/dvls")]
     [InlineData("https://host/", "https://host")]
@@ -102,7 +104,7 @@ public class EnrollmentTokenTests
         Assert.Equal(("u", expected), Assert.Single(BagMembers(token)));
     }
 
-    // CONTRACT.md §2: `u` is an absolute `https` URL without a query or fragment.
+    // CONTRACT.agent-identity.md §2: `u` is an absolute `https` URL without a query or fragment.
     // RFC 9110 §4.2.4 deprecates user information in an `https` URI and tells a recipient to treat it as an error.
     private static readonly string[] UnacceptableUrls =
     [
@@ -120,7 +122,8 @@ public class EnrollmentTokenTests
         "https://@host/dvls",
     ];
 
-    // The unacceptable URLs, and a URL one byte longer than the longest that fits in a token (CONTRACT.md §2).
+    // The unacceptable URLs, and a URL one byte longer than the longest that fits in a token
+    // (CONTRACT.agent-identity.md §2).
     public static TheoryData<string> RejectedUrlRows => new([.. UnacceptableUrls, UrlOfLength(3026)]);
 
     [Theory]
@@ -133,7 +136,7 @@ public class EnrollmentTokenTests
         Assert.Equal("productBaseUrl", exception.ParamName);
     }
 
-    // CONTRACT.md §2: a token is at most 4096 bytes.
+    // CONTRACT.agent-identity.md §2: a token is at most 4096 bytes.
     // A 3025-byte URL makes a 3033-byte bag object, a 4044-character bag and a 4095-byte token.
     // One more byte makes a 4046-character bag and a 4097-byte token, since no base64url text has 4045 characters.
     [Fact]

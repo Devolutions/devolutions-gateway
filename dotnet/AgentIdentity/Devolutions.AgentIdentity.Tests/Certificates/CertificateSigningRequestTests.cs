@@ -19,8 +19,8 @@ public class CertificateSigningRequestTests
     private static readonly BigInteger P256B = Unsigned(
         Convert.FromHexString("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B"));
 
-    // CONTRACT.md §4: the server ignores the CSR's subject and attributes, including requested extensions,
-    // and security invariant 2 lets a CSR supply only a verified public key.
+    // CONTRACT.agent-identity.md §4: the server ignores the CSR's subject and attributes,
+    // including requested extensions, and security invariant 2 lets a CSR supply only a verified public key.
     private static readonly Dictionary<string, Func<ECDsa, byte[]>> RequestsWithIgnoredContents = new()
     {
         ["subject, attributes and extensions"] = key =>
@@ -36,11 +36,11 @@ public class CertificateSigningRequestTests
             return request.CreateSigningRequest();
         },
 
-        // CONTRACT.md §4: the agent's CSR carries an empty attribute set, A0 00.
+        // CONTRACT.agent-identity.md §4: the agent's CSR carries an empty attribute set, A0 00.
         ["empty attribute set"] = key =>
             TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), attributes: [0xA0, 0x00]), key),
 
-        // CONTRACT.md §4: the server ignores an extensionRequest with an empty Extensions list,
+        // CONTRACT.agent-identity.md §4: the server ignores an extensionRequest with an empty Extensions list,
         // which common CSR builders emit although RFC 5280 §4.1 gives Extensions SIZE (1..MAX).
         // The attribute is the PKCS #9 extensionRequest (RFC 2985 §5.4.2) with one value, an empty SEQUENCE.
         ["extensionRequest with empty Extensions"] = key =>
@@ -54,7 +54,8 @@ public class CertificateSigningRequestTests
             return TestCsr.Request(info, key);
         },
 
-        // CONTRACT.md §4: attributes need no "canonical DER form, such as a sorted `SET OF`" (X.690 §11.6).
+        // CONTRACT.agent-identity.md §4: attributes need no "canonical DER form,
+        // such as a sorted `SET OF`" (X.690 §11.6).
         // Their encodings first differ in the last arc of the OIDs, 04 then 03, so the set descends.
         ["attributes out of DER order"] = key =>
         {
@@ -129,7 +130,7 @@ public class CertificateSigningRequestTests
 
     private static readonly Dictionary<string, Func<byte[]>> RequestsForAKeyNotNamedP256 = new()
     {
-        // CONTRACT.md §4: the key is a P-256 key.
+        // CONTRACT.agent-identity.md §4: the key is a P-256 key.
         ["P-384 key"] = () =>
         {
             using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP384);
@@ -165,7 +166,7 @@ public class CertificateSigningRequestTests
         },
     };
 
-    // CONTRACT.md §4: an uncompressed point, so that each key has exactly one SubjectPublicKeyInfo.
+    // CONTRACT.agent-identity.md §4: an uncompressed point, so that each key has exactly one SubjectPublicKeyInfo.
     private static readonly Dictionary<string, Func<ECDsa, byte[]>> PointsNotUncompressed = new()
     {
         // SEC 1 §2.3.3: the compressed form is 02 for an even y or 03 for an odd y, then x.
@@ -249,7 +250,7 @@ public class CertificateSigningRequestTests
     public static TheoryData<string> PointWithACoordinateOutOfTheFieldNames =>
         new(PointsWithACoordinateOutOfTheField.Keys);
 
-    // test-vectors.json csr.<name>.expected, the outcome CONTRACT.md §4 gives each request.
+    // test-vectors.json csr.<name>.expected, the outcome CONTRACT.agent-identity.md §4 gives each request.
     [Theory]
     [MemberData(nameof(VectorData.CsrNames), MemberType = typeof(VectorData))]
     public void CsrVectorHasItsExpectedOutcome(string name)
@@ -276,7 +277,7 @@ public class CertificateSigningRequestTests
     }
 
     // A request written by .NET rather than by the test builder.
-    // CONTRACT.md §4: a P-256 key and ecdsa-with-SHA256, the profile .NET writes for this key.
+    // CONTRACT.agent-identity.md §4: a P-256 key and ecdsa-with-SHA256, the profile .NET writes for this key.
     [Fact]
     public void AcceptsRequestWrittenByDotNet()
     {
@@ -311,7 +312,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(Convert.FromHexString(hex)));
     }
 
-    // CONTRACT.md §1: a CSR is DER, the encoding of one request.
+    // CONTRACT.agent-identity.md §1: a CSR is DER, the encoding of one request.
     // Bytes after the request would give one request many encodings.
     [Fact]
     public void RejectsTrailingBytes()
@@ -394,7 +395,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(RequestsForAKeyNotNamedP256[key]()));
     }
 
-    // RFC 5480 §2.1.2: id-ecDH restricts the key to key agreement; CONTRACT.md §4 needs a signing key.
+    // RFC 5480 §2.1.2: id-ecDH restricts the key to key agreement; CONTRACT.agent-identity.md §4 needs a signing key.
     [Fact]
     public void RejectsKeyRestrictedToKeyAgreement()
     {
@@ -424,7 +425,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, PointsNotUncompressed[point](key))));
     }
 
-    // CONTRACT.md §4: the key is a point on P-256.
+    // CONTRACT.agent-identity.md §4: the key is a point on P-256.
     // Flipping the low bit of y leaves the point off the curve,
     // since the only other point with the same x has y' = p - y, which is y + 1 or y - 1 only for y = (p ± 1) / 2.
     // No private key exists for such a point, so the key whose point was altered signs the request.
@@ -440,7 +441,7 @@ public class CertificateSigningRequestTests
     }
 
     // SEC 1 §3.2.2.1: the coordinates of a public key are integers below p,
-    // and CONTRACT.md §4 gives a key that is not a P-256 point invalid_request, not an exception.
+    // and CONTRACT.agent-identity.md §4 gives a key that is not a P-256 point invalid_request, not an exception.
     // Each point is on the curve modulo p, so only the range of its coordinates rejects it;
     // a platform's key import throws an exception of a platform-specific type for such a point.
     // The private key of either point is unknown, and the key is invalid whatever the signature,
@@ -467,7 +468,8 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(RequestsWithUnusedBits[bitString]()));
     }
 
-    // CONTRACT.md §4: the signature algorithm is ecdsa-with-SHA256, even when the signature verifies under it.
+    // CONTRACT.agent-identity.md §4: the signature algorithm is ecdsa-with-SHA256,
+    // even when the signature verifies under it.
     [Fact]
     public void RejectsAnotherSignatureAlgorithmOverASha256Signature()
     {
@@ -548,7 +550,7 @@ public class CertificateSigningRequestTests
         return result.Csr;
     }
 
-    // CONTRACT.md §4: a CSR that breaks a rule gets invalid_request, which §5.4 maps to 400.
+    // CONTRACT.agent-identity.md §4: a CSR that breaks a rule gets invalid_request, which §5.4 maps to 400.
     private static void AssertInvalid(CsrValidationResult result)
     {
         Assert.False(result.Succeeded);

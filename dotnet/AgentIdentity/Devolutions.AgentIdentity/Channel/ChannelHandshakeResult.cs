@@ -49,7 +49,7 @@ public sealed class ChannelHandshakeResult
     /// so the host closes the stream no later than <see cref="AuthenticatedIdentity.CertificateNotAfter"/>.
     /// When that certificate was retired during the handshake,
     /// <see cref="AuthenticatedIdentity.CertificateStatus"/> is <see cref="CertificateStatus.Retired"/>,
-    /// and CONTRACT.md §7.4 says how the host treats a stream of a retired certificate.
+    /// and CONTRACT.agent-identity.md §7.4 says how the host treats a stream of a retired certificate.
     /// </remarks>
     public AuthenticatedIdentity? Identity { get; }
 

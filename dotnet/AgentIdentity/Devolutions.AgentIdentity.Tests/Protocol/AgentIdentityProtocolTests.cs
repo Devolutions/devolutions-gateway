@@ -15,7 +15,7 @@ public class AgentIdentityProtocolTests
             registered => ($"http_signature.registered[{registered.Name}]", registered.Certificate, registered.KeyId)),
     ];
 
-    // CONTRACT.md §1: timestamps are RFC 3339 UTC strings ending in `Z`, such as 2026-09-24T12:00:00Z.
+    // CONTRACT.agent-identity.md §1: timestamps are RFC 3339 UTC strings ending in `Z`, such as 2026-09-24T12:00:00Z.
     // A timestamp names the whole second that contains the instant.
     [Theory]
     [InlineData("2026-09-24T12:00:00+00:00", "2026-09-24T12:00:00Z")]
@@ -51,8 +51,8 @@ public class AgentIdentityProtocolTests
         }
     }
 
-    // CONTRACT.md §1: a thumbprint is base64url(SHA-256(certificate DER)).
-    // CONTRACT.md §6: a request's `keyid` is the thumbprint of the certificate that signs it.
+    // CONTRACT.agent-identity.md §1: a thumbprint is base64url(SHA-256(certificate DER)).
+    // CONTRACT.agent-identity.md §6: a request's `keyid` is the thumbprint of the certificate that signs it.
     // The vector file gives each certificate with its thumbprint, or a registered certificate with its keyid.
     [Theory]
     [MemberData(nameof(VectorCertificateNames))]
@@ -63,7 +63,7 @@ public class AgentIdentityProtocolTests
         Assert.Equal(thumbprint, AgentIdentityProtocol.ComputeThumbprint(certificate));
     }
 
-    // CONTRACT.md §5.4: servers accept request bodies up to 64 KiB.
+    // CONTRACT.agent-identity.md §5.4: servers accept request bodies up to 64 KiB.
     [Fact]
     public void MaxRequestBodyBytesIs64KiB()
     {

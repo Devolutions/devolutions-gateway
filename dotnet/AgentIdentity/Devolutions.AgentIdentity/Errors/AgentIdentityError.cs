@@ -41,7 +41,7 @@ public sealed class AgentIdentityError
 
     /// <summary>
     /// The error for a request body that the host's framework cannot read or hand to the body parsers,
-    /// such as one that is not UTF-8 <c>application/json</c>, which CONTRACT.md §1 requires:
+    /// such as one that is not UTF-8 <c>application/json</c>, which CONTRACT.agent-identity.md §1 requires:
     /// <c>400 invalid_request</c>.
     /// </summary>
     /// <remarks>

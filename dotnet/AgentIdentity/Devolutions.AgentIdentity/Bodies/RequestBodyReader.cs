@@ -76,7 +76,7 @@ internal static class RequestBodyReader
     }
 
     // Returns why the bytes are not one JSON text that every parser reads the same way, or null.
-    // A repeated member name lets two parsers read two values (CONTRACT.md §1),
+    // A repeated member name lets two parsers read two values (CONTRACT.agent-identity.md §1),
     // and so does a string that is not Unicode text (RFC 8259 §8.2).
     private static string? CheckJson(ReadOnlySpan<byte> utf8Json)
     {
@@ -146,7 +146,7 @@ internal static class RequestBodyReader
             return false;
         }
 
-        // CONTRACT.md §1: a base64 value in any form but its canonical one is invalid.
+        // CONTRACT.agent-identity.md §1: a base64 value in any form but its canonical one is invalid.
         if (!StrictBase64.TryDecodeBase64(value.GetString(), out byte[]? der))
         {
             failure = "The csr is not canonical base64.";

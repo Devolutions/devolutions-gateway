@@ -5,11 +5,12 @@ using System.Security.Cryptography.X509Certificates;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The steps of CONTRACT.md §6 after parsing: their order, the certificate rules, the nonce, and the host's part.
+/// The steps of CONTRACT.agent-identity.md §6 after parsing: their order, the certificate rules, the nonce,
+/// and the host's part.
 /// </summary>
 public class RequestAuthenticatorTests
 {
-    // CONTRACT.md §5.4: servers accept request bodies up to 64 KiB.
+    // CONTRACT.agent-identity.md §5.4: servers accept request bodies up to 64 KiB.
     private const int OverTheLimit = (64 * 1024) + 1;
 
     private static readonly DateTimeOffset Now = TestAuthority.DefaultNow;
@@ -120,7 +121,8 @@ public class RequestAuthenticatorTests
 
     private static TimeSpan DeviceALifetime => DeviceACertificate.NotAfter - DeviceACertificate.NotBefore;
 
-    // CONTRACT.md §5.4: a body larger than 64 KiB returns 413 invalid_request before any authentication outcome.
+    // CONTRACT.agent-identity.md §5.4: a body larger than 64 KiB returns 413 invalid_request
+    // before any authentication outcome.
     [Theory]
     [MemberData(nameof(OversizedRequestNames))]
     public async Task BodyOverTheLimitIsRejectedWith413First(string request)
@@ -138,7 +140,7 @@ public class RequestAuthenticatorTests
         Assert.Empty(authority.Nonces.Calls);
     }
 
-    // CONTRACT.md §5.4: servers accept request bodies up to 64 KiB.
+    // CONTRACT.agent-identity.md §5.4: servers accept request bodies up to 64 KiB.
     [Fact]
     public async Task BodyOfExactlyTheLimitIsAccepted()
     {
@@ -153,7 +155,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(request));
     }
 
-    // CONTRACT.md §6: the earliest failing step decides,
+    // CONTRACT.agent-identity.md §6: the earliest failing step decides,
     // so the identity's state is reported even when the signature or the digest would not verify.
     [Theory]
     [InlineData("revoked identity, wrong key", "identity_revoked")]
@@ -167,7 +169,7 @@ public class RequestAuthenticatorTests
         Assert.Equal(expected, await authority.OutcomeAsync(failing));
     }
 
-    // CONTRACT.md §6 step 4 resolves the certificate before it reads the identity's revocation,
+    // CONTRACT.agent-identity.md §6 step 4 resolves the certificate before it reads the identity's revocation,
     // and reads revocation before validity, so a revoked identity always draws the terminal identity_revoked.
     [Theory]
     [InlineData("retired certificate, revoked identity", "identity_unknown")]
@@ -179,7 +181,7 @@ public class RequestAuthenticatorTests
         Assert.Equal(expected, await authority.OutcomeAsync(failing));
     }
 
-    // CONTRACT.md §6 table: every operation accepts a current or pending certificate.
+    // CONTRACT.agent-identity.md §6 table: every operation accepts a current or pending certificate.
     [Theory]
     [MemberData(nameof(OperationsWithAcceptedStatuses))]
     public async Task PendingOrCurrentCertificateIsAccepted(AgentOperation operation, CertificateStatus status)
@@ -190,7 +192,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.md §6 step 4: a certificate that is neither current nor pending draws identity_unknown.
+    // CONTRACT.agent-identity.md §6 step 4: a certificate that is neither current nor pending draws identity_unknown.
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task RetiredCertificateIsIdentityUnknown(AgentOperation operation)
@@ -201,7 +203,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("identity_unknown", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
+    // CONTRACT.agent-identity.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
     // A clock truncated to the second would still accept the certificate one tick after its notAfter.
     // Renew has no row one tick after, because its grace still accepts the certificate then.
     [Theory]
@@ -222,7 +224,7 @@ public class RequestAuthenticatorTests
         Assert.Equal(expected, await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.md §6: notBefore is not checked,
+    // CONTRACT.agent-identity.md §6: notBefore is not checked,
     // so a certificate dated by a fast authority clock does not lock devices out.
     [Theory]
     [MemberData(nameof(Operations))]
@@ -233,7 +235,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.md §6 table: renew accepts a certificate while now < notAfter + (notAfter − notBefore).
+    // CONTRACT.agent-identity.md §6 table: renew accepts a certificate while now < notAfter + (notAfter − notBefore).
     [Theory]
     [InlineData(CertificateStatus.Pending, "one tick after notAfter", "ok")]
     [InlineData(CertificateStatus.Current, "one tick after notAfter", "ok")]
@@ -252,7 +254,8 @@ public class RequestAuthenticatorTests
         Assert.Equal(expected, await authority.OutcomeAsync(authority.Valid(AgentOperation.Renew)));
     }
 
-    // CONTRACT.md §6 states the window of step 3 and the certificate rule of step 4 against the same `now`.
+    // CONTRACT.agent-identity.md §6 states the window of step 3 and the certificate rule of step 4
+    // against the same `now`.
     // A second reading of the clock between the window and the certificate check
     // would judge the certificate a day later, after it expired.
     [Fact]
@@ -264,7 +267,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(AgentOperation.Confirm)));
     }
 
-    // CONTRACT.md §6 step 3: 0 < expires − created ≤ 300.
+    // CONTRACT.agent-identity.md §6 step 3: 0 < expires − created ≤ 300.
     [Fact]
     public async Task SignatureLifetimeOf300SecondsIsAccepted()
     {
@@ -278,7 +281,7 @@ public class RequestAuthenticatorTests
     }
 
     // RFC 8941 §3.3.1: an integer may be negative, and RFC 9421 §2.3 serializes it with its sign.
-    // At the Unix epoch, all three inequalities of CONTRACT.md §6 step 3 hold,
+    // At the Unix epoch, all three inequalities of CONTRACT.agent-identity.md §6 step 3 hold,
     // and the certificate of device-a, whose notBefore is later, is accepted because §6 does not check notBefore.
     [Fact]
     public async Task CreatedBeforeTheUnixEpochIsAccepted()
@@ -291,7 +294,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("ok", await authority.OutcomeAsync(request));
     }
 
-    // CONTRACT.md §6: the earliest failing step decides.
+    // CONTRACT.agent-identity.md §6: the earliest failing step decides.
     // RFC 8941 §3.3.5 allows a byte sequence of no bytes, in its canonical base64 of no characters,
     // so the signature passes step 1 and its length fails only step 5, after the window of step 3.
     [Fact]
@@ -308,7 +311,7 @@ public class RequestAuthenticatorTests
         Assert.Equal("clock_skew", outcome);
     }
 
-    // CONTRACT.md §6 step 6: a pair the store already holds fails, whichever request recorded it.
+    // CONTRACT.agent-identity.md §6 step 6: a pair the store already holds fails, whichever request recorded it.
     [Theory]
     [MemberData(nameof(Operations))]
     public async Task NonceAlreadyRecordedIsSignatureInvalid(AgentOperation operation)
@@ -318,7 +321,8 @@ public class RequestAuthenticatorTests
         Assert.Equal("signature_invalid", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
-    // CONTRACT.md §6: a header the operation does not cover, such as Content-Digest on confirm, is ignored.
+    // CONTRACT.agent-identity.md §6: a header the operation does not cover, such as Content-Digest on confirm,
+    // is ignored.
     [Fact]
     public async Task ConfirmIgnoresContentDigest()
     {
@@ -398,7 +402,7 @@ public class RequestAuthenticatorTests
 
     // The registry answers by thumbprint, so another certificate is a host bug,
     // which must fail as a server error rather than draw an outcome the agent acts on.
-    // CONTRACT.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
+    // CONTRACT.agent-identity.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
     [Fact]
     public async Task RegistryReturningACertificateWithAnotherThumbprintThrows()
     {
@@ -412,8 +416,9 @@ public class RequestAuthenticatorTests
             () => authority.Authenticator.AuthenticateAsync(AgentOperation.Renew, request).AsTask());
     }
 
-    // CONTRACT.md §4: the authority issues P-256 leaves only, so any other registered bytes are a host bug.
-    // CONTRACT.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
+    // CONTRACT.agent-identity.md §4: the authority issues P-256 leaves only,
+    // so any other registered bytes are a host bug.
+    // CONTRACT.agent-identity.md §5.4: identity_unknown is terminal for the agent, so a host bug must not draw it.
     // The keyid is the thumbprint of those bytes, so the registry answers with what it was asked for.
     [Theory]
     [MemberData(nameof(RegisteredBytesOtherThanAP256CertificateNames))]

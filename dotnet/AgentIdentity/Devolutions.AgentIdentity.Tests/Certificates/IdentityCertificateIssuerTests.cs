@@ -6,10 +6,11 @@ using System.Security.Cryptography.X509Certificates;
 namespace Devolutions.AgentIdentity.Tests;
 
 // Each test decodes the issued certificate with the BCL and System.Formats.Asn1, never with the library,
-// and checks it against CONTRACT.md §4 and RFC 5280.
+// and checks it against CONTRACT.agent-identity.md §4 and RFC 5280.
 public sealed class IdentityCertificateIssuerTests : IDisposable
 {
-    // CONTRACT.md §1: IDs are lowercase hyphenated UUIDs; this one has hexadecimal letters, so its case shows.
+    // CONTRACT.agent-identity.md §1: IDs are lowercase hyphenated UUIDs; this one has hexadecimal letters,
+    // so its case shows.
     private const string IdentityIdText = "0b3c6a52-7a38-4f55-9a1c-2f1a8d3c9e01";
 
     // RFC 5280 §4.2.1.12: id-kp-clientAuth.
@@ -52,7 +53,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         _random.Dispose();
     }
 
-    // CONTRACT.md §4: the certificate is for the P-256 key of the CSR.
+    // CONTRACT.agent-identity.md §4: the certificate is for the P-256 key of the CSR.
     [Fact]
     public void CertifiesTheKeyOfTheCsr()
     {
@@ -61,7 +62,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(_agentKey.ExportSubjectPublicKeyInfo(), leaf.PublicKey.ExportSubjectPublicKeyInfo());
     }
 
-    // CONTRACT.md §4: CN=<identity_id>, and the root's subject as the issuer.
+    // CONTRACT.agent-identity.md §4: CN=<identity_id>, and the root's subject as the issuer.
     [Fact]
     public void SubjectIsTheCommonNameOfTheIdentity()
     {
@@ -73,7 +74,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(_root.SubjectName.RawData, leaf.IssuerName.RawData);
     }
 
-    // CONTRACT.md §4: SAN URI urn:uuid:<identity_id>.
+    // CONTRACT.agent-identity.md §4: SAN URI urn:uuid:<identity_id>.
     // RFC 5280 §4.2.1.6: GeneralNames is a SEQUENCE OF GeneralName, and a URI is [6] IA5String;
     // with a subject present, the extension is not critical.
     [Fact]
@@ -91,7 +92,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.False(extension.Critical);
     }
 
-    // CONTRACT.md §4: EKU clientAuth.
+    // CONTRACT.agent-identity.md §4: EKU clientAuth.
     [Fact]
     public void ExtendedKeyUsageIsClientAuthenticationOnly()
     {
@@ -103,7 +104,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.False(extension.Critical);
     }
 
-    // CONTRACT.md §4: KeyUsage digitalSignature; RFC 5280 §4.2.1.3: marked critical.
+    // CONTRACT.agent-identity.md §4: KeyUsage digitalSignature; RFC 5280 §4.2.1.3: marked critical.
     [Fact]
     public void KeyUsageIsCriticalDigitalSignatureOnly()
     {
@@ -220,7 +221,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(NowInSeconds.UtcDateTime, leaf.NotBefore.ToUniversalTime());
     }
 
-    // CONTRACT.md §4: the lifetime is a server setting.
+    // CONTRACT.agent-identity.md §4: the lifetime is a server setting.
     // RFC 5280 §4.1.2.5: a certificate holds whole seconds, so a fraction of a second in the lifetime is dropped,
     // since rounding it up would exceed the lifetime.
     [Theory]
@@ -235,7 +236,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(NowInSeconds.AddDays(30).UtcDateTime, leaf.NotAfter.ToUniversalTime());
     }
 
-    // CONTRACT.md §4: the lifetime is capped at the issuing root's notAfter.
+    // CONTRACT.agent-identity.md §4: the lifetime is capped at the issuing root's notAfter.
     [Fact]
     public void NotAfterIsCappedAtTheNotAfterOfTheIssuer()
     {
@@ -246,14 +247,14 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(NowInSeconds.AddDays(10).UtcDateTime, leaf.NotAfter.ToUniversalTime());
     }
 
-    // CONTRACT.md §4: the lifetime is a server setting with a default of 90 days.
+    // CONTRACT.agent-identity.md §4: the lifetime is a server setting with a default of 90 days.
     [Fact]
     public void DefaultLifetimeIs90Days()
     {
         Assert.Equal(TimeSpan.FromDays(90), IdentityCertificateIssuer.DefaultLifetime);
     }
 
-    // CONTRACT.md §4: the lifetime is a server setting,
+    // CONTRACT.agent-identity.md §4: the lifetime is a server setting,
     // and reading a moving clock twice would give the certificate a validity other than its lifetime.
     [Fact]
     public void ReadsTheClockOnce()
@@ -265,7 +266,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // The certificate chains to the root that issued it, for client authentication.
-    // RFC 5280 §6 path validation, as X509Chain runs it, with the CONTRACT.md §4 EKU clientAuth.
+    // RFC 5280 §6 path validation, as X509Chain runs it, with the CONTRACT.agent-identity.md §4 EKU clientAuth.
     [Fact]
     public void ChainsToTheIssuer()
     {
@@ -313,7 +314,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Throws<ArgumentOutOfRangeException>(() => Issue(lifetime: TimeSpan.FromMilliseconds(milliseconds)));
     }
 
-    // CONTRACT.md §4: notAfter is at most the issuer's notAfter,
+    // CONTRACT.agent-identity.md §4: notAfter is at most the issuer's notAfter,
     // so an issuer that expires by notBefore leaves no validity.
     [Theory]
     [InlineData(0)]

@@ -37,7 +37,8 @@ public sealed class ChannelOpeningResult
     public AgentIdentityError? Error { get; }
 
     /// <summary>
-    /// The rule that the opening request broke and the step of CONTRACT.md §6 that checks it, for host logs.
+    /// The rule that the opening request broke and the step of CONTRACT.agent-identity.md §6 that checks it,
+    /// for host logs.
     /// </summary>
     /// <remarks>
     /// It is a fixed sentence, so it never holds a header value, a token or a secret.

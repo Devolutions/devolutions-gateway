@@ -8,8 +8,8 @@ namespace Devolutions.AgentIdentity;
 /// <c>check-in</c> responses and in <c>ConfigUpdate</c> messages.
 /// </summary>
 /// <remarks>
-/// Only <see cref="Create"/> creates instances, so an instance always serializes to a config that CONTRACT.md §5.2
-/// accepts.
+/// Only <see cref="Create"/> creates instances,
+/// so an instance always serializes to a config that CONTRACT.agent-identity.md §5.2 accepts.
 /// The agent replaces its stored config only with a higher <see cref="Revision"/>,
 /// so the host creates the config with a higher revision whenever the identity's config changes.
 /// </remarks>
@@ -171,7 +171,8 @@ public sealed class IdentityConfig
 
             try
             {
-                // CONTRACT.md §1 governs every member of an agent-facing body, so it governs those inside the value.
+                // CONTRACT.agent-identity.md §1 governs every member of an agent-facing body,
+                // so it governs those inside the value.
                 if (CheckMembers(value) is { } problem)
                 {
                     throw new ArgumentException(
@@ -192,7 +193,7 @@ public sealed class IdentityConfig
         }
     }
 
-    // Returns how a member inside the value breaks the conventions of CONTRACT.md §1, or null.
+    // Returns how a member inside the value breaks the conventions of CONTRACT.agent-identity.md §1, or null.
     // The walk keeps its own stack, so that a deeply nested value cannot exhaust the thread's stack.
     // Reading a name decodes its escapes, and throws InvalidOperationException for a lone surrogate.
     private static string? CheckMembers(JsonElement value)

@@ -5,7 +5,7 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class EnrollmentAuthorizationTests
 {
-    // A token for https://host/dvls whose secret encodes the bytes 00 to 1F (CONTRACT.md §2).
+    // A token for https://host/dvls whose secret encodes the bytes 00 to 1F (CONTRACT.agent-identity.md §2).
     private const string Bag = "eyJ1IjoiaHR0cHM6Ly9ob3N0L2R2bHMifQ";
     private const string Secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
     private const string Token = "dvaet1." + Bag + "." + Secret;
@@ -19,16 +19,16 @@ public class EnrollmentAuthorizationTests
         {
             Dictionary<string, string[]> fieldLines = new()
             {
-                // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is missing.
+                // CONTRACT.agent-identity.md §2.1 (1): `token_invalid` when the `Authorization` header is missing.
                 ["no field"] = [],
 
-                // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is repeated,
+                // CONTRACT.agent-identity.md §2.1 (1): `token_invalid` when the `Authorization` header is repeated,
                 // even when every field line holds the same valid token.
                 ["the same token twice"] = ["Bearer " + Token, "Bearer " + Token],
                 ["a token, then an empty field"] = ["Bearer " + Token, ""],
                 ["an empty field, then a token"] = ["", "Bearer " + Token],
 
-                // CONTRACT.md §2.1 (1): `token_invalid` when the `Authorization` header is not `Bearer`.
+                // CONTRACT.agent-identity.md §2.1 (1): `token_invalid` when the `Authorization` header is not `Bearer`.
                 ["Basic"] = ["Basic " + Token],
                 ["DPoP"] = ["DPoP " + Token],
                 ["Bearers"] = ["Bearers " + Token],
@@ -43,7 +43,7 @@ public class EnrollmentAuthorizationTests
                 ["a space and a tab"] = ["Bearer \t" + Token],
             };
 
-            // CONTRACT.md §2.1 (1): a field that holds no token gets `token_invalid`.
+            // CONTRACT.agent-identity.md §2.1 (1): a field that holds no token gets `token_invalid`.
             foreach ((string name, string token) in MalformedTokens)
             {
                 fieldLines.Add(name, ["Bearer " + token]);
@@ -53,7 +53,7 @@ public class EnrollmentAuthorizationTests
         }
     }
 
-    // CONTRACT.md §2: a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`.
+    // CONTRACT.agent-identity.md §2: a complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`.
     // The pattern covers the whole value, so a line terminator after the token is not part of a match.
     private static Dictionary<string, string> MalformedTokens => new()
     {
@@ -80,7 +80,7 @@ public class EnrollmentAuthorizationTests
         ["a second credential after the token"] = Token + ", Bearer " + Token,
     };
 
-    // CONTRACT.md §2.1: the authority finds the token whose SHA-256(secret) matches,
+    // CONTRACT.agent-identity.md §2.1: the authority finds the token whose SHA-256(secret) matches,
     // and §2 makes it match the secret text exactly.
     [Theory]
     [InlineData("a bearer token", "Bearer " + Token)]
@@ -91,7 +91,7 @@ public class EnrollmentAuthorizationTests
     // RFC 9110 §11.4: `credentials = auth-scheme [ 1*SP ( token68 / #auth-param ) ]`.
     [InlineData("two spaces", "Bearer  " + Token)]
     [InlineData("three spaces", "Bearer   " + Token)]
-    // CONTRACT.md §2.1 (1): the authority finds a token by `SHA-256(secret)` alone,
+    // CONTRACT.agent-identity.md §2.1 (1): the authority finds a token by `SHA-256(secret)` alone,
     // and §2 makes the bag routing data that the authority never trusts, so it is not decoded.
     // The rows are a bag of an impossible base64url length, one that decodes to bytes that are not JSON,
     // and the bag of {"u":"https://other/psu"}.
@@ -122,7 +122,7 @@ public class EnrollmentAuthorizationTests
         AssertTokenInvalid(result);
     }
 
-    // CONTRACT.md §2: a token is at most 4096 bytes.
+    // CONTRACT.agent-identity.md §2: a token is at most 4096 bytes.
     // The bag is not decoded, so a bag of any length in the alphabet sets the token length.
     [Fact]
     public void AcceptsATokenOf4096Bytes()
@@ -136,7 +136,8 @@ public class EnrollmentAuthorizationTests
         Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
     }
 
-    // CONTRACT.md §2: a token is at most 4096 bytes; §2.1 (1): a field that holds no token gets `token_invalid`.
+    // CONTRACT.agent-identity.md §2: a token is at most 4096 bytes;
+    // §2.1 (1): a field that holds no token gets `token_invalid`.
     [Fact]
     public void RejectsATokenLongerThan4096Bytes()
     {
@@ -148,7 +149,7 @@ public class EnrollmentAuthorizationTests
         AssertTokenInvalid(result);
     }
 
-    // CONTRACT.md §2: the authority matches the `secret` text exactly.
+    // CONTRACT.agent-identity.md §2: the authority matches the `secret` text exactly.
     // Ending in '9' (sextet 61) instead of '8' (sextet 60) sets a pad bit,
     // so a lenient decoder reads the same 32 bytes, but the text, and so its hash, differs.
     [Fact]
@@ -201,7 +202,7 @@ public class EnrollmentAuthorizationTests
         Assert.Equal("authorizationFieldLines", exception.ParamName);
     }
 
-    // CONTRACT.md §5.4: `token_invalid` is carried by HTTP 401.
+    // CONTRACT.agent-identity.md §5.4: `token_invalid` is carried by HTTP 401.
     private static void AssertTokenInvalid(EnrollmentAuthorizationResult result)
     {
         Assert.False(result.Succeeded);

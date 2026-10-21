@@ -1,7 +1,7 @@
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The CSR key rules of a renew request, CONTRACT.md §5.3.
+/// The CSR key rules of a renew request, CONTRACT.agent-identity.md §5.3.
 /// </summary>
 /// <remarks>
 /// Every request is a renew request that device-a signed; device-b of the vector file is another identity.
@@ -10,8 +10,8 @@ public class RenewalRulesTests
 {
     private static readonly Guid OtherIdentityId = TestVectors.Instance.Key("device-b").IdentityId;
 
-    // CONTRACT.md §5.3: the key of any other certificate that the server has issued, including this identity's
-    // current or retired certificates and every certificate of another identity, gets invalid_request.
+    // CONTRACT.agent-identity.md §5.3: the key of any other certificate that the server has issued, including this
+    // identity's current or retired certificates and every certificate of another identity, gets invalid_request.
     // A deleted identity's certificates are certificates that the server has issued.
     private static readonly Dictionary<string, Func<Guid, IssuedKeyMatch>> OtherIssuedKeys = new()
     {
@@ -32,7 +32,7 @@ public class RenewalRulesTests
 
     public static TheoryData<string> OtherIssuedKeyNames => new(OtherIssuedKeys.Keys);
 
-    // CONTRACT.md §5.3: if the CSR key is the key of the identity's pending certificate,
+    // CONTRACT.agent-identity.md §5.3: if the CSR key is the key of the identity's pending certificate,
     // the server returns 200 with that pending chain, a retry after a lost response.
     // A renew request presents no enrollment token, so whatever the host says about one does not count.
     [Theory]
@@ -68,7 +68,7 @@ public class RenewalRulesTests
         Assert.False(string.IsNullOrEmpty(decision.FailureDetail));
     }
 
-    // CONTRACT.md §5.3: if the CSR key was never issued, the server issues a new pending certificate
+    // CONTRACT.agent-identity.md §5.3: if the CSR key was never issued, the server issues a new pending certificate
     // and retires the identity's previous pending certificate, if any.
     [Fact]
     public async Task IssuesAPendingCertificateForAKeyNeverIssued()

@@ -6,7 +6,7 @@ using Google.Protobuf;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The channel opening of CONTRACT.md §7.3 steps 1 and 2:
+/// The channel opening of CONTRACT.agent-identity.md §7.3 steps 1 and 2:
 /// the verified opening request and the challenge that follows it.
 /// </summary>
 public class ChannelOpeningTests
@@ -15,8 +15,9 @@ public class ChannelOpeningTests
 
     private static ChannelProofVectors ChannelProof => TestVectors.Instance.ChannelProof;
 
-    // CONTRACT.md §7.3 step 2: the first message is Challenge, with 32 random bytes fresh for this stream.
-    // CONTRACT.md §1 and §7.3: ids are lowercase hyphenated UUIDs.
+    // CONTRACT.agent-identity.md §7.3 step 2: the first message is Challenge,
+    // with 32 random bytes fresh for this stream.
+    // CONTRACT.agent-identity.md §1 and §7.3: ids are lowercase hyphenated UUIDs.
     // The bytes come from the injected generator, the host's source of every secret byte.
     [Fact]
     public async Task ChallengeHolds32BytesFromTheInjectedGenerator()
@@ -32,7 +33,7 @@ public class ChannelOpeningTests
         Assert.False(challenge.HasCorrelationId);
     }
 
-    // CONTRACT.md §7.3 step 2: the challenge holds 32 random bytes fresh for this stream.
+    // CONTRACT.agent-identity.md §7.3 step 2: the challenge holds 32 random bytes fresh for this stream.
     // A challenge reused across streams would let a proof captured on one stream authenticate another.
     [Fact]
     public async Task EachOpeningHasItsOwnChallenge()
@@ -48,7 +49,7 @@ public class ChannelOpeningTests
             second.Challenge.Challenge.Challenge_.ToByteArray());
     }
 
-    // CONTRACT.md §7.3 steps 3 and 4: the proof covers the challenge as sent and the connect nonce,
+    // CONTRACT.agent-identity.md §7.3 steps 3 and 4: the proof covers the challenge as sent and the connect nonce,
     // and is verified with the key of the certificate that authenticated the opening,
     // so the opening keeps the nonce and that certificate for the handshake.
     [Fact]
@@ -77,7 +78,8 @@ public class ChannelOpeningTests
         Assert.Equal(registered.NotAfter, opening.Certificate.NotAfter);
     }
 
-    // CONTRACT.md §7.3 steps 3 and 4: the agent signs the challenge it received, and the server verifies that proof.
+    // CONTRACT.agent-identity.md §7.3 steps 3 and 4: the agent signs the challenge it received,
+    // and the server verifies that proof.
     // The handshake checks the proof against the challenge as sent,
     // so a host that edits the message object after sending it must not change what the agent has to sign.
     [Fact]
@@ -95,8 +97,8 @@ public class ChannelOpeningTests
         Assert.Equal(sentBytes, opening.ChallengeBytes.ToArray());
     }
 
-    // CONTRACT.md §7.4: a stream closes no later than its certificate's notAfter, even while it waits for its Hello,
-    // so the opening gives the host that time.
+    // CONTRACT.agent-identity.md §7.4: a stream closes no later than its certificate's notAfter,
+    // even while it waits for its Hello, so the opening gives the host that time.
     // The vector file states it in Unix seconds, independently of any time zone.
     [Fact]
     public async Task OpeningGivesTheNotAfterOfItsCertificate()

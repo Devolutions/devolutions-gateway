@@ -4,7 +4,7 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class IdentityConfigTests
 {
-    // CONTRACT.md §5.2: `config` holds `version`, which is 1, `revision` and `agent_channel_url`.
+    // CONTRACT.agent-identity.md §5.2: `config` holds `version`, which is 1, `revision` and `agent_channel_url`.
     // An agent reads both numbers as integers, so 1.0 or 3e0 would not do.
     [Fact]
     public void JsonHasTheContractMembers()
@@ -22,7 +22,7 @@ public class IdentityConfigTests
         Assert.Equal("https://host/dvls", members["agent_channel_url"].GetString());
     }
 
-    // CONTRACT.md §5.2: `agent_channel_url` is absent when the server does not offer the channel,
+    // CONTRACT.agent-identity.md §5.2: `agent_channel_url` is absent when the server does not offer the channel,
     // and §1 omits an absent field rather than writing null.
     [Fact]
     public void JsonOmitsAnAbsentAgentChannelUrl()
@@ -35,7 +35,8 @@ public class IdentityConfigTests
         Assert.Null(config.AgentChannelUrl);
     }
 
-    // CONTRACT.md §5.2: `revision` is an unsigned 64-bit integer, with no starting value the agent assumes.
+    // CONTRACT.agent-identity.md §5.2: `revision` is an unsigned 64-bit integer,
+    // with no starting value the agent assumes.
     // A double holds no more than 53 bits, so it would round the largest revisions.
     [Theory]
     [InlineData(0UL, "0")]
@@ -51,7 +52,7 @@ public class IdentityConfigTests
         Assert.Equal(revision, config.Revision);
     }
 
-    // CONTRACT.md §5.2: `agent_channel_url` is an absolute `https` URL without a query or fragment.
+    // CONTRACT.agent-identity.md §5.2: `agent_channel_url` is an absolute `https` URL without a query or fragment.
     // RFC 9110 §4.2.4: a sender does not generate user information in an `https` URI.
     [Theory]
     [InlineData("")]
@@ -74,7 +75,8 @@ public class IdentityConfigTests
         Assert.Equal("agentChannelUrl", exception.ParamName);
     }
 
-    // CONTRACT.md §7.2: the agent prepends the URL path to `/devolutions.agent.channel.v1.AgentChannel/Connect`,
+    // CONTRACT.agent-identity.md §7.2: the agent prepends the URL path to
+    // `/devolutions.agent.channel.v1.AgentChannel/Connect`,
     // so a URL ending in a slash would put two slashes in the gRPC path.
     [Theory]
     [InlineData("https://host/dvls", "https://host/dvls")]
@@ -89,7 +91,8 @@ public class IdentityConfigTests
         Assert.Equal(expected, config.AgentChannelUrl);
     }
 
-    // CONTRACT.md §5.2: product-specific config fields, such as a PSU channel URL, may coexist with the others.
+    // CONTRACT.agent-identity.md §5.2: product-specific config fields, such as a PSU channel URL,
+    // may coexist with the others.
     [Fact]
     public void JsonHasTheProductFieldsBesideTheContractMembers()
     {
@@ -109,7 +112,8 @@ public class IdentityConfigTests
         Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), members["policy_limits"]));
     }
 
-    // CONTRACT.md §1: JSON keys are snake_case, lowercase words of letters and digits joined by single underscores.
+    // CONTRACT.agent-identity.md §1: JSON keys are snake_case,
+    // lowercase words of letters and digits joined by single underscores.
     // zz09 starts and goes on with the last letter, and holds the first and last digits.
     [Theory]
     [InlineData("a")]
@@ -141,7 +145,7 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new(name, TestJson.Parse("true"))]);
     }
 
-    // CONTRACT.md §5.2 defines these members, so a product field of one of these names would repeat it.
+    // CONTRACT.agent-identity.md §5.2 defines these members, so a product field of one of these names would repeat it.
     [Theory]
     [InlineData("version")]
     [InlineData("revision")]
@@ -176,7 +180,7 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new("label", TestJson.Parse(value))]);
     }
 
-    // CONTRACT.md §1: JSON keys are snake_case, so the members inside a product field's value are too,
+    // CONTRACT.agent-identity.md §1: JSON keys are snake_case, so the members inside a product field's value are too,
     // whether an object or an array holds them.
     [Theory]
     [InlineData("""{"maxSessions": 4}""")]
@@ -188,7 +192,8 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new("policy_limits", TestJson.Parse(value))]);
     }
 
-    // RFC 8259 §4: with a repeated name, receivers disagree on the value, as CONTRACT.md §1 notes of request bodies.
+    // RFC 8259 §4: with a repeated name, receivers disagree on the value,
+    // as CONTRACT.agent-identity.md §1 notes of request bodies.
     // A product field is a member of the config, and a name and its escaped spelling are the same name.
     private static readonly Dictionary<string, KeyValuePair<string, JsonElement>[]> RepeatedMemberNames = new()
     {
@@ -211,7 +216,7 @@ public class IdentityConfigTests
         AssertRejectsProductFields(RepeatedMemberNames[form]);
     }
 
-    // CONTRACT.md §1: an absent field is omitted, never written as null, at any depth.
+    // CONTRACT.agent-identity.md §1: an absent field is omitted, never written as null, at any depth.
     [Theory]
     [InlineData("psu_channel_url", "null")]
     [InlineData("policy_limits", """{"proxy": null}""")]

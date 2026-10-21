@@ -1,13 +1,13 @@
 # Devolutions.AgentIdentity
 
-`Devolutions.AgentIdentity` implements what every Agent Identity authority must do the same way under [CONTRACT.md][contract], so that its hosts, such as DVLS and PSU, cannot drift apart on the protocol that Devolutions Agent speaks.
-The contract is `docs/agent-identity/CONTRACT.md` in the [devolutions-gateway repository][repo], which also holds this library.
+`Devolutions.AgentIdentity` implements what every Agent Identity authority must do the same way under [CONTRACT.agent-identity.md][contract], so that its hosts, such as DVLS and PSU, cannot drift apart on the protocol that Devolutions Agent speaks.
+The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolutions-gateway repository][repo], which also holds this library.
 
 ## What the library covers
 
 - Enrollment tokens: `EnrollmentToken.Create` creates a token, `FriendlyNameFormat` parses and evaluates its friendly-name format, and `EnrollmentAuthorization.ReadBearerToken` reads it from an `enroll` request.
   The host stores the token's `SecretHash`, never its `Value`, which it shows once and never logs.
-- Request authentication: `RequestAuthenticator` verifies the signed `renew`, `confirm` and `check-in` requests and the signed opening of an agent channel stream (CONTRACT.md [§6]).
+- Request authentication: `RequestAuthenticator` verifies the signed `renew`, `confirm` and `check-in` requests and the signed opening of an agent channel stream (CONTRACT.agent-identity.md [§6]).
 - Request bodies: `EnrollRequestBody`, `RenewRequestBody` and `CheckInRequestBody` parse a body and validate its CSR (`CertificateSigningRequest`) and metadata (`AgentMetadata`).
 - Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the issued certificate that holds the CSR key.
 - Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of a new identity, or of the identity that a renew request proved.
@@ -33,7 +33,7 @@ The host provides these dependencies, with the guarantees the library relies on:
 - `INonceStore.TryRecordAsync` records a `keyid` and `nonce` pair, or returns false when the pair is already recorded, in one atomic operation, and keeps the pair until `retainUntil`.
 - `IRootSigner` holds the root that issues new certificates and a `SignatureGenerator` over its private key.
   Its `Certificate` must have a Subject Key Identifier extension, which becomes the Authority Key Identifier of each issued certificate; without one, `IdentityCertificateIssuer.Issue` throws `ArgumentException`.
-  Once a root rotation starts, it holds the new root (CONTRACT.md [§8.3]).
+  Once a root rotation starts, it holds the new root (CONTRACT.agent-identity.md [§8.3]).
 - `TimeProvider` is the authority's clock, usually `TimeProvider.System`, which decides signature freshness, certificate validity and handshake deadlines.
   Take the `now` of `EnrollmentRules.Decide` and the `serverTime` of every error from the same clock, since the agent corrects its own clock from `server_time`.
 - `RandomNumberGenerator` must be cryptographically secure, such as `RandomNumberGenerator.Create()`, since it supplies channel challenges, token secrets and certificate serial numbers.
@@ -43,12 +43,12 @@ Exceptions from the registry and the nonce store propagate to the caller.
 
 ## Call order
 
-Each HTTP request goes through the body size check, then authentication, then body parsing, so that the error precedence of CONTRACT.md [§5.4] holds: a body over 64 KiB fails first, and an authentication error wins over an invalid body, CSR or metadata.
+Each HTTP request goes through the body size check, then authentication, then body parsing, so that the error precedence of CONTRACT.agent-identity.md [§5.4] holds: a body over 64 KiB fails first, and an authentication error wins over an invalid body, CSR or metadata.
 When a step fails, answer with the `Error` of its result, as [Errors][errors] describes.
 
 ### `trust-anchor`
 
-Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normally, the old and the new during a rotation (CONTRACT.md [§5.1]).
+Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normally, the old and the new during a rotation (CONTRACT.agent-identity.md [§5.1]).
 
 ### `enroll`
 
@@ -62,8 +62,8 @@ Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normall
    - `Reject`: answer with `Error`.
    - `ReturnExistingIdentity`: take identity `ExistingIdentityId`, and change nothing.
    - `CreateIdentity`: mint an identity ID, issue its certificate with `IdentityCertificateIssuer.Issue`, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata and the key's `SubjectPublicKeyInfoSha256`.
-     Create the identity and count the token use atomically, as CONTRACT.md [§2.1] requires of concurrent enrollments.
-6. Answer with `ResponseBodies.Enroll`, given the authority ID and the identity's ID, current certificate chain, leaf first, and config (CONTRACT.md [§5.2]).
+     Create the identity and count the token use atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent enrollments.
+6. Answer with `ResponseBodies.Enroll`, given the authority ID and the identity's ID, current certificate chain, leaf first, and config (CONTRACT.agent-identity.md [§5.2]).
 
 ### Signed requests
 
@@ -83,18 +83,18 @@ Each then acts for the result's `Identity` only.
    - `Reject`: answer with `Error`.
    - `ReturnPendingCertificate`: keep the identity's pending certificate, which holds the key.
    - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the `AuthenticatedIdentity`, and store it as the identity's pending certificate, retiring the previous one.
-     Store it atomically, as CONTRACT.md [§2.1] requires of concurrent renewals.
-3. Replace the identity's metadata, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.md [§5.3]).
+     Store it atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent renewals.
+3. Replace the identity's metadata, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.agent-identity.md [§5.3]).
 
 ### `confirm`
 
-When `Identity.CertificateStatus` is `CertificateStatus.Pending`, make the certificate current, retire the previous current certificate, and clear the request-renewal flag if it was set before the certificate was issued (CONTRACT.md [§8.2]).
-Then send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)` on each stream that the retired certificate opened, and close those streams with `OK` 60 s later (CONTRACT.md [§7.4]).
-Answer `204`, also when the certificate was already current (CONTRACT.md [§5.5]).
+When `Identity.CertificateStatus` is `CertificateStatus.Pending`, make the certificate current, retire the previous current certificate, and clear the request-renewal flag if it was set before the certificate was issued (CONTRACT.agent-identity.md [§8.2]).
+Then send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)` on each stream that the retired certificate opened, and close those streams with `OK` 60 s later (CONTRACT.agent-identity.md [§7.4]).
+Answer `204`, also when the certificate was already current (CONTRACT.agent-identity.md [§5.5]).
 
 ### `check-in`
 
-Replace the identity's metadata, and answer with `ResponseBodies.CheckIn`, given the identity's config and its request-renewal flag (CONTRACT.md [§5.6], [§8.2]).
+Replace the identity's metadata, and answer with `ResponseBodies.CheckIn`, given the identity's config and its request-renewal flag (CONTRACT.agent-identity.md [§5.6], [§8.2]).
 
 ### Agent channel
 
@@ -104,19 +104,19 @@ Replace the identity's metadata, and answer with `ResponseBodies.CheckIn`, given
    Call `Opening.HelloTimedOutAsync` instead when no message arrives within `ChannelHandshake.HelloTimeout`, when `Opening.CertificateNotAfter` passes first, or when the agent ends the stream without a message.
    The first of these calls ends the handshake, and a second one throws `InvalidOperationException`.
 4. On success, replace the identity's metadata with `Metadata`, send `Welcome`, and only then treat the stream as authenticated for `Identity`.
-5. Send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.md [§7.3] steps 5 and 7).
-6. If `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: also send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)`, and close the stream with `OK` 60 s later, as for `confirm` (CONTRACT.md [§7.4]).
-7. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.md [§7.4]).
+5. Send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.agent-identity.md [§7.3] steps 5 and 7).
+6. If `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: also send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)`, and close the stream with `OK` 60 s later, as for `confirm` (CONTRACT.agent-identity.md [§7.4]).
+7. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.agent-identity.md [§7.4]).
 
-`VerifyHelloAsync` and `HelloTimedOutAsync` read the registry again, so a deletion, a revocation or the certificate's expiry since the opening closes the stream with its own error, ahead of the handshake failures (CONTRACT.md [§7.4]).
-A channel opening has no body: `VerifyHelloAsync` then checks the deadline, the message and its proof, and the metadata of the `Hello` last (CONTRACT.md [§7.3] step 4).
+`VerifyHelloAsync` and `HelloTimedOutAsync` read the registry again, so a deletion, a revocation or the certificate's expiry since the opening closes the stream with its own error, ahead of the handshake failures (CONTRACT.agent-identity.md [§7.4]).
+A channel opening has no body: `VerifyHelloAsync` then checks the deadline, the message and its proof, and the metadata of the `Hello` last (CONTRACT.agent-identity.md [§7.3] step 4).
 
 When an identity's config changes, create its `IdentityConfig` again with a higher `Revision`, and send `ChannelMessages.ConfigUpdate` on each authenticated stream of the identity.
-`ChannelMessages.RenewRequested` takes `RenewalRequestReason.Rotation` for the notifications of a root rotation (CONTRACT.md [§8.3]), and `RenewalRequestReason.Admin` for an administrator's request.
+`ChannelMessages.RenewRequested` takes `RenewalRequestReason.Rotation` for the notifications of a root rotation (CONTRACT.agent-identity.md [§8.3]), and `RenewalRequestReason.Admin` for an administrator's request.
 
 ## Errors
 
-Over HTTP, every non-2xx response under `{u}/api/agent-identity/v1/` must carry an error body, including those of the web framework (CONTRACT.md [§5.4]).
+Over HTTP, every non-2xx response under `{u}/api/agent-identity/v1/` must carry an error body, including those of the web framework (CONTRACT.agent-identity.md [§5.4]).
 Answer with status `HttpStatusCode`, header `Content-Type: application/json` and body `ToJsonBody(serverTime)`.
 For a failure that the library does not report, use `AgentIdentityError.From` with its code, or one of these errors:
 
@@ -131,7 +131,7 @@ For a failure that the library does not report, use `AgentIdentityError.From` wi
 
 The library writes no headers, so the host adds `Retry-After` to `ServiceUnavailable` when it sheds load.
 
-Over gRPC, end the call by throwing `ToRpcException(serverTime)`, which carries the status of `ToGrpcStatusCode` and the trailers `error-code` and `server-time` (CONTRACT.md [§7.4]).
+Over gRPC, end the call by throwing `ToRpcException(serverTime)`, which carries the status of `ToGrpcStatusCode` and the trailers `error-code` and `server-time` (CONTRACT.agent-identity.md [§7.4]).
 For a closure that the host decides, such as a revocation, build the error with `AgentIdentityError.From`.
 
 Log `FailureDetail` beside the error: it names the rule that the request broke and never holds a token or a secret.
@@ -156,23 +156,23 @@ dotnet test ./dotnet/AgentIdentity/AgentIdentity.sln
 `build.ps1` builds the library in Release and packs it, with its symbol package, into `dotnet/AgentIdentity/Devolutions.AgentIdentity/bin/Release/`.
 The tests also check the library against the shared vectors in `docs/agent-identity/test-vectors.json`.
 
-The package depends on `Devolutions.Agent.Channel`, the gRPC types generated from the channel schema (CONTRACT.md [§7.1]): the handshake takes its `AgentMessage` and returns its `ServerMessage`.
+The package depends on `Devolutions.Agent.Channel`, the gRPC types generated from the channel schema (CONTRACT.agent-identity.md [§7.1]): the handshake takes its `AgentMessage` and returns its `ServerMessage`.
 Implement the `AgentChannel` service with that package; a feed that serves this package must serve that one too.
 
-[contract]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md
+[contract]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md
 [repo]: https://github.com/Devolutions/devolutions-gateway
-[§2.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#21-authority-behavior
-[§5.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#51-get-trust-anchor
-[§5.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#52-post-enroll
-[§5.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#53-post-renew
-[§5.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#agent-identity-errors
-[§5.5]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#55-post-confirm
-[§5.6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#56-post-check-in-http-fallback
-[§6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#agent-identity-signatures
-[§7.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#71-service
-[§7.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#73-sequence
-[§7.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#74-termination
-[§8.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#82-server-certificate-state
-[§8.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.md#83-root-rotation
+[§2.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#21-authority-behavior
+[§5.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#51-get-trust-anchor
+[§5.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
+[§5.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#53-post-renew
+[§5.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-errors
+[§5.5]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#55-post-confirm
+[§5.6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#56-post-check-in-http-fallback
+[§6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-signatures
+[§7.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#71-service
+[§7.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
+[§7.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#74-termination
+[§8.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#82-server-certificate-state
+[§8.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#83-root-rotation
 [invariants]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/INTENT.agent-identity.md#security-invariants
 [errors]: #errors

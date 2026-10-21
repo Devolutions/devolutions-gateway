@@ -4,7 +4,7 @@ namespace Devolutions.AgentIdentity;
 /// The signature profile of one operation: its tag, its covered components and the certificate validity it accepts.
 /// </summary>
 /// <remarks>
-/// These are the rows of the table in CONTRACT.md §6.
+/// These are the rows of the table in CONTRACT.agent-identity.md §6.
 /// </remarks>
 internal sealed class SignedOperation
 {

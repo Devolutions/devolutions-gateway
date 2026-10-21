@@ -1,4 +1,4 @@
-This library holds everything every authority must do the same way under `docs/agent-identity/CONTRACT.md`, and nothing about storage, hosting or management, so that DVLS and PSU cannot drift apart on the agent-facing protocol.
+This library holds everything every authority must do the same way under `docs/agent-identity/CONTRACT.agent-identity.md`, and nothing about storage, hosting or management, so that DVLS and PSU cannot drift apart on the agent-facing protocol.
 The feature's shared intent is `INTENT.agent-identity.md` beside this file.
 
 - An authority must use the identity produced by the signature check.
