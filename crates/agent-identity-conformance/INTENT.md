@@ -14,7 +14,7 @@ The mock implements the contract's agent-facing operations and channel independe
 - Parameters: agent binary path, target (mock or DVLS), and one or more authorities, each with its base URL, management API credentials and what it offers, such as its leaf lifetime and whether it runs a channel.
 - Each test declares what it needs from an authority and runs against the first one that offers it; when none does, it reports SKIP naming the missing capability, which counts as a missing fixture, so one run against several differently configured authorities can cover every test.
 - When an agent test fails, the suite keeps that test's agent data directory and logs and prints where, because a failure seen only once in a long run against a real authority is otherwise lost.
-- A usage error never echoes a credential value, since the suite's output lands in CI logs.
+- Credentials stay out of the suite's output, which lands in CI logs: a usage error never echoes a credential value, and an `--authority` description names the environment variable holding its secret instead of carrying it, so the description itself never holds one.
 - Black box on both sides:
   - it drives the real agent binary through a generated configuration, pending-enrollment files, and the `identity enroll` command;
   - it drives the authority through its management API, and the mock also through its control surface.
