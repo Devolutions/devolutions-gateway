@@ -351,7 +351,7 @@ The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage
    `"devolutions-agent-identity/v1/channel-proof" ‖ 0x00 ‖ challenge (32 bytes) ‖ connect nonce (UTF-8 bytes of the `nonce` parameter)`.
 4. The server verifies `proof` with the public key of the certificate that authenticated the opening request.
    On success it replies `Welcome` (`correlation_id` = Hello `id`), replaces the identity's metadata (§3), and only then treats the stream as authenticated.
-   If the first agent message is not a `Hello`, its `correlation_id` is not the Challenge `id`, its proof doesn't verify, or no `Hello` arrives within 10 s, the server closes the stream with `UNAUTHENTICATED` + `error-code: signature_invalid`.
+   If the first agent message is not a `Hello` (including a message that cannot be decoded, since no proof can be read from it), its `correlation_id` is not the Challenge `id`, its proof doesn't verify, or no `Hello` arrives within 10 s, the server closes the stream with `UNAUTHENTICATED` + `error-code: signature_invalid`.
    Otherwise, if the `Hello` metadata violates §3, the server closes the stream with `INVALID_ARGUMENT` + `error-code: invalid_request`.
    Neither failure changes the identity's state.
 5. If the request-renewal flag is set, the server sends `RenewRequested` after `Welcome` on every connect until the identity confirms a newer certificate; the agent replies `Ack` (`correlation_id` = message `id`).
