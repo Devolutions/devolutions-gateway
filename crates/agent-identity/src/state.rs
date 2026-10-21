@@ -12,6 +12,7 @@ use time::format_description::well_known::Rfc3339;
 use url::Url;
 use uuid::{Uuid, Variant};
 
+pub use crate::private_file::UntrustedAuthorityDirectory;
 use crate::token::Token;
 use crate::{pending, private_file, rejected, state_lock};
 
@@ -111,7 +112,7 @@ impl Store {
         keys::list(&backend, &key_prefix)?;
         {
             let _lock = state_lock::acquire(&data_dir, acl_grant_current_user)?;
-            private_file::protect_authority_directories(&data_dir, acl_grant_current_user)?;
+            private_file::check_authority_directories(&data_dir, acl_grant_current_user)?;
         }
         Ok(Self {
             data_dir,
@@ -139,9 +140,33 @@ impl Store {
             .join("identity.json")
     }
 
+    /// Checks, without changing anything, that every authority directory is owned by the agent's account and protected
+    /// from other users.
+    ///
+    /// [`crates/agent-identity/INTENT.md`] ("Local state"): one that fails the check is never repaired, and stops all
+    /// identity processing until it is fixed, so every read and state change of the store runs this check first.
+    ///
+    /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+    pub fn check_authority_directories(&self) -> anyhow::Result<()> {
+        private_file::check_authority_directories(&self.data_dir, self.acl_grant_current_user).map(drop)
+    }
+
+    /// Takes the state lock once every authority directory passes [`Store::check_authority_directories`].
+    fn lock(&self) -> anyhow::Result<fs::File> {
+        let lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        self.check_authority_directories()?;
+        Ok(lock)
+    }
+
     pub fn read_identity(&self, authority_id: Uuid) -> anyhow::Result<Option<StoredIdentity>> {
+        self.check_authority_directories()?;
+        self.read_stored_identity(authority_id)
+    }
+
+    /// Reads an identity once every authority directory has passed [`Store::check_authority_directories`].
+    fn read_stored_identity(&self, authority_id: Uuid) -> anyhow::Result<Option<StoredIdentity>> {
         let path = self.identity_path(authority_id);
-        if !private_file::check_owned_directory(
+        if !private_file::check_authority_directory(
             path.parent().context("identity file has no parent")?,
             self.acl_grant_current_user,
         )? {
@@ -174,29 +199,9 @@ impl Store {
     }
 
     pub fn list_identities(&self) -> anyhow::Result<Vec<StoredIdentity>> {
-        let authorities = self.data_dir.join("identity").join("authorities");
-        let entries = match fs::read_dir(&authorities) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error).context("list stored identities"),
-        };
         let mut identities = Vec::new();
-        for entry in entries {
-            let entry = entry.context("read stored identity entry")?;
-            let name = entry.file_name();
-            let Some(authority_id) = name
-                .to_str()
-                .and_then(|name| Uuid::parse_str(name).ok().filter(|uuid| uuid.to_string() == name))
-            else {
-                continue;
-            };
-            let path =
-                Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| anyhow::anyhow!("non-UTF-8 authority path"))?;
-            ensure!(
-                private_file::check_owned_directory(&path, self.acl_grant_current_user)?,
-                "stored identity directory is untrusted"
-            );
-            if let Some(identity) = self.read_identity(authority_id)? {
+        for authority_id in private_file::check_authority_directories(&self.data_dir, self.acl_grant_current_user)? {
+            if let Some(identity) = self.read_stored_identity(authority_id)? {
                 identities.push(identity);
             } else {
                 match fs::symlink_metadata(self.identity_path(authority_id)) {
@@ -212,13 +217,13 @@ impl Store {
 
     /// Creates an identity only if its authority has no stored identity yet.
     pub fn write_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         self.write_identity_locked(None, identity)
     }
 
     /// Replaces an identity only while the expected snapshot is still current.
     pub fn replace_identity(&self, previous: &StoredIdentity, identity: &StoredIdentity) -> anyhow::Result<()> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         self.write_identity_locked(Some(previous), identity)
     }
 
@@ -232,7 +237,7 @@ impl Store {
             previous.is_none_or(|previous| previous.authority_id == identity.authority_id),
             "stored identity authority changed"
         );
-        let existing = self.read_identity(identity.authority_id)?;
+        let existing = self.read_stored_identity(identity.authority_id)?;
         if existing.is_none() {
             match fs::symlink_metadata(self.identity_path(identity.authority_id)) {
                 Ok(_) => anyhow::bail!("stored identity file is untrusted"),
@@ -292,9 +297,9 @@ impl Store {
             config.get("version").and_then(Value::as_u64) == Some(1),
             "unsupported config version"
         );
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         let latest = self
-            .read_identity(identity.authority_id)?
+            .read_stored_identity(identity.authority_id)?
             .context("stored identity is missing")?;
         ensure!(
             latest.identity_id == identity.identity_id && latest.token_sha256 == identity.token_sha256,
@@ -322,7 +327,7 @@ impl Store {
             key_name: name.clone(),
             certificate_chain: None,
         });
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         self.write_identity_locked(Some(&previous), &updated)?;
         *identity = updated;
         keys::generate(&self.backend, &name)
@@ -333,7 +338,7 @@ impl Store {
             let previous = identity.clone();
             let mut updated = previous.clone();
             updated.keys.pending = None;
-            let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+            let _lock = self.lock()?;
             self.write_identity_locked(Some(&previous), &updated)?;
             *identity = updated;
         }
@@ -446,7 +451,7 @@ impl Store {
     ) -> anyhow::Result<T> {
         let mut updated = identity.clone();
         change(&mut updated)?;
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         self.write_identity_locked(Some(identity), &updated)?;
         *identity = updated;
         then()
@@ -457,7 +462,7 @@ impl Store {
             let previous = identity.clone();
             let mut updated = previous.clone();
             updated.keys.previous = None;
-            let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+            let _lock = self.lock()?;
             self.write_identity_locked(Some(&previous), &updated)?;
             *identity = updated;
         }
@@ -465,13 +470,13 @@ impl Store {
     }
 
     pub fn remove_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         self.remove_identity_locked(identity)
     }
 
     fn remove_identity_locked(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
         ensure!(
-            self.read_identity(identity.authority_id)?.as_ref() == Some(identity),
+            self.read_stored_identity(identity.authority_id)?.as_ref() == Some(identity),
             "stored identity changed; reload before deleting"
         );
         for key in identity.keys.records() {
@@ -482,7 +487,7 @@ impl Store {
 
     /// Reuses an enrollment key, or skips a token already represented by an identity or rejection marker.
     pub fn begin_enrollment(&self, token: &Token) -> anyhow::Result<Option<(pending::InProgress, Box<dyn DeviceKey>)>> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         let hash_hex = token.sha256_hex();
         if rejected::is_rejected(&self.data_dir, &hash_hex)?
             || self
@@ -524,7 +529,7 @@ impl Store {
     /// Persists a permanent-outcome marker before deleting the token, key, and in-progress record.
     /// The caller supplies the hash of a token read from its matching pending file.
     pub fn discard_enrollment(&self, hash_hex: &str, reason: EnrollmentDiscardReason) -> anyhow::Result<()> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         rejected::mark_rejected(&self.data_dir, hash_hex, reason.code(), self.acl_grant_current_user)?;
         self.discard_pending_state_locked(hash_hex)
     }
@@ -553,7 +558,7 @@ impl Store {
 
     /// Rechecks an unusable pending file under the lock before removing it.
     pub fn discard_pending_file(&self, path: &Utf8Path) -> anyhow::Result<Option<PendingDiscard>> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         let directory = pending::directory(&self.data_dir);
         ensure!(
             path.parent() == Some(directory.as_path()),
@@ -602,13 +607,13 @@ impl Store {
 
     /// Removes a completed enrollment's pending state only after its key belongs to the saved identity.
     pub fn finish_enrollment(&self, hash_hex: &str, authority_id: Uuid) -> anyhow::Result<()> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         self.finish_enrollment_locked(hash_hex, authority_id)
     }
 
     fn finish_enrollment_locked(&self, hash_hex: &str, authority_id: Uuid) -> anyhow::Result<()> {
         let identity = self
-            .read_identity(authority_id)?
+            .read_stored_identity(authority_id)?
             .context("stored enrollment identity is missing")?;
         ensure!(
             identity.token_sha256 == hash_hex,
@@ -630,7 +635,7 @@ impl Store {
 
     /// Repairs missing unissued keys and drops keys no longer covered by a durable record.
     pub fn reconcile(&self) -> anyhow::Result<()> {
-        let _lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
+        let _lock = self.lock()?;
         private_file::cleanup_temporary_files(
             &pending::directory(&self.data_dir),
             pending::is_owned_temporary_stem,
@@ -647,32 +652,13 @@ impl Store {
         for hash_hex in rejected::list_rejected(&self.data_dir)? {
             self.discard_pending_state_locked(&hash_hex)?;
         }
-        let authorities = self.data_dir.join("identity").join("authorities");
-        let entries = match fs::read_dir(&authorities) {
-            Ok(entries) => Some(entries),
-            Err(error) if error.kind() == ErrorKind::NotFound => None,
-            Err(error) => return Err(error).context("list authority directories"),
-        };
-        if let Some(entries) = entries {
-            for entry in entries {
-                let entry = entry.context("read authority directory entry")?;
-                if entry.file_type()?.is_dir()
-                    && entry
-                        .file_name()
-                        .to_str()
-                        .is_some_and(|name| Uuid::parse_str(name).is_ok_and(|uuid| uuid.to_string() == name))
-                {
-                    let path = Utf8PathBuf::from_path_buf(entry.path())
-                        .map_err(|_| anyhow::anyhow!("non-UTF-8 authority path"))?;
-                    if private_file::check_owned_directory(&path, self.acl_grant_current_user)? {
-                        private_file::cleanup_temporary_files(
-                            &path,
-                            |stem| stem == ".identity.json",
-                            |path, _| private_file::remove_file(path),
-                        )?;
-                    }
-                }
-            }
+        for authority_id in private_file::check_authority_directories(&self.data_dir, self.acl_grant_current_user)? {
+            let path = self.identity_path(authority_id);
+            private_file::cleanup_temporary_files(
+                path.parent().context("identity file has no parent")?,
+                |stem| stem == ".identity.json",
+                |path, _| private_file::remove_file(path),
+            )?;
         }
         for mut identity in self.list_identities()? {
             // `crates/agent-identity/INTENT.md` ("Identities"): a rejected identity keeps its keys and slots until it
@@ -880,6 +866,13 @@ mod tests {
 
         fn store(&self) -> anyhow::Result<Store> {
             Store::new(self.0.clone(), Store::file_backend(&self.0), "ai".into(), true)
+        }
+
+        fn authority(&self, authority_id: Uuid) -> Utf8PathBuf {
+            self.0
+                .join("identity")
+                .join("authorities")
+                .join(authority_id.to_string())
         }
     }
 
@@ -1267,7 +1260,10 @@ mod tests {
 
         let authority_id = Uuid::new_v4();
         let identity_path = store.identity_path(authority_id);
-        fs::create_dir_all(identity_path.parent().context("identity path has no directory")?)?;
+        private_file::create_authority_directory(
+            identity_path.parent().context("identity path has no directory")?,
+            true,
+        )?;
         fs::write(&identity_path, b"not a stored identity")?;
         #[cfg(unix)]
         fs::set_permissions(&identity_path, fs::Permissions::from_mode(0o644))?;
@@ -1753,6 +1749,233 @@ mod tests {
         );
 
         assert_eq!(store.read_identity(stored.authority_id)?, Some(stored));
+        Ok(())
+    }
+
+    /// Who besides the agent's account a test lets into an authority directory.
+    #[derive(Clone, Copy, Debug)]
+    enum OtherUsers {
+        /// The directory's group on Unix, and the Users group on Windows.
+        Group,
+        /// Every other user.
+        Everyone,
+    }
+
+    fn open_to(path: &Utf8Path, others: OtherUsers) -> anyhow::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let mode = match others {
+                OtherUsers::Group => 0o750,
+                OtherUsers::Everyone => 0o705,
+            };
+            fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
+        }
+        #[cfg(windows)]
+        crate::windows::grant_test_directory_access(
+            path,
+            match others {
+                OtherUsers::Group => ::windows::Win32::Security::WinBuiltinUsersSid,
+                OtherUsers::Everyone => ::windows::Win32::Security::WinWorldSid,
+            },
+        )?;
+        Ok(())
+    }
+
+    /// Returns what the trust check reads from `path`: its owner and mode on Unix, its owner and DACL on Windows.
+    #[cfg(unix)]
+    fn protection(path: &Utf8Path) -> anyhow::Result<(u32, u32)> {
+        use std::os::unix::fs::MetadataExt as _;
+
+        let metadata = fs::symlink_metadata(path)?;
+        Ok((metadata.uid(), metadata.mode()))
+    }
+
+    #[cfg(windows)]
+    fn protection(path: &Utf8Path) -> anyhow::Result<crate::windows::TestSecurity> {
+        crate::windows::test_security(path)
+    }
+
+    fn untrusted_directory(error: &anyhow::Error) -> Option<&Utf8Path> {
+        error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<UntrustedAuthorityDirectory>())
+            .map(|untrusted| untrusted.path.as_path())
+    }
+
+    fn close_to_other_users(path: &Utf8Path) -> anyhow::Result<()> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        }
+        #[cfg(windows)]
+        crate::windows::set_test_directory_access(path, true)?;
+        Ok(())
+    }
+
+    #[test]
+    fn an_authority_directory_open_to_other_users_stops_every_store_use_until_it_is_fixed() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check is never
+        // repaired, and stops all identity processing, for every authority, until it is fixed.
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut trusted = enroll_locally(&store, &directory.0)?;
+        let mut other = trusted.clone();
+        other.authority_id = Uuid::new_v4();
+        other.identity_id = Uuid::new_v4();
+        other.token_sha256 = hex::encode([7u8; 32]);
+        other.keys.current.key_name = keys::new_key_name("ai");
+        store.write_identity(&other)?;
+        let untrusted = directory.authority(other.authority_id);
+        open_to(&untrusted, OtherUsers::Group)?;
+        let opened = protection(&untrusted)?;
+        let token = Token::parse(&format!(
+            "dvaet1.{}.{}",
+            URL_SAFE_NO_PAD.encode(r#"{"u":"https://new.test"}"#),
+            URL_SAFE_NO_PAD.encode([2u8; 32])
+        ))?;
+        let pending_path = pending::write(&directory.0, &token, true)?;
+
+        for (operation, result) in [
+            (
+                "reading another identity",
+                store.read_identity(trusted.authority_id).map(drop),
+            ),
+            ("listing identities", store.list_identities().map(drop)),
+            ("beginning an enrollment", store.begin_enrollment(&token).map(drop)),
+            (
+                "updating another identity's config",
+                store
+                    .update_config(&mut trusted, json!({"version": 1, "revision": 8}))
+                    .map(drop),
+            ),
+            ("reconciling", store.reconcile()),
+        ] {
+            let error = result
+                .err()
+                .with_context(|| format!("{operation} ignored an untrusted authority directory"))?;
+            assert_eq!(untrusted_directory(&error), Some(untrusted.as_path()), "{operation}");
+        }
+        assert!(pending_path.exists());
+        assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
+        assert_eq!(protection(&untrusted)?, opened);
+
+        close_to_other_users(&untrusted)?;
+        assert_eq!(store.read_identity(trusted.authority_id)?, Some(trusted));
+        Ok(())
+    }
+
+    /// What a test puts in place of an authority directory.
+    #[derive(Clone, Copy, Debug)]
+    enum Replacement {
+        /// A link to a trusted directory elsewhere.
+        Link,
+        File,
+    }
+
+    fn replace_directory(path: &Utf8Path, target: &Utf8Path, replacement: Replacement) -> std::io::Result<()> {
+        match replacement {
+            #[cfg(unix)]
+            Replacement::Link => std::os::unix::fs::symlink(target, path),
+            #[cfg(windows)]
+            Replacement::Link => std::os::windows::fs::symlink_dir(target, path),
+            Replacement::File => fs::write(path, b""),
+        }
+    }
+
+    #[test]
+    fn a_link_or_file_in_place_of_an_authority_directory_is_never_an_absent_identity() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check stops all
+        // identity processing; reading it as absent would let a local attacker hide an identity, so that its token
+        // enrolls again.
+        for replacement in [Replacement::Link, Replacement::File] {
+            let directory = TestDir::new()?;
+            if !directory.supports_owner_only_files()? {
+                return Ok(());
+            }
+            let store = directory.store()?;
+            let identity = enroll_locally(&store, &directory.0)?;
+            let authority = directory.authority(identity.authority_id);
+            let moved = directory.0.join("moved");
+            fs::rename(&authority, &moved)?;
+            match replace_directory(&authority, &moved, replacement) {
+                // Windows creates a link only under Developer Mode or elevation.
+                Err(error) if error.kind() == ErrorKind::PermissionDenied => return Ok(()),
+                result => result?,
+            }
+
+            let read = store
+                .read_identity(identity.authority_id)
+                .err()
+                .with_context(|| format!("{replacement:?} read as an absent identity"))?;
+            let start_up = directory
+                .store()
+                .err()
+                .with_context(|| format!("start-up accepted a {replacement:?}"))?;
+
+            assert_eq!(untrusted_directory(&read), Some(authority.as_path()), "{replacement:?}");
+            assert_eq!(
+                untrusted_directory(&start_up),
+                Some(authority.as_path()),
+                "{replacement:?}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn start_up_stops_on_an_authority_directory_open_to_other_users_and_leaves_it_unchanged() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that is not protected from other
+        // users is never repaired, and stops all identity processing until it is fixed.
+        for others in [OtherUsers::Group, OtherUsers::Everyone] {
+            let directory = TestDir::new()?;
+            if !directory.supports_owner_only_files()? {
+                return Ok(());
+            }
+            let identity = enroll_locally(&directory.store()?, &directory.0)?;
+            let authority = directory.authority(identity.authority_id);
+            open_to(&authority, others)?;
+            let opened = protection(&authority)?;
+
+            let error = directory
+                .store()
+                .err()
+                .context("start-up accepted an authority directory open to other users")?;
+
+            assert_eq!(untrusted_directory(&error), Some(authority.as_path()), "{others:?}");
+            assert_eq!(protection(&authority)?, opened, "{others:?}");
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn start_up_stops_on_a_foreign_owned_authority_directory_and_leaves_it_unchanged() -> anyhow::Result<()> {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory owned by another account is never
+        // repaired, and stops all identity processing until it is fixed.
+        let directory = TestDir::new()?;
+        let identity = enroll_locally(&directory.store()?, &directory.0)?;
+        let authority = directory.authority(identity.authority_id);
+        if crate::windows::set_test_owner(&authority, ::windows::Win32::Security::WinBuiltinAdministratorsSid).is_err()
+        {
+            // Only an elevated token can give the directory another owner.
+            return Ok(());
+        }
+        let owned = protection(&authority)?;
+
+        let error = directory
+            .store()
+            .err()
+            .context("start-up accepted a foreign-owned authority directory")?;
+
+        assert_eq!(untrusted_directory(&error), Some(authority.as_path()));
+        assert_eq!(protection(&authority)?, owned);
         Ok(())
     }
 }

@@ -19,6 +19,30 @@ impl fmt::Display for UntrustedStateFile {
 
 impl Error for UntrustedStateFile {}
 
+/// An `<data-dir>/identity/authorities/<authority_id>/` directory that fails the trust check.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): such a directory is never repaired, and stops all identity
+/// processing until it is fixed.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+#[derive(Debug)]
+pub struct UntrustedAuthorityDirectory {
+    pub path: Utf8PathBuf,
+    source: anyhow::Error,
+}
+
+impl fmt::Display for UntrustedAuthorityDirectory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "untrusted authority directory {}", self.path)
+    }
+}
+
+impl Error for UntrustedAuthorityDirectory {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(self.source.as_ref())
+    }
+}
+
 pub(crate) fn is_untrusted(error: &anyhow::Error) -> bool {
     error.is::<UntrustedStateFile>()
 }
@@ -105,51 +129,123 @@ pub(crate) fn prepare_directories(data_dir: &Utf8Path, grant_current_user: bool)
     Ok(())
 }
 
-pub(crate) fn protect_authority_directories(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
+/// Checks, without changing anything, that every authority directory is owned by the agent's account and protected
+/// from other users, and returns the authority IDs of those that exist.
+pub(crate) fn check_authority_directories(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Vec<Uuid>> {
     let authorities = data_dir.join("identity").join("authorities");
-    for entry in fs::read_dir(&authorities)? {
-        let entry = entry?;
+    let entries = match fs::read_dir(&authorities) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).context("list authority directories"),
+    };
+    let mut authority_ids = Vec::new();
+    for entry in entries {
+        let entry = entry.context("read authority directory entry")?;
         let name = entry.file_name();
-        if name
+        let Some(authority_id) = name
             .to_str()
             .and_then(|name| Uuid::parse_str(name).ok().filter(|uuid| uuid.to_string() == name))
-            .is_some()
-        {
-            let path =
-                Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| anyhow::anyhow!("non-UTF-8 identity path"))?;
-            let _ = check_owned_directory(&path, grant_current_user)?;
+        else {
+            continue;
+        };
+        let path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| anyhow::anyhow!("non-UTF-8 authority path"))?;
+        if check_authority_directory(&path, grant_current_user)? {
+            authority_ids.push(authority_id);
         }
+    }
+    Ok(authority_ids)
+}
+
+/// Checks, without changing it, that an authority directory is owned by the agent's account and protected from other
+/// users, and returns whether it exists.
+pub(crate) fn check_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<bool> {
+    let untrusted = |source| {
+        anyhow::Error::new(UntrustedAuthorityDirectory {
+            path: path.to_owned(),
+            source,
+        })
+    };
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+        Err(error) => {
+            return Err(untrusted(
+                anyhow::Error::new(error).context("inspect authority directory"),
+            ));
+        }
+    };
+    verify_authority_directory(path, &metadata, grant_current_user).map_err(untrusted)?;
+    Ok(true)
+}
+
+fn verify_authority_directory(
+    path: &Utf8Path,
+    metadata: &fs::Metadata,
+    grant_current_user: bool,
+) -> anyhow::Result<()> {
+    ensure!(!metadata.file_type().is_symlink(), "authority path is a symbolic link");
+    ensure!(metadata.file_type().is_dir(), "authority path is not a directory");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
+
+        let _ = grant_current_user;
+        let directory = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(path)
+            .context("open authority directory")?;
+        let metadata = directory.metadata()?;
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        let user = unsafe { libc::geteuid() };
+        verify_unix_directory_access(metadata.permissions().mode(), metadata.uid(), user)?;
+        #[cfg(target_os = "macos")]
+        crate::macos_acl::ensure_private_directory(&directory)?;
+    }
+    #[cfg(windows)]
+    {
+        ensure!(
+            !crate::windows::is_reparse_point(metadata),
+            "authority directory is a reparse point"
+        );
+        crate::windows::verify_protected_directory_path(path, grant_current_user)?;
     }
     Ok(())
 }
 
-pub(crate) fn check_owned_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<bool> {
-    let metadata = match fs::symlink_metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error).context("inspect identity directory"),
-    };
-    if !metadata.file_type().is_dir() {
-        warn!("Ignore untrusted identity directory");
-        return Ok(false);
-    }
-    #[cfg(windows)]
-    if crate::windows::is_reparse_point(&metadata) {
-        warn!("Ignore untrusted identity directory");
-        return Ok(false);
-    }
+#[cfg(unix)]
+fn verify_unix_directory_access(mode: u32, owner: libc::uid_t, user: libc::uid_t) -> anyhow::Result<()> {
+    ensure!(owner == user, "authority directory owner is not the agent's account");
+    ensure!(mode & 0o077 == 0, "authority directory is accessible to other users");
+    Ok(())
+}
+
+/// Creates a missing authority directory, and only checks an existing one, which is never repaired.
+pub(crate) fn create_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::MetadataExt as _;
+        use std::os::unix::fs::DirBuilderExt as _;
 
-        // SAFETY: Reading the process's effective UID has no preconditions.
-        if metadata.uid() != unsafe { libc::geteuid() } {
-            warn!("Ignore untrusted identity directory");
-            return Ok(false);
+        let mut builder = fs::DirBuilder::new();
+        builder.mode(0o700);
+        if let Err(error) = builder.create(path)
+            && error.kind() != ErrorKind::AlreadyExists
+        {
+            return Err(error).context("create authority directory");
         }
     }
-    create_owned_directory(path, grant_current_user).context("protect identity directory")?;
-    Ok(true)
+    #[cfg(windows)]
+    crate::windows::create_missing_directory(path, grant_current_user)?;
+    ensure!(
+        check_authority_directory(path, grant_current_user)?,
+        "authority directory disappeared after its creation"
+    );
+    #[cfg(unix)]
+    {
+        sync_directory(path)?;
+        sync_directory(path.parent().context("authority directory has no parent")?)?;
+    }
+    Ok(())
 }
 
 fn create_owned_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
@@ -204,7 +300,7 @@ pub(crate) fn write_atomic(
     let identity = data_dir.join("identity");
     let authorities = identity.join("authorities");
     if parent.parent() == Some(authorities.as_path()) {
-        create_owned_directory(parent, grant_current_user)?;
+        create_authority_directory(parent, grant_current_user)?;
     } else {
         ensure!(
             parent == identity.join("pending") || parent == identity.join("rejected"),
@@ -479,6 +575,17 @@ mod tests {
             assert!(verify_unix_file_permissions(mode, 1, None).is_err());
         }
         assert!(verify_unix_file_permissions(0o600, 1, None).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_authority_directory_owned_by_another_account_fails_the_check() {
+        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory must be owned by the agent's account.
+        // Only root can give a test directory another owner, so this pins the comparison the check makes.
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        let agent = unsafe { libc::geteuid() };
+        assert!(verify_unix_directory_access(0o700, agent.wrapping_add(1), agent).is_err());
+        assert!(verify_unix_directory_access(0o700, agent, agent).is_ok());
     }
 
     #[test]

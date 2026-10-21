@@ -170,24 +170,7 @@ pub(crate) fn create_protected_directory(
         grant_current_user,
         pending_drop_box,
     );
-    if let Err(error) = fs::symlink_metadata(path)
-        && error.kind() == ErrorKind::NotFound
-    {
-        let attributes = SecurityAttributesInit {
-            owner: Some(user.clone()),
-            dacl: Some(protected_dacl(&expected)?),
-            ..Default::default()
-        }
-        .init();
-        let parent = path.parent().context("identity directory has no parent")?;
-        let name = path.file_name().context("identity directory has no name")?;
-        let long_path = fs::canonicalize(parent)?.join(name);
-        if let Err(error) = win_api_wrappers::fs::create_directory(&long_path, Some(&attributes))
-            && fs::symlink_metadata(path).is_err()
-        {
-            return Err(error).context("create protected identity directory");
-        }
-    }
+    create_directory_if_missing(path, &user, &expected)?;
     let mut options = fs::OpenOptions::new();
     options
         .access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC).0)
@@ -280,6 +263,56 @@ pub(crate) fn verify_protected_directory(
             pending_drop_box,
         ),
     )
+}
+
+/// Creates `path` with the protected DACL the agent provisions, unless it exists, in which case it is left unchanged.
+pub(crate) fn create_missing_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
+    let system = system_sid()?;
+    let user = user_sid()?;
+    ensure!(
+        grant_current_user || user == system,
+        "identity directory must be created by SYSTEM"
+    );
+    create_directory_if_missing(
+        path,
+        &user,
+        &directory_aces(&system, &user, &administrators_sid()?, grant_current_user, false),
+    )
+}
+
+fn create_directory_if_missing(path: &Utf8Path, owner: &Sid, entries: &[(Sid, u32, u32)]) -> anyhow::Result<()> {
+    if let Err(error) = fs::symlink_metadata(path)
+        && error.kind() == ErrorKind::NotFound
+    {
+        let attributes = SecurityAttributesInit {
+            owner: Some(owner.clone()),
+            dacl: Some(protected_dacl(entries)?),
+            ..Default::default()
+        }
+        .init();
+        let parent = path.parent().context("identity directory has no parent")?;
+        let name = path.file_name().context("identity directory has no name")?;
+        let long_path = fs::canonicalize(parent)?.join(name);
+        if let Err(error) = win_api_wrappers::fs::create_directory(&long_path, Some(&attributes))
+            && fs::symlink_metadata(path).is_err()
+        {
+            return Err(error).context("create protected identity directory");
+        }
+    }
+    Ok(())
+}
+
+/// Checks, without changing it, that the directory at `path` is the protected directory the agent provisions.
+pub(crate) fn verify_protected_directory_path(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    let directory = fs::OpenOptions::new()
+        .access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL).0)
+        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE).0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+        .open(path)
+        .context("open identity directory")?;
+    verify_protected_directory(&directory, grant_current_user, false)
 }
 
 pub(crate) fn create_private_file(
@@ -770,21 +803,82 @@ pub(crate) fn assert_pending_protection(path: &Utf8Path, grant_current_user: boo
 
 #[cfg(test)]
 pub(crate) fn set_test_directory_access(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
-    use win_api_wrappers::security::acl::set_named_security_info;
-    use win_api_wrappers::str::U16CString;
+    set_test_directory_dacl(
+        path,
+        &directory_aces(
+            &system_sid()?,
+            &user_sid()?,
+            &administrators_sid()?,
+            grant_current_user,
+            false,
+        ),
+    )
+}
 
-    let parent = path.parent().context("test directory has no parent")?;
-    let name = path.file_name().context("test directory has no name")?;
+/// Gives `other` inherited full control of a test directory, besides SYSTEM and the current user.
+#[cfg(test)]
+pub(crate) fn grant_test_directory_access(path: &Utf8Path, other: Security::WELL_KNOWN_SID_TYPE) -> anyhow::Result<()> {
+    let mut entries = directory_aces(&system_sid()?, &user_sid()?, &administrators_sid()?, true, false);
+    entries.push((
+        Sid::from_well_known(other, None)?,
+        FILE_ALL_ACCESS.0,
+        (Security::CONTAINER_INHERIT_ACE | Security::OBJECT_INHERIT_ACE).0,
+    ));
+    set_test_directory_dacl(path, &entries)
+}
+
+#[cfg(test)]
+fn set_test_directory_dacl(path: &Utf8Path, entries: &[(Sid, u32, u32)]) -> anyhow::Result<()> {
+    use win_api_wrappers::security::acl::set_named_security_info;
+
+    set_named_security_info(
+        &test_wide_path(path)?,
+        SE_FILE_OBJECT,
+        None,
+        None,
+        Some(&protected_dacl(entries)?),
+        None,
+    )
+}
+
+/// Makes `owner` the owner of a test path, which takes an elevated token for any owner but the current user.
+#[cfg(test)]
+pub(crate) fn set_test_owner(path: &Utf8Path, owner: Security::WELL_KNOWN_SID_TYPE) -> anyhow::Result<()> {
+    use win_api_wrappers::security::acl::set_named_security_info;
+
+    set_named_security_info(
+        &test_wide_path(path)?,
+        SE_FILE_OBJECT,
+        Some(&Sid::from_well_known(owner, None)?),
+        None,
+        None,
+        None,
+    )
+}
+
+#[cfg(test)]
+fn test_wide_path(path: &Utf8Path) -> anyhow::Result<win_api_wrappers::str::U16CString> {
+    let parent = path.parent().context("test path has no parent")?;
+    let name = path.file_name().context("test path has no name")?;
     let full_path = fs::canonicalize(parent)?.join(name);
-    let wide = U16CString::from_os_str(full_path.as_os_str())?;
-    let dacl = protected_dacl(&directory_aces(
-        &system_sid()?,
-        &user_sid()?,
-        &administrators_sid()?,
-        grant_current_user,
-        false,
-    ))?;
-    set_named_security_info(&wide, SE_FILE_OBJECT, None, None, Some(&dacl), None)
+    Ok(win_api_wrappers::str::U16CString::from_os_str(full_path.as_os_str())?)
+}
+
+/// The owner and DACL entries of a test path.
+#[cfg(test)]
+#[derive(Debug, PartialEq)]
+pub(crate) struct TestSecurity {
+    owner: Sid,
+    dacl: Vec<(Sid, u32, u32)>,
+}
+
+#[cfg(test)]
+pub(crate) fn test_security(path: &Utf8Path) -> anyhow::Result<TestSecurity> {
+    let (owner, descriptor) = named_owner_and_dacl(path)?;
+    Ok(TestSecurity {
+        owner,
+        dacl: read_dacl(descriptor.0)?,
+    })
 }
 
 /// How long a replacement of an identity file waits for other processes to close the file it replaces.
