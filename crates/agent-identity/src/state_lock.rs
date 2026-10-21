@@ -53,6 +53,12 @@ fn lock_file(path: &Utf8Path) -> anyhow::Result<File> {
     }
 }
 
+/// Locks the identity state through an unshared handle on `<data-dir>/identity` itself rather than a lock file.
+///
+/// The lock needs no object of its own: it is the directory the agent provisions and verifies before each lock, opened
+/// without following a reparse point, so no file another account created or replaced can stand in for it.
+/// Any other handle open on the directory, a backup's or an antivirus scan's for example, also fails the open with a
+/// sharing violation, so a busy lock is retried for 30 s.
 #[cfg(windows)]
 fn lock_directory(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<File> {
     use std::os::windows::fs::OpenOptionsExt as _;
