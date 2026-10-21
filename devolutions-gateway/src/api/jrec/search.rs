@@ -605,7 +605,8 @@ mod tests {
     #[case::null("null")]
     #[tokio::test]
     async fn does_not_match_the_field_names_or_other_values_of_a_json_line(#[case] query: &str) {
-        let line = r#"{"seq":12,"done":true,"actor":null,"description":"Created User","parameters":{"New name":"Bob"}}"#;
+        let line =
+            r#"{"seq":12,"done":true,"actor":null,"description":"Created User","parameters":{"New name":"Bob"}}"#;
 
         let search = search_log(query, line.as_bytes()).await;
 
