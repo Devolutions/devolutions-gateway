@@ -115,12 +115,14 @@ public class AgentIdentityErrorTests
 
     // CONTRACT.agent-identity.md §7.4: a refused channel opening carries the code's status.
     // §7.3 step 4: invalid `Hello` metadata gets INVALID_ARGUMENT.
+    // §7.4: so does a message that cannot be decoded on an authenticated stream.
     [Theory]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData(AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated)]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData(AgentIdentityErrorCode.IdentityRevoked, StatusCode.PermissionDenied)]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
     [InlineData(AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument)]
     // oracle: spec gRPC status codes §Status codes and their use in gRPC
     [InlineData(AgentIdentityErrorCode.Unavailable, StatusCode.Unavailable)]

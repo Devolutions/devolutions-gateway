@@ -1,5 +1,7 @@
 using System.Text.Json;
 
+using Google.Protobuf;
+
 namespace Devolutions.AgentIdentity.Tests;
 
 public class IdentityConfigTests
@@ -285,6 +287,63 @@ public class IdentityConfigTests
 
         JsonElement written = TestJson.Members(config.ToUtf8Json())["policy_limits"];
         Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), written));
+    }
+
+    // A `ServerMessage` whose `id` is a lowercase hyphenated UUID and whose `ConfigUpdate` carries J bytes of JSON
+    // takes J + 46 bytes, for J from 16,384 to 2,097,147, where both lengths below are 3-byte varints:
+    //   1 byte    tag of `id`: field 1, wire type LEN, (1 << 3) | 2 = 10
+    //   1 byte    length of `id`: 36, the characters of a hyphenated UUID
+    //   36 bytes  `id`
+    //   1 byte    tag of `config_update`: field 15, wire type LEN, (15 << 3) | 2 = 122
+    //   3 bytes   length of `ConfigUpdate`: J + 4
+    //   1 byte    tag of `config_json`: field 1, wire type LEN, 10
+    //   3 bytes   length of `config_json`: J
+    //   J bytes   `config_json`
+    // `correlation_id` is unset, so it takes no bytes.
+    // An envelope of 65,536 bytes therefore carries 65,490 bytes of JSON.
+    private const int LargestConfigJsonBytes = 65_490;
+
+    // Each side of the agent channel accepts envelopes up to 65,536 bytes.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-service
+    [Fact]
+    public void CreateAcceptsAConfigWhoseConfigUpdateIsExactly64KiB()
+    {
+        IdentityConfig config = IdentityConfig.Create(1, null, PaddedProductFields(LargestConfigJsonBytes));
+
+        // oracle: spec Protocol Buffers Encoding §Length-Delimited Records
+        Assert.Equal(65_536, ChannelMessages.ConfigUpdate(config).ToByteArray().Length);
+    }
+
+    // Each side of the agent channel sends no envelope larger than 65,536 bytes,
+    // so an authority never holds a config whose `ConfigUpdate` would exceed that.
+    // One byte more JSON than the largest config makes a 65,537-byte envelope.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-service
+    // oracle: spec Protocol Buffers Encoding §Length-Delimited Records
+    [Fact]
+    public void CreateRejectsAConfigWhoseConfigUpdateWouldExceed64KiB()
+    {
+        KeyValuePair<string, JsonElement>[] productFields = PaddedProductFields(LargestConfigJsonBytes + 1);
+
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => IdentityConfig.Create(1, null, productFields));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("productFields", exception.ParamName);
+    }
+
+    // Returns one product field, padded with ASCII letters, that makes the JSON of a config with revision 1 and no
+    // agent channel URL `jsonBytes` long.
+    // Each letter adds one byte, since UTF-8 encodes an ASCII letter, which JSON need not escape, in one byte.
+    private static KeyValuePair<string, JsonElement>[] PaddedProductFields(int jsonBytes)
+    {
+        int unpaddedBytes = IdentityConfig.Create(1, null, Padding(0)).ToUtf8Json().Length;
+
+        return Padding(jsonBytes - unpaddedBytes);
+
+        static KeyValuePair<string, JsonElement>[] Padding(int letters)
+        {
+            return [new("padding", TestJson.Parse($"\"{new string('a', letters)}\""))];
+        }
     }
 
     private static void AssertRejectsProductFields(KeyValuePair<string, JsonElement>[] productFields)
