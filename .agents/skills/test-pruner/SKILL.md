@@ -28,11 +28,12 @@ Run the scoped suite repeatedly on the clean tree, for example 15 times, to find
 
 Keep independent tests; merge them into cases of one parametrized test only when they check the same property and differ only in data.
 Never delete an independent test on mutant evidence: the mutant sample is tiny next to the real fault space, and a spec vector costs nothing to keep.
-Strengthen a self-derived test with unique kills by replacing its expected value with an independent one; if none exists, keep it and mark it `// oracle: self-derived; sole guard for <faults>`, naming each fault in words, since mutant ids and line numbers change between runs.
+Strengthen a self-derived test with unique kills by replacing its expected value with an independent one; if none exists, keep it with a `mutant` marker, as `test-oracle-reviewer` defines, naming each fault it alone catches in words, since mutant ids and line numbers change between runs.
 A strengthened or gap test that fails is a finding, never a task to make it pass: report the test, the independent expected value and its source, and the code's actual output to whoever assigned the run in editing mode, or to the author in review mode, and change neither test nor code meanwhile, since whichever is edited first becomes the specification.
 Delete a self-derived test with no unique kills.
 A test of unknown oracle with unique kills has already passed the challenge; strengthen it.
 Challenge a test of unknown oracle without unique kills, unless it is protected below, since its fate does not depend on the answer.
+No `scaffold` marker outlives the pass: these rules replace it with the verified source or `mutant`, or delete what it marks, and a protected test they leave loses the marker and keeps its classification.
 
 Deletion is a set decision, not a per-test verdict.
 Two tests that both catch mutant M each have zero unique kills, and deleting both loses M.
@@ -40,7 +41,8 @@ Choose the deletion set so the caught mutants afterward equal the caught mutants
 The same rule applies to assertions: a self-derived one that never fails across its test's kills is a deletion candidate.
 
 Protected tests are never proposed for deletion: a regression test tied to an issue or fuzz crash, a test of untrusted-input parsing or bounds checks, and a doctest.
-Treat a suite that deliberately uses snapshots as a change detector: dedupe it, do not delete it.
+That holds whatever their marker, because a refactor of a parser is where a dropped bounds check goes unnoticed.
+Treat a suite that deliberately uses snapshots as a change detector as protected: dedupe it, do not delete it.
 Report flaky tests separately; deleting one hides a bug.
 
 ## Challenge
@@ -63,7 +65,7 @@ Do not add a never-panics or never-throws property where a fuzz target already c
 The caught-mutant set never shrinks except through deletions a human approves in a pull request.
 Rerun the caught set after every deletion set and every consolidation, verify by rerunning rather than reasoning, and revert on any loss; compare runs made with identical tool settings over the same scope.
 After ruling out the scoping errors and tool artifacts the reference names, triage each survivor as equivalent (no observable change), unconstrained (an observable change no independent requirement decides, such as a log message's wording), coverage gap (a change an independent requirement rejects), or bug lead (the original code looks wrong, or is unreachable in every supported configuration).
-Close each coverage gap with a test whose expected value comes from that requirement, written with `test-writer`.
+Close each coverage gap with a test at the seam `tdd` defines, marked with the requirement that rejects the change and written with `test-writer`; a survivor only a test of internals could catch is not a gap but equivalent or a bug lead, as above.
 A suite of independent tests yields few deletions; a pass may end in consolidations and gap tests only, or in no change.
 
 In editing mode, commit deletions, consolidations, strengthenings, and gap tests separately, each as soon as it is verified, so an interrupted run loses little; they are different reviews.

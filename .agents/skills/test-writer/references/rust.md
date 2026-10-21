@@ -2,6 +2,8 @@
 
 Each rule in `SKILL.md` takes these forms in Rust.
 
+In a doctest, write the marker as a hidden line, `# // oracle: ...`, so it stays out of the rendered documentation.
+
 Properties use `proptest`, whose generators are the crate's strategies.
 
 Snapshots use `expect-test`, whose `UPDATE_EXPECT=1` rewrites every stale value after a representation change.

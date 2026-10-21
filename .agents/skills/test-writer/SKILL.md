@@ -7,8 +7,11 @@ description: Design tests that catch bugs, choosing between an example test, par
 
 First name the bug the test catches that existing tests miss; without one it costs runtime and maintenance and guards nothing.
 Take the expected value from a source independent of the code under test, as `test-oracle-reviewer` defines; a value derived from the implementation detects change, not bugs.
+Mark that source as `test-oracle-reviewer` defines, and assert only what it decides, because an assertion past it pins how the code works today; add one only for feedback while implementing, marked `scaffold`, and never in place of a decision `tdd` says to ask for.
+Test at the seam `tdd` defines, the public boundary where the behavior is observed.
+A test that fails while the code still does what its marked source requires asserts past that source: narrow it to what the source decides, or delete it unless `test-pruner` protects it; a snapshot that fails only on representation is re-read and updated instead.
 Reach nothing beyond loopback, because an external host makes a failure unreproducible.
-Each rule below takes a form per language: `references/rust.md` for Rust, `references/csharp.md` for C#; load only the language in scope.
+Each rule here takes a form per language: `references/rust.md` for Rust, `references/csharp.md` for C#; load only the language in scope.
 
 ## Properties
 
@@ -20,7 +23,7 @@ A parser of untrusted input gets a fuzz target rather than a never-panics proper
 
 ## Snapshots
 
-Snapshot structured values such as a parsed config, a decoded message, or a CLI error, with the expected value beside the assertion.
+Snapshot structured values such as a parsed config or a decoded message, with the expected value beside the assertion.
 Taking or updating a snapshot is the oracle, so read and check it, because its value is whatever the code produced; when a spec or capture defines the value, assert that instead.
 Move a snapshot or blob longer than a screen into a sibling file, so the source shows the test rather than its data; keep short byte vectors inline so each field can carry its comment.
 
