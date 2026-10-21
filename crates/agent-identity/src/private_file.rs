@@ -153,7 +153,7 @@ pub(crate) fn check_stored_identities(data_dir: &Utf8Path, grant_current_user: b
         };
         let path = Utf8PathBuf::from_path_buf(entry.path()).map_err(|_| anyhow::anyhow!("non-UTF-8 authority path"))?;
         if check_authority_directory(&path, grant_current_user)? {
-            open_identity_file(&path.join("identity.json"), grant_current_user)?;
+            check_identity_file(&path.join("identity.json"), grant_current_user)?;
             authority_ids.push(authority_id);
         }
     }
@@ -235,7 +235,17 @@ fn verify_unix_directory_access(mode: u32, owner: libc::uid_t, user: libc::uid_t
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 pub(crate) fn open_identity_file(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Option<File>> {
-    match open_trusted_identity_file(path, grant_current_user) {
+    classify_identity_file(path, open_trusted_identity_file(path, grant_current_user, true))
+}
+
+/// Checks an authority directory's `identity.json` as [`open_identity_file`] does, without reading it.
+pub(crate) fn check_identity_file(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
+    classify_identity_file(path, open_trusted_identity_file(path, grant_current_user, false)).map(drop)
+}
+
+/// Turns a failure to open a trusted `identity.json` into an absent file, or else into an [`UntrustedStoredIdentity`].
+fn classify_identity_file(path: &Utf8Path, opened: anyhow::Result<File>) -> anyhow::Result<Option<File>> {
+    match opened {
         Ok(file) => Ok(Some(file)),
         Err(error)
             if error
@@ -251,7 +261,7 @@ pub(crate) fn open_identity_file(path: &Utf8Path, grant_current_user: bool) -> a
     }
 }
 
-fn open_trusted_identity_file(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<File> {
+fn open_trusted_identity_file(path: &Utf8Path, grant_current_user: bool, read_data: bool) -> anyhow::Result<File> {
     let metadata = fs::symlink_metadata(path).context("inspect identity file")?;
     ensure!(metadata.file_type().is_file(), "identity path is not a regular file");
     let mut options = OpenOptions::new();
@@ -261,17 +271,23 @@ fn open_trusted_identity_file(path: &Utf8Path, grant_current_user: bool) -> anyh
         use std::os::unix::fs::OpenOptionsExt as _;
 
         options.custom_flags(libc::O_NOFOLLOW);
+        let _ = read_data;
     }
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt as _;
 
-        use windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+        use windows::Win32::Storage::FileSystem::{FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, READ_CONTROL};
 
         ensure!(
             !crate::windows::is_reparse_point(&metadata),
             "identity file is a reparse point"
         );
+        if !read_data {
+            // Opening a file for its data just after a write can take tens of milliseconds, for example while an
+            // antivirus scans it, and the check precedes every use of the state.
+            options.access_mode((FILE_READ_ATTRIBUTES | READ_CONTROL).0);
+        }
         options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0);
     }
     let file = options.open(path).context("open identity file")?;
