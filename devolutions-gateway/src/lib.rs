@@ -71,6 +71,7 @@ pub struct DgwState {
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
     pub provisioner_tasks: provisioner_tasks::runner::ProvisionerTaskRunner,
+    pub secrets: secret_store::SecretStore,
 }
 
 #[doc(hidden)]
@@ -98,6 +99,7 @@ impl DgwState {
         let provisioning = provisioning::ProvisioningStore::new();
         let synthetic_kdc_registry = credential_injection::SyntheticKdcRegistry::new();
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
+        let secrets = secret_store::SecretStore::default();
         let task_store = gateway_db::GatewayDb::open_path(":memory:").await?.connect().await?;
         let task_store = Arc::new(provisioner_task_libsql::LibSqlProvisionerTaskStore::open(task_store).await?);
         let provisioner_tasks = provisioner_tasks::task_runner(
@@ -105,7 +107,7 @@ impl DgwState {
             Arc::new(job_queue_handle.clone()),
             conf_handle.clone(),
             recording_manager_handle.clone(),
-            provisioning.clone(),
+            secrets.clone(),
         );
 
         let state = Self {
@@ -123,6 +125,7 @@ impl DgwState {
             monitoring_state,
             agent_tunnel_handle: None,
             provisioner_tasks,
+            secrets,
         };
 
         let handles = MockHandles {

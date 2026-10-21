@@ -1,7 +1,7 @@
 //! AI settings shared by the provisioner tasks that call an AI provider.
 //!
-//! The API key and the base URL never reach `gateway.db`: they stay in memory, encrypted, as the task secret of their
-//! Task in the [`ProvisioningStore`](crate::provisioning::ProvisioningStore), until the Task ends.
+//! The API key and the base URL never reach `gateway.db`: they stay in memory, encrypted, as the secret of their Task
+//! in the [`SecretStore`](crate::secret_store::SecretStore), until the Task ends.
 
 use core::fmt;
 
