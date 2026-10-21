@@ -21,7 +21,7 @@ public class RequestAuthenticatorVectorTests
     public static TheoryData<string> OkSignedRequestCaseNames =>
         new(Vectors.Cases.Where(c => c.Expected == "ok" && c.Endpoint != "connect").Select(c => c.Name));
 
-    // Each case isolates one rule of CONTRACT.md §6 or its precedence,
+    // Each case isolates one rule of CONTRACT.agent-identity.md §6 or its precedence,
     // so any outcome but the vector's breaks that rule.
     [Theory]
     [MemberData(nameof(VectorData.HttpSignatureCaseNames), MemberType = typeof(VectorData))]
@@ -35,7 +35,7 @@ public class RequestAuthenticatorVectorTests
         Assert.Equal(vector.Expected, outcome.Outcome);
     }
 
-    // test-vectors.json http_signature.sequences, with CONTRACT.md §6 step 6.
+    // test-vectors.json http_signature.sequences, with CONTRACT.agent-identity.md §6 step 6.
     // A replayed nonce must fail, a nonce must survive a request that failed verification,
     // and a nonce accepted for one operation must not authenticate another.
     [Theory]
@@ -92,7 +92,8 @@ public class RequestAuthenticatorVectorTests
         Assert.Equal(vector.ExpectedValid, valid);
     }
 
-    // CONTRACT.md §6: nonces are committed only after the signature verifies, so garbage requests cannot burn nonces.
+    // CONTRACT.agent-identity.md §6: nonces are committed only after the signature verifies,
+    // so garbage requests cannot burn nonces.
     // With an empty nonce store, every failing case fails before step 6.
     [Theory]
     [MemberData(nameof(FailingCaseNames))]
@@ -128,7 +129,7 @@ public class RequestAuthenticatorVectorTests
         Assert.All(headers.Concat(values), value => Assert.DoesNotContain(value, outcome.FailureDetail));
     }
 
-    // CONTRACT.md §6 step 6 and the shared intent: the authority keeps each accepted nonce
+    // CONTRACT.agent-identity.md §6 step 6 and the shared intent: the authority keeps each accepted nonce
     // until 60 s after its signature expires, the last moment the window could accept the signature again.
     [Theory]
     [MemberData(nameof(OkCaseNames))]

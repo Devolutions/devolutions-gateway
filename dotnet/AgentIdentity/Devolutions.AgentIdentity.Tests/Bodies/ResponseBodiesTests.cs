@@ -5,11 +5,13 @@ using System.Text.Json;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The bodies of the successful responses of CONTRACT.md §5, each parsed with the BCL and checked against the contract.
+/// The bodies of the successful responses of CONTRACT.agent-identity.md §5,
+/// each parsed with the BCL and checked against the contract.
 /// </summary>
 public class ResponseBodiesTests
 {
-    // CONTRACT.md §1: IDs are lowercase hyphenated UUIDs; these have hexadecimal letters, so their case shows.
+    // CONTRACT.agent-identity.md §1: IDs are lowercase hyphenated UUIDs; these have hexadecimal letters,
+    // so their case shows.
     // The identity is device-a of the vector file, whose certificate the vector root issued.
     private const string AuthorityIdText = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
     private const string IdentityIdText = "0b3c6a52-7a38-4f55-9a1c-2f1a8d3c9e01";
@@ -49,7 +51,8 @@ public class ResponseBodiesTests
 
     public static TheoryData<string> ConfigBodyNames => new(ConfigBodies.Keys);
 
-    // CONTRACT.md §5.1: each root has `certificate`, `thumbprint`, `not_before` and `not_after`, all strings.
+    // CONTRACT.agent-identity.md §5.1: each root has `certificate`, `thumbprint`, `not_before` and `not_after`,
+    // all strings.
     [Fact]
     public void TrustAnchorRootHasExactlyTheContractMembers()
     {
@@ -62,8 +65,8 @@ public class ResponseBodiesTests
         Assert.All(root.Values, value => Assert.Equal(JsonValueKind.String, value.ValueKind));
     }
 
-    // CONTRACT.md §1: a certificate is its DER in canonical base64, and its thumbprint is base64url(SHA-256(DER)),
-    // which the vector file gives for its root.
+    // CONTRACT.agent-identity.md §1: a certificate is its DER in canonical base64,
+    // and its thumbprint is base64url(SHA-256(DER)), which the vector file gives for its root.
     [Fact]
     public void TrustAnchorGivesTheDerAndThumbprintOfTheRoot()
     {
@@ -74,7 +77,7 @@ public class ResponseBodiesTests
         Assert.Equal(TestVectors.Instance.Root.Thumbprint, root["thumbprint"].GetString());
     }
 
-    // CONTRACT.md §1: timestamps are RFC 3339 UTC strings ending in `Z`.
+    // CONTRACT.agent-identity.md §1: timestamps are RFC 3339 UTC strings ending in `Z`.
     // The validity is given here in offsets other than UTC, and the test machine's own time zone may be another.
     [Fact]
     public void TrustAnchorGivesTheValidityOfTheRootInUtc()
@@ -90,7 +93,7 @@ public class ResponseBodiesTests
         Assert.Equal("2036-07-08T13:10:11Z", entry["not_after"].GetString());
     }
 
-    // CONTRACT.md §5.1: the response lists one root normally and two during a rotation.
+    // CONTRACT.agent-identity.md §5.1: the response lists one root normally and two during a rotation.
     [Fact]
     public void TrustAnchorListsEveryRootInTheOrderGiven()
     {
@@ -104,7 +107,7 @@ public class ResponseBodiesTests
             roots.Select(root => TestJson.CanonicalBase64(TestJson.Members(root)["certificate"])));
     }
 
-    // CONTRACT.md §5.1: the response always lists a root, and two during a rotation.
+    // CONTRACT.agent-identity.md §5.1: the response always lists a root, and two during a rotation.
     [Fact]
     public void TrustAnchorRejectsNoRoots()
     {
@@ -113,7 +116,7 @@ public class ResponseBodiesTests
         Assert.Equal("roots", exception.ParamName);
     }
 
-    // CONTRACT.md §5.1: each root has a certificate, which a null root lacks.
+    // CONTRACT.agent-identity.md §5.1: each root has a certificate, which a null root lacks.
     [Fact]
     public void TrustAnchorRejectsANullRoot()
     {
@@ -123,7 +126,8 @@ public class ResponseBodiesTests
         Assert.Equal("roots", exception.ParamName);
     }
 
-    // CONTRACT.md §5.2: `authority_id`, `identity_id`, `certificate_chain` and `config`, every one of them required.
+    // CONTRACT.agent-identity.md §5.2: `authority_id`, `identity_id`, `certificate_chain` and `config`,
+    // every one of them required.
     // §1: IDs are lowercase hyphenated UUIDs.
     [Fact]
     public void EnrollHasExactlyTheContractMembers()
@@ -141,7 +145,7 @@ public class ResponseBodiesTests
     }
 
     // RFC 9562 §5.9: the nil UUID, with all 128 bits zero, stands for the absence of a UUID,
-    // and CONTRACT.md §5.2 requires both IDs.
+    // and CONTRACT.agent-identity.md §5.2 requires both IDs.
     [Theory]
     [InlineData(NilIdText, IdentityIdText, "authorityId")]
     [InlineData(AuthorityIdText, NilIdText, "identityId")]
@@ -153,7 +157,7 @@ public class ResponseBodiesTests
         Assert.Equal(parameter, exception.ParamName);
     }
 
-    // CONTRACT.md §5.3: `200`: `{ "certificate_chain": [ ... ] }`.
+    // CONTRACT.agent-identity.md §5.3: `200`: `{ "certificate_chain": [ ... ] }`.
     [Fact]
     public void RenewHasExactlyTheContractMembers()
     {
@@ -164,7 +168,8 @@ public class ResponseBodiesTests
         Assert.Equal(JsonValueKind.Array, members["certificate_chain"].ValueKind);
     }
 
-    // CONTRACT.md §5.6: `config` and `renewal_requested`, the identity's request-renewal flag as a JSON boolean.
+    // CONTRACT.agent-identity.md §5.6: `config` and `renewal_requested`,
+    // the identity's request-renewal flag as a JSON boolean.
     [Theory]
     [InlineData(true, JsonValueKind.True)]
     [InlineData(false, JsonValueKind.False)]
@@ -178,7 +183,7 @@ public class ResponseBodiesTests
         Assert.Equal(expected, members["renewal_requested"].ValueKind);
     }
 
-    // CONTRACT.md §4: chains are leaf-first; §1: each certificate is its DER in canonical base64.
+    // CONTRACT.agent-identity.md §4: chains are leaf-first; §1: each certificate is its DER in canonical base64.
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainIsWrittenLeafFirst(string endpoint)
@@ -191,7 +196,7 @@ public class ResponseBodiesTests
             chain.Select(TestJson.CanonicalBase64));
     }
 
-    // CONTRACT.md §4: a chain has any length, so the leaf alone is a chain too.
+    // CONTRACT.agent-identity.md §4: a chain has any length, so the leaf alone is a chain too.
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainOfTheLeafAloneIsWritten(string endpoint)
@@ -227,7 +232,7 @@ public class ResponseBodiesTests
         Assert.Equal("certificateChain", exception.ParamName);
     }
 
-    // CONTRACT.md §4 and §5.2: a chain starts with the leaf, so it holds at least one certificate.
+    // CONTRACT.agent-identity.md §4 and §5.2: a chain starts with the leaf, so it holds at least one certificate.
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void EmptyChainIsRejected(string endpoint)
@@ -237,7 +242,7 @@ public class ResponseBodiesTests
         Assert.Equal("certificateChain", exception.ParamName);
     }
 
-    // CONTRACT.md §1: each certificate of a chain is written as its DER, which a null certificate lacks.
+    // CONTRACT.agent-identity.md §1: each certificate of a chain is written as its DER, which a null certificate lacks.
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainWithANullCertificateIsRejected(string endpoint)
@@ -248,7 +253,7 @@ public class ResponseBodiesTests
         Assert.Equal("certificateChain", exception.ParamName);
     }
 
-    // CONTRACT.md §5.2 and §5.6: `config` is the identity's config, in the shape of §5.2.
+    // CONTRACT.agent-identity.md §5.2 and §5.6: `config` is the identity's config, in the shape of §5.2.
     [Theory]
     [MemberData(nameof(ConfigBodyNames))]
     public void BodyCarriesTheConfig(string endpoint)
@@ -263,7 +268,8 @@ public class ResponseBodiesTests
         Assert.Equal("https://psu/channel", config["psu_channel_url"].GetString());
     }
 
-    // CONTRACT.md §5.2 and §5.6: `config` is the identity's config, and IdentityConfig.Create sets no depth limit.
+    // CONTRACT.agent-identity.md §5.2 and §5.6: `config` is the identity's config,
+    // and IdentityConfig.Create sets no depth limit.
     // The value nests 64 levels, so the body nests 66, beyond the 64 that a System.Text.Json reader allows by default.
     [Theory]
     [MemberData(nameof(ConfigBodyNames))]

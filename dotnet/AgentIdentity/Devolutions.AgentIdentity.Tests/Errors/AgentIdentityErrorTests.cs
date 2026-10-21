@@ -5,7 +5,8 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class AgentIdentityErrorTests
 {
-    // 12:00:00.750 UTC given in a +02:00 offset, which CONTRACT.md §1 writes as a UTC timestamp in whole seconds.
+    // 12:00:00.750 UTC given in a +02:00 offset,
+    // which CONTRACT.agent-identity.md §1 writes as a UTC timestamp in whole seconds.
     private static readonly DateTimeOffset ServerTime =
         new DateTimeOffset(2026, 9, 24, 14, 0, 0, TimeSpan.FromHours(2)).AddMilliseconds(750);
 
@@ -30,7 +31,7 @@ public class AgentIdentityErrorTests
         .. FrameworkLevelErrorNames.Select(name => (name, FrameworkLevelError(name))),
     ];
 
-    // CONTRACT.md §5.4, column "HTTP".
+    // CONTRACT.agent-identity.md §5.4, column "HTTP".
     [Theory]
     [MemberData(nameof(AgentIdentityErrorCodeTests.HttpStatusCodes), MemberType = typeof(AgentIdentityErrorCodeTests))]
     public void FromCarriesTheCodeWithItsContractStatus(AgentIdentityErrorCode code, int expectedStatus)
@@ -41,7 +42,7 @@ public class AgentIdentityErrorTests
         Assert.Equal(expectedStatus, error.HttpStatusCode);
     }
 
-    // CONTRACT.md §5.4 has no code for the default value of the enum.
+    // CONTRACT.agent-identity.md §5.4 has no code for the default value of the enum.
     // Framework Design Guidelines, Parameter Design: validate enum parameters, since an enum may hold any integer.
     [Fact]
     public void FromRejectsAnUndefinedCode()
@@ -49,8 +50,8 @@ public class AgentIdentityErrorTests
         Assert.Throws<ArgumentOutOfRangeException>(() => AgentIdentityError.From(default));
     }
 
-    // CONTRACT.md §5.4: malformed JSON or body → 400 invalid_request; unknown route → 404 invalid_request;
-    // wrong method → 405 invalid_request; body too large → 413 invalid_request;
+    // CONTRACT.agent-identity.md §5.4: malformed JSON or body → 400 invalid_request;
+    // unknown route → 404 invalid_request; wrong method → 405 invalid_request; body too large → 413 invalid_request;
     // an unexpected server failure → 500 unavailable; overload or a missing dependency → 503 unavailable.
     [Theory]
     [InlineData(nameof(AgentIdentityError.MalformedBody), 400, AgentIdentityErrorCode.InvalidRequest)]
@@ -70,7 +71,8 @@ public class AgentIdentityErrorTests
         Assert.Equal(expectedCode, error.Code);
     }
 
-    // CONTRACT.md §5.4: every error body, framework-level failures included, carries a `message` of human text.
+    // CONTRACT.agent-identity.md §5.4: every error body, framework-level failures included,
+    // carries a `message` of human text.
     // The contract leaves its wording free, so only its presence is checked.
     [Theory]
     [MemberData(nameof(PublicErrorNames))]
@@ -81,7 +83,7 @@ public class AgentIdentityErrorTests
         Assert.False(string.IsNullOrWhiteSpace(error.Message));
     }
 
-    // CONTRACT.md §5.4 body, with the snake_case keys and the timestamp format of §1.
+    // CONTRACT.agent-identity.md §5.4 body, with the snake_case keys and the timestamp format of §1.
     // Parsing the raw bytes also rejects a byte order mark, which RFC 8259 §8.1 forbids in a JSON text.
     [Fact]
     public void JsonBodyHasExactlyTheContractMembers()
@@ -98,7 +100,7 @@ public class AgentIdentityErrorTests
         Assert.Equal(ServerTimeText, members["server_time"].GetString());
     }
 
-    // CONTRACT.md §7.4: a refused channel opening carries the code's status.
+    // CONTRACT.agent-identity.md §7.4: a refused channel opening carries the code's status.
     // §7.3 step 4: invalid `Hello` metadata gets INVALID_ARGUMENT.
     [Theory]
     [InlineData(AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated)]
@@ -112,7 +114,8 @@ public class AgentIdentityErrorTests
         Assert.Equal(expected, exception.StatusCode);
     }
 
-    // CONTRACT.md §7.4: trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`, in no stated order.
+    // CONTRACT.agent-identity.md §7.4: trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`,
+    // in no stated order.
     [Fact]
     public void RpcExceptionHasExactlyTheContractTrailers()
     {

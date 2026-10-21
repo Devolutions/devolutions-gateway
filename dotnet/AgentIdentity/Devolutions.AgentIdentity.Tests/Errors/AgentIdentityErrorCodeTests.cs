@@ -4,7 +4,7 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class AgentIdentityErrorCodeTests
 {
-    // CONTRACT.md §5.4, column "Code".
+    // CONTRACT.agent-identity.md §5.4, column "Code".
     public static TheoryData<AgentIdentityErrorCode, string> WireValues => new()
     {
         { AgentIdentityErrorCode.TokenInvalid, "token_invalid" },
@@ -26,7 +26,7 @@ public class AgentIdentityErrorCodeTests
         Assert.Equal(expected, code.ToWireValue());
     }
 
-    // CONTRACT.md §5.4, column "HTTP".
+    // CONTRACT.agent-identity.md §5.4, column "HTTP".
     // The table gives `unavailable` 5xx, and an unexpected failure gets 500.
     public static TheoryData<AgentIdentityErrorCode, int> HttpStatusCodes => new()
     {
@@ -49,7 +49,7 @@ public class AgentIdentityErrorCodeTests
         Assert.Equal(expected, code.ToHttpStatusCode());
     }
 
-    // CONTRACT.md §7.4: an authentication failure closes the stream with UNAUTHENTICATED,
+    // CONTRACT.agent-identity.md §7.4: an authentication failure closes the stream with UNAUTHENTICATED,
     // or PERMISSION_DENIED for `identity_revoked`.
     // §7.3 step 4: invalid `Hello` metadata closes it with INVALID_ARGUMENT and `invalid_request`.
     // `unavailable` gets UNAVAILABLE, which gRPC defines as a transient condition.
@@ -74,7 +74,7 @@ public class AgentIdentityErrorCodeTests
         Assert.Equal(expected, code.ToGrpcStatusCode());
     }
 
-    // CONTRACT.md §5.4 lists exactly these ten codes.
+    // CONTRACT.agent-identity.md §5.4 lists exactly these ten codes.
     // A code added without a contract row would otherwise go untested in every table above.
     [Fact]
     public void EveryCodeHasAContractRow()

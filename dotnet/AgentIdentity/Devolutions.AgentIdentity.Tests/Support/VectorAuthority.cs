@@ -72,7 +72,7 @@ internal sealed class VectorAuthority
         return header is null ? [] : [header];
     }
 
-    // CONTRACT.md §5: each endpoint is one operation.
+    // CONTRACT.agent-identity.md §5: each endpoint is one operation.
     public static AgentOperation Operation(string endpoint)
     {
         return endpoint switch
@@ -85,7 +85,7 @@ internal sealed class VectorAuthority
         };
     }
 
-    // CONTRACT.md "Definitions": the certificate statuses.
+    // CONTRACT.agent-identity.md "Definitions": the certificate statuses.
     private static CertificateStatus Status(string status)
     {
         return status switch

@@ -15,7 +15,8 @@ public sealed record RequestBodyOutcome(
     CertificateSigningRequest? Csr);
 
 /// <summary>
-/// The rules that every request body shares (CONTRACT.md §1 and §3); each derived class runs them on one body type.
+/// The rules that every request body shares (CONTRACT.agent-identity.md §1 and §3);
+/// each derived class runs them on one body type.
 /// </summary>
 public abstract class RequestBodyTests
 {
@@ -29,7 +30,7 @@ public abstract class RequestBodyTests
 
     protected abstract RequestBodyOutcome Parse(byte[] utf8Json);
 
-    // CONTRACT.md §5.2, §5.3 and §5.6 define the bodies, and §3 their metadata.
+    // CONTRACT.agent-identity.md §5.2, §5.3 and §5.6 define the bodies, and §3 their metadata.
     [Fact]
     public void AcceptsValidBody()
     {
@@ -38,7 +39,7 @@ public abstract class RequestBodyTests
         Assert.Equal([new KeyValuePair<string, string>("hostname", "host")], metadata);
     }
 
-    // CONTRACT.md §1: receivers ignore unknown JSON fields.
+    // CONTRACT.agent-identity.md §1: receivers ignore unknown JSON fields.
     // A name repeated in different objects is not a repeated member.
     [Theory]
     [InlineData(""" "extra": 1""")]
@@ -62,14 +63,14 @@ public abstract class RequestBodyTests
         Assert.Equal(expected, AssertValid(outcome).Metadata!);
     }
 
-    // CONTRACT.md §3: metadata may be an empty object.
+    // CONTRACT.agent-identity.md §3: metadata may be an empty object.
     [Fact]
     public void AcceptsEmptyMetadata()
     {
         Assert.Empty(AssertValid(ParseText(Body("{}", ""))).Metadata!);
     }
 
-    // CONTRACT.md §3: metadata is required, and §1 reads a null member as an absent one.
+    // CONTRACT.agent-identity.md §3: metadata is required, and §1 reads a null member as an absent one.
     [Theory]
     [InlineData(null)]
     [InlineData("null")]
@@ -78,7 +79,7 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(metadata, "")));
     }
 
-    // CONTRACT.md §3: metadata is a JSON object of string to string.
+    // CONTRACT.agent-identity.md §3: metadata is a JSON object of string to string.
     [Theory]
     [InlineData(""" "host" """)]
     [InlineData("[]")]
@@ -102,7 +103,7 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(metadata, "")));
     }
 
-    // The limits of CONTRACT.md §3 apply to metadata in a body as they do anywhere else.
+    // The limits of CONTRACT.agent-identity.md §3 apply to metadata in a body as they do anywhere else.
     public static TheoryData<string, string> MetadataBeyondTheLimits => new()
     {
         { "33 keys", JsonObject([.. Enumerable.Range(0, 33).Select(i => $"\"key_{i}\": \"value\"")]) },
@@ -120,8 +121,8 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(metadata, "")), form);
     }
 
-    // CONTRACT.md §1: a body that repeats a member name at any depth, such as one metadata key twice, is invalid,
-    // whether the names are written alike or only unescape alike.
+    // CONTRACT.agent-identity.md §1: a body that repeats a member name at any depth, such as one metadata key twice,
+    // is invalid, whether the names are written alike or only unescape alike.
     [Theory]
     [InlineData("metadata", ValidMetadata, """ "metadata": {}""")]
     [InlineData("metadata with an escaped letter", ValidMetadata, """ "m\u0065tadata": {}""")]
@@ -170,7 +171,8 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(ValidMetadata, "")[..^1]));
     }
 
-    // CONTRACT.md §5.2, §5.3 and §5.6: each body is a JSON object; RFC 8259 §2: a JSON text holds one value.
+    // CONTRACT.agent-identity.md §5.2, §5.3 and §5.6: each body is a JSON object;
+    // RFC 8259 §2: a JSON text holds one value.
     [Theory]
     [InlineData("[]")]
     [InlineData(""" "body" """)]
@@ -196,7 +198,7 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(ValidMetadata, extraMembers)), form);
     }
 
-    // CONTRACT.md §1 and RFC 8259 §8.1: JSON bodies are UTF-8.
+    // CONTRACT.agent-identity.md §1 and RFC 8259 §8.1: JSON bodies are UTF-8.
     // The bytes replace the character of a string in an unknown member.
     [Theory]
     [InlineData(new byte[] { 0xFF })]
@@ -269,7 +271,7 @@ public abstract class RequestBodyTests
 }
 
 /// <summary>
-/// The rules of a body that carries a CSR (CONTRACT.md §1, §4, §5.2 and §5.3).
+/// The rules of a body that carries a CSR (CONTRACT.agent-identity.md §1, §4, §5.2 and §5.3).
 /// </summary>
 public abstract class CsrRequestBodyTests : RequestBodyTests
 {
@@ -294,7 +296,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         Assert.Equal(SHA256.HashData(expected), csr.SubjectPublicKeyInfoSha256.ToArray());
     }
 
-    // CONTRACT.md §5.2 and §5.3: csr is required, and §1 reads a null member as an absent one.
+    // CONTRACT.agent-identity.md §5.2 and §5.3: csr is required, and §1 reads a null member as an absent one.
     [Theory]
     [InlineData(null)]
     [InlineData("null")]
@@ -303,7 +305,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         AssertInvalid(ParseText(BodyWithCsr(csr, ValidMetadata)));
     }
 
-    // CONTRACT.md §1: a CSR is DER encoded base64 in a JSON string.
+    // CONTRACT.agent-identity.md §1: a CSR is DER encoded base64 in a JSON string.
     [Theory]
     [InlineData("1")]
     [InlineData("{}")]
@@ -314,7 +316,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         AssertInvalid(ParseText(BodyWithCsr(csr, ValidMetadata)));
     }
 
-    // CONTRACT.md §1: base64 in any form but the canonical one is invalid.
+    // CONTRACT.agent-identity.md §1: base64 in any form but the canonical one is invalid.
     // Each test alters the canonical base64 of a request that the body accepts,
     // into a form that a lenient decoder would still read as that request.
     // The requests are built here rather than read from the vector file,
@@ -380,7 +382,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         AssertInvalid(ParseText(BodyWithCsr(Quote(""), ValidMetadata)));
     }
 
-    // CONTRACT.md §1 makes csr sent twice invalid_request.
+    // CONTRACT.agent-identity.md §1 makes csr sent twice invalid_request.
     [Fact]
     public void RejectsRepeatedCsr()
     {
@@ -461,7 +463,7 @@ public class RenewRequestBodyTests : CsrRequestBodyTests
 
 public class CheckInRequestBodyTests : RequestBodyTests
 {
-    // CONTRACT.md §5.6: a check-in body has no csr, so a csr member is an unknown member.
+    // CONTRACT.agent-identity.md §5.6: a check-in body has no csr, so a csr member is an unknown member.
     [Fact]
     public void IgnoresCsrMember()
     {

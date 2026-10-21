@@ -8,7 +8,8 @@ namespace Devolutions.AgentIdentity;
 /// Writes the bodies of the successful responses of the agent-facing endpoints, as UTF-8 JSON objects.
 /// </summary>
 /// <remarks>
-/// Each body has exactly the members that CONTRACT.md §5 gives the response, and no member is ever <c>null</c>.
+/// Each body has exactly the members that CONTRACT.agent-identity.md §5 gives the response,
+/// and no member is ever <c>null</c>.
 /// A certificate is written as its DER in canonical <c>base64</c>, and a time as an RFC 3339 UTC timestamp.
 /// </remarks>
 public static class ResponseBodies

@@ -4,7 +4,8 @@ using System.Text;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// Channel proofs that a test signs as an agent would, built from CONTRACT.md §7.3 step 3 rather than by the library.
+/// Channel proofs that a test signs as an agent would,
+/// built from CONTRACT.agent-identity.md §7.3 step 3 rather than by the library.
 /// </summary>
 internal static class TestChannelProof
 {

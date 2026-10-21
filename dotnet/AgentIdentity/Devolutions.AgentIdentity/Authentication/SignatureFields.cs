@@ -8,7 +8,7 @@ namespace Devolutions.AgentIdentity;
 
 /// <summary>
 /// The <c>Signature-Input</c>, <c>Signature</c> and <c>Content-Digest</c> fields of a signed request,
-/// parsed and checked against the profile of CONTRACT.md §6 step 1.
+/// parsed and checked against the profile of CONTRACT.agent-identity.md §6 step 1.
 /// </summary>
 /// <remarks>
 /// One parse drives both the profile checks and the signature base,

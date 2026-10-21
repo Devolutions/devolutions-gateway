@@ -20,7 +20,7 @@ internal static class VectorChannel
     public static DateTimeOffset OpeningTime => ConnectCase.Now;
 
     /// <summary>
-    /// Metadata that CONTRACT.md §3 accepts, with the keys that §3.1 says the agent always sends.
+    /// Metadata that CONTRACT.agent-identity.md §3 accepts, with the keys that §3.1 says the agent always sends.
     /// </summary>
     public static IReadOnlyList<KeyValuePair<string, string>> ValidMetadata { get; } =
     [

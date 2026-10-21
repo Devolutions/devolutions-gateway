@@ -7,20 +7,21 @@ public class FriendlyNameFormatTests
 
     private const string TokenName = "Fleet";
 
-    // A dvaet1 token for https://host/dvls (CONTRACT.md §2), which an administrator might paste into a format.
+    // A dvaet1 token for https://host/dvls (CONTRACT.agent-identity.md §2),
+    // which an administrator might paste into a format.
     private const string Bag = "eyJ1IjoiaHR0cHM6Ly9ob3N0L2R2bHMifQ";
     private const string Secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
     private const string Token = "dvaet1." + Bag + "." + Secret;
 
-    // The placeholders of INTENT.agent-identity.md, "Enrollment": the known metadata keys of CONTRACT.md §3,
-    // and the token's name.
+    // The placeholders of INTENT.agent-identity.md, "Enrollment":
+    // the known metadata keys of CONTRACT.agent-identity.md §3, and the token's name.
     private static readonly string[] Placeholders =
     [
         "{hostname}", "{fqdn}", "{domain}", "{os_name}", "{os_version}", "{arch}", "{agent_version}", "{machine_id}",
         "{token_name}",
     ];
 
-    // A value for each known metadata key of CONTRACT.md §3.
+    // A value for each known metadata key of CONTRACT.agent-identity.md §3.
     private static readonly AgentMetadata Metadata = Validated(new Dictionary<string, string>
     {
         ["hostname"] = "pc-042",
@@ -34,7 +35,7 @@ public class FriendlyNameFormatTests
     });
 
     // INTENT.agent-identity.md, "Enrollment": the placeholders are `{<known metadata key>}` and `{token_name}`,
-    // the enrollment token's name; CONTRACT.md §3 lists the known metadata keys.
+    // the enrollment token's name; CONTRACT.agent-identity.md §3 lists the known metadata keys.
     [Theory]
     [InlineData("{hostname}", "pc-042")]
     [InlineData("{fqdn}", "pc-042.corp.example")]
@@ -59,7 +60,7 @@ public class FriendlyNameFormatTests
     }
 
     // INTENT.agent-identity.md, "Enrollment": a format with an unpaired brace or an unknown placeholder is rejected.
-    // A placeholder names a known metadata key of CONTRACT.md §3 or `token_name` exactly,
+    // A placeholder names a known metadata key of CONTRACT.agent-identity.md §3 or `token_name` exactly,
     // so another case, white space or another key, such as one that §3 allows but does not list, is unknown.
     [Theory]
     [InlineData("{")]
@@ -156,7 +157,8 @@ public class FriendlyNameFormatTests
     }
 
     // `{token_name}` is the enrollment token's name,
-    // and CONTRACT.md §3 lets an agent report an unknown key such as `token_name`, which is never used for anything.
+    // and CONTRACT.agent-identity.md §3 lets an agent report an unknown key such as `token_name`,
+    // which is never used for anything.
     [Fact]
     public void EvaluatesTokenNameToTheTokenNameRatherThanAReportedValue()
     {
@@ -252,7 +254,7 @@ public class FriendlyNameFormatTests
     }
 
     // INTENT.agent-identity.md, "Enrollment": an empty result falls back to the identity ID,
-    // which CONTRACT.md §1 writes as a lowercase hyphenated UUID.
+    // which CONTRACT.agent-identity.md §1 writes as a lowercase hyphenated UUID.
     [Theory]
     [InlineData("{fqdn}", TokenName)]
     [InlineData("", TokenName)]

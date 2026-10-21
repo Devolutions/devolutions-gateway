@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The parsing rules of CONTRACT.md §6 step 1, beyond the vectors.
+/// The parsing rules of CONTRACT.agent-identity.md §6 step 1, beyond the vectors.
 /// </summary>
 /// <remarks>
 /// Each rejected request is signed over the base that a verifier without the rule under test would build,
@@ -248,7 +248,7 @@ public class RequestAuthenticatorProfileTests
         Assert.Equal("signature_invalid", outcome);
     }
 
-    // CONTRACT.md §6 step 1: for renew and check-in, Content-Digest holds exactly one member, sha-256,
+    // CONTRACT.agent-identity.md §6 step 1: for renew and check-in, Content-Digest holds exactly one member, sha-256,
     // without parameters, in canonical base64.
     [Theory]
     [MemberData(nameof(ContentDigestViolationCases))]
@@ -264,7 +264,7 @@ public class RequestAuthenticatorProfileTests
         Assert.Equal("signature_invalid", outcome);
     }
 
-    // CONTRACT.md §6: parameters may appear in any order, and the verifier builds @signature-params
+    // CONTRACT.agent-identity.md §6: parameters may appear in any order, and the verifier builds @signature-params
     // from the received member, so a verifier that copied the received text would reject these.
     [Theory]
     [MemberData(nameof(AcceptedFormNames))]
@@ -277,7 +277,7 @@ public class RequestAuthenticatorProfileTests
         Assert.Equal("ok", outcome);
     }
 
-    // CONTRACT.md §6 step 1: a malformed Signature-Input draws signature_invalid,
+    // CONTRACT.agent-identity.md §6 step 1: a malformed Signature-Input draws signature_invalid,
     // as a result rather than an exception, and records no nonce.
     [Theory]
     [MemberData(nameof(MalformedSignatureInputNames))]
@@ -292,7 +292,7 @@ public class RequestAuthenticatorProfileTests
     }
 
     // RFC 8941 §4.2.5: an escaped backslash decodes to one backslash, so the received tag is re\new,
-    // which CONTRACT.md §6 step 2 rejects for renew.
+    // which CONTRACT.agent-identity.md §6 step 2 rejects for renew.
     // The signature covers the tag renew, which a parser that dropped the escaped character would read.
     [Fact]
     public async Task TagWithAnEscapedBackslashIsAnotherTag()

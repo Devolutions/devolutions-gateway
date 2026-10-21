@@ -24,7 +24,7 @@ namespace Devolutions.AgentIdentity;
 /// </remarks>
 public sealed class FriendlyNameFormat
 {
-    // The known metadata keys of CONTRACT.md §3, and the token's name.
+    // The known metadata keys of CONTRACT.agent-identity.md §3, and the token's name.
     private static readonly string[] Placeholders =
         ["hostname", "fqdn", "domain", "os_name", "os_version", "arch", "agent_version", "machine_id", "token_name"];
 

@@ -5,7 +5,7 @@ namespace Devolutions.AgentIdentity;
 
 /// <summary>
 /// The proof in <c>Hello</c> that the agent holds the key of the certificate that opened the stream,
-/// as CONTRACT.md §7.3 step 3 defines it.
+/// as CONTRACT.agent-identity.md §7.3 step 3 defines it.
 /// </summary>
 internal static class ChannelProof
 {

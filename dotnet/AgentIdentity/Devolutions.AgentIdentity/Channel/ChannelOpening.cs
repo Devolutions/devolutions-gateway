@@ -118,27 +118,28 @@ public sealed class ChannelOpening
     internal DateTimeOffset OpenedAt { get; }
 
     /// <summary>
-    /// Verifies the first message that the agent sent on the stream, as CONTRACT.md §7.3 step 4 specifies.
+    /// Verifies the first message that the agent sent on the stream,
+    /// as CONTRACT.agent-identity.md §7.3 step 4 specifies.
     /// </summary>
     /// <remarks>
     /// The method reads the clock once, then the certificate registry once,
     /// because the host cannot close the stream for a change to its identity while that identity is still hidden.
-    /// In the order of CONTRACT.md §6 step 4, the handshake fails with
+    /// In the order of CONTRACT.agent-identity.md §6 step 4, the handshake fails with
     /// <see cref="AgentIdentityErrorCode.IdentityUnknown"/> when the certificate that opened the stream is no longer
     /// registered or its identity was deleted, with <see cref="AgentIdentityErrorCode.IdentityRevoked"/> when the
     /// identity is revoked, and with <see cref="AgentIdentityErrorCode.CertificateExpired"/> after
     /// <see cref="CertificateNotAfter"/>.
     /// A certificate retired since the opening still passes,
     /// and <see cref="AuthenticatedIdentity.CertificateStatus"/> then reports <see cref="CertificateStatus.Retired"/>;
-    /// CONTRACT.md §7.4 says how the host treats a stream of a retired certificate.
+    /// CONTRACT.agent-identity.md §7.4 says how the host treats a stream of a retired certificate.
     /// More than <see cref="ChannelHandshake.HelloTimeout"/> after the opening request was verified,
     /// the handshake fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>,
     /// even when the host's own timer let the message through.
     /// The message must then be a <c>Hello</c> whose <c>correlation_id</c> is the <c>id</c> of <see cref="Challenge"/>,
     /// and whose <c>proof</c> verifies with the key of the certificate that signed the opening request;
     /// otherwise the handshake fails with <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
-    /// Only then is the metadata checked, and metadata that CONTRACT.md §3 rejects fails the handshake with
-    /// <see cref="AgentIdentityErrorCode.InvalidRequest"/>.
+    /// Only then is the metadata checked, and metadata that CONTRACT.agent-identity.md §3 rejects fails the handshake
+    /// with <see cref="AgentIdentityErrorCode.InvalidRequest"/>.
     /// The <c>Welcome</c> of a successful handshake carries the time of the clock reading.
     /// The first call to this method or to <see cref="HelloTimedOutAsync"/> ends the handshake, whatever its outcome,
     /// including an exception from the registry, which propagates.
@@ -223,7 +224,7 @@ public sealed class ChannelOpening
     /// A stream still awaiting its <c>Hello</c> closes for its identity and its certificate before it closes for the
     /// timeout, so the method reads the clock once, then the certificate registry once, as
     /// <see cref="VerifyHelloAsync"/> does.
-    /// In the order of CONTRACT.md §6 step 4, the handshake fails with
+    /// In the order of CONTRACT.agent-identity.md §6 step 4, the handshake fails with
     /// <see cref="AgentIdentityErrorCode.IdentityUnknown"/> when the certificate that opened the stream is no longer
     /// registered or its identity was deleted, with <see cref="AgentIdentityErrorCode.IdentityRevoked"/> when the
     /// identity is revoked, and with <see cref="AgentIdentityErrorCode.CertificateExpired"/> after
@@ -262,14 +263,14 @@ public sealed class ChannelOpening
         }
     }
 
-    // CONTRACT.md §6: a certificate is unexpired while now ≤ notAfter.
+    // CONTRACT.agent-identity.md §6: a certificate is unexpired while now ≤ notAfter.
     private bool HasExpired(DateTimeOffset now)
     {
         return now > Certificate.NotAfter;
     }
 
     // Reads the clock, then the registry, once each.
-    // The clock comes first, as in CONTRACT.md §6, so that a slow registry cannot make a Hello late.
+    // The clock comes first, as in CONTRACT.agent-identity.md §6, so that a slow registry cannot make a Hello late.
     // The host cannot tie the stream to its identity before the proof verifies,
     // so only this lookup sees a revocation, a deletion or a rotation since the opening.
     private async ValueTask<(DateTimeOffset Now, RegisteredCertificate? Registered)> ReadClockAndRegistryAsync(
@@ -283,8 +284,8 @@ public sealed class ChannelOpening
         return (now, registered);
     }
 
-    // CONTRACT.md §7.4: a deletion, a revocation and the certificate's notAfter close a stream even while it awaits
-    // its Hello, ahead of every failure of §7.3 step 4, in the order of §6 step 4.
+    // CONTRACT.agent-identity.md §7.4: a deletion, a revocation and the certificate's notAfter close a stream even
+    // while it awaits its Hello, ahead of every failure of §7.3 step 4, in the order of §6 step 4.
     // A certificate retired since the opening does not close the stream:
     // §7.4 lets that stream complete the handshake, whereas identity_unknown would end the identity for an agent
     // that did nothing wrong.

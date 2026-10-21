@@ -70,7 +70,8 @@ internal sealed record TestRequest
     }
 
     /// <summary>
-    /// A request that every rule of CONTRACT.md §6 accepts at <paramref name="now"/>, when its key is registered.
+    /// A request that every rule of CONTRACT.agent-identity.md §6 accepts at <paramref name="now"/>,
+    /// when its key is registered.
     /// </summary>
     public static TestRequest Valid(
         AgentOperation operation,
@@ -102,7 +103,7 @@ internal sealed record TestRequest
         };
     }
 
-    // CONTRACT.md §6, column "tag".
+    // CONTRACT.agent-identity.md §6, column "tag".
     public static string Tag(AgentOperation operation)
     {
         return operation switch

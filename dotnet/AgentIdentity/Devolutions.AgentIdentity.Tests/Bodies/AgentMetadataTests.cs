@@ -4,7 +4,7 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class AgentMetadataTests
 {
-    // CONTRACT.md §3: metadata may be an empty object.
+    // CONTRACT.agent-identity.md §3: metadata may be an empty object.
     [Fact]
     public void AcceptsNoEntries()
     {
@@ -57,7 +57,7 @@ public class AgentMetadataTests
         Assert.False(metadata.ContainsKey("absent"));
     }
 
-    // CONTRACT.md §3: at most 32 keys.
+    // CONTRACT.agent-identity.md §3: at most 32 keys.
     [Fact]
     public void Accepts32Keys()
     {
@@ -72,7 +72,7 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate(NumberedEntries(33)));
     }
 
-    // CONTRACT.md §3: a key matches ^[a-z][a-z0-9_]{0,63}$.
+    // CONTRACT.agent-identity.md §3: a key matches ^[a-z][a-z0-9_]{0,63}$.
     [Theory]
     [InlineData("a")]
     [InlineData("hostname")]
@@ -115,7 +115,7 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate([new(key, "value")]), form);
     }
 
-    // CONTRACT.md §3: a value has at most 1024 UTF-8 bytes.
+    // CONTRACT.agent-identity.md §3: a value has at most 1024 UTF-8 bytes.
     // Characters of two, three and four bytes count by their bytes, not as one character or UTF-16 code unit.
     [Theory]
     [InlineData("a", 1024, "")]
@@ -137,14 +137,15 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate([new("hostname", Repeat(unit, count) + suffix)]));
     }
 
-    // CONTRACT.md §3 gives a value no minimum length.
+    // CONTRACT.agent-identity.md §3 gives a value no minimum length.
     [Fact]
     public void AcceptsEmptyValue()
     {
         AssertValid(AgentMetadata.Validate([new("domain", "")]));
     }
 
-    // CONTRACT.md §3: no C0 (U+0000 to U+001F), DEL (U+007F) or C1 (U+0080 to U+009F) control characters.
+    // CONTRACT.agent-identity.md §3: no C0 (U+0000 to U+001F),
+    // DEL (U+007F) or C1 (U+0080 to U+009F) control characters.
     public static TheoryData<int> ControlCharacters =>
         new(Enumerable.Range(0x00, 0x20).Append(0x7F).Concat(Enumerable.Range(0x80, 0x20)));
 
@@ -165,7 +166,7 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate([new("hostname", $"host{(char)codePoint}name")]));
     }
 
-    // CONTRACT.md §3 measures a value in UTF-8 bytes.
+    // CONTRACT.agent-identity.md §3 measures a value in UTF-8 bytes.
     // A string holding an unpaired surrogate is not Unicode text, so it has no UTF-8 encoding to measure or store.
     [Theory]
     [InlineData("lone high surrogate", 0x61, 0xD800, 0x62)]
@@ -179,7 +180,8 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate([new("hostname", value)]), form);
     }
 
-    // CONTRACT.md §3: the whole object has at most 16 KiB, the sum of the UTF-8 byte lengths of all keys and values.
+    // CONTRACT.agent-identity.md §3: the whole object has at most 16 KiB,
+    // the sum of the UTF-8 byte lengths of all keys and values.
     // Each value has 1021 UTF-8 bytes but 511 characters, so a count of characters would stay far below the limit.
     [Fact]
     public void AcceptsObjectOf16KiB()
@@ -195,7 +197,7 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate(EntriesOf1024Bytes(lastKey: "k150")));
     }
 
-    // CONTRACT.md §1 makes one metadata key sent twice invalid_request.
+    // CONTRACT.agent-identity.md §1 makes one metadata key sent twice invalid_request.
     // A later entry with the same key would silently replace the earlier one.
     [Fact]
     public void RejectsRepeatedKey()

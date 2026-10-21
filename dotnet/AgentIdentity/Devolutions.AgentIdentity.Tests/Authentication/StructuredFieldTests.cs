@@ -64,7 +64,7 @@ public class StructuredFieldTests
     [InlineData("sig;")]
     [InlineData("sig=1;")]
     [InlineData("sig=(\"@method\");")]
-    // CONTRACT.md §6 step 1 rejects a repeated key, of which RFC 8941 §4.2.2 would keep the last.
+    // CONTRACT.agent-identity.md §6 step 1 rejects a repeated key, of which RFC 8941 §4.2.2 would keep the last.
     [InlineData("sig=1, sig=2")]
     // RFC 8941 §4.2.2: a comma separates members, and none follows the last.
     [InlineData("sig=1 x")]

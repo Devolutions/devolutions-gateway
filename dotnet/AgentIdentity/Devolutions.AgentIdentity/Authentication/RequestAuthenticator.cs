@@ -5,25 +5,27 @@ using System.Security.Cryptography.X509Certificates;
 namespace Devolutions.AgentIdentity;
 
 /// <summary>
-/// Authenticates the signed requests of agents, as CONTRACT.md §6 specifies.
+/// Authenticates the signed requests of agents, as CONTRACT.agent-identity.md §6 specifies.
 /// </summary>
 /// <remarks>
-/// Each request goes through the six steps of CONTRACT.md §6 in order, and the first step that fails decides the error.
+/// Each request goes through the six steps of CONTRACT.agent-identity.md §6 in order,
+/// and the first step that fails decides the error.
 /// Exceptions from the certificate registry and the nonce store propagate to the caller.
 /// </remarks>
 public sealed class RequestAuthenticator
 {
-    // CONTRACT.md §6 step 3.
+    // CONTRACT.agent-identity.md §6 step 3.
     private const long MaxSignatureLifetimeSeconds = 300;
     private const long ClockToleranceSeconds = 60;
 
-    // CONTRACT.md §7.3 step 2.
+    // CONTRACT.agent-identity.md §7.3 step 2.
     private const int ChallengeLength = 32;
 
     // RFC 5480 §2.1.1: id-ecPublicKey.
     private const string EcPublicKeyOid = "1.2.840.10045.2.1";
 
-    // CONTRACT.md §6 step 6, and the shared intent: a nonce is kept until 60 s after its signature expires.
+    // CONTRACT.agent-identity.md §6 step 6, and the shared intent:
+    // a nonce is kept until 60 s after its signature expires.
     private static readonly TimeSpan NonceRetentionAfterExpiry = TimeSpan.FromSeconds(60);
 
     // RFC 5480 §2.1.1.1: the DER encoding of the namedCurve secp256r1, which is P-256.
@@ -65,7 +67,7 @@ public sealed class RequestAuthenticator
     /// <remarks>
     /// A body larger than <see cref="AgentIdentityProtocol.MaxRequestBodyBytes"/> fails first,
     /// with <see cref="AgentIdentityError.BodyTooLarge"/>.
-    /// The request then goes through the steps of CONTRACT.md §6,
+    /// The request then goes through the steps of CONTRACT.agent-identity.md §6,
     /// and its nonce is recorded only once every other step has passed.
     /// </remarks>
     /// <param name="operation">The operation of the endpoint that received the request.</param>
@@ -123,7 +125,7 @@ public sealed class RequestAuthenticator
     /// Authenticates the signed opening request of an agent channel stream, and prepares the stream's challenge.
     /// </summary>
     /// <remarks>
-    /// The opening request goes through the steps of CONTRACT.md §6 with tag <c>connect</c>,
+    /// The opening request goes through the steps of CONTRACT.agent-identity.md §6 with tag <c>connect</c>,
     /// and its nonce is recorded only once every other step has passed.
     /// A verified opening does not authenticate the stream:
     /// the agent must still sign <see cref="ChannelOpening.Challenge"/>,
@@ -309,7 +311,7 @@ public sealed class RequestAuthenticator
         return Verification.Accept(verified, fields.Nonce);
     }
 
-    // CONTRACT.md §6 step 3: 0 < expires − created ≤ 300, created ≤ now + 60 and expires ≥ now − 60.
+    // CONTRACT.agent-identity.md §6 step 3: 0 < expires − created ≤ 300, created ≤ now + 60 and expires ≥ now − 60.
     private static bool IsWithinWindow(long created, long expires, DateTimeOffset now)
     {
         // Both are integers of at most 15 digits, so their difference fits in a long.
@@ -382,7 +384,8 @@ public sealed class RequestAuthenticator
     }
 
     /// <summary>
-    /// The outcome of the steps of CONTRACT.md §6: the verified certificate and nonce, or the error of the failed step.
+    /// The outcome of the steps of CONTRACT.agent-identity.md §6: the verified certificate and nonce,
+    /// or the error of the failed step.
     /// </summary>
     private sealed class Verification
     {

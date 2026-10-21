@@ -6,7 +6,8 @@ using Devolutions.Agent.Channel.V1;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The messages that the authority pushes on an authenticated agent channel stream, CONTRACT.md §7.3 and §7.4.
+/// The messages that the authority pushes on an authenticated agent channel stream,
+/// CONTRACT.agent-identity.md §7.3 and §7.4.
 /// </summary>
 public class ChannelMessagesTests
 {
@@ -28,7 +29,7 @@ public class ChannelMessagesTests
 
     public static TheoryData<string> MessageNames => new(Messages.Keys);
 
-    // CONTRACT.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
+    // CONTRACT.agent-identity.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
     // A push answers no agent message, so it has no correlation_id.
     [Theory]
     [MemberData(nameof(MessageNames))]
@@ -40,7 +41,8 @@ public class ChannelMessagesTests
         Assert.False(built.HasCorrelationId);
     }
 
-    // CONTRACT.md §7.3 steps 5 and 7: the agent acknowledges a message by its id, so no two messages share one.
+    // CONTRACT.agent-identity.md §7.3 steps 5 and 7: the agent acknowledges a message by its id,
+    // so no two messages share one.
     [Theory]
     [MemberData(nameof(MessageNames))]
     public void EachMessageHasItsOwnId(string message)
@@ -48,7 +50,7 @@ public class ChannelMessagesTests
         Assert.NotEqual(Messages[message]().Id, Messages[message]().Id);
     }
 
-    // CONTRACT.md §7.3 step 7 and channel.proto: ConfigUpdate carries the config, in the shape of §5.2,
+    // CONTRACT.agent-identity.md §7.3 step 7 and channel.proto: ConfigUpdate carries the config, in the shape of §5.2,
     // as a UTF-8 JSON object.
     [Fact]
     public void ConfigUpdateCarriesTheConfigJson()
@@ -65,7 +67,7 @@ public class ChannelMessagesTests
     }
 
     // channel.proto: the reason of RenewRequested is "admin" or "rotation";
-    // CONTRACT.md §8.3 sends "rotation" at the start of a root rotation.
+    // CONTRACT.agent-identity.md §8.3 sends "rotation" at the start of a root rotation.
     [Theory]
     [InlineData(RenewalRequestReason.Admin, "admin")]
     [InlineData(RenewalRequestReason.Rotation, "rotation")]
@@ -77,7 +79,8 @@ public class ChannelMessagesTests
         Assert.Equal(expected, message.RenewRequested.Reason);
     }
 
-    // CONTRACT.md §7.4: the streams of a retired certificate get Reconnect{reason:"certificate_rotated"}.
+    // CONTRACT.agent-identity.md §7.4: the streams of a retired certificate get
+    // Reconnect{reason:"certificate_rotated"}.
     [Fact]
     public void ReconnectCarriesItsReason()
     {

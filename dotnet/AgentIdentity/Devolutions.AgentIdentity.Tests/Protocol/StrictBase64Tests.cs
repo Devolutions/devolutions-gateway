@@ -9,7 +9,8 @@ public class StrictBase64Tests
     private const string Base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     private const string Base64UrlAlphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
-    // CONTRACT.md Definitions: base64 is RFC 4648 §4 with padding, and base64url is RFC 4648 §5 without padding.
+    // CONTRACT.agent-identity.md Definitions: base64 is RFC 4648 §4 with padding,
+    // and base64url is RFC 4648 §5 without padding.
     private static readonly Dictionary<string, Codec> Codecs = new()
     {
         ["base64"] = new(StrictBase64.TryDecodeBase64, Base64Alphabet, "==", "=", base64 => base64),
@@ -125,7 +126,7 @@ public class StrictBase64Tests
         Assert.False(Codecs[encoding].TryDecode(encoded, out _, length));
     }
 
-    // CONTRACT.md Definitions: base64url is RFC 4648 §5 without padding.
+    // CONTRACT.agent-identity.md Definitions: base64url is RFC 4648 §5 without padding.
     [Theory]
     [MemberData(nameof(Base64UrlForms))]
     public void Base64UrlEncodesWithoutPadding(string expected, byte[] value)
