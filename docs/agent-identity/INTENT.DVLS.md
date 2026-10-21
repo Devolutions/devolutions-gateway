@@ -98,3 +98,6 @@ It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONT
   Without one, the deadline is the rotation maximum: the latest `notAfter` among unexpired current or pending certificates of non-revoked identities issued by the old root, or the current time when there are none.
   A deadline after the rotation maximum is refused.
 - The rotation status reports how many non-revoked identities still hold an unexpired current or pending certificate issued by the old root; rotation completes when that count reaches 0 (`CONTRACT.agent-identity.md` §8.3).
+- Completion is checked whenever DVLS serves the trust anchors during a rotation and after every accepted agent request, so the old root leaves the trust anchors on time without waiting for a background job.
+  A refused agent request runs no completion check, so that unauthenticated traffic costs no query, and a failed check is logged while the request it followed is still answered.
+- A rotation's completion is recorded in DVLS's activity log, whatever caused it: the count reaching 0, the deadline passing, or an emergency.
