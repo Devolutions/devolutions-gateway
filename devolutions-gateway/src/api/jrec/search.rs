@@ -33,6 +33,7 @@ const MAX_LINE_BYTES: usize = 256 * 1024;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecordingSearchRequest {
     /// Text to search for, ignoring case; leading and trailing spaces are part of it.
+    #[cfg_attr(feature = "openapi", schema(min_length = 1))]
     query: String,
     /// The recordings to search.
     recordings: RecordingSelection,
@@ -132,6 +133,7 @@ pub(crate) struct RecordingSearchHit {
     /// Name of the `.slog` artifact holding the line, as listed in `recording.json`.
     file_name: String,
     /// Number of the line in the file, counting from 1.
+    #[cfg_attr(feature = "openapi", schema(minimum = 1))]
     line_number: u64,
     /// Byte offset of the line in the file.
     offset: u64,
@@ -217,28 +219,30 @@ pub(crate) async fn search_recordings(
     Ok(Json(search.into_response()))
 }
 
-/// Search text with its case folded, the form lines are compared in.
+/// Search text in the lowercase form lines are compared in.
 struct SearchText(String);
 
 impl SearchText {
     fn new(query: &str) -> Option<Self> {
-        (!query.is_empty()).then(|| Self(fold_case(query)))
+        (!query.is_empty()).then(|| Self(lowercase_for_matching(query)))
     }
 
     fn is_in(&self, line: &str) -> bool {
-        fold_case(line).contains(&self.0)
+        lowercase_for_matching(line).contains(&self.0)
     }
 }
 
-/// Lowercases each character on its own, with the final sigma read as a sigma.
+/// Lowercases `text`, with every sigma in its middle form.
 ///
 /// `str::to_lowercase` turns a capital sigma that ends a word into a final sigma,
 /// so a query ending in "Σ" would not match the same letters inside a longer word.
-fn fold_case(text: &str) -> String {
-    text.chars()
-        .flat_map(char::to_lowercase)
-        .map(|character| if character == 'ς' { 'σ' } else { character })
-        .collect()
+fn lowercase_for_matching(text: &str) -> String {
+    let lowercase = text.to_lowercase();
+    if lowercase.contains('ς') {
+        lowercase.replace('ς', "σ")
+    } else {
+        lowercase
+    }
 }
 
 struct Search {
@@ -384,7 +388,13 @@ async fn all_recording_logs_newest_first(recording_root: &Utf8Path) -> anyhow::R
     let mut recordings = Vec::new();
 
     while let Some(entry) = read_dir.next_entry().await? {
-        let Some(recording_id) = entry.file_name().to_str().and_then(|name| Uuid::parse_str(name).ok()) else {
+        // Gateway names a recording folder by the hyphenated ID, and a copy under another spelling of the same ID
+        // would be searched as the same recording twice.
+        let Some(recording_id) = entry.file_name().to_str().and_then(|name| {
+            Uuid::parse_str(name)
+                .ok()
+                .filter(|recording_id| recording_id.to_string() == name)
+        }) else {
             continue;
         };
 
@@ -696,11 +706,11 @@ mod tests {
         assert_eq!(recording.file_names, ["ai-analysis-0.slog"]);
     }
 
-    #[tokio::test]
-    async fn lists_recordings_that_start_together_highest_id_first() {
+    /// Lists the recordings of a root holding a folder per name, each with a manifest that starts at the same time.
+    async fn list_recording_folders(names: impl IntoIterator<Item = String>) -> Vec<Uuid> {
         let root = tempfile::tempdir().expect("temp dir");
-        for id in 1..=3 {
-            let dir = root.path().join(Uuid::from_u128(id).to_string());
+        for name in names {
+            let dir = root.path().join(name);
             std::fs::create_dir(&dir).expect("create recording folder");
             std::fs::write(dir.join("recording.json"), r#"{"startTime":100}"#).expect("write manifest");
         }
@@ -708,8 +718,23 @@ mod tests {
 
         let recordings = all_recording_logs_newest_first(root).await.expect("list recordings");
 
-        let ids: Vec<_> = recordings.iter().map(|recording| recording.recording_id).collect();
+        recordings.iter().map(|recording| recording.recording_id).collect()
+    }
+
+    #[tokio::test]
+    async fn lists_recordings_that_start_together_highest_id_first() {
+        let ids = list_recording_folders((1..=3).map(|id| Uuid::from_u128(id).to_string())).await;
+
         assert_eq!(ids, [3, 2, 1].map(Uuid::from_u128));
+    }
+
+    #[tokio::test]
+    async fn lists_only_folders_named_by_the_hyphenated_id() {
+        let id = Uuid::from_u128(1);
+
+        let ids = list_recording_folders([id.to_string(), id.simple().to_string(), id.braced().to_string()]).await;
+
+        assert_eq!(ids, [id]);
     }
 
     const SECOND: i128 = 1_000_000_000;
