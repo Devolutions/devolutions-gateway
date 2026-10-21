@@ -983,6 +983,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: mutant generate leaving a missing key directory uncreated, or creating it with access for other accounts
     #[cfg(unix)]
     #[test]
     fn nested_key_directories_are_owner_only() -> anyhow::Result<()> {
@@ -998,6 +999,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: mutant an operation that opens an ancestor of an existing key directory
     #[cfg(unix)]
     #[test]
     fn existing_keys_work_under_execute_only_ancestor() -> anyhow::Result<()> {
@@ -1125,6 +1127,7 @@ mod tests {
         std::os::unix::fs::symlink(key_path(&directory.0, &real_name), key_path(&directory.0, &alias))?;
         // oracle: intent crates/device-key/INTENT.md §Operations
         assert!(open(&backend, &alias).is_err());
+        // oracle: mutant listing a symbolic link under a key name
         assert_eq!(list(&backend, TEST_PREFIX)?, vec![real_name.clone()]);
         // oracle: intent crates/device-key/INTENT.md §Operations
         delete(&backend, &alias)?;

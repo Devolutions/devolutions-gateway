@@ -801,10 +801,12 @@ mod tests {
             "{error:#}"
         );
         // Wait time-outs advance in system clock ticks, so a five-second wait can end slightly early.
+        // oracle: mutant creation failing without waiting for the lock another creator holds
         assert!(started.elapsed() >= std::time::Duration::from_millis(4_900));
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn a_mutex_under_the_former_global_lock_name_cannot_block_creation() -> anyhow::Result<()> {
         use windows::Win32::System::Threading::CreateMutexW;
@@ -814,6 +816,7 @@ mod tests {
         }
         let name = crate::new_key_name("devolutions-agent-test");
         let _cleanup = TestKey(name.clone());
+        // Any account can create a mutex under this global name, so the squatter stands in for another account.
         let squatted_name = wide(&format!("Global\\device-key-{name}"));
         // SAFETY: The mutex name is NUL-terminated.
         let raw = unsafe { CreateMutexW(None, true, PCWSTR::from_raw(squatted_name.as_ptr())) }?;
@@ -828,6 +831,7 @@ mod tests {
             .context("create a machine key while a mutex holds the former global lock name")
     }
 
+    // oracle: mutant a creator failing when the namespace closes between its failed create and its open
     #[test]
     fn a_namespace_closed_between_create_and_open_is_created_again() -> anyhow::Result<()> {
         let mut creates = 0;
