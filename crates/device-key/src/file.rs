@@ -702,7 +702,8 @@ mod tests {
             use std::os::unix::fs::PermissionsExt as _;
 
             let mode = fs::metadata(key_path(&dir.0, &name))?.permissions().mode();
-            assert_eq!(mode & 0o777, 0o600);
+            // oracle: intent crates/device-key/INTENT.md §Access
+            assert_eq!(mode & 0o077, 0);
         }
 
         drop(reopened);
@@ -714,12 +715,13 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §File backend
     #[test]
-    fn fixed_connect_signature() -> anyhow::Result<()> {
+    fn vector_key_file_signs_under_the_vector_public_key() -> anyhow::Result<()> {
         let dir = KeyDirectory::new()?;
         let backend = dir.backend();
         let name = new_key_name(TEST_PREFIX);
-        let vector: serde_json::Value = serde_json::from_str(include_str!("../test-data/fixed-signature.json"))?;
+        let vector: serde_json::Value = serde_json::from_str(include_str!("../test-data/connect-vector.json"))?;
         let encoded = vector["private_key_pkcs8"]
             .as_str()
             .context("missing vector private key")?;
@@ -729,13 +731,20 @@ mod tests {
         file.write_all(&pkcs8)?;
         file.sync_all()?;
         drop(file);
-        let key = open(&backend, &name)?.context("missing fixed key")?;
+        let public_key = VerifyingKey::from_sec1_bytes(
+            &STANDARD.decode(
+                vector["public_key_sec1"]
+                    .as_str()
+                    .context("missing vector public key")?,
+            )?,
+        )?;
+        let key = open(&backend, &name)?.context("missing vector key")?;
+        // oracle: reference docs/agent-identity/test-vectors.json
+        assert_eq!(key.public_key(), public_key);
         let base = vector["signature_base"].as_str().context("missing signature base")?;
         let signature = key.try_sign(base.as_bytes())?;
-        assert_eq!(
-            STANDARD.encode(signature.to_bytes()),
-            vector["signature"].as_str().context("missing fixed signature")?
-        );
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
+        public_key.verify(base.as_bytes(), &signature)?;
         Ok(())
     }
 
@@ -743,10 +752,12 @@ mod tests {
     fn invalid_names_cannot_reach_the_backend() -> anyhow::Result<()> {
         let dir = KeyDirectory::new()?;
         let backend = dir.backend();
-        let invalid = "../invalid";
-        assert!(generate(&backend, invalid).is_err());
-        assert!(open(&backend, invalid).is_err());
-        assert!(delete(&backend, invalid).is_err());
+        // The second name would be a valid file name, so only the name check can refuse it.
+        for invalid in ["../invalid", "Uppercase_part"] {
+            assert!(generate(&backend, invalid).is_err(), "{invalid}");
+            assert!(open(&backend, invalid).is_err(), "{invalid}");
+            assert!(delete(&backend, invalid).is_err(), "{invalid}");
+        }
         assert!(list(&backend, "../").is_err());
         assert_eq!(fs::read_dir(&dir.0)?.count(), 0);
         Ok(())
