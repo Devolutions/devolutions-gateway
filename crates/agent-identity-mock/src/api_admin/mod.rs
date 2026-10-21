@@ -314,7 +314,7 @@ impl FieldErrors {
 ///
 /// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
 fn parse_body(body: &[u8], members: &[&str]) -> Result<Map<String, Value>, ManagementError> {
-    let value = crate::json::parse_unique_members(body)
+    let value = crate::json::parse_request_body(body)
         .map_err(|error| ManagementError::invalid_request(format!("malformed JSON body: {error}")))?;
     let Value::Object(object) = value else {
         return Err(ManagementError::invalid_request("body must be a JSON object"));

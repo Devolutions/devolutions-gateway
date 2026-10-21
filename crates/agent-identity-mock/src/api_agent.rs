@@ -134,7 +134,7 @@ pub(crate) fn enrollment_token(base_url: &str, secret: &[u8; 32]) -> String {
 
 /// Parses an enroll/renew body: `{ "csr": "<base64 DER>", "metadata": {...} }`.
 fn parse_csr_body(body: &[u8]) -> Result<(Vec<u8>, Map<String, Value>), ApiError> {
-    let value = crate::json::parse_unique_members(body)
+    let value = crate::json::parse_request_body(body)
         .map_err(|error| ApiError::invalid_request(format!("malformed JSON body: {error}")))?;
     let object = value
         .as_object()
@@ -396,7 +396,7 @@ async fn check_in(AxumState(app): AxumState<Arc<App>>, headers: HeaderMap, body:
 }
 
 fn parse_check_in_body(body: &[u8]) -> Result<Map<String, Value>, ApiError> {
-    let value = crate::json::parse_unique_members(body)
+    let value = crate::json::parse_request_body(body)
         .map_err(|error| ApiError::invalid_request(format!("malformed JSON body: {error}")))?;
     let metadata = value
         .get("metadata")

@@ -16,7 +16,7 @@ const MAX_NESTING: usize = 64;
 
 /// Parses `body` as JSON, failing on syntax errors, on a string that is not valid Unicode, on a repeated member name in
 /// any object, and on more than [`MAX_NESTING`] nested objects and arrays.
-pub(crate) fn parse_unique_members(body: &[u8]) -> serde_json::Result<Value> {
+pub(crate) fn parse_request_body(body: &[u8]) -> serde_json::Result<Value> {
     let mut deserializer = serde_json::Deserializer::from_slice(body);
     let value = ValueSeed { enclosing: 0 }.deserialize(&mut deserializer)?;
     deserializer.end()?;
