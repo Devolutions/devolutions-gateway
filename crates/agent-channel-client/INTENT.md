@@ -6,3 +6,4 @@ This crate is the agent's side of the channel defined in `agent-channel-proto`.
 - The backoff doubles from 1 s and is multiplied by a jitter drawn uniformly from `[0.5, 1.5]` before its cap, as the agent's other retries are.
 - An opening that has not received `Welcome` 30 s after the connection started is a network error; until then, messages other than the expected `Challenge` and `Welcome` are ignored.
 - A `Challenge` that is not 32 bytes closes the stream as a transient failure, without sending `Hello`.
+- Dropping a channel stops an opening or a wait to reopen at once; an authenticated stream first sends the acknowledgements already queued, then ends the agent's side and gives the authority up to 5 s to end its own, so that no acknowledgement queued before the drop is lost.

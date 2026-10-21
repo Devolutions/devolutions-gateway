@@ -26,8 +26,8 @@
 - A transient failure is retried after `2^n` seconds for the `n`-th consecutive failure, multiplied by a jitter drawn uniformly from `[0.5, 1.5]`, waiting at least a `Retry-After` delay when the authority sends one, and never longer than 1 h.
   Retry state lives in memory, so a restart retries at once.
 - Check-in runs only while the identity has no authenticated stream:
-  - without `config.agent_channel_url`, when the identity's runner starts (at service start or after a new enrollment), and then every 24 h ±10%;
-  - with `config.agent_channel_url` but no stream authenticated for 1 h, counted from the runner's start or from the last check-in or `ConfigUpdate` that added or changed the URL, once, and then every 24 h ±10% until a stream authenticates.
+  - without `config.agent_channel_url`, when the identity's runner starts (at service start or after a new enrollment), and then every 24 h ±10%; after a `ConfigUpdate` removes the URL, check-in resumes on the schedule already running;
+  - with `config.agent_channel_url` but no stream authenticated for 1 h, counted from the runner's start, from the last check-in or `ConfigUpdate` that added or changed the URL, or from the loss of the last authenticated stream, once, and then every 24 h ±10% until a stream authenticates.
 
 ## Local state
 
