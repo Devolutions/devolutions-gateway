@@ -169,20 +169,6 @@ impl Target {
         Ok(identity.agent_channel_url.is_some())
     }
 
-    /// The authority's clock, as the `server_time` of its refusal of an unsigned `confirm` reports it.
-    ///
-    /// Every agent-facing error body carries the authority's `server_time` ([contract] §5.4), and an unsigned request changes nothing.
-    ///
-    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
-    pub(crate) async fn server_now(&self) -> anyhow::Result<time::OffsetDateTime> {
-        let reply = self.agent(Method::POST, "/confirm", None, None).await?;
-        ensure!(
-            !(200..300).contains(&reply.status),
-            "the authority accepted an unsigned confirm"
-        );
-        time::OffsetDateTime::parse(field(&reply.body, "server_time")?, &Rfc3339).context("invalid server_time")
-    }
-
     pub(crate) async fn requests(&self, token: Option<&Token>) -> anyhow::Result<Value> {
         let path = token.map_or_else(
             || "/__mock__/requests".to_owned(),

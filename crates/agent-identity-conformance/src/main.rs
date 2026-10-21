@@ -32,6 +32,8 @@ use crate::dvls::AppCredential;
 type TestFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 type TestFn = fn(Context) -> TestFuture;
 const RUN_DEADLINE: Duration = Duration::from_secs(14 * 60 + 30);
+/// How long a test may run unless [`run_test`] gives it another timeout.
+const TEST_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -699,7 +701,7 @@ async fn run_test(test: &Test, context: Context, deadline: Instant) -> (Outcome,
     } else if !context.mock() && test.name.starts_with("p_rotation_") {
         Duration::from_secs(context.dvls_rotation_window_secs.saturating_add(30))
     } else {
-        Duration::from_secs(90)
+        TEST_TIMEOUT
     };
     let remaining = deadline.saturating_duration_since(Instant::now());
     let allowed = timeout.min(remaining);
@@ -951,7 +953,7 @@ const TESTS: &[Test] = &[
     a!(a_rejected_identity_replaced).channel(),
     a!(a_cli_identity_enroll_writes_pending_file).cli_only(),
     a!(a_cli_identity_enroll_stdin).cli_only(),
-    a!(a_renewal_happy_path).channel(),
+    a!(a_renewal_happy_path).channel().need(Need::LongLeaves),
     a!(a_renewal_lost_response_retried, mock_only).channel(),
     a!(a_renewal_lost_confirm_response_retried, mock_only).channel(),
     a!(a_confirm_barrier_blocks_channelless_traffic, mock_only),
@@ -961,7 +963,7 @@ const TESTS: &[Test] = &[
     a!(a_channel_connected_and_metadata).channel(),
     a!(a_make_before_break_on_renewal).channel(),
     a!(a_old_key_deleted_after_confirm_without_channel, mock_only).channel(),
-    a!(a_request_renewal_connected).channel(),
+    a!(a_request_renewal_connected).channel().need(Need::LongLeaves),
     a!(a_request_renewal_while_offline).channel(),
     a!(a_request_renewal_without_channel).without_channel(),
     a!(a_reconnect_make_before_break, mock_only).channel(),
@@ -977,7 +979,7 @@ const TESTS: &[Test] = &[
     a!(a_config_unknown_fields_and_hello_revision, mock_only).channel(),
     a!(a_config_unsupported_version_keeps_stored_config, mock_only),
     a!(a_config_unsupported_version_on_enroll_keeps_pending, mock_only),
-    a!(a_multi_authority).second().channel(),
+    a!(a_multi_authority).second().channel().need(Need::LongLeaves),
     a!(a_key_non_exportable),
     a!(a_file_backend_permissions),
     a!(a_rotation_migrates_connected_agent).channel(),
@@ -992,7 +994,7 @@ mod tests {
     /// A usage error lands in CI logs, so a credential given in a form the runner does not take, such as `--app-secret=<secret>` or a stray argument, must not appear in it.
     #[test]
     fn usage_errors_never_echo_a_credential() {
-        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         let secret = "synthetic-credential";
         let mut cases: Vec<Vec<String>> = [
             "--app-key",
@@ -1035,7 +1037,7 @@ mod tests {
     /// A DVLS under test issues leaves of a few seconds, so the default window must stay below a short leaf lifetime, while an explicit window wins in either flag order.
     #[test]
     fn rotation_window_follows_a_short_leaf_lifetime_unless_explicit() -> anyhow::Result<()> {
-        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         assert_eq!(rotation_window(&[])?, 60);
         assert_eq!(rotation_window(&["--leaf-lifetime-secs", "20"])?, 15);
         assert_eq!(rotation_window(&["--leaf-lifetime-secs", "2"])?, 1);
@@ -1049,7 +1051,7 @@ mod tests {
     /// 75% of a one-second leaf lifetime holds no whole second, and rounding the window up to one second would ask DVLS for a deadline it refuses.
     #[test]
     fn one_second_leaf_lifetime_requires_an_explicit_rotation_window() {
-        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         assert!(rotation_window(&["--leaf-lifetime-secs", "1"]).is_err());
     }
 

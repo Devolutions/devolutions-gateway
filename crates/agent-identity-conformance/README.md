@@ -34,7 +34,9 @@ Pass `--agent-version <version>` to require the agent's reported version to matc
 Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
 The DVLS expiry-boundary test needs a configured leaf lifetime of roughly 10–30 seconds.
-`a_renewal_happy_path`, `a_request_renewal_connected` and `a_multi_authority` wait twice as long for the agent channel or a renewal when the leaf lifetime lets the agent's schedule renew meanwhile, so that a short lifetime slows them down rather than failing them.
+`a_renewal_happy_path`, `a_request_renewal_connected` and `a_multi_authority` need leaves that outlast a test: at least 135 seconds, 3/2 of a test's 90-second timeout, so that the agent's schedule, which renews a leaf two thirds into its lifetime, renews none of their certificates and none expires before the test ends.
+An authority that backdates `notBefore`, or whose clock runs behind the runner's, needs longer leaves.
+On an authority with shorter leaves these tests report `SKIP`; the mock's default 90-day leaves meet the need.
 `--expect-channel` defaults to `true`; use `--expect-channel false` when the server intentionally omits `config.agent_channel_url`.
 When no authority offers the channel, gRPC-dependent checks report `SKIP`; HTTP confirm checks and channelless renewal still run.
 
@@ -74,7 +76,7 @@ $env:C_APP_SECRET = '<app-secret>'
 
 A spec is comma-separated `<key>=<value>` items, and values cannot contain commas.
 Its keys are the names, without `--`, of the flags above and of `--base-url`, `--app-key`, `--authority-id` and `--extra-trusted-root`, with the same values, plus the required `app-secret-env`, which names the environment variable that holds the application secret, to keep it off the command line.
-Each test runs on the first authority, in the order of their flags, that offers what the test needs: the agent channel or none, a disposable target, leaves of at most 30 seconds, leaves of the certificate lifetime setting rather than a test lifetime, or a config change.
+Each test runs on the first authority, in the order of their flags, that offers what the test needs: the agent channel or none, a disposable target, leaves of at most 30 seconds, leaves that outlast a test, leaves of the certificate lifetime setting rather than a test lifetime, or a config change.
 The runner reads the settings of each disposable DVLS target at the start, and counts its leaves as following the setting when its leaf lifetime equals the setting in seconds.
 DVLS's management API changes a config only by switching the agent channel off and on, so a config change needs a disposable target that offers the channel.
 A test that needs two authorities also takes the next one that offers what it needs.

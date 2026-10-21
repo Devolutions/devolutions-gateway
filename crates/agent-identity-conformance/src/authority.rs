@@ -1,6 +1,7 @@
 //! The authorities a run tests, what each offers, and which ones a test runs on.
 
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use anyhow::{Context as _, ensure};
@@ -8,6 +9,19 @@ use anyhow::{Context as _, ensure};
 use crate::client::Target;
 
 pub(crate) const DAY_SECS: u64 = 24 * 3600;
+
+/// The shortest leaf lifetime that outlasts a test: 3/2 of [`crate::TEST_TIMEOUT`].
+///
+/// Every wait of a test ends within its timeout, and the agent renews a certificate `2/3 × lifetime` after its anchor ([agent intent], "Schedules").
+/// A leaf issued during a test therefore neither comes due for renewal nor expires, which would close its stream ([contract], "Termination"), before the test ends.
+/// This takes the anchor to be no earlier than the test's start: an authority that backdates `notBefore`, or whose clock runs behind the runner's, needs longer leaves.
+///
+/// [agent intent]: ../../agent-identity/INTENT.md#schedules
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#channel-termination
+pub(crate) const LONG_LEAF_SECS: u64 = crate::TEST_TIMEOUT.as_secs() * 3 / 2;
+
+static LONG_LEAVES_MISSING: LazyLock<String> =
+    LazyLock::new(|| format!("requires leaves that outlast a test, of --leaf-lifetime-secs >= {LONG_LEAF_SECS}"));
 
 /// What an authority offers the tests, as the runner's flags declare it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,16 +169,19 @@ pub(crate) enum Need {
     SettingsLifetime,
     /// The management API can change a config, so that an identity's stored revision becomes stale; the mock changes one with a control.
     ConfigChange,
+    /// The authority's leaves outlast a test, by lasting at least [`LONG_LEAF_SECS`]; the mock's last its default 90 days, which each test's reset restores.
+    LongLeaves,
 }
 
 impl Need {
-    pub(crate) const ALL: [Self; 6] = [
+    pub(crate) const ALL: [Self; 7] = [
         Self::Channel,
         Self::NoChannel,
         Self::Disposable,
         Self::ShortLeaves,
         Self::SettingsLifetime,
         Self::ConfigChange,
+        Self::LongLeaves,
     ];
 
     pub(crate) const fn bit(self) -> u8 {
@@ -181,11 +198,12 @@ impl Need {
             Self::SettingsLifetime => mock || authority.lifetime_from_settings,
             // DVLS's management API changes a config only through the agent channel switch, which needs both.
             Self::ConfigChange => mock || profile.disposable && authority.channel_available,
+            Self::LongLeaves => mock || LONG_LEAF_SECS <= profile.leaf_lifetime_secs,
         }
     }
 
     /// Why a test that has this need reports `SKIP` when no authority meets it.
-    const fn missing(self) -> &'static str {
+    fn missing(self) -> &'static str {
         match self {
             Self::Channel => "config.agent_channel_url absent and --expect-channel=false",
             Self::NoChannel => "requires a naturally channelless DVLS target",
@@ -197,6 +215,7 @@ impl Need {
             Self::ConfigChange => {
                 "a stale Hello requires a disposable DVLS target that offers the agent channel, whose switch changes the config"
             }
+            Self::LongLeaves => LONG_LEAVES_MISSING.as_str(),
         }
     }
 }
@@ -279,7 +298,7 @@ mod tests {
     /// A check runs on the first authority that offers what it needs, so a profile-dependent check reaches an extra authority instead of skipping.
     #[test]
     fn a_check_runs_on_the_first_authority_that_meets_its_needs() -> anyhow::Result<()> {
-        // oracle: spec crates/agent-identity-conformance/README.md §Several authorities
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         let authorities = dvls_run()?;
         assert_eq!(pick(&authorities, &[], false, false), Ok((0, None)));
         assert_eq!(
@@ -301,6 +320,11 @@ mod tests {
             Ok((0, None))
         );
         assert_eq!(pick(&authorities, &[Need::Channel], true, false), Ok((0, Some(1))));
+        // Twenty-second leaves expire within a test, while a day's outlast it.
+        assert_eq!(
+            pick(&authorities, &[Need::Channel, Need::LongLeaves], false, false),
+            Ok((2, None))
+        );
         Ok(())
     }
 
@@ -308,7 +332,6 @@ mod tests {
     #[test]
     fn a_check_skips_with_the_missing_capability_only_when_no_authority_meets_it() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
-        // oracle: spec crates/agent-identity-conformance/README.md §Several authorities
         let authorities = dvls_run()?;
         assert_eq!(
             pick(&authorities[..2], &[Need::NoChannel], false, false),
@@ -328,6 +351,10 @@ mod tests {
             Err(Need::Channel.missing())
         );
         assert_eq!(pick(&authorities, &[Need::NoChannel], true, false), Err(SECOND_MISSING));
+        assert_eq!(
+            pick(&authorities[..2], &[Need::Channel, Need::LongLeaves], false, false),
+            Err(Need::LongLeaves.missing())
+        );
         Ok(())
     }
 
@@ -335,7 +362,6 @@ mod tests {
     #[test]
     fn the_mock_meets_every_need_but_an_absent_channel() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
-        // oracle: spec crates/agent-identity-conformance/README.md §Several authorities
         let mock = [authority(Profile::default(), true, false)?];
         for need in Need::ALL {
             assert_eq!(pick(&mock, &[need], false, true), Ok((0, None)), "{need:?}");
@@ -351,7 +377,7 @@ mod tests {
     /// An authority's secret comes from the environment, which keeps it off the command line.
     #[test]
     fn an_authority_spec_reads_its_secret_from_the_variable_it_names() -> anyhow::Result<()> {
-        // oracle: spec crates/agent-identity-conformance/README.md §Several authorities
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         let variable = |name: &str| (name == "C_SECRET").then(|| "synthetic-secret".to_owned());
         let spec = AuthoritySpec::parse(
             "base-url=https://localhost:15512,app-key=c-key,app-secret-env=C_SECRET,leaf-lifetime-secs=7776000,expect-channel=false,disposable-dvls-target=true",
@@ -376,7 +402,7 @@ mod tests {
     /// A usage error lands in CI logs, so an `--authority` item that holds a secret in a form the runner does not take must not appear in it.
     #[test]
     fn authority_spec_errors_never_echo_a_value() {
-        // oracle: spec crates/agent-identity-conformance/README.md §Agent Identity conformance runner
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         let secret = "synthetic-credential";
         let variable = |_: &str| None;
         for spec in [
