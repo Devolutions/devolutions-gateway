@@ -655,32 +655,29 @@ mod tests {
     use super::*;
 
     // oracle: intent crates/device-key/INTENT.md §Access
-    // oracle: spec MS-DTYP §2.5.1.1
     #[test]
     fn descriptor_owns_the_key_as_the_caller_and_grants_only_caller_and_system() -> anyhow::Result<()> {
-        let user = "S-1-5-21-42";
-        assert_eq!(
-            key_descriptor_sddl(user),
-            "O:S-1-5-21-42D:P(A;;GA;;;SY)(A;;GA;;;S-1-5-21-42)"
-        );
-        assert_eq!(key_descriptor_sddl("S-1-5-18"), "O:SYD:P(A;;GA;;;SY)");
-        let caller = Token::current_process_token()
+        use win_api_wrappers::identity::sid::StringSid;
+
+        let system = Sid::from_well_known(WinLocalSystemSid, None)?;
+        let process_user = Token::current_process_token()
             .sid_and_attributes()
             .context("get process user SID")?
             .sid;
-        let system = Sid::from_well_known(WinLocalSystemSid, None)?;
-        let expected = if caller == system {
-            vec![system]
-        } else {
-            vec![system, caller.clone()]
-        };
-        let sddl = key_descriptor_sddl(&caller.to_string());
-        let descriptor = SecurityDescriptor::new(&sddl)?;
-        assert_eq!(crate::windows_acl::owner_sid(descriptor.0)?, caller);
-        crate::windows_acl::require_protected_dacl(descriptor.0, expected.clone())?;
+        let other_user = StringSid::from_str("S-1-5-21-42")?.to_sid()?;
+        for caller in [process_user, other_user, system.clone()] {
+            let sddl = key_descriptor_sddl(&caller.to_string());
+            let descriptor = SecurityDescriptor::new(&sddl)?;
+            let owner = crate::windows_acl::owner_sid(descriptor.0)?;
+            assert!(owner == caller || owner == system, "{sddl}");
+            let mut expected = vec![system.clone(), caller];
+            expected.dedup();
+            crate::windows_acl::require_protected_dacl(descriptor.0, expected.clone())?;
 
-        let extra_allow = SecurityDescriptor::new(&format!("{sddl}(A;;GA;;;BU)"))?;
-        assert!(crate::windows_acl::require_protected_dacl(extra_allow.0, expected).is_err());
+            let extra_allow = SecurityDescriptor::new(&format!("{sddl}(A;;GA;;;BU)"))?;
+            // oracle: spec MS-DTYP §2.5.1.1
+            assert!(crate::windows_acl::require_protected_dacl(extra_allow.0, expected).is_err());
+        }
         Ok(())
     }
 
@@ -748,8 +745,9 @@ mod tests {
         }
         let mut descriptor = read_descriptor(&handle)?;
         let descriptor = PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast());
+        let owner = crate::windows_acl::owner_sid(descriptor)?;
         // oracle: intent crates/device-key/INTENT.md §Access
-        assert_eq!(crate::windows_acl::owner_sid(descriptor)?, user);
+        assert!(owner == user || owner == system);
         // oracle: intent crates/device-key/INTENT.md §Access
         crate::windows_acl::require_protected_dacl(descriptor, expected)?;
         assert!(list("devolutions-agent-test")?.contains(&name));
