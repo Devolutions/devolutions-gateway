@@ -363,6 +363,8 @@ When several outcomes apply to one request, a body larger than 64 KiB returns `4
 The gRPC package is `devolutions.agent.channel.v1`, and its schema is [`crates/agent-channel-proto/proto/channel.proto`](../../crates/agent-channel-proto/proto/channel.proto) at this contract's revision.
 Every language binding, including the Rust `agent-channel-proto` crate and the .NET `Devolutions.Agent.Channel` package, is generated from that file.
 The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage` and `ServerMessage` envelopes.
+Each side accepts envelopes up to 64 KiB (65,536 bytes) of serialized protobuf, not counting gRPC's 5-byte message prefix, and sends none larger, the same limit as request bodies.
+The server treats a larger `AgentMessage` as a message that cannot be decoded: before `Welcome` as §7.3 step 4 says, after it as §7.4 says.
 
 <a id="agent-identity-channel-url"></a>
 
