@@ -831,6 +831,53 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn listing_splits_the_prefix_at_the_first_underscore() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = "scope_part_with_underscores";
+        generate(&backend, name)?;
+
+        assert_eq!(list(&backend, "scope")?, vec![name.to_owned()]);
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_missing_key_directory_holds_no_keys() -> anyhow::Result<()> {
+        let root = KeyDirectory::new()?;
+        let backend = KeyBackend::File {
+            dir: root.0.join("missing"),
+        };
+        let name = new_key_name(TEST_PREFIX);
+
+        assert!(open(&backend, &name)?.is_none());
+        delete(&backend, &name)?;
+        assert!(list(&backend, TEST_PREFIX)?.is_empty());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_temporary_written_under_the_lock_is_not_a_leftover() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        // The test holds the lock as a creator in another process would while it writes its temporary.
+        let lock = lock_directory(&directory.0)?;
+        let temporary = directory
+            .0
+            .join(format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4()));
+        create_restricted_file(&temporary)?;
+        let lister = std::thread::spawn(move || list(&backend, TEST_PREFIX));
+        std::thread::sleep(Duration::from_millis(500));
+
+        assert!(temporary.exists());
+        drop(lock);
+        lister.join().map_err(|_| anyhow::anyhow!("lister panicked"))??;
+        Ok(())
+    }
+
     #[test]
     fn lock_wait_expires_and_a_later_operation_can_proceed() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
@@ -846,6 +893,20 @@ mod tests {
         assert!(started.elapsed() >= LOCK_TIMEOUT);
         drop(lock);
         assert!(list(&directory.backend(), TEST_PREFIX)?.is_empty());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn lock_wait_on_an_existing_lock_file_expires() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        // An earlier operation leaves the lock file behind, so the holder below opens it instead of creating it.
+        list(&directory.backend(), TEST_PREFIX)?;
+        let _lock = lock_directory(&directory.0)?;
+        let started = Instant::now();
+
+        assert!(list(&directory.backend(), TEST_PREFIX).is_err());
+        assert!(started.elapsed() >= LOCK_TIMEOUT);
         Ok(())
     }
 
@@ -968,6 +1029,64 @@ mod tests {
         assert!(open(&backend, &real_name).is_err());
         fs::remove_file(key_path(&directory.0, &alias))?;
         assert!(open(&backend, &real_name)?.is_some());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[cfg(windows)]
+    #[test]
+    fn a_key_file_held_exclusively_is_not_reported_missing() -> anyhow::Result<()> {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        let _holder = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(key_path(&directory.0, &name))?;
+
+        assert!(!matches!(open(&backend, &name), Ok(None)));
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Access
+    #[cfg(windows)]
+    #[test]
+    fn a_key_file_another_account_can_read_cannot_be_opened() -> anyhow::Result<()> {
+        use win_api_wrappers::raw::Win32::Security::Authorization::{GRANT_ACCESS, SE_FILE_OBJECT};
+        use win_api_wrappers::raw::Win32::Security::{self, WinBuiltinUsersSid, WinLocalSystemSid};
+        use win_api_wrappers::raw::Win32::Storage::FileSystem::{FILE_ALL_ACCESS, FILE_GENERIC_READ};
+        use win_api_wrappers::security::acl::{
+            Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee, set_named_security_info,
+        };
+        use win_api_wrappers::str::U16CString;
+        use win_api_wrappers::token::Token;
+
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        let entry = |sid, access_permissions| ExplicitAccess {
+            access_permissions,
+            access_mode: GRANT_ACCESS,
+            inheritance: Security::NO_INHERITANCE,
+            trustee: Trustee::Sid(sid),
+        };
+        let user = Token::current_process_token().sid_and_attributes()?.sid;
+        let dacl = InheritableAcl {
+            kind: InheritableAclKind::Protected,
+            acl: Acl::new()?.set_entries(&[
+                entry(Sid::from_well_known(WinLocalSystemSid, None)?, FILE_ALL_ACCESS.0),
+                entry(user, FILE_ALL_ACCESS.0),
+                entry(Sid::from_well_known(WinBuiltinUsersSid, None)?, FILE_GENERIC_READ.0),
+            ])?,
+        };
+        let path = U16CString::from_str(key_path(&directory.0, &name).as_str())?;
+        set_named_security_info(&path, SE_FILE_OBJECT, None, None, Some(&dacl), None)?;
+
+        assert!(open(&backend, &name).is_err());
         Ok(())
     }
 
