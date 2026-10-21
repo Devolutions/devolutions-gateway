@@ -69,6 +69,7 @@ public class AuthenticationTypeTests
             [
                 "AuthenticationResult.get_Identity",
                 "ChannelHandshakeResult.get_Identity",
+                "ChannelOpening.FirstMessageUnreadableAsync",
                 "ChannelOpening.HelloTimedOutAsync",
                 "ChannelOpening.VerifyHelloAsync",
                 "ChannelOpeningResult.get_Opening",
