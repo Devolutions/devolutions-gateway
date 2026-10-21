@@ -27,11 +27,12 @@ const MAX_SCANNED_BYTES: u64 = 16 * 1024 * 1024;
 /// Bytes of a line that are matched and returned; the rest of a longer line is skipped.
 const MAX_LINE_BYTES: usize = 256 * 1024;
 
+/// What to search for, and in which recordings.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecordingSearchRequest {
-    /// Text to search for.
+    /// Text to search for, ignoring case; leading and trailing spaces are part of it.
     query: String,
     /// The recordings to search.
     recordings: RecordingSelection,
@@ -110,6 +111,7 @@ impl StartTimeRange {
     }
 }
 
+/// The lines that hold the search text.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,10 +122,12 @@ pub(crate) struct RecordingSearchResponse {
     limit_reached: bool,
 }
 
+/// A line that holds the search text.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecordingSearchHit {
+    /// The recording whose artifact holds the line.
     recording_id: Uuid,
     /// Name of the `.slog` artifact holding the line, as listed in `recording.json`.
     file_name: String,
@@ -218,8 +222,7 @@ struct SearchText(String);
 
 impl SearchText {
     fn new(query: &str) -> Option<Self> {
-        let text = query.trim().to_lowercase();
-        (!text.is_empty()).then_some(Self(text))
+        (!query.is_empty()).then(|| Self(query.to_lowercase()))
     }
 
     fn is_in(&self, line: &str) -> bool {
@@ -260,7 +263,7 @@ impl Search {
 
         loop {
             if MAX_SCANNED_BYTES <= self.scanned_bytes {
-                self.limit_reached = true;
+                self.limit_reached = !reader.fill_buf().await?.is_empty();
                 return Ok(());
             }
 
@@ -324,14 +327,14 @@ async fn read_recording_logs(dir: Utf8PathBuf, recording_id: Uuid) -> Option<Rec
 
     let path = dir.join("recording.json");
 
-    // Every search reads every manifest again, so a failure here is not worth more than a debug event.
+    // Every search reads every manifest again, so a failure here repeats on each search.
     let json = tokio::fs::read(&path)
         .await
-        .inspect_err(|error| debug!(%path, %error, "Failed to read a recording manifest"))
+        .inspect_err(|error| trace!(%path, %error, "Failed to read a recording manifest"))
         .ok()?;
 
     let manifest: Manifest = serde_json::from_slice(&json)
-        .inspect_err(|error| debug!(%path, %error, "Invalid recording manifest"))
+        .inspect_err(|error| trace!(%path, %error, "Invalid recording manifest"))
         .ok()?;
 
     let file_names = manifest
@@ -448,7 +451,13 @@ async fn read_line(reader: &mut BufReader<File>, line: &mut Vec<u8>) -> io::Resu
     let truncated = MAX_LINE_BYTES < line.len();
     if truncated {
         line.truncate(MAX_LINE_BYTES);
-        line.truncate(len_without_cut_character(line));
+
+        let cut_character = line.utf8_chunks().last().map_or(0, |chunk| {
+            let invalid = chunk.invalid();
+            let is_incomplete = std::str::from_utf8(invalid).is_err_and(|error| error.error_len().is_none());
+            if is_incomplete { invalid.len() } else { 0 }
+        });
+        line.truncate(line.len() - cut_character);
     }
 
     Ok(Some(LineRead {
@@ -456,14 +465,6 @@ async fn read_line(reader: &mut BufReader<File>, line: &mut Vec<u8>) -> io::Resu
         truncated,
         rest_unread: !ended,
     }))
-}
-
-/// Length of `line` without a UTF-8 character that is cut at its end.
-fn len_without_cut_character(line: &[u8]) -> usize {
-    match std::str::from_utf8(line) {
-        Err(error) if error.error_len().is_none() => error.valid_up_to(),
-        _ => line.len(),
-    }
 }
 
 struct Skipped {
@@ -478,10 +479,14 @@ struct Skipped {
 async fn skip_rest_of_line(reader: &mut BufReader<File>, budget: u64) -> io::Result<Skipped> {
     let mut bytes = 0;
 
-    while bytes < budget {
+    loop {
         let available = reader.fill_buf().await?;
         if available.is_empty() {
             return Ok(Skipped { bytes, finished: true });
+        }
+
+        if budget <= bytes {
+            return Ok(Skipped { bytes, finished: false });
         }
 
         let room = usize::try_from(budget - bytes).unwrap_or(usize::MAX);
@@ -496,8 +501,6 @@ async fn skip_rest_of_line(reader: &mut BufReader<File>, budget: u64) -> io::Res
             return Ok(Skipped { bytes, finished: true });
         }
     }
-
-    Ok(Skipped { bytes, finished: false })
 }
 
 #[cfg(test)]
@@ -539,6 +542,13 @@ mod tests {
         let search = search_log(query, line.as_bytes()).await;
 
         assert_eq!(hit_lines(&search), [(1, line)]);
+    }
+
+    #[tokio::test]
+    async fn keeps_the_spaces_of_the_query() {
+        let search = search_log("user ", br#"{"name":"username"}"#).await;
+
+        assert!(search.hits.is_empty());
     }
 
     #[tokio::test]
@@ -592,15 +602,19 @@ mod tests {
         assert!(search.hits.is_empty());
     }
 
+    #[rstest]
+    #[case::valid_text(b"hit".as_slice())]
+    #[case::after_an_invalid_byte(b"\xFFhi".as_slice())]
     #[tokio::test]
-    async fn cuts_a_long_line_on_a_character_boundary() {
-        // "€" is 3 bytes, so the limit falls 1 byte into a character.
-        let content = format!("hit{}", "€".repeat(MAX_LINE_BYTES / 3));
+    async fn cuts_a_long_line_on_a_character_boundary(#[case] start: &[u8]) {
+        // Both starts are 3 bytes and "€" is 3 bytes, so the limit falls 1 byte into a character.
+        let mut content = start.to_vec();
+        content.extend_from_slice("€".repeat(MAX_LINE_BYTES / 3).as_bytes());
 
-        let search = search_log("hit", content.as_bytes()).await;
+        let search = search_log("hi", &content).await;
 
-        assert_eq!(search.hits[0].line.len(), MAX_LINE_BYTES - 1);
-        assert!(!search.hits[0].line.contains('\u{FFFD}'));
+        assert!(search.hits[0].truncated);
+        assert!(search.hits[0].line.ends_with('€'));
     }
 
     #[tokio::test]
@@ -625,6 +639,38 @@ mod tests {
         assert_eq!(hit_lines(&search), [(1, "hit")]);
         assert!(search.limit_reached);
         assert!(search.scanned_bytes <= MAX_SCANNED_BYTES);
+    }
+
+    #[rstest]
+    #[case::with_a_final_line_break(b"\n".as_slice())]
+    #[case::without_one(b"".as_slice())]
+    #[tokio::test]
+    async fn reaches_no_limit_when_the_read_budget_ends_with_the_log(#[case] end: &[u8]) {
+        let budget = usize::try_from(MAX_SCANNED_BYTES).expect("budget fits in usize");
+        let mut content = b"hit\n".to_vec();
+        content.resize(budget - end.len(), b'x');
+        content.extend_from_slice(end);
+
+        let search = search_log("hit", &content).await;
+
+        assert_eq!(hit_lines(&search), [(1, "hit")]);
+        assert!(!search.limit_reached);
+    }
+
+    #[tokio::test]
+    async fn lists_recordings_that_start_together_highest_id_first() {
+        let root = tempfile::tempdir().expect("temp dir");
+        for id in 1..=3 {
+            let dir = root.path().join(Uuid::from_u128(id).to_string());
+            std::fs::create_dir(&dir).expect("create recording folder");
+            std::fs::write(dir.join("recording.json"), r#"{"startTime":100}"#).expect("write manifest");
+        }
+        let root = Utf8Path::from_path(root.path()).expect("UTF-8 path");
+
+        let recordings = all_recording_logs_newest_first(root).await.expect("list recordings");
+
+        let ids: Vec<_> = recordings.iter().map(|recording| recording.recording_id).collect();
+        assert_eq!(ids, [3, 2, 1].map(Uuid::from_u128));
     }
 
     const SECOND: i128 = 1_000_000_000;

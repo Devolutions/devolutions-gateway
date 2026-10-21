@@ -61,11 +61,14 @@ fn write_analysis_recording(root: &Path, id: Uuid, start_time: i64, log: &str) -
 /// Two recordings whose AI analysis logs hold the searched text.
 /// The older one also holds it in a recorded `.slog`, in its video, and in a log outside the recording folder that
 /// its manifest points to, to show that only the `.slog` artifacts of a recording are searched.
+/// Its manifest also lists a log that is gone, and a third recording folder has no manifest, to show that neither
+/// fails the search.
 fn write_recordings(root: &Path) -> anyhow::Result<()> {
     std::fs::write(
         root.join("outside.slog"),
         r#"{"timestamp":"2026-07-15T16:15:35.140Z","seq":0,"event":"session.action","description":"Created User"}"#,
     )?;
+    std::fs::create_dir(root.join(Uuid::from_u128(3).to_string()))?;
 
     write_recording(
         root,
@@ -79,7 +82,11 @@ fn write_recordings(root: &Path) -> anyhow::Result<()> {
                 { "fileName": "recording-1.webm", "startTime": 100, "duration": 10 },
             ],
             "artifacts": {
-                "ai-analysis": [{ "fileName": "ai-analysis-0.slog" }, { "fileName": "../outside.slog" }],
+                "ai-analysis": [
+                    { "fileName": "ai-analysis-1.slog" },
+                    { "fileName": "ai-analysis-0.slog" },
+                    { "fileName": "../outside.slog" },
+                ],
             },
         }),
         &[
