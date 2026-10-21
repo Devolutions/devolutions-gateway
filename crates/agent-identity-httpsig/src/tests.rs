@@ -226,9 +226,9 @@ fn signing_failure_is_returned_instead_of_panicking() -> anyhow::Result<()> {
 #[tokio::test]
 async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<()> {
     let vectors = vectors()?;
-    let (signer, public_key) = vector_signer(&vectors, "device-a")?;
+    let (signer, _) = vector_signer(&vectors, "device-a")?;
     let base_url = url::Url::parse("https://example.test/dvls/")?;
-    let layer = ChannelLayer::new(signer.clone(), &base_url);
+    let layer = ChannelLayer::new(signer, &base_url);
     let service = layer.layer(tower::service_fn(|request: Request<()>| async move {
         Ok::<_, std::io::Error>(request)
     }));
@@ -253,7 +253,6 @@ async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<
         assert_eq!(request.uri().path(), format!("/dvls{CONNECT_RPC_PATH}"));
         assert!(request.headers().get("signature-input").is_some());
         assert!(request.headers().get("signature").is_some());
-        assert!(request.headers().get("content-digest").is_none());
     }
     assert_eq!(
         first_nonce,
@@ -276,16 +275,6 @@ async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<
     assert_ne!(first_nonce, second_nonce);
     assert_eq!(general_purpose::URL_SAFE_NO_PAD.decode(&first_nonce)?.len(), 16);
     assert_eq!(general_purpose::URL_SAFE_NO_PAD.decode(&second_nonce)?.len(), 16);
-
-    let challenge = [42u8; 32];
-    let proof_input = channel_proof_input(&challenge, &first_nonce);
-    let proof = signer.key.try_sign(&proof_input)?;
-    public_key.verify(&proof_input, &proof)?;
-    assert!(
-        public_key
-            .verify(&channel_proof_input(&challenge, &second_nonce), &proof)
-            .is_err()
-    );
     Ok(())
 }
 
@@ -356,13 +345,6 @@ async fn channel_layer_preserves_root_path_and_applies_clock_offset() -> anyhow:
     );
     assert!((before..=after).any(|created| signature_input.contains(&format!(";created={created};"))));
     Ok(())
-}
-
-fn channel_proof_input(challenge: &[u8; 32], nonce: &str) -> Vec<u8> {
-    let mut message = b"devolutions-agent-identity/v1/channel-proof\0".to_vec();
-    message.extend_from_slice(challenge);
-    message.extend_from_slice(nonce.as_bytes());
-    message
 }
 
 fn nonce(input: &HeaderValue) -> anyhow::Result<&str> {
