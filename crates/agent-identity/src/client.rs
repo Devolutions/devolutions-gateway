@@ -27,7 +27,7 @@ use uuid::Uuid;
 use x509_cert::Certificate;
 
 use crate::metadata::Metadata;
-use crate::token::{self, Token};
+use crate::token::Token;
 
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
@@ -239,7 +239,8 @@ impl Client {
         metadata: &Metadata,
         key: &dyn DeviceKey,
     ) -> ClientResult<EnrollResponse> {
-        let url = operation_url(token.base_url(), "enroll")?;
+        let url = Url::parse(&operation_url(token.base_url(), "enroll"))
+            .map_err(|_| ClientError::local("invalid authority URL"))?;
         let body = serde_json::to_vec(&CsrRequest { csr: csr_der, metadata })
             .map_err(|_| ClientError::local("encode enroll request"))?;
         let request = self
@@ -261,7 +262,7 @@ impl Client {
     /// Sends a renewal for the key of `csr_der` and requires the returned leaf to hold `new_key`.
     pub async fn renew(
         &self,
-        base_url: &Url,
+        base_url: &str,
         signer: &RequestSigner,
         csr_der: &str,
         new_key: &VerifyingKey,
@@ -283,7 +284,7 @@ impl Client {
 
     pub async fn confirm(
         &self,
-        base_url: &Url,
+        base_url: &str,
         signer: &RequestSigner,
         clock_offset_secs: Option<i64>,
     ) -> ClientResult<()> {
@@ -301,7 +302,7 @@ impl Client {
 
     pub async fn check_in(
         &self,
-        base_url: &Url,
+        base_url: &str,
         signer: &RequestSigner,
         metadata: &Metadata,
         clock_offset_secs: Option<i64>,
@@ -321,14 +322,15 @@ impl Client {
 
     async fn signed_post(
         &self,
-        base_url: &Url,
+        base_url: &str,
         operation: &str,
         tag: Tag,
         signer: &RequestSigner,
         body: &[u8],
         clock_offset_secs: Option<i64>,
     ) -> ClientResult<(StatusCode, Vec<u8>)> {
-        let url = operation_url(base_url, operation)?;
+        let url =
+            Url::parse(&operation_url(base_url, operation)).map_err(|_| ClientError::local("invalid authority URL"))?;
         let first = self
             .send_signed(&url, tag, signer, body, clock_offset_secs.unwrap_or_default())
             .await;
@@ -417,24 +419,12 @@ impl Client {
     }
 }
 
-/// Joins an operation's path to `base_url` without its trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment
-/// token"][contract]).
+/// Joins an operation's path onto `base_url` as text, without its trailing slashes ([CONTRACT.agent-identity.md §2
+/// "Enrollment token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
-fn operation_url(base_url: &Url, operation: &str) -> ClientResult<Url> {
-    let mut url = base_url.clone();
-    token::trim_trailing_slashes(&mut url);
-    let mut segments = url
-        .path_segments_mut()
-        .map_err(|()| ClientError::local("invalid authority URL"))?;
-    segments
-        .pop_if_empty()
-        .push("api")
-        .push("agent-identity")
-        .push("v1")
-        .push(operation);
-    drop(segments);
-    Ok(url)
+fn operation_url(base_url: &str, operation: &str) -> String {
+    format!("{}/api/agent-identity/v1/{operation}", base_url.trim_end_matches('/'))
 }
 
 fn parse_response<T: DeserializeOwned>(body: &[u8]) -> ClientResult<T> {
@@ -702,13 +692,17 @@ mod tests {
                 "https://example.test/mock/api/agent-identity/v1/enroll",
             ),
         ] {
-            let base = Url::parse(base).expect("valid test URL");
-            assert_eq!(
-                operation_url(&base, "enroll").expect("join URL").as_str(),
-                expected,
-                "{base}"
-            );
+            assert_eq!(operation_url(base, "enroll"), expected, "{base}");
         }
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    #[test]
+    fn joins_paths_onto_the_base_url_as_received() {
+        assert_eq!(
+            operation_url("https://EXAMPLE.test:443/Dv%20ls", "enroll"),
+            "https://EXAMPLE.test:443/Dv%20ls/api/agent-identity/v1/enroll"
+        );
     }
 
     #[test]

@@ -418,7 +418,7 @@ async fn enroll_pending(
                 version: 1,
                 authority_id: response.authority_id,
                 identity_id: response.identity_id,
-                base_url: token.base_url().clone(),
+                base_url: token.base_url().to_owned(),
                 config: response.config,
                 token_sha256: hash.clone(),
                 rejected: None,

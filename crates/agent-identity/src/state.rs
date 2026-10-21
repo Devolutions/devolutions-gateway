@@ -5,15 +5,14 @@ use std::io::{ErrorKind, Read as _};
 use anyhow::{Context as _, ensure};
 use camino::{Utf8Path, Utf8PathBuf};
 use device_key::{self as keys, DeviceKey, KeyBackend};
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use url::Url;
 use uuid::{Uuid, Variant};
 
 pub use crate::private_file::UntrustedAuthorityDirectory;
-use crate::token::{self, Token};
+use crate::token::Token;
 use crate::{pending, private_file, rejected, state_lock};
 
 const MAX_IDENTITY_BYTES: u64 = 2 * 1024 * 1024;
@@ -26,12 +25,11 @@ pub struct StoredIdentity {
     pub version: u8,
     pub authority_id: Uuid,
     pub identity_id: Uuid,
-    /// The token's `u` without trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]),
-    /// including when read from a file written with them.
+    /// The token's `u` as received, without its trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment
+    /// token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
     ///
     /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
-    #[serde(serialize_with = "serialize_base_url", deserialize_with = "deserialize_base_url")]
-    pub base_url: Url,
+    pub base_url: String,
     pub config: Value,
     pub token_sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -756,10 +754,7 @@ impl Store {
     fn validate_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
         ensure!(identity.version == 1, "unsupported stored identity version");
         ensure!(
-            identity.base_url.scheme() == "https"
-                && identity.base_url.has_host()
-                && identity.base_url.query().is_none()
-                && identity.base_url.fragment().is_none(),
+            crate::token::is_base_url(&identity.base_url),
             "invalid stored identity base URL"
         );
         ensure!(
@@ -833,16 +828,6 @@ fn config_revision(config: &Value) -> anyhow::Result<u64> {
         .and_then(|object| object.get("revision"))
         .and_then(Value::as_u64)
         .context("config is missing its revision")
-}
-
-fn serialize_base_url<S: Serializer>(url: &Url, serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.serialize_str(url.as_str().trim_end_matches('/'))
-}
-
-fn deserialize_base_url<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Url, D::Error> {
-    let mut url = Url::deserialize(deserializer)?;
-    token::trim_trailing_slashes(&mut url);
-    Ok(url)
 }
 
 #[cfg(test)]
@@ -931,12 +916,12 @@ mod tests {
         ))
     }
 
-    fn identity_at(base_url: Url) -> StoredIdentity {
+    fn identity_at(base_url: &str) -> StoredIdentity {
         StoredIdentity {
             version: 1,
             authority_id: Uuid::new_v4(),
             identity_id: Uuid::new_v4(),
-            base_url,
+            base_url: base_url.to_owned(),
             config: json!({"version": 1, "revision": 7}),
             token_sha256: hex::encode([1u8; 32]),
             rejected: None,
@@ -961,7 +946,7 @@ mod tests {
             version: 1,
             authority_id: Uuid::new_v4(),
             identity_id: Uuid::new_v4(),
-            base_url: token.base_url().clone(),
+            base_url: token.base_url().to_owned(),
             config: json!({"version": 1, "revision": 7}),
             token_sha256: token.sha256_hex(),
             rejected: None,
@@ -1033,31 +1018,20 @@ mod tests {
             ("https://example.test/dvls/", "https://example.test/dvls"),
             ("https://example.test/dvls//", "https://example.test/dvls"),
         ] {
-            let identity = identity_at(token_for(u)?.base_url().clone());
+            let identity = identity_at(token_for(u)?.base_url());
             assert_eq!(serde_json::to_value(&identity)?["base_url"], stored, "{u}");
         }
         Ok(())
     }
 
-    // The store updates an identity only while its snapshot equals the file read back.
-    // oracle: property round-trip
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
-    fn base_urls_with_trailing_slashes_read_back_as_written() -> anyhow::Result<()> {
-        for u in [
-            "https://example.test/",
-            "https://example.test//",
-            "https://example.test/dvls/",
-            "https://example.test/dvls//",
-        ] {
-            let from_token = identity_at(token_for(u)?.base_url().clone());
-            let mut json = serde_json::to_value(identity_at(Url::parse(u)?))?;
-            json["base_url"] = json!(u);
-            let from_file: StoredIdentity = serde_json::from_value(json)?;
-            for identity in [from_token, from_file] {
-                let reread: StoredIdentity = serde_json::from_value(serde_json::to_value(&identity)?)?;
-                assert_eq!(reread, identity, "{u}");
-            }
-        }
+    fn stores_the_token_base_url_as_received() -> anyhow::Result<()> {
+        let identity = identity_at(token_for("https://EXAMPLE.test:443/Dv%20ls/")?.base_url());
+        assert_eq!(
+            serde_json::to_value(&identity)?["base_url"],
+            "https://EXAMPLE.test:443/Dv%20ls"
+        );
         Ok(())
     }
 
@@ -1138,7 +1112,7 @@ mod tests {
         }
         let store = directory.store()?;
         let raw = "not a token";
-        let hash_hex = token::sha256_hex(raw);
+        let hash_hex = crate::token::sha256_hex(raw);
         let path = pending::file_path(&directory.0, &hash_hex)?;
         let malformed = serde_json::to_vec(&json!({"version": 1, "token": raw}))?;
         #[cfg(windows)]
@@ -1349,7 +1323,7 @@ mod tests {
             version: 1,
             authority_id,
             identity_id: Uuid::new_v4(),
-            base_url: token.base_url().clone(),
+            base_url: token.base_url().to_owned(),
             config: json!({"version": 1, "revision": 1}),
             token_sha256: token.sha256_hex(),
             rejected: None,

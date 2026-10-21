@@ -11,7 +11,7 @@ use zeroize::Zeroizing;
 #[derive(Clone)]
 pub struct Token {
     value: Zeroizing<String>,
-    base_url: Url,
+    base_url: String,
 }
 
 impl Token {
@@ -43,16 +43,13 @@ impl Token {
         );
         let fields: serde_json::Value =
             serde_json::from_slice(&decoded_bag).map_err(|_| anyhow::anyhow!("invalid enrollment token bag"))?;
-        let mut base_url = fields
+        let base_url = fields
             .as_object()
             .and_then(|fields| fields.get("u"))
             .and_then(serde_json::Value::as_str)
-            .and_then(|url| Url::parse(url).ok())
-            .filter(|url| {
-                url.scheme() == "https" && url.has_host() && url.query().is_none() && url.fragment().is_none()
-            })
+            .filter(|url| is_base_url(url))
             .context("invalid enrollment authority URL")?;
-        trim_trailing_slashes(&mut base_url);
+        let base_url = base_url.trim_end_matches('/').to_owned();
         Ok(Self {
             value: Zeroizing::new(value.to_owned()),
             base_url,
@@ -63,7 +60,11 @@ impl Token {
         &self.value
     }
 
-    pub fn base_url(&self) -> &Url {
+    /// Returns the token's `u` as received, without its trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment
+    /// token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
+    pub fn base_url(&self) -> &str {
         &self.base_url
     }
 
@@ -77,14 +78,13 @@ pub fn sha256_hex(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
 }
 
-/// Removes the trailing slashes of a base URL's path ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]).
-///
-/// The path of a site root stays `/`, because an `https` URL always has one.
+/// Returns whether `url` is an absolute `https` URL without a query or fragment ([CONTRACT.agent-identity.md §2
+/// "Enrollment token"][contract]).
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
-pub(crate) fn trim_trailing_slashes(url: &mut Url) {
-    let path = url.path().trim_end_matches('/').to_owned();
-    url.set_path(&path);
+pub(crate) fn is_base_url(url: &str) -> bool {
+    Url::parse(url)
+        .is_ok_and(|url| url.scheme() == "https" && url.has_host() && url.query().is_none() && url.fragment().is_none())
 }
 
 fn is_base64url(byte: u8) -> bool {
@@ -123,7 +123,7 @@ mod tests {
     fn accepts_valid_token_and_hashes_the_entire_string() -> anyhow::Result<()> {
         let raw = token_with_bag(r#"{"u":"https://example.test/dvls","extra":true}"#);
         let token = Token::parse(&raw)?;
-        assert_eq!(token.base_url().as_str(), "https://example.test/dvls");
+        assert_eq!(token.base_url(), "https://example.test/dvls");
         assert_eq!(token.sha256_hex(), hex::encode(Sha256::digest(raw.as_bytes())));
         assert_eq!(sha256_hex(&raw), token.sha256_hex());
         assert_eq!(token.sha256_hex().len(), 64);
