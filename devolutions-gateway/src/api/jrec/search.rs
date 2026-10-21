@@ -116,7 +116,7 @@ impl StartTimeRange {
     }
 }
 
-/// The lines that hold the search text.
+/// The lines that match the search text.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -127,7 +127,7 @@ pub(crate) struct RecordingSearchResponse {
     limit_reached: bool,
 }
 
-/// A line that holds the search text.
+/// A line that matches the search text.
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -233,7 +233,7 @@ impl SearchText {
         (!query.is_empty()).then(|| Self(lowercase_for_matching(query)))
     }
 
-    /// Whether `line` holds the search text.
+    /// Whether `line` matches the search text.
     ///
     /// In a JSON object, only the string values count, once unescaped, so that a field name never matches and
     /// `DOMAIN\user` matches the `"DOMAIN\\user"` a JSON writer stores.
@@ -297,7 +297,7 @@ impl Search {
         }
     }
 
-    /// Adds the lines of one log that hold the search text.
+    /// Adds the lines of one log that match the search text.
     async fn search_file(&mut self, recording_id: Uuid, file_name: &str, path: &Utf8Path) -> io::Result<()> {
         let mut reader = BufReader::new(File::open(path).await?);
         let mut line = Vec::new();
@@ -630,13 +630,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn matches_a_json_object_cut_at_the_line_limit_as_raw_text() {
+    async fn matches_a_cut_line_that_no_longer_parses_as_raw_text() {
         let line = format!(r#"{{"description":"{}"}}"#, "x".repeat(MAX_LINE_BYTES));
 
         let search = search_log("description", line.as_bytes()).await;
 
         assert_eq!(search.hits.len(), 1);
         assert!(search.hits[0].truncated);
+    }
+
+    #[tokio::test]
+    async fn matches_a_cut_line_by_its_string_values_when_what_was_read_parses() {
+        let mut line = br#"{"description":"x"}"#.to_vec();
+        line.resize(MAX_LINE_BYTES + 1, b' ');
+
+        let search = search_log("description", &line).await;
+
+        assert!(search.hits.is_empty());
     }
 
     #[rstest]
