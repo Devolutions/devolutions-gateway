@@ -1,6 +1,6 @@
 ---
 name: contract-authoring
-description: Author or extend a normative CONTRACT.md - an exact, testable specification of an interface, protocol, or provider boundary that independent implementations and a conformance suite derive from. Use when designing a spec, contract, protocol document, or provider API that several components or backends must agree on.
+description: Author or extend a normative CONTRACT*.md - an exact, testable specification of an interface, protocol, or provider boundary that independent implementations and a conformance suite derive from. Use when designing a spec, contract, protocol document, or provider API that several components or backends must agree on.
 ---
 
 # Contract authoring
@@ -9,6 +9,7 @@ A contract defines a surface that two independently built parties must agree on:
 It names the parties in scope without schedule ("e.g.: Product A, Product B", not "A now, B later"), since a release stage is not a rule a party agrees to, and a statement belongs only if one of them must agree to it.
 Of a party's own realisation (`intent-files`), only the parts a named second party depends on enter.
 `INTENT.md` beside it explains the choices; the contract states the rules.
+Name the file `CONTRACT.<name>.md` when the repository may hold more than one contract, and cite it everywhere as `CONTRACT.<name>.md §N`, because the file name is the one citation that is unique, searchable, and readable without a lookup.
 
 ## Process
 

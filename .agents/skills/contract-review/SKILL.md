@@ -1,6 +1,6 @@
 ---
 name: contract-review
-description: Review a normative CONTRACT.md for overreach, unspecified failure paths, duplicated lists, examples standing in for rules, one-implementation bias, and untestable wording; returns findings with proposed rewordings, never edits. Use when asked to review, critique, tighten, or prepare a rewrite of a contract or protocol specification.
+description: Review a normative CONTRACT*.md for overreach, unspecified failure paths, duplicated lists, examples standing in for rules, one-implementation bias, and untestable wording; returns findings with proposed rewordings, never edits. Use when asked to review, critique, tighten, or prepare a rewrite of a contract or protocol specification.
 ---
 
 # Contract review
