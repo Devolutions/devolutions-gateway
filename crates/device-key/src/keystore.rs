@@ -654,6 +654,8 @@ mod tests {
 
     use super::*;
 
+    // oracle: intent crates/device-key/INTENT.md §Access
+    // oracle: spec MS-DTYP §2.5.1.1
     #[test]
     fn descriptor_owns_the_key_as_the_caller_and_grants_only_caller_and_system() -> anyhow::Result<()> {
         let user = "S-1-5-21-42";
@@ -682,6 +684,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Backends
+    // oracle: spec MS-ERREF §2.1.1
     #[test]
     fn unavailable_provider_errors_exclude_access_denied() {
         assert!(provider_is_unavailable(NTE_BAD_PROVIDER));
@@ -709,6 +713,7 @@ mod tests {
         }
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn machine_key_round_trip() -> anyhow::Result<()> {
         if !run_machine_key_test()? {
@@ -717,15 +722,20 @@ mod tests {
         let name = crate::new_key_name("devolutions-agent-test");
         let _cleanup = TestKey(name.clone());
         let key = generate(&name)?;
+        // oracle: mutant a key reporting a name other than the one it was created under
         assert_eq!(key.name(), name);
         let reopened = open(&name)?.context("machine key disappeared")?;
+        // oracle: property round-trip
         assert_eq!(reopened.public_key(), key.public_key());
         let message = b"machine-key signature round trip";
         let signature = reopened.try_sign(message)?;
+        // oracle: intent crates/device-key/INTENT.md §Signing
         reopened.public_key().verify(message, &signature)?;
         let provider = Provider::open()?;
         let handle = provider.key(&name)?.context("machine key disappeared")?;
+        // oracle: intent crates/device-key/INTENT.md §Private keys
         ensure_non_exportable(&handle)?;
+        // oracle: intent crates/device-key/INTENT.md §Device key
         ensure_supported_algorithm(&handle)?;
         let user = Token::current_process_token()
             .sid_and_attributes()
@@ -738,7 +748,9 @@ mod tests {
         }
         let mut descriptor = read_descriptor(&handle)?;
         let descriptor = PSECURITY_DESCRIPTOR(descriptor.as_mut_ptr().cast());
+        // oracle: intent crates/device-key/INTENT.md §Access
         assert_eq!(crate::windows_acl::owner_sid(descriptor)?, user);
+        // oracle: intent crates/device-key/INTENT.md §Access
         crate::windows_acl::require_protected_dacl(descriptor, expected)?;
         assert!(list("devolutions-agent-test")?.contains(&name));
         drop(handle);
@@ -767,6 +779,7 @@ mod tests {
         Ok(false)
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn creation_wait_for_another_creator_expires() -> anyhow::Result<()> {
         let name = crate::new_key_name("devolutions-agent-test");
@@ -784,6 +797,7 @@ mod tests {
             .map_err(|_| anyhow::anyhow!("generator panicked"))?
             .err()
             .context("creation did not wait for the held lock")?;
+        // oracle: mutant a creation-lock time-out reported as another failure
         assert!(
             format!("{error:#}").contains("timed out waiting for machine-key creation lock"),
             "{error:#}"
@@ -834,6 +848,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn a_namespace_that_keeps_disappearing_fails_instead_of_retrying_forever() {
         let result = create_or_open_namespace::<()>(
@@ -843,6 +858,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn concurrent_creates_cannot_replace_a_machine_key() -> anyhow::Result<()> {
         use std::sync::{Arc, Barrier};

@@ -675,6 +675,7 @@ mod tests {
         }
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn round_trip_signature_and_delete() -> anyhow::Result<()> {
         let dir = KeyDirectory::new()?;
@@ -682,7 +683,9 @@ mod tests {
         let name = new_key_name(TEST_PREFIX);
         let key = generate(&backend, &name)?;
         let reopened = open(&backend, &name)?.context("generated key disappeared")?;
+        // oracle: mutant a key reporting a name other than the one it was opened under
         assert_eq!(reopened.name(), name);
+        // oracle: property round-trip
         assert_eq!(reopened.public_key(), key.public_key());
         assert_eq!(list(&backend, TEST_PREFIX)?, vec![name.clone()]);
         assert!(generate(&backend, &name).is_err());
@@ -695,6 +698,7 @@ mod tests {
 
         let message = b"file backend signatures";
         let raw = reopened.try_sign(message)?;
+        // oracle: intent crates/device-key/INTENT.md §Signing
         reopened.public_key().verify(message, &raw)?;
 
         #[cfg(unix)]
@@ -748,6 +752,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Key name
     #[test]
     fn invalid_names_are_refused_by_every_operation() -> anyhow::Result<()> {
         let dir = KeyDirectory::new()?;
@@ -762,6 +767,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn concurrent_generators_cannot_replace_a_key() -> anyhow::Result<()> {
         use std::sync::{Arc, Barrier};
@@ -792,6 +798,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn abandoned_key_material_is_removed_by_a_later_operation() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
@@ -816,6 +823,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn listing_requires_the_exact_prefix_and_a_well_formed_name() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
@@ -878,6 +886,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn lock_wait_expires_and_a_later_operation_can_proceed() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
@@ -886,6 +895,7 @@ mod tests {
         let error = list(&directory.backend(), TEST_PREFIX)
             .err()
             .context("contended key-directory lock did not time out")?;
+        // oracle: mutant a key-directory lock time-out reported as another failure
         assert!(
             error.to_string().contains("timed out waiting for key-directory lock"),
             "{error:#}"
@@ -910,6 +920,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Access
     #[cfg(unix)]
     #[test]
     fn key_files_must_not_be_readable_by_other_accounts() -> anyhow::Result<()> {
@@ -927,6 +938,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Access
     #[cfg(unix)]
     #[test]
     fn only_the_caller_or_root_can_own_a_key_file() {
@@ -936,6 +948,8 @@ mod tests {
         assert!(!owner_is_trusted(1001, 0));
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Access
+    // oracle: spec MS-FSCC §2.5.1
     #[cfg(windows)]
     #[test]
     fn key_files_require_persistent_volume_acls() {
@@ -946,6 +960,7 @@ mod tests {
         assert!(volume_supports_acls(FILE_PERSISTENT_ACLS));
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Access
     #[cfg(windows)]
     #[test]
     fn key_file_owner_must_be_process_user_or_system() -> anyhow::Result<()> {
@@ -1002,6 +1017,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[cfg(windows)]
     #[test]
     fn retired_key_is_discovered_after_interrupted_delete() -> anyhow::Result<()> {
@@ -1017,6 +1033,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn hard_linked_key_file_cannot_be_opened() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
@@ -1099,8 +1116,10 @@ mod tests {
         let alias = new_key_name(TEST_PREFIX);
         generate(&backend, &real_name)?;
         std::os::unix::fs::symlink(key_path(&directory.0, &real_name), key_path(&directory.0, &alias))?;
+        // oracle: intent crates/device-key/INTENT.md §Operations
         assert!(open(&backend, &alias).is_err());
         assert_eq!(list(&backend, TEST_PREFIX)?, vec![real_name.clone()]);
+        // oracle: intent crates/device-key/INTENT.md §Operations
         delete(&backend, &alias)?;
         assert!(open(&backend, &real_name)?.is_some());
         Ok(())

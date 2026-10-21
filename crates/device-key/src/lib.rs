@@ -139,11 +139,14 @@ fn name_matches_prefix(name: &str, prefix: &str) -> bool {
 mod tests {
     use super::*;
 
+    // oracle: intent crates/device-key/INTENT.md §Key name
     #[test]
     fn key_names_are_well_formed_and_scoped() -> anyhow::Result<()> {
         let name = new_key_name("devolutions-agent-identity");
         validate_name(&name)?;
+        // oracle: intent crates/device-key/INTENT.md §Operations
         assert!(name_matches_prefix(&name, "devolutions-agent-identity"));
+        // oracle: intent crates/device-key/INTENT.md §Operations
         assert!(!name_matches_prefix(&name, "devolutions-agent"));
         validate_name(&format!("{}_{}", "a".repeat(64), "z_9-".repeat(32)))?;
         for invalid in [
@@ -169,6 +172,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Backends
     #[cfg(not(windows))]
     #[test]
     fn windows_provider_is_distinguishably_unavailable() -> anyhow::Result<()> {
