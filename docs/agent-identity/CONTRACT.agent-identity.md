@@ -35,7 +35,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - Optional fields are omitted when absent (never write `null`, but accept it).
 - Receivers ignore unknown JSON fields unless stated otherwise.
 - A JSON request body that repeats a member name at any depth, such as `csr` twice or one metadata key twice, → `invalid_request`, so that no proxy, log or second parser reads a different value than the authority.
-- A JSON request body nested more than 64 levels deep, or holding a string that is not valid Unicode, such as an escaped lone surrogate, in any member, including an unknown one → `invalid_request`, for the same reason: parsers disagree on both.
+- A JSON request body with more than 64 nested objects and arrays, counting the top-level object, or holding a string that is not valid Unicode, such as an escaped lone surrogate, in any member, including an unknown one → `invalid_request`, for the same reason: parsers disagree on both.
 - Timestamps are RFC 3339 UTC strings ending in `Z` (e.g.: `2026-09-24T12:00:00Z`).
 - IDs are lowercase hyphenated UUIDs.
 - Certificates and CSRs are DER, encoded `base64` in JSON.
