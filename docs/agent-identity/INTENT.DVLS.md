@@ -26,8 +26,10 @@ The rules every authority applies the same way live in the `Devolutions.AgentIde
 - DVLS creates the root when the first enrollment token is created, so a root exists before any agent can enroll, and a DVLS that never uses the feature holds no root.
 - The root private key is stored only encrypted, with AES-256-GCM under a key derived by HKDF from DVLS's data encryption key, and no API exports it.
   When the data encryption key changes, the root key is re-encrypted like everything else.
+  Its plaintext is cleared from memory as soon as it is protected, best effort.
 - When the root key cannot be decrypted, only the operations that need it fail: enrollment, renewal and root rotation.
   The rest of DVLS keeps working, existing identities keep authenticating, and administrators see the error.
+  A root key stored in a format version this DVLS does not know counts as one that cannot be decrypted.
 - DVLS warns administrators ahead of the root's expiry, and starts a rotation automatically at least one certificate lifetime before the root expires, so that the root's expiry never shortens a certificate.
 - `authority_id` is generated once and stored in the DVLS settings.
 
@@ -36,6 +38,7 @@ The rules every authority applies the same way live in the `Devolutions.AgentIde
 - The certificate lifetime is set in days.
   A test-only setting allows a lifetime in seconds for the conformance suite's expiry tests, and is hard to enable by mistake.
 - DVLS offers the agent channel (`config.agent_channel_url`) whenever its hosting supports gRPC channels; which hosting setups and versions qualify is left to the implementation.
+  When DVLS cannot tell whether its hosting supports them, it does not offer the channel, because an agent offered a channel that cannot work retries it indefinitely, while one offered none still checks in.
 - The administrator setting "Agent channel enabled", on by default, turns the channel off behind reverse proxies that break gRPC, which DVLS cannot detect.
 
 ## Load
@@ -62,6 +65,8 @@ It follows DVLS's public API contract (`DVLS/Server/server/Common/PublicApi/CONT
 
   Roles grant them to users and application identities; built-in administrators hold all four.
 - Agent Identity's settings are "Agent channel enabled", the certificate lifetime in days and the rotation notification rate.
+  A settings update applies all its values or none: one invalid value leaves every setting unchanged.
+- Every management operation that changes state is recorded in DVLS's activity log, and the message-type numbers stored for it never change, because existing log entries keep them.
 
 ### Enrollment tokens
 
