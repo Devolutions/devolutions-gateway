@@ -12,6 +12,7 @@ publish = false
 workspace = true
 
 [dependencies]
+agent-channel-client = { path = "../crates/agent-channel-client" }
 agent-identity = { path = "../crates/agent-identity" }
 agent-sysevent-codes = { path = "../crates/agent-sysevent-codes" }
 device-key = { path = "../crates/device-key" }
@@ -121,6 +122,9 @@ embed-resource = "3.0"
 [build-dependencies]
 tonic-build = "0.12"
 protoc-bin-vendored = "3"
+
+[dev-dependencies]
+rstest = "0.25"
 
 [target.'cfg(windows)'.dev-dependencies]
 expect-test = "1.5"

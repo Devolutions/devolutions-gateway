@@ -1,9 +1,11 @@
-//! The per-authority runner: renewal, confirmation and check-in of one stored identity.
+//! The per-authority runner: renewal, confirmation, check-in and agent channel of one stored identity.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
 
+use agent_channel_client::{ChannelClient, HelloFields, Target};
 use agent_identity::client::{self, Client, ClientError, RequestSigner, TerminalCode};
 use agent_identity::schedule::{self, ChannelUrl};
 use agent_identity::state::{KEY_LOST, KeyRecord, KeySlots, Store, StoredIdentity};
@@ -17,6 +19,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::RetryState;
+use super::channel::{LinkId, Notice, Streams, Want};
 use super::config::IdentityDebugConf;
 
 const CHECK_IN_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -28,6 +31,7 @@ const MAX_WAIT: Duration = Duration::from_secs(60);
 pub(super) struct Shared {
     pub(super) store: Store,
     pub(super) client: Client,
+    pub(super) channels: ChannelClient,
     pub(super) settings: IdentityDebugConf,
 }
 
@@ -92,6 +96,16 @@ struct Runner {
     check_in_after_confirm: bool,
     channel_url: Option<Url>,
     warned_malformed_config: Option<Value>,
+    streams: Streams,
+    /// What the streams reported and the runner hasn't handled yet.
+    notices: VecDeque<Notice>,
+    /// Whether a `confirm` may have succeeded without this run knowing it: one was sent and no `204` answered it
+    /// since, or the run started with a pending slot.
+    confirm_unknown: bool,
+    /// Whether the agent channel waits for the next `confirm`, because its certificate expired.
+    channel_after_confirm: bool,
+    /// The stored `config.revision`, which each `Hello` reports.
+    config_revision: Arc<AtomicU64>,
 }
 
 impl Runner {
@@ -112,6 +126,11 @@ impl Runner {
             check_in_after_confirm: false,
             channel_url: None,
             warned_malformed_config: None,
+            streams: Streams::spawn(),
+            notices: VecDeque::new(),
+            confirm_unknown: identity.keys.pending.is_some(),
+            channel_after_confirm: false,
+            config_revision: Arc::new(AtomicU64::new(0)),
         };
         // `crates/agent-identity/INTENT.md` ("Schedules"): without a channel URL, check in when the runner starts;
         // with one, once no stream has authenticated for 1 h, counted from the runner's start.
@@ -155,8 +174,10 @@ impl Runner {
                     self.local_retry.next_attempt.unwrap_or_else(Instant::now)
                 }
             };
+            // The streams wake the runner with a notice, which its next step handles, or a change of their status.
             tokio::select! {
                 _ = tokio::time::sleep_until(wake.into()) => {}
+                notice = self.streams.wait() => self.notices.extend(notice),
                 _ = shutdown.wait() => return,
             }
         }
@@ -164,14 +185,17 @@ impl Runner {
 
     /// Takes the next action of the identity, and returns when to take the following one, or `None` to stop.
     async fn step(&mut self) -> anyhow::Result<Option<Instant>> {
-        let store = &self.shared.store;
+        let shared = Arc::clone(&self.shared);
+        let store = &shared.store;
         let Some(mut identity) = store.read_identity(self.authority_id)? else {
             return Ok(None);
         };
         if identity.identity_id != self.identity_id || identity.rejected.is_some() {
             return Ok(None);
         }
+        self.handle_notices(&mut identity)?;
         if let Some(code) = self.terminal {
+            self.streams.reconcile(Want::Nothing).await;
             // UNTESTED: a latched terminal outcome sends no further signed request while its record fails to persist.
             // A local write failure must not let the runner retry the operation that drew the terminal outcome.
             // When changing this, keep the latch checked before any request and set before any persistence.
@@ -199,6 +223,13 @@ impl Runner {
             .pending
             .as_ref()
             .is_some_and(|pending| pending.certificate_chain.is_some());
+        self.config_revision
+            .store(config_revision(&identity.config), Ordering::Relaxed);
+        self.follow_channel_url(&identity, now);
+        self.reconcile_channel(&identity).await?;
+        if self.terminal.is_some() {
+            return Ok(Some(Instant::now()));
+        }
         if identity.keys.pending.is_some() {
             // UNTESTED: no check-in is sent while any pending slot exists, including after an unusable pending key
             // was replaced and after a restart.
@@ -211,6 +242,12 @@ impl Runner {
             if !self.renewal_retry.is_due() {
                 return Ok(self.renewal_retry.next_attempt);
             }
+            if confirming && !self.confirm_unknown && self.streams.opening(now) {
+                // `CONTRACT.md` §8.1 step 3: once `confirm` is sent, no stream opens until its outcome is known, so a
+                // stream that is opening completes first; the client's opening timeout bounds the wait, and the
+                // stream's next event wakes the runner.
+                return Ok(Some(now + MAX_WAIT));
+            }
             if confirming {
                 self.confirm(&mut identity, recovering).await?;
             } else {
@@ -219,7 +256,6 @@ impl Runner {
             return Ok(Some(Instant::now()));
         }
 
-        self.follow_channel_url(&identity, now);
         let renewal_at = if self.renewal_requested {
             now
         } else {
@@ -230,8 +266,13 @@ impl Runner {
             self.renew(&mut identity, false).await?;
             return Ok(Some(Instant::now()));
         }
+        // UNTESTED: check-in waits while a stream is authenticated, however overdue it is.
+        // When changing this, keep check-in for the time without an authenticated stream.
+        // `crates/agent-identity/INTENT.md` ("Schedules"): check-in runs only while the identity has no authenticated
+        // stream.
         let check_in_wake = self
             .next_check_in
+            .filter(|_| !self.streams.authenticated())
             .map(|check_in_at| later(check_in_at, self.check_in_retry.next_attempt));
         if check_in_wake.is_some_and(|wake| wake <= now) {
             self.check_in(&mut identity).await?;
@@ -277,6 +318,7 @@ impl Runner {
             signer
         };
         let csr = csr::create(new_key.as_ref()).context("create renewal CSR")?;
+        let metadata = self.metadata();
         let result = self
             .shared
             .client
@@ -285,7 +327,7 @@ impl Runner {
                 &signer,
                 &csr,
                 &new_key.public_key(),
-                &self.metadata(),
+                &metadata,
                 None,
             )
             .await;
@@ -335,7 +377,15 @@ impl Runner {
             return Ok(());
         };
         let signer = client::request_signer(Arc::from(key), certificate_chain(&pending)?)?;
-        match self.shared.client.confirm(&identity.base_url, &signer, None).await {
+        // UNTESTED: `confirm` is sent only after the streams are held, which drops every stream that hasn't
+        // authenticated; an opening that reaches the authority after `confirm` retired its key draws the terminal
+        // `identity_unknown`. When changing this, hold the streams before every `confirm`.
+        // `CONTRACT.md` §8.1 step 3: from now until a `204`, the outcome of a `confirm` may be unknown, so no stream
+        // opens.
+        self.confirm_unknown = true;
+        self.streams.reconcile(Want::Hold).await;
+        let result = self.shared.client.confirm(&identity.base_url, &signer, None).await;
+        match result {
             Ok(()) => {
                 if recovering {
                     // `crates/agent-identity/INTENT.md` ("Stored identities"): once the next `confirm` succeeds,
@@ -345,6 +395,8 @@ impl Runner {
                 store.promote_pending(identity)?;
                 self.renewal_retry.succeeded();
                 self.renewal_requested = false;
+                self.confirm_unknown = false;
+                self.channel_after_confirm = false;
                 if std::mem::take(&mut self.check_in_after_confirm) {
                     self.next_check_in = Some(Instant::now());
                 }
@@ -353,7 +405,10 @@ impl Runner {
                     identity_id = %self.identity_id,
                     "Agent Identity certificate renewed"
                 );
-                store.remove_previous_key(identity)?;
+                // `CONTRACT.md` §8.1 step 4: a stream with the new key opens at once, and the old stream closes once
+                // it authenticates.
+                self.reconcile_channel(identity).await?;
+                self.shared.store.remove_previous_key(identity)?;
             }
             Err(ClientError::CertificateExpired) => {
                 // `CONTRACT.agent-identity.md` §8.1: the pending certificate expired before it was confirmed; renew
@@ -379,10 +434,11 @@ impl Runner {
         let Some(signer) = self.current_signer(identity)? else {
             return Ok(());
         };
+        let metadata = self.metadata();
         let result = self
             .shared
             .client
-            .check_in(&identity.base_url, &signer, &self.metadata(), None)
+            .check_in(&identity.base_url, &signer, &metadata, None)
             .await;
         match result {
             Ok(response) => {
@@ -394,6 +450,8 @@ impl Runner {
                 if self.shared.store.update_config(identity, response.config)? {
                     info!(authority_id = %self.authority_id, "Agent Identity config updated");
                 }
+                self.config_revision
+                    .store(config_revision(&identity.config), Ordering::Relaxed);
                 self.check_in_retry.succeeded();
                 self.next_check_in = Some(Instant::now() + self.check_in_interval());
             }
@@ -410,6 +468,136 @@ impl Runner {
             }
         }
         Ok(())
+    }
+
+    /// Handles what the identity's streams reported since the previous step.
+    fn handle_notices(&mut self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
+        while let Some(notice) = self.notices.pop_front().or_else(|| self.streams.try_next_notice()) {
+            match &notice {
+                Notice::Lost => {
+                    // UNTESTED: losing the last authenticated stream restarts the 1 h count before check-in resumes.
+                    // When changing this, keep the count running from the loss, not from the runner's start.
+                    // `crates/agent-identity/INTENT.md` ("Schedules"): with a channel URL, check in once no stream
+                    // has authenticated for 1 h.
+                    let check_in_at = Instant::now() + self.channel_failure_check_in_after();
+                    self.next_check_in = self.next_check_in.map(|_| check_in_at);
+                }
+                // The step's reconciliation opens the stream.
+                Notice::StreamNeeded => {}
+                Notice::Terminal(code) => self.reject(code.as_str()),
+                Notice::CertificateExpired { key_name } => {
+                    if *key_name == identity.keys.current.key_name {
+                        // `CONTRACT.md` §5.4: renew at once, signing with the expired certificate, and connect again
+                        // only after `confirm`.
+                        warn!(
+                            authority_id = %self.authority_id,
+                            "Agent Identity certificate expired; renewing before the agent channel reconnects"
+                        );
+                        self.renewal_requested = true;
+                        self.channel_after_confirm = true;
+                    }
+                }
+                Notice::RenewRequested { key_name } => {
+                    // UNTESTED: a request on a stream of a key that a confirmed renewal replaced starts no renewal, and
+                    // one during a renewal is satisfied when that renewal is confirmed, which clears the flag.
+                    // When changing this, keep one renewal for each request.
+                    if *key_name == identity.keys.current.key_name {
+                        self.renewal_requested = true;
+                    }
+                }
+                Notice::ConfigUpdate { link, id, config_json } => {
+                    // UNTESTED: a pushed config that can't be stored stays queued and is not acknowledged, so that a
+                    // later step stores it; when changing this, acknowledge only a config that is stored or not newer.
+                    if let Err(error) = self.store_pushed_config(identity, *link, id, config_json) {
+                        self.notices.push_front(notice.clone());
+                        return Err(error);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Stores a config pushed on the stream `link` if its revision is higher, then acknowledges it; the step applies
+    /// it to the streams afterwards (`CONTRACT.md` §7.3 step 7).
+    fn store_pushed_config(
+        &mut self,
+        identity: &mut StoredIdentity,
+        link: LinkId,
+        id: &str,
+        config_json: &str,
+    ) -> anyhow::Result<()> {
+        let config = match client::parse_pushed_config(config_json) {
+            Ok(config) => config,
+            Err(error) => {
+                // `CONTRACT.md` §5.2: a config with another version is a transient failure, and the stored config
+                // stays; the authority sends it again after the next `Hello`.
+                warn!(
+                    authority_id = %self.authority_id,
+                    %error,
+                    "Ignoring an Agent Identity config pushed on the agent channel"
+                );
+                return Ok(());
+            }
+        };
+        if self.shared.store.update_config(identity, config)? {
+            info!(authority_id = %self.authority_id, "Agent Identity config updated");
+        }
+        self.streams.ack(link, id);
+        Ok(())
+    }
+
+    /// Opens, keeps or drops the identity's streams for its state ([CONTRACT.md §7.3 "Sequence"][sequence] and
+    /// [§8.1 "Agent renewal"][renewal]).
+    ///
+    /// [sequence]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+    /// [renewal]: ../../../docs/agent-identity/CONTRACT.md#81-agent-renewal
+    async fn reconcile_channel(&mut self, identity: &StoredIdentity) -> anyhow::Result<()> {
+        let current = &identity.keys.current;
+        let url = self.channel_url.clone().filter(|_| !self.channel_after_confirm);
+        let want = match url {
+            // `CONTRACT.md` §8.1 step 3: no stream opens while the outcome of a `confirm` may be unknown.
+            _ if self.confirm_unknown => Want::Hold,
+            Some(url) => Want::Stream {
+                url,
+                key_name: current.key_name.clone(),
+            },
+            None => Want::Nothing,
+        };
+        let Want::Stream { url, key_name } = want.clone() else {
+            self.streams.reconcile(want).await;
+            return Ok(());
+        };
+        if !self.streams.reconcile(want).await {
+            return Ok(());
+        }
+        let Some(key) = device_key::open(self.shared.store.key_backend(), &key_name)? else {
+            self.reject(KEY_LOST);
+            return Ok(());
+        };
+        let target = Target {
+            url: url.clone(),
+            key: Arc::from(key),
+            leaf_certificate_der: client::leaf_certificate_der(certificate_chain(current)?)?,
+            hello: self.hello_fields(),
+        };
+        let channel = self.shared.channels.connect(target)?;
+        debug!(authority_id = %self.authority_id, %url, %key_name, "Agent channel stream opening");
+        self.streams.open(url, key_name, channel);
+        Ok(())
+    }
+
+    /// Returns what each `Hello` carries: the metadata collected when it is sent, and the stored config revision
+    /// (`CONTRACT.md` §3.1 and §7.3 step 7).
+    fn hello_fields(&self) -> Arc<dyn Fn() -> HelloFields + Send + Sync> {
+        let config_revision = Arc::clone(&self.config_revision);
+        let override_path = self.shared.settings.metadata_override_path.clone();
+        Arc::new(move || HelloFields {
+            metadata: metadata::collect(env!("CARGO_PKG_VERSION"), override_path.as_deref())
+                .into_iter()
+                .collect(),
+            config_revision: config_revision.load(Ordering::Relaxed),
+        })
     }
 
     /// Latches a terminal outcome; the next step records it and stops this runner for good.
@@ -579,6 +767,11 @@ fn certificate_chain(record: &KeyRecord) -> anyhow::Result<&[String]> {
         .certificate_chain
         .as_deref()
         .context("identity key has no certificate chain")
+}
+
+/// Returns the revision of a stored config, which the store only accepts with one.
+fn config_revision(config: &Value) -> u64 {
+    config.get("revision").and_then(Value::as_u64).unwrap_or_default()
 }
 
 fn later(at: Instant, retry_at: Option<Instant>) -> Instant {

@@ -1,5 +1,6 @@
 //! Agent Identity in the agent binary: the identity service task, the `identity` command and its configuration.
 
+mod channel;
 pub mod cli;
 pub mod config;
 mod runner;
@@ -8,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use agent_channel_client::{Backoff, ChannelClient, uniform_jitter};
 use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
 use agent_identity::pending::{self, PendingRead};
 use agent_identity::state::{
@@ -123,8 +125,10 @@ async fn run_identity(
                 continue;
             }
         };
-        let client = match Client::new(conf.proxy.to_proxy_config(), settings.extra_trusted_root.as_deref()) {
-            Ok(client) => client,
+        let clients = Client::new(conf.proxy.to_proxy_config(), settings.extra_trusted_root.as_deref())
+            .and_then(|client| Ok((client, channel_client(conf, &settings)?)));
+        let (client, channels) = match clients {
+            Ok(clients) => clients,
             Err(error) => {
                 if log_is_due(&mut last_trust_error) {
                     warn!(
@@ -142,6 +146,7 @@ async fn run_identity(
         let shared = Arc::new(Shared {
             store,
             client,
+            channels,
             settings: settings.clone(),
         });
         let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
@@ -169,6 +174,42 @@ fn log_is_due(last: &mut Option<Instant>) -> bool {
         *last = Some(Instant::now());
         true
     }
+}
+
+/// Creates the agent channel client, which trusts and reaches authorities as the identity HTTP client does.
+///
+/// `devolutions-agent/src/identity/INTENT.md` ("Configuration"): `disable_jitter` and `backoff_max_secs` apply to the
+/// channel's reconnect backoff as to every other identity retry.
+fn channel_client(conf: &Conf, settings: &IdentityDebugConf) -> anyhow::Result<ChannelClient> {
+    let extra_trusted_roots = match &settings.extra_trusted_root {
+        Some(path) => {
+            let pem = std::fs::read(path).context("read the extra trusted root")?;
+            rustls_pemfile::certs(&mut pem.as_slice())
+                .collect::<std::io::Result<Vec<_>>>()
+                .context("parse the extra trusted root")?
+        }
+        None => Vec::new(),
+    };
+    let jitter: Arc<dyn Fn() -> f64 + Send + Sync> = if settings.disable_jitter.unwrap_or_default() {
+        Arc::new(|| 1.0)
+    } else {
+        Arc::new(uniform_jitter)
+    };
+    let backoff = Backoff {
+        max: settings
+            .backoff_max_secs
+            .map(|seconds| Duration::from_secs(seconds.max(1))),
+        jitter,
+        ..Backoff::default()
+    };
+    ChannelClient::new(
+        conf.proxy.to_proxy_config(),
+        &extra_trusted_roots,
+        agent_channel_client::Settings {
+            backoff,
+            ..agent_channel_client::Settings::default()
+        },
+    )
 }
 
 async fn wait_or_stop(shutdown: &mut ShutdownSignal, duration: Duration) -> bool {
@@ -238,6 +279,7 @@ async fn run_pending_enrollments(
         store,
         client,
         settings,
+        ..
     } = shared;
     let mut retries: HashMap<Utf8PathBuf, RetryState> = HashMap::new();
     let mut last_list_error = None;

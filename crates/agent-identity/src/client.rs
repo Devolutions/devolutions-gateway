@@ -536,9 +536,23 @@ fn validate_chain_der(chain: &[String]) -> ClientResult<Vec<Certificate>> {
 
 /// Returns a signer for a stored key and the leaf of its certificate chain.
 pub fn request_signer(key: Arc<dyn DeviceKey>, chain: &[String]) -> anyhow::Result<RequestSigner> {
+    Ok(RequestSigner::new(key, &leaf_certificate_der(chain)?))
+}
+
+/// Returns the DER leaf certificate of a stored chain.
+pub fn leaf_certificate_der(chain: &[String]) -> anyhow::Result<Vec<u8>> {
     let leaf = chain.first().context("stored certificate chain is empty")?;
-    let leaf = STANDARD.decode(leaf).context("decode stored leaf certificate")?;
-    Ok(RequestSigner::new(key, &leaf))
+    STANDARD.decode(leaf).context("decode stored leaf certificate")
+}
+
+/// Parses a config pushed on the agent channel ([CONTRACT.md §7.3 "Sequence"][contract], step 7) and checks it as a
+/// check-in config.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.md#73-sequence
+pub fn parse_pushed_config(config_json: &str) -> ClientResult<Value> {
+    let config = serde_json::from_str(config_json).map_err(|_| ClientError::invalid_response("invalid config JSON"))?;
+    validate_config(&config)?;
+    Ok(config)
 }
 
 /// Returns the `notBefore` and `notAfter` of a stored chain's leaf certificate.
