@@ -34,9 +34,11 @@ Strong kinds name an independent source, and a test, case, or assertion marked w
 - `property <law>`: a law of the code under test named by one of `round-trip`, `idempotent`, `involution`, `commutative`, `associative`, or `monotonic`.
 
 Write every path from the repository root, with forward slashes and exact case, such as `crates/gateway-db/INTENT.md`, because markers sit at every depth and a root-relative path reads and resolves the same from each.
+A file in another repository is cited as `<owner>/<repo>@<sha>:<path>`, with `<path>` from that repository's root, such as `Devolutions/devolutions-gateway@43958682a1b2:docs/agent-identity/CONTRACT.agent-identity.md`, and `<sha>` a commit of at least 12 hex digits, never a branch or tag, because a pinned commit never changes and so resolves the same every time.
 A `spec` document outside `docs/`, such as `RFC 6455` or `MS-RDPBCGR`, is named rather than given as a path.
 `§<section>` names the `id` of an anchor the file places before a heading as `<a id="…"></a>`, or else a heading, in any case, or the number a heading starts with, so `§3.2` matches `3.2 Framing`.
 Cite the anchor when the file has one, because it survives a renamed heading or a renumbered section.
+When a pinned section changes upstream, re-check the test against the new text, then bump the pin or change the test, never the expected value alone, because a value changed without its pin cites text that decides the old one.
 
 A `property` law is accepted only by its well-known name, because the name is its definition, while any other property needs a written source: it takes the kind of the document that states it, and is `scaffold` until one does.
 An assertion whose expected value comes from running the code under test is self-derived even over generated inputs, so it is `mutant` or `scaffold`, never `property`.
