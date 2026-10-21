@@ -841,8 +841,10 @@ async fn reopens_after_each_transient_closure_once_its_growing_delay_has_passed(
 async fn an_opening_without_welcome_in_time_is_an_outage() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
+    // The client must send its `Hello` before the opening times out, which a loaded machine has taken more than 300 ms
+    // to do; the closure must still come well within `WAIT`.
     let settings = Settings {
-        opening_timeout: Duration::from_millis(300),
+        opening_timeout: Duration::from_secs(2),
         ..Settings::default()
     };
     let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
