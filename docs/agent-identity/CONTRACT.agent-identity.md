@@ -35,6 +35,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - Optional fields are omitted when absent (never write `null`, but accept it).
 - Receivers ignore unknown JSON fields unless stated otherwise.
 - A JSON request body that repeats a member name at any depth, such as `csr` twice or one metadata key twice, → `invalid_request`, so that no proxy, log or second parser reads a different value than the authority.
+- A JSON request body nested more than 64 levels deep, or holding a string that is not valid Unicode, such as an escaped lone surrogate, in any member, including an unknown one → `invalid_request`, for the same reason: parsers disagree on both.
 - Timestamps are RFC 3339 UTC strings ending in `Z` (e.g.: `2026-09-24T12:00:00Z`).
 - IDs are lowercase hyphenated UUIDs.
 - Certificates and CSRs are DER, encoded `base64` in JSON.
@@ -119,6 +120,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - Chains are leaf-first, any length; the agent never assumes a tier count.
 - The root profile and the number of CA tiers are each authority's choice.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
+  The leaf carries no other extension except an authority key identifier and a subject key identifier; in particular it carries no basicConstraints, so a leaf can never act as a CA.
 - The server ignores the CSR's subject and attributes, including an `extensionRequest` with an empty `Extensions` list, which common CSR builders emit, and it does not require their contents in canonical DER form, such as a sorted `SET OF`, since nothing it decides depends on them; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
 - The agent's CSR carries an empty attribute set: the `[0]` field RFC 2986 requires is present and empty (`A0 00`), so that a strict PKCS#10 parser accepts it; an empty `extensionRequest` breaks RFC 5280's `SIZE (1..MAX)`.
