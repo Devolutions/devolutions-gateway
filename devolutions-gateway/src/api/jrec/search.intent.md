@@ -32,16 +32,25 @@ Search has its own scope because `gateway.recordings.read` only lists recording 
 ## Request
 
 `recordings` is `"all"` or a list of recording IDs, and stays open to new forms added without breaking existing callers.
-`"all"` orders recordings by start time, latest first, then by ID, the largest UUID as a 128-bit number first, so that the order is the same on every request.
+`"all"` orders recordings by start time, latest first, then by ID, the largest UUID as a 128-bit number first, so that the order is the same on every request and every page.
 A list keeps its order and searches a repeated ID once.
 A request with a field Gateway does not know is rejected, as `rg` and `grep` reject an unknown flag, so that an option added later is never silently ignored by an older Gateway.
 
 The optional `startTime` range takes RFC 3339 date-times and keeps a recording when `from <= startTime < to`, using the start time in `recording.json`, never anything inside a log.
 A missing end leaves that side of the range open.
 
-## Limits
+## Pages
 
-One search reads about 16 MiB of logs at most and returns at most 1,000 hits, so that searching every recording takes a bounded time.
+Results come in pages, so that searching every recording takes a bounded time per request.
+A page ends after reading about 16 MiB of logs or after `maxHits` hits, whichever comes first.
+`maxHits` is from 1 to 1,000 and defaults to 1,000; a value outside that range is rejected, never clamped.
+A page carries a `nextCursor` until every log is read, and a page with fewer hits than `maxHits` may still have one, since the read limit can end it first.
+
+Gateway keeps no state between pages; the cursor holds where the next page starts.
+A cursor is accepted only with the same `query`, `recordings` and `startTime` as the page that gave it.
+The hit that does not fit in a page opens the next one, so that every page moves the search forward and returns each hit once.
+Pages never go back: a recording that starts, or a log that grows, behind the cursor while paging is not searched.
+A log replaced while paging, as an AI analysis rerun does, is read from the cursor's byte offset on, so lines can be missed or misnumbered; this is accepted for now.
 
 ## Later
 
