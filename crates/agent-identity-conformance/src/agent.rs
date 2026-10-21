@@ -5834,40 +5834,8 @@ mod tests {
 
     #[tokio::test]
     async fn orphan_audit_accepts_both_records_and_cleanup_is_prefix_scoped() -> anyhow::Result<()> {
-        let work_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("..")
-            .join("target")
-            .join("agent-identity-conformance-tests");
-        std::fs::create_dir_all(&work_dir)?;
-        let prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
-        let target = Target::new(
-            "https://localhost/mock".to_owned(),
-            crate::dvls::AppCredential::new("test".to_owned(), "test".to_owned()),
-            None,
-            None,
-        )?;
-        let mut case = AgentCase::new(
-            Context {
-                target,
-                second: None,
-                target_kind: crate::TargetKind::Mock,
-                disposable_dvls_target: false,
-                dvls_rotation_window_secs: 60,
-                leaf_lifetime_secs: 90 * 24 * 3600,
-                expect_channel: true,
-                channel_available: true,
-                key_name_prefix: prefix.clone(),
-                agent_version: None,
-                unprivileged: None,
-                agent_bin: PathBuf::new(),
-                key_backend: KeyBackend::File,
-                work_dir,
-            },
-            None,
-            false,
-        )
-        .await?;
+        let mut case = file_backend_case().await?;
+        let prefix = case.ctx.key_name_prefix.clone();
         let fixture_token = "dvaet1.fixturebag.fixturesecret";
         let fixture_hash = token_file_id(fixture_token);
         case.add_token(fixture_token);
