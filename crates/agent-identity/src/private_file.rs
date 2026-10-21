@@ -26,18 +26,18 @@ impl Error for UntrustedStateFile {}
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 #[derive(Debug)]
-pub struct UntrustedAuthorityDirectory {
+pub struct UntrustedStoredIdentity {
     pub path: Utf8PathBuf,
     source: anyhow::Error,
 }
 
-impl fmt::Display for UntrustedAuthorityDirectory {
+impl fmt::Display for UntrustedStoredIdentity {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "untrusted authority directory {}", self.path)
     }
 }
 
-impl Error for UntrustedAuthorityDirectory {
+impl Error for UntrustedStoredIdentity {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         Some(self.source.as_ref())
     }
@@ -131,7 +131,7 @@ pub(crate) fn prepare_directories(data_dir: &Utf8Path, grant_current_user: bool)
 
 /// Checks, without changing anything, that every authority directory is owned by the agent's account and protected
 /// from other users, and returns the authority IDs of those that exist.
-pub(crate) fn check_authority_directories(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Vec<Uuid>> {
+pub(crate) fn check_stored_identities(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Vec<Uuid>> {
     let authorities = data_dir.join("identity").join("authorities");
     let entries = match fs::read_dir(&authorities) {
         Ok(entries) => entries,
@@ -165,7 +165,7 @@ pub(crate) fn check_authority_directories(data_dir: &Utf8Path, grant_current_use
 /// users, and returns whether it exists.
 pub(crate) fn check_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<bool> {
     let untrusted = |source| {
-        anyhow::Error::new(UntrustedAuthorityDirectory {
+        anyhow::Error::new(UntrustedStoredIdentity {
             path: path.to_owned(),
             source,
         })

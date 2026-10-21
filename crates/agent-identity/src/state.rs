@@ -11,7 +11,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::{Uuid, Variant};
 
-pub use crate::private_file::UntrustedAuthorityDirectory;
+pub use crate::private_file::UntrustedStoredIdentity;
 use crate::token::Token;
 use crate::{pending, private_file, rejected, state_lock};
 
@@ -115,7 +115,7 @@ impl Store {
         keys::list(&backend, &key_prefix)?;
         {
             let _lock = state_lock::acquire(&data_dir, acl_grant_current_user)?;
-            private_file::check_authority_directories(&data_dir, acl_grant_current_user)?;
+            private_file::check_stored_identities(&data_dir, acl_grant_current_user)?;
         }
         Ok(Self {
             data_dir,
@@ -150,23 +150,23 @@ impl Store {
     /// identity processing until it is fixed, so every read and state change of the store runs this check first.
     ///
     /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
-    pub fn check_authority_directories(&self) -> anyhow::Result<()> {
-        private_file::check_authority_directories(&self.data_dir, self.acl_grant_current_user).map(drop)
+    pub fn check_stored_identities(&self) -> anyhow::Result<()> {
+        private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user).map(drop)
     }
 
-    /// Takes the state lock once every authority directory passes [`Store::check_authority_directories`].
+    /// Takes the state lock once every authority directory passes [`Store::check_stored_identities`].
     fn lock(&self) -> anyhow::Result<fs::File> {
         let lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
-        self.check_authority_directories()?;
+        self.check_stored_identities()?;
         Ok(lock)
     }
 
     pub fn read_identity(&self, authority_id: Uuid) -> anyhow::Result<Option<StoredIdentity>> {
-        self.check_authority_directories()?;
+        self.check_stored_identities()?;
         self.read_stored_identity(authority_id)
     }
 
-    /// Reads an identity once every authority directory has passed [`Store::check_authority_directories`].
+    /// Reads an identity once every authority directory has passed [`Store::check_stored_identities`].
     fn read_stored_identity(&self, authority_id: Uuid) -> anyhow::Result<Option<StoredIdentity>> {
         let path = self.identity_path(authority_id);
         if !private_file::check_authority_directory(
@@ -203,7 +203,7 @@ impl Store {
 
     pub fn list_identities(&self) -> anyhow::Result<Vec<StoredIdentity>> {
         let mut identities = Vec::new();
-        for authority_id in private_file::check_authority_directories(&self.data_dir, self.acl_grant_current_user)? {
+        for authority_id in private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user)? {
             if let Some(identity) = self.read_stored_identity(authority_id)? {
                 identities.push(identity);
             } else {
@@ -655,7 +655,7 @@ impl Store {
         for hash_hex in rejected::list_rejected(&self.data_dir)? {
             self.discard_pending_state_locked(&hash_hex)?;
         }
-        for authority_id in private_file::check_authority_directories(&self.data_dir, self.acl_grant_current_user)? {
+        for authority_id in private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user)? {
             let path = self.identity_path(authority_id);
             private_file::cleanup_temporary_files(
                 path.parent().context("identity file has no parent")?,
@@ -1853,10 +1853,10 @@ mod tests {
         crate::windows::test_security(path)
     }
 
-    fn untrusted_directory(error: &anyhow::Error) -> Option<&Utf8Path> {
+    fn untrusted_path(error: &anyhow::Error) -> Option<&Utf8Path> {
         error
             .chain()
-            .find_map(|cause| cause.downcast_ref::<UntrustedAuthorityDirectory>())
+            .find_map(|cause| cause.downcast_ref::<UntrustedStoredIdentity>())
             .map(|untrusted| untrusted.path.as_path())
     }
 
@@ -1916,7 +1916,7 @@ mod tests {
             let error = result
                 .err()
                 .with_context(|| format!("{operation} ignored an untrusted authority directory"))?;
-            assert_eq!(untrusted_directory(&error), Some(untrusted.as_path()), "{operation}");
+            assert_eq!(untrusted_path(&error), Some(untrusted.as_path()), "{operation}");
         }
         assert!(pending_path.exists());
         assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
@@ -1954,8 +1954,8 @@ mod tests {
             .err()
             .context("an upper-case authority directory let its token begin another enrollment")?;
 
-        assert_eq!(untrusted_directory(&start_up), Some(upper_case.as_path()));
-        assert_eq!(untrusted_directory(&enrollment), Some(upper_case.as_path()));
+        assert_eq!(untrusted_path(&start_up), Some(upper_case.as_path()));
+        assert_eq!(untrusted_path(&enrollment), Some(upper_case.as_path()));
         assert!(pending::read_in_progress(&directory.0, &token.sha256_hex())?.is_none());
         Ok(())
     }
@@ -2008,12 +2008,8 @@ mod tests {
                 .err()
                 .with_context(|| format!("start-up accepted a {replacement:?}"))?;
 
-            assert_eq!(untrusted_directory(&read), Some(authority.as_path()), "{replacement:?}");
-            assert_eq!(
-                untrusted_directory(&start_up),
-                Some(authority.as_path()),
-                "{replacement:?}"
-            );
+            assert_eq!(untrusted_path(&read), Some(authority.as_path()), "{replacement:?}");
+            assert_eq!(untrusted_path(&start_up), Some(authority.as_path()), "{replacement:?}");
         }
         Ok(())
     }
@@ -2037,7 +2033,7 @@ mod tests {
                 .err()
                 .context("start-up accepted an authority directory open to other users")?;
 
-            assert_eq!(untrusted_directory(&error), Some(authority.as_path()), "{others:?}");
+            assert_eq!(untrusted_path(&error), Some(authority.as_path()), "{others:?}");
             assert_eq!(protection(&authority)?, opened, "{others:?}");
         }
         Ok(())
@@ -2063,7 +2059,7 @@ mod tests {
             .err()
             .context("start-up accepted a foreign-owned authority directory")?;
 
-        assert_eq!(untrusted_directory(&error), Some(authority.as_path()));
+        assert_eq!(untrusted_path(&error), Some(authority.as_path()));
         assert_eq!(protection(&authority)?, owned);
         Ok(())
     }
@@ -2086,7 +2082,7 @@ mod tests {
             .err()
             .context("start-up accepted an authority directory with inherited access")?;
 
-        assert_eq!(untrusted_directory(&error), Some(authority.as_path()));
+        assert_eq!(untrusted_path(&error), Some(authority.as_path()));
         assert_eq!(protection(&authority)?, inherited);
         Ok(())
     }

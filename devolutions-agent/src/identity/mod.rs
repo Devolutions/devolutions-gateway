@@ -14,7 +14,7 @@ use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
 use agent_identity::pending::{self, PendingRead};
 use agent_identity::state::{
     EnrollmentDiscardReason, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots, PendingDiscard, Store, StoredIdentity,
-    UntrustedAuthorityDirectory,
+    UntrustedStoredIdentity,
 };
 use agent_identity::token::Token;
 use agent_identity::{csr, metadata};
@@ -116,7 +116,7 @@ async fn run_identity(
                 if log_is_due(&mut last_store_error) {
                     if let Some(untrusted) = error
                         .chain()
-                        .find_map(|cause| cause.downcast_ref::<UntrustedAuthorityDirectory>())
+                        .find_map(|cause| cause.downcast_ref::<UntrustedStoredIdentity>())
                     {
                         // UNTESTED: this log names the authority directory and how to fix it, because the agent never
                         // repairs it and stays stopped until an administrator does.
@@ -316,7 +316,7 @@ async fn run_pending_enrollments(
     loop {
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails its check stops all
         // identity processing; start-up reports it and waits until it is fixed.
-        if store.check_authority_directories().is_err() {
+        if store.check_stored_identities().is_err() {
             return Stopped::Untrusted;
         }
         match pending::list(data_dir) {
