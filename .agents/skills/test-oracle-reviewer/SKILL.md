@@ -27,7 +27,7 @@ Mark where an expected value comes from with `// oracle: <kind> <reference>` on 
 Strong kinds name an independent source, and a test, case, or assertion marked with one is deleted only when its source changes or is shown not to decide what it asserts:
 
 - `spec <document> §<section>`: normative text other than a contract or intent file, such as an RFC, a Microsoft open specification, or `docs/JMUX-spec.md`.
-- `contract <path> §<section>`: a `CONTRACT.md`.
+- `contract <path> §<section>`: a `CONTRACT*.md`.
 - `intent <path> §<section>`: a statement in an intent file.
 - `regression <issue or crash file>`: a bug report or fuzz crash.
 - `reference <implementation, capture, or model>`: what another implementation or a reference model does, recorded or compared live.
