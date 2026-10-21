@@ -780,6 +780,25 @@ impl AgentCase {
         Ok(())
     }
 
+    /// Waits until the agent has deleted each token's pending file and in-progress record.
+    ///
+    /// On success the agent deletes both (`crates/agent-identity/INTENT.md`, "Pending-enrollment files"), but nothing orders their deletion before it stores the identity.
+    async fn until_pending_consumed(&mut self, tokens: &[&Token]) -> anyhow::Result<()> {
+        let paths = tokens
+            .iter()
+            .flat_map(|token| {
+                [
+                    self.pending_path_for(&token.text),
+                    self.in_progress_path_for(&token.text),
+                ]
+            })
+            .collect::<Vec<_>>();
+        self.until_files("the deletion of the pending files and in-progress records", || {
+            paths.iter().all(|path| !path.exists())
+        })
+        .await
+    }
+
     async fn finish(&mut self) -> anyhow::Result<()> {
         let stopped = self.stop().await;
         let layout = self.audit_identity_tree();
@@ -1176,6 +1195,7 @@ async fn dropped_enrollment(case: &mut AgentCase, token: &Token) -> anyhow::Resu
     target.faults(&json!({ "drop_next_response": "enroll" })).await?;
     case.write_pending(&token.text)?;
     let started = Instant::now();
+    let mut unsettled = "agent did not commit a dropped-response enrollment and persist its key within 20 seconds";
     loop {
         let requests = target.requests(Some(token)).await?;
         let attempts = count(&requests, "enroll")?;
@@ -1192,7 +1212,6 @@ async fn dropped_enrollment(case: &mut AgentCase, token: &Token) -> anyhow::Resu
             && record.used_count == 1
             && let Some(progress) = case.in_progress()?
         {
-            ensure!(attempts > before, "enrollment committed without a recorded request");
             ensure!(
                 case.pending_path().exists(),
                 "agent deleted the pending file before receiving a response"
@@ -1207,23 +1226,25 @@ async fn dropped_enrollment(case: &mut AgentCase, token: &Token) -> anyhow::Resu
             );
             let key = field(&progress, "key_name")?.to_owned();
             ensure!(key_exists(case, &key)?, "committed enrollment key is missing");
-            ensure!(
-                target.control("faults", &json!({})).await?.body["drop_next_response"].is_null(),
+            // The enrollment can commit between the counter and listing reads, and the mock's README orders neither its counters nor the fault's consumption before the commit, so wait for both.
+            let consumed = target.control("faults", &json!({})).await?.body["drop_next_response"].is_null();
+            if before < attempts && consumed {
+                let id = listing
+                    .items
+                    .first()
+                    .context("listing omitted the identity")?
+                    .id
+                    .clone();
+                return Ok((id, key));
+            }
+            unsettled = if before < attempts {
                 "the dropped enroll response fault was not consumed"
-            );
-            let id = listing
-                .items
-                .first()
-                .context("listing omitted the identity")?
-                .id
-                .clone();
-            return Ok((id, key));
+            } else {
+                "enrollment committed without a recorded request"
+            };
         }
         case.check_running()?;
-        ensure!(
-            started.elapsed() < WAIT,
-            "agent did not commit a dropped-response enrollment and persist its key within 20 seconds"
-        );
+        ensure!(started.elapsed() < WAIT, "{unsettled}");
         tokio::time::sleep(POLL).await;
     }
 }
@@ -1818,10 +1839,7 @@ pub(crate) async fn a_enroll_lost_response_retried_across_restart(ctx: Context) 
                 key_name(&state, "current")? == key,
                 "agent did not reuse the in-progress key"
             );
-            ensure!(
-                !case.in_progress_path().exists(),
-                "in-progress enrollment record survived success"
-            );
+            case.until_pending_consumed(&[&token]).await?;
             let record = case.identity_record(&target, &id).await?;
             assert_stored_identity(case, &token, &state, &record)?;
             Ok(())
@@ -1890,18 +1908,7 @@ pub(crate) async fn a_two_pending_tokens_same_authority_last_wins(ctx: Context) 
                 "last completing token did not become the stored identity for its authority"
             );
             wait_key_deleted(case, &replacement_key).await?;
-            // Deleting the pending files and in-progress records may finish after the identity is stored.
-            let consumed = [&original_token, &replacement].map(|token| {
-                [
-                    case.pending_path_for(&token.text),
-                    case.in_progress_path_for(&token.text),
-                ]
-            });
-            case.until_files(
-                "the deletion of both tokens' pending files and in-progress records",
-                || consumed.iter().flatten().all(|path| !path.exists()),
-            )
-            .await?;
+            case.until_pending_consumed(&[&original_token, &replacement]).await?;
             ensure!(
                 target.management().identity_count(&original_token).await? == 1
                     && target.management().identity_count(&replacement).await? == 1
@@ -1973,6 +1980,7 @@ pub(crate) async fn a_two_pending_tokens_different_authorities_progress_independ
                 "first authority backoff blocked or displaced the second pending token"
             );
             let (first_id, first_state) = case.enrolled(&first, &first_token).await?;
+            case.until_pending_consumed(&[&first_token, &second_token]).await?;
             let first_authority = field(&first_state, "authority_id")?;
             let second_authority = field(&second_state, "authority_id")?;
             ensure!(
@@ -1981,10 +1989,6 @@ pub(crate) async fn a_two_pending_tokens_different_authorities_progress_independ
                     && second_state["identity_id"] == second_id
                     && case.state(first_authority)?["identity_id"] == first_id
                     && case.state(second_authority)?["identity_id"] == second_id
-                    && !case.pending_path_for(&first_token.text).exists()
-                    && !case.pending_path_for(&second_token.text).exists()
-                    && !case.in_progress_path_for(&first_token.text).exists()
-                    && !case.in_progress_path_for(&second_token.text).exists()
                     && first.management().token(&first_token.id).await?.used_count == 1
                     && second.management().token(&second_token.id).await?.used_count == 1,
                 "independent authorities did not both enroll and retain their keys"
@@ -3262,6 +3266,7 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
             target.faults(&json!({ "drop_next_response": "renew" })).await?;
             target.management().request_renewal(&id).await?;
             let started = Instant::now();
+            let mut unsettled = "agent did not persist the first pending renewal";
             let (pending_thumb, pending_key) = loop {
                 let record = case.identity_record(&target, &id).await?;
                 let state = case.state(&authority)?;
@@ -3281,19 +3286,16 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
                     && let Some(pending) = pending
                     && let Ok(key) = key_name(&state, "pending")
                 {
-                    break (pending.thumbprint.clone(), key.to_owned());
+                    // The mock's README does not order the fault's consumption before the renewal it commits.
+                    if target.control("faults", &json!({})).await?.body["drop_next_response"].is_null() {
+                        break (pending.thumbprint.clone(), key.to_owned());
+                    }
+                    unsettled = "drop-next-renew fault was not consumed";
                 }
                 case.check_running()?;
-                ensure!(
-                    started.elapsed() < WAIT,
-                    "agent did not persist the first pending renewal"
-                );
+                ensure!(started.elapsed() < WAIT, "{unsettled}");
                 tokio::time::sleep(POLL).await;
             };
-            ensure!(
-                target.control("faults", &json!({})).await?.body["drop_next_response"].is_null(),
-                "drop-next-renew fault was not consumed"
-            );
             case.stop().await?;
             let requests = target.requests(None).await?;
             ensure!(
