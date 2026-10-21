@@ -34,9 +34,11 @@
 The location and format of the files below are stable, because the conformance tester stands in for the installer and observes the agent through them.
 `<data-dir>` means the agent's configured data directory.
 
-- The agent provisions its identity directories and, at start-up, resets a wrong owner or wrong permissions on them.
+- The agent provisions its identity directories and, at start-up, resets a wrong owner or wrong permissions on them, without changing any authority directory under them.
 - Before it uses stored identities, the agent checks that every `<data-dir>/identity/authorities/<authority_id>/` directory is owned by its account and protected from other users.
   One that fails the check is never repaired, and stops all identity processing until it is fixed, because skipping it would let a local attacker hide or forge an identity, for example hide a rejected identity so that its token enrolls again.
+  The running agent repeats the check before every use of its state and on each pending-directory poll, stops every identity and its streams while any directory fails it, and resumes without a restart once all pass.
+  A directory passes only if it is owned by the agent's account and is, on Unix, closed to group and other, or on Windows, protected by exactly the DACL the agent provisions; a link, a reparse point, a non-directory and, on a case-insensitive file system, any case variant of its name are all checked.
 - Every state change holds an exclusive lock on the identity directory: the file `<data-dir>/identity/.agent-identity.lock` on Linux and macOS, and on Windows an unshared handle on `<data-dir>/identity` itself; on Windows, a busy lock is retried for 30 s.
 - Size limits: a pending file holds at most 16 KiB of plaintext, an in-progress record 16 KiB, `identity.json` 2 MiB, and a rejection marker 1 KiB.
 
