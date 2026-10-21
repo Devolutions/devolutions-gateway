@@ -10,7 +10,7 @@ This crate is the agent's side of the channel defined in `agent-channel-proto`.
 
 ## Handshake
 
-- An opening that has not received `Welcome` 30 s after the connection started is a network error; until then, messages other than the expected `Challenge` and `Welcome` are ignored.
+- An opening that has not received `Welcome` 30 s after the connection started is a network error; until then, messages other than the expected `Challenge` and `Welcome` are ignored when their `id` is a UUID.
 - A `Challenge` that is not 32 bytes closes the stream as a transient failure, without sending `Hello`.
 
 ## Closing
