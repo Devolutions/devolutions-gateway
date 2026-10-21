@@ -3,19 +3,25 @@
 Search reads only the files listed under `artifacts` in `recording.json` whose type is `slog`.
 Recording files listed under `files` are not searched, a `.slog` recording included.
 
-Search does not interpret log content: it matches the query case-insensitively against the raw text of each line, so that any kind of artifact, present or future, can be searched.
-Per-field search, such as matching an entry's `description` only, is not supported, since it would need Gateway to parse what producers write.
+A line holding a JSON object is matched case-insensitively against the object's string values, at any depth and once unescaped; field names, numbers, booleans and null never match.
+Any other line is matched case-insensitively against its raw text, so that any kind of artifact, present or future, can be searched.
+A line cut at 256 KiB follows the same rule: what was read is matched by its string values when it parses as a JSON object, and as raw text otherwise.
+
+Values are matched rather than raw text because users search the text they see: raw matching made a field name such as `description` match every line, and missed text that JSON escapes, such as `DOMAIN\user` stored as `DOMAIN\\user`.
+The rule never depends on field names, so a producer can change the fields it writes without any change to search.
+Per-field search, such as matching an entry's `description` only, is not supported: the fields a producer writes are unknown to Gateway, which only cares about values.
 
 ## Hits
 
 A hit is a line that holds the query.
-It carries the recording ID, the file name, the line number counting from 1, the byte offset of the line, and the line itself as a string.
-Gateway does not check that a line is JSON: a `.slog` is NDJSON by format, but a line holds whatever its producer pushed, such as a half-written last line while the push is live.
+A hit carries the recording ID, the file name, the line number counting from 1, the byte offset of the line, and the raw line itself as a string.
+Line numbers count from 1 like the slog package in `webapp/packages/session-recording-log`, so that a hit and that package's own search give a line the same number.
+Gateway does not require a line to be JSON: a `.slog` is NDJSON by format, but a line holds whatever its producer pushed, such as a half-written last line while the push is live.
 A line longer than 256 KiB is matched on its first 256 KiB and returned cut, with `truncated: true`; the caller fetches the file for the whole line.
 
 ## Access
 
-A valid token with the `gateway.recordings.search` scope is the only check, and DVLS decides who gets one.
+A valid token with the `gateway.recordings.search` scope is the only check, and the provisioner that issues the token decides who gets one.
 Search has its own scope because `gateway.recordings.read` only lists recording IDs and must not reveal log contents.
 
 ## Request
@@ -33,3 +39,4 @@ One search reads about 16 MiB of logs at most and returns at most 1,000 hits, so
 ## Later
 
 Regular expressions or wildcards, a total hit count, and combining words are wanted later, and the request shape must not preclude them.
+Choosing which artifact kinds to search, or searching other sources such as the `.slog` recordings under `files`, is wanted later; the request shape must not preclude it either.
