@@ -203,7 +203,7 @@ pub(crate) async fn search_recordings(
                 Ok(()) => {}
                 // A recording can be deleted while it is searched.
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                    debug!(%path, "Recording log listed in the manifest is missing");
+                    trace!(%path, "Recording log listed in the manifest is missing");
                 }
                 Err(error) => warn!(%path, %error, "Failed to search a recording log"),
             }
@@ -217,17 +217,28 @@ pub(crate) async fn search_recordings(
     Ok(Json(search.into_response()))
 }
 
-/// Search text in lowercase, the case lines are compared in.
+/// Search text with its case folded, the form lines are compared in.
 struct SearchText(String);
 
 impl SearchText {
     fn new(query: &str) -> Option<Self> {
-        (!query.is_empty()).then(|| Self(query.to_lowercase()))
+        (!query.is_empty()).then(|| Self(fold_case(query)))
     }
 
     fn is_in(&self, line: &str) -> bool {
-        line.to_lowercase().contains(&self.0)
+        fold_case(line).contains(&self.0)
     }
+}
+
+/// Lowercases each character on its own, with the final sigma read as a sigma.
+///
+/// `str::to_lowercase` turns a capital sigma that ends a word into a final sigma,
+/// so a query ending in "Σ" would not match the same letters inside a longer word.
+fn fold_case(text: &str) -> String {
+    text.chars()
+        .flat_map(char::to_lowercase)
+        .map(|character| if character == 'ς' { 'σ' } else { character })
+        .collect()
 }
 
 struct Search {
@@ -337,6 +348,8 @@ async fn read_recording_logs(dir: Utf8PathBuf, recording_id: Uuid) -> Option<Rec
         .inspect_err(|error| trace!(%path, %error, "Invalid recording manifest"))
         .ok()?;
 
+    // A log listed twice would be searched twice.
+    let mut seen = HashSet::new();
     let file_names = manifest
         .artifacts
         .into_file_names()
@@ -347,6 +360,7 @@ async fn read_recording_logs(dir: Utf8PathBuf, recording_id: Uuid) -> Option<Rec
                     .extension()
                     .and_then(RecordingFileType::from_extension)
                     == Some(RecordingFileType::SessionRecordingLog)
+                && seen.insert(file_name.clone())
         })
         .collect();
 
@@ -544,6 +558,16 @@ mod tests {
         assert_eq!(hit_lines(&search), [(1, line)]);
     }
 
+    #[rstest]
+    #[case::query_ending_in_a_capital_sigma("ΧΡΗΣ", "ΧΡΗΣΤΗΣ")]
+    #[case::line_ending_in_a_capital_sigma("σ", "ΟΣ")]
+    #[tokio::test]
+    async fn matches_a_sigma_wherever_it_falls_in_a_word(#[case] query: &str, #[case] line: &str) {
+        let search = search_log(query, line.as_bytes()).await;
+
+        assert_eq!(hit_lines(&search), [(1, line)]);
+    }
+
     #[tokio::test]
     async fn keeps_the_spaces_of_the_query() {
         let search = search_log("user ", br#"{"name":"username"}"#).await;
@@ -655,6 +679,21 @@ mod tests {
 
         assert_eq!(hit_lines(&search), [(1, "hit")]);
         assert!(!search.limit_reached);
+    }
+
+    #[tokio::test]
+    async fn lists_a_log_once_when_the_manifest_repeats_it() {
+        let root = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            root.path().join("recording.json"),
+            r#"{"startTime":100,"artifacts":{"ai-analysis":[{"fileName":"ai-analysis-0.slog"},{"fileName":"ai-analysis-0.slog"}]}}"#,
+        )
+        .expect("write manifest");
+        let dir = Utf8PathBuf::from_path_buf(root.path().to_owned()).expect("UTF-8 path");
+
+        let recording = read_recording_logs(dir, Uuid::nil()).await.expect("readable manifest");
+
+        assert_eq!(recording.file_names, ["ai-analysis-0.slog"]);
     }
 
     #[tokio::test]
