@@ -6,7 +6,6 @@ Properties use CsCheck: compose `Gen<T>` with LINQ and `Sample` it; each type's 
 CsCheck rather than FsCheck, because its generators shrink without per-type shrinkers, so a composed generator costs one declaration, and it adds no FSharp.Core to a C# test project.
 Releases after CsCheck 2.14.1 need .NET 6 or later, so a .NET Framework test project pins 2.14.1, the last on .NET Standard 2.0.
 A failing `Sample` prints a seed; replay it with `seed:` or the `CsCheck_Seed` environment variable, and pin the failure by keeping the shrunk value in a regression test rather than the seed, since a generator change moves the seed's meaning.
-Where no fuzz harness covers the C# code under test, a parser of untrusted input gets a CsCheck property over malformed inputs, and a pull request comment says it is not fuzzed.
 
 Snapshots are written by hand: the expected value inline or, past a screen, in a sibling file copied into the test output.
 Nothing rewrites a stale value, so edit each by hand after reading it.
