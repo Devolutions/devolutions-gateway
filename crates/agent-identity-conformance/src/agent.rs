@@ -782,7 +782,9 @@ impl AgentCase {
 
     /// Waits until the agent has deleted each token's pending file and in-progress record.
     ///
-    /// On success the agent deletes both (`crates/agent-identity/INTENT.md`, "Pending-enrollment files"), but nothing orders their deletion before it stores the identity.
+    /// On success the agent deletes both ([agent intent], "Pending-enrollment files"), but nothing orders their deletion before it stores the identity.
+    ///
+    /// [agent intent]: ../../agent-identity/INTENT.md#pending-enrollment-files
     async fn until_pending_consumed(&mut self, tokens: &[&Token]) -> anyhow::Result<()> {
         let paths = tokens
             .iter()
@@ -2016,22 +2018,30 @@ pub(crate) async fn a_enroll_revoked_before_response_is_permanent(ctx: Context) 
             let attempts = loop {
                 let requests = target.requests(Some(&token)).await?;
                 let attempts = count(&requests, "enroll")?;
+                let rejections = count(&requests, "enroll_identity_revoked")?;
                 ensure!(
-                    count(&requests, "enroll_identity_revoked")? <= 1,
+                    rejections <= 1,
                     "agent retried enrollment again after receiving identity_revoked"
                 );
-                if count(&requests, "enroll_identity_revoked")? == 1
-                    && !case.pending_path().exists()
-                    && !case.in_progress_path().exists()
-                    && !key_exists(case, &key)?
-                    && !case.has_stored_identity()?
-                {
+                let conditions = [
+                    (rejections == 1, "identity_revoked recorded"),
+                    (!case.pending_path().exists(), "pending file deleted"),
+                    (!case.in_progress_path().exists(), "in-progress record deleted"),
+                    (!key_exists(case, &key)?, "enrollment key deleted"),
+                    (!case.has_stored_identity()?, "no identity stored"),
+                ];
+                if conditions.iter().all(|(met, _)| *met) {
                     break attempts;
                 }
                 case.check_running()?;
                 ensure!(
                     started.elapsed() < WAIT,
-                    "agent did not remove the revoked enrollment, in-progress record and key within 20 seconds"
+                    "agent did not remove the revoked enrollment, in-progress record and key within 20 seconds (unmet: {})",
+                    conditions
+                        .iter()
+                        .filter_map(|(met, name)| (!met).then_some(*name))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
                 tokio::time::sleep(POLL).await;
             };
