@@ -54,9 +54,10 @@ Opening a key that any other account can access fails, so a key created by a les
 - Opening a missing key reports that it is not there.
   Opening fails if the key breaks the access rule, is exportable, is a link, or uses an algorithm the crate does not support.
 - Deleting is idempotent: deleting a key that is already gone succeeds.
-- Listing under a prefix returns only well-formed names whose part before the first `_` equals that prefix.
+- Listing under a prefix returns only well-formed names whose part before the first `_` equals that prefix, and never a link.
 - No leftover copy of a private key survives a later operation in the same key store.
-  Another process's work in progress is never taken for a leftover.
+  Another process's work in progress is never taken for a leftover, and a file the crate did not create is never removed.
+- An unexpected entry in a key store makes an operation skip it or fail, never panic.
 - Waiting for another process has a time limit; when it runs out, the operation fails.
 
 ## Signing
@@ -84,3 +85,5 @@ The crate never falls back to another backend, and never logs that error or rais
 
 The file backend is a supported backend, not a test stand-in.
 Its key files are PKCS#8.
+On Unix, the directories it creates for keys are `0700`, so the access rule holds before the first key exists.
+It needs only traverse permission on the ancestors of its key directory, not read permission, so a service can keep keys under a parent it cannot list.
