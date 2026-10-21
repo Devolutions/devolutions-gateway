@@ -675,6 +675,16 @@ mod tests {
         }
     }
 
+    /// Leaves the temporary of a creator that stopped before installing its key.
+    fn create_leftover(directory: &KeyDirectory) -> anyhow::Result<Utf8PathBuf> {
+        let leftover = directory
+            .0
+            .join(format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4()));
+        let mut file = create_restricted_file(&leftover)?;
+        file.write_all(b"unfinalized private key")?;
+        Ok(leftover)
+    }
+
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn round_trip_signature_and_delete() -> anyhow::Result<()> {
@@ -836,6 +846,104 @@ mod tests {
 
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
+    fn cleanup_leaves_entries_that_only_resemble_its_temporaries() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let leftover = create_leftover(&directory)?;
+        let name = new_key_name(TEST_PREFIX);
+        let uuid = || Uuid::new_v4().to_string();
+        // RFC 9562 §4 places the version in the first digit of the third group and the variant in the first digit of the fourth.
+        let uuid_with_digit = |index: usize, digit: &str| {
+            let mut uuid = Uuid::new_v4().to_string();
+            uuid.replace_range(index..=index, digit);
+            uuid
+        };
+        // The crate names a temporary `.{key name}-{lowercase version 4 UUID}.tmp`; each name differs in one part.
+        let foreign_files = [
+            format!(".{name}-{}.tmp", uuid().to_uppercase()),
+            format!(".{name}-{}.tmp", uuid_with_digit(14, "1")),
+            format!(".{name}-{}.tmp", uuid_with_digit(19, "c")),
+            format!(".{}-{}.tmp", name.to_uppercase(), uuid()),
+            format!("{name}-{}.tmp", uuid()),
+        ];
+        for file_name in &foreign_files {
+            create_restricted_file(&directory.0.join(file_name))?;
+        }
+        let foreign_directory = directory.0.join(format!(".{name}-{}.tmp", uuid()));
+        fs::create_dir(&foreign_directory)?;
+
+        // An operation may skip an unexpected entry or fail, so only what it leaves behind is checked.
+        let _ = list(&directory.backend(), TEST_PREFIX);
+
+        assert!(!leftover.exists());
+        for file_name in &foreign_files {
+            assert!(directory.0.join(file_name).is_file(), "{file_name}");
+        }
+        assert!(foreign_directory.is_dir());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn unexpected_entry_names_cause_no_panic() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let leftover = create_leftover(&directory)?;
+        // Slicing these names by a UUID's or the prefix's length would land inside a character or past an end.
+        let stray_names = [
+            format!(".é{}.tmp", "0".repeat(35)),
+            ".x.tmp".to_owned(),
+            format!("{TEST_PREFIX}.p8"),
+        ];
+        for stray_name in &stray_names {
+            create_restricted_file(&directory.0.join(stray_name))?;
+        }
+
+        // An operation may skip an unexpected entry or fail; a panic fails this test.
+        let _ = list(&directory.backend(), TEST_PREFIX);
+
+        assert!(!leftover.exists());
+        for stray_name in &stray_names {
+            assert!(directory.0.join(stray_name).is_file(), "{stray_name}");
+        }
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    // APFS refuses file names that are not UTF-8.
+    #[cfg(any(target_os = "linux", windows))]
+    #[test]
+    fn entry_names_that_are_not_utf8_cause_no_panic() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let leftover = create_leftover(&directory)?;
+        #[cfg(unix)]
+        let stray_name = {
+            use std::os::unix::ffi::OsStringExt as _;
+
+            std::ffi::OsString::from_vec(b".\xff.tmp".to_vec())
+        };
+        // An unpaired surrogate is a valid NTFS file name but has no UTF-8 form.
+        #[cfg(windows)]
+        let stray_name = {
+            use std::os::windows::ffi::OsStringExt as _;
+
+            let wide = [u16::from(b'.'), 0xD800]
+                .into_iter()
+                .chain(".tmp".encode_utf16())
+                .collect::<Vec<_>>();
+            std::ffi::OsString::from_wide(&wide)
+        };
+        let stray = directory.0.as_std_path().join(stray_name);
+        File::create(&stray)?;
+
+        // An operation may skip an unexpected entry or fail; a panic fails this test.
+        let _ = list(&directory.backend(), TEST_PREFIX);
+
+        assert!(!leftover.exists());
+        assert!(stray.is_file());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
     fn listing_requires_the_exact_prefix_and_a_well_formed_name() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
@@ -983,7 +1091,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: mutant generate leaving a missing key directory uncreated, or creating it with access for other accounts
+    // oracle: intent crates/device-key/INTENT.md §File backend
     #[cfg(unix)]
     #[test]
     fn nested_key_directories_are_owner_only() -> anyhow::Result<()> {
@@ -999,7 +1107,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: mutant an operation that opens an ancestor of an existing key directory
+    // oracle: intent crates/device-key/INTENT.md §File backend
     #[cfg(unix)]
     #[test]
     fn existing_keys_work_under_execute_only_ancestor() -> anyhow::Result<()> {
@@ -1017,7 +1125,7 @@ mod tests {
         let ancestor = root.0.join("execute-only");
         let keys = ancestor.join("keys");
         fs::create_dir_all(&keys)?;
-        fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o300))?;
+        fs::set_permissions(&ancestor, fs::Permissions::from_mode(0o100))?;
         let _restore = RestorePermissions(ancestor);
         let backend = KeyBackend::File { dir: keys };
         let name = new_key_name(TEST_PREFIX);
@@ -1116,6 +1224,7 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[cfg(unix)]
     #[test]
     fn key_symlink_cannot_be_opened() -> anyhow::Result<()> {
@@ -1125,11 +1234,8 @@ mod tests {
         let alias = new_key_name(TEST_PREFIX);
         generate(&backend, &real_name)?;
         std::os::unix::fs::symlink(key_path(&directory.0, &real_name), key_path(&directory.0, &alias))?;
-        // oracle: intent crates/device-key/INTENT.md §Operations
         assert!(open(&backend, &alias).is_err());
-        // oracle: mutant listing a symbolic link under a key name
         assert_eq!(list(&backend, TEST_PREFIX)?, vec![real_name.clone()]);
-        // oracle: intent crates/device-key/INTENT.md §Operations
         delete(&backend, &alias)?;
         assert!(open(&backend, &real_name)?.is_some());
         Ok(())
