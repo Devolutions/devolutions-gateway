@@ -112,6 +112,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ steps.get-commit.outputs.ref }}
+          # A pull request's merge commit and its first parent, the base the check compares against.
+          fetch-depth: 2
 
       - name: Get version
         id: get-version
@@ -131,6 +133,15 @@ jobs:
               echo "::error::Bad formatting, please run 'cargo +nightly fmt --all'"
               exit 1
           fi
+
+      - name: Check oracle markers
+        env:
+          # Reads the files that markers pin in other repositories; a pin the token cannot read gets only a syntax check.
+          GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN || github.token }}
+        run: |
+          $Base = if ('${{ github.event_name }}' -Eq 'pull_request' -And -Not '${{ inputs.ref }}') { 'HEAD^1' }
+          ./ci/check-oracle-markers.ps1 -Base $Base
+        shell: pwsh
 
       - name: Configure rust profile
         id: rust-profile
@@ -196,6 +207,30 @@ jobs:
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
         shell: pwsh
         run: sccache --show-stats
+
+  oracle-markers-tests:
+    name: oracle marker check tests
+    needs: [preflight]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Install Pester
+        run: Install-Module Pester -RequiredVersion 5.6.0 -Force
+        shell: pwsh
+
+      - name: Pester tests
+        run: |
+          Import-Module Pester -RequiredVersion 5.6.0
+          $Result = Invoke-Pester ci/check-oracle-markers.Tests.ps1 -PassThru
+          if ($Result.Result -Ne 'Passed') {
+            exit 1
+          }
+        shell: pwsh
 
   tests:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
@@ -1523,7 +1558,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, oracle-markers-tests, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:
