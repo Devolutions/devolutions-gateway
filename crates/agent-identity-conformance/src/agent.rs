@@ -176,6 +176,23 @@ pub(crate) fn is_temporary_sibling(path: &Path, documented: &HashSet<PathBuf>, k
     }
 }
 
+/// Whether a temporary sibling, as [`is_temporary_sibling`] finds it, belongs to `identity.json` or an in-progress record.
+///
+/// The agent writes both records atomically, through a temporary file that it renames over the record ([agent intent], "Stored identities").
+/// That keeps the record whole when stopping the agent cuts a write short, but nothing promises that the temporary file is then removed.
+///
+/// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
+pub(crate) fn is_record_temporary(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let candidate = name.strip_prefix('.').unwrap_or(name);
+    temporary_name(name, "identity.json")
+        || candidate
+            .get(..64)
+            .is_some_and(|hash| temporary_name(name, &format!("{hash}.in-progress.json")))
+}
+
 fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> anyhow::Result<()> {
     let values = metadata.as_object().context("agent metadata is not an object")?;
     let mut total_bytes = 0;
@@ -460,6 +477,9 @@ impl AgentCase {
     }
 
     fn state(&self, authority_id: &str) -> anyhow::Result<Value> {
+        // UNTESTED: on Windows, the suite reads the agent's files with read, write and delete sharing, the default of `std::fs`, so polling never blocks the agent's replace of a record.
+        // A reader without delete sharing makes that replace fail until the reader closes the file, which delays the agent and keeps its temporary file meanwhile.
+        // When reading the agent's files through another API, keep `FILE_SHARE_DELETE`.
         serde_json::from_slice(&std::fs::read(self.identity_path(authority_id))?).context("read stored identity")
     }
 
@@ -897,8 +917,10 @@ impl AgentCase {
                     eprintln!("WARN leftover copy of deleted key {key}: {}", path.display());
                     continue;
                 }
+                let temporary = is_temporary_sibling(&path, &documented, &self.ctx.key_name_prefix);
+                // A record's atomic write can leave its temporary file when it does not complete, as when the agent is stopped mid-write (`is_record_temporary`); any other temporary sibling is a leftover.
                 ensure!(
-                    !is_temporary_sibling(&path, &documented, &self.ctx.key_name_prefix),
+                    !temporary || is_record_temporary(&path),
                     "leftover identity temporary file {}",
                     path.display()
                 );
@@ -915,6 +937,8 @@ impl AgentCase {
                         "documented identity file {} is not a file",
                         path.display()
                     );
+                } else if temporary {
+                    eprintln!("WARN temporary file of an interrupted record write {}", path.display());
                 } else {
                     eprintln!("WARN unknown identity file {}", path.display());
                 }
@@ -2449,15 +2473,26 @@ pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: C
                 let failed_at = Instant::now();
                 let failed = case.identity_record(&target, &id).await?;
                 let stored = case.state(&authority)?;
+                // The injected failure rejects the renewal before the authority processes it (mock README, `fail_next_response`), and only `confirm` promotes a certificate (CONTRACT.agent-identity.md §5.5).
+                // The request-renewal flag stays set until the identity confirms a newer certificate (§8.2).
+                // Metadata and the last-seen time are left out, because the agent's channel traffic legitimately updates them: the authority replaces metadata on the `Hello` of the reconnect after the previous `confirm` (§3, §8.1 step 4), and moves the last-seen time on that `Hello` and on the `Ack` of `RenewRequested` (§7.3 step 5; shared intent, "Configuration and metadata").
                 ensure!(
-                    failed.certificates == record_before.certificates
-                        && failed.metadata == record_before.metadata
-                        && failed.last_seen_at == record_before.last_seen_at
+                    failed.certificates == record_before.certificates && failed.renewal_requested,
+                    "injected renew {status} changed the identity's certificates or request-renewal flag"
+                );
+                // The old certificate remains in use after a transient renew error (§8.1, "Failure handling"), a transient error is never terminal (§5.4), and a renew response carries no config (§5.3).
+                ensure!(
+                    stored["keys"]["current"] == stored_before["keys"]["current"]
+                        && stored["keys"]["previous"] == stored_before["keys"]["previous"]
                         && stored["config"] == stored_before["config"]
-                        && key_name(&stored, "current")? == old_key
-                        && stored["keys"]["pending"]["certificate_chain"].is_null()
                         && stored.get("rejected").is_none(),
-                    "injected renew {status} changed server or committed identity state"
+                    "injected renew {status} changed the agent's committed identity state"
+                );
+                // The agent records the pending key before sending the renewal and stores a chain only once renew succeeds (agent intent, "Stored identities"), and it retries with the same CSR (§8.1 step 2).
+                ensure!(
+                    stored["keys"]["pending"]["key_name"].is_string()
+                        && stored["keys"]["pending"]["certificate_chain"].is_null(),
+                    "agent did not keep a pending key without a chain after the injected renew {status}"
                 );
                 if status == 429 {
                     // The agent waits for `Retry-After` up to its maximum retry delay (CONTRACT.agent-identity.md §5.4), which `backoff_max_secs: 2` caps, so the retry comes after about two seconds.
@@ -5962,13 +5997,21 @@ mod tests {
         std::fs::write(&template, b"also not a temporary file")?;
         case.audit_identity_tree()?;
         std::fs::remove_file(template)?;
-        let leftover = identity.with_file_name("identity.json.tmp");
-        std::fs::write(&leftover, b"temp")?;
-        ensure!(
-            case.audit_identity_tree().is_err(),
-            "leftover identity.json sibling was accepted"
-        );
-        std::fs::remove_file(leftover)?;
+        // A record's atomic write can leave its temporary file when the agent is stopped mid-write.
+        for leftover in [
+            identity.with_file_name(format!(".identity.json-{}.tmp", uuid::Uuid::new_v4())),
+            case.in_progress_path().with_extension("json.tmp"),
+        ] {
+            std::fs::write(&leftover, b"temp")?;
+            case.audit_identity_tree()
+                .with_context(|| format!("temporary record file {} was rejected", leftover.display()))?;
+            std::fs::write(&leftover, pkcs8.as_bytes())?;
+            ensure!(
+                case.audit_identity_tree().is_err(),
+                "a temporary record file holding a private key was accepted"
+            );
+            std::fs::remove_file(leftover)?;
+        }
         for leftover in [
             case.pending_path()
                 .with_extension(if cfg!(windows) { "dat.tmp" } else { "json.tmp" }),

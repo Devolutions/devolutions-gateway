@@ -43,7 +43,8 @@ The runner reports a unique `KEY NAME PREFIX` of `conformance-<32 lowercase hex 
 Key names must be `<prefix>_<lowercase hyphenated UUID>`; file-backed keys live at `<data-dir>/identity/keys/<key_name>.p8`.
 Only keys whose part before the first `_` equals the run prefix belong to that run.
 After each agent test, the runner fails if any key with that prefix is absent from `identity.json` or `<data-dir>/identity/pending/<hex>.in-progress.json`, then deletes only run-prefixed machine and file-backed keys on either target.
-It rejects unrecorded `*.p8` files and PKCS#8 private keys anywhere under `<data-dir>/identity`, plus leftover temporary siblings of identity files; other unknown files produce warnings.
+It rejects unrecorded `*.p8` files and PKCS#8 private keys anywhere under `<data-dir>/identity`, plus leftover temporary siblings of pending and key files; other unknown files produce warnings.
+A temporary sibling of `identity.json` or of an in-progress record also produces a warning, because stopping the agent can cut that record's atomic write short.
 On Unix, file-backed keys must have mode `0600` and be owned by the agent's uid.
 Windows software provider keys must allow only the agent's account and SYSTEM, regardless of `acl_grant_current_user`; when the agent runs as SYSTEM, only SYSTEM is expected.
 The SYSTEM fixture requires an elevated administrator unless the suite already runs as SYSTEM; without this fixture, the Windows non-exportability case reports `SKIP`.

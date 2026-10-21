@@ -238,8 +238,10 @@ fn audit_identity_tree(request: &Request, token: &str) -> anyhow::Result<()> {
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("p8")),
                 "unexpected private key file under SYSTEM identity"
             );
+            let temporary = crate::agent::is_temporary_sibling(&path, &documented, &request.key_name_prefix);
+            // A record's atomic write can leave its temporary file when it does not complete, as when the agent is stopped mid-write (`is_record_temporary`); any other temporary sibling is a leftover.
             ensure!(
-                !crate::agent::is_temporary_sibling(&path, &documented, &request.key_name_prefix),
+                !temporary || crate::agent::is_record_temporary(&path),
                 "leftover SYSTEM identity temporary file"
             );
             if file_type.is_file() {
@@ -257,6 +259,8 @@ fn audit_identity_tree(request: &Request, token: &str) -> anyhow::Result<()> {
                     file_type.is_file(),
                     "documented SYSTEM identity file is not a regular file"
                 );
+            } else if temporary {
+                eprintln!("WARN SYSTEM identity temporary file of an interrupted record write");
             } else {
                 eprintln!("WARN unknown SYSTEM identity file");
             }
@@ -376,6 +380,11 @@ mod tests {
         };
         let token = format!("dvaet1.bag.{}", "A".repeat(43));
         audit_identity_tree(&request, &token)?;
+        // A stop can leave the temporary file of a record's atomic write.
+        let interrupted = authority.join(format!(".identity.json-{}.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&interrupted, b"{")?;
+        audit_identity_tree(&request, &token)?;
+        std::fs::remove_file(interrupted)?;
         let leaked = authority.join("debug.log");
         std::fs::write(&leaked, &token.as_bytes()[token.len() - 12..])?;
         assert!(audit_identity_tree(&request, &token).is_err());
