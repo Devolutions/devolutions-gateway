@@ -867,6 +867,8 @@ const TESTS: &[Test] = &[
     p!(p_channel_deleted_before_hello).channel(),
     p!(p_channel_no_hello_timeout).channel(),
     p!(p_channel_hello_invalid_metadata_rejected).channel(),
+    p!(p_channel_undecodable_first_message_rejected).channel(),
+    p!(p_channel_undecodable_message_after_welcome_rejected).channel(),
     p!(p_channel_clock_skew_refusal_carries_server_time).channel(),
     p!(p_channel_server_time_corrects_skew, mock_only).channel(),
     p!(p_channel_unavailable_no_channel_url, mock_only),

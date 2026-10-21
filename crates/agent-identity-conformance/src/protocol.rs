@@ -3138,8 +3138,7 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
         };
         if variant == "wrong_correlation" {
             stream
-                .sender
-                .send(agent_channel_proto::AgentMessage {
+                .send(&agent_channel_proto::AgentMessage {
                     id: uuid::Uuid::new_v4().to_string(),
                     correlation_id: Some(uuid::Uuid::new_v4().to_string()),
                     payload: Some(agent_channel_proto::agent_message::Payload::Hello(
@@ -3364,6 +3363,141 @@ pub(crate) async fn p_channel_hello_invalid_metadata_rejected(ctx: Context) -> a
             identity_record(&ctx.target, &identity.identity_id).await? == before,
             "Hello metadata with {variant} changed identity state"
         );
+    }
+    Ok(())
+}
+
+/// How a frame departs from a valid `AgentMessage` of exactly [`channel::MAX_ENVELOPE_LEN`] bytes, so that the authority cannot decode it.
+#[derive(Clone, Copy, Debug)]
+enum Undecodable {
+    /// The envelope `id`, a protobuf `string`, starts with the byte 0xFF, which UTF-8 never uses.
+    // oracle: spec RFC 3629 §1
+    // oracle: spec Protocol Buffers "Feature Settings for Editions" §features.utf8_validation
+    InvalidUtf8,
+    /// The last byte is cut, so the last field holds fewer bytes than its length prefix declares.
+    // oracle: spec Protocol Buffers "Encoding" §Length-Delimited Records
+    Truncated,
+    /// One more byte of padding makes the frame one byte longer than the envelope limit.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    Oversized,
+}
+
+impl Undecodable {
+    const ALL: [Self; 3] = [Self::InvalidUtf8, Self::Truncated, Self::Oversized];
+
+    /// Applies the defect to the frame that `valid` serializes from an envelope `id` and a frame length.
+    fn frame(self, valid: impl Fn(&[u8], usize) -> anyhow::Result<Vec<u8>>) -> anyhow::Result<Vec<u8>> {
+        let mut id = uuid::Uuid::new_v4().to_string().into_bytes();
+        match self {
+            Self::InvalidUtf8 => {
+                id[0] = 0xFF;
+                valid(&id, channel::MAX_ENVELOPE_LEN)
+            }
+            Self::Truncated => {
+                let mut frame = valid(&id, channel::MAX_ENVELOPE_LEN)?;
+                frame.pop();
+                Ok(frame)
+            }
+            Self::Oversized => valid(&id, channel::MAX_ENVELOPE_LEN + 1),
+        }
+    }
+}
+
+/// A first agent message that the authority cannot decode, including one over the envelope limit, closes the stream as `signature_invalid` and changes nothing.
+///
+/// See [CONTRACT.agent-identity.md] §7.3 "Sequence", step 4, and §7.1 "Service".
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) async fn p_channel_undecodable_first_message_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    let (_, identity) = issued(&ctx, "enrolled").await?;
+    let metadata = [("hostname", "undecodable")];
+    next_last_seen_second(&ctx).await?;
+    let before = identity_record(&ctx.target, &identity.identity_id).await?;
+    for undecodable in Undecodable::ALL {
+        let mut stream = channel::open(&ctx.target, &identity).await?;
+        let challenge = stream.challenge().await?;
+        let frame = undecodable.frame(|id, len| stream.hello_frame(&identity, &challenge, &metadata, id, len))?;
+        stream.send_frame(frame).await?;
+        let status = stream
+            .closing_status(Duration::from_secs(3))
+            .await
+            .with_context(|| format!("{undecodable:?} Hello"))?;
+        channel::expect_status(&status, Code::Unauthenticated, "signature_invalid")
+            .with_context(|| format!("{undecodable:?} Hello"))?;
+        ensure!(
+            identity_record(&ctx.target, &identity.identity_id).await? == before,
+            "{undecodable:?} Hello changed identity state"
+        );
+    }
+    // The valid frame that each defect departs from authenticates the stream, so each refusal comes from its defect alone.
+    let mut stream = channel::open(&ctx.target, &identity).await?;
+    let challenge = stream.challenge().await?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let frame = stream.hello_frame(
+        &identity,
+        &challenge,
+        &metadata,
+        id.as_bytes(),
+        channel::MAX_ENVELOPE_LEN,
+    )?;
+    stream.send_frame(frame).await?;
+    let welcome = stream.next().await?;
+    ensure!(
+        matches!(
+            welcome.payload,
+            Some(agent_channel_proto::server_message::Payload::Welcome(_))
+        ) && welcome.correlation_id.as_deref() == Some(id.as_str()),
+        "a valid Hello of {} bytes did not receive its Welcome",
+        channel::MAX_ENVELOPE_LEN
+    );
+    ensure!(
+        identity_record(&ctx.target, &identity.identity_id)
+            .await?
+            .metadata_value("hostname")
+            == Some("undecodable"),
+        "a valid Hello of {} bytes did not replace the metadata",
+        channel::MAX_ENVELOPE_LEN
+    );
+    Ok(())
+}
+
+/// An agent message that the authority cannot decode, including one over the envelope limit, closes an authenticated stream as `invalid_request`.
+///
+/// See [CONTRACT.agent-identity.md] §7.4 "Termination" and §7.1 "Service".
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) async fn p_channel_undecodable_message_after_welcome_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    let (_, identity) = issued(&ctx, "after-welcome").await?;
+    // An envelope whose only other field is one the schema does not define, so it carries no known payload.
+    let unknown_payload =
+        |id: &[u8], len| channel::agent_message_frame(id, &agent_channel_proto::AgentMessage::default(), len);
+    for undecodable in Undecodable::ALL {
+        let mut stream = channel::open(&ctx.target, &identity).await?;
+        stream.hello(&identity, &[]).await?;
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+        // The authority ignores the valid frame that the defect departs from, so the stream stays open until the defective one.
+        let id = uuid::Uuid::new_v4().to_string();
+        stream
+            .send_frame(unknown_payload(id.as_bytes(), channel::MAX_ENVELOPE_LEN)?)
+            .await?;
+        ensure!(
+            tokio::time::timeout(Duration::from_millis(500), stream.stream.message())
+                .await
+                .is_err(),
+            "a valid message of {} bytes with an unknown payload got a reply or ended the stream",
+            channel::MAX_ENVELOPE_LEN
+        );
+        stream.send_frame(undecodable.frame(unknown_payload)?).await?;
+        let status = stream
+            .closing_status(Duration::from_secs(3))
+            .await
+            .with_context(|| format!("{undecodable:?} message after Welcome"))?;
+        channel::expect_status(&status, Code::InvalidArgument, "invalid_request")
+            .with_context(|| format!("{undecodable:?} message after Welcome"))?;
     }
     Ok(())
 }
@@ -6997,8 +7131,45 @@ pub(crate) async fn p_identity_statuses(ctx: Context) -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use base64::engine::general_purpose::STANDARD;
+    use prost::Message as _;
 
     use super::*;
+
+    #[test]
+    fn only_the_defective_frames_fail_a_reference_decoder() -> anyhow::Result<()> {
+        // oracle: reference prost
+        let message = agent_channel_proto::AgentMessage {
+            id: String::new(),
+            correlation_id: Some("challenge".to_owned()),
+            payload: Some(agent_channel_proto::agent_message::Payload::Ack(
+                agent_channel_proto::Ack {},
+            )),
+        };
+        let valid = |id: &[u8], len| channel::agent_message_frame(id, &message, len);
+        let frame = valid(b"id", channel::MAX_ENVELOPE_LEN)?;
+        ensure!(
+            frame.len() == channel::MAX_ENVELOPE_LEN
+                && agent_channel_proto::AgentMessage::decode(frame.as_slice())?
+                    == agent_channel_proto::AgentMessage {
+                        id: "id".to_owned(),
+                        ..message.clone()
+                    },
+            "the padded frame is not its message at the envelope limit"
+        );
+        for undecodable in [Undecodable::InvalidUtf8, Undecodable::Truncated] {
+            ensure!(
+                agent_channel_proto::AgentMessage::decode(undecodable.frame(valid)?.as_slice()).is_err(),
+                "the {undecodable:?} frame decodes"
+            );
+        }
+        let oversized = Undecodable::Oversized.frame(valid)?;
+        ensure!(
+            oversized.len() == channel::MAX_ENVELOPE_LEN + 1
+                && agent_channel_proto::AgentMessage::decode(oversized.as_slice()).is_ok(),
+            "the oversized frame is not a valid message one byte over the envelope limit"
+        );
+        Ok(())
+    }
 
     #[test]
     fn byte_sequence_rewrites_keep_lenient_bytes_but_lose_canonical_form() -> anyhow::Result<()> {

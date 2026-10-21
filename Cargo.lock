@@ -176,6 +176,7 @@ dependencies = [
  "libc",
  "p256 0.14.0-rc.14",
  "p384 0.14.0-rc.14",
+ "prost 0.13.5",
  "rand 0.10.2",
  "rcgen",
  "reqwest",

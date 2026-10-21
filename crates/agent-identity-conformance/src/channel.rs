@@ -1,13 +1,17 @@
 use std::time::Duration;
 
-use agent_channel_proto::agent_channel_client::AgentChannelClient;
 use agent_channel_proto::{Ack, AgentMessage, Hello, ServerMessage, agent_message, server_message};
 use anyhow::{Context as _, ensure};
 use http::Request as HttpRequest;
+use http::uri::PathAndQuery;
+use prost::Message as _;
+use prost::bytes::{Buf as _, BufMut as _};
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::body::BoxBody;
+use tonic::client::Grpc;
+use tonic::codec::{Codec, DecodeBuf, Decoder, EncodeBuf, Encoder};
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint};
 use tonic::{Code, Request, Status, Streaming};
 use tower::{Service as _, ServiceExt as _, service_fn};
@@ -15,8 +19,28 @@ use tower::{Service as _, ServiceExt as _, service_fn};
 use crate::client::{Identity, Target};
 use crate::signer::SignedHeaders;
 
+/// The largest envelope either side of the channel accepts or sends, in bytes of serialized protobuf without gRPC's 5-byte message prefix.
+///
+/// See [CONTRACT.agent-identity.md] §7.1 "Service".
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) const MAX_ENVELOPE_LEN: usize = 65_536;
+
+/// The `:path` of `AgentChannel.Connect` below the channel URL's path.
+///
+/// See [CONTRACT.agent-identity.md] §7.2 "URL and path prefix".
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+const CONNECT_PATH: &str = "/devolutions.agent.channel.v1.AgentChannel/Connect";
+
+/// The key of `AgentMessage.id`, field 1 with wire type 2 (`LEN`): `1 << 3 | 2`.
+const ID_KEY: [u8; 1] = [0x0A];
+
+/// The key of field 99 with wire type 2 (`LEN`), which `AgentMessage` does not define: `99 << 3 | 2` = 794, the varint `0x9A 0x06`.
+const PADDING_KEY: [u8; 2] = [0x9A, 0x06];
+
 pub(crate) struct ChannelStream {
-    pub(crate) sender: mpsc::Sender<AgentMessage>,
+    sender: mpsc::Sender<Vec<u8>>,
     pub(crate) stream: Streaming<ServerMessage>,
     pub(crate) headers: SignedHeaders,
 }
@@ -45,9 +69,7 @@ impl ChannelStream {
         metadata: &[(&str, &str)],
         proof_override: Option<Vec<u8>>,
     ) -> anyhow::Result<String> {
-        let revision = identity.config["revision"]
-            .as_u64()
-            .context("identity config has no revision")?;
+        let revision = config_revision(identity)?;
         self.send_hello_with_revision(identity, challenge, metadata, proof_override, revision)
             .await
     }
@@ -60,29 +82,59 @@ impl ChannelStream {
         proof_override: Option<Vec<u8>>,
         revision: u64,
     ) -> anyhow::Result<String> {
+        let message = self.hello_message(identity, challenge, metadata, proof_override, revision)?;
+        self.send(&message).await.context("send channel Hello")?;
+        Ok(message.id)
+    }
+
+    /// Serializes the `Hello` that [`Self::send_hello`] sends, as [`agent_message_frame`] does with `id` and `len`.
+    pub(crate) fn hello_frame(
+        &self,
+        identity: &Identity,
+        challenge: &ServerMessage,
+        metadata: &[(&str, &str)],
+        id: &[u8],
+        len: usize,
+    ) -> anyhow::Result<Vec<u8>> {
+        let message = self.hello_message(identity, challenge, metadata, None, config_revision(identity)?)?;
+        agent_message_frame(id, &message, len)
+    }
+
+    fn hello_message(
+        &self,
+        identity: &Identity,
+        challenge: &ServerMessage,
+        metadata: &[(&str, &str)],
+        proof_override: Option<Vec<u8>>,
+        revision: u64,
+    ) -> anyhow::Result<AgentMessage> {
         let Some(server_message::Payload::Challenge(payload)) = challenge.payload.as_ref() else {
             anyhow::bail!("expected a channel challenge");
         };
-        let id = uuid::Uuid::new_v4().to_string();
         let proof =
             proof_override.unwrap_or_else(|| identity.key.channel_proof(&payload.challenge, &self.headers.nonce));
-        self.sender
-            .send(AgentMessage {
-                id: id.clone(),
-                correlation_id: Some(challenge.id.clone()),
-                payload: Some(agent_message::Payload::Hello(Hello {
-                    metadata: metadata
-                        .iter()
-                        .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
-                        .collect(),
-                    capabilities: Vec::new(),
-                    applied_state_versions: [("config".to_owned(), revision)].into_iter().collect(),
-                    proof,
-                })),
-            })
-            .await
-            .context("send channel Hello")?;
-        Ok(id)
+        Ok(AgentMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            correlation_id: Some(challenge.id.clone()),
+            payload: Some(agent_message::Payload::Hello(Hello {
+                metadata: metadata
+                    .iter()
+                    .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                    .collect(),
+                capabilities: Vec::new(),
+                applied_state_versions: [("config".to_owned(), revision)].into_iter().collect(),
+                proof,
+            })),
+        })
+    }
+
+    pub(crate) async fn send(&mut self, message: &AgentMessage) -> anyhow::Result<()> {
+        self.send_frame(message.encode_to_vec()).await
+    }
+
+    /// Sends `frame` as one gRPC message, whether or not it decodes as an `AgentMessage`.
+    pub(crate) async fn send_frame(&mut self, frame: Vec<u8>) -> anyhow::Result<()> {
+        self.sender.send(frame).await.context("send channel frame")
     }
 
     pub(crate) async fn hello(&mut self, identity: &Identity, metadata: &[(&str, &str)]) -> anyhow::Result<()> {
@@ -98,15 +150,13 @@ impl ChannelStream {
     }
 
     pub(crate) async fn ack(&mut self, message: &ServerMessage) -> anyhow::Result<()> {
-        let sender = self.sender.clone();
-        sender
-            .send(AgentMessage {
-                id: uuid::Uuid::new_v4().to_string(),
-                correlation_id: Some(message.id.clone()),
-                payload: Some(agent_message::Payload::Ack(Ack {})),
-            })
-            .await
-            .context("acknowledge channel message")
+        self.send(&AgentMessage {
+            id: uuid::Uuid::new_v4().to_string(),
+            correlation_id: Some(message.id.clone()),
+            payload: Some(agent_message::Payload::Ack(Ack {})),
+        })
+        .await
+        .context("acknowledge channel message")
     }
 
     pub(crate) async fn next(&mut self) -> anyhow::Result<ServerMessage> {
@@ -135,8 +185,9 @@ impl ChannelStream {
 pub(crate) fn expect_status(status: &Status, grpc_code: Code, error_code: &str) -> anyhow::Result<()> {
     ensure!(
         status.code() == grpc_code,
-        "expected gRPC {grpc_code:?}, got {:?}",
-        status.code()
+        "expected gRPC {grpc_code:?}, got {:?} ({:?})",
+        status.code(),
+        status.message()
     );
     ensure!(
         status
@@ -251,7 +302,7 @@ async fn open_at_url(
                 .map_err(|error| Status::from_error(Box::new(error)))
         }
     });
-    let mut client = AgentChannelClient::new(service);
+    let mut grpc = Grpc::new(service);
     let (sender, receiver) = mpsc::channel(8);
     let mut request = Request::new(ReceiverStream::new(receiver));
     request.metadata_mut().insert(
@@ -276,12 +327,100 @@ async fn open_at_url(
             .metadata_mut()
             .append(name, value.parse().context("duplicate signature metadata")?);
     }
-    let stream = client.connect(request).await?.into_inner();
+    grpc.ready().await?;
+    let stream = grpc
+        .streaming(request, PathAndQuery::from_static(CONNECT_PATH), FrameCodec)
+        .await?
+        .into_inner();
     Ok(ChannelStream {
         sender,
         stream,
         headers,
     })
+}
+
+fn config_revision(identity: &Identity) -> anyhow::Result<u64> {
+    identity.config["revision"]
+        .as_u64()
+        .context("identity config has no revision")
+}
+
+/// Serializes `message` with `id` in place of its own, as bytes that need not be UTF-8, and pads it with an unknown field to exactly `len` bytes.
+///
+/// A protobuf decoder skips a field its schema does not define, so the padding changes no decoded value.
+pub(crate) fn agent_message_frame(id: &[u8], message: &AgentMessage, len: usize) -> anyhow::Result<Vec<u8>> {
+    let mut frame = Vec::with_capacity(len);
+    frame.extend_from_slice(&ID_KEY);
+    prost::encode_length_delimiter(id.len(), &mut frame)?;
+    frame.extend_from_slice(id);
+    AgentMessage {
+        id: String::new(),
+        ..message.clone()
+    }
+    .encode(&mut frame)?;
+    let room = len
+        .checked_sub(frame.len() + PADDING_KEY.len())
+        .context("the message leaves no room for padding")?;
+    // The padding's length prefix takes part of the room, and a varint takes at most 10 bytes.
+    let padding = (1..=10)
+        .filter_map(|prefix_len| room.checked_sub(prefix_len))
+        .find(|&padding| padding + prost::length_delimiter_len(padding) == room)
+        .with_context(|| format!("no padding makes the frame {len} bytes"))?;
+    frame.extend_from_slice(&PADDING_KEY);
+    prost::encode_length_delimiter(padding, &mut frame)?;
+    frame.extend(std::iter::repeat_n(0, padding));
+    ensure!(frame.len() == len, "padded frame is {} bytes, not {len}", frame.len());
+    Ok(frame)
+}
+
+/// Sends each frame's bytes as they are, so that a test can send a message that does not decode, and decodes server messages within the envelope limit.
+struct FrameCodec;
+
+impl Codec for FrameCodec {
+    type Encode = Vec<u8>;
+    type Decode = ServerMessage;
+    type Encoder = FrameCodec;
+    type Decoder = FrameCodec;
+
+    fn encoder(&mut self) -> Self::Encoder {
+        FrameCodec
+    }
+
+    fn decoder(&mut self) -> Self::Decoder {
+        FrameCodec
+    }
+}
+
+impl Encoder for FrameCodec {
+    type Item = Vec<u8>;
+    type Error = Status;
+
+    fn encode(&mut self, frame: Vec<u8>, dst: &mut EncodeBuf<'_>) -> Result<(), Status> {
+        dst.put_slice(&frame);
+        Ok(())
+    }
+}
+
+impl Decoder for FrameCodec {
+    type Item = ServerMessage;
+    type Error = Status;
+
+    fn decode(&mut self, src: &mut DecodeBuf<'_>) -> Result<Option<ServerMessage>, Status> {
+        // The buffer holds exactly one message, without its gRPC prefix.
+        let len = src.remaining();
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+        // UNTESTED: a server message over the envelope limit fails the read that receives it.
+        // No authority under test sends one, so a broken check still passes every run.
+        // When changing this decoder, lower the limit below a `Challenge` and see every channel test fail.
+        if MAX_ENVELOPE_LEN < len {
+            return Err(Status::internal(format!(
+                "server message of {len} bytes exceeds the {MAX_ENVELOPE_LEN}-byte envelope limit"
+            )));
+        }
+        ServerMessage::decode(src)
+            .map(Some)
+            .map_err(|error| Status::internal(format!("undecodable server message: {error}")))
+    }
 }
 
 #[cfg(test)]
