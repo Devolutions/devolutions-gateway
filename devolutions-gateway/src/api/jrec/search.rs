@@ -153,8 +153,8 @@ pub(crate) struct RecordingSearchHit {
 /// In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
 /// once unescaped, so field names, numbers, booleans and null never match.
 /// Any other line, such as one still being written, is matched as raw text.
-/// A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is
-/// usually matched as raw text.
+/// A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually
+/// matched as raw text.
 /// Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched.
 /// Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
 #[cfg_attr(feature = "openapi", utoipa::path(
