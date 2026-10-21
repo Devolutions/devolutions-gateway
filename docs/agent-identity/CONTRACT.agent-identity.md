@@ -365,6 +365,7 @@ Every language binding, including the Rust `agent-channel-proto` crate and the .
 The service is `AgentChannel.Connect`, one bidirectional stream of `AgentMessage` and `ServerMessage` envelopes.
 Each side accepts envelopes up to 64 KiB (65,536 bytes) of serialized protobuf, not counting gRPC's 5-byte message prefix, and sends none larger, the same limit as request bodies.
 The server treats a larger `AgentMessage` as a message that cannot be decoded: before `Welcome` as §7.3 step 4 says, after it as §7.4 says.
+An authority never holds an effective config whose `ConfigUpdate` envelope would exceed that limit, so a config it serves through §5.2, §5.6 or the channel always fits one.
 
 <a id="agent-identity-channel-url"></a>
 
