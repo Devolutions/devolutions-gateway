@@ -44,7 +44,8 @@ public sealed class RequestBodyParseResult<TBody>
     /// Why the body is invalid, for the host's logs, when <see cref="Succeeded"/> is false.
     /// </summary>
     /// <remarks>
-    /// The detail never repeats a value from the body, and quotes a metadata key only when the key itself is valid.
+    /// The detail never repeats a value from the body, not even a metadata key:
+    /// it names a metadata entry by its position.
     /// </remarks>
     public string? FailureDetail { get; }
 

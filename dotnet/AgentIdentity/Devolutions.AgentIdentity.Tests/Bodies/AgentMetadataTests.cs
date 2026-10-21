@@ -4,6 +4,31 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class AgentMetadataTests
 {
+    // Text that the entry where the metadata fails holds in its key and in its value.
+    private const string LeakedKey = "leaked_key";
+    private const string LeakedValue = "leaked value";
+
+    // Metadata that breaks each rule of CONTRACT.agent-identity.md §1 and §3, by name,
+    // at an entry whose key holds LeakedKey and whose value holds LeakedValue.
+    private static readonly Dictionary<string, KeyValuePair<string, string>[]> Failures = new()
+    {
+        ["33 keys"] = [.. Enumerable.Range(0, 33).Select(i => Entry($"{LeakedKey}_{i}", LeakedValue))],
+        ["key outside the pattern"] = [Entry($"{LeakedKey}\n", LeakedValue)],
+        ["repeated key"] = [Entry(LeakedKey, "first"), Entry(LeakedKey, LeakedValue)],
+        ["value with a control character"] = [Entry(LeakedKey, $"{LeakedValue}\u0007")],
+        ["value that is not Unicode"] = [Entry(LeakedKey, $"{LeakedValue}\uD800")],
+        ["value of 1025 UTF-8 bytes"] = [Entry(LeakedKey, LeakedValue + new string('a', 1025 - LeakedValue.Length))],
+
+        // 17 entries of 13 + 1000 bytes: the first 16 hold 16208 bytes, and all 17 hold 17221, past 16 KiB.
+        ["object over 16 KiB"] =
+        [
+            .. Enumerable.Range(0, 17)
+                .Select(i => Entry($"{LeakedKey}_{i:D2}", LeakedValue + new string('a', 1000 - LeakedValue.Length))),
+        ],
+    };
+
+    public static TheoryData<string> FailureNames => new(Failures.Keys);
+
     // Metadata may be an empty object.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
     [Fact]
@@ -225,16 +250,39 @@ public class AgentMetadataTests
         AssertInvalid(AgentMetadata.Validate([new("hostname", "a"), new("hostname", "b")]));
     }
 
-    // The failure detail goes to host logs, so it holds no metadata key, such as an invalid one with a line break.
+    // The failure detail goes to host logs, so it holds no key or value of the metadata, valid or not,
+    // since an agent could otherwise write into the authority's logs.
     // oracle: intent dotnet/AgentIdentity/INTENT.md §Failure details
-    [Fact]
-    public void FailureDetailDoesNotQuoteAnInvalidKey()
+    [Theory]
+    [MemberData(nameof(FailureNames))]
+    public void FailureDetailHoldsNoKeyOrValue(string failure)
     {
-        MetadataValidationResult result = AgentMetadata.Validate([new("host\nforged log line", "value")]);
+        MetadataValidationResult result = AgentMetadata.Validate(Failures[failure]);
+
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+        // oracle: spec RFC 3629 §3
+        AssertInvalid(result, failure);
+        Assert.DoesNotContain(LeakedKey, result.FailureDetail);
+        Assert.DoesNotContain(LeakedValue, result.FailureDetail);
+    }
+
+    // The control character is part of the value, so the detail holds neither the character
+    // nor its code point in a hexadecimal rendering such as U+0007, 0x07, 0x0007 or 0007.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Failure details
+    [Theory]
+    [MemberData(nameof(ControlCharacters))]
+    public void FailureDetailDoesNotNameTheControlCharacter(int codePoint)
+    {
+        MetadataValidationResult result = AgentMetadata.Validate([Entry("hostname", $"host{(char)codePoint}name")]);
+        string[] renderings = [$"U+{codePoint:X4}", $"0x{codePoint:X2}", $"0x{codePoint:X4}", $"{codePoint:X4}"];
 
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
         AssertInvalid(result);
-        Assert.DoesNotContain("forged log line", result.FailureDetail);
+        Assert.DoesNotContain(((char)codePoint).ToString(), result.FailureDetail, StringComparison.Ordinal);
+        Assert.All(
+            renderings,
+            rendering => Assert.DoesNotContain(rendering, result.FailureDetail, StringComparison.OrdinalIgnoreCase));
     }
 
     // AgentMetadata.Validate documents an ArgumentException for an entry with a null key or value.
@@ -263,6 +311,11 @@ public class AgentMetadataTests
         Assert.Equal(400, result.Error.HttpStatusCode);
         // oracle: mutant an empty failure detail for a repeated key or for metadata over 16 KiB
         Assert.False(string.IsNullOrEmpty(result.FailureDetail));
+    }
+
+    private static KeyValuePair<string, string> Entry(string key, string value)
+    {
+        return new KeyValuePair<string, string>(key, value);
     }
 
     private static IEnumerable<KeyValuePair<string, string>> NumberedEntries(int count)

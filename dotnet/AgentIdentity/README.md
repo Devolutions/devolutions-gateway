@@ -135,7 +135,7 @@ The library writes no headers, so the host adds `Retry-After` to `ServiceUnavail
 Over gRPC, end the call by throwing `ToRpcException(serverTime)`, which carries the status of `ToGrpcStatusCode` and the trailers `error-code` and `server-time` (CONTRACT.agent-identity.md [§7.4]).
 For a closure that the host decides, such as a revocation, build the error with `AgentIdentityError.From`.
 
-Log `FailureDetail` beside the error: it names the rule that the request broke and never holds a token or a secret.
+Log `FailureDetail` beside the error: it names the rule that the request broke and never holds a value taken from the request, such as a metadata key or value, a header, signature data or a token.
 
 ## Authenticated identities
 
