@@ -4,8 +4,9 @@ namespace Devolutions.AgentIdentity.Tests;
 
 public class IdentityConfigTests
 {
-    // CONTRACT.agent-identity.md §5.2: `config` holds `version`, which is 1, `revision` and `agent_channel_url`.
+    // `config` holds `version`, which is 1, `revision` and `agent_channel_url`.
     // An agent reads both numbers as integers, so 1.0 or 3e0 would not do.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [Fact]
     public void JsonHasTheContractMembers()
     {
@@ -24,6 +25,8 @@ public class IdentityConfigTests
 
     // CONTRACT.agent-identity.md §5.2: `agent_channel_url` is absent when the server does not offer the channel,
     // and §1 omits an absent field rather than writing null.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [Fact]
     public void JsonOmitsAnAbsentAgentChannelUrl()
     {
@@ -35,9 +38,9 @@ public class IdentityConfigTests
         Assert.Null(config.AgentChannelUrl);
     }
 
-    // CONTRACT.agent-identity.md §5.2: `revision` is an unsigned 64-bit integer,
-    // with no starting value the agent assumes.
+    // `revision` is an unsigned 64-bit integer, with no starting value the agent assumes.
     // A double holds no more than 53 bits, so it would round the largest revisions.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [Theory]
     [InlineData(0UL, "0")]
     [InlineData(9007199254740993UL, "9007199254740993")]
@@ -55,29 +58,45 @@ public class IdentityConfigTests
     // CONTRACT.agent-identity.md §5.2: `agent_channel_url` is an absolute `https` URL without a query or fragment.
     // RFC 9110 §4.2.4: a sender does not generate user information in an `https` URI.
     [Theory]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [InlineData("")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [InlineData("/dvls")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [InlineData("host/dvls")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [InlineData("http://host/dvls")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [InlineData("wss://host/dvls")]
+    // oracle: spec RFC 9110 §4.2.2
     [InlineData("https:///dvls")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [InlineData("https://host/dvls?tenant=1")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: spec RFC 3986 §3.4
     [InlineData("https://host/dvls?")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [InlineData("https://host/dvls#top")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: spec RFC 3986 §3.5
     [InlineData("https://host/dvls#")]
+    // oracle: spec RFC 9110 §4.2.4
     [InlineData("https://admin@host/dvls")]
+    // oracle: spec RFC 9110 §4.2.4
     [InlineData("https://@host/dvls")]
     public void CreateRejectsAnotherAgentChannelUrl(string agentChannelUrl)
     {
         ArgumentException exception =
             Assert.Throws<ArgumentException>(() => IdentityConfig.Create(1, agentChannelUrl));
 
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("agentChannelUrl", exception.ParamName);
     }
 
-    // CONTRACT.agent-identity.md §7.2: the agent prepends the URL path to
-    // `/devolutions.agent.channel.v1.AgentChannel/Connect`,
+    // The agent prepends the URL path to `/devolutions.agent.channel.v1.AgentChannel/Connect`,
     // so a URL ending in a slash would put two slashes in the gRPC path.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
     [Theory]
     [InlineData("https://host/dvls", "https://host/dvls")]
     [InlineData("https://host/dvls/", "https://host/dvls")]
@@ -91,8 +110,8 @@ public class IdentityConfigTests
         Assert.Equal(expected, config.AgentChannelUrl);
     }
 
-    // CONTRACT.agent-identity.md §5.2: product-specific config fields, such as a PSU channel URL,
-    // may coexist with the others.
+    // Product-specific config fields, such as a PSU channel URL, may coexist with the others.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [Fact]
     public void JsonHasTheProductFieldsBesideTheContractMembers()
     {
@@ -112,9 +131,9 @@ public class IdentityConfigTests
         Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), members["policy_limits"]));
     }
 
-    // CONTRACT.agent-identity.md §1: JSON keys are snake_case,
-    // lowercase words of letters and digits joined by single underscores.
+    // JSON keys are snake_case, lowercase words of letters and digits joined by single underscores.
     // zz09 starts and goes on with the last letter, and holds the first and last digits.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Theory]
     [InlineData("a")]
     [InlineData("psu_channel_url")]
@@ -129,16 +148,27 @@ public class IdentityConfigTests
     }
 
     [Theory]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("Channel")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("psuChannel")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("psu-channel")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("psu channel")]
+    // oracle: scaffold
     [InlineData("_psu")]
+    // oracle: scaffold
     [InlineData("psu_")]
+    // oracle: scaffold
     [InlineData("psu__channel")]
+    // oracle: scaffold
     [InlineData("2fa")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("psu\n")]
+    // oracle: scaffold
     [InlineData("caf\u00E9")]
     public void CreateRejectsAProductFieldNameThatIsNotSnakeCase(string name)
     {
@@ -146,6 +176,8 @@ public class IdentityConfigTests
     }
 
     // CONTRACT.agent-identity.md §5.2 defines these members, so a product field of one of these names would repeat it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: spec RFC 8259 §4
     [Theory]
     [InlineData("version")]
     [InlineData("revision")]
@@ -155,15 +187,17 @@ public class IdentityConfigTests
         AssertRejectsProductFields([new(name, TestJson.Parse("2"))]);
     }
 
-    // RFC 8259 §4: an object member is a name and a value.
+    // An object member is a name and a value.
     // The default JsonElement holds no JSON value at all.
+    // oracle: spec RFC 8259 §4
     [Fact]
     public void CreateRejectsAProductFieldWithoutAValue()
     {
         AssertRejectsProductFields([new("psu_channel_url", default)]);
     }
 
-    // RFC 8259 §4: a member name is a string, which a null name is not.
+    // A member name is a string, which a null name is not.
+    // oracle: spec RFC 8259 §4
     [Fact]
     public void CreateRejectsAProductFieldWithoutAName()
     {
@@ -173,15 +207,18 @@ public class IdentityConfigTests
     // RFC 8259 §8.1: JSON text exchanged between systems is UTF-8, which cannot encode an unpaired surrogate.
     // Failing here keeps every later serialization of the config from failing.
     [Theory]
+    // oracle: scaffold
     [InlineData("""["ok", "\ud800"]""")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [InlineData("""{"\ud800": 1}""")]
     public void CreateRejectsAProductFieldValueThatIsNotUnicodeText(string value)
     {
         AssertRejectsProductFields([new("label", TestJson.Parse(value))]);
     }
 
-    // CONTRACT.agent-identity.md §1: JSON keys are snake_case, so the members inside a product field's value are too,
+    // JSON keys are snake_case, so the members inside a product field's value are too,
     // whether an object or an array holds them.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Theory]
     [InlineData("""{"maxSessions": 4}""")]
     [InlineData("""{"limits": {"max_sessions": 4, "Max_paths": 2}}""")]
@@ -203,12 +240,14 @@ public class IdentityConfigTests
             [new("policy_limits", TestJson.Parse("""{"max_sessions": 4, "max_sessions": 5}"""))],
         ["member of an object in an array"] =
             [new("policy_limits", TestJson.Parse("""{"limits": [{"max_sessions": 4, "max_sessions": 5}]}"""))],
+        // oracle: spec RFC 8259 §7
         ["member of a value with an escaped name"] =
             [new("policy_limits", TestJson.Parse("""{"max_sessions": 4, "max\u005Fsessions": 5}"""))],
     };
 
     public static TheoryData<string> RepeatedMemberNameForms => new(RepeatedMemberNames.Keys);
 
+    // oracle: spec RFC 8259 §4
     [Theory]
     [MemberData(nameof(RepeatedMemberNameForms))]
     public void CreateRejectsARepeatedMemberName(string form)
@@ -216,7 +255,8 @@ public class IdentityConfigTests
         AssertRejectsProductFields(RepeatedMemberNames[form]);
     }
 
-    // CONTRACT.agent-identity.md §1: an absent field is omitted, never written as null, at any depth.
+    // An absent field is omitted, never written as null, at any depth.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Theory]
     [InlineData("psu_channel_url", "null")]
     [InlineData("policy_limits", """{"proxy": null}""")]
@@ -228,6 +268,10 @@ public class IdentityConfigTests
 
     // RFC 8259 §4 asks for unique names within an object, and §5 makes array elements values rather than members.
     // A name repeats only within one object, and an array element is no field, so it may be null.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: spec RFC 8259 §4
+    // oracle: spec RFC 8259 §5
     [Fact]
     public void CreateAcceptsAValueWhoseMembersFollowTheConventions()
     {
@@ -239,7 +283,9 @@ public class IdentityConfigTests
         Assert.True(JsonElement.DeepEquals(TestJson.Parse(Limits), written));
     }
 
-    // A JsonElement reads from its JsonDocument, which the host may dispose once the config exists.
+    // A JsonElement reads from its JsonDocument, which the host may dispose once the config exists,
+    // so the config keeps a copy of each product field rather than the argument it validated.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [Fact]
     public void ConfigOutlivesTheDocumentOfItsProductFields()
     {
@@ -256,6 +302,7 @@ public class IdentityConfigTests
     }
 
     // A config is immutable, and the response bodies and ConfigUpdate messages write its JSON as it was created.
+    // oracle: scaffold
     [Fact]
     public void ChangingTheReturnedJsonLeavesTheConfigUnchanged()
     {
@@ -273,6 +320,7 @@ public class IdentityConfigTests
         ArgumentException exception = Assert.Throws<ArgumentException>(
             () => IdentityConfig.Create(1, "https://host/dvls", productFields));
 
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("productFields", exception.ParamName);
     }
 }

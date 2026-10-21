@@ -38,8 +38,11 @@ public class RequestAuthenticatorProfileTests
             RenewWithSignatureInput(signed => [$"sig={signed}", $"sig2={signed}"]),
 
         // RFC 8941 §4.2 joins field lines with commas, and §4.2.2 fails a dictionary that ends in one.
+        // oracle: spec RFC 8941 §4.2
+        // oracle: spec RFC 8941 §4.2.2
         ["Signature-Input with an empty second field line"] = () =>
             RenewWithSignatureInput(signed => [$"sig={signed}", ""]),
+        // oracle: spec RFC 8941 §4.2.2
         ["Signature-Input ending in a comma"] = () =>
             RenewWithSignatureInput(signed => [$"sig={signed},"]),
 
@@ -92,6 +95,7 @@ public class RequestAuthenticatorProfileTests
 
         // RFC 8941 §3.3.1 allows at most 15 digits, leading zeros included,
         // and RFC 9421 §2.3 signs the integer as RFC 8941 §4.1.4 serializes it, without them.
+        // oracle: spec RFC 8941 §3.3.1
         ["created of 16 digits"] = () =>
             RenewWithSignatureInput(signed => [$"sig={signed.Replace(CreatedParameter, $";created=000000{Created}")}"]),
 
@@ -109,6 +113,7 @@ public class RequestAuthenticatorProfileTests
 
         // RFC 8941 §4.2.5 escapes only a quote and a backslash,
         // so a lenient parser reads \n as n, and the tag as renew.
+        // oracle: spec RFC 8941 §4.2.5
         ["tag with an escape RFC 8941 does not define"] = () =>
             RenewWithSignatureInput(signed => [$"sig={signed.Replace(TagParameter, @";tag=""re\new""")}"]),
 
@@ -156,8 +161,10 @@ public class RequestAuthenticatorProfileTests
                 .ToHttpRequest(),
 
         // The signed base serializes the parsed member, so the white space RFC 8941 allows never reaches it.
+        // oracle: spec RFC 8941 §4.2.3.2
         ["a space after each semicolon"] = () =>
             RenewWithSignatureInput(signed => [$"sig={signed.Replace(";", "; ")}"]),
+        // oracle: spec RFC 8941 §4.2.1.2
         ["spaces inside the inner list"] = () =>
         {
             TestRequest request = Renew();
@@ -166,6 +173,7 @@ public class RequestAuthenticatorProfileTests
         },
 
         // A proxy that combines field lines can leave white space around each one; RFC 9421 §2.1 removes it.
+        // oracle: spec RFC 9421 §2.1
         ["white space around each field line"] = () =>
         {
             TestRequest request = Renew();
@@ -177,6 +185,8 @@ public class RequestAuthenticatorProfileTests
 
         // RFC 8941 §3.3.1 allows 15 digits, leading zeros included,
         // and RFC 9421 §2.3 signs the integer as RFC 8941 §4.1.4 serializes it, without them.
+        // oracle: spec RFC 8941 §3.3.1
+        // oracle: spec RFC 8941 §4.1.4
         ["created with leading zeros, in 15 digits"] = () =>
             RenewWithSignatureInput(signed => [$"sig={signed.Replace(CreatedParameter, $";created=00000{Created}")}"]),
     };
@@ -185,18 +195,24 @@ public class RequestAuthenticatorProfileTests
     // most break RFC 8941 at their very end, where a parser that read on would leave the input.
     private static readonly Dictionary<string, Func<SignedHttpRequest>> MalformedSignatureInputs = new()
     {
-        // RFC 9421 §3.2: the member is an inner list.
+        // The member is an inner list.
+        // oracle: spec RFC 9421 §3.2
         ["an integer member"] = () => RenewWithSignatureInput(_ => ["sig=1"]),
 
-        // RFC 8941 §4.2.3.2: a parameter has a key, and a key follows its equals sign with a bare item.
+        // A parameter has a key, and a key follows its equals sign with a bare item.
+        // oracle: spec RFC 8941 §4.2.3.2
         ["a semicolon at the end"] = () => RenewWithSignatureInput(signed => [$"sig={signed};"]),
+        // oracle: spec RFC 8941 §4.2.3.2
         ["created last, without a value"] = () => RenewWithLast("created", ""),
 
-        // RFC 8941 §4.2.4: a minus sign is followed by a digit.
+        // A minus sign is followed by a digit.
+        // oracle: spec RFC 8941 §4.2.4
         ["created last, a minus sign alone"] = () => RenewWithLast("created", "-"),
+        // oracle: spec RFC 8941 §4.2.4
         ["created last, a minus sign before a letter"] = () => RenewWithLast("created", "-x"),
 
-        // RFC 8941 §4.2.5: a backslash is followed by the character it escapes, and a closing quote ends a string.
+        // A backslash is followed by the character it escapes, and a closing quote ends a string.
+        // oracle: spec RFC 8941 §4.2.5
         ["tag last, unclosed, ending in a backslash"] = () => RenewWithLast("tag", "\"renew\\"),
     };
 
@@ -237,6 +253,7 @@ public class RequestAuthenticatorProfileTests
 
     // A verifier that keeps the last of repeated keys, decodes leniently, or reads a parameter of another type
     // accepts a request whose signature data a proxy, a log or another parser can read differently.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(StepOneViolationNames))]
     public async Task CorrectlySignedRequestBreakingAStepOneRuleIsSignatureInvalid(string violation)
@@ -248,8 +265,9 @@ public class RequestAuthenticatorProfileTests
         Assert.Equal("signature_invalid", outcome);
     }
 
-    // CONTRACT.agent-identity.md §6 step 1: for renew and check-in, Content-Digest holds exactly one member, sha-256,
+    // Step 1: for renew and check-in, Content-Digest holds exactly one member, sha-256,
     // without parameters, in canonical base64.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(ContentDigestViolationCases))]
     public async Task CorrectlySignedRequestBreakingAContentDigestRuleIsSignatureInvalid(
@@ -264,8 +282,9 @@ public class RequestAuthenticatorProfileTests
         Assert.Equal("signature_invalid", outcome);
     }
 
-    // CONTRACT.agent-identity.md §6: parameters may appear in any order, and the verifier builds @signature-params
+    // Parameters may appear in any order, and the verifier builds @signature-params
     // from the received member, so a verifier that copied the received text would reject these.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(AcceptedFormNames))]
     public async Task RequestInAFormThatRfc8941AllowsIsAccepted(string form)
@@ -277,8 +296,9 @@ public class RequestAuthenticatorProfileTests
         Assert.Equal("ok", outcome);
     }
 
-    // CONTRACT.agent-identity.md §6 step 1: a malformed Signature-Input draws signature_invalid,
+    // Step 1: a malformed Signature-Input draws signature_invalid,
     // as a result rather than an exception, and records no nonce.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(MalformedSignatureInputNames))]
     public async Task MalformedSignatureInputIsSignatureInvalid(string form)
@@ -294,6 +314,8 @@ public class RequestAuthenticatorProfileTests
     // RFC 8941 §4.2.5: an escaped backslash decodes to one backslash, so the received tag is re\new,
     // which CONTRACT.agent-identity.md §6 step 2 rejects for renew.
     // The signature covers the tag renew, which a parser that dropped the escaped character would read.
+    // oracle: spec RFC 8941 §4.2.5
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Fact]
     public async Task TagWithAnEscapedBackslashIsAnotherTag()
     {

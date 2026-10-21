@@ -19,6 +19,8 @@ public class ChannelOpeningTests
     // with 32 random bytes fresh for this stream.
     // CONTRACT.agent-identity.md §1 and §7.3: ids are lowercase hyphenated UUIDs.
     // The bytes come from the injected generator, the host's source of every secret byte.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Fact]
     public async Task ChallengeHolds32BytesFromTheInjectedGenerator()
     {
@@ -28,13 +30,16 @@ public class ChannelOpeningTests
 
         ServerMessage challenge = opening.Challenge;
         Assert.Equal(ServerMessage.PayloadOneofCase.Challenge, challenge.PayloadCase);
+        // oracle: scaffold
         Assert.Equal(Enumerable.Range(0, 32).Select(i => (byte)i), challenge.Challenge.Challenge_.ToByteArray());
         Assert.Matches(UuidPattern, challenge.Id);
+        // oracle: scaffold
         Assert.False(challenge.HasCorrelationId);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 2: the challenge holds 32 random bytes fresh for this stream.
+    // Step 2: the challenge holds 32 random bytes fresh for this stream.
     // A challenge reused across streams would let a proof captured on one stream authenticate another.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task EachOpeningHasItsOwnChallenge()
     {
@@ -43,15 +48,20 @@ public class ChannelOpeningTests
         ChannelOpening first = await OpenAsync(authority, TestRequest.DefaultNonce);
         ChannelOpening second = await OpenAsync(authority, "EBESExQVFhcYGRobHB0eHw");
 
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
         Assert.NotEqual(first.Challenge.Id, second.Challenge.Id);
+        // oracle: scaffold
         Assert.Equal(
             Enumerable.Range(32, 32).Select(i => (byte)i),
             second.Challenge.Challenge.Challenge_.ToByteArray());
     }
 
-    // CONTRACT.agent-identity.md §7.3 steps 3 and 4: the proof covers the challenge as sent and the connect nonce,
+    // Steps 3 and 4: the proof covers the challenge as sent and the connect nonce,
     // and is verified with the key of the certificate that authenticated the opening,
     // so the opening keeps the nonce and that certificate for the handshake.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: reference docs/agent-identity/test-vectors.json channel_proof
+    // oracle: reference docs/agent-identity/test-vectors.json http_signature.registered.device-a
     [Fact]
     public async Task OpeningKeepsWhatTheChannelProofCovers()
     {
@@ -78,10 +88,10 @@ public class ChannelOpeningTests
         Assert.Equal(registered.NotAfter, opening.Certificate.NotAfter);
     }
 
-    // CONTRACT.agent-identity.md §7.3 steps 3 and 4: the agent signs the challenge it received,
-    // and the server verifies that proof.
+    // Steps 3 and 4: the agent signs the challenge it received, and the server verifies that proof.
     // The handshake checks the proof against the challenge as sent,
     // so a host that edits the message object after sending it must not change what the agent has to sign.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task KeptChallengeDoesNotFollowEditsOfTheMessage()
     {
@@ -97,9 +107,11 @@ public class ChannelOpeningTests
         Assert.Equal(sentBytes, opening.ChallengeBytes.ToArray());
     }
 
-    // CONTRACT.agent-identity.md §7.4: a stream closes no later than its certificate's notAfter,
+    // A stream closes no later than its certificate's notAfter,
     // even while it waits for its Hello, so the opening gives the host that time.
     // The vector file states it in Unix seconds, independently of any time zone.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+    // oracle: reference docs/agent-identity/test-vectors.json http_signature.registered.device-a
     [Fact]
     public async Task OpeningGivesTheNotAfterOfItsCertificate()
     {

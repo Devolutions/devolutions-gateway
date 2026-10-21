@@ -55,6 +55,10 @@ public class StrictBase64Tests
         { "-_8", [0xFB, 0xFF] },
     };
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: spec RFC 4648 §10
+    // oracle: spec RFC 4648 §4
+    // oracle: spec RFC 4648 §5
     [Theory]
     [MemberData(nameof(CanonicalForms))]
     public void DecodesTheCanonicalForm(string encoding, string encoded, byte[] expected)
@@ -65,6 +69,10 @@ public class StrictBase64Tests
 
     // Each row is a form that RFC 4648 §4, or §5 without padding, does not produce for any byte string,
     // so accepting it would give one value two encodings.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: spec RFC 4648 §4
+    // oracle: spec RFC 4648 §5
     [Theory]
     [InlineData("base64", "missing padding", "Zg")]
     [InlineData("base64", "missing one padding character", "Zm9vYg=")]
@@ -92,6 +100,8 @@ public class StrictBase64Tests
     }
 
     // RFC 4648 §10 vectors with the number of bytes they encode; padding characters encode none.
+    // oracle: spec RFC 4648 §10
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
     [Theory]
     [InlineData("base64", "", 0)]
     [InlineData("base64", "Zg==", 1)]
@@ -108,6 +118,8 @@ public class StrictBase64Tests
     }
 
     // RFC 4648 §10 gives the length of each vector, which differs from the length each row requires.
+    // oracle: spec RFC 4648 §10
+    // oracle: mutant the decoder accepts a value whose decoded length differs from the length the caller requires
     [Theory]
     [InlineData("base64", "", 1)]
     [InlineData("base64", "Zg==", 0)]
@@ -127,6 +139,9 @@ public class StrictBase64Tests
     }
 
     // CONTRACT.agent-identity.md Definitions: base64url is RFC 4648 §5 without padding.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: spec RFC 4648 §5
+    // oracle: spec RFC 4648 §10
     [Theory]
     [MemberData(nameof(Base64UrlForms))]
     public void Base64UrlEncodesWithoutPadding(string expected, byte[] value)
@@ -137,6 +152,9 @@ public class StrictBase64Tests
     // The BCL encoder writes canonical base64,
     // and RFC 4648 §5 derives base64url from it by swapping the last two characters and dropping the padding.
     // Random values of every length up to 96 bytes end in each final-quantum shape many times.
+    // oracle: spec RFC 4648 §4
+    // oracle: spec RFC 4648 §5
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
     [Fact]
     public void DecodesAndEncodesEveryLengthLikeTheBcl()
     {
@@ -157,8 +175,12 @@ public class StrictBase64Tests
         }
     }
 
-    // RFC 4648 §3.5: only the final quantum has pad bits, which a canonical encoding sets to zero,
+    // Only the final quantum has pad bits, which a canonical encoding sets to zero,
     // so trying every final quantum of one or two bytes checks that each value has exactly one accepted encoding.
+    // oracle: spec RFC 4648 §3.5
+    // oracle: spec RFC 4648 §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
     [Theory]
     [InlineData("base64")]
     [InlineData("base64url")]

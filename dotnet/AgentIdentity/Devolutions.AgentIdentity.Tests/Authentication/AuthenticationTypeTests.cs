@@ -13,20 +13,26 @@ public class AuthenticationTypeTests
 {
     private static readonly Type[] AuthenticationTypes =
     [
+        // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
         typeof(AuthenticatedIdentity),
+        // The handshake turns an opening into an identity,
+        // so an opening built by a caller would yield an identity that no signature check produced.
+        // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
         typeof(ChannelOpening),
+        // oracle: mutant a public AuthenticationResult constructor
         typeof(AuthenticationResult),
+        // oracle: scaffold
         typeof(ChannelOpeningResult),
+        // oracle: scaffold
         typeof(ChannelHandshakeResult),
     ];
 
     public static TheoryData<Type> AuthenticationTypeData => new(AuthenticationTypes);
 
-    // INTENT.md: code that acts for an identity takes it as a type only the signature check can create.
+    // Code that acts for an identity takes it as a type only the signature check can create.
     // A public or protected constructor would let a caller build an identity from any values,
     // or a subclass of one with its own constructor.
     // The other types carry an identity, or the opening that becomes one, out of the check.
-    // oracle: self-derived beyond AuthenticatedIdentity; sole guard for a public AuthenticationResult constructor.
     [Theory]
     [MemberData(nameof(AuthenticationTypeData))]
     public void TypeHasNoPublicOrProtectedConstructor(Type type)
@@ -39,6 +45,7 @@ public class AuthenticationTypeTests
     }
 
     // Any other public member producing one of these types would be a factory that bypasses the signature check.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
     [Fact]
     public void OnlyAuthenticationProducesTheseTypes()
     {

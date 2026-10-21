@@ -262,6 +262,8 @@ public class ChannelHandshakeTests
         TestVectors.Instance.HttpSignature.RegisteredCertificate("device-a").NotAfter;
 
     // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: UNAUTHENTICATED with error-code signature_invalid.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Theory]
     [MemberData(nameof(SignatureFailureNames))]
     public async Task FirstMessageFailingTheProofRulesIsSignatureInvalid(string failure)
@@ -273,6 +275,8 @@ public class ChannelHandshakeTests
 
     // CONTRACT.agent-identity.md §7.3 step 4: a Hello that proves the key but carries metadata violating §3 is
     // INVALID_ARGUMENT with error-code invalid_request.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
     [Fact]
     public async Task HelloWithInvalidMetadataIsInvalidRequest()
     {
@@ -295,6 +299,9 @@ public class ChannelHandshakeTests
     // The late Hello is signature_invalid like the message failures, and comes before all of them, metadata included.
     // CONTRACT.agent-identity.md §7.3 step 4 then checks the payload, the correlation_id, the proof, then the metadata,
     // so an agent that has not proved the key never learns whether its metadata would pass.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Theory]
     [MemberData(nameof(PairsOfFailuresWithDifferentCodes))]
     public async Task EarlierFailureWins(string earlier, string later)
@@ -308,8 +315,9 @@ public class ChannelHandshakeTests
 
     // Two failures that both close the stream with signature_invalid differ only in their failure detail,
     // so the detail shows that the earlier one closed it.
-    // oracle: self-derived; CONTRACT.agent-identity.md §7.3 step 4 fixes no failure detail,
+    // CONTRACT.agent-identity.md §7.3 step 4 fixes no failure detail,
     // so the expected one is the handshake's own for the earlier failure alone.
+    // oracle: scaffold
     [Theory]
     [MemberData(nameof(PairsOfFailuresWithTheSameCode))]
     public async Task EarlierOfTwoSignatureFailuresWins(string earlier, string later)
@@ -321,6 +329,7 @@ public class ChannelHandshakeTests
         ChannelHandshakeResult result = await HandshakeAsync(FailurePairs[(earlier, later)]);
 
         Assert.NotEqual(laterAlone.FailureDetail, earlierAlone.FailureDetail);
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
         AssertFailed(result, expectedCode, expectedStatus);
         Assert.Equal(earlierAlone.FailureDetail, result.FailureDetail);
     }
@@ -329,6 +338,7 @@ public class ChannelHandshakeTests
     // the host cannot know yet.
     // CONTRACT.agent-identity.md §7.4: PERMISSION_DENIED
     // with the trailers `error-code: identity_revoked` and `server-time`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
     public async Task IdentityRevokedDuringTheHandshakeIsIdentityRevoked()
     {
@@ -338,13 +348,15 @@ public class ChannelHandshakeTests
 
         AgentIdentityError error =
             AssertFailed(result, AgentIdentityErrorCode.IdentityRevoked, StatusCode.PermissionDenied);
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
         Assert.Equal(
             [("error-code", "identity_revoked"), ("server-time", "2026-09-24T12:00:00Z")],
             error.ToRpcException(serverTime).Trailers.Select(entry => (entry.Key, entry.Value)));
     }
 
-    // CONTRACT.agent-identity.md §6 step 4: a certificate that is no longer registered, or whose identity was deleted,
-    // is identity_unknown.
+    // Step 4: a certificate that is no longer registered, or whose identity was deleted, is identity_unknown.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
     public async Task CertificateRemovedDuringTheHandshakeIsIdentityUnknown()
     {
@@ -361,8 +373,12 @@ public class ChannelHandshakeTests
     // so the result reports the retirement.
     // Failing it would send a healthy agent the terminal identity_unknown.
     [Theory]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [InlineData(CertificateStatus.Pending, CertificateStatus.Pending)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.5
     [InlineData(CertificateStatus.Pending, CertificateStatus.Current)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData(CertificateStatus.Current, CertificateStatus.Retired)]
     public async Task IdentityHasTheCertificateStatusAtTheEndOfTheHandshake(
         CertificateStatus opened,
@@ -381,6 +397,7 @@ public class ChannelHandshakeTests
     // A retired certificate passes the handshake, but the revocation of its identity still blocks it.
     // CONTRACT.agent-identity.md §7.4: revocation closes a stream still awaiting its Hello, with PERMISSION_DENIED and
     // identity_revoked.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
     public async Task RevocationWinsOverARetiredCertificate()
     {
@@ -393,6 +410,7 @@ public class ChannelHandshakeTests
     // Whatever the outcome, the handshake reads the registry once, for the certificate that opened the stream.
     // CONTRACT.agent-identity.md §7.4 applies a deletion or a revocation since the opening to a stream awaiting its
     // Hello, so the handshake reads the registry again; that it reads it exactly once is the library's API.
+    // oracle: scaffold
     [Theory]
     [MemberData(nameof(ScenarioNames))]
     public async Task HandshakeReadsTheRegistryOnce(string scenario)
@@ -409,6 +427,8 @@ public class ChannelHandshakeTests
     // so another answer is a host bug, which must fail as a server error rather than draw an outcome the agent acts on.
     // CONTRACT.agent-identity.md §5.4: an unexpected server failure is the transient `500 unavailable`,
     // whereas identity_unknown and identity_revoked are terminal; the exception type is the library's API.
+    // oracle: mutant a handshake that acts on a registry answer for another certificate,
+    // or for the opening certificate under another identity
     [Theory]
     [MemberData(nameof(WrongRegistryAnswersAndCalls))]
     public async Task RegistryAnsweringForAnotherCertificateOrIdentityThrows(string answer, string call)
@@ -426,6 +446,8 @@ public class ChannelHandshakeTests
     // Only the library's API decides that the call, not the answer, ends the handshake,
     // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
     // that the object's state does not allow.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
     public async Task HandshakeEndsBeforeTheRegistryAnswers()
     {
@@ -440,6 +462,7 @@ public class ChannelHandshakeTests
         ValueTask<ChannelHandshakeResult> timingOut = opening.HelloTimedOutAsync();
         answer.SetResult();
 
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         await Assert.ThrowsAsync<InvalidOperationException>(() => timingOut.AsTask());
         Assert.True((await verifying).Succeeded);
     }
@@ -451,6 +474,8 @@ public class ChannelHandshakeTests
     // Only the library's API decides that the call, not the answer, ends the handshake,
     // and that a later call throws InvalidOperationException, which the Framework Design Guidelines give a call
     // that the object's state does not allow.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Fact]
     public async Task TimeoutEndsTheHandshakeBeforeTheRegistryAnswers()
     {
@@ -465,12 +490,14 @@ public class ChannelHandshakeTests
             opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
         answer.SetResult();
 
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         await Assert.ThrowsAsync<InvalidOperationException>(() => verifying.AsTask());
         AssertFailed(await timingOut, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
     // CONTRACT.agent-identity.md §6 reads the clock before the registry, and so does the handshake,
     // so a Hello that arrives in time stays in time however long the registry takes to answer.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task SlowRegistryDoesNotMakeAHelloLate()
     {
@@ -490,9 +517,11 @@ public class ChannelHandshakeTests
         Assert.True(result.Succeeded, result.FailureDetail);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 4: the server verifies the proof with the key of the certificate that
-    // authenticated the opening request, so the stream is authenticated for that certificate and its identity.
+    // Step 4: the server verifies the proof with the key of the certificate that authenticated the opening request,
+    // so the stream is authenticated for that certificate and its identity.
     // The vector file states the facts of the certificate, in Unix seconds, independently of any time zone.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: reference docs/agent-identity/test-vectors.json http_signature.registered.device-a
     [Fact]
     public async Task ValidHelloAuthenticatesTheIdentityOfTheOpeningCertificate()
     {
@@ -509,13 +538,14 @@ public class ChannelHandshakeTests
         Assert.Equal(registered.CertificateStatus, identity.CertificateStatus.ToString().ToLowerInvariant());
         Assert.Equal(registered.NotBefore, identity.CertificateNotBefore);
         Assert.Equal(registered.NotAfter, identity.CertificateNotAfter);
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
         Assert.Equal(AgentOperation.Connect, identity.Operation);
         Assert.Null(result.Error);
         Assert.Null(result.FailureDetail);
     }
 
-    // CONTRACT.agent-identity.md §3: the server replaces the identity's metadata
-    // with the metadata of each authenticated Hello.
+    // The server replaces the identity's metadata with the metadata of each authenticated Hello.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
     [Fact]
     public async Task ValidHelloYieldsItsMetadata()
     {
@@ -527,9 +557,10 @@ public class ChannelHandshakeTests
         Assert.Equal(VectorChannel.ValidMetadata, result.Metadata);
     }
 
-    // CONTRACT.agent-identity.md §3: metadata may be an empty object.
+    // Metadata may be an empty object.
     // A protobuf map without entries is also how a Hello without metadata arrives,
     // so the rule that rejects a JSON body without metadata cannot apply here.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
     [Fact]
     public async Task HelloWithoutMetadataSucceeds()
     {
@@ -546,6 +577,8 @@ public class ChannelHandshakeTests
     // CONTRACT.agent-identity.md §7.3 step 4: Welcome has correlation_id = Hello id.
     // CONTRACT.agent-identity.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
     // The Hello id is in uppercase, so a Welcome that normalized it would no longer match what the agent sent.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
     [Fact]
     public async Task WelcomeAnswersTheHello()
     {
@@ -564,10 +597,11 @@ public class ChannelHandshakeTests
         Assert.Equal(hello.Id, welcome.CorrelationId);
     }
 
-    // channel.proto: Welcome carries server_time.
+    // Welcome carries server_time.
     // The clock reads the time of the opening twice, to judge the request and to start the Hello timeout,
     // then the time of the handshake, then a later time.
     // The Welcome carries the time at which the server answers, from that one reading.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
     [Fact]
     public async Task WelcomeCarriesTheServerTimeOfTheHandshake()
     {
@@ -584,10 +618,10 @@ public class ChannelHandshakeTests
         Assert.Equal(250_000_000, serverTime.Nanos);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 3: the Hello answers the Challenge id,
-    // with a proof over the challenge bytes.
+    // Step 3: the Hello answers the Challenge id, with a proof over the challenge bytes.
     // The agent answers the Challenge it received, so the handshake holds the Hello to the id and bytes as sent,
     // even if the host later edits the message object it sent.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task HandshakeChecksTheChallengeAsSent()
     {
@@ -601,8 +635,9 @@ public class ChannelHandshakeTests
         Assert.True(result.Succeeded, result.FailureDetail);
     }
 
-    // CONTRACT.agent-identity.md §6: a certificate is unexpired while now ≤ notAfter, compared to the exact instant.
+    // A certificate is unexpired while now ≤ notAfter, compared to the exact instant.
     // The Welcome shows that the clock reading that judged the certificate is the one at notAfter.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Fact]
     public async Task HandshakeSucceedsAtTheCertificateNotAfter()
     {
@@ -611,6 +646,7 @@ public class ChannelHandshakeTests
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(hello);
 
         Assert.True(result.Succeeded, result.FailureDetail);
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
         Assert.Equal(Timestamp.FromDateTimeOffset(DeviceANotAfter), result.Welcome.Welcome.ServerTime);
     }
 
@@ -618,9 +654,13 @@ public class ChannelHandshakeTests
     // CONTRACT.agent-identity.md §7.4 and the shared intent, security invariant 8: a stream closes no later than the
     // notAfter of the certificate that opened it, with UNAUTHENTICATED and error-code certificate_expired,
     // even while it waits for its Hello, so the timeout fails as a timeout only until then.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData("a valid Hello", 1, AgentIdentityErrorCode.CertificateExpired)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [InlineData("no Hello in time", 0, AgentIdentityErrorCode.SignatureInvalid)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [InlineData("no Hello in time", 1, AgentIdentityErrorCode.CertificateExpired)]
     public async Task HandshakeIsCertificateExpiredOnlyAfterTheNotAfter(
         string end,
@@ -638,6 +678,9 @@ public class ChannelHandshakeTests
     // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
     // CONTRACT.agent-identity.md §7.4: revocation and expiry close a stream still awaiting its Hello ahead of the
     // failures of §7.3 step 4, the timeout included, and so does a deletion, which leaves the certificate unregistered.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Theory]
     [MemberData(nameof(NoHelloNames))]
     public async Task NoHelloInTimeIsSignatureInvalidUnlessAClosureApplies(string noHello)
@@ -649,15 +692,17 @@ public class ChannelHandshakeTests
         AssertFailed(result, expectedCode, expectedStatus);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 4: the server waits 10 s for the Hello.
+    // Step 4: the server waits 10 s for the Hello.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public void HelloTimeoutIs10Seconds()
     {
         Assert.Equal(TimeSpan.FromSeconds(10), ChannelHandshake.HelloTimeout);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 4: the Hello must arrive within 10 s of the opening, 10 s included.
+    // Step 4: the Hello must arrive within 10 s of the opening, 10 s included.
     // The Welcome shows that the clock reading that judged the timeout is the one at 10 s.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task HelloExactlyAtTheTimeoutSucceeds()
     {
@@ -669,11 +714,13 @@ public class ChannelHandshakeTests
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
 
         Assert.True(result.Succeeded, result.FailureDetail);
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
         Assert.Equal(Timestamp.FromDateTimeOffset(answered), result.Welcome.Welcome.ServerTime);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid.
+    // Step 4: no Hello within 10 s closes the stream with signature_invalid.
     // A Hello that the host passes on after the timeout fails, so a late host timer cannot let it through.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task HelloOneTickAfterTheTimeoutIsSignatureInvalid()
     {
@@ -686,11 +733,12 @@ public class ChannelHandshakeTests
         AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.agent-identity.md §7.3 steps 1 and 2: the agent sends nothing until it receives the Challenge,
+    // Steps 1 and 2: the agent sends nothing until it receives the Challenge,
     // which the server sends once it has verified the opening request.
     // The agent can answer only once the opening is verified and its challenge sent,
     // so the 10 s run from the end of verification, not from the earlier reading that judged the request.
     // Here the registry and the nonce store take 5 s, and the Hello comes 10 s after them.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     [Fact]
     public async Task HelloTimeoutRunsFromTheEndOfTheOpening()
     {
@@ -709,6 +757,8 @@ public class ChannelHandshakeTests
     // CONTRACT.agent-identity.md §7.3 step 4 decides a stream by its first agent message or by the timeout, not both.
     // Only the library's API decides that a later call throws InvalidOperationException,
     // which the Framework Design Guidelines give a call that the object's state does not allow.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
     [MemberData(nameof(HandshakeEndsThenAnotherCall))]
     public async Task HandshakeEndsAtTheFirstCall(string first, string second)
@@ -721,6 +771,8 @@ public class ChannelHandshakeTests
 
     // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: the server closes the stream with the gRPC status of the failure
     // and the trailers `error-code: <§5.4 code>` and `server-time: <RFC 3339>`, which the agent reads.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
     [Theory]
     [InlineData("a Hello with the proof of another device", StatusCode.Unauthenticated, "signature_invalid")]
     [InlineData("a Hello with invalid metadata", StatusCode.InvalidArgument, "invalid_request")]
@@ -738,6 +790,7 @@ public class ChannelHandshakeTests
         RpcException exception = result.Error.ToRpcException(serverTime);
 
         Assert.Equal(expectedStatus, exception.StatusCode);
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
         Assert.Equal(
             [("error-code", expectedCode), ("server-time", "2026-09-24T12:00:00Z")],
             exception.Trailers.Select(entry => (entry.Key, entry.Value)));
@@ -752,7 +805,12 @@ public class ChannelHandshakeTests
         Assert.False(result.Succeeded);
         Assert.Equal(expectedCode, result.Error.Code);
         Assert.Equal(expectedStatus, result.Error.ToRpcException(DateTimeOffset.UnixEpoch).StatusCode);
+        // oracle: mutant an empty failure detail for a late Hello, a first message that is not a Hello,
+        // a Hello without a correlation_id or correlated to another id, a proof that does not verify,
+        // no Hello before the timeout, a certificate no longer registered, or a revoked identity
         Assert.False(string.IsNullOrEmpty(result.FailureDetail));
+        // No server push or metadata update happens before step 4 succeeds, and only then is the stream authenticated.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
         Assert.Null(result.Identity);
         Assert.Null(result.Metadata);
         Assert.Null(result.Welcome);

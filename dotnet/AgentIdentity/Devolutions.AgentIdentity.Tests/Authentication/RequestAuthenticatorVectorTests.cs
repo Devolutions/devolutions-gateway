@@ -23,6 +23,7 @@ public class RequestAuthenticatorVectorTests
 
     // Each case isolates one rule of CONTRACT.agent-identity.md §6 or its precedence,
     // so any outcome but the vector's breaks that rule.
+    // oracle: reference docs/agent-identity/test-vectors.json http_signature.cases
     [Theory]
     [MemberData(nameof(VectorData.HttpSignatureCaseNames), MemberType = typeof(VectorData))]
     public async Task CaseReturnsItsExpectedOutcome(string name)
@@ -38,6 +39,7 @@ public class RequestAuthenticatorVectorTests
     // test-vectors.json http_signature.sequences, with CONTRACT.agent-identity.md §6 step 6.
     // A replayed nonce must fail, a nonce must survive a request that failed verification,
     // and a nonce accepted for one operation must not authenticate another.
+    // oracle: reference docs/agent-identity/test-vectors.json http_signature.sequences
     [Theory]
     [MemberData(nameof(VectorData.HttpSignatureSequenceNames), MemberType = typeof(VectorData))]
     public async Task SequenceReturnsItsExpectedOutcomes(string name)
@@ -57,6 +59,8 @@ public class RequestAuthenticatorVectorTests
     // test-vectors.json signature_base of each case, as RFC 9421 §2.5 builds it.
     // A signature base that differs from the signed one in any byte fails verification for every agent,
     // and an accepted request does not show which byte the verifier would get wrong in another request.
+    // oracle: reference docs/agent-identity/test-vectors.json http_signature.cases
+    // oracle: spec RFC 9421 §2.5
     [Theory]
     [MemberData(nameof(OkCaseNames))]
     public void OkCaseSignatureBaseIsTheVectorBase(string name)
@@ -79,6 +83,8 @@ public class RequestAuthenticatorVectorTests
 
     // RFC 9421 Appendix B.2.4 is the RFC's own ecdsa-p256-sha256 example,
     // so it fails a primitive that hashes with another algorithm or reads another signature format.
+    // oracle: spec RFC 9421 §B.2.4
+    // oracle: spec RFC 9421 §B.1.3
     [Fact]
     public void Rfc9421B24VerifiesWithTheLibraryPrimitive()
     {
@@ -92,9 +98,9 @@ public class RequestAuthenticatorVectorTests
         Assert.Equal(vector.ExpectedValid, valid);
     }
 
-    // CONTRACT.agent-identity.md §6: nonces are committed only after the signature verifies,
-    // so garbage requests cannot burn nonces.
+    // Nonces are committed only after the signature verifies, so garbage requests cannot burn nonces.
     // With an empty nonce store, every failing case fails before step 6.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(FailingCaseNames))]
     public async Task FailingCaseRecordsNoNonce(string name)
@@ -108,6 +114,7 @@ public class RequestAuthenticatorVectorTests
 
     // The failure detail goes to host logs, so a detail that echoed the request would carry text the sender chose,
     // and a captured signature, into those logs.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Failure details
     [Theory]
     [MemberData(nameof(FailingCaseNames))]
     public async Task FailingCaseDetailHoldsNoRequestData(string name)
@@ -131,6 +138,8 @@ public class RequestAuthenticatorVectorTests
 
     // CONTRACT.agent-identity.md §6 step 6 and the shared intent: the authority keeps each accepted nonce
     // until 60 s after its signature expires, the last moment the window could accept the signature again.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
     [Theory]
     [MemberData(nameof(OkCaseNames))]
     public async Task OkCaseRecordsItsNonceOnceUntilExpiresPlus60Seconds(string name)
@@ -152,6 +161,8 @@ public class RequestAuthenticatorVectorTests
     // Code that acts for an identity relies on these facts,
     // such as the status that tells confirm whether to promote the certificate.
     // The registered certificates of the vector file state them, in Unix seconds, independently of any time zone.
+    // oracle: reference docs/agent-identity/test-vectors.json http_signature.registered
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     [Theory]
     [MemberData(nameof(OkSignedRequestCaseNames))]
     public async Task OkCaseIdentityIsThatOfTheSigningCertificate(string name)
@@ -179,6 +190,8 @@ public class RequestAuthenticatorVectorTests
         Assert.Equal(registered.CertificateStatus, identity.CertificateStatus.ToString().ToLowerInvariant());
         Assert.Equal(registered.NotBefore, identity.CertificateNotBefore);
         Assert.Equal(registered.NotAfter, identity.CertificateNotAfter);
+        // A renewal acts only for an identity that a renew request proved, so the identity carries its operation.
+        // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
         Assert.Equal(VectorAuthority.Operation(vector.Endpoint), identity.Operation);
     }
 

@@ -21,11 +21,14 @@ public class EnrollmentRulesTests
         ["the key of a deleted identity"] = IssuedKeyMatch.ForDeletedIdentity(),
     };
 
-    // CONTRACT.agent-identity.md §2.1: a token creates an identity when it exists, has not been deleted,
+    // A token creates an identity when it exists, has not been deleted,
     // has not expired, and fewer than `max_uses` identities have been created with it; (6) a new identity.
     // The rows are a usable token, one that expires one tick after now, and one that can create one more identity.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [Theory]
     [InlineData(TimeSpan.TicksPerDay, 3)]
+    // `token_expired` only when `now ≥ expires_at`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [InlineData(1L, 3)]
     [InlineData(TimeSpan.TicksPerDay, 9)]
     public void CreatesAnIdentityForANewKeyWithAUsableToken(long ticksToExpiry, int identitiesCreated)
@@ -39,23 +42,27 @@ public class EnrollmentRulesTests
         Assert.Null(decision.Error);
     }
 
-    // CONTRACT.agent-identity.md §2.1: when several outcomes apply, the earliest wins:
+    // When several outcomes apply, the earliest wins:
     // (4) `token_invalid` for a deleted token, then `token_expired` for an expired one; (5) `token_exhausted`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [Theory]
-    // CONTRACT.agent-identity.md §5.4: `token_expired` when `now ≥ expires_at`.
+    // `token_expired` when `now ≥ expires_at`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
     [InlineData(false, 0L, 10, 3, AgentIdentityErrorCode.TokenExpired)]
-    // CONTRACT.agent-identity.md §2.1: a token creates an identity only while fewer than `max_uses` identities
-    // have been created with it.
+    // A token creates an identity only while fewer than `max_uses` identities have been created with it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [InlineData(false, TimeSpan.TicksPerDay, 10, 10, AgentIdentityErrorCode.TokenExhausted)]
     [InlineData(false, TimeSpan.TicksPerDay, 10, 11, AgentIdentityErrorCode.TokenExhausted)]
     [InlineData(false, TimeSpan.TicksPerDay, 0, 0, AgentIdentityErrorCode.TokenExhausted)]
-    // CONTRACT.agent-identity.md §2.1: a deleted token authenticates only for an idempotent replay;
+    // A deleted token authenticates only for an idempotent replay;
     // every other use returns `token_invalid`, whether or not the token has also expired or been exhausted.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [InlineData(true, TimeSpan.TicksPerDay, 10, 3, AgentIdentityErrorCode.TokenInvalid)]
     [InlineData(true, 0L, 10, 3, AgentIdentityErrorCode.TokenInvalid)]
     [InlineData(true, TimeSpan.TicksPerDay, 10, 10, AgentIdentityErrorCode.TokenInvalid)]
     [InlineData(true, 0L, 10, 10, AgentIdentityErrorCode.TokenInvalid)]
-    // CONTRACT.agent-identity.md §2.1: (4) `token_expired` comes before (5) `token_exhausted`.
+    // (4) `token_expired` comes before (5) `token_exhausted`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [InlineData(false, 0L, 10, 10, AgentIdentityErrorCode.TokenExpired)]
     public void RejectsANewKeyWithTheEarliestTokenOutcome(
         bool deleted,
@@ -71,10 +78,11 @@ public class EnrollmentRulesTests
         AssertRejected(expected, decision);
     }
 
-    // CONTRACT.agent-identity.md §2.1: the key of the current certificate of a non-revoked identity enrolled with the
+    // The key of the current certificate of a non-revoked identity enrolled with the
     // same token → 200 with that identity, without counting a use.
     // The key lookup (3) comes before (4) and (5), and a deleted token authenticates for this replay,
     // so the replay wins whether the token is deleted, expired or exhausted.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [Theory]
     [InlineData(false, false, false)]
     [InlineData(true, false, false)]
@@ -92,12 +100,13 @@ public class EnrollmentRulesTests
         Assert.Null(decision.Error);
     }
 
-    // CONTRACT.agent-identity.md §2.1: the first matching key rule decides.
+    // The first matching key rule decides.
     // The key of an identity enrolled with a different token → `invalid_request`, before the revocation rule;
     // any certificate key of a revoked identity → `identity_revoked`, before the pending-or-retired rule
     // and instead of the replay, which needs a non-revoked identity;
     // the key of a pending or retired certificate of a non-revoked identity → `invalid_request`,
     // instead of the replay, which needs the current certificate.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [Theory]
     [InlineData(false, false, CertificateStatus.Current, false, false, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(false, false, CertificateStatus.Pending, false, false, AgentIdentityErrorCode.InvalidRequest)]
@@ -108,8 +117,8 @@ public class EnrollmentRulesTests
     [InlineData(true, true, CertificateStatus.Retired, false, false, AgentIdentityErrorCode.IdentityRevoked)]
     [InlineData(true, false, CertificateStatus.Pending, false, false, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(true, false, CertificateStatus.Retired, false, false, AgentIdentityErrorCode.InvalidRequest)]
-    // CONTRACT.agent-identity.md §2.1: (3) the result of the key lookup comes
-    // before (4) `token_expired` and (5) `token_exhausted`.
+    // (3) the result of the key lookup comes before (4) `token_expired` and (5) `token_exhausted`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [InlineData(false, false, CertificateStatus.Current, true, false, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(false, false, CertificateStatus.Current, false, true, AgentIdentityErrorCode.InvalidRequest)]
     [InlineData(true, true, CertificateStatus.Current, true, false, AgentIdentityErrorCode.IdentityRevoked)]
@@ -132,10 +141,11 @@ public class EnrollmentRulesTests
         AssertRejected(expected, decision);
     }
 
-    // CONTRACT.agent-identity.md §2.1: the key of a certificate of a deleted identity → `identity_revoked`,
+    // The key of a certificate of a deleted identity → `identity_revoked`,
     // and (3) the result of the key lookup comes before (4) `token_expired` and (5) `token_exhausted`.
     // The authority keeps only the SPKI SHA-256 and issuance time of a deleted identity's keys,
     // so no other key rule applies to them.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, true)]
@@ -149,8 +159,9 @@ public class EnrollmentRulesTests
         AssertRejected(AgentIdentityErrorCode.IdentityRevoked, decision);
     }
 
-    // CONTRACT.agent-identity.md §2.1 (3): a deleted token gets `token_invalid` for anything but an idempotent replay,
+    // (3): a deleted token gets `token_invalid` for anything but an idempotent replay,
     // whatever the CSR public key matches.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
     [Theory]
     [MemberData(nameof(KeysButTheReplayNames))]
     public void RejectsADeletedTokenWithTokenInvalidForAnIssuedKeyButTheReplay(string key)
@@ -160,8 +171,10 @@ public class EnrollmentRulesTests
         AssertRejected(AgentIdentityErrorCode.TokenInvalid, decision);
     }
 
-    // Framework Design Guidelines: a bad argument throws the most derived ArgumentException, whose ParamName names it,
+    // A bad argument throws the most derived ArgumentException, whose ParamName names it,
     // here ArgumentOutOfRangeException for a count below zero.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
     [InlineData(-1, 0, "maxUses")]
     [InlineData(1, -1, "identitiesCreated")]
@@ -176,6 +189,9 @@ public class EnrollmentRulesTests
     // Statuses start at 1, so a status that the host never set is not a valid one,
     // and a value after the last status is not one either.
     // Framework Design Guidelines: validate enum arguments, and throw the most derived ArgumentException naming them.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    // oracle: spec Framework Design Guidelines §Using Standard Exception Types
     [Theory]
     [InlineData(0)]
     [InlineData(4)]
@@ -187,13 +203,15 @@ public class EnrollmentRulesTests
         Assert.Equal("status", exception.ParamName);
     }
 
-    // Framework Design Guidelines: a null argument throws ArgumentNullException, whose ParamName names it.
+    // A null argument throws ArgumentNullException, whose ParamName names it.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [Fact]
     public void DecideRejectsANullToken()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
             () => EnrollmentRules.Decide(null!, null, Now));
 
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("token", exception.ParamName);
     }
 
@@ -202,6 +220,8 @@ public class EnrollmentRulesTests
         Assert.Equal(EnrollmentOutcome.Reject, decision.Outcome);
         Assert.Equal(expected, decision.Error?.Code);
         Assert.Null(decision.ExistingIdentityId);
+        // oracle: mutant an empty failure detail for an enrollment refused for a deleted, expired or exhausted token,
+        // or for a CSR key of a deleted, revoked or other-token identity or of a pending or retired certificate
         Assert.False(string.IsNullOrEmpty(decision.FailureDetail));
     }
 
