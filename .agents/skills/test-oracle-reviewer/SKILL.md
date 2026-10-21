@@ -33,6 +33,10 @@ Strong kinds name an independent source, and a test, case, or assertion marked w
 - `reference <implementation, capture, or model>`: what another implementation or a reference model does, recorded or compared live.
 - `property <statement>`: a property no document states, such as a round-trip or an input the test chose being honored.
 
+Write every path from the repository root, with forward slashes and exact case, such as `crates/gateway-db/INTENT.md`, because markers sit at every depth and a root-relative path reads and resolves the same from each.
+A `spec` document outside `docs/`, such as `RFC 6455` or `MS-RDPBCGR`, is named rather than given as a path, and a `regression` crash file is a path under `fuzz/`.
+`§<section>` names a heading in the file, in any case, or the number the heading starts with, so `§3.2` matches `3.2 Framing`.
+
 A hand-derived value or a checked snapshot takes the kind of the source it was checked against.
 
 Weak kinds name a self-derived source, which detects change rather than bugs, so any intentional change, such as a refactor or a new feature, may delete a test, case, or assertion marked with one without justification unless `test-pruner` protects it:
