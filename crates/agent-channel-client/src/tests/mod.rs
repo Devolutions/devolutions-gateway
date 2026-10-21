@@ -157,30 +157,33 @@ async fn assert_no_event(channel: &mut Channel) {
     }
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
 #[tokio::test]
 async fn opens_a_signed_stream_under_the_url_path_and_waits_for_the_challenge() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
     let _channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // CONTRACT.agent-identity.md §7.2: the URL path prefixes the RPC path, and the opening carries a `connect`
-    // signature.
+    // The URL path prefixes the RPC path, and the opening carries a `connect` signature.
     let opening = authority.next_opening().await;
     assert_eq!(opening.path, "/dvls/devolutions.agent.channel.v1.AgentChannel/Connect");
     let signature_input = opening.signature_input().to_owned();
     assert!(signature_input.contains(";tag=\"connect\""), "{signature_input}");
+    assert!(opening.headers.contains_key("signature"));
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     assert!(
         signature_input.contains(&format!(";keyid=\"{}\"", identity.thumbprint)),
         "{signature_input}"
     );
-    assert!(opening.headers.contains_key("signature"));
 
-    // CONTRACT.agent-identity.md §7.3 step 1: the agent sends nothing until it receives `Challenge`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // Step 1: the agent sends nothing until it receives `Challenge`.
     let mut stream = opening.accept();
     assert!(stream.receive_within(Duration::from_millis(300)).await.is_none());
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
 #[tokio::test]
 async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -198,22 +201,25 @@ async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::
         client(&authority, Settings::default())?.connect(identity.target_with_hello(&authority.url, hello))?;
     let mut stream = authority.next_opening().await.accept();
 
-    // CONTRACT.agent-identity.md §3.1: metadata is collected when the `Hello` is sent.
+    // Metadata is collected when the `Hello` is sent, so the `Hello` carries the hostname set after the opening.
     *hostname.lock().expect("hostname lock") = "at-hello".to_owned();
     let challenge = [0x5a; 32];
     let challenge_id = stream.challenge(&challenge).await;
     let message = stream.receive().await;
 
-    // CONTRACT.agent-identity.md §7.3 step 3.
+    // Step 3.
     assert_eq!(message.correlation_id.as_deref(), Some(challenge_id.as_str()));
     let Some(agent_message::Payload::Hello(hello)) = message.payload else {
         panic!("expected Hello, got {message:?}");
     };
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3.1
     assert_eq!(
         hello.metadata,
         HashMap::from([("hostname".to_owned(), "at-hello".to_owned())])
     );
+    // Step 7.
     assert_eq!(hello.applied_state_versions, HashMap::from([("config".to_owned(), 7)]));
+    // Step 3.
     let mut proven = CHANNEL_PROOF_DOMAIN.to_vec();
     proven.push(0x00);
     proven.extend_from_slice(&challenge);
@@ -226,6 +232,7 @@ async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::
     Ok(())
 }
 
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
 #[test]
 fn channel_proof_input_matches_the_shared_vector() -> anyhow::Result<()> {
     let vectors = vectors()?;
@@ -244,6 +251,9 @@ fn channel_proof_input_matches_the_shared_vector() -> anyhow::Result<()> {
 fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Handshake
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
 #[tokio::test]
 async fn authenticates_only_on_the_welcome_answering_its_hello() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -254,7 +264,7 @@ async fn authenticates_only_on_the_welcome_answering_its_hello() -> anyhow::Resu
     stream.challenge(&[1; 32]).await;
     let hello = stream.receive().await;
 
-    // INTENT.agent-identity.md, invariant 7: nothing counts before the challenge succeeds.
+    // Nothing counts before the challenge succeeds (INTENT.agent-identity.md, security invariant 7).
     send_unexpected(&stream).await;
     assert_no_event(&mut channel).await;
 
@@ -290,6 +300,7 @@ async fn send_unexpected(stream: &ServerStream) {
         .await;
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
 #[tokio::test]
 async fn reports_pushes_with_their_envelope_ids_and_ignores_unknown_payloads() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -299,7 +310,7 @@ async fn reports_pushes_with_their_envelope_ids_and_ignores_unknown_payloads() -
     stream.authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
-    // CONTRACT.agent-identity.md §7.3: unknown payloads are ignored.
+    // Unknown payloads are ignored.
     stream.send_unknown(&new_id()).await;
     stream.send(&new_id(), Some(&new_id()), Payload::Ack(Ack {})).await;
     let (renew_id, reconnect_id, config_id) = (new_id(), new_id(), new_id());
@@ -356,6 +367,7 @@ async fn reports_pushes_with_their_envelope_ids_and_ignores_unknown_payloads() -
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
 #[tokio::test]
 async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -378,21 +390,24 @@ async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
 
     channel.ack(&renew_id);
 
-    // CONTRACT.agent-identity.md §7.3 step 5: `Ack` with `correlation_id` = message `id`.
+    // Step 5: `Ack` with `correlation_id` = message `id`.
     let ack = stream.receive().await;
     assert_eq!(ack.correlation_id.as_deref(), Some(renew_id.as_str()));
     assert_eq!(ack.payload, Some(agent_message::Payload::Ack(Ack {})));
-    // CONTRACT.agent-identity.md §1 and §7.3: envelope IDs are lowercase hyphenated UUIDs.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // Envelope IDs are lowercase hyphenated UUIDs.
     for id in [&hello.id, &ack.id] {
         let uuid = uuid::Uuid::parse_str(id)?;
         assert_eq!(&uuid.hyphenated().to_string(), id);
     }
-    // RFC 9562 §1: a UUID is unique, so the acknowledgement's ID is neither the Hello's nor the acknowledged message's.
+    // oracle: spec RFC 9562 §1
+    // A UUID is unique, so the acknowledgement's ID is neither the Hello's nor the acknowledged message's.
     assert_ne!(ack.id, hello.id);
     assert_ne!(ack.id, renew_id);
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn pings_the_connection_at_the_keepalive_interval() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -411,9 +426,8 @@ async fn pings_the_connection_at_the_keepalive_interval() -> anyhow::Result<()> 
     tokio::time::sleep(Duration::from_secs(1)).await;
     let pings = authority.pings() - before;
     let window = start.elapsed();
-    // The hyper client schedules each ping one interval after the last frame it read (hyper 1.10
-    // `src/proto/h2/ping.rs`), so pings are at least 100 ms apart and the window holds at most one more ping than whole
-    // intervals.
+    // oracle: reference hyper 1.10 `src/proto/h2/ping.rs`, which sends each ping one interval after the last frame read
+    // Pings are thus at least 100 ms apart, and the window holds at most one more ping than whole intervals.
     let most = usize::try_from(window.as_millis() / 100)? + 1;
     // A timer only promises not to fire early (`tokio::time::sleep`), so the lower bound lets each ping run up to one
     // interval late; the 30 s default would send none.
@@ -424,6 +438,9 @@ async fn pings_the_connection_at_the_keepalive_interval() -> anyhow::Result<()> 
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
 #[case::identity_revoked(
     Code::PermissionDenied,
@@ -462,9 +479,7 @@ async fn reports_a_refused_opening_with_its_status_trailers_and_class(
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // CONTRACT.agent-identity.md §7.4 and §5.4 classify the closure.
-    // A transient one is an outage: crates/agent-channel-client/INTENT.md caps the backoff at 5 min "after network
-    // errors, server downtime, and any other transient refusal or closure of the stream".
+    // The error code classifies the closure, and every transient refusal is an outage.
     authority
         .next_opening()
         .await
@@ -477,6 +492,9 @@ async fn reports_a_refused_opening_with_its_status_trailers_and_class(
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
 #[case::revoked(
     Code::PermissionDenied,
@@ -507,6 +525,8 @@ async fn reports_the_closure_of_an_authenticated_stream(
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
 #[rstest]
 #[case::revoked(Code::PermissionDenied, "identity_revoked")]
 #[case::unknown(Code::Unauthenticated, "identity_unknown")]
@@ -520,8 +540,7 @@ async fn stops_after_a_terminal_or_expired_certificate_closure(
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // CONTRACT.agent-identity.md §7.4: the agent reconnects unless the identity is terminal; §5.4: it renews before
-    // retrying.
+    // The agent reconnects unless the identity is terminal, and renews after `certificate_expired` before it retries.
     authority
         .next_opening()
         .await
@@ -541,6 +560,8 @@ fn names_each_terminal_code_as_the_contract_does(#[case] code: TerminalCode, #[c
     assert_eq!(code.as_str(), name);
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn a_refused_connection_is_an_outage() -> anyhow::Result<()> {
     let authority = TestAuthority::start(Mode::Grpc).await?;
@@ -550,12 +571,16 @@ async fn a_refused_connection_is_an_outage() -> anyhow::Result<()> {
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&url))?;
 
+    // A network error is transient, and no authority sent a gRPC status.
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert_eq!(closure.grpc_code, None);
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn an_untrusted_server_certificate_is_an_outage() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -564,12 +589,14 @@ async fn an_untrusted_server_certificate_is_an_outage() -> anyhow::Result<()> {
     let client = ChannelClient::new(ProxyConfig::Off, &[other_root], Settings::default())?;
     let mut channel = client.connect(identity.target(&authority.url))?;
 
+    // A TLS error is transient, and the opening never reaches a server the agent does not trust.
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert!(authority.opening_within(Duration::ZERO).await.is_none());
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
 #[case::html_over_http2(Mode::Http2Page("text/html"))]
 // oracle: spec gRPC Web (grpc/grpc doc/PROTOCOL-WEB.md) §Protocol differences vs gRPC over HTTP2
@@ -582,7 +609,6 @@ async fn a_path_that_cannot_carry_grpc_is_reported_as_such(#[case] mode: Mode) -
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
 
-    // crates/agent-channel-client/INTENT.md: "a reverse proxy that answers without HTTP/2 or gRPC".
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::NoGrpcPath));
     Ok(())
@@ -607,6 +633,7 @@ async fn authenticates_whatever_form_the_grpc_content_type_takes(
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Handshake
 #[rstest]
 #[case::shorter(31)]
 #[case::longer(33)]
@@ -617,7 +644,6 @@ async fn closes_without_hello_when_the_challenge_is_not_32_bytes(#[case] length:
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
     let mut stream = authority.next_opening().await.accept();
 
-    // CONTRACT.agent-identity.md §7.3 step 3 proves a 32-byte challenge.
     stream.challenge(&vec![1; length]).await;
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
@@ -625,6 +651,9 @@ async fn closes_without_hello_when_the_challenge_is_not_32_bytes(#[case] length:
     Ok(())
 }
 
+// oracle: intent crates/device-key/INTENT.md §Signing
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn a_proof_signing_failure_closes_the_stream_as_an_outage() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -637,6 +666,7 @@ async fn a_proof_signing_failure_closes_the_stream_as_an_outage() -> anyhow::Res
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
     let mut stream = authority.next_opening().await.accept();
 
+    // Signing can fail, a failure the contract does not name is transient, and without a proof there is no `Hello`.
     stream.challenge(&[1; 32]).await;
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
@@ -669,6 +699,7 @@ fn clock_skew_refusal(server_time: OffsetDateTime) -> Status {
     status
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
 #[tokio::test]
 async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -679,8 +710,7 @@ async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Resul
 
     authority.next_opening().await.refuse(clock_skew_refusal(server_time));
 
-    // CONTRACT.agent-identity.md §6: the retry offsets `created` by `server_time − local_time`, from the `server-time`
-    // trailer.
+    // The retry offsets `created` by `server_time − local_time`, from the `server-time` trailer.
     // The agent reads its clock after `local_time` and signs before the retry arrives, so `created` exceeds the server
     // time by at most the whole seconds that passed meanwhile.
     let retry = authority.next_opening().await;
@@ -696,6 +726,9 @@ async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Resul
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn a_second_clock_skew_refusal_is_transient() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -712,6 +745,7 @@ async fn a_second_clock_skew_refusal_is_transient() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn reopens_after_each_transient_closure_once_its_growing_delay_has_passed() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -726,6 +760,7 @@ async fn reopens_after_each_transient_closure_once_its_growing_delay_has_passed(
     };
     let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
 
+    // A timer never fires early (`tokio::time::sleep`), so each reopening comes at least its delay after the closure.
     let mut opening = authority.next_opening().await;
     for delay in [15_625, 31_250, 62_500].map(Duration::from_micros) {
         let refused = tokio::time::Instant::now();
@@ -749,6 +784,8 @@ async fn reopens_after_each_transient_closure_once_its_growing_delay_has_passed(
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Handshake
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn an_opening_without_welcome_in_time_is_an_outage() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -762,12 +799,16 @@ async fn an_opening_without_welcome_in_time_is_an_outage() -> anyhow::Result<()>
     stream.challenge(&[1; 32]).await;
     stream.receive().await;
 
+    // A network error, which no gRPC status explains.
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert_eq!(closure.grpc_code, None);
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §8.1
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
 #[tokio::test]
 async fn opens_a_new_stream_while_the_current_one_stays_open() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -777,8 +818,7 @@ async fn opens_a_new_stream_while_the_current_one_stays_open() -> anyhow::Result
     current_stream.authenticate().await;
     assert_eq!(next_event(&mut current).await, Event::Authenticated);
 
-    // CONTRACT.agent-identity.md §7.3 step 6 and §8.1 step 4: the new stream, here for a renewed key, opens before the
-    // old one closes.
+    // Step 6 of §7.3 and step 4 of §8.1: the new stream, here for a renewed key, opens before the old one closes.
     let mut next = client.connect(Identity::from_vectors("device-b")?.target(&authority.url))?;
     let mut next_stream = authority.next_opening().await.accept();
     next_stream.authenticate().await;
@@ -820,7 +860,9 @@ fn authority_address(authority: &TestAuthority) -> String {
     format!("127.0.0.1:{}", authority.url.port().expect("authority port"))
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
+// oracle: reference hyper-util 0.1.20 proxy matcher, which percent-decodes the user info for reqwest
 // The user info decodes to `agent@corp` and `p:ss`.
 #[case::user_and_password("agent%40corp:p%3Ass", "agent@corp:p:ss")]
 // oracle: reference hyper-util 0.1.20 `test_parse_http_auth_without_password`, the proxy parser of reqwest
@@ -842,21 +884,25 @@ async fn tunnels_through_an_http_proxy_with_the_credentials_of_its_url(
     let heads = proxy.heads();
     assert_eq!(heads.len(), 1);
     let head = &heads[0];
+    // oracle: spec RFC 9110 §9.3.6
     assert!(
         head.starts_with(&format!("CONNECT {} HTTP/1.1\r\n", authority_address(&authority))),
         "{head}"
     );
-    // RFC 7617 §2: Basic credentials are the Base64 of the user ID, a colon and the password.
+    // oracle: spec RFC 7617 §2
+    // Basic credentials are the Base64 of the user ID, a colon and the password.
     let authorization = format!("Basic {}", STANDARD.encode(credentials));
     assert_eq!(header(head, "proxy-authorization"), Some(authorization.as_str()));
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn tunnels_through_an_https_proxy() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let proxy_pki = Pki::generate()?;
-    // RFC 7301 §3.2: a proxy that also offers HTTP/2 would select it if the agent offered it, and then expect HTTP/2.
+    // oracle: spec RFC 7301 §3.2
+    // A proxy that also offers HTTP/2 would select it if the agent offered it, and then expect HTTP/2.
     let proxy = TestProxy::start(Some(proxy_pki.server_config(&[b"h2", b"http/1.1"])?)).await?;
     let identity = Identity::from_vectors("device-a")?;
     let proxy_config = manual_proxy(&format!("https://{}", proxy.host), &[])?;
@@ -868,6 +914,7 @@ async fn tunnels_through_an_https_proxy() -> anyhow::Result<()> {
 
     let heads = proxy.heads();
     assert_eq!(heads.len(), 1);
+    // oracle: spec RFC 9110 §9.3.6
     assert!(
         heads[0].starts_with(&format!("CONNECT {} HTTP/1.1\r\n", authority_address(&authority))),
         "{}",
@@ -877,6 +924,7 @@ async fn tunnels_through_an_https_proxy() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn connects_directly_to_a_host_the_proxy_excludes() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -891,6 +939,8 @@ async fn connects_directly_to_a_host_the_proxy_excludes() -> anyhow::Result<()> 
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+// oracle: reference reqwest 0.12.28 `connect_socks`, which resolves the name locally for `socks5` but not `socks5h`
 #[rstest]
 #[case::socks5("socks5://agent%40corp:p%3Ass@", Some(("agent@corp", "p:ss")), None)]
 #[case::socks5h("socks5h://", None, Some("localhost"))]
@@ -911,8 +961,6 @@ async fn tunnels_through_a_socks5_proxy_resolving_the_name_where_its_scheme_says
     authority.next_opening().await.accept().authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
-    // reqwest, which sends the agent's identity requests, resolves the name locally for `socks5` and leaves it to the
-    // proxy for `socks5h`.
     let expected = SocksRequest {
         credentials: credentials.map(|(user, password)| (user.to_owned(), password.to_owned())),
         domain: domain.map(str::to_owned),
@@ -960,6 +1008,7 @@ async fn an_unsupported_proxy_scheme_is_an_outage_without_a_connection() -> anyh
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
 #[tokio::test]
 async fn refuses_a_channel_url_without_tls() -> anyhow::Result<()> {
     let authority = TestAuthority::start(Mode::Grpc).await?;
@@ -967,7 +1016,7 @@ async fn refuses_a_channel_url_without_tls() -> anyhow::Result<()> {
     let mut url = authority.url.clone();
     url.set_scheme("http").expect("http is a valid scheme");
 
-    // The channel runs over HTTP/2 and TLS only.
+    // The channel URL is an `https` URL.
     assert!(
         client(&authority, Settings::default())?
             .connect(identity.target(&url))
@@ -975,19 +1024,20 @@ async fn refuses_a_channel_url_without_tls() -> anyhow::Result<()> {
     );
     Ok(())
 }
+
 #[test]
 fn the_default_timings_are_the_documented_ones() {
     let settings = Settings::default();
-    // crates/agent-channel-client/INTENT.md: an HTTP/2 keepalive every 30 s.
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
     assert_eq!(settings.keepalive_interval, Duration::from_secs(30));
-    // 30 s from the TCP connection to `Welcome`, like the identity HTTP client's request timeout.
+    // oracle: intent crates/agent-channel-client/INTENT.md §Handshake
     assert_eq!(settings.opening_timeout, Duration::from_secs(30));
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
 #[tokio::test]
 async fn sends_the_acknowledgements_queued_before_the_channel_is_dropped() -> anyhow::Result<()> {
-    // CONTRACT.agent-identity.md §7.3 step 7: the agent stores a config, replies `Ack`, then applies it, which may
-    // close the stream.
+    // The agent stores a config, replies `Ack`, then applies it, which may close the stream (contract §7.3, step 7).
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
     let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
@@ -1014,17 +1064,17 @@ async fn sends_the_acknowledgements_queued_before_the_channel_is_dropped() -> an
         matches!(&ack, Some(Ok(Some(message))) if message.correlation_id.as_deref() == Some(update_id.as_str())),
         "{ack:?}"
     );
-    // crates/agent-channel-client/INTENT.md: the agent then ends its side, which the authority reads as the end of the
-    // stream rather than a reset.
+    // The agent then ends its side, which the authority reads as the end of the stream rather than a reset.
     let end = stream.receive_within(WAIT).await;
     assert!(matches!(end, Some(Ok(None))), "{end:?}");
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
 #[tokio::test]
 async fn dropping_the_channel_stops_an_opening_at_once() -> anyhow::Result<()> {
-    // An opening signed with a key that a `confirm` retired draws the terminal `identity_unknown`
-    // (CONTRACT.agent-identity.md §6 step 4), so the caller's drop must end it.
+    // An opening signed with a key that a `confirm` retired draws the terminal `identity_unknown` (contract §6, step
+    // 4), so the caller's drop must end it.
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
     let channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
@@ -1036,6 +1086,7 @@ async fn dropping_the_channel_stops_an_opening_at_once() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent crates/agent-channel-client/INTENT.md §Closing
 #[tokio::test]
 async fn dropping_the_channel_stops_it_from_reopening() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1059,6 +1110,7 @@ async fn dropping_the_channel_stops_it_from_reopening() -> anyhow::Result<()> {
 
     drop(channel);
 
+    // Without the drop, the channel would reopen 500 ms after the closure, well within this wait.
     assert!(authority.opening_within(Duration::from_secs(2)).await.is_none());
     Ok(())
 }
@@ -1112,6 +1164,7 @@ async fn a_dropped_channel_stops_waiting_for_an_authority_that_keeps_its_side_op
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
 #[tokio::test]
 async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1142,6 +1195,7 @@ async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     next_closure(&mut channel).await;
     channel.ack(&old_id);
 
+    // An `Ack` replies to a message of its own stream (step 5), so the next stream carries only the new one.
     let mut second = authority.next_opening().await.accept();
     second.authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
@@ -1153,7 +1207,7 @@ async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Checks that a closure with gRPC status OK keeps its trailers and stays transient.
+/// Checks that a closure with gRPC status OK keeps its trailers and, with an unknown error code, stays transient.
 fn assert_ok_closure_with_trailers(closure: &Closure) {
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert_eq!(closure.grpc_code, Some(Code::Ok));
@@ -1161,6 +1215,9 @@ fn assert_ok_closure_with_trailers(closure: &Closure) {
     assert_eq!(closure.server_time.as_deref(), Some(SERVER_TIME));
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn reports_the_trailers_of_an_opening_refused_with_ok() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1175,6 +1232,9 @@ async fn reports_the_trailers_of_an_opening_refused_with_ok() -> anyhow::Result<
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn reports_the_trailers_of_a_stream_closed_with_ok_before_welcome() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1189,6 +1249,9 @@ async fn reports_the_trailers_of_a_stream_closed_with_ok_before_welcome() -> any
     Ok(())
 }
 
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn reports_the_trailers_of_a_stream_closed_with_ok_after_welcome() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1198,7 +1261,7 @@ async fn reports_the_trailers_of_a_stream_closed_with_ok_after_welcome() -> anyh
     stream.authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
-    // CONTRACT.agent-identity.md §7.4: a retired certificate's streams are closed with OK.
+    // A retired certificate's streams are closed with OK.
     stream.close(closing_status(Code::Ok, Some("future_code"))).await;
     assert_ok_closure_with_trailers(&next_closure(&mut channel).await.0);
     Ok(())

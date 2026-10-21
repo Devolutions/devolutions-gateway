@@ -96,10 +96,7 @@ mod tests {
         }
     }
 
-    // crates/agent-channel-client/INTENT.md: the channel reconnects "with a jittered exponential backoff from 1 s".
-    // "The backoff grows to 1 h when the response shows the path cannot carry gRPC, such as a reverse proxy that answers
-    // without HTTP/2 or gRPC, and to 5 min after network errors, server downtime, and any other transient refusal or
-    // closure of the stream".
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
     #[rstest]
     #[case::outage(
         TransientKind::Outage,
@@ -113,6 +110,7 @@ mod tests {
         assert_eq!(delays(&without_jitter(), kind, expected.len()), seconds(expected));
     }
 
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
     #[rstest]
     #[case::low(0.5, &[0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 300.0])]
     #[case::high(1.5, &[1.5, 3.0, 6.0, 12.0, 24.0, 48.0, 96.0, 192.0, 300.0, 300.0])]
@@ -127,6 +125,9 @@ mod tests {
         );
     }
 
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+    // The agent passes its `backoff_max_secs` as `max`.
     #[rstest]
     #[case::outage(TransientKind::Outage)]
     #[case::no_grpc_path(TransientKind::NoGrpcPath)]
@@ -148,6 +149,7 @@ mod tests {
         );
     }
 
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
     #[test]
     fn the_default_jitter_stays_within_half_and_one_and_a_half() {
         let draws: Vec<f64> = (0..1000).map(|_| uniform_jitter()).collect();
