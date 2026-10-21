@@ -1,7 +1,6 @@
 BeforeAll {
     $Script = Join-Path $PSScriptRoot 'check-oracle-markers.ps1'
-    # Fixtures spell a PowerShell marker through this, so the only markers this file holds are its own.
-    $H = '#'
+    # Fixtures write a PowerShell marker as "`# oracle:", which builds `# oracle:` while this file's own scan reads no marker in it.
 
     # The script annotates in GitHub Actions, and fixture violations must not annotate the pull request.
     $SavedGitHubActions = $Env:GITHUB_ACTIONS
@@ -200,7 +199,7 @@ Describe 'Marker grammar and references' {
 
     It 'Checks markers in PowerShell files' { # oracle: intent ci/check-oracle-markers.intent.md §languages
         $Repo = New-Repo
-        Set-RepoFile $Repo 'ci/a.Tests.ps1' "Describe 'd' {`n    It 'a' { $H oracle: scaffold`n    }`n}`n"
+        Set-RepoFile $Repo 'ci/a.Tests.ps1' "Describe 'd' {`n    It 'a' { `# oracle: scaffold`n    }`n}`n"
         Invoke-Git $Repo add -A
 
         $Result = Invoke-Check $Repo
@@ -445,7 +444,7 @@ Describe 'New tests' {
         @{ Name = 'xUnit theory'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Theory]`n    [InlineData(1)]`n    public void A(int x) { }`n}`n"; Line = 3; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Rust test followed by a marked helper'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = `"}`";`n}`n`nfn helper() {`n    // oracle: property round-trip`n}`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Pester test'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' {`n        1 | Should -Be 1`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
-        @{ Name = 'Pester test followed by a marked one'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' {`n    }`n`n    It 'b' {`n        1 | Should -Be 1 $H oracle: property round-trip`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'Pester test followed by a marked one'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' {`n    }`n`n    It 'b' {`n        1 | Should -Be 1 `# oracle: property round-trip`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'xUnit fact followed by a marked helper'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n    }`n`n    void Helper() { } // oracle: property round-trip`n}`n"; Line = 3; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
     ) {
         Set-RepoFile $Repo $Path $Content
@@ -458,10 +457,10 @@ Describe 'New tests' {
     }
 
     It 'Accepts a new test with its marker <Name>' -ForEach @(
-        @{ Name = 'on its It line'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' { $H oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
-        @{ Name = 'above its It'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    $H oracle: property round-trip`n    It 'a' {`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
-        @{ Name = 'on a -ForEach row'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a <N>' -ForEach @(`n        @{ N = 1 } $H oracle: property round-trip`n    ) {`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
-        @{ Name = 'in its body after -ForEach hashtables'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a <N>' -ForEach @(@{ N = 1 }, @{ N = 2 }) {`n        `$N | Should -BeGreaterThan 0 $H oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'on its It line'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' { `# oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'above its It'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    `# oracle: property round-trip`n    It 'a' {`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'on a -ForEach row'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a <N>' -ForEach @(`n        @{ N = 1 } `# oracle: property round-trip`n    ) {`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'in its body after -ForEach hashtables'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a <N>' -ForEach @(@{ N = 1 }, @{ N = 2 }) {`n        `$N | Should -BeGreaterThan 0 `# oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'above its attributes'; Path = 'src/a.rs'; Content = "// oracle: property round-trip`n#[test]`nfn a() {}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'in its body'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'on a case row'; Path = 'src/a.rs'; Content = "#[rstest]`n#[case::empty(0)] // oracle: property round-trip`nfn a(#[case] n: u8) {}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
