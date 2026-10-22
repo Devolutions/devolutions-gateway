@@ -48,7 +48,7 @@ public sealed class AgentIdentityTests
         Assert.Contains(action, AgentActions.Actions);
         Assert.Equal(Execute.deferred, action.Execute);
         Assert.False(action.Impersonate);
-        // oracle: mutant the action returns Return.ignore, so a failed enrollment no longer fails the install
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
         Assert.Equal(Return.check, action.Return);
         // HideTarget keeps the CustomActionData out of the MSI log, and WiX hides the property that carries it.
         // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
@@ -86,7 +86,7 @@ public sealed class AgentIdentityTests
         Assert.Contains(action, AgentActions.Actions);
         Assert.Equal(Execute.deferred, action.Execute);
         Assert.False(action.Impersonate);
-        // oracle: mutant the action returns Return.check, so a failed cleanup fails the uninstall
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
         Assert.Equal(Return.ignore, action.Return);
         // RemoveFiles runs after StopServices, so the stopped service holds neither the state lock nor a key.
         // oracle: mutant the cleanup runs before StopServices, while the service may hold the state lock and keys
@@ -97,17 +97,17 @@ public sealed class AgentIdentityTests
     [Theory]
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("first install with a token", true, "IDENTITY_ENROLLMENT_TOKEN=" + Token)]
-    // oracle: mutant the condition tests WIX_UPGRADE_DETECTED instead of Installed
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("major upgrade with a token", true, "WIX_UPGRADE_DETECTED={00000000-0000-0000-0000-000000000001}", "IDENTITY_ENROLLMENT_TOKEN=" + Token)]
-    // oracle: mutant the condition omits the token, so enrollment runs without one
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("first install without a token", false)]
-    // oracle: mutant the condition omits the token, so enrollment runs without one
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("major upgrade without a token", false, "WIX_UPGRADE_DETECTED={00000000-0000-0000-0000-000000000001}")]
-    // oracle: mutant the condition tests WIX_UPGRADE_DETECTED instead of Installed
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("maintenance with a token", false, "Installed=00:00:00", "IDENTITY_ENROLLMENT_TOKEN=" + Token)]
-    // oracle: mutant the condition tests WIX_UPGRADE_DETECTED instead of Installed
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("repair with a token", false, "Installed=00:00:00", "REINSTALL=ALL", "IDENTITY_ENROLLMENT_TOKEN=" + Token)]
-    // oracle: mutant the condition tests WIX_UPGRADE_DETECTED instead of Installed
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("full uninstall with a token", false, "Installed=00:00:00", "REMOVE=ALL", "IDENTITY_ENROLLMENT_TOKEN=" + Token)]
     public void EnrollmentRunsOnlyOnAnInstallOrUpgradeWithAToken(string scenario, bool expected, params string[] properties)
     {
@@ -123,7 +123,7 @@ public sealed class AgentIdentityTests
     [InlineData("old product removed by a major upgrade", false, "Installed=00:00:00", "REMOVE=ALL", "UPGRADINGPRODUCTCODE={00000000-0000-0000-0000-000000000002}")]
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("new product of a major upgrade", false, "WIX_UPGRADE_DETECTED={00000000-0000-0000-0000-000000000001}")]
-    // oracle: mutant the condition omits REMOVE="ALL", so the cleanup runs on a first install
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [InlineData("first install", false)]
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     [InlineData("repair", false, "Installed=00:00:00", "REINSTALL=ALL")]
