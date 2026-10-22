@@ -1136,7 +1136,7 @@ async fn a_new_task_that_fails_keeps_an_earlier_success_whose_log_was_not_listed
 
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
-async fn a_new_task_removes_a_log_left_unlisted_by_a_task_that_did_not_succeed() {
+async fn a_new_task_removes_a_log_left_unlisted_by_an_unknown_task() {
     let harness = Harness::new().await;
     let session_id = harness.write_session();
     let dir = harness.recording_path.join(session_id.to_string());

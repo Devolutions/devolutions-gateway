@@ -1011,7 +1011,8 @@ impl RecordingManagerTask {
         // The rename swaps the file in at once and the manifest follows, so it never lists a missing or partial file.
         match fs::rename(file, &artifact_path).await {
             Ok(()) => {}
-            // An earlier call moved it, then stopped before the manifest was written.
+            // Already moved, by an earlier call cut short before the manifest was written, or by a newer Task that listed
+            // it for the Task that made it; what is in place is listed.
             Err(error) if error.kind() == io::ErrorKind::NotFound && artifact_path.exists() => {}
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 warn!(%file, "The artifact to list is gone");
