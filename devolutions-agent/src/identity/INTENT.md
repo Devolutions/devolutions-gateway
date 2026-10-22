@@ -35,3 +35,7 @@ The agent's generic command-line and configuration modules only route to them, s
   - `extra_trusted_root`: path to a PEM file with one or more certificates added to the TLS trust store in addition to the OS roots.
   - `acl_grant_current_user` (Windows only): additionally grants the agent process's user access to pending-enrollment files and identity state, which still use a protected DACL.
     It does not concern device keys, whose access rule always grants the caller's account.
+
+## Channel
+
+- Notices from the agent channel are coalesced while the identity's runner is busy: only the pushed config with the highest revision is kept, and once it is stored the agent acknowledges it and at most 32 of the configs it superseded, so that a burst of pushes uses bounded memory; an unacknowledged superseded config is harmless, because `Hello`/`Welcome` reconciliation is authoritative (`CONTRACT.agent-identity.md` §7.3).
