@@ -27,6 +27,8 @@ struct Echo {
     progress_timeout: time::Duration,
     runs: Arc<AtomicUsize>,
     ended: Arc<Mutex<Vec<Uuid>>>,
+    /// Ends that fail before one succeeds.
+    end_failures: Arc<AtomicUsize>,
 }
 
 #[async_trait]
@@ -77,6 +79,14 @@ impl ProvisionerTask for Echo {
     }
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {
+        if self
+            .end_failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+            .is_ok()
+        {
+            anyhow::bail!("the end failed");
+        }
+
         self.ended.lock().push(record.id);
         Ok(())
     }
@@ -87,6 +97,7 @@ struct Harness {
     job_queue_rx: JobQueueReceiver,
     runs: Arc<AtomicUsize>,
     ended: Arc<Mutex<Vec<Uuid>>>,
+    end_failures: Arc<AtomicUsize>,
 }
 
 impl Harness {
@@ -112,6 +123,7 @@ impl Harness {
         let (job_queue, job_queue_rx) = JobQueueHandle::new();
         let runs = Arc::new(AtomicUsize::new(0));
         let ended = Arc::new(Mutex::new(Vec::new()));
+        let end_failures = Arc::new(AtomicUsize::new(0));
 
         let runner = ProvisionerTaskRunner::builder(store, Arc::new(job_queue))
             .register(Echo {
@@ -119,6 +131,7 @@ impl Harness {
                 progress_timeout,
                 runs: Arc::clone(&runs),
                 ended: Arc::clone(&ended),
+                end_failures: Arc::clone(&end_failures),
             })
             .build();
 
@@ -127,6 +140,7 @@ impl Harness {
             job_queue_rx,
             runs,
             ended,
+            end_failures,
         }
     }
 
@@ -272,7 +286,7 @@ struct StoredJobs(Mutex<Vec<String>>);
 
 #[async_trait]
 impl ProvisionerTaskJobQueue for StoredJobs {
-    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
+    async fn push(&self, job: ProvisionerTaskJob, _schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
         self.0.lock().push(job_queue::Job::write_json(&job)?);
         Ok(())
     }
@@ -304,6 +318,7 @@ async fn resume_queues_only_the_tasks_left_without_a_job() {
             progress_timeout: time::Duration::hours(1),
             runs: Arc::default(),
             ended: Arc::default(),
+            end_failures: Arc::default(),
         })
         .build();
     let create = |id: Uuid| runner.create::<Echo>(id, format!("target-{id}"), &EchoParams { value: 1 }, |_| Ok(()));
@@ -427,6 +442,36 @@ async fn invalid_parameters_and_unknown_kinds_fail_the_task() {
     assert_eq!(harness.runs.load(Ordering::SeqCst), 0);
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn an_end_that_fails_is_done_again_by_a_new_job_until_it_succeeds() {
+    let mut harness = Harness::new(|value| Ok(json!(value))).await;
+    let id = harness.create(1).await;
+    let mut job = harness.queued_job();
+    harness.end_failures.store(2, Ordering::SeqCst);
+
+    for _ in 0..2 {
+        job.run().await.expect("the end is left to a new job");
+
+        let JobMessage {
+            job: next,
+            schedule_for,
+        } = harness.job_queue_rx.try_recv().expect("a new job");
+        assert!(
+            schedule_for.is_some_and(|at| OffsetDateTime::now_utc() < at),
+            "it runs later"
+        );
+        assert!(harness.ended.lock().is_empty());
+        job = next;
+    }
+
+    job.run().await.expect("the end succeeds");
+
+    assert_eq!(harness.task(id).await.state, ProvisionerTaskState::Succeeded);
+    assert_eq!(*harness.ended.lock(), [id]);
+    assert!(harness.job_queue_rx.try_recv().is_err(), "no job is left");
+}
+
 // oracle: intent crates/provisioner-task/INTENT.md §Invariants
 #[tokio::test]
 async fn an_attempt_without_progress_is_cancelled_at_the_deadline() {
@@ -444,7 +489,7 @@ async fn an_attempt_without_progress_is_cancelled_at_the_deadline() {
 // oracle: intent crates/provisioner-task/INTENT.md §Invariants
 #[tokio::test]
 async fn progress_keeps_an_attempt_running_past_its_first_deadline() {
-    let mut harness = Harness::with_progress_timeout(|value| Ok(json!(value)), time::Duration::seconds(2)).await;
+    let mut harness = Harness::with_progress_timeout(|value| Ok(json!(value)), time::Duration::seconds(3)).await;
     let id = harness.create(PROGRESS).await;
 
     harness.queued_job().run().await.expect("no retry");
