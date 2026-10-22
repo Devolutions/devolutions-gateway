@@ -691,6 +691,31 @@ Describe 'New tests' {
         $Result.Output | Should -Be @("ci/escaped.Tests.ps1:2: new test has no '# oracle:' marker")
     }
 
+    It 'Counts only tests, not functions, when <Name>' -ForEach @(
+        @{ Name = 'a Rust helper becomes a test'; Before = @{ 'src/helper.rs' = "fn helper() {}`n" }; After = @{ 'src/helper.rs' = "#[test]`nfn helper() {}`n" }; Remove = @(); Expected = @("src/helper.rs:1: new test has no '// oracle:' marker") } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'a C# method becomes a test'; Before = @{ 'dotnet/H.cs' = "class H`n{`n    public void Check() { }`n}`n" }; After = @{ 'dotnet/H.cs' = "class H`n{`n    [Fact]`n    public void Check() { }`n}`n" }; Remove = @(); Expected = @("dotnet/H.cs:3: new test has no '// oracle:' marker") } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'a test replaces a deleted helper of its name'; Before = @{ 'src/helper.rs' = "fn helper() {}`n" }; After = @{ 'src/t.rs' = "#[test]`nfn helper() {}`n" }; Remove = @('src/helper.rs'); Expected = @("src/t.rs:1: new test has no '// oracle:' marker") } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'a helper joins an edited test of its name'; Before = @{}; After = @{ 'src/old.rs' = "#[tokio::test]`nasync fn old() {}`n"; 'src/h.rs' = "fn old() {}`n" }; Remove = @(); Expected = @() } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+    ) {
+        foreach ($Path in $Before.Keys) {
+            Set-RepoFile $Repo $Path $Before[$Path]
+        }
+        Invoke-Git $Repo add -A
+        Invoke-Git $Repo commit -q --allow-empty -m before
+        $CountBase = (& git -C $Repo rev-parse HEAD)
+        foreach ($Path in $Remove) {
+            Remove-Item -LiteralPath (Join-Path $Repo $Path)
+        }
+        foreach ($Path in $After.Keys) {
+            Set-RepoFile $Repo $Path $After[$Path]
+        }
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $CountBase
+
+        $Result.Output | Should -Be $Expected
+    }
+
     It 'Reports only the added one of two unmarked namesakes' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         Set-RepoFile $Repo 'src/old.rs' "#[test]`nfn old() {}`n`nmod b {`n    #[test]`n    fn old() {}`n}`n"
         Invoke-Git $Repo add -A

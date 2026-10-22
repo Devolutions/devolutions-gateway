@@ -58,17 +58,11 @@ $TestAttributePatterns = @{
     '.rs' = '#\[(?:test|tokio::test|rstest)\b'
     '.cs' = '(?:\[|,|^)\s*(?:Xunit\.)?(?:Fact|Theory)\b'
 }
-# A Rust or C# test is named by the function its attributes decorate, and a Pester test by the name its `It` gives;
-# the git forms match the same declarations.
+# A Rust or C# test is named by the function its attributes decorate, and a Pester test by the name its `It` gives.
 $DeclarationPatterns = @{
     '.rs' = '\bfn\s+(?<name>\w+)'
     '.cs' = '\b(?:void|Task|ValueTask)\s+(?<name>\w+)\s*\('
     '.ps1' = '^\s*It\s+(?:-Name\s+)?(?:''(?<name>(?:[^'']|'''')*)''|"(?<name>(?:[^"`]|`.|"")*)")'
-}
-$GitDeclarationPatterns = @{
-    '.rs' = 'fn[[:space:]]+[A-Za-z0-9_]+'
-    '.cs' = '(void|Task|ValueTask)[[:space:]]+[A-Za-z0-9_]+[[:space:]]*\('
-    '.ps1' = '^[[:space:]]*It[[:space:]]+(-Name[[:space:]]+)?(''([^'']|'''')*''|"([^"`]|`.|"")*")'
 }
 # Lines that can sit between a marker and the declaration it heads.
 $PrefixPatterns = @{
@@ -414,37 +408,6 @@ function Test-Anchors {
     }
 }
 
-# Counts the declarations of each name, per file extension, at a revision or in the working tree.
-# PowerShell command names ignore case, so `it` declares a Pester test as `It` does.
-function Get-DeclarationCounts([string] $Revision) {
-    $Counts = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::Ordinal)
-    foreach ($Extension in $GitDeclarationPatterns.Keys) {
-        $Arguments = @('grep', '-h', '-o', '-I', '-E')
-        if ($Extension -eq '.ps1') {
-            $Arguments += '-i'
-        }
-        $Arguments += @('-e', $GitDeclarationPatterns[$Extension])
-        if ($Revision) {
-            $Arguments += $Revision
-        }
-        $Output = & git -C $Root -c core.quotePath=false @Arguments -- "*$Extension"
-        if ($LASTEXITCODE -gt 1) {
-            throw "git grep failed with exit code $LASTEXITCODE"
-        }
-        foreach ($Declaration in $Output) {
-            if ($Declaration -match $DeclarationPatterns[$Extension]) {
-                $Key = "${Extension}:$($Matches.name)"
-                $Counts[$Key] = (Get-Count $Counts $Key) + 1
-            }
-        }
-    }
-    , $Counts
-}
-
-function Get-Count($Counts, [string] $Key) {
-    if ($Counts.ContainsKey($Key)) { $Counts[$Key] } else { 0 }
-}
-
 # Comments and string and character literals, which may span lines.
 # Rust block comments nest and C# ones do not; a C# interpolation hole is code that may hold its own literals and braces.
 $InterpolationHole = '\{(?>[^{}"''\\]+|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])''|\{(?<brace>)|\}(?<-brace>))*(?(brace)(?!))\}'
@@ -602,42 +565,43 @@ function Get-AddedLines([string] $File) {
     , $Added
 }
 
-# Returns the fingerprints of the tests a name declares at the base in the files the diff touches.
-function Get-BaseFingerprints([string] $Extension, [string] $Name, $Touched) {
+# Lists the tests a name declares at the base or in the working tree, found in the files whose text declares the name,
+# so a function that is no test never counts as one.
+function Get-NamedTests([string] $Extension, [string] $Name, [switch] $AtBase) {
     $Escaped = $Name -replace '([\[\]\\^$.|?*+(){}])', '\$1'
     $Pattern = switch ($Extension) {
         '.rs' { "fn[[:space:]]+$Escaped([^A-Za-z0-9_]|$)" }
         '.cs' { "(void|Task|ValueTask)[[:space:]]+$Escaped[[:space:]]*\(" }
         '.ps1' { "It[[:space:]]+(-Name[[:space:]]+)?('$Escaped'|`"$Escaped`")" }
     }
-    $Case = if ($Extension -eq '.ps1') { '-i' } else { '--no-ignore-case' }
-    $Fingerprints = [System.Collections.Generic.List[string]]::new()
-    foreach ($Entry in @(& git -C $Root -c core.quotePath=false grep -l -I -E $Case -e $Pattern $Base -- "*$Extension")) {
-        $File = $Entry.Substring($Base.Length + 1)
-        if (-not $Touched.Contains($File)) {
-            continue
-        }
-        $Lines = @(Invoke-Git show "${Base}:$File")
-        foreach ($Test in @(Get-FileTests $File $Lines)) {
-            if ($Test.Name -ceq $Name) {
-                $Fingerprints.Add($Test.Fingerprint)
-            }
-        }
+    $Arguments = @('grep', '-l', '-I', '-E', $(if ($Extension -eq '.ps1') { '-i' } else { '--no-ignore-case' }), '-e', $Pattern)
+    if ($AtBase) {
+        $Arguments += $Base
     }
-    , $Fingerprints
+    $Files = @(& git -C $Root -c core.quotePath=false @Arguments -- "*$Extension")
+    if ($LASTEXITCODE -gt 1) {
+        throw "git grep failed with exit code $LASTEXITCODE"
+    }
+    foreach ($Entry in $Files) {
+        $File, $Lines = if ($AtBase) {
+            $Path = $Entry.Substring($Base.Length + 1)
+            $Path, @(Invoke-Git show "${Base}:$Path")
+        } else {
+            $Entry, @(Get-Content -LiteralPath (Join-Path $Root $Entry))
+        }
+        Get-FileTests $File @($Lines) | Where-Object { $_.Name -ceq $Name }
+    }
 }
 
 # A test the diff adds is new unless it exactly matches, marker included, a base occurrence of its name that the diff moved away,
 # and each new test needs its own marker. When the check cannot tell a new test from an edited or moved one, it counts it as new,
-# so the doubt costs a marker rather than letting an unmarked test through; a name declared no more often than at the base gains no test.
+# so the doubt costs a marker rather than letting an unmarked test through; a name that names no more tests than at the base gains none.
 function Test-NewTests {
     $ChangedFiles = @(Invoke-Git diff --name-only --diff-filter=AMR $Base -- '*.rs' '*.cs' '*.ps1')
     if ($ChangedFiles.Count -eq 0) {
         return
     }
     $Touched = [System.Collections.Generic.HashSet[string]]::new([string[]] @(Invoke-Git diff --name-only --no-renames $Base -- '*.rs' '*.cs' '*.ps1'))
-    $Before = Get-DeclarationCounts $Base
-    $After = Get-DeclarationCounts
 
     $Added = [System.Collections.Generic.List[object]]::new()
     $Kept = [System.Collections.Generic.List[object]]::new()
@@ -653,7 +617,7 @@ function Test-NewTests {
         }
     }
 
-    # Names compare ordinally, as the declaration counts do.
+    # Names compare ordinally, as the test counts do.
     foreach ($Group in $Added | Group-Object -CaseSensitive { "$([System.IO.Path]::GetExtension($_.File)):$($_.Name)" }) {
         $Extension = [System.IO.Path]::GetExtension($Group.Group[0].File)
         $Name = $Group.Group[0].Name
@@ -662,14 +626,14 @@ function Test-NewTests {
             # A test whose name cannot be found counts as new.
             $New.AddRange(@($Group.Group))
         } else {
-            $Key = "${Extension}:$Name"
-            $Gain = (Get-Count $After $Key) - (Get-Count $Before $Key)
+            $Before = @(Get-NamedTests $Extension $Name -AtBase)
+            $Gain = @(Get-NamedTests $Extension $Name).Count - $Before.Count
             if ($Gain -le 0) {
                 continue
             }
             # The tests added beyond the gain may be moves, each from a base occurrence no kept test still holds.
             $Moves = $Group.Count - $Gain
-            $Vacated = if ($Moves -gt 0) { Get-BaseFingerprints $Extension $Name $Touched }
+            $Vacated = [System.Collections.Generic.List[string]]::new([string[]] @($Before | Where-Object { $Touched.Contains($_.File) } | ForEach-Object { $_.Fingerprint }))
             if ($Moves -gt 0) {
                 foreach ($Test in $Kept | Where-Object { $_.Name -ceq $Name -and [System.IO.Path]::GetExtension($_.File) -eq $Extension }) {
                     $Vacated.Remove($Test.Fingerprint) | Out-Null
