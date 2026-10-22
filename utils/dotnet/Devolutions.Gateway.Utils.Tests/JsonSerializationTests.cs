@@ -230,6 +230,7 @@ public class JsonSerializationTests
         Assert.Equal(EXPECTED, result);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     [Fact]
     public void ScopeClaimsRecordingAiAnalysisStart()
     {
@@ -240,6 +241,7 @@ public class JsonSerializationTests
         Assert.Equal(EXPECTED, result);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     [Fact]
     public void ScopeClaimsRecordingAiAnalysisRead()
     {
