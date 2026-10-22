@@ -11,7 +11,9 @@ namespace Devolutions.AgentIdentity;
 /// Only <see cref="Validate"/> and the request body parsers create instances,
 /// so an instance always holds an uncompressed P-256 key that signed its request.
 /// The request's subject, attributes and extensions are ignored and not kept,
-/// since an identity is never derived from claims in a CSR.
+/// since an identity is never derived from claims in a CSR,
+/// so the subject and the attributes need only be BER elements of their type;
+/// the rest of the request is DER, as CONTRACT.agent-identity.md §1 requires of a CSR.
 /// </remarks>
 public sealed class CertificateSigningRequest
 {
@@ -49,15 +51,16 @@ public sealed class CertificateSigningRequest
     public ReadOnlyMemory<byte> SubjectPublicKeyInfoSha256 { get; }
 
     /// <summary>
-    /// Validates a DER-encoded PKCS #10 certificate signing request (RFC 2986).
+    /// Validates a PKCS #10 certificate signing request (RFC 2986).
     /// </summary>
     /// <remarks>
-    /// A valid request is DER without trailing bytes and has version 0.
+    /// A valid request has version 0 and no trailing bytes, and is DER except for the subject and the attributes,
+    /// which the server ignores: each need only be a BER element of its type, a SEQUENCE and a constructed <c>[0]</c>.
     /// Its key is <c>id-ecPublicKey</c> on the named curve P-256, as an uncompressed point on the curve (RFC 5480).
     /// Its signature algorithm is <c>ecdsa-with-SHA256</c> without parameters (RFC 5758),
     /// and its signature verifies under its key over the exact bytes of its <c>certificationRequestInfo</c>.
     /// </remarks>
-    /// <param name="der">The DER encoding of the request.</param>
+    /// <param name="der">The encoding of the request, DER except for its subject and attributes.</param>
     public static CsrValidationResult Validate(ReadOnlySpan<byte> der)
     {
         try
@@ -83,24 +86,31 @@ public sealed class CertificateSigningRequest
         }
 
         ReadOnlyMemory<byte> requestInfo = request.PeekEncodedValue();
-        AsnReader info = request.ReadSequence();
+        ReadOnlyMemory<byte> fields = request.PeekContentBytes();
+        _ = request.ReadSequence();
         AsnReader signatureAlgorithm = request.ReadSequence();
         byte[] signature = request.ReadBitString(out int signatureUnusedBits);
         request.ThrowIfNotEmpty();
 
-        if (!info.TryReadInt32(out int version) || version != 0)
+        if (!AsnDecoder.TryReadInt32(fields.Span, AsnEncodingRules.DER, out int version, out int length) || version != 0)
         {
             return CsrValidationResult.Failure("The CSR version is not 0.");
         }
 
-        // The subject and the attributes are read only as DER elements of their type, and never parsed,
-        // because the server ignores them; the self-signature still covers their bytes.
-        _ = info.ReadSequence();
-        ReadOnlyMemory<byte> subjectPublicKeyInfo = info.PeekEncodedValue();
-        AsnReader subjectPublicKeyInfoReader = info.ReadSequence();
-        _ = info.ReadSetOf(skipSortOrderValidation: true, AttributesTag);
-        info.ThrowIfNotEmpty();
+        // The subject and the attributes are read only as BER elements of their type, and never parsed,
+        // because nothing the server decides depends on them; the self-signature still covers their bytes.
+        fields = fields[length..];
+        AsnDecoder.ReadSequence(fields.Span, AsnEncodingRules.BER, out _, out _, out length);
 
+        fields = fields[length..];
+        AsnDecoder.ReadSequence(fields.Span, AsnEncodingRules.DER, out _, out _, out length);
+        ReadOnlyMemory<byte> subjectPublicKeyInfo = fields[..length];
+
+        AsnReader attributes = new(fields[length..], AsnEncodingRules.BER);
+        _ = attributes.ReadSetOf(AttributesTag);
+        attributes.ThrowIfNotEmpty();
+
+        AsnReader subjectPublicKeyInfoReader = new AsnReader(subjectPublicKeyInfo, AsnEncodingRules.DER).ReadSequence();
         if (ReadP256Point(subjectPublicKeyInfoReader, out ECPoint point) is { } keyFailure)
         {
             return CsrValidationResult.Failure(keyFailure);
