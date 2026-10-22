@@ -8,3 +8,4 @@ When connection is established with request of recordings for the session, if re
 # Artifacts
 Artifacts are files that are not recordings, currently only have `ai-analysis` with combination to `slog` file type.
 Currently, we do not have an api endpoint to push artifacts, but we will have one in the future.
+Gateway replaces the manifest in one step and never rewrites it in place, so neither a reader nor a crash ever leaves half of it.

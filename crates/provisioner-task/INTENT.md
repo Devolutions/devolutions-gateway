@@ -13,7 +13,7 @@ Only these transitions exist:
 - `Running` -> `Succeeded`
 - `Running` -> `Failed`
 
-Each Task has a deadline counted from when Gateway receives it.
+Each Task has a deadline. While the Task runs, its deadline may move forward each time it makes progress.
 An unfinished Task past its deadline is failed, so a lost job can't block its target forever.
 
 # Tasks and jobs
