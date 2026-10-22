@@ -25,7 +25,7 @@ The mock implements the contract's agent-facing operations and channel independe
   1. the management API;
   2. the agent's files;
   3. logs, as a last resort.
-- Tests that need mock fault injection are skipped when the target is DVLS.
+- Tests that need mock fault injection are N/A when the target is DVLS, as tests its module declares unsupported.
   A run that skips a test for a missing fixture or privilege fails as incomplete unless `--allow-incomplete` is passed, so a partial run never reports success by default.
   N/A is reserved for a test that does not apply to the platform, or that the authority's module declares unsupported, such as an expiry test against an authority that cannot issue short-lived certificates.
 - The `testsuite` crate builds the mock and the tester, runs the mock, runs the tester against it, and requires every test to pass.
