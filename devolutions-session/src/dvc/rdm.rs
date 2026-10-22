@@ -416,6 +416,38 @@ impl RdmMessageProcessor {
         Ok(NowMessage::Rdm(NowRdmMessage::Capabilities(response)))
     }
 
+    /// Builds the `NOW_RDM_CAPABILITIES` reply that reports RDM as unavailable.
+    ///
+    /// Capability responses carry no request id, so the client matches them to requests by send order.
+    /// A request left unanswered would shift every later response; when regular processing fails, the agent answers
+    /// with this reply instead.
+    /// The timestamp is the current Unix time, clamped to 0 when the system clock predates the epoch.
+    pub fn unavailable_capabilities_response() -> anyhow::Result<NowMessage<'static>> {
+        let server_timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_secs());
+
+        let response = NowRdmCapabilitiesMsg::new(server_timestamp, String::new())
+            .context("create RDM unavailable capabilities response")?;
+
+        Ok(NowMessage::Rdm(NowRdmMessage::Capabilities(response)))
+    }
+
+    /// Turns the outcome of [`Self::process_capabilities`] into the reply to send.
+    ///
+    /// A processing failure is answered with [`Self::unavailable_capabilities_response`].
+    /// The returned error, raised only when even that reply cannot be built, is meant to end the channel:
+    /// it must never stay open with the request unanswered.
+    pub fn capabilities_reply(processed: anyhow::Result<NowMessage<'static>>) -> anyhow::Result<NowMessage<'static>> {
+        match processed {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                error!(%error, "Failed to process RDM capabilities message; answering with RDM unavailable");
+                Self::unavailable_capabilities_response()
+            }
+        }
+    }
+
     /// Process RDM app start message:
     /// - If RDM is already connected and ready, send immediate READY notification.
     /// - If RDM connection is in progress, ignore duplicate app start.
@@ -886,4 +918,53 @@ async fn send_rdm_app_notify(
     let message = NowRdmAppNotifyMsg::new(state, reason);
     dvc_tx.send(NowMessage::Rdm(NowRdmMessage::AppNotify(message))).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use now_proto_pdu::{NowMessage, NowRdmCapabilitiesMsg, NowRdmMessage};
+
+    use super::RdmMessageProcessor;
+
+    fn expect_capabilities(message: NowMessage<'static>) -> NowRdmCapabilitiesMsg<'static> {
+        let NowMessage::Rdm(NowRdmMessage::Capabilities(caps)) = message else {
+            panic!("expected a NOW_RDM_CAPABILITIES reply, got {message:?}");
+        };
+
+        caps
+    }
+
+    /// The reply sent when capabilities processing fails must report RDM as unavailable, so the
+    /// client handles the failure through its regular "RDM unavailable" path.
+    #[test]
+    fn unavailable_capabilities_response_has_app_unavailable() {
+        let response = RdmMessageProcessor::unavailable_capabilities_response().expect("fallback reply is buildable");
+        let caps = expect_capabilities(response);
+
+        assert!(!caps.is_app_available());
+        assert_eq!(caps.rdm_version(), "");
+        assert_eq!(caps.version_extra(), "");
+    }
+
+    /// A failed capabilities processing still yields a reply, so the request is never left
+    /// unanswered while the channel stays open.
+    #[test]
+    fn failed_capabilities_processing_is_answered_with_app_unavailable() {
+        let reply = RdmMessageProcessor::capabilities_reply(Err(anyhow::anyhow!("system clock predates the epoch")))
+            .expect("failure is answered rather than propagated");
+
+        assert!(!expect_capabilities(reply).is_app_available());
+    }
+
+    #[test]
+    fn successful_capabilities_processing_is_passed_through() {
+        let processed = NowRdmCapabilitiesMsg::new(42, "2026.1.0")
+            .expect("valid capabilities")
+            .with_app_available();
+        let expected = NowMessage::Rdm(NowRdmMessage::Capabilities(processed));
+
+        let reply = RdmMessageProcessor::capabilities_reply(Ok(expected.clone())).expect("success is passed through");
+
+        assert_eq!(reply, expected);
+    }
 }

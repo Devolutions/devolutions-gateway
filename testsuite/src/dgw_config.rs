@@ -105,8 +105,7 @@ fn find_unused_port() -> u16 {
 }
 
 fn find_unused_udp_port() -> u16 {
-    std::net::UdpSocket::bind((std::net::Ipv6Addr::UNSPECIFIED, 0))
-        .or_else(|_| std::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, 0)))
+    std::net::UdpSocket::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
         .unwrap()

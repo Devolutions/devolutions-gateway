@@ -197,6 +197,52 @@ jobs:
         shell: pwsh
         run: sccache --show-stats
 
+  oracle-markers:
+    name: oracle markers
+    needs: [preflight]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          # A pull request's merge commit and its first parent, the base the check compares against.
+          fetch-depth: 2
+
+      - name: Check oracle markers
+        env:
+          # Reads the files that markers pin in other repositories; a pin the token cannot read gets only a syntax check.
+          GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN || github.token }}
+        run: |
+          $Base = if ('${{ github.event_name }}' -Eq 'pull_request' -And -Not '${{ inputs.ref }}') { 'HEAD^1' }
+          ./ci/check-oracle-markers.ps1 -Base $Base
+        shell: pwsh
+
+  oracle-markers-tests:
+    name: oracle marker check tests
+    needs: [preflight]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Install Pester
+        run: Install-Module Pester -RequiredVersion 5.6.0 -Force
+        shell: pwsh
+
+      - name: Pester tests
+        run: |
+          Import-Module Pester -RequiredVersion 5.6.0
+          $Result = Invoke-Pester ci/check-oracle-markers.Tests.ps1 -PassThru
+          if ($Result.Result -Ne 'Passed') {
+            exit 1
+          }
+        shell: pwsh
+
   tests:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
@@ -343,8 +389,19 @@ jobs:
       - name: Configure Windows runner
         if: ${{ runner.os == 'Windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          choco install nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -530,6 +587,10 @@ jobs:
 
       - name: Run session-recording-log tests
         run: pnpm --filter @devolutions/session-recording-log test
+        working-directory: webapp
+
+      - name: Run multi-video-player tests
+        run: pnpm --filter @devolutions/multi-video-player test --runInBand
         working-directory: webapp
 
       - name: Upload gateway-ui artifact
@@ -723,15 +784,26 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
+          Install-ChocoPackage wixtoolset --version 3.14.0 --allow-downgrade --force
 
           # WiX is installed on Windows runners but not in the PATH
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          choco install nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1005,9 +1077,20 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          Install-ChocoPackage wixtoolset --version 3.14.0 --allow-downgrade --force
 
           # Devolutions PEDM needs MakeAppx.exe
           Write-Output "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1016,7 +1099,7 @@ jobs:
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          choco install nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1347,7 +1430,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
+          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
@@ -1403,7 +1486,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
+          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
@@ -1486,7 +1569,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, oracle-markers, oracle-markers-tests, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:

@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
     }),
     // Copy video.js fonts to output directory and package.json for publishing
     viteStaticCopy({
+      hook: 'closeBundle',
       targets: [
         {
           src: './node_modules/video.js/dist/font/**/*',
@@ -18,6 +19,10 @@ export default defineConfig(({ mode }) => {
           src: './package.dist.json',
           dest: './',
           rename: 'package.json',
+        },
+        {
+          src: './README.md',
+          dest: './',
         },
       ],
     }),

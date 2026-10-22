@@ -18,14 +18,8 @@ Install-Module JiraPS -Scope CurrentUser
 
 ### Atlassian API token
 
-Generate one at <https://id.atlassian.com/manage-profile/security/api-tokens>.
-
-The token must have the following Jira scopes:
-
-| Scope | Why |
-|---|---|
-| `read:jira-work` | Read issues and transitions |
-| `write:jira-work` | Create issues, add links, perform transitions |
+Generate one at <https://id.atlassian.com/manage-profile/security/api-tokens> with **Create API token**, not **Create API token with scopes**.
+The script calls `JIRA_URL` directly, and Jira rejects scoped tokens there with `Client must be authenticated to access this resource.`
 
 ### Environment variables
 

@@ -5,6 +5,7 @@ import './custom-time-tooltip';
 import { Options, Percentage, Status } from '../util';
 import CustomPlayProgressBar from './custom-play-progress-bar';
 import CustomTimeTooltip from './custom-time-tooltip';
+
 const Slider = videojs.getComponent('Slider');
 
 export class SingleVideoSeekBar extends Slider {
@@ -44,7 +45,11 @@ export class SingleVideoSeekBar extends Slider {
       return;
     }
 
-    this.progress.userSeek(this.getPositionPercentage(event));
+    this.progress.userSeek(this.getPositionPercentage(event)).catch((error: Error) => {
+      if (error.name !== 'AbortError') {
+        console.error('Seek failed:', error);
+      }
+    });
   }
 
   handleMouseEntre() {

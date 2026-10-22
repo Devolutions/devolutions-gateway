@@ -26,6 +26,29 @@ class FakeSourceBuffer extends EventTarget {
 }
 
 describe('ReactiveSourceBuffer', () => {
+  it('rejects pending and queued appends on disposal instead of waiting for updateend', async () => {
+    const sourceBuffer = new FakeSourceBuffer();
+    const mediaSource = { addSourceBuffer: () => sourceBuffer } as unknown as MediaSource;
+    const reactive = new ReactiveSourceBuffer(mediaSource, 'vp8');
+    const first = expect(reactive.appendBuffer(new Uint8Array([1]))).rejects.toMatchObject({ name: 'AbortError' });
+    const queued = expect(reactive.appendBuffer(new Uint8Array([2]))).rejects.toMatchObject({ name: 'AbortError' });
+    await Promise.resolve();
+    reactive.dispose();
+    await first;
+    await queued;
+    expect(sourceBuffer.appended).toEqual([new Uint8Array([1])]);
+  });
+
+  it('rejects a native SourceBuffer abort explicitly', async () => {
+    const sourceBuffer = new FakeSourceBuffer();
+    const mediaSource = { addSourceBuffer: () => sourceBuffer } as unknown as MediaSource;
+    const reactive = new ReactiveSourceBuffer(mediaSource, 'vp8');
+    const appended = expect(reactive.appendBuffer(new Uint8Array([1]))).rejects.toMatchObject({ name: 'AbortError' });
+    await Promise.resolve();
+    sourceBuffer.dispatchEvent(new Event('abort'));
+    await appended;
+  });
+
   it('serializes append operations', async () => {
     const sourceBuffer = new FakeSourceBuffer();
     const mediaSource = {
