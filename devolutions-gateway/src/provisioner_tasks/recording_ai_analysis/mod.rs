@@ -291,41 +291,52 @@ impl RecordingAiAnalysis {
     }
 }
 
+const UNLISTED_LOG_PREFIX: &str = ".ai-analysis-";
+
+const UNLISTED_LOG_SUFFIX: &str = ".slog";
+
 /// Where a Task leaves its log until its success is recorded: in the session folder, but not in the manifest, under a
 /// name of its own, so the end of another Task leaves it alone.
 fn unlisted_log_path(manifest_path: &Utf8Path, task_id: Uuid) -> Utf8PathBuf {
-    manifest_path.with_file_name(format!(".ai-analysis-{task_id}.slog"))
+    manifest_path.with_file_name(format!("{UNLISTED_LOG_PREFIX}{task_id}{UNLISTED_LOG_SUFFIX}"))
 }
 
-/// Removes the logs that earlier Tasks of the session left unlisted, so the late end of an earlier Task finds nothing to
-/// list over a newer analysis.
-async fn remove_unlisted_logs(manifest_path: &Utf8Path) -> std::io::Result<()> {
+/// The logs that Tasks of the session left unlisted, each with the ID of its Task.
+async fn unlisted_logs(manifest_path: &Utf8Path) -> std::io::Result<Vec<(Uuid, Utf8PathBuf)>> {
     let Some(dir) = manifest_path.parent() else {
-        return Ok(());
+        return Ok(Vec::new());
     };
     let mut entries = match tokio::fs::read_dir(dir).await {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
+    let mut logs = Vec::new();
 
     while let Some(entry) = entries.next_entry().await? {
         let name = entry.file_name();
-        let is_unlisted_log = name
-            .to_str()
-            .and_then(|name| name.strip_prefix(".ai-analysis-"))
-            .and_then(|name| name.strip_suffix(".slog"))
-            .is_some_and(|task_id| Uuid::parse_str(task_id).is_ok());
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let task_id = name
+            .strip_prefix(UNLISTED_LOG_PREFIX)
+            .and_then(|name| name.strip_suffix(UNLISTED_LOG_SUFFIX))
+            .and_then(|task_id| Uuid::parse_str(task_id).ok());
 
-        if is_unlisted_log {
-            match tokio::fs::remove_file(entry.path()).await {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
-                _ => {}
-            }
+        if let Some(task_id) = task_id {
+            logs.push((task_id, dir.join(name)));
         }
     }
 
-    Ok(())
+    Ok(logs)
+}
+
+/// Removes `path`, unless it is already gone.
+async fn remove_if_exists(path: &Utf8Path) -> std::io::Result<()> {
+    match tokio::fs::remove_file(path).await {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
+    }
 }
 
 #[async_trait]
@@ -388,10 +399,12 @@ impl ProvisionerTask for RecordingAiAnalysis {
                     AttemptError::Permanent(Permanent::Internal)
                 })?;
 
-            remove_unlisted_logs(&manifest_path).await.map_err(|error| {
-                error!(task.id = %attempt.task_id, %error, "Failed to remove the earlier unlisted AI analysis logs");
-                AttemptError::Permanent(Permanent::Internal)
-            })?;
+            self.end_unlisted_logs(attempt, session_id, &manifest_path)
+                .await
+                .map_err(|error| {
+                    error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to end the logs earlier AI analyses left unlisted");
+                    AttemptError::Permanent(Permanent::Internal)
+                })?;
         }
 
         let secret = self.secrets.get(SecretId(attempt.task_id)).map_err(|error| {
@@ -438,12 +451,9 @@ impl ProvisionerTask for RecordingAiAnalysis {
                 .await
                 .context("list the AI analysis log in the session")?;
         } else {
-            match tokio::fs::remove_file(&log_path).await {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                    return Err(anyhow::Error::new(error).context(format!("remove {log_path}")));
-                }
-                _ => {}
-            }
+            remove_if_exists(&log_path)
+                .await
+                .with_context(|| format!("remove {log_path}"))?;
         }
 
         recording_analysis::discard(&manifest_path, Some(&record.id.to_string()))
@@ -568,6 +578,36 @@ impl RecordingAiAnalysis {
 }
 
 impl RecordingAiAnalysis {
+    /// Does what the end of an earlier Task does to the log it left unlisted, since that end may still be due, so a
+    /// newer Task never loses an analysis whose success is recorded: the log of a succeeded Task is listed, so it stays
+    /// until a newer analysis succeeds, and the log of a failed or unknown one is removed.
+    async fn end_unlisted_logs(
+        &self,
+        attempt: &Attempt,
+        session_id: Uuid,
+        manifest_path: &Utf8Path,
+    ) -> anyhow::Result<()> {
+        for (task_id, log_path) in unlisted_logs(manifest_path).await.context("list the unlisted logs")? {
+            match attempt
+                .state_of(task_id)
+                .await
+                .context("read the Task of an unlisted log")?
+            {
+                Some(ProvisionerTaskState::Succeeded) => self
+                    .recordings
+                    .replace_artifacts(session_id, ArtifactKind::AiAnalysis, &log_path)
+                    .await
+                    .with_context(|| format!("list {log_path}"))?,
+                Some(ProvisionerTaskState::Failed) | None => remove_if_exists(&log_path)
+                    .await
+                    .with_context(|| format!("remove {log_path}"))?,
+                Some(ProvisionerTaskState::Queued | ProvisionerTaskState::Running) => {}
+            }
+        }
+
+        Ok(())
+    }
+
     /// Waits until no remux job of the session is stored, since a remux replaces a video that would be read.
     async fn wait_for_remux(&self, attempt: &Attempt, dir: &Utf8Path) -> Result<(), AttemptError> {
         loop {
