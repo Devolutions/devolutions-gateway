@@ -11,6 +11,7 @@ use agent_identity_httpsig::{ChannelLayer, OpeningNonce, RequestSigner};
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::metadata::MetadataMap;
 use tonic::{Code, Status, Streaming};
@@ -42,7 +43,7 @@ pub(crate) async fn run(
             return;
         };
         let reopen_after = match closure.class {
-            ClosureClass::Transient(kind) => Some(backoff.next_delay(&shared.settings.backoff, kind)),
+            ClosureClass::Transient(kind) => Some(backoff.next_delay(&shared.settings.backoff, kind, Instant::now())),
             ClosureClass::Terminal(_) | ClosureClass::CertificateExpired => None,
         };
         if events.send(Event::Closed { closure, reopen_after }).await.is_err() {
@@ -73,7 +74,7 @@ async fn stream_once(
         },
         () = dropped(acks) => return None,
     };
-    backoff.reset();
+    backoff.authenticated(Instant::now());
     // Acknowledgements sent before this stream authenticated answer an earlier stream's messages.
     while acks.try_recv().is_ok() {}
     events.send(Event::Authenticated).await.ok()?;

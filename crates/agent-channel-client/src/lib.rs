@@ -23,7 +23,7 @@ mod closure;
 mod stream;
 mod transport;
 
-pub use crate::backoff::{Backoff, uniform_jitter};
+pub use crate::backoff::{Backoff, uniform_jitter, uniform_spread};
 pub use crate::closure::{Closure, ClosureClass, TerminalCode, TransientKind};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);

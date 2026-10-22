@@ -953,16 +953,73 @@ async fn reopens_after_each_transient_closure_once_its_growing_delay_has_passed(
         opening = authority.next_opening().await;
         assert!(delay <= refused.elapsed());
     }
+    Ok(())
+}
 
-    // An authenticated stream starts the backoff from 1 s again.
-    let mut stream = opening.accept();
-    stream.authenticate().await;
+/// Settings that reopen quickly, count a stream as long-lived after `stable_after`, and draw a spread of 40 ms.
+fn quick_reopening_stable_after(stable_after: Duration) -> Settings {
+    let settings = quick_reopening();
+    Settings {
+        backoff: Backoff {
+            stable_after,
+            spread: Arc::new(|| Duration::from_millis(40)),
+            ..settings.backoff
+        },
+        ..settings
+    }
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+#[tokio::test]
+async fn keeps_backing_off_after_a_stream_that_drops_soon_after_authenticating() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let settings = quick_reopening_stable_after(Duration::from_secs(1));
+    let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
+    authority
+        .next_opening()
+        .await
+        .refuse(closing_status(Code::Unavailable, Some("unavailable")));
+    assert_eq!(next_closure(&mut channel).await.1, Some(Duration::from_micros(15_625)));
+
+    // The opening outlasts the stable time, which counts only from `Welcome`.
+    let mut stream = authority.next_opening().await.accept();
+    stream.challenge(&[7; 32]).await;
+    let hello = stream.receive().await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    stream
+        .send(
+            &new_id(),
+            Some(&hello.id),
+            Payload::Welcome(Welcome { server_time: None }),
+        )
+        .await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
     stream
         .close(closing_status(Code::Unavailable, Some("unavailable")))
         .await;
-    let (_, reopen_after) = next_closure(&mut channel).await;
-    assert_eq!(reopen_after, Some(Duration::from_micros(15_625)));
+
+    assert_eq!(next_closure(&mut channel).await.1, Some(Duration::from_micros(31_250)));
+    Ok(())
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+#[tokio::test]
+async fn spreads_the_reconnect_after_a_stream_that_stayed_authenticated() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let settings = quick_reopening_stable_after(Duration::from_millis(300));
+    let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    stream
+        .close(closing_status(Code::Unavailable, Some("unavailable")))
+        .await;
+
+    assert_eq!(next_closure(&mut channel).await.1, Some(Duration::from_millis(40)));
     authority.next_opening().await;
     Ok(())
 }
