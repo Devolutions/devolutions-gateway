@@ -464,6 +464,30 @@ public class ChannelHandshakeTests
         Assert.All(handshakeLookups, thumbprint => Assert.Equal(DeviceA.Thumbprint, thumbprint));
     }
 
+    // CONTRACT.agent-identity.md §7.4: revocation closes live streams, and a stream awaiting its Hello is checked for
+    // revocation and deletion when the Hello arrives or the wait times out.
+    // The host adds the stream to the live streams that its revocation and deletion paths close before it ends the
+    // handshake, so a revocation that commits before the handshake's registry read fails the handshake,
+    // and one that commits after that read finds the stream.
+    // No revocation slips between the two only if that read happens within the call, after the host added the stream,
+    // rather than at the opening.
+    // The library cannot check that the host adds the stream, so the test pins only the library's side of the order.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    [Theory]
+    [InlineData("a valid Hello")]
+    [InlineData("no Hello in time")]
+    [InlineData("the first message could not be decoded")]
+    public async Task HandshakeReadsTheRegistryAfterTheHostAddsTheStream(string end)
+    {
+        LiveStreamRecordingRegistry registry = new();
+        ChannelOpening opening = await OpenAsync(registry);
+        registry.StreamAdded = true;
+
+        await HandshakeEnds[end](opening);
+
+        Assert.Contains(true, registry.StreamAddedAtLookups);
+    }
+
     // The registry answers a thumbprint with the certificate issued under it, for its one identity,
     // so another answer is a host bug, which must fail as a server error rather than draw an outcome the agent acts on.
     // CONTRACT.agent-identity.md §5.4: an unexpected server failure is the transient `500 unavailable`,
@@ -982,6 +1006,27 @@ public class ChannelHandshakeTests
         return (opening, VectorChannel.HelloMessage(opening, proof));
     }
 
+    // Opens the vector stream as VectorChannel.OpenAsync does, but over the given registry.
+    private static async Task<ChannelOpening> OpenAsync(ICertificateRegistry registry)
+    {
+        ChannelProofVectors vectors = TestVectors.Instance.ChannelProof;
+        HttpSignatureCaseVector connect = TestVectors.Instance.HttpSignature.Case(vectors.ConnectCase);
+        RequestAuthenticator authenticator = new(
+            registry,
+            new RecordingNonceStore(),
+            new FixedTimeProvider(VectorChannel.OpeningTime),
+            new ScriptedRandomNumberGenerator(vectors.Challenge));
+
+        ChannelOpeningResult result = await authenticator.AuthenticateChannelOpeningAsync(
+            connect.Method,
+            VectorAuthority.Lines(connect.Headers.SignatureInput),
+            VectorAuthority.Lines(connect.Headers.Signature));
+
+        // oracle: reference docs/agent-identity/test-vectors.json channel_proof.connect_case
+        Assert.True(result.Succeeded, result.FailureDetail);
+        return result.Opening;
+    }
+
     private static string NewId()
     {
         return Guid.NewGuid().ToString("D");
@@ -1024,4 +1069,23 @@ public class ChannelHandshakeTests
 
     // A scenario that fails the handshake, with the code and the gRPC status that close the stream.
     private sealed record Failure(Scenario Scenario, AgentIdentityErrorCode Code, StatusCode Status);
+
+    // The registry of the vector authority, which records for each lookup whether the host had already added the
+    // stream to its live streams.
+    private sealed class LiveStreamRecordingRegistry : ICertificateRegistry
+    {
+        private readonly FakeCertificateRegistry _registry = new VectorAuthority().Registry;
+
+        public bool StreamAdded { get; set; }
+
+        public List<bool> StreamAddedAtLookups { get; } = [];
+
+        public ValueTask<RegisteredCertificate?> FindByThumbprintAsync(
+            string thumbprint,
+            CancellationToken cancellationToken)
+        {
+            StreamAddedAtLookups.Add(StreamAdded);
+            return _registry.FindByThumbprintAsync(thumbprint, cancellationToken);
+        }
+    }
 }
