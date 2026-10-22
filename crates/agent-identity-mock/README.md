@@ -19,12 +19,12 @@ agent-identity-mock --listen 127.0.0.1:0 --path-prefix /mock --app-key <key> --a
 | `--token-lifetime-secs <secs>` | How long a `tokenId` lasts after its login; `420` (DVLS's 7 minutes) by default. |
 | `--state-dir <dir>` | Where `ready.json` and the TLS CA PEM are written; created if missing. |
 
-On startup the server generates a TLS CA and a server certificate for `localhost`/`127.0.0.1` and serves HTTPS on a single port with ALPN `h2` and `http/1.1` (REST and gRPC share the port).
+On startup the server generates a TLS CA and a server certificate for `localhost`, `127.0.0.1` and the listen address, and serves HTTPS on a single port with ALPN `h2` and `http/1.1` (REST and gRPC share the port).
 Like a DVLS that has never used Agent Identity, it holds no root until the first enrollment token or `__mock__/reset` creates one.
 It then writes `<state-dir>/ready.json` atomically (temp file + rename):
 
 ```json
-{ "base_url": "https://127.0.0.1:<port>/mock", "tls_ca_pem": "<abs path to CA PEM>", "authority_id": "<uuid>" }
+{ "base_url": "https://<listen address>:<port>/mock", "tls_ca_pem": "<abs path to CA PEM>", "authority_id": "<uuid>" }
 ```
 
 `tls_ca_pem` is what an agent trusts through `__debug__.identity.extra_trusted_root`.

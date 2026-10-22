@@ -1,7 +1,7 @@
 //! `agent-identity-mock` binary: HTTPS (ALPN h2 + http/1.1) mock server for the Agent
 //! Identity V1 contract. Writes `<state-dir>/ready.json` once listening.
 
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -82,9 +82,9 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> anyhow::Result<Args> {
     })
 }
 
-/// TLS CA + server certificate for `localhost` and `127.0.0.1` (rcgen), with ALPN
+/// TLS CA + server certificate for `localhost`, `127.0.0.1` and the listen address `ip` (rcgen), with ALPN
 /// `h2` and `http/1.1`.
-fn tls_config() -> anyhow::Result<(tokio_rustls::rustls::ServerConfig, String)> {
+fn tls_config(ip: IpAddr) -> anyhow::Result<(tokio_rustls::rustls::ServerConfig, String)> {
     let ca_key = rcgen::KeyPair::generate().context("generate TLS CA key")?;
     let mut ca_params = rcgen::CertificateParams::new(Vec::<String>::new()).context("TLS CA params")?;
     ca_params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
@@ -94,8 +94,9 @@ fn tls_config() -> anyhow::Result<(tokio_rustls::rustls::ServerConfig, String)> 
     let ca_cert = ca_params.self_signed(&ca_key).context("self-sign TLS CA")?;
 
     let server_key = rcgen::KeyPair::generate().context("generate TLS server key")?;
-    let mut server_params = rcgen::CertificateParams::new(vec!["localhost".to_owned(), "127.0.0.1".to_owned()])
-        .context("TLS server params")?;
+    let mut server_params =
+        rcgen::CertificateParams::new(vec!["localhost".to_owned(), "127.0.0.1".to_owned(), ip.to_string()])
+            .context("TLS server params")?;
     server_params
         .distinguished_name
         .push(rcgen::DnType::CommonName, "localhost");
@@ -115,6 +116,11 @@ fn tls_config() -> anyhow::Result<(tokio_rustls::rustls::ServerConfig, String)> 
         .context("build TLS config")?;
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
     Ok((config, ca_cert.pem()))
+}
+
+/// The URL clients reach the mock at: the address it listens on, so that `ready.json` names a reachable address.
+fn base_url(local_addr: SocketAddr, path_prefix: &str) -> String {
+    format!("https://{local_addr}{path_prefix}")
 }
 
 /// Writes `ready.json` atomically (write temp + rename).
@@ -137,13 +143,13 @@ async fn main() -> anyhow::Result<()> {
     let args = parse_args(std::env::args().skip(1))?;
     std::fs::create_dir_all(&args.state_dir).context("create state dir")?;
 
-    let (tls_config, ca_pem) = tls_config()?;
-    let ca_pem_path = args.state_dir.join("mock-tls-ca.pem");
-    std::fs::write(&ca_pem_path, &ca_pem).context("write TLS CA PEM")?;
-
     let listener = TcpListener::bind(args.listen).await.context("bind listener")?;
     let local_addr = listener.local_addr().context("local address")?;
-    let base_url = format!("https://127.0.0.1:{}{}", local_addr.port(), args.path_prefix);
+    let base_url = base_url(local_addr, &args.path_prefix);
+
+    let (tls_config, ca_pem) = tls_config(local_addr.ip())?;
+    let ca_pem_path = args.state_dir.join("mock-tls-ca.pem");
+    std::fs::write(&ca_pem_path, &ca_pem).context("write TLS CA PEM")?;
 
     let clock = MockClock::new();
     let state = State::new(clock.now());
@@ -188,7 +194,7 @@ mod tests {
 
     use rstest::rstest;
 
-    use super::parse_args;
+    use super::{base_url, parse_args, tls_config};
 
     fn args_with_listen(listen: &str) -> Vec<String> {
         [
@@ -238,5 +244,42 @@ mod tests {
         args.extend(extra_args.iter().map(|arg| (*arg).to_owned()));
         let lifetime = parse_args(args).ok().map(|args| args.token_lifetime);
         assert_eq!(lifetime, Some(expected));
+    }
+
+    // oracle: spec RFC 5280 §4.2.1.6
+    // oracle: mutant the advertised URL or the TLS certificate names 127.0.0.1 whatever the listen address
+    #[rstest]
+    #[case::ipv4("127.0.0.1:4433", "https://127.0.0.1:4433/mock")]
+    #[case::ipv4_other("127.0.0.2:4433", "https://127.0.0.2:4433/mock")]
+    #[case::ipv6("[::1]:4433", "https://[::1]:4433/mock")]
+    #[tokio::test]
+    async fn the_advertised_url_names_the_listen_address_and_its_certificate_names_it_too(
+        #[case] listen: std::net::SocketAddr,
+        #[case] expected: &str,
+    ) -> anyhow::Result<()> {
+        use der::{DecodePem as _, Encode as _};
+        use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
+        use tokio_rustls::rustls::{ClientConfig, RootCertStore};
+
+        assert_eq!(base_url(listen, "/mock"), expected);
+
+        let (server, ca_pem) = tls_config(listen.ip())?;
+        let mut roots = RootCertStore::empty();
+        roots.add(CertificateDer::from(
+            x509_cert::Certificate::from_pem(ca_pem.as_bytes())?.to_der()?,
+        ))?;
+        let provider = std::sync::Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
+        let client = ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()?
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(server));
+        let accepted = tokio::spawn(async move { acceptor.accept(server_io).await.map(drop) });
+        let _client = tokio_rustls::TlsConnector::from(std::sync::Arc::new(client))
+            .connect(ServerName::IpAddress(listen.ip().into()), client_io)
+            .await?;
+        accepted.await??;
+        Ok(())
     }
 }
