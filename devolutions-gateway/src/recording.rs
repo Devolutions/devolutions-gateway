@@ -571,8 +571,8 @@ impl RecordingMessageSender {
     ///
     /// `file` must be in the session folder, so that a reader finds the earlier artifact or the new one, never none or a
     /// partial one.
-    /// Calling it again after it was cut short finishes the work, and a session whose recording was deleted meanwhile
-    /// only loses `file`.
+    /// Calling it again after it was cut short finishes the work, a `file` already gone lists nothing new, and a session
+    /// whose recording was deleted meanwhile only loses `file`.
     pub(crate) async fn replace_artifacts(&self, id: Uuid, kind: ArtifactKind, file: &Utf8Path) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.channel
@@ -1005,8 +1005,13 @@ impl RecordingManagerTask {
         // The rename swaps the file in at once and the manifest follows, so it never lists a missing or partial file.
         match fs::rename(file, &artifact_path).await {
             Ok(()) => {}
-            // An earlier call moved it, then stopped before the manifest was written.
-            Err(error) if error.kind() == io::ErrorKind::NotFound && artifact_path.exists() => {}
+            // An earlier call moved it and stopped before the manifest was written, or it was removed for a newer
+            // artifact; either way, what is in place is what to list.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if !artifact_path.exists() {
+                    return Ok(());
+                }
+            }
             Err(error) => return Err(anyhow::Error::new(error).context(format!("move {file} to {artifact_path}"))),
         }
 
