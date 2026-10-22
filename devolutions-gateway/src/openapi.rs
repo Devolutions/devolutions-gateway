@@ -307,25 +307,25 @@ enum AiAnalysisRecoverableErrorKind {
 }
 
 // The error kinds are written out above for their descriptions, which utoipa drops from the variants without fields, so
-// these matches stop the build until a new kind is written out too.
+// these matches stop the build until a new kind or field is written out too.
 const _: fn(&Permanent) -> AiAnalysisErrorKind = |error| match error {
-    Permanent::AiRejected { .. } => AiAnalysisErrorKind::AiRejected,
-    Permanent::AiBadAnswer { .. } => AiAnalysisErrorKind::AiBadAnswer,
+    Permanent::AiRejected { status: _ } => AiAnalysisErrorKind::AiRejected,
+    Permanent::AiBadAnswer { why: _ } => AiAnalysisErrorKind::AiBadAnswer,
     Permanent::KeyLost => AiAnalysisErrorKind::KeyLost,
     Permanent::NoRecording => AiAnalysisErrorKind::NoRecording,
     Permanent::MixedRecording => AiAnalysisErrorKind::MixedRecording,
-    Permanent::UnreadableRecording { .. } => AiAnalysisErrorKind::UnreadableRecording,
+    Permanent::UnreadableRecording { file: _ } => AiAnalysisErrorKind::UnreadableRecording,
     Permanent::InvalidTask => AiAnalysisErrorKind::InvalidTask,
     Permanent::Panicked => AiAnalysisErrorKind::Panicked,
     Permanent::Internal => AiAnalysisErrorKind::Internal,
-    Permanent::AttemptsExhausted { .. } => AiAnalysisErrorKind::AttemptsExhausted,
+    Permanent::AttemptsExhausted { last: _ } => AiAnalysisErrorKind::AttemptsExhausted,
     Permanent::DeadlinePassed => AiAnalysisErrorKind::DeadlinePassed,
     Permanent::NotQueued => AiAnalysisErrorKind::NotQueued,
 };
 
 const _: fn(&Recoverable) -> AiAnalysisRecoverableErrorKind = |error| match error {
     Recoverable::AiUnreachable => AiAnalysisRecoverableErrorKind::AiUnreachable,
-    Recoverable::AiBusy { .. } => AiAnalysisRecoverableErrorKind::AiBusy,
+    Recoverable::AiBusy { status: _ } => AiAnalysisRecoverableErrorKind::AiBusy,
     Recoverable::Storage => AiAnalysisRecoverableErrorKind::Storage,
 };
 
