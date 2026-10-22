@@ -245,10 +245,7 @@ impl Client {
             ClientError::local("system proxy unreadable")
         })?;
         if let Some(proxy) = proxy {
-            // A System proxy that reqwest would ignore is not checked yet, and still lets the request connect directly.
-            if let ProxyConfig::Manual(_) = self.proxy {
-                check_proxy_is_usable(&proxy)?;
-            }
+            check_proxy_is_usable(&proxy)?;
             let proxy = reqwest::Proxy::all(proxy).map_err(|_| ClientError::local("configure identity HTTP client"))?;
             builder = builder.proxy(proxy);
         }
@@ -1021,12 +1018,17 @@ mod tests {
         Ok(Some("http://proxy.test:99999".to_owned()))
     }
 
+    fn unsupported_system_proxy(_: &Url) -> anyhow::Result<Option<String>> {
+        Ok(Some("ftp://proxy.test:21".to_owned()))
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
     #[rstest]
     #[case::detection_fails(unreadable_system_proxy)]
     #[case::unparseable_proxy(unparseable_system_proxy)]
+    #[case::unsupported_scheme(unsupported_system_proxy)]
     #[tokio::test]
-    async fn a_system_proxy_the_request_cannot_read_fails_it_without_connecting_directly(
+    async fn a_system_proxy_the_request_cannot_use_fails_it_without_connecting_directly(
         #[case] system_proxy: fn(&Url) -> anyhow::Result<Option<String>>,
         #[values(Request::Enroll, Request::CheckIn)] request: Request,
     ) -> anyhow::Result<()> {
