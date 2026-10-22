@@ -248,7 +248,6 @@ jobs:
     needs: [preflight]
     runs-on: ${{ matrix.runner }}
     strategy:
-      fail-fast: false
       matrix:
         arch: [x64]
         os: [windows, linux]
