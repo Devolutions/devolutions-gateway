@@ -7,43 +7,28 @@ namespace Devolutions.AgentIdentity;
 /// </summary>
 /// <remarks>
 /// When the opening fails, the host closes the stream with <see cref="AgentIdentityError.ToRpcException"/> of
-/// <see cref="Error"/>.
+/// <see cref="AgentIdentityResult.Error"/>.
+/// <see cref="AgentIdentityResult.FailureDetail"/> names the rule that the opening request broke and the step of
+/// CONTRACT.agent-identity.md §6 that checks it.
 /// </remarks>
-public sealed class ChannelOpeningResult
+public sealed class ChannelOpeningResult : AgentIdentityResult
 {
     private ChannelOpeningResult(ChannelOpening? opening, AgentIdentityError? error, string? failureDetail)
+        : base(error, failureDetail)
     {
-        Succeeded = opening is not null;
         Opening = opening;
-        Error = error;
-        FailureDetail = failureDetail;
     }
 
     /// <summary>
     /// Whether the opening request authenticated.
     /// </summary>
     [MemberNotNullWhen(true, nameof(Opening))]
-    [MemberNotNullWhen(false, nameof(Error), nameof(FailureDetail))]
-    public bool Succeeded { get; }
+    public override bool Succeeded => Opening is not null;
 
     /// <summary>
     /// The opened stream, waiting for the agent to sign its challenge, when the opening request authenticated.
     /// </summary>
     public ChannelOpening? Opening { get; }
-
-    /// <summary>
-    /// The error to close the stream with, when the opening request did not authenticate.
-    /// </summary>
-    public AgentIdentityError? Error { get; }
-
-    /// <summary>
-    /// The rule that the opening request broke and the step of CONTRACT.agent-identity.md §6 that checks it,
-    /// for host logs.
-    /// </summary>
-    /// <remarks>
-    /// It is a fixed sentence, so it never holds a header value, a token or a secret.
-    /// </remarks>
-    public string? FailureDetail { get; }
 
     internal static ChannelOpeningResult Success(ChannelOpening opening)
     {

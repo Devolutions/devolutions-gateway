@@ -5,40 +5,28 @@ namespace Devolutions.AgentIdentity;
 /// <summary>
 /// The outcome of authenticating a signed request.
 /// </summary>
-public sealed class AuthenticationResult
+/// <remarks>
+/// <see cref="AgentIdentityResult.FailureDetail"/> names the rule that the request broke and the step of
+/// CONTRACT.agent-identity.md §6 that checks it.
+/// </remarks>
+public sealed class AuthenticationResult : AgentIdentityResult
 {
     private AuthenticationResult(AuthenticatedIdentity? identity, AgentIdentityError? error, string? failureDetail)
+        : base(error, failureDetail)
     {
-        Succeeded = identity is not null;
         Identity = identity;
-        Error = error;
-        FailureDetail = failureDetail;
     }
 
     /// <summary>
     /// Whether the request authenticated.
     /// </summary>
     [MemberNotNullWhen(true, nameof(Identity))]
-    [MemberNotNullWhen(false, nameof(Error), nameof(FailureDetail))]
-    public bool Succeeded { get; }
+    public override bool Succeeded => Identity is not null;
 
     /// <summary>
     /// The identity that the request proved, when it authenticated.
     /// </summary>
     public AuthenticatedIdentity? Identity { get; }
-
-    /// <summary>
-    /// The error to respond with, when the request did not authenticate.
-    /// </summary>
-    public AgentIdentityError? Error { get; }
-
-    /// <summary>
-    /// The rule that the request broke and the step of CONTRACT.agent-identity.md §6 that checks it, for host logs.
-    /// </summary>
-    /// <remarks>
-    /// It is a fixed sentence, so it never holds a header value, a token or a secret.
-    /// </remarks>
-    public string? FailureDetail { get; }
 
     internal static AuthenticationResult Success(AuthenticatedIdentity identity)
     {

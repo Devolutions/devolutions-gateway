@@ -10,12 +10,24 @@ namespace Devolutions.AgentIdentity;
 /// or the error that closes the stream.
 /// </summary>
 /// <remarks>
+/// <para>
 /// On success, the host replaces the identity's metadata with <see cref="Metadata"/>, sends <see cref="Welcome"/>,
 /// and only then treats the stream as authenticated.
-/// On failure, the host closes the stream with <see cref="AgentIdentityError.ToRpcException"/> of <see cref="Error"/>,
-/// and changes no state of the identity.
+/// On failure, the host closes the stream with <see cref="AgentIdentityError.ToRpcException"/> of
+/// <see cref="AgentIdentityResult.Error"/>, and changes no state of the identity.
+/// </para>
+/// <para>
+/// The error is <see cref="AgentIdentityErrorCode.IdentityUnknown"/> when the certificate that opened the stream is
+/// no longer registered or its identity was deleted, <see cref="AgentIdentityErrorCode.IdentityRevoked"/> when the
+/// identity was revoked, <see cref="AgentIdentityErrorCode.CertificateExpired"/> when the certificate expired
+/// during the handshake, and <see cref="AgentIdentityErrorCode.InvalidRequest"/> when the agent proved the key in
+/// time but sent invalid metadata.
+/// Every other failure is <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
+/// <see cref="AgentIdentityResult.FailureDetail"/> never repeats a value from the message, not even a metadata key:
+/// it names a metadata entry by its position.
+/// </para>
 /// </remarks>
-public sealed class ChannelHandshakeResult
+public sealed class ChannelHandshakeResult : AgentIdentityResult
 {
     private ChannelHandshakeResult(
         AuthenticatedIdentity? identity,
@@ -23,13 +35,11 @@ public sealed class ChannelHandshakeResult
         ServerMessage? welcome,
         AgentIdentityError? error,
         string? failureDetail)
+        : base(error, failureDetail)
     {
-        Succeeded = identity is not null;
         Identity = identity;
         Metadata = metadata;
         Welcome = welcome;
-        Error = error;
-        FailureDetail = failureDetail;
     }
 
     /// <summary>
@@ -37,8 +47,7 @@ public sealed class ChannelHandshakeResult
     /// unrevoked identity, and the agent proved in time that it holds its key and sent valid metadata.
     /// </summary>
     [MemberNotNullWhen(true, nameof(Identity), nameof(Metadata), nameof(Welcome))]
-    [MemberNotNullWhen(false, nameof(Error), nameof(FailureDetail))]
-    public bool Succeeded { get; }
+    public override bool Succeeded => Identity is not null && Metadata is not null && Welcome is not null;
 
     /// <summary>
     /// The identity that the stream is authenticated for, with <see cref="AgentOperation.Connect"/>,
@@ -63,27 +72,6 @@ public sealed class ChannelHandshakeResult
     /// a fresh <c>id</c>, the <c>Hello</c> <c>id</c> as <c>correlation_id</c>, and the server time.
     /// </summary>
     public ServerMessage? Welcome { get; }
-
-    /// <summary>
-    /// The error to close the stream with, when the handshake failed.
-    /// </summary>
-    /// <remarks>
-    /// It is <see cref="AgentIdentityErrorCode.IdentityUnknown"/> when the certificate that opened the stream is no
-    /// longer registered or its identity was deleted, <see cref="AgentIdentityErrorCode.IdentityRevoked"/> when the
-    /// identity was revoked, <see cref="AgentIdentityErrorCode.CertificateExpired"/> when the certificate expired
-    /// during the handshake, and <see cref="AgentIdentityErrorCode.InvalidRequest"/> when the agent proved the key in
-    /// time but sent invalid metadata.
-    /// Every other failure is <see cref="AgentIdentityErrorCode.SignatureInvalid"/>.
-    /// </remarks>
-    public AgentIdentityError? Error { get; }
-
-    /// <summary>
-    /// The rule that the handshake failed on, for host logs, when the handshake failed.
-    /// </summary>
-    /// <remarks>
-    /// It never repeats a value from the message, not even a metadata key: it names a metadata entry by its position.
-    /// </remarks>
-    public string? FailureDetail { get; }
 
     internal static ChannelHandshakeResult Success(
         AuthenticatedIdentity identity,
