@@ -107,8 +107,8 @@ pub enum Progress {
     Reading { read_bytes: u64, total_bytes: u64 },
     /// Asking the AI: chunks already described, out of all chunks, and the tokens of the requests sent so far.
     ///
-    /// Sent before each chunk, after each request to the AI, and once all chunks are described. The summary request,
-    /// which follows when the chunks have actions, is counted by the event sent after it.
+    /// Sent before and after each request to the AI, and once all chunks are described.
+    /// A request counts as unreported until its answer comes, so usage cut off with a request is never shown as complete.
     Describing {
         described_chunks: usize,
         total_chunks: usize,
@@ -194,8 +194,9 @@ pub struct UsageSoFar {
     pub input_tokens: u64,
     /// Tokens of the answers.
     pub output_tokens: u64,
-    /// Requests that may have cost tokens the provider did not report, such as an answer without a token count or a
-    /// request that got no answer; while it is not zero, the two counts are short of what the provider billed.
+    /// Requests that may have cost tokens the provider did not report, such as an answer without a token count, a request
+    /// that got no answer, or one still waiting for it; while it is not zero, the two counts are short of what the
+    /// provider billed.
     pub unreported_requests: u64,
 }
 
@@ -382,9 +383,9 @@ impl AnalyzeRecording<'_> {
     /// Starts the analysis on the Tokio runtime and returns its events.
     ///
     /// The events are [`RecordingAnalysisEvent::Progress`] while it runs, then [`RecordingAnalysisEvent::Complete`]
-    /// or [`RecordingAnalysisEvent::Failure`], which is always the last one. [`Progress::Reading`] events are dropped
-    /// while the channel is full, so a slow reader only misses some of them; the other events never are, so the last
-    /// [`Progress::Describing`] counts every request sent before a failure.
+    /// or [`RecordingAnalysisEvent::Failure`], which is always the last one.
+    /// [`Progress::Reading`] events are dropped while the channel is full, so a slow reader only misses some of them;
+    /// the other events never are, so the last [`Progress::Describing`] counts every request sent before a failure.
     /// The channel ending without a last event means the analysis panicked.
     ///
     /// Dropping the receiver cancels the analysis.
@@ -531,8 +532,6 @@ impl Run {
                 continue;
             }
 
-            self.report_describing(index, total).await;
-
             let described = match chunk {
                 Chunk::Transcript { file } => {
                     let transcript = tokio::fs::read_to_string(workspace.join(file))
@@ -592,9 +591,8 @@ impl Run {
 
             let summary = tokio::select! {
                 () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                summary = request.send() => summary,
+                summary = self.ask(request.send(), total, total) => summary,
             };
-            self.count(&summary, total, total).await;
 
             Some(summary?)
         };
@@ -683,8 +681,7 @@ impl Run {
                 request = request.max_output_tokens(max_output_tokens);
             }
 
-            let answer = request.send().await;
-            self.count(&answer, index, total).await;
+            let answer = self.ask(request.send(), index, total).await;
 
             match answer {
                 Ok(response) => described.add(response),
@@ -739,8 +736,7 @@ impl Run {
                 request = request.max_output_tokens(max_output_tokens);
             }
 
-            let answer = request.send().await;
-            self.count(&answer, index, total).await;
+            let answer = self.ask(request.send(), index, total).await;
 
             match answer {
                 Ok(response) => described.add(response),
@@ -764,22 +760,36 @@ impl Run {
         Ok(described)
     }
 
-    /// Counts the tokens of one request to the AI, then reports them with the chunks described so far.
-    async fn count<T>(&self, answer: &Result<Response<T>, Error>, described_chunks: usize, total_chunks: usize) {
+    /// Sends one request to the AI and counts its tokens, reporting them with the chunks described so far before the
+    /// request, as one unreported request, and again once it is answered.
+    async fn ask<T>(
+        &self,
+        request: impl Future<Output = Result<Response<T>, Error>>,
+        described_chunks: usize,
+        total_chunks: usize,
+    ) -> Result<Response<T>, Error> {
+        self.usage.lock().unwrap_or_else(PoisonError::into_inner).add(None);
+        self.report_describing(described_chunks, total_chunks).await;
+
+        let answer = request.await;
+
         {
             let mut usage = self.usage.lock().unwrap_or_else(PoisonError::into_inner);
+            usage.unreported_requests -= 1;
 
-            match answer {
+            match &answer {
                 Ok(response) => usage.add(response.usage),
                 Err(Error::Truncated { usage: reported }) => usage.add(*reported),
                 // An error status means the provider turned the request down instead of answering it.
-                Err(Error::Status { .. }) => return,
+                Err(Error::Status { .. }) => {}
                 // The answer, if any, was lost or unreadable, so the provider may have counted tokens we never saw.
                 Err(_) => usage.add(None),
             }
         }
 
         self.report_describing(described_chunks, total_chunks).await;
+
+        answer
     }
 
     fn usage(&self) -> UsageSoFar {

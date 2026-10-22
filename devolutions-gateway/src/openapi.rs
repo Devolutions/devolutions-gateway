@@ -210,8 +210,8 @@ struct AiAnalysisSucceededPayload {
 struct AiAnalysisUsage {
     input_tokens: u64,
     output_tokens: u64,
-    /// Requests that may have cost tokens the provider did not report, such as a request that got no answer; while it
-    /// is not 0, `inputTokens` and `outputTokens` are short of what the provider billed.
+    /// Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one
+    /// still waiting for it; while it is not 0, `inputTokens` and `outputTokens` are short of what the provider billed.
     unreported_requests: u64,
 }
 
