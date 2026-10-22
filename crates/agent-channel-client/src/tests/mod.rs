@@ -1023,6 +1023,27 @@ fn authority_address(authority: &TestAuthority) -> String {
     format!("127.0.0.1:{}", authority.url.port().expect("authority port"))
 }
 
+// oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+// oracle: reference reqwest 0.12.28 `IntoProxy`, which reads a proxy URL without a scheme as an `http://` URL
+// Identity requests go through such a proxy, so the channel must too.
+#[tokio::test]
+async fn tunnels_through_a_proxy_set_without_a_scheme_as_an_http_proxy() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let proxy = TestProxy::start(None).await?;
+    let port = proxy.host.rsplit_once(':').ok_or_else(|| anyhow!("proxy port"))?.1;
+    let identity = Identity::from_vectors("device-a")?;
+    let client = ChannelClient::new(
+        manual_proxy(&format!("localhost:{port}"), &[])?,
+        std::slice::from_ref(&authority.ca),
+        Settings::default(),
+    )?;
+    let mut channel = client.connect(identity.target(&authority.url))?;
+    authority.next_opening().await.accept().authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+    assert_eq!(proxy.heads().len(), 1);
+    Ok(())
+}
+
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
 // oracle: reference hyper-util 0.1.20 proxy matcher, which percent-decodes the user info for reqwest

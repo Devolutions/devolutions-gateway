@@ -318,9 +318,24 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
 fn parse_system_proxy(proxy: &str) -> anyhow::Result<Url> {
     match Url::parse(proxy) {
         Err(url::ParseError::RelativeUrlWithoutBase) => Url::parse(&format!("http://{proxy}")),
-        parsed => parsed,
+        parsed => parsed.map(read_as_http),
     }
     .context("invalid proxy URL from system settings")
+}
+
+/// Reads a proxy written without a scheme as an `http://` URL, as reqwest does.
+///
+/// `proxy.corp:8080` parses as a URL whose scheme is `proxy.corp` and which has no host; every client then sees the
+/// same `http://proxy.corp:8080/`, so that identity requests and the channel go through the same proxy.
+/// A URL that doesn't read as one is kept, so that its client still refuses it.
+fn read_as_http(proxy: Url) -> Url {
+    if proxy.has_host() || proxy.as_str().contains("://") {
+        return proxy;
+    }
+    Url::parse(&format!("http://{proxy}"))
+        .ok()
+        .filter(Url::has_host)
+        .unwrap_or(proxy)
 }
 
 /// Returns the proxy that `config` selects for `url`, or `None` to connect directly.
@@ -338,7 +353,7 @@ pub fn proxy_for_url(url: &Url, config: &ProxyConfig) -> Option<Url> {
             if manual.should_bypass(url) {
                 None
             } else {
-                manual.select_proxy(url).cloned()
+                manual.select_proxy(url).cloned().map(read_as_http)
             }
         }
     }
@@ -506,12 +521,25 @@ mod tests {
     #[rstest]
     #[case::ipv4("10.0.0.1:8080", "http://10.0.0.1:8080/")]
     #[case::ipv6("[::1]:8080", "http://[::1]:8080/")]
+    #[case::host_name("proxy.corp:8080", "http://proxy.corp:8080/")]
     #[case::with_scheme("https://proxy.test:3128", "https://proxy.test:3128/")]
     fn a_system_proxy_without_a_scheme_is_an_http_proxy(
         #[case] setting: &str,
         #[case] expected: &str,
     ) -> anyhow::Result<()> {
         assert_eq!(parse_system_proxy(setting)?.as_str(), expected);
+        Ok(())
+    }
+
+    // oracle: reference reqwest 0.12.28 `IntoProxy`, which reads a proxy URL without a scheme as an `http://` URL
+    #[test]
+    fn a_manual_proxy_without_a_scheme_is_an_http_proxy() -> anyhow::Result<()> {
+        let config = ProxyConfig::Manual(ManualProxyConfig {
+            all: Some(Url::parse("localhost:8080")?),
+            ..Default::default()
+        });
+        let selected = proxy_for_url(&Url::parse("https://authority.test/dvls")?, &config);
+        assert_eq!(selected.as_ref().map(Url::as_str), Some("http://localhost:8080/"));
         Ok(())
     }
 }
