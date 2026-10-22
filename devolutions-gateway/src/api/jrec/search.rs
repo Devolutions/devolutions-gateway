@@ -346,6 +346,14 @@ impl SearchText {
 /// Greek ends a word with "ς" rather than "σ", so without this, a query that stops at a sigma would not match the same
 /// letters inside a longer word.
 fn push_lowercase_for_matching(text: &str, lowercase: &mut String) {
+    // Logs are mostly ASCII, which lowercases far faster byte by byte than character by character.
+    if text.is_ascii() {
+        let start = lowercase.len();
+        lowercase.push_str(text);
+        lowercase[start..].make_ascii_lowercase();
+        return;
+    }
+
     for character in text.chars().flat_map(char::to_lowercase) {
         lowercase.push(if character == 'ς' { 'σ' } else { character });
     }
