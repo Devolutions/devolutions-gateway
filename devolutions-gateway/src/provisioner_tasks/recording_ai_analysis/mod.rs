@@ -512,24 +512,20 @@ impl RecordingAiAnalysis {
                 Some(RecordingAnalysisEvent::Progress(progress)) => {
                     // Reading sends an event every half second, so while reading the Task is updated only when the percent
                     // changes.
-                    let shown = match progress {
-                        Progress::Reading { .. } => (progress.stage(), u64::from(progress.percent()), None),
-                        Progress::Describing { usage, .. } => (
-                            progress.stage(),
-                            progress.done_and_total().map_or(0, |(done, _)| done),
-                            Some(usage),
-                        ),
-                        _ => (
-                            progress.stage(),
-                            progress.done_and_total().map_or(0, |(done, _)| done),
-                            None,
-                        ),
+                    let done = match progress {
+                        Progress::Reading { .. } => u64::from(progress.percent()),
+                        _ => progress.done_and_total().map_or(0, |(done, _)| done),
                     };
+                    let attempt_usage = match progress {
+                        Progress::Describing { usage, .. } => Some(usage),
+                        _ => None,
+                    };
+                    let shown = (progress.stage(), done, attempt_usage);
 
                     if recorded != Some(shown) {
                         recorded = Some(shown);
 
-                        if let Some(attempt_usage) = shown.2 {
+                        if let Some(attempt_usage) = attempt_usage {
                             usage = earlier.with(attempt_usage);
                         }
 
