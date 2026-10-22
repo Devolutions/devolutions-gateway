@@ -157,7 +157,7 @@ async fn assert_no_event(channel: &mut Channel) {
     }
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
 #[tokio::test]
 async fn opens_a_signed_stream_under_the_url_path_and_waits_for_the_challenge() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -170,20 +170,20 @@ async fn opens_a_signed_stream_under_the_url_path_and_waits_for_the_challenge() 
     let signature_input = opening.signature_input().to_owned();
     assert!(signature_input.contains(";tag=\"connect\""), "{signature_input}");
     assert!(opening.headers.contains_key("signature"));
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     assert!(
         signature_input.contains(&format!(";keyid=\"{}\"", identity.thumbprint)),
         "{signature_input}"
     );
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // Step 1: the agent sends nothing until it receives `Challenge`.
     let mut stream = opening.accept();
     assert!(stream.receive_within(Duration::from_millis(300)).await.is_none());
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -212,7 +212,7 @@ async fn answers_the_challenge_with_a_hello_proving_the_device_key() -> anyhow::
     let Some(agent_message::Payload::Hello(hello)) = message.payload else {
         panic!("expected Hello, got {message:?}");
     };
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     assert_eq!(
         hello.metadata,
         HashMap::from([("hostname".to_owned(), "at-hello".to_owned())])
@@ -253,7 +253,7 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 // oracle: intent crates/agent-channel-client/INTENT.md §Handshake
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn authenticates_only_on_the_welcome_answering_its_hello() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -300,7 +300,7 @@ async fn send_unexpected(stream: &ServerStream) {
         .await;
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn reports_pushes_with_their_envelope_ids_and_ignores_unknown_payloads() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -367,7 +367,7 @@ async fn reports_pushes_with_their_envelope_ids_and_ignores_unknown_payloads() -
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-service
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
 #[tokio::test]
 async fn processes_a_message_as_large_as_an_envelope_may_be() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -418,7 +418,7 @@ fn varint(mut value: u64) -> Vec<u8> {
     bytes
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -445,7 +445,7 @@ async fn acknowledges_a_message_under_a_fresh_uuid() -> anyhow::Result<()> {
     let ack = stream.receive().await;
     assert_eq!(ack.correlation_id.as_deref(), Some(renew_id.as_str()));
     assert_eq!(ack.payload, Some(agent_message::Payload::Ack(Ack {})));
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // Envelope IDs are lowercase hyphenated UUIDs.
     for id in [&hello.id, &ack.id] {
         let uuid = uuid::Uuid::parse_str(id)?;
@@ -489,8 +489,8 @@ async fn pings_the_connection_at_the_keepalive_interval() -> anyhow::Result<()> 
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
 #[case::identity_revoked(
@@ -543,8 +543,8 @@ async fn reports_a_refused_opening_with_its_status_trailers_and_class(
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
 #[case::revoked(
@@ -576,8 +576,8 @@ async fn reports_the_closure_of_an_authenticated_stream(
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 #[rstest]
 #[case::revoked(Code::PermissionDenied, "identity_revoked")]
 #[case::unknown(Code::Unauthenticated, "identity_unknown")]
@@ -603,7 +603,7 @@ async fn stops_after_a_terminal_or_expired_certificate_closure(
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 #[rstest]
 #[case::identity_revoked(TerminalCode::IdentityRevoked, "identity_revoked")]
 #[case::identity_unknown(TerminalCode::IdentityUnknown, "identity_unknown")]
@@ -611,7 +611,7 @@ fn names_each_terminal_code_as_the_contract_does(#[case] code: TerminalCode, #[c
     assert_eq!(code.as_str(), name);
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn a_refused_connection_is_an_outage() -> anyhow::Result<()> {
@@ -629,7 +629,7 @@ async fn a_refused_connection_is_an_outage() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
@@ -813,7 +813,7 @@ fn encoded_renewal(id: &str) -> Vec<u8> {
 }
 
 // oracle: intent crates/device-key/INTENT.md §Signing
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn a_proof_signing_failure_closes_the_stream_as_an_outage() -> anyhow::Result<()> {
@@ -860,7 +860,7 @@ fn clock_skew_refusal(server_time: OffsetDateTime) -> Status {
     status
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
 #[tokio::test]
 async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -887,8 +887,8 @@ async fn retries_a_clock_skew_refusal_once_at_the_server_time() -> anyhow::Resul
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn a_second_clock_skew_refusal_is_transient() -> anyhow::Result<()> {
@@ -969,8 +969,8 @@ async fn an_opening_without_welcome_in_time_is_an_outage() -> anyhow::Result<()>
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §8.1
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
 // oracle: intent crates/agent-channel-client/INTENT.md §Closing
 #[tokio::test]
 async fn opens_a_new_stream_while_the_current_one_stays_open() -> anyhow::Result<()> {
@@ -1175,7 +1175,7 @@ async fn an_unsupported_proxy_scheme_is_an_outage_without_a_connection() -> anyh
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
 #[tokio::test]
 async fn refuses_a_channel_url_without_tls() -> anyhow::Result<()> {
     let authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1331,7 +1331,7 @@ async fn a_dropped_channel_stops_waiting_for_an_authority_that_keeps_its_side_op
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
 #[tokio::test]
 async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
@@ -1382,8 +1382,8 @@ fn assert_ok_closure_with_trailers(closure: &Closure) {
     assert_eq!(closure.server_time.as_deref(), Some(SERVER_TIME));
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn reports_the_trailers_of_an_opening_refused_with_ok() -> anyhow::Result<()> {
@@ -1399,8 +1399,8 @@ async fn reports_the_trailers_of_an_opening_refused_with_ok() -> anyhow::Result<
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn reports_the_trailers_of_a_stream_closed_with_ok_before_welcome() -> anyhow::Result<()> {
@@ -1416,8 +1416,8 @@ async fn reports_the_trailers_of_a_stream_closed_with_ok_before_welcome() -> any
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[tokio::test]
 async fn reports_the_trailers_of_a_stream_closed_with_ok_after_welcome() -> anyhow::Result<()> {

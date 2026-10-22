@@ -61,7 +61,7 @@ fn vector_signer(vectors: &Value, name: &str) -> anyhow::Result<(RequestSigner, 
         }),
         &certificate,
     );
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     assert_eq!(signer.keyid, field(vector, "thumbprint")?);
     Ok((signer, public_key))
 }
@@ -76,28 +76,28 @@ fn signs_all_four_profile_tags_exactly_as_vectored() -> anyhow::Result<()> {
     }
 
     let cases = [
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
         Case {
             name: "valid_renew_alg_before_keyid",
             tag: Tag::Renew,
             key: "device-a",
             nonce_start: 144,
         },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
         Case {
             name: "valid_connect_alg_before_keyid",
             tag: Tag::Connect,
             key: "device-a",
             nonce_start: 160,
         },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
         Case {
             name: "valid_confirm_alg_before_keyid",
             tag: Tag::Confirm,
             key: "device-g",
             nonce_start: 176,
         },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
         Case {
             name: "valid_check_in_alg_before_keyid",
             tag: Tag::CheckIn,
@@ -216,7 +216,7 @@ fn builds_and_signs_rfc_9421_b_2_4_response_base() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
 // A request signature is the device key's raw r‖s, so a key that fails to sign leaves no valid request to return.
 #[test]
 fn signing_failure_is_returned_instead_of_panicking() -> anyhow::Result<()> {
@@ -264,20 +264,20 @@ async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<
     let second_nonce = second_nonce.await?;
 
     for request in [&first, &second] {
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
         assert_eq!(request.uri().path(), format!("/dvls{CONNECT_RPC_PATH}"));
         let signature_input = request
             .headers()
             .get("signature-input")
             .ok_or_else(|| anyhow!("missing signature input"))?
             .to_str()?;
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
         assert!(signature_input.starts_with(r#"sig=("@method");"#), "{signature_input}");
         assert!(signature_input.contains(r#";tag="connect""#), "{signature_input}");
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
         assert!(request.headers().get("signature").is_some());
     }
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     assert_eq!(
         first_nonce,
         nonce(
@@ -296,12 +296,12 @@ async fn channel_layer_prefixes_once_and_signs_each_opening() -> anyhow::Result<
                 .ok_or_else(|| anyhow!("missing signature input"))?,
         )?
     );
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     assert_ne!(first_nonce, second_nonce);
     assert_eq!(general_purpose::URL_SAFE_NO_PAD.decode(&first_nonce)?.len(), 16);
     assert_eq!(general_purpose::URL_SAFE_NO_PAD.decode(&second_nonce)?.len(), 16);
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
     for (base_url, expected_path) in [
         ("https://example.test/dvls//", format!("/dvls{CONNECT_RPC_PATH}")),
         ("https://example.test//", CONNECT_RPC_PATH.to_owned()),
@@ -332,12 +332,12 @@ async fn channel_layer_prefixes_an_rpc_path_that_matches_the_base_path() -> anyh
     opening.extensions_mut().insert(handoff);
 
     let request = service.oneshot(opening).await.map_err(|error| anyhow!("{error}"))?;
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
     assert_eq!(
         request.uri().path(),
         format!("/devolutions.agent.channel.v1.AgentChannel{CONNECT_RPC_PATH}")
     );
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     assert_eq!(
         received_nonce.await?,
         nonce(
@@ -371,14 +371,14 @@ async fn channel_layer_preserves_root_path_and_applies_clock_offset() -> anyhow:
         .await
         .map_err(|error| anyhow!("{error}"))?;
     let after = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() + 3_600;
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
     assert_eq!(request.uri().path(), CONNECT_RPC_PATH);
     let signature_input = request
         .headers()
         .get("signature-input")
         .ok_or_else(|| anyhow!("missing signature input"))?
         .to_str()?;
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     assert_eq!(
         received_nonce.await?,
         nonce(
@@ -388,7 +388,7 @@ async fn channel_layer_preserves_root_path_and_applies_clock_offset() -> anyhow:
                 .ok_or_else(|| anyhow!("missing signature input"))?
         )?
     );
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     assert!((before..=after).any(|created| signature_input.contains(&format!(";created={created};"))));
     Ok(())
 }
@@ -416,7 +416,7 @@ fn signature_covers_the_request_method() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
 #[test]
 fn confirm_covers_only_the_method_when_given_a_body() -> anyhow::Result<()> {
     let vectors = vectors()?;
@@ -427,7 +427,7 @@ fn confirm_covers_only_the_method_when_given_a_body() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
 #[test]
 fn signature_expiry_stays_within_structured_field_integers() -> anyhow::Result<()> {
     let vectors = vectors()?;
@@ -476,7 +476,7 @@ fn channel_service_is_not_ready_before_its_inner_service() -> anyhow::Result<()>
     Ok(())
 }
 
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.2
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
 #[tokio::test]
 async fn channel_opening_is_not_sent_when_signing_fails() -> anyhow::Result<()> {
     let key = TestKey {
