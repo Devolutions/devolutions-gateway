@@ -278,6 +278,7 @@ fn assert_rfc3339(value: &Value) {
     OffsetDateTime::parse(text, &Rfc3339).unwrap_or_else(|error| panic!("{text}: {error}"));
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn start_returns_202_then_200_for_the_same_request() {
     let gateway = Gateway::start().await;
@@ -305,11 +306,12 @@ async fn start_returns_202_then_200_for_the_same_request() {
     let (status, again) = gateway.post(session_id, &request(task_id, "gpt-test", &base_url)).await;
     assert_eq!(status, StatusCode::OK, "{again}");
     // The job may have started meanwhile, so only the fields a run leaves alone are compared.
-    for field in ["id", "kind", "target", "params", "createdAt", "deadlineAt"] {
+    for field in ["id", "kind", "target", "params", "createdAt"] {
         assert_eq!(again[field], created[field], "{field}");
     }
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn start_conflicts_return_409_with_a_code() {
     let gateway = Gateway::start().await;
@@ -331,6 +333,7 @@ async fn start_conflicts_return_409_with_a_code() {
     assert_eq!(body, json!({ "code": "analysis_in_progress", "taskId": task_id }));
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn start_without_recording_returns_404() {
     let gateway = Gateway::start().await;
@@ -343,6 +346,7 @@ async fn start_without_recording_returns_404() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn start_ignores_unknown_fields() {
     let gateway = Gateway::start().await;
@@ -356,6 +360,7 @@ async fn start_ignores_unknown_fields() {
     assert_eq!(status, StatusCode::ACCEPTED, "{created}");
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn invalid_bodies_and_settings_return_400() {
     let gateway = Gateway::start().await;
@@ -404,6 +409,7 @@ async fn invalid_bodies_and_settings_return_400() {
     assert_eq!(status, StatusCode::NOT_FOUND, "no Task is recorded");
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn endpoints_require_their_scope() {
     let gateway = Gateway::start().await;
@@ -432,6 +438,7 @@ async fn endpoints_require_their_scope() {
     assert_eq!(status, StatusCode::NOT_FOUND, "the wildcard scope is accepted");
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn an_analysis_is_found_at_its_location_only() {
     let gateway = Gateway::start().await;
@@ -459,6 +466,7 @@ async fn an_analysis_is_found_at_its_location_only() {
     assert_eq!(status, StatusCode::NOT_FOUND, "not under another session");
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn get_analysis_returns_404_for_an_unknown_id() {
     let gateway = Gateway::start().await;
@@ -468,6 +476,7 @@ async fn get_analysis_returns_404_for_an_unknown_id() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Secrets
 #[tokio::test]
 async fn analysis_succeeds_without_leaking_the_key_or_the_base_url() {
     let gateway = Gateway::start().await;
@@ -485,9 +494,10 @@ async fn analysis_succeeds_without_leaking_the_key_or_the_base_url() {
     assert_eq!(task["attempts"], 1);
     assert_eq!(task["payload"]["fileName"], "ai-analysis-0.slog");
     assert_eq!(task["payload"]["model"], "gpt-test-2026-09-30");
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     assert_eq!(
         task["payload"]["usage"],
-        json!({ "inputTokens": 20, "outputTokens": 40 }),
+        json!({ "inputTokens": 20, "outputTokens": 40, "unreportedRequests": 0 }),
         "one request for the actions, one for the summary"
     );
     assert_rfc3339(&task["startedAt"]);
@@ -508,6 +518,7 @@ async fn analysis_succeeds_without_leaking_the_key_or_the_base_url() {
     }
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn provider_refusing_the_key_fails_the_task() {
     let gateway = Gateway::start().await;
@@ -520,8 +531,14 @@ async fn provider_refusing_the_key_fails_the_task() {
 
     let task = gateway.finished_analysis(session_id, task_id).await;
     assert_eq!(task["state"], "failed", "{task}");
-    assert_eq!(task["payload"]["reason"], "permanent error");
-    assert_eq!(task["payload"]["attempts"], 1);
+    assert_eq!(task["attempts"], 1);
+    assert_eq!(
+        task["payload"],
+        json!({
+            "error": { "kind": "aiRejected", "status": 401 },
+            "usage": { "inputTokens": 0, "outputTokens": 0, "unreportedRequests": 0 },
+        })
+    );
 
     let (status, _) = gateway
         .post(session_id, &request(Uuid::new_v4(), "gpt-test", &base_url))

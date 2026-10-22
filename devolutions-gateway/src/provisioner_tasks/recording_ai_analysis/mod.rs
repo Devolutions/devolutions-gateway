@@ -1,11 +1,14 @@
-//! AI analysis (`recording-ai-analysis`): describes what the user did in one recorded session, and adds the result to
-//! the session as a new log.
+//! AI analysis (`recording-ai-analysis`): describes what the user did in one recorded session, and puts the result in
+//! the session as its log, in place of the earlier one.
 //!
 //! [`start`] checks the request and records the Task through the
 //! [`ProvisionerTaskRunner`](super::runner::ProvisionerTaskRunner).
 //! Each attempt runs the analysis of the AI crate,
 //! [`AiClient::analyze_recording`](devolutions_gateway_ai::AiClient::analyze_recording), which keeps its working files
-//! next to the session manifest so that a retry resumes where the last attempt stopped, then adds the log to the session.
+//! next to the session manifest so that a retry resumes where the last attempt stopped, then leaves the log in the
+//! session folder, unlisted, under a name of its own Task.
+//! Once the runner records the success, the end of the Task lists that log in the manifest in place of the earlier one;
+//! a Task that fails removes it instead.
 //! The API key and the working files go away when the Task ends.
 
 #[cfg(test)]
@@ -17,19 +20,19 @@ use std::sync::{Arc, LazyLock, Weak};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
+use devolutions_gateway_ai::Language;
 use devolutions_gateway_ai::recording_analysis::{
-    self, Progress, RecordingAnalysisEvent, RecordingFile, RecordingManifest, Recordings, RecordingsError,
+    self, Progress, RecordingAnalysisEvent, RecordingFile, RecordingManifest, Recordings, RecordingsError, UsageSoFar,
 };
-use devolutions_gateway_ai::{Language, Usage};
-use provisioner_task::{CreateOutcome, ProvisionerTaskRecord};
+use provisioner_task::{CreateOutcome, ProvisionerTaskRecord, ProvisionerTaskState};
 use secrecy::SecretString;
 use serde_json::json;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use super::AttemptError;
 use super::ai::{AiAccess, AiProvider, AiSettings, AiSettingsError, ClientError};
 use super::runner::{Attempt, DynProvisionerTaskJobQueue, ProvisionerTask};
+use super::{AttemptError, Permanent, Recoverable};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
@@ -39,34 +42,57 @@ use crate::token::AccessScope;
 
 pub const KIND: &str = "recording-ai-analysis";
 
-/// Time from the creation of an AI analysis during which its attempts may start, waiting and retries included.
-pub const ATTEMPT_START_WINDOW: time::Duration = time::Duration::hours(2);
+/// Time from the creation of an AI analysis until it must start.
+pub const START_WINDOW: time::Duration = time::Duration::hours(2);
 
-/// Time one attempt of an AI analysis gets.
-pub const ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30 * 60);
+/// Time a running AI analysis may go without progress before it fails.
+pub const PROGRESS_TIMEOUT: time::Duration = time::Duration::minutes(30);
 
 /// Time between two checks for a remux of the session.
 const REMUX_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
-const KEY_LOST: &str = "the API key is no longer available, such as after a Gateway restart";
-
-/// Tokens counted by the AI provider, as kept in Task results.
+/// Tokens the AI provider counted for a Task, over all its attempts, as kept in its payloads.
 ///
-/// It mirrors [`Usage`], so a change in the AI crate never changes what we store.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+/// It mirrors [`UsageSoFar`], so a change in the AI crate never changes what we store.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TokenUsage {
     input_tokens: u64,
     output_tokens: u64,
+    /// Requests whose tokens the provider did not report, so the two counts are short of what it billed.
+    unreported_requests: u64,
 }
 
-impl From<Usage> for TokenUsage {
-    fn from(usage: Usage) -> Self {
+impl TokenUsage {
+    /// The usage in a payload of the Task; none before its first attempt.
+    fn of(payload: &serde_json::Value) -> Self {
+        payload
+            .get("usage")
+            .and_then(|usage| serde_json::from_value(usage.clone()).ok())
+            .unwrap_or_default()
+    }
+
+    /// This usage, with that of the attempt running now.
+    fn with(self, attempt: UsageSoFar) -> Self {
         Self {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
+            input_tokens: self.input_tokens.saturating_add(attempt.input_tokens),
+            output_tokens: self.output_tokens.saturating_add(attempt.output_tokens),
+            unreported_requests: self.unreported_requests.saturating_add(attempt.unreported_requests),
         }
     }
+}
+
+/// Payload of a running AI analysis Task: how far it is, and the tokens it used so far.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Running {
+    /// `preparing` until the analysis reports its stage: `reading`, `describing` or `writing`.
+    step: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    done: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    total: Option<u64>,
+    usage: TokenUsage,
 }
 
 /// What a caller asks for when it starts an AI analysis.
@@ -127,11 +153,8 @@ pub struct Analysis {
     file_name: String,
     /// Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
     model: String,
-    /// Tokens the AI provider counted for the log, answers cut and asked again included.
-    ///
-    /// Absent when the provider did not report them for every request.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    usage: Option<TokenUsage>,
+    /// Tokens the AI provider counted for the Task, over all its attempts.
+    usage: TokenUsage,
     /// Versions of the prompts that wrote the log, such as
     /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
     prompt_version: String,
@@ -240,7 +263,7 @@ pub struct RecordingAiAnalysis {
     recordings: RecordingMessageSender,
     secrets: SecretStore,
     job_queue: DynProvisionerTaskJobQueue,
-    attempt_timeout: std::time::Duration,
+    progress_timeout: time::Duration,
 }
 
 impl RecordingAiAnalysis {
@@ -255,7 +278,7 @@ impl RecordingAiAnalysis {
             recordings,
             secrets,
             job_queue,
-            attempt_timeout: ATTEMPT_TIMEOUT,
+            progress_timeout: PROGRESS_TIMEOUT,
         }
     }
 
@@ -266,6 +289,12 @@ impl RecordingAiAnalysis {
             .join(session_id.to_string())
             .join("recording.json")
     }
+}
+
+/// Where a Task leaves its log until its success is recorded: in the session folder, but not in the manifest, under a
+/// name that only this Task uses, so that removing the working files of another analysis never removes it.
+fn unlisted_log_path(manifest_path: &Utf8Path, task_id: Uuid) -> Utf8PathBuf {
+    manifest_path.with_file_name(format!(".ai-analysis-{task_id}.slog"))
 }
 
 #[async_trait]
@@ -280,44 +309,66 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
     type Output = Analysis;
 
-    fn attempt_start_window(&self) -> time::Duration {
-        ATTEMPT_START_WINDOW
+    fn start_window(&self) -> time::Duration {
+        START_WINDOW
     }
 
-    fn attempt_timeout(&self) -> std::time::Duration {
-        self.attempt_timeout
+    fn progress_timeout(&self) -> time::Duration {
+        self.progress_timeout
+    }
+
+    fn starting_payload(&self, last: &serde_json::Value) -> serde_json::Value {
+        json!(Running {
+            step: "preparing",
+            done: None,
+            total: None,
+            usage: TokenUsage::of(last),
+        })
+    }
+
+    fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value {
+        json!({ "error": error, "usage": TokenUsage::of(last) })
     }
 
     async fn run(&self, attempt: &Attempt, params: Params) -> Result<Analysis, AttemptError> {
-        let session_id = Uuid::parse_str(&attempt.target).map_err(|error| AttemptError::Failed {
-            reason: "invalid task",
-            details: format!("invalid session ID: {error}"),
+        let session_id = Uuid::parse_str(&attempt.target).map_err(|error| {
+            warn!(task.id = %attempt.task_id, %error, "Invalid session ID");
+            AttemptError::Permanent(Permanent::InvalidTask)
         })?;
 
-        // Waiting for an earlier analysis of the session counts in the attempt time, so a timeout cancels it too.
+        // The API key is kept until the deadline, which the start of this attempt moved.
+        self.secrets.set_expiry(SecretId(attempt.task_id), attempt.deadline());
+
+        // Waiting for an earlier analysis of the session is no progress, so the deadline cancels it too.
         let _session = tokio::select! {
             session = lock_session(session_id) => session,
-            () = attempt.cancel.cancelled() => return Err(AttemptError::Cancelled),
+            () = attempt.cancel.cancelled() => return Err(AttemptError::Permanent(Permanent::DeadlinePassed)),
         };
 
-        // A new Task is a hard restart, so the session loses its earlier analysis even when the Task then fails, such as
-        // on a lost key. Every attempt clears, since an earlier one may have ended before it could.
-        self.clear_earlier_analysis(attempt, session_id).await?;
+        // A new Task never resumes from what an earlier analysis left, while its retries resume from their own files.
+        if attempt.attempts == 1 {
+            recording_analysis::discard(&self.manifest_path(session_id), None)
+                .await
+                .map_err(|error| {
+                    error!(task.id = %attempt.task_id, %error, "Failed to remove the earlier AI analysis working files");
+                    AttemptError::Permanent(Permanent::Internal)
+                })?;
+        }
 
-        let secret = self
-            .secrets
-            .get(SecretId(attempt.task_id))
-            .map_err(|error| AttemptError::Permanent(format!("{error:#}")))?;
+        let secret = self.secrets.get(SecretId(attempt.task_id)).map_err(|error| {
+            error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to read the API key");
+            AttemptError::Permanent(Permanent::Internal)
+        })?;
 
         let Some(secret) = secret else {
             warn!(task.id = %attempt.task_id, attempts = attempt.attempts, "AI analysis lost its API key");
-            return Err(AttemptError::Failed {
-                reason: "key lost",
-                details: KEY_LOST.to_owned(),
-            });
+            return Err(AttemptError::Permanent(Permanent::KeyLost));
         };
 
-        let access = AiAccess::from_secret(&secret).map_err(|error| AttemptError::Permanent(format!("{error:#}")))?;
+        let access = AiAccess::from_secret(&secret).map_err(|error| {
+            error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to read the API key");
+            AttemptError::Permanent(Permanent::Internal)
+        })?;
 
         let settings = AiSettings {
             provider: params.provider,
@@ -330,43 +381,39 @@ impl ProvisionerTask for RecordingAiAnalysis {
             .await
     }
 
-    async fn on_end(&self, record: &ProvisionerTaskRecord) {
+    async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {
         self.secrets.remove(SecretId(record.id));
 
         let Ok(session_id) = Uuid::parse_str(&record.target) else {
-            return;
+            return Ok(());
         };
 
         let manifest_path = self.manifest_path(session_id);
+        let log_path = unlisted_log_path(&manifest_path, record.id);
         let _session = lock_session(session_id).await;
 
-        if let Err(error) = recording_analysis::discard(&manifest_path, Some(&record.id.to_string())).await {
-            warn!(task.id = %record.id, session.id = %session_id, %error, "Failed to remove the AI analysis working files");
+        if record.state == ProvisionerTaskState::Succeeded {
+            // The success is recorded, so the log takes the place of the earlier analysis.
+            self.recordings
+                .replace_artifacts(session_id, ArtifactKind::AiAnalysis, &log_path)
+                .await
+                .context("list the AI analysis log in the session")?;
+        } else {
+            match tokio::fs::remove_file(&log_path).await {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                    return Err(anyhow::Error::new(error).context(format!("remove {log_path}")));
+                }
+                _ => {}
+            }
         }
+
+        recording_analysis::discard(&manifest_path, Some(&record.id.to_string()))
+            .await
+            .context("remove the AI analysis working files")
     }
 }
 
 impl RecordingAiAnalysis {
-    /// Removes the analysis an earlier Task added to the session, and on the first attempt the working files any
-    /// analysis left; later attempts are job retries, which resume from their own working files.
-    async fn clear_earlier_analysis(&self, attempt: &Attempt, session_id: Uuid) -> Result<(), AttemptError> {
-        let cleared = async {
-            self.recordings
-                .clear_artifacts(session_id, ArtifactKind::AiAnalysis)
-                .await?;
-
-            if attempt.attempts == 1 {
-                recording_analysis::discard(&self.manifest_path(session_id), None).await?;
-            }
-
-            anyhow::Ok(())
-        };
-
-        cleared
-            .await
-            .map_err(|error| AttemptError::Permanent(format!("failed to remove the earlier AI analysis: {error:#}")))
-    }
-
     /// Runs the analysis while the caller holds the lock of the session.
     async fn analyze(
         &self,
@@ -378,18 +425,27 @@ impl RecordingAiAnalysis {
     ) -> Result<Analysis, AttemptError> {
         let conf = self.conf_handle.get_conf();
 
-        let client = settings
-            .client(&conf, &api_key)
-            .map_err(|error| AttemptError::Permanent(error.to_string()))?;
+        let client = settings.client(&conf, &api_key).map_err(|error| {
+            error!(task.id = %attempt.task_id, %error, "Failed to build the AI client");
+            AttemptError::Permanent(Permanent::Internal)
+        })?;
 
         let recording = self
             .recordings
             .get_finished(session_id)
             .await
-            .map_err(|error| AttemptError::Permanent(format!("{error:#}")))?;
+            .map_err(|error| match error {
+                FinishedRecordingError::NotFound => AttemptError::Permanent(Permanent::NoRecording),
+                error => {
+                    error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to read the recording");
+                    AttemptError::Permanent(Permanent::Internal)
+                }
+            })?;
 
-        let manifest =
-            analysis_manifest(&recording.manifest).map_err(|error| AttemptError::Permanent(error.to_string()))?;
+        let manifest = analysis_manifest(&recording.manifest).map_err(|error| match error {
+            RecordingsError::Mixed => AttemptError::Permanent(Permanent::MixedRecording),
+            _ => AttemptError::Permanent(Permanent::NoRecording),
+        })?;
         let manifest_path = recording.manifest_path();
 
         self.wait_for_remux(attempt, &recording.dir).await?;
@@ -407,8 +463,10 @@ impl RecordingAiAnalysis {
             request = request.language(language);
         }
 
+        let earlier = TokenUsage::of(&attempt.payload);
+        let mut usage = earlier;
         let mut events = request.start();
-        let mut recorded: Option<(&'static str, u64)> = None;
+        let mut recorded = None;
 
         let analysis = loop {
             match events.recv().await {
@@ -416,35 +474,59 @@ impl RecordingAiAnalysis {
                     // Reading sends an event every half second, so while reading the Task is updated only when the percent
                     // changes.
                     let shown = match progress {
-                        Progress::Reading { .. } => (progress.stage(), u64::from(progress.percent())),
-                        _ => (progress.stage(), progress.done_and_total().map_or(0, |(done, _)| done)),
+                        Progress::Reading { .. } => (progress.stage(), u64::from(progress.percent()), None),
+                        Progress::Describing { usage, .. } => (
+                            progress.stage(),
+                            progress.done_and_total().map_or(0, |(done, _)| done),
+                            Some(usage),
+                        ),
+                        _ => (
+                            progress.stage(),
+                            progress.done_and_total().map_or(0, |(done, _)| done),
+                            None,
+                        ),
                     };
+
                     if recorded != Some(shown) {
                         recorded = Some(shown);
-                        attempt.report_progress(progress_payload(&progress)).await;
+
+                        if let Some(attempt_usage) = shown.2 {
+                            usage = earlier.with(attempt_usage);
+                        }
+
+                        attempt.report_progress(progress_payload(&progress, usage)).await;
+                        self.secrets.set_expiry(SecretId(attempt.task_id), attempt.deadline());
                     }
                 }
                 Some(RecordingAnalysisEvent::Complete(analysis)) => break analysis,
-                Some(RecordingAnalysisEvent::Failure(error)) => return Err(error.into()),
+                Some(RecordingAnalysisEvent::Failure(error)) => {
+                    warn!(task.id = %attempt.task_id, %error, "AI analysis attempt failed");
+                    return Err(error.into());
+                }
                 Some(_) => {}
                 None => {
-                    return Err(AttemptError::Permanent(
-                        "the AI analysis stopped unexpectedly".to_owned(),
-                    ));
+                    error!(task.id = %attempt.task_id, "The AI analysis stopped unexpectedly");
+                    return Err(AttemptError::Permanent(Permanent::Panicked));
                 }
             }
         };
 
-        let file_name = add_log(&self.recordings, session_id, &analysis.log_path)
+        // The log stays out of the manifest until the runner records the success, so a Task that fails never replaces
+        // the earlier analysis.
+        let log_path = unlisted_log_path(&manifest_path, attempt.task_id);
+        tokio::fs::rename(&analysis.log_path, &log_path)
             .await
-            .map_err(|error| AttemptError::Permanent(format!("failed to add the log: {error:#}")))?;
+            .map_err(|error| {
+                error!(task.id = %attempt.task_id, %error, "Failed to keep the AI analysis log");
+                AttemptError::Permanent(Permanent::Internal)
+            })?;
 
-        debug!(task.id = %attempt.task_id, file = %file_name, actions = analysis.actions, "Session log added");
+        debug!(task.id = %attempt.task_id, actions = analysis.actions, "AI analysis log written");
 
         Ok(Analysis {
-            file_name,
+            file_name: ArtifactKind::AiAnalysis.file_name(0),
             model: analysis.model,
-            usage: analysis.usage.map(TokenUsage::from),
+            usage: earlier.with(analysis.usage),
             prompt_version: analysis.prompt_version,
         })
     }
@@ -454,11 +536,10 @@ impl RecordingAiAnalysis {
     /// Waits until no remux job of the session is stored, since a remux replaces a video that would be read.
     async fn wait_for_remux(&self, attempt: &Attempt, dir: &Utf8Path) -> Result<(), AttemptError> {
         loop {
-            let jobs = self
-                .job_queue
-                .stored_jobs(RemuxJob::NAME)
-                .await
-                .map_err(|error| AttemptError::Transient(format!("failed to list the remux jobs: {error:#}")))?;
+            let jobs = self.job_queue.stored_jobs(RemuxJob::NAME).await.map_err(|error| {
+                warn!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to list the remux jobs");
+                AttemptError::Recoverable(Recoverable::Storage)
+            })?;
 
             if !remux_pending(&jobs, dir) {
                 return Ok(());
@@ -468,20 +549,21 @@ impl RecordingAiAnalysis {
 
             tokio::select! {
                 () = tokio::time::sleep(REMUX_POLL_INTERVAL) => {}
-                () = attempt.cancel.cancelled() => return Err(AttemptError::Cancelled),
+                () = attempt.cancel.cancelled() => return Err(AttemptError::Permanent(Permanent::DeadlinePassed)),
             }
         }
     }
 }
 
-/// The payload of a running AI analysis Task: its progress, for whoever asks about it.
-fn progress_payload(progress: &Progress) -> serde_json::Value {
+/// The payload of a running AI analysis Task: its progress, for whoever asks about it, and the tokens it used so far.
+fn progress_payload(progress: &Progress, usage: TokenUsage) -> serde_json::Value {
     let (done, total) = progress.done_and_total().unzip();
 
-    json!({
-        "step": progress.stage(),
-        "done": done,
-        "total": total,
+    json!(Running {
+        step: progress.stage(),
+        done,
+        total,
+        usage,
     })
 }
 
@@ -523,19 +605,4 @@ fn analysis_manifest(manifest: &JrecManifest) -> Result<RecordingManifest, Recor
         duration: manifest.duration(),
         recordings,
     })
-}
-
-/// Adds the complete log the analysis left next to the manifest to the session.
-async fn add_log(recordings: &RecordingMessageSender, session_id: Uuid, log_path: &Utf8Path) -> anyhow::Result<String> {
-    let artifact_path = recordings.add_artifact(session_id, ArtifactKind::AiAnalysis).await?;
-
-    // The log is in the session folder, so a rename moves it in at once and the session never holds a partial one.
-    tokio::fs::rename(log_path, &artifact_path)
-        .await
-        .with_context(|| format!("move the log to {artifact_path}"))?;
-
-    Ok(artifact_path
-        .file_name()
-        .context("artifact path has no file name")?
-        .to_owned())
 }

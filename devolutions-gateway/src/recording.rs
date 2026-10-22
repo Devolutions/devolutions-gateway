@@ -79,9 +79,22 @@ impl JrecManifest {
         Ok(manifest)
     }
 
+    /// Writes the manifest to a file of its own first, then renames it over `path`, so that neither a reader nor a crash
+    /// ever finds half of it.
     fn save_to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        use std::io::Write as _;
+
+        let path = path.as_ref();
+        let partial = path.with_extension("json.partial");
         let json = serde_json::to_string_pretty(&self)?;
-        std::fs::write(path, json)?;
+
+        let mut file = std::fs::File::create(&partial)?;
+        file.write_all(json.as_bytes())?;
+        file.sync_all()?;
+        drop(file);
+
+        std::fs::rename(&partial, path)?;
+
         Ok(())
     }
 }
@@ -382,9 +395,10 @@ enum RecordingManagerMessage {
         kind: ArtifactKind,
         channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
     },
-    ClearArtifacts {
+    ReplaceArtifacts {
         id: Uuid,
         kind: ArtifactKind,
+        file: Utf8PathBuf,
         channel: oneshot::Sender<anyhow::Result<()>>,
     },
     GetFinished {
@@ -453,10 +467,16 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("kind", kind)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::ClearArtifacts { id, kind, channel: _ } => f
-                .debug_struct("ClearArtifacts")
+            RecordingManagerMessage::ReplaceArtifacts {
+                id,
+                kind,
+                file,
+                channel: _,
+            } => f
+                .debug_struct("ReplaceArtifacts")
                 .field("id", id)
                 .field("kind", kind)
+                .field("file", file)
                 .finish_non_exhaustive(),
             RecordingManagerMessage::GetFinished { id, channel: _ } => {
                 f.debug_struct("GetFinished").field("id", id).finish_non_exhaustive()
@@ -524,17 +544,26 @@ impl RecordingMessageSender {
         rx.await.context("couldn't receive AddArtifact result")?
     }
 
-    /// Removes every artifact of `kind` from the session, both its file and its manifest entry.
+    /// Moves `file` into the session as its only artifact of `kind`, named `kind.file_name(0)`, in place of the earlier
+    /// ones.
     ///
-    /// A session without recording has nothing to remove.
-    pub(crate) async fn clear_artifacts(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<()> {
+    /// `file` must be in the session folder, so that a reader finds the earlier artifact or the new one, never none or a
+    /// partial one.
+    /// Calling it again after it was cut short finishes the work, and a session whose recording was deleted meanwhile
+    /// only loses `file`.
+    pub(crate) async fn replace_artifacts(&self, id: Uuid, kind: ArtifactKind, file: &Utf8Path) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.channel
-            .send(RecordingManagerMessage::ClearArtifacts { id, kind, channel: tx })
+            .send(RecordingManagerMessage::ReplaceArtifacts {
+                id,
+                kind,
+                file: file.to_owned(),
+                channel: tx,
+            })
             .await
             .ok()
-            .context("couldn't send ClearArtifacts message")?;
-        rx.await.context("couldn't receive ClearArtifacts result")?
+            .context("couldn't send ReplaceArtifacts message")?;
+        rx.await.context("couldn't receive ReplaceArtifacts result")?
     }
 
     pub(crate) async fn get_finished(&self, id: Uuid) -> Result<FinishedRecording, FinishedRecordingError> {
@@ -927,31 +956,49 @@ impl RecordingManagerTask {
         Ok(artifact_path)
     }
 
-    async fn handle_clear_artifacts(&self, id: Uuid, kind: ArtifactKind) -> anyhow::Result<()> {
+    async fn handle_replace_artifacts(&self, id: Uuid, kind: ArtifactKind, file: &Utf8Path) -> anyhow::Result<()> {
         let recording_path = self.recordings_path.join(id.to_string());
         let manifest_path = recording_path.join("recording.json");
 
+        // A recording deleted while its artifact was being generated must stay deleted.
         if !manifest_path.exists() {
-            return Ok(());
+            match fs::remove_file(file).await {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                    return Err(anyhow::Error::new(error).context(format!("remove {file}")));
+                }
+                _ => return Ok(()),
+            }
         }
 
         let mut manifest = JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
-        let artifacts = core::mem::take(manifest.artifacts.of_kind_mut(kind));
 
-        if artifacts.is_empty() {
-            return Ok(());
+        let file_name = kind.file_name(0);
+        let artifact_path = recording_path.join(&file_name);
+
+        // The rename swaps the file in at once and the manifest follows, so it never lists a missing or partial file.
+        match fs::rename(file, &artifact_path).await {
+            Ok(()) => {}
+            // An earlier call moved it, then stopped before the manifest was written.
+            Err(error) if error.kind() == io::ErrorKind::NotFound && artifact_path.exists() => {}
+            Err(error) => return Err(anyhow::Error::new(error).context(format!("move {file} to {artifact_path}"))),
         }
 
-        // The manifest goes first, so it never lists a file that is gone.
+        let earlier = core::mem::replace(
+            manifest.artifacts.of_kind_mut(kind),
+            vec![JrecArtifact {
+                file_name: file_name.clone(),
+            }],
+        );
+
         manifest
             .save_to_file(&manifest_path)
             .context("write manifest to disk")?;
 
-        for artifact in artifacts {
+        for artifact in earlier.into_iter().filter(|artifact| artifact.file_name != file_name) {
             let artifact_path = recording_path.join(&artifact.file_name);
             match fs::remove_file(&artifact_path).await {
                 Err(error) if error.kind() != io::ErrorKind::NotFound => {
-                    return Err(anyhow::Error::new(error).context(format!("remove {artifact_path}")));
+                    warn!(%error, %artifact_path, "Failed to remove an earlier artifact");
                 }
                 _ => {}
             }
@@ -1087,8 +1134,8 @@ async fn recording_manager_task(
                     RecordingManagerMessage::AddArtifact { id, kind, channel } => {
                         let _ = channel.send(manager.handle_add_artifact(id, kind).await);
                     },
-                    RecordingManagerMessage::ClearArtifacts { id, kind, channel } => {
-                        let _ = channel.send(manager.handle_clear_artifacts(id, kind).await);
+                    RecordingManagerMessage::ReplaceArtifacts { id, kind, file, channel } => {
+                        let _ = channel.send(manager.handle_replace_artifacts(id, kind, &file).await);
                     },
                     RecordingManagerMessage::GetFinished { id, channel } => {
                         let _ = channel.send(manager.handle_get_finished(id));
@@ -1585,6 +1632,7 @@ mod tests {
         assert_eq!(harness.sender.get_count().await.expect("count"), 1);
     }
 
+    // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
     #[tokio::test]
     async fn finished_recordings_are_read_through_the_manager() {
         let harness = Harness::start();
