@@ -110,6 +110,22 @@ public class IdentityConfigTests
         Assert.Equal(agentChannelUrl, config.AgentChannelUrl);
     }
 
+    // `agent_channel_url` has no trailing slash, and the agent removes trailing slashes from one that has them.
+    // Create may reject a URL ending in slashes, but a config it creates holds the URL without them.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
+    [Theory]
+    [InlineData("https://host/dvls/", "https://host/dvls")]
+    [InlineData("https://host/dvls//", "https://host/dvls")]
+    [InlineData("https://host/", "https://host")]
+    public void CreateRejectsOrRemovesTheTrailingSlashesOfAnAgentChannelUrl(
+        string agentChannelUrl,
+        string withoutSlashes)
+    {
+        Creation creation = CreateFrom(agentChannelUrl);
+
+        Assert.Contains(creation, (Creation[])[Creation.Holding(withoutSlashes), Creation.Rejection]);
+    }
+
     // Product-specific config fields, such as a PSU channel URL, may coexist with the others.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
     [Fact]
@@ -353,5 +369,33 @@ public class IdentityConfigTests
 
         // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("productFields", exception.ParamName);
+    }
+
+    // What Create makes of the URL: the `agent_channel_url` that the JSON of its config holds, or a rejection.
+    private static Creation CreateFrom(string agentChannelUrl)
+    {
+        IdentityConfig config;
+
+        try
+        {
+            config = IdentityConfig.Create(1, agentChannelUrl);
+        }
+        catch (ArgumentException)
+        {
+            return Creation.Rejection;
+        }
+
+        return Creation.Holding(TestJson.Members(config.ToUtf8Json())["agent_channel_url"].GetString());
+    }
+
+    // What Create makes of an agent channel URL: a rejection, or a config whose JSON holds `AgentChannelUrl`.
+    private sealed record Creation(bool Rejected, string? AgentChannelUrl)
+    {
+        public static Creation Rejection { get; } = new(Rejected: true, AgentChannelUrl: null);
+
+        public static Creation Holding(string? agentChannelUrl)
+        {
+            return new Creation(Rejected: false, AgentChannelUrl: agentChannelUrl);
+        }
     }
 }

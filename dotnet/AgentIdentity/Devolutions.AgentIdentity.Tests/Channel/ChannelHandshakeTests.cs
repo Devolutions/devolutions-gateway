@@ -337,12 +337,15 @@ public class ChannelHandshakeTests
     // a certificate no longer registered, a revoked identity, an expired certificate, then a late Hello.
     // A stream that fails one of them is closed for that reason, whatever the message holds, and so is a stream
     // without Hello, which gets identity_unknown for an identity revoked and then deleted.
+    // A revocation or a deletion found when the Hello arrives or the wait times out wins over a certificate also past
+    // its notAfter, whether a Hello arrived, none arrived in time, or the first message could not be decoded.
     // The late Hello is signature_invalid like the message failures, and comes before all of them, metadata included.
     // CONTRACT.agent-identity.md §7.3 step 4 then checks the payload, the correlation_id, the proof, then the metadata,
     // so an agent that has not proved the key never learns whether its metadata would pass.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     [Theory]
     [MemberData(nameof(PairsOfFailuresWithDifferentCodes))]
     public async Task EarlierFailureWins(string earlier, string later)
