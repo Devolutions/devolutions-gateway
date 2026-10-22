@@ -4568,6 +4568,7 @@ pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Res
                 "offline renewal flag missing"
             );
             case.start().await?;
+            // The test's leaves outlast it, so only the requested renewal replaces the original certificate, and no expiry closes a stream.
             let renewed = case
                 .until_identity(&target, &id, "renewal after reconnect", |record| {
                     current_thumbprint(record).is_ok_and(|thumb| thumb != original) && !record.renewal_requested
@@ -5688,6 +5689,7 @@ pub(crate) async fn a_rotation_migrates_connected_agent(ctx: Context) -> anyhow:
             };
             let initial = started.active_identities_on_old_root;
             ensure!(initial >= 1, "the agent's old-root identity was not counted");
+            // The test's leaves outlast it, so only the rotation renews the old-root certificate, and no expiry closes a stream.
             let new = case
                 .until_identity(&target, &id, "connected new-root certificate", |record| {
                     record.issuer() != Some(&*old_root)

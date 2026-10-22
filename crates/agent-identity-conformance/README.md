@@ -34,7 +34,7 @@ Pass `--agent-version <version>` to require the agent's reported version to matc
 Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
 The DVLS expiry-boundary test needs a configured leaf lifetime of roughly 10–30 seconds.
-`a_renewal_happy_path`, `a_request_renewal_connected` and `a_multi_authority` need leaves that outlast a test: at least 135 seconds, 3/2 of a test's 90-second timeout, so that the agent's schedule, which renews a leaf two thirds into its lifetime, renews none of their certificates and none expires before the test ends.
+`a_renewal_happy_path`, `a_request_renewal_connected`, `a_request_renewal_while_offline`, `a_multi_authority` and `a_rotation_migrates_connected_agent` need leaves that outlast a test: at least 135 seconds, 3/2 of a test's 90-second timeout, so that the agent's schedule, which renews a leaf two thirds into its lifetime, renews none of their certificates and none expires before the test ends.
 An authority that backdates `notBefore`, or whose clock runs behind the runner's, needs longer leaves.
 On an authority with shorter leaves these tests report `SKIP`; the mock's default 90-day leaves meet the need.
 `--expect-channel` defaults to `true`; use `--expect-channel false` when the server intentionally omits `config.agent_channel_url`.

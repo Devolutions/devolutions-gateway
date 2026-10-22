@@ -966,7 +966,7 @@ const TESTS: &[Test] = &[
     a!(a_make_before_break_on_renewal).channel(),
     a!(a_old_key_deleted_after_confirm_without_channel, mock_only).channel(),
     a!(a_request_renewal_connected).channel().need(Need::LongLeaves),
-    a!(a_request_renewal_while_offline).channel(),
+    a!(a_request_renewal_while_offline).channel().need(Need::LongLeaves),
     a!(a_request_renewal_without_channel).without_channel(),
     a!(a_reconnect_make_before_break, mock_only).channel(),
     a!(a_revocation_stops_agent).channel(),
@@ -984,7 +984,7 @@ const TESTS: &[Test] = &[
     a!(a_multi_authority).second().channel().need(Need::LongLeaves),
     a!(a_key_non_exportable),
     a!(a_file_backend_permissions),
-    a!(a_rotation_migrates_connected_agent).channel(),
+    a!(a_rotation_migrates_connected_agent).channel().need(Need::LongLeaves),
     a!(a_rotation_migrates_through_check_in, mock_only),
     a!(a_rotation_migrates_on_schedule, mock_only),
 ];

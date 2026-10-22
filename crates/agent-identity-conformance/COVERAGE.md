@@ -38,7 +38,7 @@ The `p_*` tests check an authority and the `a_*` tests the agent; the tests name
 
 - The shared vectors' pass rule is in `docs/agent-identity/INTENT.agent-identity.md`, "Conformance": a signer passes when it reproduces a vector's inputs and its signature verifies under the vector's public key.
 - `docs/agent-identity/verify_vectors.py` recomputes the shared vectors with an implementation-independent library.
-- `a_renewal_happy_path`, `a_request_renewal_connected` and `a_multi_authority` need leaves of at least 3/2 of a test's timeout, so that none of their certificates comes due for renewal ("Schedules" in the agent's intent) or expires (§7.4) before the test ends; on an authority with shorter leaves they report `SKIP` rather than excuse a closed channel or a later certificate.
+- `a_renewal_happy_path`, `a_request_renewal_connected`, `a_request_renewal_while_offline`, `a_multi_authority` and `a_rotation_migrates_connected_agent` need leaves of at least 3/2 of a test's timeout, so that none of their certificates comes due for renewal ("Schedules" in the agent's intent) or expires (§7.4) before the test ends, and only a requested renewal or a rotation replaces one; on an authority with shorter leaves they report `SKIP` rather than excuse a closed channel or a later certificate.
 - Verified by review only: the randomness of secrets, nonces and challenges, and the stability of `authority_id` across restores.
 - Known gaps, with no test yet: the §1 conventions beyond the error body, timestamps, repeated members, nesting depth, invalid Unicode and canonical `base64`.
 
