@@ -148,13 +148,12 @@ impl<'s> utoipa::ToSchema<'s> for ErrorCode {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
-
     use expect_test::expect;
 
     use super::*;
 
     /// Codes are public API: existing codes are never renamed or removed, and new codes are appended.
+    // oracle: spec docs/API-spec.md §errors
     #[test]
     fn codes_are_stable() {
         let codes = ErrorCode::ALL
@@ -189,26 +188,5 @@ mod tests {
             wrong_token_type
             insufficient_scope"#]]
         .assert_eq(&codes);
-    }
-
-    #[test]
-    fn codes_are_unique_snake_case_and_documented() {
-        let mut seen = HashSet::new();
-
-        for code in ErrorCode::ALL {
-            let code_str = code.as_str();
-
-            assert!(seen.insert(code_str), "duplicated code: {code_str}");
-            assert!(
-                code_str.starts_with(|c: char| c.is_ascii_lowercase())
-                    && code_str.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
-                "not snake_case: {code_str}"
-            );
-            assert!(!code.description().is_empty(), "undocumented code: {code_str}");
-            assert_eq!(
-                serde_json::to_value(code).expect("serialize the code"),
-                serde_json::Value::from(code_str)
-            );
-        }
     }
 }

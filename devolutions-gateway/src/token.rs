@@ -2070,6 +2070,7 @@ mod tests {
             JwsError::InvalidEncoding { input: String::new() }
         }
 
+        // oracle: spec docs/API-spec.md §token-errors
         #[rstest]
         // Raised before the signature is verified.
         #[case::missing_delegation_key(TokenError::MissingDelegationKey, ErrorCode::MalformedToken)]

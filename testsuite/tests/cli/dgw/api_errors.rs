@@ -149,23 +149,12 @@ fn scope_token(claims: &Value) -> String {
     sign_token(&provisioner_key(), "SCOPE", None, claims)
 }
 
-/// A BRIDGE token whose lifetime exceeds the 12-hour maximum.
-fn too_long_bridge_token() -> String {
-    let now = now();
-    let claims = json!({
-        "target_host": "http://localhost",
-        "jet_aid": Uuid::new_v4(),
-        "nbf": now - 60,
-        "exp": now + 13 * 3600,
-    });
-    sign_token(&provisioner_key(), "BRIDGE", None, &claims)
-}
-
-fn jrl_token(jrl: Value) -> String {
-    let claims = json!({ "jti": Uuid::new_v4(), "iat": now(), "jrl": jrl });
+fn jrl_token(iat: i64, jrl: Value) -> String {
+    let claims = json!({ "jti": Uuid::new_v4(), "iat": iat, "jrl": jrl });
     sign_token(&provisioner_key(), "JRL", None, &claims)
 }
 
+// oracle: spec docs/API-spec.md §errors
 #[tokio::test]
 async fn missing_token() {
     let gateway = Gateway::start().await;
@@ -178,6 +167,7 @@ async fn missing_token() {
     gateway.stop().await;
 }
 
+// oracle: spec docs/API-spec.md §errors
 #[rstest]
 #[case::malformed_token("not-a-token".to_owned(), "malformed_token")]
 #[case::malformed_claims(scope_token(&without_claim(heartbeat_claims(), "scope")), "malformed_token")]
@@ -186,7 +176,6 @@ async fn missing_token() {
 #[case::expired(scope_token(&expired_claims()), "expired")]
 #[case::not_yet_valid(scope_token(&not_yet_valid_claims()), "not_yet_valid")]
 #[case::gateway_id_mismatch(scope_token(&other_gateway_claims()), "gateway_id_mismatch")]
-#[case::invalid_token(too_long_bridge_token(), "invalid_token")]
 #[tokio::test]
 async fn rejected_token(#[case] token: String, #[case] expected_error: &str) {
     let gateway = Gateway::start().await;
@@ -200,6 +189,7 @@ async fn rejected_token(#[case] token: String, #[case] expected_error: &str) {
 
 /// The signature is verified before any claim: without a token signed by a trusted key,
 /// a caller learns nothing about the claims the Gateway expects.
+// oracle: spec docs/API-spec.md §errors
 #[rstest]
 #[case::expired(expired_claims())]
 #[case::not_yet_valid(not_yet_valid_claims())]
@@ -217,6 +207,8 @@ async fn claims_are_not_disclosed_without_a_valid_signature(#[case] claims: Valu
     gateway.stop().await;
 }
 
+// oracle: spec docs/API-spec.md §errors
+// oracle: spec docs/API-spec.md §SCOPE
 #[tokio::test]
 async fn unexpected_replay() {
     let gateway = Gateway::start().await;
@@ -226,13 +218,15 @@ async fn unexpected_replay() {
     let first = gateway.get_heartbeat(Some(&token)).await;
     assert_eq!(first.status, 200, "{first:?}");
 
-    // Scope tokens can't be reused.
+    // A SCOPE token is valid for a single request.
     let second = gateway.get_heartbeat(Some(&token)).await;
     second.assert_unauthorized("unexpected_replay");
 
     gateway.stop().await;
 }
 
+// oracle: spec docs/API-spec.md §errors
+// oracle: spec docs/API-spec.md §JRL (JWT Revocation List)
 #[tokio::test]
 async fn revoked() {
     let gateway = Gateway::start().await;
@@ -243,7 +237,7 @@ async fn revoked() {
         .request(
             reqwest::Method::POST,
             "/jet/jrl",
-            Some(&jrl_token(json!({ "jti": [claims["jti"]] }))),
+            Some(&jrl_token(now(), json!({ "jti": [claims["jti"]] }))),
         )
         .await;
     assert_eq!(jrl_update.status, 200, "{jrl_update:?}");
@@ -255,18 +249,49 @@ async fn revoked() {
     gateway.stop().await;
 }
 
+// oracle: spec docs/API-spec.md §errors
+// oracle: spec docs/API-spec.md §JRL (JWT Revocation List)
+#[tokio::test]
+async fn outdated_revocation_list() {
+    let gateway = Gateway::start().await;
+
+    let now = now();
+
+    let jrl_update = gateway
+        .request(reqwest::Method::POST, "/jet/jrl", Some(&jrl_token(now, json!({}))))
+        .await;
+    assert_eq!(jrl_update.status, 200, "{jrl_update:?}");
+
+    // The Gateway only accepts a revocation list newer than its current one.
+    let response = gateway
+        .request(
+            reqwest::Method::POST,
+            "/jet/jrl",
+            Some(&jrl_token(now - 3600, json!({}))),
+        )
+        .await;
+
+    response.assert_unauthorized("invalid_token");
+
+    gateway.stop().await;
+}
+
+// oracle: spec docs/API-spec.md §errors
+// oracle: spec docs/API-spec.md §About scopes
 #[tokio::test]
 async fn wrong_token_type() {
     let gateway = Gateway::start().await;
 
     // A valid token, but the route expects a SCOPE token.
-    let response = gateway.get_heartbeat(Some(&jrl_token(json!({})))).await;
+    let response = gateway.get_heartbeat(Some(&jrl_token(now(), json!({})))).await;
 
     response.assert_problem(403, "Forbidden", "wrong_token_type", None);
 
     gateway.stop().await;
 }
 
+// oracle: spec docs/API-spec.md §errors
+// oracle: spec docs/API-spec.md §About scopes
 #[tokio::test]
 async fn insufficient_scope() {
     let gateway = Gateway::start().await;
@@ -284,6 +309,8 @@ async fn insufficient_scope() {
     gateway.stop().await;
 }
 
+// oracle: spec docs/API-spec.md §errors
+// oracle: spec docs/API-spec.md §OpenAPI
 #[tokio::test]
 async fn generic_code_derived_from_status() {
     let gateway = Gateway::start().await;
@@ -300,6 +327,7 @@ async fn generic_code_derived_from_status() {
 }
 
 /// The KDC proxy reads its token from the path, and validates it outside of the authentication middleware.
+// oracle: spec docs/API-spec.md §errors
 #[tokio::test]
 async fn rejected_kdc_token() {
     let gateway = Gateway::start().await;

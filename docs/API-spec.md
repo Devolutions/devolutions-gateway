@@ -212,6 +212,8 @@ Once jetsocat is successfully connected to the Devolutions Gateway, you can conf
 
 ### SCOPE
 
+A SCOPE token is valid for a single request: the Gateway rejects a token it has already accepted with the `unexpected_replay` error code.
+
 #### Claims
 
 ```json5
@@ -470,6 +472,7 @@ i.e.:
 }
 ```
 
+<a id="errors"></a>
 ## Errors
 
 Error responses carry a machine-readable body, following [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) (problem details for HTTP APIs), with the `application/problem+json` content type:
@@ -502,6 +505,7 @@ When no specific code applies, the error code is derived from the HTTP status:
 
 Some errors don't carry this body yet, such as the errors raised while parsing a request body, and the `400` responses of `/jet/net/scan`, which have their own format.
 
+<a id="token-errors"></a>
 ### Token and authorization errors
 
 | Code | Status | Meaning |
