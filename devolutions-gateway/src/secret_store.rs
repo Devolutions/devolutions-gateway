@@ -72,6 +72,20 @@ impl SecretStore {
             .map(Some)
     }
 
+    /// Moves the expiry of the secret of `id` to `expires_at`, unless it is already removed or expired.
+    pub fn set_expiry(&self, id: SecretId, expires_at: time::OffsetDateTime) {
+        self.set_expiry_at(id, expires_at, time::OffsetDateTime::now_utc());
+    }
+
+    fn set_expiry_at(&self, id: SecretId, expires_at: time::OffsetDateTime, now: time::OffsetDateTime) {
+        if let Some(entry) = self.entries.lock().get_mut(&id)
+            && now < entry.expires_at
+        {
+            entry.expires_at = expires_at;
+            self.cleanup_notify.notify_one();
+        }
+    }
+
     /// Removes the secret of `id`.
     pub fn remove(&self, id: SecretId) {
         self.entries.lock().remove(&id);
@@ -194,5 +208,33 @@ mod tests {
 
         store.remove_expired(now + time::Duration::minutes(1));
         assert!(store.entries.lock().is_empty(), "the cleanup pass removes it");
+    }
+
+    // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Secrets
+    #[test]
+    fn a_moved_expiry_keeps_the_secret_until_then() {
+        let store = SecretStore::default();
+        let now = time::OffsetDateTime::now_utc();
+        let moved = SecretId(Uuid::new_v4());
+        let expired = SecretId(Uuid::new_v4());
+
+        store
+            .insert(moved, &SecretString::from("a"), now + time::Duration::minutes(1))
+            .expect("insert");
+        store.insert(expired, &SecretString::from("b"), now).expect("insert");
+
+        store.set_expiry_at(moved, now + time::Duration::hours(1), now);
+        store.set_expiry_at(expired, now + time::Duration::hours(1), now);
+
+        assert!(
+            store
+                .get_at(moved, now + time::Duration::minutes(30))
+                .expect("read")
+                .is_some()
+        );
+        assert!(
+            store.get_at(expired, now).expect("read").is_none(),
+            "an expired secret stays gone"
+        );
     }
 }
