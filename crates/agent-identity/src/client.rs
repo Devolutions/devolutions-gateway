@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::io::Cursor;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -12,7 +13,7 @@ use base64::engine::general_purpose::STANDARD;
 use camino::Utf8Path;
 use der::{Decode as _, Encode as _};
 use device_key::DeviceKey;
-use http_client_proxy::ProxyConfig;
+use http_client_proxy::{AutomaticConfiguration, ProxyConfig};
 use p256::ecdsa::VerifyingKey;
 use p256::pkcs8::EncodePublicKey as _;
 use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
@@ -22,6 +23,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tracing::{debug, warn};
 use url::Url;
 use uuid::Uuid;
 use x509_cert::Certificate;
@@ -204,6 +206,15 @@ impl Client {
     }
 
     fn http_for(&self, url: &Url) -> ClientResult<reqwest::Client> {
+        // UNTESTED: one gate for the process, so that the warning is logged once per run rather than once per client
+        // or identity.
+        // When changing this, keep a single static gate for every client.
+        static AUTOMATIC_CONFIGURATION_WARNED: AtomicBool = AtomicBool::new(false);
+        warn_on_automatic_configuration(
+            &AUTOMATIC_CONFIGURATION_WARNED,
+            &self.proxy,
+            http_client_proxy::system_automatic_configuration,
+        );
         // UNTESTED: Each identity request must use the proxy selected for its own URL, including bypasses.
         // Reqwest otherwise applies environment proxies to bypassed targets.
         // A client cached for another URL keeps the proxy selected for that URL.
@@ -456,6 +467,37 @@ fn check_proxy_is_usable(proxy: &Url) -> ClientResult<()> {
     Ok(())
 }
 
+/// Warns once, through `warned`, that System mode doesn't evaluate the Windows automatic proxy configuration `read`
+/// returns.
+///
+/// Until it does, identity requests connect directly (`crates/agent-identity/INTENT.md`, "Trust and transport").
+/// A configuration that can't be read logs no warning.
+fn warn_on_automatic_configuration(
+    warned: &AtomicBool,
+    proxy: &ProxyConfig,
+    read: impl FnOnce() -> std::io::Result<AutomaticConfiguration>,
+) {
+    if !matches!(proxy, ProxyConfig::System) || warned.load(Ordering::Relaxed) {
+        return;
+    }
+    let configuration = match read() {
+        Ok(configuration) => configuration,
+        Err(error) => {
+            debug!(%error, "Failed to read the Windows automatic proxy configuration");
+            return;
+        }
+    };
+    if (configuration.automatic_detection || configuration.configuration_script)
+        && !warned.swap(true, Ordering::Relaxed)
+    {
+        warn!(
+            automatic_detection = configuration.automatic_detection,
+            configuration_script = configuration.configuration_script,
+            "Windows automatic proxy configuration is not evaluated; identity requests connect directly"
+        );
+    }
+}
+
 /// Joins an operation's path onto `base_url` as text, without its trailing slashes ([CONTRACT.agent-identity.md §2
 /// "Enrollment token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
 ///
@@ -624,6 +666,7 @@ mod tests {
     use p256::ecdsa::{DerSignature, Signature, SigningKey};
     use rstest::rstest;
     use spki::SubjectPublicKeyInfoOwned;
+    use tracing_subscriber::layer::SubscriberExt as _;
     use x509_cert::builder::profile::BuilderProfile;
     use x509_cert::builder::{Builder as _, CertificateBuilder};
     use x509_cert::ext::Extension;
@@ -1095,5 +1138,48 @@ mod tests {
             exclude: exclude.iter().map(|pattern| (*pattern).to_owned()).collect(),
             ..Default::default()
         }))
+    }
+
+    /// Counts the warnings logged.
+    struct WarningCount(Arc<AtomicUsize>);
+
+    impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for WarningCount {
+        fn on_event(&self, event: &tracing::Event<'_>, _: tracing_subscriber::layer::Context<'_, S>) {
+            if *event.metadata().level() == tracing::Level::WARN {
+                self.0.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+    }
+
+    fn automatic_configuration(automatic_detection: bool, configuration_script: bool) -> AutomaticConfiguration {
+        AutomaticConfiguration {
+            automatic_detection,
+            configuration_script,
+        }
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    #[rstest]
+    #[case::automatic_detection(ProxyConfig::System, automatic_configuration(true, false), 1)]
+    #[case::configuration_script(ProxyConfig::System, automatic_configuration(false, true), 1)]
+    #[case::neither(ProxyConfig::System, automatic_configuration(false, false), 0)]
+    #[case::proxy_off(ProxyConfig::Off, automatic_configuration(true, true), 0)]
+    fn warns_once_per_run_that_system_mode_skips_automatic_proxy_configuration(
+        #[case] proxy: ProxyConfig,
+        #[case] configuration: AutomaticConfiguration,
+        #[case] expected_warnings: usize,
+    ) {
+        let warned = AtomicBool::new(false);
+        let warnings = Arc::new(AtomicUsize::new(0));
+        let subscriber = tracing_subscriber::registry().with(WarningCount(Arc::clone(&warnings)));
+
+        tracing::subscriber::with_default(subscriber, || {
+            // The first identity request of the run, then a later one.
+            for _ in 0..2 {
+                warn_on_automatic_configuration(&warned, &proxy, || Ok(configuration));
+            }
+        });
+
+        assert_eq!(warnings.load(Ordering::SeqCst), expected_warnings);
     }
 }

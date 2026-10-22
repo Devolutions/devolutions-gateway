@@ -158,6 +158,7 @@ dependencies = [
  "time",
  "tokio 1.52.3",
  "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
  "win-api-wrappers",
@@ -3361,6 +3362,7 @@ dependencies = [
  "rstest",
  "tracing",
  "url",
+ "winreg",
 ]
 
 [[package]]

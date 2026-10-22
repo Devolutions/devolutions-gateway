@@ -124,6 +124,73 @@ impl Default for ProxyConfig {
     }
 }
 
+/// Windows automatic proxy configuration, which System mode doesn't evaluate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AutomaticConfiguration {
+    /// "Automatically detect settings", which discovers a configuration script through WPAD.
+    pub automatic_detection: bool,
+    /// "Use automatic configuration script", which names a PAC script.
+    pub configuration_script: bool,
+}
+
+impl AutomaticConfiguration {
+    /// Reads the WinINet `DefaultConnectionSettings` value, whose ninth byte holds the low byte of its
+    /// `INTERNET_PER_CONN_FLAGS`.
+    #[cfg(any(windows, test))]
+    fn from_default_connection_settings(settings: &[u8]) -> Self {
+        // `PROXY_TYPE_AUTO_PROXY_URL` and `PROXY_TYPE_AUTO_DETECT` of `wininet.h`.
+        const AUTO_PROXY_URL: u8 = 0x04;
+        const AUTO_DETECT: u8 = 0x08;
+
+        let flags = settings
+            .get(4 /* Version */ + 4 /* Counter */)
+            .copied()
+            .unwrap_or_default();
+        Self {
+            automatic_detection: flags & AUTO_DETECT != 0,
+            configuration_script: flags & AUTO_PROXY_URL != 0,
+        }
+    }
+}
+
+/// Reads whether the WinINet settings that System mode reads enable automatic proxy configuration.
+///
+/// System mode reads the settings of the current user and of the machine, and takes no proxy from settings that enable
+/// automatic configuration.
+/// Settings that were never saved enable none, as do platforms other than Windows.
+pub fn system_automatic_configuration() -> std::io::Result<AutomaticConfiguration> {
+    #[cfg(windows)]
+    {
+        use winreg::RegKey;
+        use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+        const CONNECTIONS: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections";
+
+        // UNTESTED: the registry is machine state a unit test can't set without changing the machine.
+        // When changing this, check a PAC script and automatic detection, each set for the service account and for the
+        // machine, and a hive without the `Connections` key.
+        let mut configuration = AutomaticConfiguration::default();
+        for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+            let settings = match RegKey::predef(hive)
+                .open_subkey(CONNECTIONS)
+                .and_then(|connections| connections.get_raw_value("DefaultConnectionSettings"))
+            {
+                Ok(settings) => settings,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            let enabled = AutomaticConfiguration::from_default_connection_settings(&settings.bytes);
+            configuration.automatic_detection |= enabled.automatic_detection;
+            configuration.configuration_script |= enabled.configuration_script;
+        }
+        Ok(configuration)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(AutomaticConfiguration::default())
+    }
+}
+
 /// Generates a cache key for HTTP clients based on URL and proxy configuration.
 ///
 /// Keys are based on scheme, host, port, and proxy configuration.
@@ -376,5 +443,29 @@ mod tests {
             assert_eq!(config.should_bypass(&Url::parse(target)?), bypass, "{target}");
         }
         Ok(())
+    }
+
+    // oracle: spec Windows SDK wininet.h §INTERNET_PER_CONN_FLAGS
+    // oracle: reference proxy_cfg 0.4.2 `win_inet_get_autoconfig_type`, which reads these flags from the ninth byte
+    #[rstest]
+    #[case::direct(0x01, false, false)]
+    #[case::named_proxy(0x03, false, false)]
+    #[case::configuration_script(0x05, false, true)]
+    #[case::automatic_detection(0x09, true, false)]
+    fn reads_the_automatic_configuration_flags_of_the_connection_settings(
+        #[case] flags: u8,
+        #[case] automatic_detection: bool,
+        #[case] configuration_script: bool,
+    ) {
+        // Version, counter, then the `PROXY_TYPE_*` flags, each a little-endian 32-bit value.
+        let settings = [0x46, 0, 0, 0, 0x02, 0, 0, 0, flags, 0, 0, 0];
+        let expected = AutomaticConfiguration {
+            automatic_detection,
+            configuration_script,
+        };
+        assert_eq!(
+            AutomaticConfiguration::from_default_connection_settings(&settings),
+            expected
+        );
     }
 }
