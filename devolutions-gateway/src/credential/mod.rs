@@ -7,6 +7,19 @@ use secrecy::ExposeSecret as _;
 
 use self::crypto::MASTER_KEY;
 
+/// The same thing as [`EncryptedPassword`], named for secrets that aren't passwords, like an API key.
+pub type EncryptedSecret = EncryptedPassword;
+
+/// Encrypts any secret with the in-memory key that protects injected credentials.
+pub(crate) fn encrypt_secret(secret: &secrecy::SecretString) -> anyhow::Result<EncryptedSecret> {
+    MASTER_KEY.lock().encrypt(secret.expose_secret())
+}
+
+/// Decrypts a secret from [`encrypt_secret`] into a short-lived value that zeroizes on drop.
+pub(crate) fn decrypt_secret(encrypted: &EncryptedSecret) -> anyhow::Result<secrecy::SecretString> {
+    MASTER_KEY.lock().decrypt(encrypted)
+}
+
 /// Credential at the application protocol level
 #[derive(Debug, Clone)]
 pub enum AppCredential {
