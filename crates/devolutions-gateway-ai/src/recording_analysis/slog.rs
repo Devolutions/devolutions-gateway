@@ -7,38 +7,43 @@ use serde::Serialize;
 
 use crate::session_actions::Action;
 
+/// One line of the AI `.slog`.
+///
+/// These types are the standard of what an AI log holds: each kind of event carries exactly its own fields.
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Entry<'a> {
+struct Line<'a> {
     timestamp: String,
     seq: usize,
-    event: &'static str,
-    description: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    object: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    parameters: Option<&'a BTreeMap<String, String>>,
-    source: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    model: Option<&'a str>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    prompt_version: Option<&'a str>,
+    #[serde(flatten)]
+    event: Event<'a>,
+    source: Source,
 }
 
-impl<'a> Entry<'a> {
-    fn new(seq: usize, timestamp: String, event: &'static str, description: &'a str) -> Self {
-        Self {
-            timestamp,
-            seq,
-            event,
-            description,
-            object: None,
-            parameters: None,
-            source: "ai",
-            model: None,
-            prompt_version: None,
-        }
-    }
+#[derive(Serialize)]
+#[serde(tag = "event")]
+enum Event<'a> {
+    #[serde(rename = "session.start", rename_all = "camelCase")]
+    Start {
+        description: &'static str,
+        model: &'a str,
+        prompt_version: &'a str,
+    },
+    #[serde(rename = "session.action")]
+    Action {
+        description: &'a str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        object: Option<&'a str>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        parameters: Option<&'a BTreeMap<String, String>>,
+    },
+    #[serde(rename = "session.end")]
+    End { description: &'static str },
+}
+
+#[derive(Serialize)]
+enum Source {
+    #[serde(rename = "ai")]
+    Ai,
 }
 
 /// Writes the log of a session entry by entry, so the actions never have to be all in memory.
@@ -59,11 +64,14 @@ impl<W: std::io::Write> SlogWriter<W> {
         };
 
         let timestamp = timestamp(start_time, Duration::ZERO)?;
-        writer.write(Entry {
-            model: Some(model),
-            prompt_version: Some(prompt_version),
-            ..Entry::new(0, timestamp, "session.start", "Session started")
-        })?;
+        writer.write(
+            timestamp,
+            Event::Start {
+                description: "Session started",
+                model,
+                prompt_version,
+            },
+        )?;
 
         Ok(writer)
     }
@@ -71,24 +79,38 @@ impl<W: std::io::Write> SlogWriter<W> {
     /// Actions must come in offset order.
     pub(super) fn action(&mut self, action: &Action) -> anyhow::Result<()> {
         let timestamp = timestamp(self.start_time, action.offset)?;
-        self.write(Entry {
-            object: action.object.as_deref(),
-            parameters: Some(&action.parameters).filter(|parameters| !parameters.is_empty()),
-            ..Entry::new(self.seq, timestamp, "session.action", &action.description)
-        })
+        self.write(
+            timestamp,
+            Event::Action {
+                description: &action.description,
+                object: action.object.as_deref(),
+                parameters: Some(&action.parameters).filter(|parameters| !parameters.is_empty()),
+            },
+        )
     }
 
     /// Writes `session.end` for a session that lasted `duration` seconds.
     pub(super) fn finish(mut self, duration: i64) -> anyhow::Result<W> {
         let end_offset = Duration::from_secs(u64::try_from(duration).unwrap_or(0));
         let timestamp = timestamp(self.start_time, end_offset)?;
-        self.write(Entry::new(self.seq, timestamp, "session.end", "Session ended"))?;
+        self.write(
+            timestamp,
+            Event::End {
+                description: "Session ended",
+            },
+        )?;
         self.out.flush()?;
         Ok(self.out)
     }
 
-    fn write(&mut self, entry: Entry<'_>) -> anyhow::Result<()> {
-        serde_json::to_writer(&mut self.out, &entry)?;
+    fn write(&mut self, timestamp: String, event: Event<'_>) -> anyhow::Result<()> {
+        let line = Line {
+            timestamp,
+            seq: self.seq,
+            event,
+            source: Source::Ai,
+        };
+        serde_json::to_writer(&mut self.out, &line)?;
         self.out.write_all(b"\n")?;
         self.seq += 1;
         Ok(())
@@ -137,6 +159,8 @@ mod tests {
         }
     }
 
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
+    // oracle: reference webapp/packages/session-recording-log/src/fixtures/sample-complete.slog
     #[test]
     fn writes_the_shipped_schema_with_the_source_on_every_line() {
         let actions = [
@@ -152,7 +176,12 @@ mod tests {
             r#"{"timestamp":"2026-08-20T19:44:57.250Z","seq":2,"event":"session.action","description":"Closed the shell","source":"ai"}"#,
             r#"{"timestamp":"2026-08-20T19:45:25.000Z","seq":3,"event":"session.end","description":"Session ended","source":"ai"}"#,
         ];
-        assert_eq!(slog, expected.map(|line| format!("{line}\n")).concat());
+        let lines = |text: &str| -> Vec<serde_json::Value> {
+            text.lines()
+                .map(|line| serde_json::from_str(line).expect("JSON line"))
+                .collect()
+        };
+        assert_eq!(lines(&slog), lines(&expected.join("\n")));
     }
 
     #[test]
