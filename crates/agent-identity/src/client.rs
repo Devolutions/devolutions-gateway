@@ -226,6 +226,12 @@ impl Client {
         for root in &self.extra_trusted_roots {
             builder = builder.add_root_certificate(root.clone());
         }
+        // A System proxy that reqwest would ignore is not checked yet, and still lets the request connect directly.
+        if let ProxyConfig::Manual(_) = self.proxy
+            && let Some(proxy) = http_client_proxy::proxy_for_url(url, &self.proxy)
+        {
+            check_proxy_is_usable(&proxy)?;
+        }
         let client = http_client_proxy::build_client_with_proxy(builder, url, &self.proxy)
             .map_err(|_| ClientError::local("configure identity HTTP client"))?;
         clients.insert(url.clone(), client.clone());
@@ -419,6 +425,37 @@ impl Client {
     }
 }
 
+/// Fails with a transient error for a proxy that reqwest would ignore, connecting directly instead, which identity
+/// requests never do (`crates/agent-identity/INTENT.md`, "Trust and transport").
+///
+/// Reqwest 0.12.28 reads a proxy URL without a host, such as `proxy.corp:8080` whose scheme is its host name, as an
+/// `http://` URL.
+/// It hands the proxy to hyper-util 0.1.20 `parse_env_uri`, which ignores any scheme other than these, and any proxy
+/// whose text is not an `http::Uri` with a host.
+fn check_proxy_is_usable(proxy: &Url) -> ClientResult<()> {
+    let read_as_http;
+    let proxy = if proxy.has_host() {
+        proxy
+    } else {
+        read_as_http = Url::parse(&format!("http://{proxy}")).map_err(|_| ClientError::local("invalid proxy URL"))?;
+        &read_as_http
+    };
+    if !matches!(
+        proxy.scheme(),
+        "http" | "https" | "socks4" | "socks4a" | "socks5" | "socks5h"
+    ) {
+        return Err(ClientError::local("unsupported proxy scheme"));
+    }
+    let has_host = proxy
+        .as_str()
+        .parse::<http::Uri>()
+        .is_ok_and(|uri| uri.host().is_some_and(|host| !host.is_empty()));
+    if !has_host {
+        return Err(ClientError::local("invalid proxy URL"));
+    }
+    Ok(())
+}
+
 /// Joins an operation's path onto `base_url` as text, without its trailing slashes ([CONTRACT.agent-identity.md §2
 /// "Enrollment token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
 ///
@@ -580,7 +617,12 @@ pub fn validate_certificate_chain(chain: &[String], key: &VerifyingKey) -> Clien
 
 #[cfg(test)]
 mod tests {
-    use p256::ecdsa::{DerSignature, SigningKey};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use http_client_proxy::ManualProxyConfig;
+    use p256::ecdsa::{DerSignature, Signature, SigningKey};
+    use rstest::rstest;
     use spki::SubjectPublicKeyInfoOwned;
     use x509_cert::builder::profile::BuilderProfile;
     use x509_cert::builder::{Builder as _, CertificateBuilder};
@@ -878,5 +920,180 @@ mod tests {
                 "{config}"
             );
         }
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    #[rstest]
+    #[tokio::test]
+    async fn a_manual_proxy_of_an_unsupported_scheme_fails_the_request_without_connecting_directly(
+        #[values(Request::Enroll, Request::CheckIn)] request: Request,
+    ) -> anyhow::Result<()> {
+        let authority = CountingListener::start().await?;
+
+        let error = request
+            .send(manual_proxy("ftp://127.0.0.1:1", &[])?, &authority)
+            .await?;
+
+        assert!(matches!(error, Some(ClientError::Transient { .. })), "{error:?}");
+        assert_eq!(authority.connections(), 0);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    #[rstest]
+    #[case::http_host_outside_uri_syntax("http://pro{xy:3128")]
+    #[case::socks_host_outside_uri_syntax("socks5://pro{xy:1080")]
+    #[tokio::test]
+    async fn a_manual_proxy_url_reqwest_cannot_read_fails_the_request_without_connecting_directly(
+        #[case] proxy: &str,
+        #[values(Request::Enroll, Request::CheckIn)] request: Request,
+    ) -> anyhow::Result<()> {
+        let authority = CountingListener::start().await?;
+
+        let error = request.send(manual_proxy(proxy, &[])?, &authority).await?;
+
+        assert!(matches!(error, Some(ClientError::Transient { .. })), "{error:?}");
+        assert_eq!(authority.connections(), 0);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    // oracle: reference reqwest 0.12.28 `IntoProxy`, which reads a proxy URL without a host as an `http://` URL
+    #[tokio::test]
+    async fn a_manual_proxy_without_a_scheme_carries_the_request_as_an_http_proxy() -> anyhow::Result<()> {
+        let authority = CountingListener::start().await?;
+        let proxy = CountingListener::start().await?;
+        // A URL parser reads `localhost` here as the scheme, and the port as the path.
+        let proxy_setting = format!("localhost:{}", proxy.port);
+
+        // The proxy closes the connection, so the request fails once it reaches the proxy.
+        Request::Enroll
+            .send(manual_proxy(&proxy_setting, &[])?, &authority)
+            .await?;
+
+        assert!(0 < proxy.connections());
+        assert_eq!(authority.connections(), 0);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    // oracle: reference hyper-util 0.1.20 `parse_env_uri`, which lists the proxy schemes reqwest connects through
+    #[rstest]
+    #[case::http("http")]
+    #[case::https("https")]
+    #[case::socks4("socks4")]
+    #[case::socks4a("socks4a")]
+    #[case::socks5("socks5")]
+    #[case::socks5h("socks5h")]
+    #[tokio::test]
+    async fn a_manual_proxy_of_each_supported_scheme_carries_the_request(#[case] scheme: &str) -> anyhow::Result<()> {
+        let authority = CountingListener::start().await?;
+        let proxy = CountingListener::start().await?;
+        let proxy_url = format!("{scheme}://127.0.0.1:{}", proxy.port);
+
+        // The proxy closes the connection, so the request fails once it reaches the proxy.
+        Request::Enroll.send(manual_proxy(&proxy_url, &[])?, &authority).await?;
+
+        assert!(0 < proxy.connections());
+        assert_eq!(authority.connections(), 0);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    #[tokio::test]
+    async fn an_authority_the_manual_proxy_settings_exclude_is_reached_directly() -> anyhow::Result<()> {
+        let authority = CountingListener::start().await?;
+        // A proxy the request can't use shows that the exclusion, not the proxy, decides the route.
+        let proxy = manual_proxy("ftp://127.0.0.1:1", &["127.0.0.1"])?;
+
+        // The authority closes the connection, so the request fails once it reaches the authority.
+        Request::Enroll.send(proxy, &authority).await?;
+
+        assert!(0 < authority.connections());
+        Ok(())
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum Request {
+        Enroll,
+        CheckIn,
+    }
+
+    impl Request {
+        /// Sends this request to `authority` through `proxy`, and returns its error.
+        async fn send(self, proxy: ProxyConfig, authority: &CountingListener) -> anyhow::Result<Option<ClientError>> {
+            let client = Client::new(proxy, None)?;
+            let key = TestKey(SigningKey::from_slice(&[7u8; 32])?);
+            let error = match self {
+                Self::Enroll => {
+                    let bag = URL_SAFE_NO_PAD.encode(format!(r#"{{"u":"{}"}}"#, authority.base_url()));
+                    let token = Token::parse(&format!("dvaet1.{bag}.{}", "A".repeat(43)))?;
+                    client.enroll(&token, "csr", &Metadata::new(), &key).await.err()
+                }
+                Self::CheckIn => {
+                    let signer = RequestSigner::new(Arc::new(key), b"leaf certificate");
+                    client
+                        .check_in(&authority.base_url(), &signer, &Metadata::new(), None)
+                        .await
+                        .err()
+                }
+            };
+            Ok(error)
+        }
+    }
+
+    struct TestKey(SigningKey);
+
+    impl DeviceKey for TestKey {
+        fn name(&self) -> &str {
+            "test_key"
+        }
+
+        fn public_key(&self) -> VerifyingKey {
+            *self.0.verifying_key()
+        }
+
+        fn try_sign(&self, message: &[u8]) -> signature::Result<Signature> {
+            signature::Signer::<Signature>::try_sign(&self.0, message)
+        }
+    }
+
+    /// A loopback port that counts the TCP connections it receives and closes each one at once.
+    struct CountingListener {
+        port: u16,
+        connections: Arc<AtomicUsize>,
+    }
+
+    impl CountingListener {
+        async fn start() -> anyhow::Result<Self> {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+            let port = listener.local_addr()?.port();
+            let connections = Arc::new(AtomicUsize::new(0));
+            let counter = Arc::clone(&connections);
+            tokio::spawn(async move {
+                // Counting before the close orders the count before the error the client sees.
+                while let Ok((stream, _)) = listener.accept().await {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    drop(stream);
+                }
+            });
+            Ok(Self { port, connections })
+        }
+
+        fn base_url(&self) -> String {
+            format!("https://127.0.0.1:{}", self.port)
+        }
+
+        fn connections(&self) -> usize {
+            self.connections.load(Ordering::SeqCst)
+        }
+    }
+
+    fn manual_proxy(proxy: &str, exclude: &[&str]) -> anyhow::Result<ProxyConfig> {
+        Ok(ProxyConfig::Manual(ManualProxyConfig {
+            all: Some(Url::parse(proxy)?),
+            exclude: exclude.iter().map(|pattern| (*pattern).to_owned()).collect(),
+            ..Default::default()
+        }))
     }
 }
