@@ -29,6 +29,9 @@ public class ChannelHandshakeTests
     };
 
     // Messages that break exactly one rule of §7.3 step 4 that closes the stream with signature_invalid.
+    // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: UNAUTHENTICATED with error-code signature_invalid.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     private static readonly Dictionary<string, Func<ChannelOpening, AgentMessage>> SignatureFailures = new()
     {
         ["an Ack"] = opening => new AgentMessage
@@ -113,16 +116,11 @@ public class ChannelHandshakeTests
             ["the first message could not be decoded"] = (opening, _) => opening.FirstMessageUnreadableAsync(),
         };
 
-    public static TheoryData<string> SignatureFailureNames => new(SignatureFailures.Keys);
+    public static TheoryData<string> FailureNames => new(Failures.Keys);
 
     public static TheoryData<string> InvalidMetadataEntryNames => new(InvalidMetadataEntries.Keys);
 
     public static TheoryData<string> ScenarioNames => new(Scenarios.Keys);
-
-    // Each end with no Hello, alone and after each closure.
-    public static TheoryData<string> NoHelloNames =>
-        new(NoHelloEnds.Keys.SelectMany(
-            end => Closures.Keys.Select(closure => WithClosure(end, closure)).Prepend(end)));
 
     // Each wrong answer of the registry, to each of the calls that read it.
     public static TheoryData<string, string> WrongRegistryAnswersAndCalls
@@ -142,15 +140,21 @@ public class ChannelHandshakeTests
         }
     }
 
-    // Each pair of failures that the handshake checks one after the other, and that close the stream with different
-    // codes.
-    public static TheoryData<string, string> PairsOfFailuresWithDifferentCodes =>
-        FailurePairNames((earlier, later) => earlier.Code != later.Code);
+    // Each pair of failures that the handshake checks one after the other.
+    public static TheoryData<string, string> FailurePairNames
+    {
+        get
+        {
+            TheoryData<string, string> cases = new();
 
-    // Each pair of failures that the handshake checks one after the other, and that close the stream with the same
-    // code, signature_invalid.
-    public static TheoryData<string, string> PairsOfFailuresWithTheSameCode =>
-        FailurePairNames((earlier, later) => earlier.Code == later.Code);
+            foreach ((string earlier, string later) in FailurePairs.Keys)
+            {
+                cases.Add(earlier, later);
+            }
+
+            return cases;
+        }
+    }
 
     // Every way to end a handshake.
     public static TheoryData<string> HandshakeEndNames => new(HandshakeEnds.Keys);
@@ -163,14 +167,20 @@ public class ChannelHandshakeTests
     // after the Hello timeout.
     private static OrderedDictionary<string, Failure> Closures => new()
     {
+        // Step 4: a certificate that is no longer registered, or whose identity was deleted, is identity_unknown.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         ["the certificate is no longer registered"] = new(
             new Scenario { CertificateRemoved = true },
             AgentIdentityErrorCode.IdentityUnknown,
             StatusCode.Unauthenticated),
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         ["the identity is revoked"] = new(
             new Scenario { IdentityRevoked = true },
             AgentIdentityErrorCode.IdentityRevoked,
             StatusCode.PermissionDenied),
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         ["the certificate has expired"] = new(
             new Scenario { HandshakeTime = DeviceANotAfter.AddTicks(1) },
             AgentIdentityErrorCode.CertificateExpired,
@@ -181,6 +191,9 @@ public class ChannelHandshakeTests
     // the closures, then a late Hello.
     private static OrderedDictionary<string, Failure> EarlyFailures => new(Closures)
     {
+        // Step 4: no Hello within 10 s closes the stream with signature_invalid.
+        // A Hello that the host passes on after the timeout fails, so a late host timer cannot let it through.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
         ["the Hello is late"] = new(
             new Scenario { HandshakeTime = VectorChannel.OpeningTime.AddSeconds(10).AddTicks(1) },
             AgentIdentityErrorCode.SignatureInvalid,
@@ -197,6 +210,11 @@ public class ChannelHandshakeTests
                     new Scenario { FirstMessage = failure.Value },
                     AgentIdentityErrorCode.SignatureInvalid,
                     StatusCode.Unauthenticated)))
+
+            // A Hello that proves the key but carries metadata violating §3 is INVALID_ARGUMENT with error-code
+            // invalid_request.
+            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
             .Append(KeyValuePair.Create(
                 "a Hello with invalid metadata",
                 new Failure(
@@ -224,6 +242,13 @@ public class ChannelHandshakeTests
     // Every failure by name: each early failure, each message failure,
     // and each end with no Hello, alone with signature_invalid (§7.3 step 4) and after each closure,
     // which §7.4 applies first.
+    // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid,
+    // and so does a first message that cannot be decoded, which is not a Hello.
+    // CONTRACT.agent-identity.md §7.4: revocation and expiry close a stream still awaiting its Hello ahead of the
+    // failures of §7.3 step 4, the timeout included, and so does a deletion, which leaves the certificate unregistered.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     private static Dictionary<string, Failure> Failures =>
         EarlyFailures
             .Concat(MessageFailures)
@@ -281,32 +306,21 @@ public class ChannelHandshakeTests
     private static DateTimeOffset DeviceANotAfter =>
         TestVectors.Instance.HttpSignature.RegisteredCertificate("device-a").NotAfter;
 
-    // CONTRACT.agent-identity.md §7.3 step 4 and §7.4: UNAUTHENTICATED with error-code signature_invalid.
+    // Each failure, alone, closes the stream with its code and gRPC status;
+    // the markers where each failure is defined name the rule that decides its code.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
-    [Theory]
-    [MemberData(nameof(SignatureFailureNames))]
-    public async Task FirstMessageFailingTheProofRulesIsSignatureInvalid(string failure)
-    {
-        ChannelHandshakeResult result = await VerifyAsync(SignatureFailures[failure]);
-
-        AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
-    }
-
-    // CONTRACT.agent-identity.md §7.3 step 4: a Hello that proves the key but carries metadata violating §3 is
-    // INVALID_ARGUMENT with error-code invalid_request.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-    [Fact]
-    public async Task HelloWithInvalidMetadataIsInvalidRequest()
+    [Theory]
+    [MemberData(nameof(FailureNames))]
+    public async Task FailureClosesTheStreamWithItsCode(string failure)
     {
-        ChannelOpening opening = await VectorChannel.OpenAsync();
-        AgentMessage hello = VectorChannel.ValidHelloMessage(opening);
-        LaterFailures["a Hello with invalid metadata"](hello);
+        (Scenario scenario, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[failure];
 
-        ChannelHandshakeResult result = await opening.VerifyHelloAsync(hello);
+        ChannelHandshakeResult result = await HandshakeAsync(scenario);
 
-        AssertFailed(result, AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument);
+        AssertFailed(result, expectedCode, expectedStatus);
     }
 
     // The failure detail goes to host logs, so it holds no key or value of the metadata, valid or not,
@@ -342,25 +356,13 @@ public class ChannelHandshakeTests
     // The late Hello is signature_invalid like the message failures, and comes before all of them, metadata included.
     // CONTRACT.agent-identity.md §7.3 step 4 then checks the payload, the correlation_id, the proof, then the metadata,
     // so an agent that has not proved the key never learns whether its metadata would pass.
+    // Two failures that both close the stream with signature_invalid close it with signature_invalid together.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     [Theory]
-    [MemberData(nameof(PairsOfFailuresWithDifferentCodes))]
+    [MemberData(nameof(FailurePairNames))]
     public async Task EarlierFailureWins(string earlier, string later)
-    {
-        (_, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[earlier];
-
-        ChannelHandshakeResult result = await HandshakeAsync(FailurePairs[(earlier, later)]);
-
-        AssertFailed(result, expectedCode, expectedStatus);
-    }
-
-    // Two failures that both close the stream with signature_invalid close it with signature_invalid together.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
-    [Theory]
-    [MemberData(nameof(PairsOfFailuresWithTheSameCode))]
-    public async Task TwoSignatureFailuresAreSignatureInvalid(string earlier, string later)
     {
         (_, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[earlier];
 
@@ -389,17 +391,6 @@ public class ChannelHandshakeTests
             error.ToRpcException(serverTime).Trailers
                 .Select(entry => (entry.Key, entry.Value))
                 .OrderBy(entry => entry.Key, StringComparer.Ordinal));
-    }
-
-    // Step 4: a certificate that is no longer registered, or whose identity was deleted, is identity_unknown.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
-    [Fact]
-    public async Task CertificateRemovedDuringTheHandshakeIsIdentityUnknown()
-    {
-        ChannelHandshakeResult result = await HandshakeAsync(new Scenario { CertificateRemoved = true });
-
-        AssertFailed(result, AgentIdentityErrorCode.IdentityUnknown, StatusCode.Unauthenticated);
     }
 
     // The identity reports the status that the registry holds for the opening certificate when the handshake ends.
@@ -734,24 +725,6 @@ public class ChannelHandshakeTests
         AssertFailed(result, expectedCode, StatusCode.Unauthenticated);
     }
 
-    // CONTRACT.agent-identity.md §7.3 step 4: no Hello within 10 s closes the stream with signature_invalid,
-    // and so does a first message that cannot be decoded, which is not a Hello.
-    // CONTRACT.agent-identity.md §7.4: revocation and expiry close a stream still awaiting its Hello ahead of the
-    // failures of §7.3 step 4, the timeout included, and so does a deletion, which leaves the certificate unregistered.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
-    [Theory]
-    [MemberData(nameof(NoHelloNames))]
-    public async Task NoHelloIsSignatureInvalidUnlessAClosureApplies(string noHello)
-    {
-        (Scenario scenario, AgentIdentityErrorCode expectedCode, StatusCode expectedStatus) = Failures[noHello];
-
-        ChannelHandshakeResult result = await HandshakeAsync(scenario);
-
-        AssertFailed(result, expectedCode, expectedStatus);
-    }
-
     // Step 4: the server waits 10 s for the Hello.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     [Fact]
@@ -773,21 +746,6 @@ public class ChannelHandshakeTests
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
 
         Assert.True(result.Succeeded, result.FailureDetail);
-    }
-
-    // Step 4: no Hello within 10 s closes the stream with signature_invalid.
-    // A Hello that the host passes on after the timeout fails, so a late host timer cannot let it through.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
-    [Fact]
-    public async Task HelloOneTickAfterTheTimeoutIsSignatureInvalid()
-    {
-        DateTimeOffset opened = VectorChannel.OpeningTime;
-        ChannelOpening opening = await VectorChannel.OpenAsync(
-            new SteppingTimeProvider(opened, opened, opened.AddSeconds(10).AddTicks(1)));
-
-        ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
-
-        AssertFailed(result, AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated);
     }
 
     // Steps 1 and 2: the agent sends nothing until it receives the Challenge,
@@ -925,29 +883,6 @@ public class ChannelHandshakeTests
     private static string WithClosure(string end, string closure)
     {
         return $"{end}, and {closure}";
-    }
-
-    // The names of the pairs of failures whose two failures the predicate accepts.
-    private static TheoryData<string, string> FailurePairNames(Func<Failure, Failure, bool> include)
-    {
-        Dictionary<string, Failure> failures = Failures;
-        TheoryData<string, string> cases = new();
-
-        foreach ((string earlier, string later) in FailurePairs.Keys)
-        {
-            if (include(failures[earlier], failures[later]))
-            {
-                cases.Add(earlier, later);
-            }
-        }
-
-        return cases;
-    }
-
-    // Opens the vector stream and verifies the first message built for it.
-    private static Task<ChannelHandshakeResult> VerifyAsync(Func<ChannelOpening, AgentMessage> firstMessage)
-    {
-        return HandshakeAsync(new Scenario { FirstMessage = firstMessage });
     }
 
     // Opens the vector stream, changes the registry and the clock as the scenario says,
