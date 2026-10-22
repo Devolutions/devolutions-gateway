@@ -11,7 +11,8 @@ The crate provides methods for specific purposes, for example, to summarize a te
 Analyze recording takes a parsed manifest file and its path to a recording folder.
 It returns a stream of events that contains the progress of the analysis, and final results of the analysis and the potential errors that happened during the analysis.
 
-The final result is a series of JSON objects with timestamps and a natural language description of the events that happened during the recording.
+The final result is a session log (`.slog`): a series of JSON objects with timestamps and a natural language description of the events that happened during the recording.
+Every line of it says `"source":"ai"`, and `session.start` names the model and the prompt versions, because whoever reads the file can always use the extra meta info.
 
 Analyze recording is trivial for terminal recordings.
 We pre-process the .trp file to .cast, strip out some noise, then send it as text to the AI services.
