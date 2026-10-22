@@ -1096,6 +1096,57 @@ mod tests {
     }
 
     // oracle: intent crates/device-key/INTENT.md §Access
+    #[cfg(unix)]
+    #[test]
+    fn root_only_a_key_file_owned_by_another_account_cannot_be_opened() -> anyhow::Result<()> {
+        // SAFETY: Reading the current effective UID has no preconditions.
+        let user = unsafe { libc::geteuid() };
+        if user != 0 {
+            // The test harness captures `eprintln!` output from a passing test, but not direct writes to stderr.
+            writeln!(
+                std::io::stderr(),
+                "SKIP: root_only_a_key_file_owned_by_another_account_cannot_be_opened needs root"
+            )?;
+            return Ok(());
+        }
+        let nobody = {
+            let mut entry = std::mem::MaybeUninit::<libc::passwd>::uninit();
+            let mut buffer: [libc::c_char; 1024] = [0; 1024];
+            let mut found = std::ptr::null_mut();
+            // SAFETY: The name is NUL-terminated, and the entry, buffer and result pointers are writable for the call.
+            let status = unsafe {
+                libc::getpwnam_r(
+                    c"nobody".as_ptr(),
+                    entry.as_mut_ptr(),
+                    buffer.as_mut_ptr(),
+                    buffer.len(),
+                    &mut found,
+                )
+            };
+            ensure!(status == 0 && !found.is_null(), "look up the nobody account");
+            // SAFETY: A lookup that succeeded and found the account filled the entry.
+            unsafe { entry.assume_init() }.pw_uid
+        };
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        let other_name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        generate(&backend, &other_name)?;
+        std::os::unix::fs::chown(key_path(&directory.0, &name), Some(nobody), None)?;
+
+        assert!(open(&backend, &name).is_err());
+        // oracle: intent crates/device-key/INTENT.md §Operations
+        assert!(list(&backend, TEST_PREFIX)?.contains(&other_name));
+        // An operation may skip an unexpected entry or fail, so only what it leaves behind is checked.
+        let _ = delete(&backend, &name);
+        // The other key, created the same way but left with its owner, still opens.
+        // oracle: intent crates/device-key/INTENT.md §Operations
+        assert!(open(&backend, &other_name)?.is_some());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Access
     // oracle: spec MS-FSCC §2.5.1
     #[cfg(windows)]
     #[test]
