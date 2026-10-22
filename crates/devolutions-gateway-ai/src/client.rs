@@ -521,6 +521,7 @@ mod tests {
         }
     }
 
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
     #[test]
     fn the_language_rule_names_the_language() {
         let language = Language::new("français").expect("language");
@@ -535,11 +536,14 @@ mod tests {
     fn a_prompt_version_is_the_name_and_the_hash_of_the_texts() {
         const VERSION: &str = prompt_version!("test", "a", "b");
 
-        assert_eq!(VERSION, format!("test-{:016x}", fnv1a(&["a", "b"])));
+        // oracle: reference FNV-1a 64 of the bytes 61 FF 62 FF, computed by hand with a separate model
+        assert_eq!(VERSION, "test-d2b371819297f98a");
+        // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
         assert_ne!(fnv1a(&["a", "b"]), fnv1a(&["ab"]));
         assert_ne!(fnv1a(&["a", "b"]), fnv1a(&["a", "c"]));
     }
 
+    // oracle: reference servo/rust-fnv 1.0.7 basic_tests, FNV-1a 64 of "" and "a"
     #[test]
     fn fnv1a_matches_the_reference_value() {
         const PRIME: u64 = 0x0000_0100_0000_01b3;

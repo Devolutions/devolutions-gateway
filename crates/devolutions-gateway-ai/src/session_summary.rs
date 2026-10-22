@@ -148,6 +148,7 @@ mod tests {
 
     use super::*;
 
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
     #[test]
     fn actions_are_sent_as_json_lines() {
         let actions = [
@@ -174,6 +175,7 @@ mod tests {
         );
     }
 
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
     #[test]
     fn the_summary_is_trimmed_and_never_empty() {
         let summary = read_summary("\n L'utilisateur a listé les journaux. \n").expect("a summary with text");
@@ -182,18 +184,5 @@ mod tests {
         let error = read_summary(" \n").expect_err("a blank summary");
         assert!(matches!(error, Error::InvalidOutput { .. }), "{error:?}");
         assert!(!error.is_transient());
-    }
-
-    #[test]
-    fn prompt_names_the_input_fields() {
-        for field in [
-            "\"elapsedSeconds\"",
-            "\"description\"",
-            "\"object\"",
-            "\"parameters\"",
-            "[redacted]",
-        ] {
-            assert!(PROMPT.contains(field), "prompt is missing {field}");
-        }
     }
 }

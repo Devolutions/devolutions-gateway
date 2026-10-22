@@ -420,6 +420,7 @@ async fn working_files_belong_to_their_owner() {
     );
 }
 
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
 #[tokio::test]
 async fn the_language_reaches_every_request_and_keeps_its_own_working_files() {
     // About 1 MB of transcript: three chunks.
@@ -453,6 +454,7 @@ async fn the_language_reaches_every_request_and_keeps_its_own_working_files() {
     assert_eq!(entries[4]["summary"], "Summary 5");
 }
 
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
 #[tokio::test]
 async fn a_session_without_actions_has_no_summary() {
     let session = Session::new(10);
@@ -474,6 +476,7 @@ async fn a_session_without_actions_has_no_summary() {
     assert_eq!(entries[1].get("summary"), None);
 }
 
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
 #[tokio::test]
 async fn a_summary_worth_asking_again_fails_the_analysis() {
     let session = Session::new(10);
@@ -488,6 +491,7 @@ async fn a_summary_worth_asking_again_fails_the_analysis() {
     assert!(!recording_dir(&session.manifest_path).join(LOG_FILE).exists());
 }
 
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
 #[tokio::test]
 async fn a_summary_that_cannot_succeed_fails_the_analysis() {
     let session = Session::new(10);
