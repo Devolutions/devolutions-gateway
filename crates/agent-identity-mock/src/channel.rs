@@ -837,6 +837,8 @@ mod tests {
         Challenge,
         Welcome,
         Reconnect(String),
+        /// A `RenewRequested` and its reason.
+        RenewRequested(String),
         /// A `ConfigUpdate` and the length of its envelope, from its gRPC message prefix.
         ConfigUpdate {
             envelope_len: usize,
@@ -1099,6 +1101,7 @@ mod tests {
                     }
                     Some(server_message::Payload::Welcome(_)) => Seen::Welcome,
                     Some(server_message::Payload::Reconnect(reconnect)) => Seen::Reconnect(reconnect.reason),
+                    Some(server_message::Payload::RenewRequested(renew)) => Seen::RenewRequested(renew.reason),
                     Some(server_message::Payload::ConfigUpdate(_)) => Seen::ConfigUpdate { envelope_len: len },
                     other => anyhow::bail!("unexpected server message {other:?}"),
                 };
@@ -1204,6 +1207,135 @@ mod tests {
 
         let closure = Seen::Closed("16".to_owned(), "signature_invalid".to_owned());
         assert_eq!(channel.drain(QUIET).await?, [closure]);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §7.3 step 4: a `Hello` whose `correlation_id` is not the Challenge `id`, or whose
+    /// proof doesn't verify, closes the stream with `UNAUTHENTICATED` + `signature_invalid`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    #[rstest]
+    #[case::wrong_correlation(Answer::WrongCorrelation)]
+    #[case::bad_proof(Answer::BadProof)]
+    #[tokio::test]
+    async fn hello_failing_its_check_is_signature_invalid(#[case] answer: Answer) -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        channel.answer(answer, &enrolled.key).await?;
+
+        let closure = Seen::Closed("16".to_owned(), "signature_invalid".to_owned());
+        assert_eq!(channel.drain(QUIET).await?, [closure]);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §7.3 step 7: a `Hello` carrying a lower config revision than the identity's gets
+    /// `ConfigUpdate` after `Welcome`, on a stream that stays open.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    #[tokio::test]
+    async fn stale_hello_gets_the_config_after_welcome() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        {
+            let mut state = enrolled.app.state.lock().await;
+            let fields = Map::from_iter([("site".to_owned(), Value::from("paris"))]);
+            assert_eq!(state.merge_config_fields(&fields).ok(), Some(1));
+        }
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        channel.send(channel.hello(&enrolled.key)?).await?;
+
+        let seen = channel.drain(QUIET).await?;
+        assert!(
+            matches!(seen.as_slice(), [Seen::Welcome, Seen::ConfigUpdate { .. }]),
+            "{seen:?}"
+        );
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §7.3 step 5: while the request-renewal flag is set, the server sends `RenewRequested`
+    /// after `Welcome`, on a stream that stays open.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    #[tokio::test]
+    async fn flagged_identity_gets_renew_requested_after_welcome() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        assert!(
+            enrolled
+                .app
+                .state
+                .lock()
+                .await
+                .request_renewal(enrolled.identity_id)
+                .is_ok()
+        );
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        channel.send(channel.hello(&enrolled.key)?).await?;
+
+        let renew = Seen::RenewRequested("admin".to_owned());
+        assert_eq!(channel.drain(QUIET).await?, [Seen::Welcome, renew]);
+        Ok(())
+    }
+
+    /// A mock reset deletes every identity, and CONTRACT.agent-identity.md §7.4 closes a stream awaiting `Hello` whose
+    /// identity no longer exists with `UNAUTHENTICATED` + `identity_unknown`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[tokio::test(start_paused = true)]
+    async fn reset_closes_a_stream_awaiting_hello_as_identity_unknown() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let mut channel = Channel::open(&enrolled).await?;
+        assert_eq!(channel.next(QUIET).await?, Some(Seen::Challenge));
+
+        let reset = http::Request::post("/mock/__mock__/reset").body(Full::new(Bytes::new()))?;
+        let response = Dispatcher::new(Arc::clone(&enrolled.app))
+            .handle(reset)
+            .await
+            .expect("the mock answers");
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        // Waiting past the 10 s `Hello` timeout costs nothing on tokio's paused clock.
+        let closure = Seen::Closed("16".to_owned(), "identity_unknown".to_owned());
+        assert_eq!(channel.drain(Duration::from_secs(11)).await?, [closure]);
+        Ok(())
+    }
+
+    /// The mock control can break the channel without changing any config ([mock intent][intent], "Mock-only
+    /// control"), so a channel opening fails without a `Challenge`.
+    ///
+    /// [intent]: ../INTENT.md#mock-only-control
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[tokio::test]
+    async fn broken_channel_refuses_an_opening() -> anyhow::Result<()> {
+        let enrolled = Enrolled::new().await?;
+        let fault = http::Request::post("/mock/__mock__/faults")
+            .body(Full::new(Bytes::from_static(br#"{"channel_broken":true}"#)))?;
+        let response = Dispatcher::new(Arc::clone(&enrolled.app))
+            .handle(fault)
+            .await
+            .expect("the mock answers");
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        let (_, signature_input, signature) = sign(&enrolled.key, &enrolled.keyid, "connect", enrolled.app.now())?;
+        let (_agent, agent_messages) = mpsc::channel::<Result<Frame<Bytes>, Infallible>>(1);
+        let opening = http::Request::post(format!("/mock/{}/Connect", agent_channel_proto::SERVICE_NAME))
+            .header("content-type", "application/grpc")
+            .header("te", "trailers")
+            .header("signature-input", signature_input)
+            .header("signature", signature)
+            .body(StreamBody::new(ReceiverStream::new(agent_messages)))?;
+        let response = Dispatcher::new(Arc::clone(&enrolled.app))
+            .handle(opening)
+            .await
+            .expect("the mock answers");
+
+        let status = response
+            .headers()
+            .get("grpc-status")
+            .map(|value| value.to_str())
+            .transpose()?;
+        assert!(status.is_some_and(|status| status != "0"), "{status:?}");
         Ok(())
     }
 
