@@ -33,6 +33,8 @@ public class AuthenticationTypeTests
     // A public or protected constructor would let a caller build an identity from any values,
     // or a subclass of one with its own constructor.
     // The other types carry an identity, or the opening that becomes one, out of the check.
+    // Each row's marker names what decides it.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
     [Theory]
     [MemberData(nameof(AuthenticationTypeData))]
     public void TypeHasNoPublicOrProtectedConstructor(Type type)

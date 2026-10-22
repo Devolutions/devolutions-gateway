@@ -413,6 +413,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
     }
 
+    // oracle: spec RFC 2986 §4
     [Theory]
     [MemberData(nameof(RequestWithAnExtraElementNames))]
     public void RejectsExtraElement(string sequence)
@@ -503,6 +504,9 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(der));
     }
 
+    // The key needs an uncompressed P-256 point and the request a verified self-signature, else invalid_request;
+    // each row's marker names the encoding rule that the bit string breaks.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(RequestWithUnusedBitsNames))]
     public void RejectsBitStringWithUnusedBits(string bitString)
