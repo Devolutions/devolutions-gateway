@@ -1,5 +1,6 @@
 using System.Formats.Asn1;
 using System.Numerics;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
@@ -23,8 +24,6 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     private const string AuthorityKeyIdentifierOid = "2.5.29.35";
     private const string ExtendedKeyUsageOid = "2.5.29.37";
 
-    private static readonly Guid IdentityId = Guid.Parse(IdentityIdText.ToUpperInvariant());
-
     // 12:00:00.750 UTC, whose fraction a certificate cannot hold.
     private static readonly DateTimeOffset NowInSeconds = new(2026, 9, 24, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateTimeOffset Now = NowInSeconds.AddMilliseconds(750);
@@ -42,11 +41,32 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
     public static TheoryData<string> SerialNumberDrawNames => new(SerialNumberDraws.Keys);
 
+    // A token that can create an identity.
+    private static EnrollmentTokenState UsableToken => new(false, Now.AddDays(1), maxUses: 10, identitiesCreated: 0);
+
+    // A decision of each outcome but the creation of an identity: an expired token's refusal and a replay.
+    private static Dictionary<EnrollmentOutcome, EnrollmentDecision> DecisionsButCreateIdentity => new()
+    {
+        [EnrollmentOutcome.Reject] =
+            EnrollmentRules.Decide(new(false, Now, maxUses: 10, identitiesCreated: 0), null, Now),
+        [EnrollmentOutcome.ReturnExistingIdentity] = EnrollmentRules.Decide(
+            UsableToken,
+            IssuedKeyMatch.ForIdentity(Guid.Parse(IdentityIdText), true, false, CertificateStatus.Current),
+            Now),
+    };
+
     private readonly ECDsa _rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     private readonly ECDsa _agentKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     private readonly RandomNumberGenerator _random = RandomNumberGenerator.Create();
     private readonly X509Certificate2 _root;
     private readonly CertificateSigningRequest _csr;
+
+    // The decision that creates the identity whose certificate each test issues, unless the test passes another.
+    private readonly EnrollmentDecision _creating = EnrollmentRules.Decide(UsableToken, null, Now);
+
+    // The ID that the decision minted, as CONTRACT.agent-identity.md §1 writes IDs:
+    // Guid.ToString("D") writes a UUID lowercase and hyphenated.
+    private string NewIdentityIdText => Assert.NotNull(_creating.NewIdentityId).ToString("D");
 
     public IdentityCertificateIssuerTests()
     {
@@ -84,7 +104,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         X500RelativeDistinguishedName name = Assert.Single(leaf.SubjectName.EnumerateRelativeDistinguishedNames());
         Assert.Equal("2.5.4.3", name.GetSingleElementType().Value);
-        Assert.Equal(IdentityIdText, name.GetSingleElementValue());
+        Assert.Equal(NewIdentityIdText, name.GetSingleElementValue());
         // oracle: spec RFC 5280 §4.1.2.4
         Assert.Equal(_root.SubjectName.RawData, leaf.IssuerName.RawData);
     }
@@ -105,7 +125,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         AsnReader names = new AsnReader(extension.RawData, AsnEncodingRules.DER).ReadSequence();
         string uri = names.ReadCharacterString(UniversalTagNumber.IA5String, new Asn1Tag(TagClass.ContextSpecific, 6));
 
-        Assert.Equal($"urn:uuid:{IdentityIdText}", uri);
+        Assert.Equal($"urn:uuid:{NewIdentityIdText}", uri);
         Assert.False(names.HasData);
         Assert.False(extension.Critical);
     }
@@ -290,7 +310,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         using X509Certificate2 leaf = Issue(csr: csr);
 
-        Assert.Equal($"CN={IdentityIdText}", leaf.Subject);
+        Assert.Equal($"CN={NewIdentityIdText}", leaf.Subject);
         // The leaf carries no basicConstraints, so a leaf can never act as a CA.
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         Assert.Null(leaf.Extensions[BasicConstraintsOid]);
@@ -334,6 +354,63 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         using X509Certificate2 root = CreateRoot(Now.AddDays(-1), Now.AddYears(10), withSubjectKeyIdentifier: false);
 
         Assert.Throws<ArgumentException>(() => Issue(root: root));
+    }
+
+    // Code that acts for an identity takes it as a type only the library's checks can create;
+    // for a new identity, that is the enrollment decision that creates it.
+    // A refusal creates no identity, and a replay returns the identity's current chain rather than a new certificate.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Theory]
+    [InlineData(EnrollmentOutcome.Reject)]
+    [InlineData(EnrollmentOutcome.ReturnExistingIdentity)]
+    public void ThrowsForADecisionThatCreatesNoIdentity(EnrollmentOutcome outcome)
+    {
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => Issue(creating: DecisionsButCreateIdentity[outcome]));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("creating", exception.ParamName);
+    }
+
+    // A null argument throws ArgumentNullException, whose ParamName names it.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Fact]
+    public void ThrowsForANullDecision()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => IdentityCertificateIssuer.Issue(
+            (EnrollmentDecision)null!,
+            _csr,
+            new TestRootSigner(_root, _rootKey),
+            Lifetime,
+            new FixedTimeProvider(Now),
+            _random));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("creating", exception.ParamName);
+    }
+
+    // An identity is never taken from a value that a caller sent,
+    // so no public member that issues a certificate takes an identity ID.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+    [Fact]
+    public void NoPublicMemberIssuesACertificateForAnIdentityId()
+    {
+        const BindingFlags declared = BindingFlags.Public | BindingFlags.NonPublic
+            | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+        Type[] identityIds = [typeof(Guid), typeof(Guid?)];
+
+        IEnumerable<string> issuers = typeof(IdentityCertificateIssuer).Assembly
+            .GetExportedTypes()
+            .SelectMany(type => type.GetMethods(declared)
+                .Where(method => method.IsPublic || method.IsFamily || method.IsFamilyOrAssembly)
+                .Where(method => method.ReturnType == typeof(X509Certificate2))
+                .Where(method => method.GetParameters()
+                    .Any(parameter => identityIds.Contains(parameter.ParameterType)))
+                .Select(method => $"{type.Name}.{method.Name}"));
+
+        Assert.Empty(issuers);
     }
 
     // Code that acts for an identity takes the identity that the signature check produced.
@@ -413,6 +490,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     private X509Certificate2 Issue(
+        EnrollmentDecision? creating = null,
         TimeSpan? lifetime = null,
         TimeProvider? clock = null,
         RandomNumberGenerator? random = null,
@@ -420,7 +498,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         CertificateSigningRequest? csr = null)
     {
         return IdentityCertificateIssuer.Issue(
-            IdentityId,
+            creating ?? _creating,
             csr ?? _csr,
             new TestRootSigner(root ?? _root, _rootKey),
             lifetime ?? Lifetime,

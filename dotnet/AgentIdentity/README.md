@@ -10,7 +10,7 @@ The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolut
 - Request authentication: `RequestAuthenticator` verifies the signed `renew`, `confirm` and `check-in` requests and the signed opening of an agent channel stream (CONTRACT.agent-identity.md [§6]).
 - Request bodies: `EnrollRequestBody`, `RenewRequestBody` and `CheckInRequestBody` parse a body and validate its CSR (`CertificateSigningRequest`) and metadata (`AgentMetadata`), and `ConfirmRequestBody` checks that a `confirm` body is empty.
 - Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the issued certificate that holds the CSR key.
-- Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of a new identity, or of the identity that a renew request proved.
+- Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of the new identity that an enrollment decision creates, or of the identity that a renew request proved.
 - Responses: `IdentityConfig` holds an identity's config, and `ResponseBodies` writes the bodies of the `trust-anchor`, `enroll`, `renew` and `check-in` responses.
 - Agent channel: `ChannelOpening` verifies the handshake that authenticates a stream, and `ChannelMessages` builds the `ConfigUpdate`, `RenewRequested` and `Reconnect` messages that the authority pushes.
 - Errors: `AgentIdentityError` gives each error its code, HTTP status and message, and writes its JSON body and gRPC exception.
@@ -61,9 +61,9 @@ Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normall
 5. Pass the token's `EnrollmentTokenState`, the match and the current time to `EnrollmentRules.Decide`, and act on its `Outcome`:
    - `Reject`: answer with `Error`.
    - `ReturnExistingIdentity`: take identity `ExistingIdentityId`, and change nothing.
-   - `CreateIdentity`: mint an identity ID, issue its certificate with `IdentityCertificateIssuer.Issue`, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata and the key's `SubjectPublicKeyInfoSha256`.
+   - `CreateIdentity`: take `NewIdentityId`, which the library minted, as the identity's ID, issue its certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata and the key's `SubjectPublicKeyInfoSha256`.
      Create the identity and count the token use atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent enrollments.
-6. Answer with `ResponseBodies.Enroll`, given the authority ID and the identity's ID, current certificate chain, leaf first, and config (CONTRACT.agent-identity.md [§5.2]).
+6. Answer with `ResponseBodies.Enroll`, given the authority ID and the ID taken in step 5, with that identity's current certificate chain, leaf first, and config (CONTRACT.agent-identity.md [§5.2]).
 
 ### Signed requests
 
@@ -147,6 +147,8 @@ Log `FailureDetail` beside the error: it names the rule that the request broke a
 Only the signature check, `RequestAuthenticator.AuthenticateAsync`, and the channel handshake, `ChannelOpening.VerifyHelloAsync`, create an `AuthenticatedIdentity`, which has no public constructor.
 Code that acts for an identity should take one, so that it acts for the identity a signature proved, never for an identity ID that the agent or a caller sent.
 The library does so itself: `RenewalRules.Decide` and the renewal overload of `IdentityCertificateIssuer.Issue` take the renewing `AuthenticatedIdentity`, and throw `ArgumentException` for one authenticated for another operation.
+The certificate of a new identity is issued from the `EnrollmentDecision` that creates it, which only `EnrollmentRules.Decide` produces, under the `NewIdentityId` that it minted; the overload that takes the decision throws `ArgumentException` for one of another outcome.
+No `IdentityCertificateIssuer.Issue` overload takes an identity ID.
 A verified channel opening yields only a `ChannelOpening`, whose identity stays hidden until the agent signs the stream's challenge, since signed opening headers are not tied to one stream and can be captured by a TLS-terminating proxy, TLS inspection or a header log (security invariant 7 of [INTENT.agent-identity.md][invariants]).
 For the same reason, `AuthenticateAsync` throws `ArgumentOutOfRangeException` for `AgentOperation.Connect`.
 

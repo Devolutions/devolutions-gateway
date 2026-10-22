@@ -3,7 +3,7 @@ using System.Reflection;
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// The types that only request authentication and the channel handshake create.
+/// The types that only request authentication, the channel handshake and the enrollment rules create.
 /// </summary>
 /// <remarks>
 /// INTENT.md: code that acts for an identity takes it as a type only the signature check can create,
@@ -19,6 +19,10 @@ public class AuthenticationTypeTests
         // so an opening built by a caller would yield an identity that no signature check produced.
         // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
         typeof(ChannelOpening),
+        // A new identity's certificate is issued from the decision that creates it,
+        // so a decision built by a caller would certify a key for an identity that no enrollment created.
+        // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+        typeof(EnrollmentDecision),
         // oracle: mutant a public AuthenticationResult constructor
         typeof(AuthenticationResult),
         // oracle: mutant a public ChannelOpeningResult constructor
@@ -32,7 +36,8 @@ public class AuthenticationTypeTests
     // Code that acts for an identity takes it as a type only the signature check can create.
     // A public or protected constructor would let a caller build an identity from any values,
     // or a subclass of one with its own constructor.
-    // The other types carry an identity, or the opening that becomes one, out of the check.
+    // The other types carry an identity, the opening that becomes one, or the decision that creates one,
+    // out of a check.
     // Each row's marker names what decides it.
     // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
     [Theory]
@@ -46,10 +51,11 @@ public class AuthenticationTypeTests
         Assert.Empty(reachable);
     }
 
-    // A new public member producing one of these types could be a factory that bypasses the signature check.
+    // A new public member producing one of these types could be a factory that bypasses the check that creates it.
     // The intent forbids creating an identity outside that check but not forwarding one that it created,
     // so the list of members allowed to produce one is the library's own.
-    // oracle: mutant a public member that builds an AuthenticatedIdentity outside the signature check
+    // oracle: mutant a public member that builds an AuthenticatedIdentity outside the signature check,
+    // or an EnrollmentDecision outside the enrollment rules
     [Fact]
     public void NoOtherPublicMemberProducesTheseTypes()
     {
@@ -75,6 +81,7 @@ public class AuthenticationTypeTests
                 "ChannelOpening.HelloTimedOutAsync",
                 "ChannelOpening.VerifyHelloAsync",
                 "ChannelOpeningResult.get_Opening",
+                "EnrollmentRules.Decide",
                 "RequestAuthenticator.AuthenticateAsync",
                 "RequestAuthenticator.AuthenticateChannelOpeningAsync",
             ],
