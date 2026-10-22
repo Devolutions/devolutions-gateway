@@ -63,8 +63,10 @@ fn read_token<R: BufRead>(mut input: R) -> anyhow::Result<Zeroizing<String>> {
 mod tests {
     use super::*;
 
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
     #[test]
     fn stdin_identity_token_trims_whitespace_and_rejects_empty_input() {
+        // oracle: mutant keeps the whitespace around the token
         assert_eq!(
             read_token(&b"  dvaet1.bag.secret \r\nsecond line\n"[..])
                 .expect("read one token")

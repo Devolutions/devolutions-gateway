@@ -106,6 +106,7 @@ mod tests {
 
     #[test]
     fn identity_config_parses_all_debug_controls_and_defaults() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         let config: dto::ConfFile = serde_json::from_value(serde_json::json!({
             "Identity": { "KeyBackend": "File" },
             "__debug__": {
@@ -154,6 +155,7 @@ mod tests {
 
     #[test]
     fn identity_backend_values_are_platform_independent() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         for (backend, expected) in [
             ("File", IdentityKeyBackend::File),
             ("WindowsSoftwareProvider", IdentityKeyBackend::WindowsSoftwareProvider),
@@ -174,6 +176,7 @@ mod tests {
 
     #[test]
     fn invalid_identity_key_prefix_is_rejected_at_config_load() -> anyhow::Result<()> {
+        // oracle: intent crates/device-key/INTENT.md §Key name
         for prefix in ["", "Upper", "with_underscore", &"a".repeat(65)] {
             let file: dto::ConfFile =
                 serde_json::from_value(serde_json::json!({"__debug__": {"identity": {"key_name_prefix": prefix}}}))?;

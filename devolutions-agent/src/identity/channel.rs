@@ -649,7 +649,8 @@ mod tests {
         .expect("no terminal notice in time");
     }
 
-    // `CONTRACT.agent-identity.md` §5.4: after a terminal outcome, the agent never reconnects for the identity.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // After a terminal outcome, the agent never reconnects for the identity.
     // The runner learns of the outcome from a notice only once it isn't busy, so the streams' task holds this rule.
     #[tokio::test]
     async fn after_a_terminal_closure_no_stream_opens_even_before_the_runner_acts_on_it() -> anyhow::Result<()> {
@@ -676,6 +677,8 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // A terminal outcome ends the identity, so the stream in use closes too.
     #[tokio::test]
     async fn a_terminal_refusal_of_a_new_stream_closes_the_stream_in_use_before_the_runner_acts_on_it()
     -> anyhow::Result<()> {
@@ -694,11 +697,13 @@ mod tests {
         Ok(())
     }
 
-    // A stream that reopens with a retired key draws the terminal `identity_unknown` (`CONTRACT.agent-identity.md` §6
-    // step 4), and no stream opens while the outcome of a `confirm` may be unknown (§8.1 step 3), so a stream that
+    // A stream that reopens with a retired key draws the terminal `identity_unknown` (step 4 of the signature checks),
+    // and no stream opens while the outcome of a `confirm` may be unknown (step 3 of agent renewal), so a stream that
     // closes in either state must be dropped before its channel reopens it.
     #[rstest]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[case::its_key_was_replaced(stream("renewed"))]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
     #[case::the_streams_are_held(Want::Hold)]
     fn an_authenticated_stream_that_may_not_reopen_is_dropped_when_it_closes(#[case] want: Want) {
         let now = Instant::now();
@@ -715,8 +720,9 @@ mod tests {
 
     #[test]
     fn a_reconnect_request_wakes_the_runner_and_the_old_stream_closes_once_the_new_one_authenticates() {
-        // `CONTRACT.agent-identity.md` §7.3 step 6: the agent opens the new stream, then closes the old one; only the
-        // runner can open a stream, so the request reaches it as a notice.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+        // On `Reconnect` (step 6), the agent opens the new stream, then closes the old one; only the runner can open a
+        // stream, so the request reaches it as a notice.
         let now = Instant::now();
         let mut links = Links::new();
         links.reconcile(stream("current"));
@@ -745,7 +751,8 @@ mod tests {
 
     #[test]
     fn holding_drops_a_stream_that_has_not_authenticated() {
-        // `CONTRACT.agent-identity.md` §8.1 step 3: once `confirm` is sent, no stream may be opening.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+        // Once `confirm` is sent (step 3), no stream may be opening.
         let now = Instant::now();
         let mut links = Links::new();
         links.reconcile(stream("current"));
@@ -758,8 +765,9 @@ mod tests {
 
     #[test]
     fn a_wanted_stream_that_closes_reopens_and_reports_the_loss() {
-        // `crates/agent-identity/INTENT.md` ("Schedules"): check-in resumes once no stream has authenticated for 1 h,
-        // so the runner learns when the identity's last authenticated stream closes.
+        // oracle: intent crates/agent-identity/INTENT.md §Schedules
+        // Check-in resumes once no stream has authenticated for 1 h, so the runner learns when the identity's last
+        // authenticated stream closes.
         let now = Instant::now();
         let mut links = Links::new();
         links.reconcile(stream("current"));
@@ -768,6 +776,7 @@ mod tests {
 
         links.handle(link, closed_transiently(Duration::from_secs(1)), now);
 
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         assert!(!dropped.load(Ordering::SeqCst));
         assert!(!links.authenticated());
         assert_eq!(notices(&mut links), [Notice::Lost]);
@@ -775,6 +784,7 @@ mod tests {
 
     #[test]
     fn a_stream_is_opening_until_it_authenticates_and_again_once_its_reopening_starts() {
+        // oracle: mutant a stream waiting to reopen counts as opening during its backoff
         // The runner sends `confirm` only while no stream is opening (`CONTRACT.agent-identity.md` §8.1 step 3), and a
         // stream waiting to reopen sends nothing until its backoff ends.
         let opened_at = Instant::now();

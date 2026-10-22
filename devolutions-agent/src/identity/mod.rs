@@ -483,8 +483,9 @@ mod tests {
     #[cfg(not(windows))]
     #[tokio::test]
     async fn unavailable_key_backend_stops_identity_after_one_system_event() -> anyhow::Result<()> {
-        // `crates/agent-identity/INTENT.md` ("Identities"): an unavailable backend is reported once and stops the
-        // identity feature before it touches any state; the Windows software provider never exists on this platform.
+        // oracle: intent crates/agent-identity/INTENT.md §Identities
+        // An unavailable backend is reported once and stops the identity feature before it touches any state; the
+        // Windows software provider never exists on this platform.
         let data_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("target")
             .join("identity-tests")
@@ -507,6 +508,7 @@ mod tests {
         outcome.context("identity task kept running")??;
         let entries = events.0.lock();
         assert_eq!(entries.len(), 1);
+        // oracle: spec docs/agent-identity/README.md §Key backend unavailable
         assert_eq!(entries[0].event_code, Some(1100));
         assert!(
             entries[0]
@@ -617,9 +619,9 @@ mod tests {
 
     #[tokio::test]
     async fn an_untrusted_authority_directory_holds_pending_enrollment_until_it_is_fixed() -> anyhow::Result<()> {
-        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that fails the check stops all
-        // identity processing until it is fixed, so no pending file is processed meanwhile, and processing resumes
-        // without a restart.
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        // An authority directory that fails the check stops all identity processing until it is fixed, so no pending
+        // file is processed meanwhile, and processing resumes without a restart.
         use base64::Engine as _;
 
         let data_dir = TestDataDir::new()?;
@@ -702,8 +704,9 @@ mod tests {
 
     #[test]
     fn the_n_th_consecutive_failure_waits_2_to_the_n_seconds_times_jitter_then_at_most_the_maximum() {
-        // `crates/agent-identity/INTENT.md` ("Schedules"): a transient failure is retried after `2^n` seconds for the
-        // `n`-th consecutive failure, multiplied by a jitter from `[0.5, 1.5]`, and never longer than 1 h.
+        // oracle: intent crates/agent-identity/INTENT.md §Schedules
+        // A transient failure is retried after `2^n` seconds for the `n`-th consecutive failure, multiplied by a jitter
+        // from `[0.5, 1.5]`, and never longer than 1 h.
         let hour = Duration::from_secs(3600);
         assert_eq!(backoff(1, 1.0, hour), Duration::from_secs(2));
         assert_eq!(backoff(3, 1.5, hour), Duration::from_secs(12));
@@ -714,8 +717,10 @@ mod tests {
 
     #[test]
     fn retry_after_is_capped_by_maximum_backoff() {
-        // `CONTRACT.agent-identity.md` §5.4 and `crates/agent-identity/INTENT.md` ("Schedules") cap `Retry-After` at the maximum delay.
-        // `devolutions-agent/src/identity/INTENT.md` ("Configuration") lets `backoff_max_secs` lower that maximum.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+        // The agent waits at least `Retry-After`, up to its maximum retry delay, which
+        // `crates/agent-identity/INTENT.md` ("Schedules") sets to 1 h and `backoff_max_secs` lowers
+        // (`devolutions-agent/src/identity/INTENT.md`, "Configuration").
         let maximum = Duration::from_secs(17);
         assert_eq!(
             retry_delay(maximum, Duration::from_secs(5), Some(Duration::from_secs(3600))),

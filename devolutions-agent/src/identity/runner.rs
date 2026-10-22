@@ -798,6 +798,7 @@ mod tests {
 
     #[test]
     fn a_past_renewal_time_is_due_at_the_caller_s_now() {
+        // oracle: mutant a passed time is scheduled as far ahead as it is overdue
         // A renewal time that has passed must compare due against the instant the step read, or the step spins.
         let now = Instant::now();
         assert_eq!(instant_at(SystemTime::now() - Duration::from_secs(1), now), now);
@@ -805,9 +806,9 @@ mod tests {
 
     #[test]
     fn a_certificate_keeps_the_time_it_was_stored_until_it_is_scheduled() {
-        // `crates/agent-identity/INTENT.md` ("Schedules"): the anchor is the earlier of `notBefore` and the moment the
-        // agent stored or loaded the certificate, so a pending certificate confirmed 6 s after renew stored it keeps
-        // the time of storage once it becomes current.
+        // oracle: intent crates/agent-identity/INTENT.md §Schedules
+        // The anchor is the earlier of `notBefore` and the moment the agent stored or loaded the certificate, so a
+        // pending certificate confirmed 6 s after renew stored it keeps the time of storage once it becomes current.
         let stored_at = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
         let mut loads = LoadTimes::default();
         loads.record("renewed", stored_at);
