@@ -87,7 +87,10 @@ impl JrecManifest {
 
         let path = path.as_ref();
         // jrec never serves a name that starts with a dot, so a file a crash left behind is never downloaded.
-        let partial = path.with_file_name(".recording.json.partial");
+        let mut partial_name = std::ffi::OsString::from(".");
+        partial_name.push(path.file_name().context("manifest path without a file name")?);
+        partial_name.push(".partial");
+        let partial = path.with_file_name(partial_name);
         let json = serde_json::to_string_pretty(&self)?;
 
         let mut file = std::fs::File::create(&partial)?;
