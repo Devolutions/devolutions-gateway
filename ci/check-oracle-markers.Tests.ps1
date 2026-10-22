@@ -198,6 +198,32 @@ Describe 'Marker grammar and references' {
         $Result.ExitCode | Should -Be 0
     }
 
+    It 'Ignores marker-shaped text inside <Name>' -ForEach @(
+        @{ Name = 'a Rust raw string'; Path = 'src/lib.rs'; Content = "const S: &str = r`"`n// oracle: scaffold`n`";`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'a C# verbatim string'; Path = 'dotnet/T.cs'; Content = "class T { string s = @`"`n// oracle: scaffold`n`"; }`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'a PowerShell here-string'; Path = 'ci/a.ps1'; Content = "`$x = @'`n`# oracle: scaffold`n'@`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+    ) {
+        $Repo = New-Repo
+        Set-RepoFile $Repo $Path $Content
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo
+
+        $Result.Output | Should -BeNullOrEmpty
+        $Result.ExitCode | Should -Be 0
+    }
+
+    It 'Ignores a marker label in another case' { # oracle: intent ci/check-oracle-markers.intent.md §languages
+        $Repo = New-Repo
+        Set-RepoFile $Repo 'src/lib.rs' "fn f() {} // ORACLE: scaffold`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo
+
+        $Result.Output | Should -BeNullOrEmpty
+        $Result.ExitCode | Should -Be 0
+    }
+
     It 'Checks markers in PowerShell files' { # oracle: intent ci/check-oracle-markers.intent.md §languages
         $Repo = New-Repo
         Set-RepoFile $Repo 'ci/a.Tests.ps1' "Describe 'd' {`n    It 'a' { `# oracle: scaffold`n    }`n}`n"
@@ -247,12 +273,15 @@ Describe 'Repeated anchors' {
         $Result.ExitCode | Should -Be 0
     }
 
-    It 'Rejects a citation of an anchor id repeated within a pinned file' { # oracle: intent ci/check-oracle-markers.intent.md §paths
+    It 'Rejects a citation of a pinned file with a repeated anchor, cited by <Name>' -ForEach @(
+        @{ Name = 'the repeated id'; Section = 'x' } # oracle: intent ci/check-oracle-markers.intent.md §paths
+        @{ Name = 'a heading'; Section = 'A' } # oracle: intent ci/check-oracle-markers.intent.md §paths
+    ) {
         $Repo = New-Repo
         $GitHub = New-FakeGitHub @{
             'Org/specs' = @{ Default = 'main'; Branches = @{ main = $PinA }; Commits = @{ $PinA = @{ 'docs/CONTRACT.specs.md' = "<a id=`"x`"></a>`n# A`n`n<a id=`"x`"></a>`n# B`n" } } }
         }
-        Set-RepoFile $Repo 'src/lib.rs' "fn f() {} // oracle: contract Org/specs@43958682a1b2:docs/CONTRACT.specs.md §x`n"
+        Set-RepoFile $Repo 'src/lib.rs' "fn f() {} // oracle: contract Org/specs@43958682a1b2:docs/CONTRACT.specs.md §$Section`n"
         Invoke-Git $Repo add -A
 
         $Result = Invoke-Check $Repo -GitHubApi $GitHub
@@ -448,6 +477,8 @@ Describe 'New tests' {
         @{ Name = 'Pester test followed by a marked one'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' {`n    }`n`n    It 'b' {`n        1 | Should -Be 1 `# oracle: property round-trip`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'Pester test declared with a lowercase it'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    it 'a' {`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Rust test with a brace in a block comment, followed by a marked helper'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    /* { */`n}`n`nfn helper() {`n    // oracle: property round-trip`n}`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'Rust test whose only marker sits in a raw string'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = r`"`n// oracle: property round-trip`n`";`n}`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'Rust test whose only marker label is uppercase'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {} // ORACLE: property round-trip`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'xUnit fact followed by a marked helper'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n    }`n`n    void Helper() { } // oracle: property round-trip`n}`n"; Line = 3; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
     ) {
         Set-RepoFile $Repo $Path $Content
@@ -524,6 +555,31 @@ Describe 'New tests' {
         @{ Name = 'a marked Pester namesake joins its file'; Path = 'ci/old.Tests.ps1'; Content = "Describe 'd' {`n    It 'old' {`n        1 | Should -Be 1`n    }`n}`n`nDescribe 'e' {`n    It 'old' { `# oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
     ) {
         Set-RepoFile $Repo $Path $Content
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $Base
+
+        $Result.Output | Should -BeNullOrEmpty
+        $Result.ExitCode | Should -Be 0
+    }
+
+    It 'Reports a new unmarked namesake of an existing marked test' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'src/kept.rs' "#[test]`nfn kept() {} // oracle: property round-trip`n"
+        Invoke-Git $Repo add -A
+        Invoke-Git $Repo commit -q -m kept
+        $KeptBase = (& git -C $Repo rev-parse HEAD)
+        Set-RepoFile $Repo 'src/kept.rs' "#[test]`nfn kept() {} // oracle: property round-trip`n`nmod b {`n    #[test]`n    fn kept() {}`n}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $KeptBase
+
+        $Result.Output | Should -Be @("src/kept.rs:5: new test has no '// oracle:' marker")
+    }
+
+    It 'Ignores an unmarked test moved while a marked namesake is added elsewhere' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Remove-Item -LiteralPath (Join-Path $Repo 'src/old.rs')
+        Set-RepoFile $Repo 'src/moved.rs' "#[test]`nfn old() {}`n"
+        Set-RepoFile $Repo 'src/z.rs' "#[test]`nfn old() {} // oracle: property round-trip`n"
         Invoke-Git $Repo add -A
 
         $Result = Invoke-Check $Repo $Base
