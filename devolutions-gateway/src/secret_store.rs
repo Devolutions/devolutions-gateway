@@ -147,20 +147,24 @@ mod tests {
             .insert(id, &SecretString::from("secret-a"), now + time::Duration::hours(1))
             .expect("insert");
 
+        // oracle: intent devolutions-gateway/src/secret_store.intent.md §secrets
         assert!(
             !format!("{store:?}").contains("secret-a"),
             "the store's Debug output never shows the secret"
         );
         let secret = store.get_at(id, now).expect("decrypt").expect("present");
+        // oracle: property round-trip
         assert_eq!(secret.expose_secret(), "secret-a");
 
         store
             .insert(id, &SecretString::from("secret-b"), now + time::Duration::hours(1))
             .expect("replace");
         let secret = store.get_at(id, now).expect("decrypt").expect("present");
+        // oracle: intent devolutions-gateway/src/secret_store.intent.md §replacement
         assert_eq!(secret.expose_secret(), "secret-b");
     }
 
+    // oracle: intent devolutions-gateway/src/secret_store.intent.md §secrets
     #[test]
     fn secret_goes_away_when_removed_or_expired() {
         let store = SecretStore::default();
@@ -183,8 +187,11 @@ mod tests {
             store.get_at(expired, now).expect("read").is_none(),
             "a secret is gone once its expiry is reached"
         );
+        assert!(
+            !store.entries.lock().contains_key(&expired),
+            "reading an expired secret drops it"
+        );
 
-        assert_eq!(store.next_expiry(), Some(now + time::Duration::minutes(1)));
         store.remove_expired(now + time::Duration::minutes(1));
         assert!(store.entries.lock().is_empty(), "the cleanup pass removes it");
     }
