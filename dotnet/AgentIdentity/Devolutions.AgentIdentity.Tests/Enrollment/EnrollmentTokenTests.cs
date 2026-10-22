@@ -16,7 +16,8 @@ public class EnrollmentTokenTests
     [Fact]
     public void CreateEncodesTheGeneratorBytesAsTheSecret()
     {
-        EnrollmentToken token = EnrollmentToken.Create("https://host/dvls", new ReplayingGenerator(SecretBytes));
+        EnrollmentToken token =
+            EnrollmentToken.Create("https://host/dvls", new ScriptedRandomNumberGenerator(SecretBytes));
 
         Assert.StartsWith("dvaet1.", token.Value, StringComparison.Ordinal);
         Assert.EndsWith("." + SecretText, token.Value, StringComparison.Ordinal);
@@ -29,7 +30,8 @@ public class EnrollmentTokenTests
     [Fact]
     public void SecretHashIsTheSha256OfTheSecretText()
     {
-        EnrollmentToken token = EnrollmentToken.Create("https://host/dvls", new ReplayingGenerator(SecretBytes));
+        EnrollmentToken token =
+            EnrollmentToken.Create("https://host/dvls", new ScriptedRandomNumberGenerator(SecretBytes));
 
         Assert.Equal(SHA256.HashData(Encoding.ASCII.GetBytes(SecretText)), token.SecretHash.ToArray());
     }
@@ -49,7 +51,8 @@ public class EnrollmentTokenTests
             byte[] bytes = new byte[32];
             random.NextBytes(bytes);
 
-            EnrollmentToken token = EnrollmentToken.Create("https://host/dvls", new ReplayingGenerator(bytes));
+            EnrollmentToken token =
+                EnrollmentToken.Create("https://host/dvls", new ScriptedRandomNumberGenerator(bytes));
 
             Assert.Matches(@"\Advaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}\z", token.Value);
             string secret = token.Value.Split('.')[2];
@@ -75,7 +78,8 @@ public class EnrollmentTokenTests
             {
                 byte[] bytes = new byte[32];
                 random.NextBytes(bytes);
-                EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(bytes));
+                EnrollmentToken token =
+                    EnrollmentToken.Create(productBaseUrl, new ScriptedRandomNumberGenerator(bytes));
                 byte[] expected = SHA256.HashData(Encoding.ASCII.GetBytes(token.Value.Split('.')[2]));
 
                 EnrollmentAuthorizationResult result =
@@ -96,7 +100,7 @@ public class EnrollmentTokenTests
     [InlineData("https://host")]
     public void CreatePutsTheProductBaseUrlInTheBag(string productBaseUrl)
     {
-        EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes));
+        EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ScriptedRandomNumberGenerator(SecretBytes));
 
         // The bag of a token the library creates holds `u` alone.
         // oracle: intent dotnet/AgentIdentity/INTENT.md §Enrollment tokens
@@ -159,7 +163,7 @@ public class EnrollmentTokenTests
     public void CreateRejectsAnotherUrl(string productBaseUrl)
     {
         ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes)));
+            () => EnrollmentToken.Create(productBaseUrl, new ScriptedRandomNumberGenerator(SecretBytes)));
 
         // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("productBaseUrl", exception.ParamName);
@@ -174,7 +178,8 @@ public class EnrollmentTokenTests
     [Fact]
     public void CreateAcceptsTheLongestUrlThatFits()
     {
-        EnrollmentToken token = EnrollmentToken.Create(UrlOfLength(3025), new ReplayingGenerator(SecretBytes));
+        EnrollmentToken token =
+            EnrollmentToken.Create(UrlOfLength(3025), new ScriptedRandomNumberGenerator(SecretBytes));
 
         Assert.Equal(4095, token.Value.Length);
     }
@@ -185,7 +190,8 @@ public class EnrollmentTokenTests
     [Fact]
     public void ToStringRevealsNoPartOfTheToken()
     {
-        EnrollmentToken token = EnrollmentToken.Create("https://host/dvls", new ReplayingGenerator(SecretBytes));
+        EnrollmentToken token =
+            EnrollmentToken.Create("https://host/dvls", new ScriptedRandomNumberGenerator(SecretBytes));
         string[] segments = token.Value.Split('.');
 
         EnrollmentTokenAssert.RevealsNoPart(token.ToString(), segments[1], segments[2]);
@@ -198,7 +204,7 @@ public class EnrollmentTokenTests
     public void CreateFailureRevealsNoPartOfTheSecret(string productBaseUrl)
     {
         ArgumentException exception = Assert.Throws<ArgumentException>(
-            () => EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes)));
+            () => EnrollmentToken.Create(productBaseUrl, new ScriptedRandomNumberGenerator(SecretBytes)));
 
         EnrollmentTokenAssert.RevealsNoPart(exception.Message, SecretText);
     }
@@ -219,7 +225,7 @@ public class EnrollmentTokenTests
     // A creation with one null argument, by the name of the parameter that receives it.
     private static Dictionary<string, Action> CreationsWithANullArgument => new()
     {
-        ["productBaseUrl"] = () => EnrollmentToken.Create(null!, new ReplayingGenerator(SecretBytes)),
+        ["productBaseUrl"] = () => EnrollmentToken.Create(null!, new ScriptedRandomNumberGenerator(SecretBytes)),
         ["randomNumberGenerator"] = () => EnrollmentToken.Create("https://host/dvls", null!),
     };
 
@@ -237,7 +243,7 @@ public class EnrollmentTokenTests
 
         try
         {
-            token = EnrollmentToken.Create(productBaseUrl, new ReplayingGenerator(SecretBytes));
+            token = EnrollmentToken.Create(productBaseUrl, new ScriptedRandomNumberGenerator(SecretBytes));
         }
         catch (ArgumentException)
         {
@@ -270,25 +276,6 @@ public class EnrollmentTokenTests
         public static Creation Holding(string? u)
         {
             return new Creation(Rejected: false, U: u);
-        }
-    }
-
-    /// <summary>
-    /// A generator that returns the given bytes in order, so that a test knows the secret it produces.
-    /// </summary>
-    private sealed class ReplayingGenerator(byte[] bytes) : RandomNumberGenerator
-    {
-        private int _position;
-
-        public override void GetBytes(byte[] data)
-        {
-            GetBytes(data.AsSpan());
-        }
-
-        public override void GetBytes(Span<byte> data)
-        {
-            bytes.AsSpan(_position, data.Length).CopyTo(data);
-            _position += data.Length;
         }
     }
 }
