@@ -30,7 +30,7 @@ public class AgentMetadataTests
     public static TheoryData<string> FailureNames => new(Failures.Keys);
 
     // Metadata may be an empty object.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void AcceptsNoEntries()
     {
@@ -40,7 +40,7 @@ public class AgentMetadataTests
     }
 
     // Metadata is a JSON object of string to string, and keeps each entry received.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void KeepsEveryEntryReceived()
     {
@@ -89,7 +89,7 @@ public class AgentMetadataTests
     }
 
     // At most 32 keys.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void Accepts32Keys()
     {
@@ -98,7 +98,7 @@ public class AgentMetadataTests
         Assert.Equal(32, metadata.Count);
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void Rejects33Keys()
     {
@@ -106,7 +106,7 @@ public class AgentMetadataTests
     }
 
     // A key matches ^[a-z][a-z0-9_]{0,63}$.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData("a")]
     [InlineData("hostname")]
@@ -118,14 +118,14 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate([new(key, "value")]));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void AcceptsKeyOf64Characters()
     {
         AssertValid(AgentMetadata.Validate([new("k" + new string('0', 63), "value")]));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void RejectsKeyOf65Characters()
     {
@@ -134,7 +134,7 @@ public class AgentMetadataTests
 
     // A case-insensitive match would take the Kelvin sign for 'k',
     // and a .NET regular expression ending in $ also matches before a final line feed.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData("empty", "")]
     [InlineData("uppercase first letter", "Hostname")]
@@ -154,7 +154,7 @@ public class AgentMetadataTests
 
     // A value has at most 1024 UTF-8 bytes.
     // Characters of two, three and four bytes count by their bytes, not as one character or UTF-16 code unit.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData("a", 1024, "")]
     [InlineData("\u00E9", 512, "")]
@@ -165,7 +165,7 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate([new("hostname", Repeat(unit, count) + suffix)]));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData("a", 1025, "")]
     [InlineData("\u00E9", 512, "a")]
@@ -177,7 +177,7 @@ public class AgentMetadataTests
     }
 
     // CONTRACT.agent-identity.md §3 gives a value no minimum length.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void AcceptsEmptyValue()
     {
@@ -188,7 +188,7 @@ public class AgentMetadataTests
     public static TheoryData<int> ControlCharacters =>
         new(Enumerable.Range(0x00, 0x20).Append(0x7F).Concat(Enumerable.Range(0x80, 0x20)));
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [MemberData(nameof(ControlCharacters))]
     public void RejectsValueWithControlCharacter(int codePoint)
@@ -197,7 +197,7 @@ public class AgentMetadataTests
     }
 
     // The neighbors of the control ranges, including U+00A0, the first character after C1.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData(0x20)]
     [InlineData(0x7E)]
@@ -209,7 +209,7 @@ public class AgentMetadataTests
 
     // CONTRACT.agent-identity.md §3 measures a value in UTF-8 bytes.
     // A string holding an unpaired surrogate is not Unicode text, so it has no UTF-8 encoding to measure or store.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     // oracle: spec RFC 3629 §3
     [Theory]
     [InlineData("lone high surrogate", 0x61, 0xD800, 0x62)]
@@ -225,7 +225,7 @@ public class AgentMetadataTests
 
     // The whole object has at most 16 KiB, the sum of the UTF-8 byte lengths of all keys and values.
     // Each value has 1021 UTF-8 bytes but 511 characters, so a count of characters would stay far below the limit.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void AcceptsObjectOf16KiB()
     {
@@ -233,7 +233,7 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate(EntriesOf1024Bytes(lastKey: "k15")));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void RejectsObjectOf16KiBAndOneByte()
     {
@@ -243,7 +243,7 @@ public class AgentMetadataTests
 
     // CONTRACT.agent-identity.md §1 makes one metadata key sent twice invalid_request.
     // A later entry with the same key would silently replace the earlier one.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void RejectsRepeatedKey()
     {
@@ -259,8 +259,8 @@ public class AgentMetadataTests
     {
         MetadataValidationResult result = AgentMetadata.Validate(Failures[failure]);
 
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
         // oracle: spec RFC 3629 §3
         AssertInvalid(result, failure);
         Assert.DoesNotContain(LeakedKey, result.FailureDetail);
@@ -277,7 +277,7 @@ public class AgentMetadataTests
         MetadataValidationResult result = AgentMetadata.Validate([Entry("hostname", $"host{(char)codePoint}name")]);
         string[] renderings = [$"U+{codePoint:X4}", $"0x{codePoint:X2}", $"0x{codePoint:X4}", $"{codePoint:X4}"];
 
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
         AssertInvalid(result);
         Assert.DoesNotContain(((char)codePoint).ToString(), result.FailureDetail, StringComparison.Ordinal);
         Assert.All(
@@ -306,7 +306,7 @@ public class AgentMetadataTests
     private static void AssertInvalid(MetadataValidationResult result, string? form = null)
     {
         Assert.False(result.Succeeded, form);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         Assert.Equal(AgentIdentityErrorCode.InvalidRequest, result.Error.Code);
         Assert.Equal(400, result.Error.HttpStatusCode);
         // oracle: mutant an empty failure detail for a repeated key or for metadata over 16 KiB

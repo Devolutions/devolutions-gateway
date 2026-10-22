@@ -18,8 +18,8 @@ public class ChannelOpeningTests
     // CONTRACT.agent-identity.md §7.3 step 2: the first message is Challenge,
     // with 32 random bytes fresh for this stream.
     // CONTRACT.agent-identity.md §1 and §7.3: ids are lowercase hyphenated UUIDs.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public async Task ChallengeHolds32Bytes()
     {
@@ -35,7 +35,7 @@ public class ChannelOpeningTests
 
     // Step 2: the challenge holds 32 random bytes fresh for this stream.
     // A challenge reused across streams would let a proof captured on one stream authenticate another.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     [Fact]
     public async Task EachOpeningHasItsOwnChallenge()
     {
@@ -44,9 +44,9 @@ public class ChannelOpeningTests
         ChannelOpening first = await OpenAsync(authority, TestRequest.DefaultNonce);
         ChannelOpening second = await OpenAsync(authority, "EBESExQVFhcYGRobHB0eHw");
 
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         Assert.NotEqual(first.Challenge.Id, second.Challenge.Id);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
         Assert.Equal(32, second.Challenge.Challenge.Challenge_.Length);
         Assert.NotEqual(
             first.Challenge.Challenge.Challenge_.ToByteArray(),
@@ -56,7 +56,7 @@ public class ChannelOpeningTests
     // Steps 3 and 4: the proof covers the challenge as sent and the connect nonce,
     // and is verified with the key of the certificate that authenticated the opening,
     // so the opening keeps the nonce and that certificate for the handshake.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: reference docs/agent-identity/test-vectors.json channel_proof
     // oracle: reference docs/agent-identity/test-vectors.json http_signature.registered.device-a
     [Fact]
@@ -88,7 +88,7 @@ public class ChannelOpeningTests
     // Steps 3 and 4: the agent signs the challenge it received, and the server verifies that proof.
     // The handshake checks the proof against the challenge as sent,
     // so a host that edits the message object after sending it must not change what the agent has to sign.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     [Fact]
     public async Task KeptChallengeDoesNotFollowEditsOfTheMessage()
     {
@@ -107,7 +107,7 @@ public class ChannelOpeningTests
     // A stream closes no later than its certificate's notAfter,
     // even while it waits for its Hello, so the opening gives the host that time.
     // The vector file states it in Unix seconds, independently of any time zone.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     // oracle: reference docs/agent-identity/test-vectors.json http_signature.registered.device-a
     [Fact]
     public async Task OpeningGivesTheNotAfterOfItsCertificate()

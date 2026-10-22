@@ -35,10 +35,10 @@ public abstract class RequestBodyTests
     protected abstract RequestBodyOutcome Parse(byte[] utf8Json);
 
     // CONTRACT.agent-identity.md §5.2, §5.3 and §5.6 define the bodies, and §3 their metadata.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.6
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     [Fact]
     public void AcceptsValidBody()
     {
@@ -49,7 +49,7 @@ public abstract class RequestBodyTests
 
     // Receivers ignore unknown JSON fields.
     // A name repeated in different objects is not a repeated member.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData(""" "extra": 1""")]
     [InlineData(""" "extra": {"nested": [1, 2.5e3, true, false, null, {"a": "b"}]}""")]
@@ -76,7 +76,7 @@ public abstract class RequestBodyTests
     }
 
     // Metadata may be an empty object.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Fact]
     public void AcceptsEmptyMetadata()
     {
@@ -84,8 +84,8 @@ public abstract class RequestBodyTests
     }
 
     // CONTRACT.agent-identity.md §3: metadata is required, and §1 reads a null member as an absent one.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData(null)]
     [InlineData("null")]
@@ -95,7 +95,7 @@ public abstract class RequestBodyTests
     }
 
     // Metadata is a JSON object of string to string.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData(""" "host" """)]
     [InlineData("[]")]
@@ -107,7 +107,7 @@ public abstract class RequestBodyTests
         AssertInvalid(ParseText(Body(metadata, "")));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [InlineData("""{"hostname": 1}""")]
     [InlineData("""{"hostname": true}""")]
@@ -131,7 +131,7 @@ public abstract class RequestBodyTests
         { "value of 1025 UTF-8 bytes", $$"""{"hostname": "{{string.Concat(Enumerable.Repeat("\u00E9", 512))}}a"}""" },
     };
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [MemberData(nameof(MetadataBeyondTheLimits))]
     public void RejectsMetadataBeyondTheLimits(string form, string metadata)
@@ -162,8 +162,8 @@ public abstract class RequestBodyTests
     {
         RequestBodyOutcome outcome = ParseText(Body(metadata, ""));
 
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
         AssertInvalid(outcome, form);
         Assert.DoesNotContain(LeakedKey, outcome.FailureDetail);
         Assert.DoesNotContain(LeakedValue, outcome.FailureDetail);
@@ -171,7 +171,7 @@ public abstract class RequestBodyTests
 
     // A body that repeats a member name at any depth, such as one metadata key twice,
     // is invalid, whether the names are written alike or only unescape alike.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData("metadata", ValidMetadata, """ "metadata": {}""")]
     // oracle: spec RFC 8259 §7
@@ -198,9 +198,9 @@ public abstract class RequestBodyTests
     // oracle: spec RFC 8259 §2
     // oracle: spec RFC 8259 §8.1
     [InlineData("byte order mark", "\uFEFF", "")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.6
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     [InlineData("object inside an array", "[", "]")]
     public void RejectsTextAroundTheObject(string form, string prefix, string suffix)
     {
@@ -243,9 +243,9 @@ public abstract class RequestBodyTests
 
     // CONTRACT.agent-identity.md §5.2, §5.3 and §5.6: each body is a JSON object;
     // RFC 8259 §2: a JSON text holds one value.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.6
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     [Theory]
     [InlineData("[]")]
     [InlineData(""" "body" """)]
@@ -262,7 +262,7 @@ public abstract class RequestBodyTests
     // A string that is not valid Unicode, such as an escaped lone surrogate, in any member, including an unknown one,
     // is invalid, since parsers disagree on what it reads as.
     // A member name is a string too.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData("lone high surrogate", """ "extra": "\ud800" """)]
     [InlineData("lone low surrogate", """ "extra": "\udc00" """)]
@@ -275,7 +275,7 @@ public abstract class RequestBodyTests
 
     // CONTRACT.agent-identity.md §1 and RFC 8259 §8.1: JSON bodies are UTF-8.
     // The bytes replace the character of a string in an unknown member.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // oracle: spec RFC 3629 §4
     [Theory]
     [InlineData(new byte[] { 0xFF })]
@@ -292,14 +292,14 @@ public abstract class RequestBodyTests
 
     // A body with more than 64 nested objects and arrays, counting the top-level object, is invalid.
     // The body object is the first, so 63 nested arrays make 64 and 64 make 65.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void AcceptsNestingOf64Levels()
     {
         AssertValid(ParseText(Body(ValidMetadata, NestedArrays(63))));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void RejectsNestingOf65Levels()
     {
@@ -324,7 +324,7 @@ public abstract class RequestBodyTests
     protected static RequestBodyOutcome AssertValid(RequestBodyOutcome outcome)
     {
         Assert.True(outcome.Succeeded, outcome.FailureDetail);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
         Assert.NotNull(outcome.Metadata);
 
         return outcome;
@@ -334,7 +334,7 @@ public abstract class RequestBodyTests
     protected static void AssertInvalid(RequestBodyOutcome outcome, string? form = null)
     {
         Assert.False(outcome.Succeeded, form);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         Assert.NotNull(outcome.Error);
         Assert.Equal(AgentIdentityErrorCode.InvalidRequest, outcome.Error.Code);
         Assert.Equal(400, outcome.Error.HttpStatusCode);
@@ -376,14 +376,14 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
         CertificateSigningRequest csr = AssertValid(ParseText(Body(ValidMetadata, ""))).Csr!;
 
         Assert.Equal(expected, csr.SubjectPublicKeyInfo.ToArray());
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
         Assert.Equal(SHA256.HashData(expected), csr.SubjectPublicKeyInfoSha256.ToArray());
     }
 
     // CONTRACT.agent-identity.md §5.2 and §5.3: csr is required, and §1 reads a null member as an absent one.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     [Theory]
     [InlineData(null)]
     [InlineData("null")]
@@ -393,7 +393,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     }
 
     // A CSR is DER encoded base64 in a JSON string.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData("1")]
     [InlineData("{}")]
@@ -409,8 +409,8 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     // into a form that a lenient decoder would still read as that request.
     // The requests are built here rather than read from the vector file,
     // so that each form applies to them whatever request the file holds.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -424,7 +424,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     // The pad bits of the final quantum, four after one octet and two after two octets, are zero.
     // The character before the padding holds them, so setting its lowest bit sets one pad bit.
     // oracle: spec RFC 4648 §3.5
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData(1)]
     [InlineData(2)]
@@ -439,7 +439,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     }
 
     // A lenient decoder skips white space, such as the line breaks that RFC 7468 places every 64 characters.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // oracle: spec RFC 4648 §3.3
     [Theory]
     [InlineData("\n")]
@@ -452,8 +452,8 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     }
 
     // RFC 4648 §5: the base64url alphabet writes - and _ for the + and / of base64.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void RejectsCsrInTheBase64UrlAlphabet()
     {
@@ -481,7 +481,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
     }
 
     // CONTRACT.agent-identity.md §1 makes csr sent twice invalid_request.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void RejectsRepeatedCsr()
     {
@@ -517,7 +517,7 @@ public abstract class CsrRequestBodyTests : RequestBodyTests
 
     private void AssertOnlyCanonicalCsrIsValid(string canonical, string altered)
     {
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         AssertValid(ParseText(BodyWithCsr(Quote(canonical), ValidMetadata)));
 
         AssertInvalid(ParseText(BodyWithCsr(Quote(altered), ValidMetadata)));
@@ -563,8 +563,8 @@ public class RenewRequestBodyTests : CsrRequestBodyTests
 public class CheckInRequestBodyTests : RequestBodyTests
 {
     // A check-in body has no csr, so a csr member is an unknown member.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.6
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void IgnoresCsrMember()
     {

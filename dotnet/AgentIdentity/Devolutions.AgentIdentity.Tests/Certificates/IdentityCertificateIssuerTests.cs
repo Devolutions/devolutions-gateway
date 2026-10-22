@@ -65,7 +65,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // The certificate is for the P-256 key of the CSR.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void CertifiesTheKeyOfTheCsr()
     {
@@ -75,8 +75,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // CN=<identity_id>, and the root's subject as the issuer.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void SubjectIsTheCommonNameOfTheIdentity()
     {
@@ -92,8 +92,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     // CONTRACT.agent-identity.md §4: SAN URI urn:uuid:<identity_id>.
     // RFC 5280 §4.2.1.6: GeneralNames is a SEQUENCE OF GeneralName, and a URI is [6] IA5String;
     // with a subject present, the extension is not critical.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // oracle: spec RFC 5280 §4.2.1.6
     [Fact]
     public void AlternativeNameIsTheUrnUuidOfTheIdentity()
@@ -111,7 +111,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // EKU clientAuth.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void ExtendedKeyUsageIsClientAuthenticationOnly()
     {
@@ -123,7 +123,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // CONTRACT.agent-identity.md §4: KeyUsage digitalSignature; RFC 5280 §4.2.1.3: marked critical.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void KeyUsageIsCriticalDigitalSignatureOnly()
     {
@@ -165,7 +165,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
     // The leaf carries SAN, EKU and KeyUsage, and no other extension except an authority key identifier and a subject
     // key identifier, so no basicConstraints.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void HasExactlyTheProfileExtensions()
     {
@@ -215,7 +215,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // The lifetime is a server setting.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void NotAfterIsNotBeforePlusTheLifetime()
     {
@@ -225,7 +225,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // The lifetime is capped at the issuing root's notAfter.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void NotAfterIsCappedAtTheNotAfterOfTheIssuer()
     {
@@ -237,7 +237,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // The lifetime is a server setting with a default of 90 days.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void DefaultLifetimeIs90Days()
     {
@@ -246,7 +246,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
     // The lifetime is a server setting,
     // and reading a moving clock twice would give the certificate a validity other than its lifetime.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void ReadsTheClockOnce()
     {
@@ -258,7 +258,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     // The certificate chains to the root that issued it, for client authentication.
     // RFC 5280 §6 path validation, as X509Chain runs it, with the CONTRACT.agent-identity.md §4 EKU clientAuth.
     // oracle: spec RFC 5280 §6
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void ChainsToTheIssuer()
     {
@@ -277,8 +277,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // Security invariant 2: the authority mints the subject, and a CSR supplies only a verified public key.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void IgnoresTheSubjectAndExtensionsOfTheCsr()
     {
@@ -292,7 +292,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
         Assert.Equal($"CN={IdentityIdText}", leaf.Subject);
         // The leaf carries no basicConstraints, so a leaf can never act as a CA.
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         Assert.Null(leaf.Extensions[BasicConstraintsOid]);
         X509EnhancedKeyUsageExtension usage =
             Assert.IsType<X509EnhancedKeyUsageExtension>(leaf.Extensions[ExtendedKeyUsageOid]);
@@ -312,7 +312,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     }
 
     // notAfter is at most the issuer's notAfter, so an issuer that expires by notBefore leaves no validity.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
     [InlineData(0)]
@@ -339,8 +339,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     // Code that acts for an identity takes the identity that the signature check produced.
     // The renew request is signed by device-a, whose identity ID the vector file gives.
     // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public async Task RenewalCertifiesTheKeyOfTheCsrForTheIdentityThatSignedTheRenewRequest()
     {
@@ -358,7 +358,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     // and only a renew request proves the identity that a renewal acts for.
     // An identity that proved its key for another operation never had a renew request accepted for it.
     // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
     [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.Confirm)]

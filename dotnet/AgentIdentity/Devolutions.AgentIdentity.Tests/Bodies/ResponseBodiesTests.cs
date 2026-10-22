@@ -52,7 +52,7 @@ public class ResponseBodiesTests
     public static TheoryData<string> ConfigBodyNames => new(ConfigBodies.Keys);
 
     // Each root has `certificate`, `thumbprint`, `not_before` and `not_after`, all strings.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
     [Fact]
     public void TrustAnchorRootHasExactlyTheContractMembers()
     {
@@ -67,7 +67,7 @@ public class ResponseBodiesTests
 
     // CONTRACT.agent-identity.md §1: a certificate is its DER in canonical base64,
     // and its thumbprint is base64url(SHA-256(DER)), which the vector file gives for its root.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // oracle: reference docs/agent-identity/test-vectors.json root
     [Fact]
     public void TrustAnchorGivesTheDerAndThumbprintOfTheRoot()
@@ -81,7 +81,7 @@ public class ResponseBodiesTests
 
     // CONTRACT.agent-identity.md §1: timestamps are RFC 3339 UTC strings ending in `Z`.
     // The validity is given here in offsets other than UTC, and the test machine's own time zone may be another.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // oracle: spec RFC 3339 §5.6
     [Fact]
     public void TrustAnchorGivesTheValidityOfTheRootInUtc()
@@ -98,7 +98,7 @@ public class ResponseBodiesTests
     }
 
     // The response lists one root normally and two during a rotation.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
     [Fact]
     public void TrustAnchorListsEveryRoot()
     {
@@ -116,7 +116,7 @@ public class ResponseBodiesTests
     }
 
     // The response always lists a root, and two during a rotation.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
     [Fact]
     public void TrustAnchorRejectsNoRoots()
     {
@@ -127,7 +127,7 @@ public class ResponseBodiesTests
     }
 
     // Each root has a certificate, which a null root lacks.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
     [Fact]
     public void TrustAnchorRejectsANullRoot()
     {
@@ -141,8 +141,8 @@ public class ResponseBodiesTests
     // CONTRACT.agent-identity.md §5.2: `authority_id`, `identity_id`, `certificate_chain` and `config`,
     // every one of them required.
     // §1: IDs are lowercase hyphenated UUIDs.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Fact]
     public void EnrollHasExactlyTheContractMembers()
     {
@@ -161,7 +161,7 @@ public class ResponseBodiesTests
     // RFC 9562 §5.9: the nil UUID, with all 128 bits zero, stands for the absence of a UUID,
     // and CONTRACT.agent-identity.md §5.2 requires both IDs.
     // oracle: spec RFC 9562 §5.9
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Theory]
     [InlineData(NilIdText, IdentityIdText, "authorityId")]
     [InlineData(AuthorityIdText, NilIdText, "identityId")]
@@ -175,7 +175,7 @@ public class ResponseBodiesTests
     }
 
     // `200`: `{ "certificate_chain": [ ... ] }`.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     [Fact]
     public void RenewHasExactlyTheContractMembers()
     {
@@ -187,7 +187,7 @@ public class ResponseBodiesTests
     }
 
     // `config` and `renewal_requested`, the identity's request-renewal flag as a JSON boolean.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.6
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     [Theory]
     [InlineData(true, JsonValueKind.True)]
     [InlineData(false, JsonValueKind.False)]
@@ -202,8 +202,8 @@ public class ResponseBodiesTests
     }
 
     // CONTRACT.agent-identity.md §4: chains are leaf-first; §1: each certificate is its DER in canonical base64.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainIsWrittenLeafFirst(string endpoint)
@@ -217,8 +217,8 @@ public class ResponseBodiesTests
     }
 
     // A chain has any length, so the leaf alone is a chain too.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainOfTheLeafAloneIsWritten(string endpoint)
@@ -232,7 +232,7 @@ public class ResponseBodiesTests
     // A CA's subject is encoded exactly as the issuer of each certificate it issues,
     // so in a leaf-first chain the issuer of each certificate is the subject of the next.
     // oracle: spec RFC 5280 §4.1.2.6
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainWithTheRootFirstIsRejected(string endpoint)
@@ -246,7 +246,7 @@ public class ResponseBodiesTests
 
     // The other root has another subject than the vector root, which issued the leaf.
     // oracle: spec RFC 5280 §4.1.2.6
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainWithACertificateThatDidNotIssueThePreviousOneIsRejected(string endpoint)
@@ -261,9 +261,9 @@ public class ResponseBodiesTests
     }
 
     // CONTRACT.agent-identity.md §4 and §5.2: a chain starts with the leaf, so it holds at least one certificate.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void EmptyChainIsRejected(string endpoint)
@@ -275,7 +275,7 @@ public class ResponseBodiesTests
     }
 
     // Each certificate of a chain is written as its DER, which a null certificate lacks.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [MemberData(nameof(ChainBodyNames))]
     public void ChainWithANullCertificateIsRejected(string endpoint)
@@ -288,8 +288,8 @@ public class ResponseBodiesTests
     }
 
     // CONTRACT.agent-identity.md §5.2 and §5.6: `config` is the identity's config, in the shape of §5.2.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.6
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     [Theory]
     [MemberData(nameof(ConfigBodyNames))]
     public void BodyCarriesTheConfig(string endpoint)
@@ -307,8 +307,8 @@ public class ResponseBodiesTests
     // CONTRACT.agent-identity.md §5.2 and §5.6: `config` is the identity's config,
     // and IdentityConfig.Create sets no depth limit.
     // The value nests 64 levels, so the body nests 66, beyond the 64 that a System.Text.Json reader allows by default.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.6
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     [Theory]
     [MemberData(nameof(ConfigBodyNames))]
     public void BodyCarriesADeeplyNestedConfig(string endpoint)

@@ -12,7 +12,7 @@ public class EnrollmentTokenTests
     private const string SecretText = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
     // `<prefix>.<bag>.<secret>`, where `secret` is base64url of 32 random bytes.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [Fact]
     public void CreateEncodesTheGeneratorBytesAsTheSecret()
     {
@@ -24,8 +24,8 @@ public class EnrollmentTokenTests
 
     // The authority matches the `secret` text exactly,
     // so it hashes the 43 characters rather than the bytes they encode.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     [Fact]
     public void SecretHashIsTheSha256OfTheSecretText()
     {
@@ -37,8 +37,8 @@ public class EnrollmentTokenTests
     // A complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`,
     // and its secret is the canonical base64url encoding of the 32 random bytes.
     // The random values are seeded, so a failure reproduces.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void CreateWritesEverySecretInTheContractPattern()
     {
@@ -62,8 +62,8 @@ public class EnrollmentTokenTests
     // and finds the token of an enroll request by the hash that ReadBearerToken returns.
     // CONTRACT.agent-identity.md §2: the authority matches the `secret` text exactly,
     // so both hashes are the SHA-256 of the 43 ASCII characters of the token's secret.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     [Fact]
     public void ReadBearerTokenReturnsTheSecretHashOfEveryCreatedToken()
     {
@@ -90,7 +90,7 @@ public class EnrollmentTokenTests
 
     // `bag` is the base64url encoding of a UTF-8 JSON object whose `u` is the product base URL,
     // so a URL already in the form of `u` is written as given.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [Theory]
     [InlineData("https://host/dvls")]
     [InlineData("https://host")]
@@ -107,11 +107,11 @@ public class EnrollmentTokenTests
     // but a token it creates holds in `u` the form that the source of the row decides.
     [Theory]
     // `u` has no trailing slash, and the agent removes trailing slashes, so `https://host/` names `https://host`.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [InlineData("https://host/dvls/", "https://host/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [InlineData("https://host/dvls//", "https://host/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [InlineData("https://host/", "https://host")]
     // White space around a URI is not part of it.
     // oracle: spec RFC 3986 §Appendix C
@@ -130,7 +130,7 @@ public class EnrollmentTokenTests
     // RFC 9110 §4.2.4 deprecates user information in an `https` URI and tells a recipient to treat it as an error.
     private static readonly string[] UnacceptableUrls =
     [
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
         "",
         "/dvls",
         "host/dvls",
@@ -138,7 +138,7 @@ public class EnrollmentTokenTests
         "wss://host/dvls",
         // oracle: spec RFC 9110 §4.2.2
         "https:///dvls",
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
         "https://host/dvls?tenant=1",
         "https://host/dvls?",
         "https://host/dvls#top",
@@ -150,7 +150,7 @@ public class EnrollmentTokenTests
 
     // The unacceptable URLs, and a URL one byte longer than the longest that fits in a token
     // (CONTRACT.agent-identity.md §2).
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     public static TheoryData<string> RejectedUrlRows => new([.. UnacceptableUrls, UrlOfLength(3026)]);
 
     // oracle: spec Framework Design Guidelines §Validating Arguments
@@ -169,7 +169,7 @@ public class EnrollmentTokenTests
     // A token's bag holds `u` alone, without insignificant white space, which fixes the longest URL that fits.
     // A 3025-byte URL makes a 3033-byte bag object, a 4044-character bag and a 4095-byte token.
     // One more byte makes a 4046-character bag and a 4097-byte token, since no base64url text has 4045 characters.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     // oracle: intent dotnet/AgentIdentity/INTENT.md §Enrollment tokens
     [Fact]
     public void CreateAcceptsTheLongestUrlThatFits()
@@ -251,10 +251,10 @@ public class EnrollmentTokenTests
     private static (string Name, string? Value)[] BagMembers(EnrollmentToken token)
     {
         string bag = token.Value.Split('.')[1];
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
         Assert.True(Base64Url.IsValid(bag));
         byte[] json = Base64Url.DecodeFromChars(bag);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         Assert.Equal(bag, Base64Url.EncodeToString(json));
 
         using JsonDocument document = JsonDocument.Parse(json);
