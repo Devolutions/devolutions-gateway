@@ -96,51 +96,104 @@ public class CertificateSigningRequestTests
         },
     };
 
-    // X.690 §10.1: DER writes each length in the fewest octets.
-    private static readonly Dictionary<string, Func<byte[]>> RequestsWithALongerLength = new()
+    // Requests that break a rule of the CSR profile, by name.
+    private static readonly Dictionary<string, Func<byte[]>> InvalidRequests = new()
     {
+        // None of these bytes is a CertificationRequest.
+        // oracle: spec RFC 2986 §4
+        ["no bytes"] = () => [],
+        // oracle: spec RFC 2986 §4
+        ["a zero octet"] = () => [0x00],
+        // oracle: spec RFC 2986 §4
+        ["an empty SEQUENCE"] = () => [0x30, 0x00],
+        // oracle: spec RFC 2986 §4
+        ["a SEQUENCE of a truncated SEQUENCE"] = () => [0x30, 0x03, 0x30, 0x01, 0x0A],
+
+        // A CSR is DER, the encoding of one request.
+        // Bytes after the request would give one request many encodings.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        ["trailing bytes"] = () => [.. AcceptedValidVector(), 0x00],
+
+        // X.690 §10.1: DER writes each length in the fewest octets.
+        // A CSR is DER, except for the subject and the attributes, which the server ignores.
         // The self-signature covers only the request info, so the request still verifies with a longer outer length.
-        ["CertificationRequest"] = () => TestCsr.TlvWithLongerLength(0x30, ValidVectorContents()),
+        // oracle: spec X.690 §10.1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        ["CertificationRequest with a longer length"] = () => TestCsr.TlvWithLongerLength(0x30, ValidVectorContents()),
 
         // The same for the request info and its version, which a test can only change by signing the request again.
-        ["CertificationRequestInfo"] = () =>
+        // oracle: spec X.690 §10.1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        ["CertificationRequestInfo with a longer length"] = WithNewKey(key =>
         {
-            using ECDsa key = NewKey();
             byte[] spki = key.ExportSubjectPublicKeyInfo();
             byte[] info = TestCsr.TlvWithLongerLength(
                 0x30,
                 [.. TestCsr.Integer(0), .. TestCsr.EmptySubject, .. spki, .. TestCsr.EmptyAttributes]);
             return TestCsr.Request(info, key);
-        },
-        ["version"] = () =>
+        }),
+        // oracle: spec X.690 §10.1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        ["version with a longer length"] = WithNewKey(key =>
         {
-            using ECDsa key = NewKey();
             byte[] info = TestCsr.Sequence(
                 TestCsr.TlvWithLongerLength(0x02, [0x00]),
                 TestCsr.EmptySubject,
                 key.ExportSubjectPublicKeyInfo(),
                 TestCsr.EmptyAttributes);
             return TestCsr.Request(info, key);
-        },
+        }),
 
         // Another encoding of the key's SubjectPublicKeyInfo would give the key a second SHA-256.
+        // oracle: spec X.690 §10.1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-        ["SubjectPublicKeyInfo"] = () =>
+        ["SubjectPublicKeyInfo with a longer length"] = WithNewKey(key =>
         {
-            using ECDsa key = NewKey();
             byte[] spki = TestCsr.TlvWithLongerLength(
                 0x30,
                 [.. TestCsr.P256Algorithm(), .. TestCsr.BitString(TestCsr.UncompressedPoint(key))]);
             return TestCsr.Request(TestCsr.RequestInfo(spki), key);
-        },
-    };
+        }),
 
-    // RFC 2986 §4 defines exactly the fields of each SEQUENCE, with no extension marker,
-    // and RFC 5480 §2 those of SubjectPublicKeyInfo and of its AlgorithmIdentifier.
-    private static readonly Dictionary<string, Func<ECDsa, byte[]>> RequestsWithAnExtraElement = new()
-    {
+        // DER uses the definite form of length.
+        // oracle: spec X.690 §10.1
+        ["indefinite length"] = () => [0x30, 0x80, .. ValidVectorContents(), 0x00, 0x00],
+
+        // version is v1, encoded 0.
         // oracle: spec RFC 2986 §4.1
-        ["CertificationRequestInfo"] = key =>
+        ["version 1"] = WithNewKey(key =>
+        {
+            byte[] info = TestCsr.Sequence(
+                TestCsr.Integer(1),
+                TestCsr.EmptySubject,
+                key.ExportSubjectPublicKeyInfo(),
+                TestCsr.EmptyAttributes);
+            return TestCsr.Request(info, key);
+        }),
+
+        // The subject is a Name, which is a SEQUENCE.
+        // oracle: spec RFC 2986 §4.1
+        // oracle: spec RFC 5280 §4.1.2.4
+        ["subject that is not a SEQUENCE"] = WithNewKey(key =>
+            TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject: [0x31, 0x00]), key)),
+
+        // attributes is a required field, a constructed [0] IMPLICIT SET OF Attribute.
+        // oracle: spec RFC 2986 §4.1
+        ["request info without attributes"] = WithNewKey(key => RequestWithAttributes(key, [])),
+
+        // The module of Appendix A uses IMPLICIT TAGS,
+        // and X.690 8.14.4 a) keeps an implicitly tagged SET OF constructed,
+        // so the attributes written primitive, 80 00, are not the required field.
+        // oracle: spec RFC 2986 §4.1
+        // oracle: spec RFC 2986 §A
+        // oracle: spec X.690 §8.14
+        ["request info with primitive attributes"] = WithNewKey(key => RequestWithAttributes(key, [0x80, 0x00])),
+
+        // RFC 2986 §4 defines exactly the fields of each SEQUENCE, with no extension marker,
+        // and RFC 5480 §2 those of SubjectPublicKeyInfo and of its AlgorithmIdentifier.
+        // oracle: spec RFC 2986 §4.1
+        ["CertificationRequestInfo with an extra element"] = WithNewKey(key =>
         {
             byte[] info = TestCsr.Sequence(
                 TestCsr.Integer(0),
@@ -149,9 +202,9 @@ public class CertificateSigningRequestTests
                 TestCsr.EmptyAttributes,
                 TestCsr.Null);
             return TestCsr.Request(info, key);
-        },
+        }),
         // oracle: spec RFC 2986 §4.2
-        ["CertificationRequest"] = key =>
+        ["CertificationRequest with an extra element"] = WithNewKey(key =>
         {
             byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
             return TestCsr.Sequence(
@@ -159,11 +212,11 @@ public class CertificateSigningRequestTests
                 TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
                 TestCsr.BitString(TestCsr.Sign(key, info)),
                 TestCsr.Null);
-        },
+        }),
 
         // Another element would give the key a second SubjectPublicKeyInfo, and so a second SHA-256.
         // oracle: spec RFC 5480 §2
-        ["AlgorithmIdentifier of the key"] = key =>
+        ["AlgorithmIdentifier of the key with an extra element"] = WithNewKey(key =>
         {
             byte[] algorithm = TestCsr.Sequence(
                 TestCsr.Oid(TestCsr.IdEcPublicKey),
@@ -171,20 +224,17 @@ public class CertificateSigningRequestTests
                 TestCsr.Null);
             byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
             return TestCsr.Request(TestCsr.RequestInfo(spki), key);
-        },
+        }),
         // oracle: spec RFC 5480 §2
-        ["SubjectPublicKeyInfo"] = key =>
+        ["SubjectPublicKeyInfo with an extra element"] = WithNewKey(key =>
         {
             byte[] spki = TestCsr.Sequence(
                 TestCsr.P256Algorithm(),
                 TestCsr.BitString(TestCsr.UncompressedPoint(key)),
                 TestCsr.Null);
             return TestCsr.Request(TestCsr.RequestInfo(spki), key);
-        },
-    };
+        }),
 
-    private static readonly Dictionary<string, Func<byte[]>> RequestsForAKeyNotNamedP256 = new()
-    {
         // The key is a P-256 key.
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         ["P-384 key"] = () =>
@@ -195,68 +245,112 @@ public class CertificateSigningRequestTests
 
         // secp256k1 (SEC 2 §2.4.1) points also take 65 octets uncompressed, so only the curve name tells them apart.
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-        ["P-256 point named secp256k1"] = () =>
+        ["P-256 point named secp256k1"] = WithNewKey(key =>
         {
-            using ECDsa key = NewKey();
             byte[] algorithm = TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), TestCsr.Oid("1.3.132.0.10"));
             byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
             return TestCsr.Request(TestCsr.RequestInfo(spki), key);
-        },
-    };
+        }),
 
-    // RFC 5480 §2.1.1: the parameters of id-ecPublicKey MUST be present, and only namedCurve is allowed.
-    private static readonly Dictionary<string, Func<ECDsa, byte[]>> KeysWithoutANamedCurve = new()
-    {
-        ["no parameters"] = key => TestCsr.SubjectPublicKeyInfo(
-            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey)),
-            TestCsr.UncompressedPoint(key)),
-        ["implicitCurve"] = key => TestCsr.SubjectPublicKeyInfo(
-            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), TestCsr.Null),
-            TestCsr.UncompressedPoint(key)),
+        // RFC 5480 §2.1.2: id-ecDH restricts the key to key agreement;
+        // CONTRACT.agent-identity.md §4 needs a signing key.
+        // oracle: spec RFC 5480 §2.1.2
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["key restricted to key agreement"] = WithNewKey(key =>
+        {
+            byte[] algorithm = TestCsr.Sequence(TestCsr.Oid("1.3.132.1.12"), TestCsr.Oid(TestCsr.Secp256r1));
+            byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
+            return TestCsr.Request(TestCsr.RequestInfo(spki), key);
+        }),
+
+        // RFC 5480 §2.1.1: the parameters of id-ecPublicKey MUST be present, and only namedCurve is allowed.
+        // oracle: spec RFC 5480 §2.1.1
+        ["key without curve parameters"] = WithNewKey(key => RequestWithKeyAlgorithm(
+            key,
+            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey)))),
+        // oracle: spec RFC 5480 §2.1.1
+        ["key with implicitCurve"] = WithNewKey(key => RequestWithKeyAlgorithm(
+            key,
+            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), TestCsr.Null))),
 
         // The specified form of the P-256 domain parameters,
         // which .NET writes for a key imported with explicit parameters.
-        ["specifiedCurve"] = key => TestCsr.SubjectPublicKeyInfo(
-            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), P256SpecifiedDomain()),
-            TestCsr.UncompressedPoint(key)),
-    };
+        // oracle: spec RFC 5480 §2.1.1
+        ["key with specifiedCurve"] = WithNewKey(key => RequestWithKeyAlgorithm(
+            key,
+            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), P256SpecifiedDomain()))),
 
-    // CONTRACT.agent-identity.md §4: an uncompressed point, so that each key has exactly one SubjectPublicKeyInfo.
-    private static readonly Dictionary<string, Func<ECDsa, byte[]>> PointsNotUncompressed = new()
-    {
+        // CONTRACT.agent-identity.md §4: an uncompressed point, so that each key has exactly one SubjectPublicKeyInfo.
         // The compressed form is 02 for an even y or 03 for an odd y, then x.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         // oracle: spec SEC 1 §2.3.3
-        ["compressed"] = key =>
+        ["compressed point"] = WithNewKey(key =>
         {
             ECParameters parameters = key.ExportParameters(includePrivateParameters: false);
-            return [(byte)(0x02 | (parameters.Q.Y![^1] & 1)), .. parameters.Q.X!];
-        },
+            return RequestWithPoint(key, [(byte)(0x02 | (parameters.Q.Y![^1] & 1)), .. parameters.Q.X!]);
+        }),
 
         // ANSI X9.62 also defines a hybrid form, 06 or 07 then both coordinates; RFC 5480 §2.2 rejects it.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         // oracle: spec RFC 5480 §2.2
-        ["hybrid"] = key =>
+        ["hybrid point"] = WithNewKey(key =>
         {
             byte[] point = TestCsr.UncompressedPoint(key);
             point[0] = (byte)(0x06 | (point[^1] & 1));
-            return point;
-        },
+            return RequestWithPoint(key, point);
+        }),
 
         // The uncompressed form is 04, then x and y in 32 octets each, 65 octets in all.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         // oracle: spec SEC 1 §2.3.3
-        ["without its form octet"] = key => TestCsr.UncompressedPoint(key)[1..],
-        ["with an extra octet"] = key => [.. TestCsr.UncompressedPoint(key), 0x00],
+        ["point without its form octet"] = WithNewKey(key =>
+            RequestWithPoint(key, TestCsr.UncompressedPoint(key)[1..])),
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        // oracle: spec SEC 1 §2.3.3
+        ["point with an extra octet"] = WithNewKey(key =>
+            RequestWithPoint(key, [.. TestCsr.UncompressedPoint(key), 0x00])),
 
         // The point at infinity is the single octet 00.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         // oracle: spec SEC 1 §2.3.3
-        ["point at infinity"] = _ => [0x00],
-    };
+        ["point at infinity"] = WithNewKey(key => RequestWithPoint(key, [0x00])),
 
-    // X.690 §11.2.1: DER requires an unused bit to be zero, so each BIT STRING is one whose last octet is even.
-    private static readonly Dictionary<string, Func<byte[]>> RequestsWithUnusedBits = new()
-    {
+        // The key is a point on P-256.
+        // Flipping the low bit of y leaves the point off the curve,
+        // since the only other point with the same x has y' = p - y, which is y + 1 or y - 1 only for y = (p ± 1) / 2.
+        // No private key exists for such a point, so the key whose point was altered signs the request.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["point off the curve"] = () =>
+        {
+            using ECDsa key = ECDsa.Create();
+            key.ImportPkcs8PrivateKey(TestVectors.Instance.Key("device-a").PrivateKeyPkcs8, out _);
+            byte[] point = TestCsr.UncompressedPoint(key);
+            point[^1] ^= 0x01;
+            return RequestWithPoint(key, point);
+        },
+
+        // SEC 1 §3.2.2.1: the coordinates of a public key are integers below p,
+        // and CONTRACT.agent-identity.md §4 gives a key that is not a P-256 point invalid_request, not an exception.
+        // Each point is on the curve modulo p, so only the range of its coordinates rejects it;
+        // a platform's key import throws an exception of a platform-specific type for such a point.
+        // x = p, which is 0 modulo p, and y a square root of b modulo p.
+        // oracle: spec SEC 1 §3.2.2.1
+        ["point with x out of the field"] = () => RequestWithPointOnP256ModuloP(
+            "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF",
+            "66485C780E2F83D72433BD5D84A06BB6541C2AF31DAE871728BF856A174F93F4"),
+
+        // y = p + 1, which is 1 modulo p, and x a root of x³ - 3x + b - 1 modulo p.
+        // oracle: spec SEC 1 §3.2.2.1
+        ["point with y out of the field"] = () => RequestWithPointOnP256ModuloP(
+            "09E78D4EF60D05F750F6636209092BC43CBDD6B47E11A9DE20A9FEB2A50BB96C",
+            "FFFFFFFF00000001000000000000000000000001000000000000000000000000"),
+
+        // X.690 §11.2.1: DER requires an unused bit to be zero, so each BIT STRING is one whose last octet is even.
+        // The key needs an uncompressed P-256 point, else invalid_request.
         // The octets of the point become the bits of the BIT STRING, so none is unused.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         // oracle: spec RFC 5480 §2.2
-        ["subjectPublicKey"] = () =>
+        ["subjectPublicKey with unused bits"] = () =>
         {
             using ECDsa key = NewKeyWhere(point => (point[^1] & 1) == 0);
             byte[] spki = TestCsr.SubjectPublicKeyInfo(
@@ -266,52 +360,86 @@ public class CertificateSigningRequestTests
             return TestCsr.Request(TestCsr.RequestInfo(spki), key);
         },
 
+        // The request needs a verified self-signature, else invalid_request.
         // The BIT STRING holds the octets of the DER Ecdsa-Sig-Value, so none is unused.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         // oracle: spec RFC 3279 §2.2
         // oracle: spec RFC 3279 §2.2.3
-        ["signature"] = () =>
+        ["signature with unused bits"] = WithNewKey(key =>
         {
-            using ECDsa key = NewKey();
             (byte[] info, byte[] signature) = SignedInfoWhere(key, (_, s) => (s[^1] & 1) == 0);
             return TestCsr.Sequence(
                 info,
                 TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
                 TestCsr.BitString(signature, unusedBits: 1));
-        },
-    };
+        }),
 
-    // Uncompressed points with a coordinate of p or more, each another encoding of a point on P-256,
-    // which would give its key a second SubjectPublicKeyInfo SHA-256.
-    private static readonly Dictionary<string, (string X, string Y)> PointsWithACoordinateOutOfTheField = new()
-    {
-        // x = p, which is 0 modulo p, and y a square root of b modulo p.
-        ["x"] = (
-            "FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF",
-            "66485C780E2F83D72433BD5D84A06BB6541C2AF31DAE871728BF856A174F93F4"),
+        // The signature algorithm is ecdsa-with-SHA256, even when the signature verifies under it.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["another signature algorithm over a SHA-256 signature"] = WithNewKey(key =>
+        {
+            byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
+            byte[] algorithm = TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha384);
+            return TestCsr.Request(info, key, algorithm, HashAlgorithmName.SHA256);
+        }),
 
-        // y = p + 1, which is 1 modulo p, and x a root of x³ - 3x + b - 1 modulo p.
-        ["y"] = (
-            "09E78D4EF60D05F750F6636209092BC43CBDD6B47E11A9DE20A9FEB2A50BB96C",
-            "FFFFFFFF00000001000000000000000000000001000000000000000000000000"),
+        // The AlgorithmIdentifier of ecdsa-with-SHA256 MUST omit the parameters.
+        // oracle: spec RFC 5758 §3.2
+        ["signature algorithm with NULL parameters"] = WithNewKey(key =>
+        {
+            byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
+            byte[] algorithm = TestCsr.Sequence(TestCsr.Oid(TestCsr.EcdsaWithSha256), TestCsr.Null);
+            return TestCsr.Request(info, key, algorithm);
+        }),
+
+        // Security invariant 1: the self-signature is the proof of possession of the request's key.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["request signed by another key"] = WithNewKey(key =>
+        {
+            using ECDsa other = NewKey();
+            return TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo()), other);
+        }),
+
+        // The signature is a DER ECDSA-Sig-Value, not the 64-octet r‖s form that request signatures use.
+        // oracle: spec RFC 5758 §3.2
+        // oracle: spec RFC 3279 §2.2.3
+        ["signature in fixed-field form"] = WithNewKey(key =>
+        {
+            byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
+            byte[] signature = key.SignData(
+                info,
+                HashAlgorithmName.SHA256,
+                DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
+            return TestCsr.Sequence(
+                info,
+                TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
+                TestCsr.BitString(signature));
+        }),
+
+        // SEC 1 4.1.4 step 1: a verifier outputs "invalid" unless r and s are both in [1, n - 1], so both are positive.
+        // An r whose top bit is set needs a leading zero octet; without it, DER reads a negative number,
+        // which the BCL verifier accepts as the unsigned value, so only the library's own check rejects it.
+        // An r that would start FF after the zero octet is skipped, since its negative form would not be minimal DER.
+        // oracle: spec SEC 1 §4.1.4
+        // oracle: spec X.690 §8.3
+        ["signature with a negative r"] = WithNewKey(key =>
+        {
+            (byte[] info, byte[] signature) = SignedInfoWhere(key, (r, _) => r.Length == 33 && r[1] != 0xFF);
+            (byte[] r, byte[] s) = ReadSignature(signature);
+            byte[] negative = TestCsr.Sequence(TestCsr.Tlv(0x02, r[1..]), TestCsr.Tlv(0x02, s));
+            // oracle: reference .NET ECDsa.VerifyData
+            Assert.True(
+                key.VerifyData(info, negative, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence));
+            return TestCsr.Sequence(
+                info,
+                TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
+                TestCsr.BitString(negative));
+        }),
     };
 
     public static TheoryData<string> RequestWithIgnoredContentsNames => new(RequestsWithIgnoredContents.Keys);
 
-    public static TheoryData<string> RequestWithALongerLengthNames => new(RequestsWithALongerLength.Keys);
-
-    public static TheoryData<string> RequestWithAnExtraElementNames => new(RequestsWithAnExtraElement.Keys);
-
-    public static TheoryData<string> RequestForAKeyNotNamedP256Names => new(RequestsForAKeyNotNamedP256.Keys);
-
-    public static TheoryData<string> KeyWithoutANamedCurveNames => new(KeysWithoutANamedCurve.Keys);
-
-    public static TheoryData<string> PointNotUncompressedNames => new(PointsNotUncompressed.Keys);
-
-    public static TheoryData<string> RequestWithUnusedBitsNames => new(RequestsWithUnusedBits.Keys);
-
-    public static TheoryData<string> PointWithACoordinateOutOfTheFieldNames =>
-        new(PointsWithACoordinateOutOfTheField.Keys);
-
+    public static TheoryData<string> InvalidRequestNames => new(InvalidRequests.Keys);
     // test-vectors.json csr.<name>.expected, the outcome CONTRACT.agent-identity.md §4 gives each request.
     // oracle: reference docs/agent-identity/test-vectors.json csr
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
@@ -370,276 +498,14 @@ public class CertificateSigningRequestTests
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
 
-    // None of these is a CertificationRequest.
-    // oracle: spec RFC 2986 §4
-    [Theory]
-    [InlineData("")]
-    [InlineData("00")]
-    [InlineData("3000")]
-    [InlineData("300330010A")]
-    public void RejectsBytesThatAreNotARequest(string hex)
-    {
-        AssertInvalid(CertificateSigningRequest.Validate(Convert.FromHexString(hex)));
-    }
-
-    // A CSR is DER, the encoding of one request.
-    // Bytes after the request would give one request many encodings.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
-    [Fact]
-    public void RejectsTrailingBytes()
-    {
-        byte[] valid = AcceptedValidVector();
-
-        AssertInvalid(CertificateSigningRequest.Validate([.. valid, 0x00]));
-    }
-
-    // A CSR is DER, except for the subject and the attributes, which the server ignores.
-    // oracle: spec X.690 §10.1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
-    [Theory]
-    [MemberData(nameof(RequestWithALongerLengthNames))]
-    public void RejectsLengthInMoreOctetsThanNeeded(string element)
-    {
-        AssertInvalid(CertificateSigningRequest.Validate(RequestsWithALongerLength[element]()));
-    }
-
-    // DER uses the definite form of length.
-    // oracle: spec X.690 §10.1
-    [Fact]
-    public void RejectsIndefiniteLength()
-    {
-        byte[] contents = ValidVectorContents();
-
-        AssertInvalid(CertificateSigningRequest.Validate([0x30, 0x80, .. contents, 0x00, 0x00]));
-    }
-
-    // version is v1, encoded 0.
-    // oracle: spec RFC 2986 §4.1
-    [Fact]
-    public void RejectsVersion1()
-    {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.Sequence(
-            TestCsr.Integer(1),
-            TestCsr.EmptySubject,
-            key.ExportSubjectPublicKeyInfo(),
-            TestCsr.EmptyAttributes);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
-    }
-
-    // The subject is a Name, which is a SEQUENCE.
-    // oracle: spec RFC 2986 §4.1
-    // oracle: spec RFC 5280 §4.1.2.4
-    [Fact]
-    public void RejectsSubjectThatIsNotASequence()
-    {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject: [0x31, 0x00]);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
-    }
-
-    // attributes is a required field, a constructed [0] IMPLICIT SET OF Attribute.
-    // The rows leave it out and write it primitive, 80 00.
-    // oracle: spec RFC 2986 §4.1
-    [Theory]
-    [InlineData("")]
-    // The module of Appendix A uses IMPLICIT TAGS, and X.690 8.14.4 a) keeps an implicitly tagged SET OF constructed.
-    // oracle: spec RFC 2986 §A
-    // oracle: spec X.690 §8.14
-    [InlineData("8000")]
-    public void RejectsRequestInfoWithoutConstructedAttributes(string attributes)
-    {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.Sequence(
-            TestCsr.Integer(0),
-            TestCsr.EmptySubject,
-            key.ExportSubjectPublicKeyInfo(),
-            Convert.FromHexString(attributes));
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key)));
-    }
-
-    // oracle: spec RFC 2986 §4
-    [Theory]
-    [MemberData(nameof(RequestWithAnExtraElementNames))]
-    public void RejectsExtraElement(string sequence)
-    {
-        using ECDsa key = NewKey();
-
-        AssertInvalid(CertificateSigningRequest.Validate(RequestsWithAnExtraElement[sequence](key)));
-    }
-
+    // Each request breaks a rule of the CSR profile, and a request that breaks one gets invalid_request;
+    // each row's markers name the rule it breaks.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
-    [MemberData(nameof(RequestForAKeyNotNamedP256Names))]
-    public void RejectsKeyNotNamedP256(string key)
+    [MemberData(nameof(InvalidRequestNames))]
+    public void RejectsInvalidRequest(string request)
     {
-        AssertInvalid(CertificateSigningRequest.Validate(RequestsForAKeyNotNamedP256[key]()));
-    }
-
-    // RFC 5480 §2.1.2: id-ecDH restricts the key to key agreement; CONTRACT.agent-identity.md §4 needs a signing key.
-    // oracle: spec RFC 5480 §2.1.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    [Fact]
-    public void RejectsKeyRestrictedToKeyAgreement()
-    {
-        using ECDsa key = NewKey();
-        byte[] algorithm = TestCsr.Sequence(TestCsr.Oid("1.3.132.1.12"), TestCsr.Oid(TestCsr.Secp256r1));
-        byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
-    }
-
-    // oracle: spec RFC 5480 §2.1.1
-    [Theory]
-    [MemberData(nameof(KeyWithoutANamedCurveNames))]
-    public void RejectsKeyWithoutANamedCurve(string parameters)
-    {
-        using ECDsa key = NewKey();
-        byte[] spki = KeysWithoutANamedCurve[parameters](key);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
-    }
-
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    [Theory]
-    [MemberData(nameof(PointNotUncompressedNames))]
-    public void RejectsPointNotUncompressed(string point)
-    {
-        using ECDsa key = NewKey();
-
-        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, PointsNotUncompressed[point](key))));
-    }
-
-    // The key is a point on P-256.
-    // Flipping the low bit of y leaves the point off the curve,
-    // since the only other point with the same x has y' = p - y, which is y + 1 or y - 1 only for y = (p ± 1) / 2.
-    // No private key exists for such a point, so the key whose point was altered signs the request.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    [Fact]
-    public void RejectsPointOffTheCurve()
-    {
-        using ECDsa key = ECDsa.Create();
-        key.ImportPkcs8PrivateKey(TestVectors.Instance.Key("device-a").PrivateKeyPkcs8, out _);
-        byte[] point = TestCsr.UncompressedPoint(key);
-        point[^1] ^= 0x01;
-
-        AssertInvalid(CertificateSigningRequest.Validate(RequestWithPoint(key, point)));
-    }
-
-    // SEC 1 §3.2.2.1: the coordinates of a public key are integers below p,
-    // and CONTRACT.agent-identity.md §4 gives a key that is not a P-256 point invalid_request, not an exception.
-    // Each point is on the curve modulo p, so only the range of its coordinates rejects it;
-    // a platform's key import throws an exception of a platform-specific type for such a point.
-    // The private key of either point is unknown, and the key is invalid whatever the signature,
-    // so r = s = 1 stands in for the signature.
-    // oracle: spec SEC 1 §3.2.2.1
-    [Theory]
-    [MemberData(nameof(PointWithACoordinateOutOfTheFieldNames))]
-    public void RejectsPointWithACoordinateOutOfTheField(string coordinate)
-    {
-        (string x, string y) = PointsWithACoordinateOutOfTheField[coordinate];
-        byte[] point = [0x04, .. Convert.FromHexString(x), .. Convert.FromHexString(y)];
-        // oracle: spec SEC 2 §2.4.2
-        Assert.True(IsOnP256ModuloP(point));
-        byte[] der = TestCsr.Sequence(
-            TestCsr.RequestInfo(TestCsr.SubjectPublicKeyInfo(TestCsr.P256Algorithm(), point)),
-            TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
-            TestCsr.BitString(TestCsr.Sequence(TestCsr.Integer(1), TestCsr.Integer(1))));
-
-        AssertInvalid(CertificateSigningRequest.Validate(der));
-    }
-
-    // The key needs an uncompressed P-256 point and the request a verified self-signature, else invalid_request;
-    // each row's marker names the encoding rule that the bit string breaks.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    [Theory]
-    [MemberData(nameof(RequestWithUnusedBitsNames))]
-    public void RejectsBitStringWithUnusedBits(string bitString)
-    {
-        AssertInvalid(CertificateSigningRequest.Validate(RequestsWithUnusedBits[bitString]()));
-    }
-
-    // The signature algorithm is ecdsa-with-SHA256, even when the signature verifies under it.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    [Fact]
-    public void RejectsAnotherSignatureAlgorithmOverASha256Signature()
-    {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
-        byte[] algorithm = TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha384);
-        byte[] der = TestCsr.Request(info, key, algorithm, HashAlgorithmName.SHA256);
-
-        AssertInvalid(CertificateSigningRequest.Validate(der));
-    }
-
-    // The AlgorithmIdentifier of ecdsa-with-SHA256 MUST omit the parameters.
-    // oracle: spec RFC 5758 §3.2
-    [Fact]
-    public void RejectsSignatureAlgorithmWithNullParameters()
-    {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
-        byte[] algorithm = TestCsr.Sequence(TestCsr.Oid(TestCsr.EcdsaWithSha256), TestCsr.Null);
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, key, algorithm)));
-    }
-
-    // Security invariant 1: the self-signature is the proof of possession of the request's key.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    [Fact]
-    public void RejectsRequestSignedByAnotherKey()
-    {
-        using ECDsa key = NewKey();
-        using ECDsa other = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
-
-        AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(info, other)));
-    }
-
-    // The signature is a DER ECDSA-Sig-Value, not the 64-octet r‖s form that request signatures use.
-    // oracle: spec RFC 5758 §3.2
-    // oracle: spec RFC 3279 §2.2.3
-    [Fact]
-    public void RejectsSignatureInFixedFieldForm()
-    {
-        using ECDsa key = NewKey();
-        byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo());
-        byte[] signature = key.SignData(
-            info,
-            HashAlgorithmName.SHA256,
-            DSASignatureFormat.IeeeP1363FixedFieldConcatenation);
-        byte[] der = TestCsr.Sequence(
-            info,
-            TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
-            TestCsr.BitString(signature));
-
-        AssertInvalid(CertificateSigningRequest.Validate(der));
-    }
-
-    // SEC 1 4.1.4 step 1: a verifier outputs "invalid" unless r and s are both in [1, n - 1], so both are positive.
-    // An r whose top bit is set needs a leading zero octet; without it, DER reads a negative number,
-    // which the BCL verifier accepts as the unsigned value, so only the library's own check rejects it.
-    // An r that would start FF after the zero octet is skipped, since its negative form would not be minimal DER.
-    // oracle: spec SEC 1 §4.1.4
-    // oracle: spec X.690 §8.3
-    [Fact]
-    public void RejectsSignatureWithNegativeR()
-    {
-        using ECDsa key = NewKey();
-        (byte[] info, byte[] signature) = SignedInfoWhere(key, (r, _) => r.Length == 33 && r[1] != 0xFF);
-        (byte[] r, byte[] s) = ReadSignature(signature);
-        byte[] negative = TestCsr.Sequence(TestCsr.Tlv(0x02, r[1..]), TestCsr.Tlv(0x02, s));
-        // oracle: reference .NET ECDsa.VerifyData
-        Assert.True(key.VerifyData(info, negative, HashAlgorithmName.SHA256, DSASignatureFormat.Rfc3279DerSequence));
-        byte[] der = TestCsr.Sequence(
-            info,
-            TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
-            TestCsr.BitString(negative));
-
-        AssertInvalid(CertificateSigningRequest.Validate(der));
+        AssertInvalid(CertificateSigningRequest.Validate(InvalidRequests[request]()));
     }
 
     private static CertificateSigningRequest AssertValid(CsrValidationResult result)
@@ -708,6 +574,49 @@ public class CertificateSigningRequestTests
         }
 
         throw new InvalidOperationException("No key met the condition in 64 attempts.");
+    }
+
+    private static Func<byte[]> WithNewKey(Func<ECDsa, byte[]> request)
+    {
+        return () =>
+        {
+            using ECDsa key = NewKey();
+            return request(key);
+        };
+    }
+
+    private static byte[] RequestWithAttributes(ECDsa key, byte[] attributes)
+    {
+        byte[] info = TestCsr.Sequence(
+            TestCsr.Integer(0),
+            TestCsr.EmptySubject,
+            key.ExportSubjectPublicKeyInfo(),
+            attributes);
+
+        return TestCsr.Request(info, key);
+    }
+
+    private static byte[] RequestWithKeyAlgorithm(ECDsa key, byte[] algorithm)
+    {
+        byte[] spki = TestCsr.SubjectPublicKeyInfo(algorithm, TestCsr.UncompressedPoint(key));
+
+        return TestCsr.Request(TestCsr.RequestInfo(spki), key);
+    }
+
+    // A request for the uncompressed point of the given coordinates, after checking that the point is on P-256
+    // once its coordinates are reduced modulo p.
+    // The private key of such a point is unknown, and the key is invalid whatever the signature,
+    // so r = s = 1 stands in for the signature.
+    private static byte[] RequestWithPointOnP256ModuloP(string x, string y)
+    {
+        byte[] point = [0x04, .. Convert.FromHexString(x), .. Convert.FromHexString(y)];
+        // oracle: spec SEC 2 §2.4.2
+        Assert.True(IsOnP256ModuloP(point));
+
+        return TestCsr.Sequence(
+            TestCsr.RequestInfo(TestCsr.SubjectPublicKeyInfo(TestCsr.P256Algorithm(), point)),
+            TestCsr.SignatureAlgorithm(TestCsr.EcdsaWithSha256),
+            TestCsr.BitString(TestCsr.Sequence(TestCsr.Integer(1), TestCsr.Integer(1))));
     }
 
     private static byte[] RequestWithPoint(ECDsa signer, byte[] point)
