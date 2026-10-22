@@ -19,7 +19,8 @@ use crate::ca::{self, RootCa};
 use crate::channel::config_fits_envelope;
 use crate::name_eval;
 use crate::oracle::{
-    AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, check_csr, unexpired, within_renewal_grace,
+    AuthenticatedIdentity, CertStatus, NonceStore, RegisteredCert, Rejection, check_csr, unexpired,
+    within_renewal_grace,
 };
 
 /// The only config schema version the contract defines ([CONTRACT.agent-identity.md][contract], "5.2 `POST enroll`").
@@ -374,18 +375,14 @@ fn identity_status(revoked: bool, certs: impl IntoIterator<Item = (CertStatus, i
 }
 
 /// Pushed into a live channel stream's task.
+#[derive(Clone)]
 pub(crate) enum StreamPush {
     RenewRequested(&'static str),
     Reconnect(&'static str),
     ConfigUpdate(String),
-    /// Retired certificate's 60-second reconnect period elapsed (§7.4).
-    CloseOk,
-    /// Identity revoked: close PERMISSION_DENIED + `identity_revoked`.
-    CloseRevoked,
-    /// Identity or certificate vanished (delete, reset): close with `identity_unknown`.
-    CloseUnknown,
-    /// The mock clock reached the certificate's `notAfter`.
-    CloseExpired,
+    /// Closes the stream (§7.4): with `OK` once a retired certificate's 60-second reconnect period elapses, or with the
+    /// rejection's status and `error-code`.
+    Close(Option<Rejection>),
 }
 
 pub(crate) struct StreamHandle {
@@ -812,15 +809,12 @@ impl State {
     }
 
     /// Pushes an event to every live stream of an identity; broken channels are dropped.
-    pub(crate) fn push_to_identity(&mut self, identity_id: Uuid, push: &PushKind) {
+    pub(crate) fn push_to_identity(&mut self, identity_id: Uuid, push: StreamPush) {
         let dead: Vec<Uuid> = self
             .streams
             .iter()
-            .filter(|(_, s)| s.identity_id == identity_id)
-            .filter_map(|(id, s)| match push.send(&s.tx) {
-                Err(_) => Some(*id),
-                Ok(()) => None,
-            })
+            .filter(|(_, s)| s.identity_id == identity_id && s.tx.send(push.clone()).is_err())
+            .map(|(id, _)| *id)
             .collect();
         for id in dead {
             self.streams.remove(&id);
@@ -877,7 +871,7 @@ impl State {
             for (stream_id, stream) in &mut self.streams {
                 if stream.cert_thumbprint == old_thumbprint {
                     stream.retire_at = Some(now.saturating_add(60));
-                    if PushKind::Reconnect("certificate_rotated").send(&stream.tx).is_ok() {
+                    if stream.tx.send(StreamPush::Reconnect("certificate_rotated")).is_ok() {
                         notified.push(*stream_id);
                     }
                 }
@@ -1189,7 +1183,7 @@ impl State {
         if identity.revoked_at.is_none() {
             identity.revoked_at = Some(now);
         }
-        self.push_to_identity(identity_id, &PushKind::CloseRevoked);
+        self.push_to_identity(identity_id, StreamPush::Close(Some(Rejection::IdentityRevoked)));
         self.complete_rotation_if_ready(now);
         Ok(())
     }
@@ -1203,7 +1197,7 @@ impl State {
         if !identity.revoked() {
             return Err(ApiError::conflict("identity must be revoked before deletion"));
         }
-        self.push_to_identity(identity_id, &PushKind::CloseUnknown);
+        self.push_to_identity(identity_id, StreamPush::Close(Some(Rejection::IdentityUnknown)));
         let live = self
             .streams
             .iter()
@@ -1246,7 +1240,7 @@ impl State {
             reason: RenewReason::Admin,
             min_issued_seq,
         });
-        self.push_to_identity(identity_id, &PushKind::RenewRequested("admin"));
+        self.push_to_identity(identity_id, StreamPush::RenewRequested("admin"));
         Ok(())
     }
 
@@ -1346,7 +1340,7 @@ impl State {
                 !identity.revoked() && has_live_old_root_stream(identity, &self.streams, &old_root, mock_now)
             });
             if eligible {
-                self.push_to_identity(identity_id, &PushKind::RenewRequested("rotation"));
+                self.push_to_identity(identity_id, StreamPush::RenewRequested("rotation"));
                 self.rotation_push_times.push_back(now);
             }
         }
@@ -1390,16 +1384,16 @@ impl State {
                     .lookup_cert(&stream.cert_thumbprint)
                     .filter(|cert| stream_expired(cert.not_after, now))?;
                 let reason = if cert.revoked {
-                    ("PERMISSION_DENIED", "identity_revoked", PushKind::CloseRevoked)
+                    ("PERMISSION_DENIED", "identity_revoked", Rejection::IdentityRevoked)
                 } else {
-                    ("UNAUTHENTICATED", "certificate_expired", PushKind::CloseExpired)
+                    ("UNAUTHENTICATED", "certificate_expired", Rejection::CertificateExpired)
                 };
                 Some((*id, reason))
             })
             .collect::<Vec<_>>();
-        for (stream_id, (status, code, push)) in expired_challenges {
+        for (stream_id, (status, code, rejection)) in expired_challenges {
             if let Some(stream) = self.challenged_streams.remove(&stream_id) {
-                let _ = push.send(&stream.tx);
+                let _ = stream.tx.send(StreamPush::Close(Some(rejection)));
                 self.close_stream(
                     stream_id,
                     stream.identity_id,
@@ -1414,21 +1408,21 @@ impl State {
             .iter()
             .filter_map(|(id, stream)| {
                 let reason = match self.lookup_cert(&stream.cert_thumbprint) {
-                    None => Some(("UNAUTHENTICATED", "identity_unknown", PushKind::CloseUnknown)),
+                    None => Some(("UNAUTHENTICATED", "identity_unknown", Rejection::IdentityUnknown)),
                     Some(cert) if cert.revoked => {
-                        Some(("PERMISSION_DENIED", "identity_revoked", PushKind::CloseRevoked))
+                        Some(("PERMISSION_DENIED", "identity_revoked", Rejection::IdentityRevoked))
                     }
                     Some(cert) if stream_expired(cert.not_after, now) => {
-                        Some(("UNAUTHENTICATED", "certificate_expired", PushKind::CloseExpired))
+                        Some(("UNAUTHENTICATED", "certificate_expired", Rejection::CertificateExpired))
                     }
                     Some(_) => None,
                 }?;
                 Some((*id, reason))
             })
             .collect::<Vec<_>>();
-        for (stream_id, (status, code, push)) in expired {
+        for (stream_id, (status, code, rejection)) in expired {
             if let Some(stream) = self.streams.remove(&stream_id) {
-                let _ = push.send(&stream.tx);
+                let _ = stream.tx.send(StreamPush::Close(Some(rejection)));
                 self.close_stream(
                     stream_id,
                     stream.identity_id,
@@ -1446,7 +1440,7 @@ impl State {
             .collect::<Vec<_>>();
         for stream_id in retired {
             if let Some(stream) = self.streams.remove(&stream_id) {
-                let _ = PushKind::CloseOk.send(&stream.tx);
+                let _ = stream.tx.send(StreamPush::Close(None));
                 self.close_stream(stream_id, stream.identity_id, &stream.cert_thumbprint, "OK", None);
             }
         }
@@ -1457,14 +1451,8 @@ impl State {
     /// Mock reset clears tokens, identities, nonces, faults, settings, rotation and the clock offset.
     /// It creates a fresh root, unless `with_root` is false, and closes live streams with `identity_unknown`.
     pub(crate) fn reset(&mut self, now: i64, with_root: bool) -> anyhow::Result<()> {
-        let stream_ids: Vec<Uuid> = self.streams.keys().copied().collect();
-        for id in &stream_ids {
-            if let Some(handle) = self.streams.get(id) {
-                let _ = PushKind::CloseUnknown.send(&handle.tx);
-            }
-        }
-        for handle in self.challenged_streams.values() {
-            let _ = PushKind::CloseUnknown.send(&handle.tx);
+        for handle in self.streams.values().chain(self.challenged_streams.values()) {
+            let _ = handle.tx.send(StreamPush::Close(Some(Rejection::IdentityUnknown)));
         }
         self.streams.clear();
         self.challenged_streams.clear();
@@ -1578,30 +1566,6 @@ pub(crate) fn lookup_cert(
         not_after: cert.not_after,
         public_key: cert.public_key,
     })
-}
-
-/// Cloneable push description (sending borrows the channel).
-pub(crate) enum PushKind {
-    RenewRequested(&'static str),
-    Reconnect(&'static str),
-    CloseOk,
-    CloseRevoked,
-    CloseUnknown,
-    CloseExpired,
-}
-
-impl PushKind {
-    fn send(&self, tx: &mpsc::UnboundedSender<StreamPush>) -> Result<(), ()> {
-        let push = match self {
-            PushKind::RenewRequested(reason) => StreamPush::RenewRequested(reason),
-            PushKind::Reconnect(reason) => StreamPush::Reconnect(reason),
-            PushKind::CloseOk => StreamPush::CloseOk,
-            PushKind::CloseRevoked => StreamPush::CloseRevoked,
-            PushKind::CloseUnknown => StreamPush::CloseUnknown,
-            PushKind::CloseExpired => StreamPush::CloseExpired,
-        };
-        tx.send(push).map_err(|_| ())
-    }
 }
 
 #[cfg(test)]
@@ -2006,7 +1970,7 @@ mod tests {
             assert_eq!(state.merge_config_fields(&fields).ok(), Some(1));
         }
         assert!(state.is_connected(identity_id));
-        state.push_to_identity(identity_id, &PushKind::CloseRevoked);
+        state.push_to_identity(identity_id, StreamPush::Close(Some(Rejection::IdentityRevoked)));
         let mut previous_revision = 0;
         for marker in 0..128 {
             let StreamPush::ConfigUpdate(config_json) = rx.try_recv()? else {
@@ -2018,7 +1982,10 @@ mod tests {
             previous_revision = revision;
             assert_eq!(config["marker"], marker);
         }
-        assert!(matches!(rx.try_recv()?, StreamPush::CloseRevoked));
+        assert!(matches!(
+            rx.try_recv()?,
+            StreamPush::Close(Some(Rejection::IdentityRevoked))
+        ));
         assert!(state.is_connected(identity_id));
         assert_eq!(
             state

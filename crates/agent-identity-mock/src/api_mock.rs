@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::app::{App, rfc3339};
-use crate::state::{ApiError, DropTarget, FailNextResponse, Faults, PushKind};
+use crate::state::{ApiError, DropTarget, FailNextResponse, Faults, StreamPush};
 
 pub(crate) fn router(app: Arc<App>) -> Router {
     Router::new()
@@ -158,7 +158,7 @@ async fn reconnect(AxumState(app): AxumState<Arc<App>>, Json(request): Json<Reco
     if !state.identities.contains_key(&request.identity_id) {
         return control_error(&ApiError::not_found("unknown identity"));
     }
-    state.push_to_identity(request.identity_id, &PushKind::Reconnect("mock"));
+    state.push_to_identity(request.identity_id, StreamPush::Reconnect("mock"));
     StatusCode::ACCEPTED.into_response()
 }
 

@@ -347,30 +347,15 @@ async fn close_opening_push(
     cert_thumbprint: &str,
     push: Option<StreamPush>,
 ) {
-    let (code, error_code) = match push {
-        Some(StreamPush::CloseExpired) => (Code::Unauthenticated, "certificate_expired"),
-        Some(StreamPush::CloseUnknown) => (Code::Unauthenticated, "identity_unknown"),
-        Some(StreamPush::CloseRevoked) => (Code::PermissionDenied, "identity_revoked"),
-        Some(StreamPush::CloseOk) => {
+    let rejection = match push {
+        Some(StreamPush::Close(None)) => {
             finish_stream(app, stream_id, identity_id, cert_thumbprint, "OK", None).await;
             return;
         }
-        _ => (Code::Unauthenticated, "signature_invalid"),
+        Some(StreamPush::Close(Some(rejection))) => rejection,
+        _ => Rejection::SignatureInvalid,
     };
-    close_with(out, error_status(code, error_code, app.now())).await;
-    finish_stream(
-        app,
-        stream_id,
-        identity_id,
-        cert_thumbprint,
-        if code == Code::PermissionDenied {
-            "PERMISSION_DENIED"
-        } else {
-            "UNAUTHENTICATED"
-        },
-        Some(error_code),
-    )
-    .await;
+    close_rejected(app, out, stream_id, identity_id, cert_thumbprint, rejection).await;
 }
 
 async fn run_stream(
@@ -720,20 +705,17 @@ async fn run_stream(
                         }
                     }
                     // Make-before-break: end of stream with OK.
-                    Some(StreamPush::CloseOk) => break,
-                    Some(StreamPush::CloseRevoked) => {
-                        close_with(&out, error_status(Code::PermissionDenied, "identity_revoked", app.now())).await;
-                        termination = ("PERMISSION_DENIED", Some("identity_revoked"));
-                        break;
-                    }
-                    Some(StreamPush::CloseUnknown) => {
-                        close_with(&out, error_status(Code::Unauthenticated, "identity_unknown", app.now())).await;
-                        termination = ("UNAUTHENTICATED", Some("identity_unknown"));
-                        break;
-                    }
-                    Some(StreamPush::CloseExpired) => {
-                        close_with(&out, error_status(Code::Unauthenticated, "certificate_expired", app.now())).await;
-                        termination = ("UNAUTHENTICATED", Some("certificate_expired"));
+                    Some(StreamPush::Close(None)) => break,
+                    Some(StreamPush::Close(Some(rejection))) => {
+                        close_with(&out, rejection_status(rejection, app.now())).await;
+                        termination = (
+                            if rejection == Rejection::IdentityRevoked {
+                                "PERMISSION_DENIED"
+                            } else {
+                                "UNAUTHENTICATED"
+                            },
+                            Some(rejection.code()),
+                        );
                         break;
                     }
                     None => break,

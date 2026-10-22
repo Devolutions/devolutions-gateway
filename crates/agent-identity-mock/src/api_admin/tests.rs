@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 use super::{BASE_PATH, Permission, Permissions, TOKEN_ID_HEADER, key_permissions, router};
 use crate::app::{App, nanos, rfc3339};
+use crate::oracle::Rejection;
 use crate::state::{State, StreamPush, config_update_len};
 
 const APP_KEY: &str = "admin";
@@ -1174,7 +1175,10 @@ async fn revoke_identity_is_idempotent() -> anyhow::Result<()> {
     let path = format!("/{id}/revoke");
     assert_eq!(call(&app, Method::POST, &path, None).await?, (204, Value::Null));
     assert_eq!(call(&app, Method::POST, &path, None).await?, (204, Value::Null));
-    assert!(matches!(stream.try_recv(), Ok(StreamPush::CloseRevoked)));
+    assert!(matches!(
+        stream.try_recv(),
+        Ok(StreamPush::Close(Some(Rejection::IdentityRevoked)))
+    ));
 
     let (_, view) = call(&app, Method::GET, &format!("/{id}"), None).await?;
     assert_eq!(
