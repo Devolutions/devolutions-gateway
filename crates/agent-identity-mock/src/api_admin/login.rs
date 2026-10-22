@@ -6,7 +6,7 @@
 //! it logs out or its lifetime has passed since its login, however often it is used.
 //! The lifetime runs on real time rather than the mock clock, because tests advance the mock clock by days.
 //!
-//! [dvls-intent]: ../../../../docs/agent-identity/INTENT.DVLS.md#management-api
+//! [dvls-intent]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#management-api
 
 use std::collections::HashMap;
 use std::sync::Arc;

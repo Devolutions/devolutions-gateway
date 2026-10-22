@@ -4,7 +4,7 @@ This binary is a reference authority for the conformance tester.
 
 - The agent-facing operations and the agent channel, exactly as [CONTRACT.agent-identity.md](../../docs/agent-identity/CONTRACT.agent-identity.md) specifies.
 - DVLS's management API as it is, so that the same tests run against the mock and against DVLS.
-  Its decisions are in DVLS's Agent Identity intent (`docs/agent-identity/INTENT.DVLS.md` until it moves to the RDM repository), and its exact shape is DVLS's OpenAPI document:
+  Its decisions are in DVLS's Agent Identity intent (`DVLS/Server/server/Common/AgentIdentity/INTENT.md` in the RDM repository), and its exact shape is DVLS's OpenAPI document:
   - enrollment tokens: create (the full token is returned only then), list, read and delete; tokens are immutable after creation, and a friendly-name format with an unpaired brace or an unknown placeholder is rejected;
   - identities: list with page-number pagination, views, metadata selection and filters, read, rename, revoke, delete (only once revoked), and request renewal; each identity's status is active, in grace, expired or revoked, as DVLS's intent defines them;
   - root rotation: start with an optional deadline, and read its status, including the number of non-revoked identities still holding an unexpired current or pending certificate from the old root;

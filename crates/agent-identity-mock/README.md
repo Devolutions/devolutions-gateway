@@ -192,5 +192,5 @@ X.509 and DER supply CSR structure types; P-256 performs signature verification.
 It also pins the login, each management API operation, error class, paging bound, permission and setting effect to DVLS's OpenAPI documents.
 
 [contract]: ../../docs/agent-identity/CONTRACT.agent-identity.md
-[dvls-management]: ../../docs/agent-identity/INTENT.DVLS.md#management-api
+[dvls-management]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#management-api
 [mock-control]: INTENT.md#mock-only-control

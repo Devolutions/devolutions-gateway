@@ -2,7 +2,7 @@
 //!
 //! Management APIs are product-specific, so tests reach an authority's only through the module for that authority.
 //! Every route, header, field name, paging rule, enum spelling, status code and error body of DVLS's management API lives here, so tests depend only on the operations and records below.
-//! DVLS's OpenAPI document for Agent Identity is the reference for all of them; `docs/agent-identity/INTENT.DVLS.md`, "Management API", holds the decisions behind them.
+//! DVLS's OpenAPI document for Agent Identity is the reference for all of them; DVLS's Agent Identity intent (`DVLS/Server/server/Common/AgentIdentity/INTENT.md` in the RDM repository), "Management API", holds the decisions behind them.
 //! The sessions that authenticate it come from the login and logout of DVLS's public OpenAPI document.
 
 use std::collections::BTreeMap;
@@ -1266,7 +1266,7 @@ mod tests {
 
     #[test]
     fn secret_disclosure_is_found_in_member_names_and_values_but_not_in_redactions() {
-        // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+        // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
         let secret = "s3cr3t-text";
         let record = |extra: Value| {
             let mut record = json!({ "id": "token-id", "name": "test", "hint": "s3c…" });

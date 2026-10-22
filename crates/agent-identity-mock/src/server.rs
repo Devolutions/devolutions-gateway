@@ -541,8 +541,8 @@ mod tests {
     /// A reset `without_root` stands for a DVLS that never created a token: no root is published until the first
     /// enrollment token creates one ([DVLS intent][dvls], "Root CA").
     ///
-    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
+    /// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#root-ca
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Root CA
     // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[tokio::test]
     async fn reset_without_root_publishes_a_root_only_after_the_first_token() -> anyhow::Result<()> {

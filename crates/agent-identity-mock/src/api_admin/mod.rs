@@ -7,7 +7,7 @@
 //! Invalid parameters are `400` with a `PublicApiValidationError` body; every other error carries a `PublicApiError`
 //! body, except the `401` for a missing `tokenId` header, which has none.
 //!
-//! [dvls-intent]: ../../../../docs/agent-identity/INTENT.DVLS.md#management-api
+//! [dvls-intent]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#management-api
 
 use std::sync::Arc;
 
@@ -84,7 +84,7 @@ pub(crate) fn router(app: Arc<App>) -> Router {
 
 /// DVLS's Agent Identity permissions ([DVLS intent][dvls-intent], "Management API").
 ///
-/// [dvls-intent]: ../../../../docs/agent-identity/INTENT.DVLS.md#management-api
+/// [dvls-intent]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#management-api
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Permission {
     View,

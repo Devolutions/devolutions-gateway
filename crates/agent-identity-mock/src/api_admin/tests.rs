@@ -403,7 +403,7 @@ fn invalid_key_is_refused(#[case] key: &str) {
 
 /// Each operation's `403` response in DVLS's OpenAPI document names the permission the operation requires, and a
 /// session holds the permissions of the application key that logged in.
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
 #[rstest]
 #[case::get_identities(Method::GET, "", "view", "manage+revoke+rotate-root", "AgentIdentityView")]
 #[case::get_identity(Method::GET, "/{id}", "view", "manage+revoke+rotate-root", "AgentIdentityView")]
@@ -559,7 +559,7 @@ async fn repeated_token_id_header_is_401_missing_or_invalid_token() -> anyhow::R
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken` returns `201` with an
 /// `AgentIdentityEnrollmentTokenCreated`, whose token `GetAgentIdentityEnrollmentToken` never returns.
 /// `expiresOn` defaults to 90 days ahead, and a token without a friendly-name format or config omits them.
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 #[tokio::test]
 async fn create_token_returns_the_full_token_only_once() -> anyhow::Result<()> {
@@ -674,12 +674,12 @@ async fn token_expiry_keeps_its_fraction_of_a_second() -> anyhow::Result<()> {
     "expiresOn"
 )]
 #[case::expiry_not_a_date_time(|_| json!({ "name": "t", "maxUses": 1, "expiresOn": "soon" }), "expiresOn")]
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 #[case::unpaired_brace(
     |_| json!({ "name": "t", "maxUses": 1, "friendlyNameFormat": "{hostname" }),
     "friendlyNameFormat"
 )]
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 #[case::unknown_placeholder(
     |_| json!({ "name": "t", "maxUses": 1, "friendlyNameFormat": "{nope}" }),
     "friendlyNameFormat"
@@ -760,7 +760,7 @@ fn token_config_for_envelope(base_url: &str, envelope_len: usize) -> Value {
 /// would start with a config one byte past it is refused on `config`, in a `PublicApiValidationError`, and not
 /// created.
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 #[tokio::test]
 async fn create_token_refuses_a_config_past_the_envelope_limit() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -776,7 +776,7 @@ async fn create_token_refuses_a_config_past_the_envelope_limit() -> anyhow::Resu
 /// CONTRACT.agent-identity.md §7.1 accepts envelopes up to 64 KiB, so a token whose identities start with a config
 /// whose `ConfigUpdate` envelope is exactly that size is created.
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 #[tokio::test]
 async fn create_token_accepts_a_config_at_the_envelope_limit() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -816,7 +816,7 @@ async fn create_token_refuses_a_repeated_member_name(
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`: "The first token also creates the Agent Identity root";
 /// a freshly started mock, like a DVLS that never used Agent Identity, holds none before it.
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Root CA
 #[tokio::test]
 async fn first_token_creates_the_root() -> anyhow::Result<()> {
     let (app, _) = pristine_app().await?;
@@ -1185,7 +1185,7 @@ async fn revoke_identity_is_idempotent() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityPublicApi_DeleteAgentIdentity` deletes only a revoked identity: `409` before, `204`, then `404`.
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
 #[tokio::test]
 async fn delete_identity_requires_revocation() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1203,7 +1203,7 @@ async fn delete_identity_requires_revocation() -> anyhow::Result<()> {
 }
 
 /// `AgentIdentityPublicApi_RequestAgentIdentityRenewal` sets the request-renewal flag and notifies the connected agent.
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
 #[tokio::test]
 async fn request_renewal_flags_and_notifies() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1369,7 +1369,7 @@ async fn idle_rotation_has_no_roots() -> anyhow::Result<()> {
 
 /// `AgentIdentityPublicApi_StartAgentIdentityRotation` with `{}` uses the rotation maximum: the latest expiry among the
 /// old root's unexpired current or pending certificates of identities that are not revoked.
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
 #[tokio::test]
 async fn rotation_defaults_to_the_rotation_maximum() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -1438,7 +1438,7 @@ async fn rotation_deadline_is_utc_unless_an_offset_is_given(#[case] deadline: fn
 
 /// `AgentIdentityRotationCreateDTO.deadlineOn`: "A time at or before now requests an emergency rotation", which
 /// completes at once and unpublishes the old root (CONTRACT.agent-identity.md §8.3).
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
 #[rstest]
 #[case::now(0)]
@@ -1531,10 +1531,10 @@ async fn rotation_refuses_an_invalid_body(#[case] body: Option<Value>, #[case] f
 // ==== Settings ====
 
 /// `AgentIdentitySettings` by default: the channel enabled and offered, 90-day certificates (CONTRACT.agent-identity.md
-/// §4), and 10 rotation notifications per second (INTENT.DVLS.md, "Load").
+/// §4), and 10 rotation notifications per second (DVLS's Agent Identity intent, "Load").
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentitySettings
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Load
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Load
 #[tokio::test]
 async fn settings_have_their_defaults() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -1638,7 +1638,7 @@ fn rotation_notified(streams: &mut [UnboundedReceiver<StreamPush>]) -> Vec<bool>
 /// `AgentIdentitySettings.rotationNotificationsPerSecond`: "How many connected identities are notified per second during
 /// a root rotation"; an identity beyond the rate is notified in the next second.
 // oracle: spec DVLS public OpenAPI document §AgentIdentitySettings
-// oracle: intent docs/agent-identity/INTENT.DVLS.md §Load
+// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Load
 #[tokio::test]
 async fn rotation_notifies_at_the_settings_rate() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;

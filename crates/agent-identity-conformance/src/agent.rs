@@ -4244,7 +4244,7 @@ pub(crate) async fn a_expired_current_renews_in_grace_or_rejects_beyond(ctx: Con
 pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();

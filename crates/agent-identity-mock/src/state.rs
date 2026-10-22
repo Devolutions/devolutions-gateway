@@ -2,7 +2,7 @@
 //! One mutex around `State` serializes enrollment and rotation.
 //!
 //! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
-//! [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#management-api
+//! [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#management-api
 //! [mock]: ../INTENT.md#mock-only-control
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -86,7 +86,7 @@ const SECS_PER_DAY: i64 = 24 * 3600;
 
 /// DVLS's Agent Identity settings ([DVLS intent][dvls], "Management API").
 ///
-/// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#management-api
+/// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#management-api
 #[derive(Debug, Clone)]
 pub(crate) struct Settings {
     /// "Agent channel enabled"; the channel is offered only while the hosting also supports it.
@@ -100,7 +100,7 @@ impl Default for Settings {
     /// and rotation notifies 10 identities per second ([DVLS intent][dvls], "Load").
     ///
     /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#4-certificates
-    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#load
+    /// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#load
     fn default() -> Self {
         Self {
             agent_channel_enabled: true,
@@ -321,7 +321,7 @@ impl Identity {
 
 /// Identity status as the [DVLS intent][dvls] defines it ("Terminology"), distinct from the certificate statuses.
 ///
-/// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#terminology
+/// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#terminology
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum IdentityStatus {
     Active,
@@ -502,7 +502,7 @@ impl State {
     /// Creates the state of a DVLS that has never used Agent Identity: it holds no root until the first enrollment
     /// token creates one ([DVLS intent][dvls], "Root CA").
     ///
-    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    /// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#root-ca
     pub fn new(now: i64) -> Self {
         Self {
             tokens: HashMap::new(),
@@ -1500,7 +1500,7 @@ impl State {
     /// Creates the first root, as DVLS does with the first enrollment token ([DVLS intent][dvls], "Root CA").
     /// Without the root key's encryption key, the root cannot be created and the token is a conflict.
     ///
-    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
+    /// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#root-ca
     pub(crate) fn ensure_root(&mut self, now: i64) -> Result<(), ApiError> {
         if !self.roots.is_empty() {
             return Ok(());
@@ -1780,7 +1780,7 @@ mod tests {
     /// Offering the channel adds `agent_channel_url` to every config, and the version override lengthens `version`.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     #[rstest]
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     #[case::agent_channel_enabled(disable_agent_channel, enable_agent_channel)]
     #[case::hosting_support(withdraw_hosting_support, restore_hosting_support)]
     #[case::config_version(keep_defaults, override_config_version)]
@@ -1817,7 +1817,7 @@ mod tests {
     /// after the token is created.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     #[test]
     fn enrollment_past_the_envelope_limit_creates_no_identity() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -1861,7 +1861,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Terminology
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[rstest]
     #[case::current_unexpired(&[CURRENT], 999, IdentityStatus::Active)]
@@ -1883,7 +1883,7 @@ mod tests {
         assert_eq!(identity_status(false, certs.iter().copied(), now), expected);
     }
 
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Terminology
     #[rstest]
     #[case::unexpired(999)]
     #[case::in_grace(1050)]
@@ -1944,8 +1944,8 @@ mod tests {
     /// The rotation status counts identities that still hold an unexpired old-root certificate ([DVLS intent][dvls], "Rotation"),
     /// and CONTRACT.agent-identity.md §6 keeps a certificate unexpired while `now ≤ notAfter`.
     ///
-    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#rotation
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    /// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#rotation
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     #[test]
     fn old_root_certificate_counts_as_active_through_its_not_after() -> anyhow::Result<()> {
@@ -2055,8 +2055,8 @@ mod tests {
     /// enrollment, renewal and root rotation"; CONTRACT.agent-identity.md §5.4 maps such a failure to `500
     /// unavailable`.
     ///
-    /// [dvls]: ../../../docs/agent-identity/INTENT.DVLS.md#root-ca
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
+    /// [dvls]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md#root-ca
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Root CA
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[test]
     fn unavailable_root_key_fails_enrollment() -> anyhow::Result<()> {
@@ -2130,7 +2130,7 @@ mod tests {
     }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     #[test]
     fn enrollment_includes_token_config_at_initial_revision() -> anyhow::Result<()> {
         let now = 1_790_000_000;

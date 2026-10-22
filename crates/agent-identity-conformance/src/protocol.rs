@@ -790,7 +790,7 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
 pub(crate) async fn p_token_config_contributes_to_effective_config(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
     spec.config = Some([("psu_channel_url".to_owned(), "https://psu.example".to_owned())].into());
     let token = ctx.target.management().create_token_from(&spec).await?;
@@ -1114,7 +1114,7 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
 
 pub(crate) async fn p_friendly_name_format(ctx: Context) -> anyhow::Result<()> {
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let management = ctx.target.management();
     let token = management
         .create_token(2, TOKEN_LIFETIME, Some("  {hostname}-{{ok}}-{token_name}-{fqdn}  "))
@@ -2951,7 +2951,7 @@ pub(crate) async fn p_revocation_blocks_connect(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (token, identity) = issued(&ctx, "delete").await?;
@@ -3023,7 +3023,7 @@ pub(crate) async fn p_deleted_certificate_cannot_connect(ctx: Context) -> anyhow
 pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
     let (_, identity) = issued(&ctx, "initial").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     let challenge = stream.challenge().await?;
@@ -3855,7 +3855,7 @@ pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow:
 /// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`, which the switch withdraws and restores.
 pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Certificates and channel
     if ctx.mock() {
         return stale_hello_reconciled(&ctx).await;
     }
@@ -3895,7 +3895,7 @@ async fn stale_hello_reconciled(ctx: &Context) -> anyhow::Result<()> {
         }
         let updated = check_in_config(&ctx.target, &identity).await?;
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-        // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
+        // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Certificates and channel
         ensure!(
             count(&updated, "revision")? > enrolled_revision && updated.get("agent_channel_url").is_some(),
             "switching the agent channel off and on did not raise the config revision"
@@ -4020,7 +4020,7 @@ pub(crate) async fn p_config_update_pushes_higher_revision(ctx: Context) -> anyh
 pub(crate) async fn p_request_renewal_connected_and_on_connect(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
     let (_, identity) = issued(&ctx, "push").await?;
     let mut connected = channel::open(&ctx.target, &identity).await?;
     connected.hello(&identity, &[("hostname", "push")]).await?;
@@ -4804,7 +4804,7 @@ pub(crate) async fn p_rotation_publishes_both_roots_and_issues_from_new(ctx: Con
 }
 
 pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
     let (_, mut a) = issued(&ctx, "old-a").await?;
     let (_, b) = issued(&ctx, "old-b").await?;
     let old_root = identity_record(&ctx.target, &a.identity_id)
@@ -4853,7 +4853,7 @@ pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()>
 }
 
 pub(crate) async fn p_rotation_conflict_409(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
     let _ = issued(&ctx, "rotation").await?;
     begin_rotation(&ctx).await?;
     ensure!(
@@ -4967,8 +4967,8 @@ pub(crate) async fn p_rotation_completes_immediately_without_old_root_identities
 }
 
 pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Terminology
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
     let (_, expired) = issued(&ctx, "expired-old-root").await?;
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
@@ -5060,7 +5060,7 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
 }
 
 pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
     ensure!(
         ctx.mock() || ctx.disposable_dvls_target,
         "requires a disposable DVLS target"
@@ -5305,7 +5305,7 @@ pub(crate) async fn p_rotation_completes_early_at_certificate_expiry_via_freeze(
 
 pub(crate) async fn p_rotation_push_rate_survives_deadline(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Load
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Load
     ctx.target
         .faults(&json!({ "rotation_rate_limit_per_sec": 1, "leaf_lifetime_secs": 30 }))
         .await?;
@@ -5490,7 +5490,7 @@ pub(crate) async fn p_rotation_old_root_cert_renewable_after_deadline(ctx: Conte
 }
 
 pub(crate) async fn p_rotation_emergency_deadline(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Rotation
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     if !ctx.mock() {
         ensure!(
@@ -5630,7 +5630,7 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
 }
 
 pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
     let token = token(&ctx, 10).await?;
     let mut created = Vec::new();
     for n in 0..4 {
@@ -5738,8 +5738,8 @@ async fn listing_page(target: &Target, token: &Token, page: u64) -> anyhow::Resu
 }
 
 pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Identities
     let management = ctx.target.management();
     let decoy_token = token(&ctx, 1).await?;
     let token = token(&ctx, 5).await?;
@@ -5917,7 +5917,7 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
 }
 
 pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let management = ctx.target.management();
     let token = token(&ctx, 1).await?;
     let record = management.token(&token.id).await?;
@@ -5981,7 +5981,7 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_management_requires_auth(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     assert_management_routes_denied(&ctx, Credential::Absent, |_| true, Refusal::Unauthenticated).await?;
     // oracle: spec DVLS public API contract §6
     let unknown = unknown_token_id();
@@ -6098,7 +6098,7 @@ async fn assert_management_routes_denied(
 ///
 /// Each route group, the settings included, is called with a credential lacking that group's permission; on the mock it holds every other permission, so none stands in for the missing one.
 pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     for permission in Permission::ALL {
         let session =
             dvls::session_lacking(&ctx, permission).ok_or(crate::Incomplete("requires --unprivileged-app-key"))?;
@@ -6115,7 +6115,7 @@ pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Resu
 }
 
 pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     ensure!(
         ctx.mock() || ctx.disposable_dvls_target,
         "rotation authorization requires a disposable DVLS target"
@@ -6153,7 +6153,7 @@ pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Resu
 
 /// The OpenAPI document, on a token's `expiresOn`: "in the future and at most 365 days ahead ... (Default: 90 days ahead)".
 pub(crate) async fn p_token_expiry_default_and_maximum(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let management = ctx.target.management();
     let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
     spec.expires_on = None;
@@ -6181,8 +6181,8 @@ pub(crate) async fn p_token_expiry_default_and_maximum(ctx: Context) -> anyhow::
 
 /// The OpenAPI document: starting a rotation is 409 when "no root exists yet", and "The first token also creates the Agent Identity root".
 pub(crate) async fn p_rotation_without_root_conflicts(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Root CA
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     expect_status(
         &ctx.target.control("reset", &json!({ "without_root": true })).await?,
         200,
@@ -6211,7 +6211,7 @@ pub(crate) async fn p_rotation_without_root_conflicts(ctx: Context) -> anyhow::R
 
 /// The OpenAPI document: starting a rotation is 409 when "the root key is unavailable", and creating the first token is 409 when "The first root cannot be created because the data encryption key is unavailable".
 pub(crate) async fn p_root_key_unavailable_conflicts(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Root CA
     let _ = issued(&ctx, "root-key").await?;
     let roots = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
     ctx.target.faults(&json!({ "root_key_unavailable": true })).await?;
@@ -6253,8 +6253,8 @@ pub(crate) async fn p_root_key_unavailable_conflicts(ctx: Context) -> anyhow::Re
 /// The OpenAPI document, on the settings: `authorityId` is "The authority_id agents receive at enrollment", and `isAgentChannelAvailable` is "Whether DVLS offers the agent channel: it is enabled and the hosting supports it".
 /// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`.
 pub(crate) async fn p_settings_read(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Certificates and channel
     let (_, identity) = issued(&ctx, "settings").await?;
     let settings = ctx.target.management().settings().await?;
     ensure!(
@@ -6274,7 +6274,7 @@ pub(crate) async fn p_settings_read(ctx: Context) -> anyhow::Result<()> {
 
 /// The OpenAPI document, on a settings change: `certificateLifetimeDays` is "from 1 to 365 days" and `rotationNotificationsPerSecond` "from 1 to 1000".
 pub(crate) async fn p_settings_change_bounds(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     require_settings_changes(&ctx)?;
     let management = ctx.target.management();
     let original = management.settings().await?;
@@ -6327,8 +6327,8 @@ pub(crate) async fn p_settings_change_bounds(ctx: Context) -> anyhow::Result<()>
 
 /// The OpenAPI document: `certificateLifetimeDays` is "The lifetime of the identity certificates issued from now on, in days".
 pub(crate) async fn p_settings_certificate_lifetime_applies_to_new_certificates(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Certificates and channel
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     require_settings_changes(&ctx)?;
     let management = ctx.target.management();
     let original = management.settings().await?;
@@ -6395,7 +6395,7 @@ pub(crate) async fn p_settings_certificate_lifetime_applies_to_new_certificates(
 /// The OpenAPI document: `isAgentChannelEnabled` "turns the agent channel off behind a reverse proxy that breaks gRPC", and `isAgentChannelAvailable` is "Whether DVLS offers the agent channel: it is enabled and the hosting supports it".
 /// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`.
 pub(crate) async fn p_settings_channel_switch_withdraws_and_restores_channel_url(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Certificates and channel
     require_settings_changes(&ctx)?;
     let management = ctx.target.management();
     let original = management.settings().await?;
@@ -7249,7 +7249,7 @@ pub(crate) async fn p_friendly_name_white_space_and_truncation(ctx: Context) -> 
 ///
 /// A certificate is unexpired while `now <= notAfter` (CONTRACT.agent-identity.md §6), and renewal grace lasts while `now < notAfter + (notAfter − notBefore)`.
 pub(crate) async fn p_identity_statuses(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Terminology
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let management = ctx.target.management();
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;

@@ -53,7 +53,7 @@ impl Profile {
     /// DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead ([DVLS intent], "Rotation").
     /// A leaf lifetime of one second leaves no whole second within that cap, so it requires an explicit window.
     ///
-    /// [DVLS intent]: ../../../docs/agent-identity/INTENT.DVLS.md
+    /// [DVLS intent]: https://github.com/Devolutions/RDM/blob/0acd9d2474bf9fd4a030e146a28097bf4ddf391a/DVLS/Server/server/Common/AgentIdentity/INTENT.md
     pub(crate) fn rotation_window_secs(&self) -> anyhow::Result<u64> {
         if let Some(window) = self.rotation_window_secs {
             return Ok(window);
