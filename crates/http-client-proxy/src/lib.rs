@@ -308,9 +308,19 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
         None => return Ok(None),
     };
 
-    let proxy_url = Url::parse(&proxy_url).context("invalid proxy URL from system settings")?;
+    let proxy_url = parse_system_proxy(&proxy_url)?;
 
     Ok(Some(proxy_url))
+}
+
+/// Parses a proxy from system settings, reading one without a scheme, such as `10.0.0.1:8080`, as an `http://` URL,
+/// as reqwest does.
+fn parse_system_proxy(proxy: &str) -> anyhow::Result<Url> {
+    match Url::parse(proxy) {
+        Err(url::ParseError::RelativeUrlWithoutBase) => Url::parse(&format!("http://{proxy}")),
+        parsed => parsed,
+    }
+    .context("invalid proxy URL from system settings")
 }
 
 /// Returns the proxy that `config` selects for `url`, or `None` to connect directly.
@@ -490,5 +500,18 @@ mod tests {
             AutomaticConfiguration::from_default_connection_settings(&settings),
             expected
         );
+    }
+
+    // oracle: reference reqwest 0.12.28 `IntoProxy`, which reads a proxy URL without a scheme as an `http://` URL
+    #[rstest]
+    #[case::ipv4("10.0.0.1:8080", "http://10.0.0.1:8080/")]
+    #[case::ipv6("[::1]:8080", "http://[::1]:8080/")]
+    #[case::with_scheme("https://proxy.test:3128", "https://proxy.test:3128/")]
+    fn a_system_proxy_without_a_scheme_is_an_http_proxy(
+        #[case] setting: &str,
+        #[case] expected: &str,
+    ) -> anyhow::Result<()> {
+        assert_eq!(parse_system_proxy(setting)?.as_str(), expected);
+        Ok(())
     }
 }
