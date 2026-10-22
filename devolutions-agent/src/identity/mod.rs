@@ -508,7 +508,7 @@ mod tests {
         outcome.context("identity task kept running")??;
         let entries = events.0.lock();
         assert_eq!(entries.len(), 1);
-        // oracle: spec docs/agent-identity/README.md §Key backend unavailable
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         assert_eq!(entries[0].event_code, Some(1100));
         assert!(
             entries[0]
