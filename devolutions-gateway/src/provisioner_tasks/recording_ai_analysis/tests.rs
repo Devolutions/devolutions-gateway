@@ -718,12 +718,14 @@ async fn an_analysis_without_progress_fails_at_its_deadline() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     assert_eq!(
         task.payload,
         json!({
             "error": { "kind": "deadlinePassed" },
-            "usage": { "inputTokens": 0, "outputTokens": 0, "unreportedRequests": 0 },
-        })
+            "usage": { "inputTokens": 0, "outputTokens": 0, "unreportedRequests": 1 },
+        }),
+        "the request cut off at the deadline may have cost tokens"
     );
     assert!(!harness.workspace(session_id).exists());
     assert!(!harness.has_key(task_id));

@@ -266,6 +266,7 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     };
     assert_eq!(total_bytes, recording_size);
     assert!(read_bytes <= total_bytes);
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     assert_eq!(
         progress
             .iter()
@@ -276,7 +277,10 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
             Progress::Describing {
                 described_chunks: 0,
                 total_chunks: 1,
-                usage: UsageSoFar::default(),
+                usage: UsageSoFar {
+                    unreported_requests: 1,
+                    ..tokens(0, 0)
+                },
             },
             Progress::Describing {
                 described_chunks: 0,
@@ -291,9 +295,18 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
             Progress::Describing {
                 described_chunks: 1,
                 total_chunks: 1,
+                usage: UsageSoFar {
+                    unreported_requests: 1,
+                    ..tokens(10, 20)
+                },
+            },
+            Progress::Describing {
+                described_chunks: 1,
+                total_chunks: 1,
                 usage: tokens(20, 40),
             },
-        ]
+        ],
+        "a request counts as unreported until its answer comes"
     );
     assert_eq!(progress.last(), Some(&Progress::Writing));
 }
