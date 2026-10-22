@@ -172,6 +172,10 @@ function Find-Section($Outline, [string] $Section) {
     }
     $Next = $Outline.Headings | Where-Object { $_.Index -gt $Heading.Index -and $_.Level -le $Heading.Level } | Select-Object -First 1
     $End = if ($Next) { $Next.Index } else { $Outline.Lines.Count }
+    # The anchors and blank lines just above the next heading belong to it.
+    while ($End - 1 -gt $Heading.Index -and -not ($Outline.Lines[$End - 1] -replace $AnchorPattern, '').Trim()) {
+        $End--
+    }
     $Body = if ($Heading.Index + 1 -lt $End) { $Outline.Lines[($Heading.Index + 1)..($End - 1)] -join "`n" } else { '' }
     [pscustomobject]@{ Heading = $Heading.Text; Body = $Body.Trim() }
 }
@@ -375,7 +379,7 @@ function Get-FileMarkers([string] $File, [string[]] $Lines) {
     foreach ($Break in [regex]::Matches($Text, "`n")) {
         $Breaks.Add($Break.Index)
     }
-    foreach ($Literal in [regex]::Matches($Text, $LiteralPattern)) {
+    foreach ($Literal in [regex]::Matches($Text, $LiteralPatterns[$Extension])) {
         if ($Literal.Value.StartsWith('//') -and $Literal.Value -cmatch $Pattern) {
             $Before = $Breaks.BinarySearch($Literal.Index)
             $Line = if ($Before -lt 0) { -$Before } else { $Before + 1 }
@@ -440,21 +444,33 @@ function Get-Count($Counts, [string] $Key) {
     if ($Counts.ContainsKey($Key)) { $Counts[$Key] } else { 0 }
 }
 
-# Comments and string and character literals of Rust and C#, which may span lines.
-$LiteralPattern = @(
-    '/\*[\s\S]*?\*/'
-    '//[^\n]*'
-    '(?<![\w])b?r(?<hashes>#*)"[\s\S]*?"\k<hashes>'
-    '(?<quotes>"{3,})[\s\S]*?\k<quotes>'
-    '(?:\$@|@\$?)"(?:[^"]|"")*"'
-    '"(?:\\[\s\S]|[^"\\])*"'
-    "'(?:\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2}|\\.|[^'\\\n])'"
-) -join '|'
+# Comments and string and character literals, which may span lines.
+# Rust block comments nest and C# ones do not; a C# interpolation hole is code that may hold its own literals and braces.
+$InterpolationHole = '\{(?>[^{}"''\\]+|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])''|\{(?<brace>)|\}(?<-brace>))*(?(brace)(?!))\}'
+$LiteralPatterns = @{
+    '.rs' = @(
+        '/\*(?>/\*(?<depth>)|\*/(?<-depth>)|(?!/\*|\*/)[\s\S])*\*/(?(depth)(?!))'
+        '//[^\n]*'
+        '(?<![\w])b?r(?<hashes>#*)"[\s\S]*?"\k<hashes>'
+        '"(?:\\[\s\S]|[^"\\])*"'
+        "'(?:\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2}|\\.|[^'\\\n])'"
+    ) -join '|'
+    '.cs' = @(
+        '/\*[\s\S]*?\*/'
+        '//[^\n]*'
+        '(?<quotes>"{3,})[\s\S]*?\k<quotes>'
+        "(?:\`$@|@\`$)`"(?:\{\{|\}\}|$InterpolationHole|`"`"|[^`"{}])*`""
+        "\`$`"(?:\{\{|\}\}|$InterpolationHole|\\.|[^`"\\{}])*`""
+        '@"(?:[^"]|"")*"'
+        '"(?:\\.|[^"\\\n])*"'
+        "'(?:\\u[0-9a-fA-F]{4}|\\x[0-9a-fA-F]{1,4}|\\.|[^'\\\n])'"
+    ) -join '|'
+}
 
 # Blanks comments and literals, keeping line breaks, so the brackets, braces, and semicolons left are code.
-function Get-CodeLines([string[]] $Lines) {
+function Get-CodeLines([string[]] $Lines, [string] $Extension) {
     $Text = $Lines -join "`n"
-    $Blanked = [regex]::Replace($Text, $LiteralPattern, [System.Text.RegularExpressions.MatchEvaluator] { param($Match) $Match.Value -replace '[^\n]', ' ' })
+    $Blanked = [regex]::Replace($Text, $LiteralPatterns[$Extension], [System.Text.RegularExpressions.MatchEvaluator] { param($Match) $Match.Value -replace '[^\n]', ' ' })
     , ($Blanked -split "`n")
 }
 
@@ -486,7 +502,7 @@ function Get-ItemEnd([string[]] $Code, [int] $From) {
 # so a marker in its comments, attributes, or body belongs to it and one in a later item does not.
 function Get-Tests([string[]] $Lines, [string] $Extension) {
     $Pattern = $TestAttributePatterns[$Extension]
-    $Code = Get-CodeLines $Lines
+    $Code = Get-CodeLines $Lines $Extension
     $Tests = [System.Collections.Generic.List[object]]::new()
     $Start = -1
     $Attribute = -1

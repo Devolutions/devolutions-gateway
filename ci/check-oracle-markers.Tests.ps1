@@ -202,6 +202,7 @@ Describe 'Marker grammar and references' {
         @{ Name = 'a Rust raw string'; Path = 'src/lib.rs'; Content = "const S: &str = r`"`n// oracle: scaffold`n`";`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'a C# verbatim string'; Path = 'dotnet/T.cs'; Content = "class T { string s = @`"`n// oracle: scaffold`n`"; }`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'a PowerShell here-string'; Path = 'ci/a.ps1'; Content = "`$x = @'`n`# oracle: scaffold`n'@`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'a nested Rust block comment'; Path = 'src/lib.rs'; Content = "/* outer`n/* inner */`n// oracle: scaffold`n*/`nfn f() {}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
     ) {
         $Repo = New-Repo
         Set-RepoFile $Repo $Path $Content
@@ -211,6 +212,17 @@ Describe 'Marker grammar and references' {
 
         $Result.Output | Should -BeNullOrEmpty
         $Result.ExitCode | Should -Be 0
+    }
+
+    It 'Reads a C# line comment after a block comment, which does not nest' { # oracle: intent ci/check-oracle-markers.intent.md §languages
+        $Repo = New-Repo
+        Set-RepoFile $Repo 'dotnet/T.cs' "/* a /* b */`n// oracle: scaffold`nclass T {}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo
+
+        $Result.Output | Should -Be @("dotnet/T.cs:2: 'scaffold' marker must not merge; give what it marks a strong source, keep it as 'mutant', or delete it")
+        $Result.ExitCode | Should -Be 1
     }
 
     It 'Ignores a marker label in another case' { # oracle: intent ci/check-oracle-markers.intent.md §languages
@@ -405,6 +417,7 @@ Describe 'Drift report' {
 
     It 'Reports a pinned section that is <Name> on the default branch' -ForEach @(
         @{ Name = 'unchanged'; Head = "# Specs, revised`n`n<a id=`"agent-id`"></a>`n## 6 Agent identity`n`nAgents present a key.`n"; Status = 'unchanged: bump the pin to b0b0b0b0b0b0' } # oracle: intent ci/check-oracle-markers.intent.md §drift
+        @{ Name = 'unchanged while the next section gains an anchor'; Head = "# Specs`n`n<a id=`"agent-id`"></a>`n## 6 Agent identity`n`nAgents present a key.`n`n<a id=`"other`"></a>`n## 7 Other`n"; Status = 'unchanged: bump the pin to b0b0b0b0b0b0' } # oracle: intent ci/check-oracle-markers.intent.md §drift
         @{ Name = 'changed'; Head = "# Specs`n`n## 6 Agent identity`n`nAgents present a certificate.`n"; Status = 'changed on main; re-check the test against the new text' } # oracle: intent ci/check-oracle-markers.intent.md §drift
         @{ Name = 'renamed'; Head = "# Specs`n`n## 6 Agent keys`n`nAgents present a key.`n"; Status = "moved: the section is now '6 Agent keys' on main; re-check the test" } # oracle: intent ci/check-oracle-markers.intent.md §drift
         @{ Name = 'removed'; Head = "# Specs`n`n## 7 Other`n"; Status = 'removed: §6 no longer resolves on main; re-check the test' } # oracle: intent ci/check-oracle-markers.intent.md §drift
@@ -502,6 +515,7 @@ Describe 'New tests' {
         @{ Name = 'in its body after a raw string holding a quote and a brace'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = r#`"`"}`"#;`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'in its body after a raw string spanning lines'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = r`"`n}`n`";`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'in its body after a fixed-size array parameter'; Path = 'src/a.rs'; Content = "#[rstest]`n#[case::four([1, 2, 3, 4])]`nfn parses(#[case] bytes: [u8; 4]) {`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'in its body after a C# interpolated string holding a brace'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n        var text = `$`"{string.Join(`"}`", values)}`";`n        // oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
     ) {
         Set-RepoFile $Repo $Path $Content
         Invoke-Git $Repo add -A
