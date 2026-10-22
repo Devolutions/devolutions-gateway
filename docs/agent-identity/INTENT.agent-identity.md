@@ -63,9 +63,11 @@ Not intended:
    A leaked token can enroll new identities; it must never allow impersonating or altering an existing identity.
 4. An authority authenticates a request only through a certificate it registered for that identity, looked up by thumbprint, and a signature by that certificate's key.
    The agent never sends its certificate to the authority, and validating a chain is not authentication: any certificate the root issued chains successfully, and a chain says nothing about revocation.
-5. Revocation is final by design.
-   It blocks authentication and renewal, closes live streams, and never makes an issued public key reusable.
-   A device whose identity is revoked comes back only by enrolling again with a different token, as a new identity.
+5. Revocation is final for the identity and its keys.
+   It blocks authentication and renewal, closes live streams, and never makes an issued public key reusable, so a revoked identity never authenticates again.
+   The agent never undoes a revocation on its own: it doesn't enroll again with the token that created the revoked identity.
+   That is a safeguard on the device, not a control, because enrollment authenticates the token, not the device: whoever controls the device can clear its state, then enroll it with any token that can still enroll, as a new identity that uses up a token use.
+   Keeping a revoked device out therefore also takes deleting every token it can still use.
 6. Reported metadata is informational (display, friendly-name evaluation).
    It is never used for authorization.
 7. An agent channel stream is authenticated only once the device has signed a fresh challenge for that stream.

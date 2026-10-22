@@ -129,8 +129,10 @@ The agent learns of it from the authority's answer to its next request or, for a
 It then records the identity as rejected, logs `The Agent Identity is rejected; it stops renewing and checking in` with the reason in `code`, and never contacts the authority for that identity again.
 The agent also ends an identity whose current device key no longer exists, recording it as rejected with the code `key_lost`.
 
-Revocation is final.
-Running the same token again is a no-op, and only an enrollment with a different token brings the device back, as a new identity.
+Revocation is final for the identity: it never authenticates again.
+Running the same token again is a no-op, so the agent never brings itself back; an enrollment with a different token enrolls the device again, as a new identity.
+This protects against mistakes, not against whoever controls the device: clearing the agent's state, as a full uninstall on Windows does (see below), lets any token that can still enroll bring the device back as a new identity.
+To keep a revoked device out, also delete every enrollment token it can still use.
 The ended identity keeps its files and keys until a new identity replaces it or the agent is uninstalled.
 
 ### Upgrade and uninstall
