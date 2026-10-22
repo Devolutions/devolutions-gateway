@@ -405,6 +405,9 @@ fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()>
 }
 
 pub(crate) async fn p_trust_anchor_lists_roots(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let roots = ctx.target.trust_anchor().await?;
     let entries = roots["roots"].as_array().context("missing roots")?;
     ensure!(
@@ -435,6 +438,7 @@ pub(crate) async fn p_trust_anchor_lists_roots(ctx: Context) -> anyhow::Result<(
 }
 
 pub(crate) async fn p_channel_url_expectation(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     let (_, identity) = issued(&ctx, "channel-availability").await?;
     if ctx.expect_channel {
         ensure!(
@@ -464,6 +468,7 @@ pub(crate) async fn p_channel_url_expectation(ctx: Context) -> anyhow::Result<()
 }
 
 pub(crate) async fn p_reset_rebases_root_validity(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let old = ctx.target.trust_anchor().await?;
     ctx.target.advance(90 * 24 * 3600).await?;
     ctx.target.reset().await?;
@@ -478,6 +483,8 @@ pub(crate) async fn p_reset_rebases_root_validity(ctx: Context) -> anyhow::Resul
 }
 
 pub(crate) async fn p_token_n_uses_consumed_then_exhausted(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let token = token(&ctx, 3).await?;
     let mut authority_id = None;
     for n in 1..=3 {
@@ -498,6 +505,7 @@ pub(crate) async fn p_token_n_uses_consumed_then_exhausted(ctx: Context) -> anyh
 }
 
 pub(crate) async fn p_token_concurrent_enrollment_respects_max_uses(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 5).await?;
     let mut tasks = tokio::task::JoinSet::new();
     let barrier = Arc::new(Barrier::new(21));
@@ -549,6 +557,7 @@ pub(crate) async fn p_token_concurrent_enrollment_respects_max_uses(ctx: Context
 }
 
 pub(crate) async fn p_concurrent_same_key_enroll_replays_winner(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 1).await?;
     let csr = KeyPair::generate()?.csr;
     let body = json!({ "csr": csr, "metadata": { "hostname": "shared-key" } });
@@ -583,6 +592,8 @@ pub(crate) async fn p_concurrent_same_key_enroll_replays_winner(ctx: Context) ->
 }
 
 pub(crate) async fn p_concurrent_same_key_renew_replays_winner(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let (token, identity) = issued(&ctx, "shared-renew").await?;
     let key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "shared-renewal" } }))?;
@@ -621,6 +632,7 @@ pub(crate) async fn p_concurrent_same_key_renew_replays_winner(ctx: Context) -> 
 }
 
 pub(crate) async fn p_failed_enrollment_consumes_nothing(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 2).await?;
     let (prefix, _) = token.text.rsplit_once('.').context("token structure")?;
     let invalid_secret = format!(
@@ -666,6 +678,8 @@ pub(crate) async fn p_failed_enrollment_consumes_nothing(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_token_errors_distinct(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let first_token = token(&ctx, 1).await?;
     let (prefix, _) = first_token.text.rsplit_once('.').context("invalid issued token")?;
     let wrong_secret = format!(
@@ -694,6 +708,8 @@ pub(crate) async fn p_token_errors_distinct(ctx: Context) -> anyhow::Result<()> 
 }
 
 pub(crate) async fn p_token_expired(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let token = ctx
         .target
         .management()
@@ -712,6 +728,8 @@ pub(crate) async fn p_token_expired(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     let token = token(&ctx, 1).await?;
     let key = KeyPair::generate()?;
     let first = ctx
@@ -770,6 +788,9 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
 }
 
 pub(crate) async fn p_token_config_contributes_to_effective_config(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
     let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
     spec.config = Some([("psu_channel_url".to_owned(), "https://psu.example".to_owned())].into());
     let token = ctx.target.management().create_token_from(&spec).await?;
@@ -786,6 +807,7 @@ pub(crate) async fn p_token_config_contributes_to_effective_config(ctx: Context)
 }
 
 pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let foreign_token = token(&ctx, 1).await?;
     let token = token(&ctx, 2).await?;
     let key = KeyPair::generate()?;
@@ -851,6 +873,7 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_enroll_revoked_same_key_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 2).await?;
     let key = KeyPair::generate()?;
     let enrolled = ctx.target.enroll(&token.text, &key, &json!({})).await?;
@@ -864,6 +887,7 @@ pub(crate) async fn p_enroll_revoked_same_key_rejected(ctx: Context) -> anyhow::
 }
 
 pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let original_token = token(&ctx, 1).await?;
     let original_key = KeyPair::generate()?;
     let first = ctx
@@ -952,6 +976,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     let (_, identity) = issued(&ctx, "renew-a").await?;
     let (_, other) = issued(&ctx, "renew-b").await?;
     let initial = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -1016,6 +1041,7 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     let token = token(&ctx, 12).await?;
     let many = (0..33)
         .map(|n| (format!("k{n}"), json!("v")))
@@ -1087,6 +1113,8 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_friendly_name_format(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
     let management = ctx.target.management();
     let token = management
         .create_token(2, TOKEN_LIFETIME, Some("  {hostname}-{{ok}}-{token_name}-{fqdn}  "))
@@ -1129,6 +1157,8 @@ pub(crate) async fn p_friendly_name_format(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_identity_cannot_impersonate_another(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
     let (_, a) = issued(&ctx, "alpha").await?;
     let (b_token, b) = issued(&ctx, "bravo").await?;
     let b_before = identity_record(&ctx.target, &b.identity_id).await?;
@@ -1175,6 +1205,9 @@ pub(crate) async fn p_identity_cannot_impersonate_another(ctx: Context) -> anyho
 }
 
 pub(crate) async fn p_channel_hello_cannot_impersonate_another(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
     let (_, a) = issued(&ctx, "alpha").await?;
     let (_, b) = issued(&ctx, "bravo").await?;
     let b_before = identity_record(&ctx.target, &b.identity_id).await?;
@@ -1200,6 +1233,7 @@ pub(crate) async fn p_channel_hello_cannot_impersonate_another(ctx: Context) -> 
 }
 
 pub(crate) async fn p_renew_digest_integrity(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "original").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = KeyPair::generate()?;
@@ -1276,11 +1310,13 @@ async fn renew_in_alternate_parameter_order(ctx: &Context) -> anyhow::Result<(Id
 }
 
 pub(crate) async fn p_signature_parameter_order_accepted_renew(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     renew_in_alternate_parameter_order(&ctx).await?;
     Ok(())
 }
 
 pub(crate) async fn p_signature_parameter_order_accepted_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     use SignatureParameter::{Algorithm, Created, Expires, KeyId, Nonce, Tag};
 
     let (identity, renew_headers) = renew_in_alternate_parameter_order(&ctx).await?;
@@ -1302,6 +1338,7 @@ pub(crate) async fn p_signature_parameter_order_accepted_connect(ctx: Context) -
 }
 
 pub(crate) async fn p_renew_rejects_sha384_csr(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     let (_, identity) = issued(&ctx, "original").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
@@ -1327,6 +1364,7 @@ pub(crate) async fn p_renew_rejects_sha384_csr(ctx: Context) -> anyhow::Result<(
 }
 
 pub(crate) async fn p_replay_nonce_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "replay").await?;
     let new_key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": {} }))?;
@@ -1371,6 +1409,7 @@ pub(crate) async fn p_replay_nonce_rejected(ctx: Context) -> anyhow::Result<()> 
 }
 
 pub(crate) async fn p_replay_window_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "window").await?;
     let new_key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": {} }))?;
@@ -1427,6 +1466,7 @@ pub(crate) async fn p_replay_window_rejected(ctx: Context) -> anyhow::Result<()>
 }
 
 pub(crate) async fn p_connect_signature_replayed_to_renew(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "cross-tag").await?;
     let new_key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": {} }))?;
@@ -1438,6 +1478,8 @@ pub(crate) async fn p_connect_signature_replayed_to_renew(ctx: Context) -> anyho
 }
 
 pub(crate) async fn p_renew_signature_rejected_on_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "reverse-cross-tag").await?;
     let csr = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
@@ -1455,6 +1497,8 @@ pub(crate) async fn p_renew_signature_rejected_on_connect(ctx: Context) -> anyho
 }
 
 pub(crate) async fn p_channel_duplicate_signature_metadata_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "duplicate-channel-signature").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     for name in ["signature-input", "signature"] {
@@ -1477,6 +1521,8 @@ pub(crate) async fn p_channel_duplicate_signature_metadata_rejected(ctx: Context
 }
 
 pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     let (_, mut identity) = issued(&ctx, "confirm-cross-tag").await?;
     let old_thumb = identity.thumbprint.clone();
     let connect_tag = identity.key.sign_now(&old_thumb, "connect", None);
@@ -1516,6 +1562,8 @@ pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> any
 }
 
 pub(crate) async fn p_confirm_signature_rejected_on_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, mut identity) = issued(&ctx, "confirm-to-connect").await?;
     let old_thumb = identity.thumbprint.clone();
     let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
@@ -1568,6 +1616,8 @@ async fn next_last_seen_second(ctx: &Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, mut identity) = issued(&ctx, "check-in").await?;
     let enrolled = identity.config.clone();
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -1665,6 +1715,8 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
 }
 
 pub(crate) async fn p_check_in_cross_tag_signatures_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     let (_, identity) = issued(&ctx, "check-in-cross-tag").await?;
     let body = serde_json::to_vec(&json!({ "metadata": {} }))?;
     let check_in_tag = identity.key.sign_now(&identity.thumbprint, "check-in", Some(&body));
@@ -1708,6 +1760,8 @@ pub(crate) async fn p_check_in_cross_tag_signatures_rejected(ctx: Context) -> an
 }
 
 pub(crate) async fn p_check_in_signature_rejected_on_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "check-in-to-connect").await?;
     let body = serde_json::to_vec(&json!({ "metadata": {} }))?;
     let headers = identity.key.sign_now(&identity.thumbprint, "check-in", Some(&body));
@@ -1797,6 +1851,7 @@ fn sign_with_components(
 }
 
 pub(crate) async fn p_same_tag_covered_components_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "same-tag-components").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let http_prefix = reqwest::Url::parse(&ctx.target.base_url)?
@@ -1853,6 +1908,8 @@ pub(crate) async fn p_same_tag_covered_components_rejected(ctx: Context) -> anyh
 }
 
 pub(crate) async fn p_same_tag_connect_components_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "same-tag-connect-components").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let channel_prefix = reqwest::Url::parse(
@@ -1888,6 +1945,7 @@ pub(crate) async fn p_same_tag_connect_components_rejected(ctx: Context) -> anyh
 }
 
 pub(crate) async fn p_extra_signature_parameters_rejected_renew(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "extra-renew-parameter").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = KeyPair::generate()?;
@@ -1910,6 +1968,8 @@ pub(crate) async fn p_extra_signature_parameters_rejected_renew(ctx: Context) ->
 }
 
 pub(crate) async fn p_extra_signature_parameters_rejected_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "extra-connect-parameter").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     for parameter in [";conformance=\"extra\"", ";conformance"] {
@@ -1934,6 +1994,7 @@ pub(crate) async fn p_extra_signature_parameters_rejected_connect(ctx: Context) 
 }
 
 pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "wire-negatives").await?;
     let original = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = KeyPair::generate()?;
@@ -2097,6 +2158,8 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
 }
 
 pub(crate) async fn p_signature_noncanonical_base64_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let (_, identity) = issued(&ctx, "noncanonical-base64").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = KeyPair::generate()?;
@@ -2132,6 +2195,7 @@ pub(crate) async fn p_signature_noncanonical_base64_rejected(ctx: Context) -> an
 }
 
 pub(crate) async fn p_signature_repeated_raw_items_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "repeated-raw-items").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = KeyPair::generate()?;
@@ -2168,6 +2232,8 @@ pub(crate) async fn p_signature_repeated_raw_items_rejected(ctx: Context) -> any
 }
 
 pub(crate) async fn p_connect_signature_noncanonical_or_repeated_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "connect-wire-negatives").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let sign = || identity.key.sign_now(&identity.thumbprint, "connect", None);
@@ -2299,6 +2365,8 @@ fn without_padding(value: &str) -> anyhow::Result<String> {
 }
 
 pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     let (_, mut identity) = issued(&ctx, "unchanged").await?;
     let original_name = identity_record(&ctx.target, &identity.identity_id).await?.friendly_name;
     let new_key = KeyPair::generate()?;
@@ -2377,6 +2445,7 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     let (_, mut identity) = issued(&ctx, "confirm-idempotent").await?;
     let old_thumb = identity.thumbprint.clone();
     let original = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -2451,6 +2520,8 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_confirm_retired_certificate_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "retired-confirm").await?;
     let first_key = KeyPair::generate()?;
     let first = ctx.target.renew(&identity, &first_key, &json!({})).await?;
@@ -2478,6 +2549,9 @@ pub(crate) async fn p_confirm_retired_certificate_rejected(ctx: Context) -> anyh
 }
 
 pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     let (_, mut identity) = issued(&ctx, "expired-confirm").await?;
     let old_thumb = identity.thumbprint.clone();
@@ -2525,6 +2599,7 @@ pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context)
 }
 
 pub(crate) async fn p_confirm_nonempty_body_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     let (_, mut identity) = issued(&ctx, "confirm-body").await?;
     let key = KeyPair::generate()?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
@@ -2543,6 +2618,8 @@ pub(crate) async fn p_confirm_nonempty_body_rejected(ctx: Context) -> anyhow::Re
 }
 
 pub(crate) async fn p_confirm_faults_do_not_duplicate_promotion(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let (_, mut identity) = issued(&ctx, "confirm-faults").await?;
     let old_thumb = identity.thumbprint.clone();
     let key = KeyPair::generate()?;
@@ -2599,6 +2676,7 @@ pub(crate) async fn p_confirm_faults_do_not_duplicate_promotion(ctx: Context) ->
 }
 
 pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     let (_, identity) = issued(&ctx, "lost-renew").await?;
     let new_key = KeyPair::generate()?;
     expect_status(
@@ -2644,6 +2722,7 @@ pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Re
 }
 
 pub(crate) async fn p_mock_enroll_retry_barrier(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let token = token(&ctx, 1).await?;
     let key = KeyPair::generate()?;
     expect_status(
@@ -2701,6 +2780,7 @@ pub(crate) async fn p_mock_enroll_retry_barrier(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn p_renew_second_pending_retires_first(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     let (_, identity) = issued(&ctx, "pending").await?;
     let first_key = KeyPair::generate()?;
     let first = ctx.target.renew(&identity, &first_key, &json!({})).await?;
@@ -2739,6 +2819,9 @@ pub(crate) async fn p_renew_second_pending_retires_first(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_retired_pending_certificate_cannot_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "retired-connect").await?;
     let first_key = KeyPair::generate()?;
     let first = ctx.target.renew(&identity, &first_key, &json!({})).await?;
@@ -2770,6 +2853,8 @@ pub(crate) async fn p_retired_pending_certificate_cannot_connect(ctx: Context) -
 }
 
 pub(crate) async fn p_renew_within_grace(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 4 })).await?;
     let (_, identity) = issued(&ctx, "grace").await?;
     ctx.target.advance(5).await?;
@@ -2798,6 +2883,8 @@ pub(crate) async fn p_renew_within_grace(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_renew_beyond_grace(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 4 })).await?;
     let (_, identity) = issued(&ctx, "too-late").await?;
     ctx.target.advance(9).await?;
@@ -2807,6 +2894,8 @@ pub(crate) async fn p_renew_beyond_grace(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let (_, identity) = issued(&ctx, "revoke").await?;
     ctx.target.management().revoke(&identity.identity_id).await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -2843,6 +2932,8 @@ pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyho
 }
 
 pub(crate) async fn p_revocation_blocks_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "revoked-connect").await?;
     ctx.target.management().revoke(&identity.identity_id).await?;
     let status = channel::open(&ctx.target, &identity)
@@ -2860,6 +2951,9 @@ pub(crate) async fn p_revocation_blocks_connect(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (token, identity) = issued(&ctx, "delete").await?;
     let management = ctx.target.management();
     ensure!(
@@ -2907,6 +3001,8 @@ pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> any
 }
 
 pub(crate) async fn p_deleted_certificate_cannot_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "deleted-connect").await?;
     ctx.target.management().revoke(&identity.identity_id).await?;
     ctx.target.management().delete_identity(&identity.identity_id).await?;
@@ -2925,6 +3021,9 @@ pub(crate) async fn p_deleted_certificate_cannot_connect(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
     let (_, identity) = issued(&ctx, "initial").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     let challenge = stream.challenge().await?;
@@ -2980,6 +3079,7 @@ pub(crate) async fn p_channel_hello_updates_metadata_and_connected(ctx: Context)
 }
 
 pub(crate) async fn p_channel_agent_message_refreshes_last_seen(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Configuration and metadata
     let (_, identity) = issued(&ctx, "agent-message").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
@@ -3022,6 +3122,7 @@ pub(crate) async fn p_channel_agent_message_refreshes_last_seen(ctx: Context) ->
 }
 
 pub(crate) async fn p_handshake_barrier_holds_authentication(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     let (_, identity) = issued(&ctx, "barrier").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     expect_status(&ctx.target.control("handshake", &json!({ "pause": true })).await?, 200)?;
@@ -3086,6 +3187,8 @@ pub(crate) async fn p_handshake_barrier_holds_authentication(ctx: Context) -> an
 }
 
 pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
     let (_, identity) = issued(&ctx, "untouched").await?;
     let (_, other) = issued(&ctx, "other-device").await?;
     let mut first = channel::open(&ctx.target, &identity).await?;
@@ -3231,6 +3334,7 @@ async fn close_awaiting_hello(
 }
 
 pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "before-revocation").await?;
     let streams = streams_awaiting_hello(
         &ctx,
@@ -3276,6 +3380,7 @@ pub(crate) async fn p_channel_revoked_before_hello(ctx: Context) -> anyhow::Resu
 ///
 /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "before-deletion").await?;
     let streams = streams_awaiting_hello(&ctx, &identity, &[AwaitedHello::Valid, AwaitedHello::BadProof]).await?;
     let authenticated = if ctx.mock() {
@@ -3309,6 +3414,7 @@ pub(crate) async fn p_channel_deleted_before_hello(ctx: Context) -> anyhow::Resu
 }
 
 pub(crate) async fn p_channel_no_hello_timeout(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     let (_, identity) = issued(&ctx, "no-hello").await?;
     let initial = identity_record(&ctx.target, &identity.identity_id).await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
@@ -3330,6 +3436,8 @@ pub(crate) async fn p_channel_no_hello_timeout(ctx: Context) -> anyhow::Result<(
 }
 
 pub(crate) async fn p_channel_hello_invalid_metadata_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     let (_, identity) = issued(&ctx, "invalid-hello-metadata").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let long_key = format!("k{}", "a".repeat(64));
@@ -3503,6 +3611,9 @@ pub(crate) async fn p_channel_undecodable_message_after_welcome_rejected(ctx: Co
 }
 
 pub(crate) async fn p_channel_clock_skew_refusal_carries_server_time(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let (_, identity) = issued(&ctx, "skewed-opening").await?;
     let created = time::OffsetDateTime::now_utc().unix_timestamp() - 600;
     let headers = identity.key.sign(
@@ -3525,6 +3636,8 @@ pub(crate) async fn p_channel_clock_skew_refusal_carries_server_time(ctx: Contex
 }
 
 pub(crate) async fn p_channel_server_time_corrects_skew(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "server-time-retry").await?;
     ctx.target.faults(&json!({ "clock_skew_secs": 900 })).await?;
     let failure = channel::open(&ctx.target, &identity)
@@ -3554,6 +3667,8 @@ pub(crate) async fn p_channel_server_time_corrects_skew(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     ctx.target.faults(&json!({ "channel_available": false })).await?;
     let token = token(&ctx, 1).await?;
     let key = KeyPair::generate()?;
@@ -3585,6 +3700,7 @@ pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_mock_malformed_https_channel_urls(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     for (variant, suffix) in [("query", "?identity_probe=1"), ("fragment", "#identity_probe")] {
         ctx.target.faults(&json!({ "malformed_channel_url": variant })).await?;
         let (_, identity) = issued(&ctx, variant).await?;
@@ -3618,6 +3734,8 @@ pub(crate) async fn p_mock_malformed_https_channel_urls(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     let (_, mut identity) = issued(&ctx, "config-revisions").await?;
     let (_, other) = issued(&ctx, "second-config-revisions").await?;
     let initial = check_in_config(&ctx.target, &identity).await?;
@@ -3736,6 +3854,8 @@ pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow:
 /// On DVLS, the identity's revision goes stale through the only config change DVLS's management API makes: switching the agent channel off and on.
 /// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`, which the switch withdraws and restores.
 pub(crate) async fn p_config_hello_reconciles_stale_revision(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
     if ctx.mock() {
         return stale_hello_reconciled(&ctx).await;
     }
@@ -3834,6 +3954,8 @@ async fn stale_hello_reconciled(ctx: &Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_config_update_pushes_higher_revision(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     let (_, identity) = issued(&ctx, "config-push").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
@@ -3896,6 +4018,9 @@ pub(crate) async fn p_config_update_pushes_higher_revision(ctx: Context) -> anyh
 }
 
 pub(crate) async fn p_request_renewal_connected_and_on_connect(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
     let (_, identity) = issued(&ctx, "push").await?;
     let mut connected = channel::open(&ctx.target, &identity).await?;
     connected.hello(&identity, &[("hostname", "push")]).await?;
@@ -3945,6 +4070,7 @@ pub(crate) async fn p_request_renewal_connected_and_on_connect(ctx: Context) -> 
 }
 
 pub(crate) async fn p_reconnect_push_and_handoff(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     let (_, identity) = issued(&ctx, "reconnect").await?;
     let mut old = channel::open(&ctx.target, &identity).await?;
     old.hello(&identity, &[]).await?;
@@ -4025,6 +4151,7 @@ pub(crate) async fn p_reconnect_push_and_handoff(ctx: Context) -> anyhow::Result
 }
 
 pub(crate) async fn p_request_renewal_flag_cleared_only_on_confirm(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
     let (_, mut identity) = issued(&ctx, "offline-flag").await?;
     ctx.target.management().request_renewal(&identity.identity_id).await?;
     ensure!(
@@ -4064,6 +4191,7 @@ pub(crate) async fn p_request_renewal_flag_cleared_only_on_confirm(ctx: Context)
 }
 
 pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
     let (_, mut identity) = issued(&ctx, "clear-flag").await?;
     let mut old = channel::open(&ctx.target, &identity).await?;
     old.hello(&identity, &[]).await?;
@@ -4131,6 +4259,7 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
 }
 
 pub(crate) async fn p_revocation_closes_stream(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "live-revoke").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
@@ -4145,6 +4274,7 @@ pub(crate) async fn p_revocation_closes_stream(ctx: Context) -> anyhow::Result<(
 }
 
 pub(crate) async fn p_stream_closes_at_not_after(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     if ctx.mock() {
         ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     }
@@ -4249,6 +4379,8 @@ pub(crate) async fn p_stream_closes_at_not_after(ctx: Context) -> anyhow::Result
 }
 
 pub(crate) async fn p_expired_certificate_refused_at_stream_open(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     let (_, identity) = issued(&ctx, "expired-open").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -4300,6 +4432,7 @@ pub(crate) async fn p_expired_certificate_refused_at_stream_open(ctx: Context) -
 }
 
 pub(crate) async fn p_challenged_stream_expires_on_advance(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 20 })).await?;
     let (_, identity) = issued(&ctx, "challenge-expiry").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -4338,6 +4471,8 @@ pub(crate) async fn p_challenged_stream_expires_on_advance(ctx: Context) -> anyh
 }
 
 pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
     let (_, mut identity) = issued(&ctx, "make-before-break").await?;
     let old_thumb = identity.thumbprint.clone();
     let mut old = channel::open(&ctx.target, &identity).await?;
@@ -4460,6 +4595,8 @@ pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_confirm_reconnects_and_closes_retired_stream_at_grace(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     let (_, mut identity) = issued(&ctx, "retired-stream-grace").await?;
     let old_thumb = identity.thumbprint.clone();
     let mut old = channel::open(&ctx.target, &identity).await?;
@@ -4562,6 +4699,7 @@ pub(crate) async fn p_confirm_reconnects_and_closes_retired_stream_at_grace(ctx:
 }
 
 pub(crate) async fn p_channel_retired_before_hello_completes_then_reconnects(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, mut identity) = issued(&ctx, "retired-before-hello").await?;
     let old_thumb = identity.thumbprint.clone();
     let mut stream = channel::open(&ctx.target, &identity).await?;
@@ -4632,6 +4770,7 @@ pub(crate) async fn p_channel_retired_before_hello_completes_then_reconnects(ctx
 }
 
 pub(crate) async fn p_rotation_publishes_both_roots_and_issues_from_new(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     if !ctx.mock() {
         wait_rotation_idle(&ctx.target, ctx.dvls_rotation_window_secs).await?;
     }
@@ -4665,6 +4804,7 @@ pub(crate) async fn p_rotation_publishes_both_roots_and_issues_from_new(ctx: Con
 }
 
 pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
     let (_, mut a) = issued(&ctx, "old-a").await?;
     let (_, b) = issued(&ctx, "old-b").await?;
     let old_root = identity_record(&ctx.target, &a.identity_id)
@@ -4713,6 +4853,7 @@ pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()>
 }
 
 pub(crate) async fn p_rotation_conflict_409(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
     let _ = issued(&ctx, "rotation").await?;
     begin_rotation(&ctx).await?;
     ensure!(
@@ -4724,6 +4865,7 @@ pub(crate) async fn p_rotation_conflict_409(ctx: Context) -> anyhow::Result<()> 
 }
 
 pub(crate) async fn p_rotation_completes_early_when_last_identity_migrates(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     let (_, mut first) = issued(&ctx, "first-old-root").await?;
     let (_, mut last) = issued(&ctx, "last-old-root").await?;
     let old_root = thumbprint(first.certificate_chain.last().context("missing old root")?)?;
@@ -4797,6 +4939,7 @@ pub(crate) async fn p_rotation_completes_early_when_last_identity_migrates(ctx: 
 }
 
 pub(crate) async fn p_rotation_completes_immediately_without_old_root_identities(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     let original = ctx.target.trust_anchor().await?;
     let original_roots = original["roots"].as_array().context("original roots")?;
     ensure!(original_roots.len() == 1, "expected one root before rotation");
@@ -4824,6 +4967,8 @@ pub(crate) async fn p_rotation_completes_immediately_without_old_root_identities
 }
 
 pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
     let (_, expired) = issued(&ctx, "expired-old-root").await?;
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
@@ -4915,6 +5060,7 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
 }
 
 pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
     ensure!(
         ctx.mock() || ctx.disposable_dvls_target,
         "requires a disposable DVLS target"
@@ -4978,6 +5124,7 @@ pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: C
 }
 
 pub(crate) async fn p_rotation_disposable_completes_before_future_deadline(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     ensure!(
         ctx.mock() || ctx.disposable_dvls_target,
         "requires a disposable DVLS target"
@@ -5033,6 +5180,8 @@ pub(crate) async fn p_rotation_disposable_completes_before_future_deadline(ctx: 
 }
 
 pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
     let (_, expired) = issued(&ctx, "grace-old-root").await?;
     let old_root = thumbprint(expired.certificate_chain.last().context("missing old root")?)?;
@@ -5111,6 +5260,8 @@ pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context
 }
 
 pub(crate) async fn p_rotation_completes_early_at_certificate_expiry_via_freeze(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
     let (_, short) = issued(&ctx, "freeze-short-old-root").await?;
     let expiry = identity_record(&ctx.target, &short.identity_id)
@@ -5153,6 +5304,8 @@ pub(crate) async fn p_rotation_completes_early_at_certificate_expiry_via_freeze(
 }
 
 pub(crate) async fn p_rotation_push_rate_survives_deadline(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Load
     ctx.target
         .faults(&json!({ "rotation_rate_limit_per_sec": 1, "leaf_lifetime_secs": 30 }))
         .await?;
@@ -5211,6 +5364,7 @@ pub(crate) async fn p_rotation_push_rate_survives_deadline(ctx: Context) -> anyh
 }
 
 pub(crate) async fn p_rotation_deadline_removes_old_root(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     if !ctx.mock() {
         wait_rotation_idle(&ctx.target, ctx.dvls_rotation_window_secs).await?;
     }
@@ -5304,6 +5458,7 @@ pub(crate) async fn p_rotation_deadline_removes_old_root(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn p_rotation_old_root_cert_renewable_after_deadline(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     let (_, old) = issued(&ctx, "still-allowed").await?;
     let original_root = thumbprint(old.certificate_chain.last().context("missing old root")?)?;
     ctx.target.management().rotate(RotationDeadline::Now).await?;
@@ -5335,6 +5490,8 @@ pub(crate) async fn p_rotation_old_root_cert_renewable_after_deadline(ctx: Conte
 }
 
 pub(crate) async fn p_rotation_emergency_deadline(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Rotation
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     if !ctx.mock() {
         ensure!(
             ctx.disposable_dvls_target,
@@ -5384,6 +5541,7 @@ pub(crate) async fn p_rotation_emergency_deadline(ctx: Context) -> anyhow::Resul
 }
 
 pub(crate) async fn p_rotation_request_renewal_pushed(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     let (_, identity) = issued(&ctx, "rotation-push").await?;
     let mut stream = channel::open(&ctx.target, &identity).await?;
     stream.hello(&identity, &[]).await?;
@@ -5409,6 +5567,7 @@ pub(crate) async fn p_rotation_request_renewal_pushed(ctx: Context) -> anyhow::R
 }
 
 pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 30 })).await?;
     let (_, mut identity) = issued(&ctx, "pending-only-old-root").await?;
     let old_root = thumbprint(identity.certificate_chain.last().context("missing old root")?)?;
@@ -5471,6 +5630,7 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
 }
 
 pub(crate) async fn p_listing_pagination_stable_during_concurrent_enrollment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
     let token = token(&ctx, 10).await?;
     let mut created = Vec::new();
     for n in 0..4 {
@@ -5578,6 +5738,8 @@ async fn listing_page(target: &Target, token: &Token, page: u64) -> anyhow::Resu
 }
 
 pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
     let management = ctx.target.management();
     let decoy_token = token(&ctx, 1).await?;
     let token = token(&ctx, 5).await?;
@@ -5755,6 +5917,7 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
 }
 
 pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
     let management = ctx.target.management();
     let token = token(&ctx, 1).await?;
     let record = management.token(&token.id).await?;
@@ -5818,6 +5981,7 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_management_requires_auth(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
     assert_management_routes_denied(&ctx, Credential::Absent, |_| true, Refusal::Unauthenticated).await?;
     // oracle: spec DVLS public API contract §6
     let unknown = unknown_token_id();
@@ -5934,6 +6098,7 @@ async fn assert_management_routes_denied(
 ///
 /// Each route group, the settings included, is called with a credential lacking that group's permission; on the mock it holds every other permission, so none stands in for the missing one.
 pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
     for permission in Permission::ALL {
         let session =
             dvls::session_lacking(&ctx, permission).ok_or(crate::Incomplete("requires --unprivileged-app-key"))?;
@@ -5950,6 +6115,7 @@ pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Resu
 }
 
 pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
     ensure!(
         ctx.mock() || ctx.disposable_dvls_target,
         "rotation authorization requires a disposable DVLS target"
@@ -5987,6 +6153,7 @@ pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Resu
 
 /// The OpenAPI document, on a token's `expiresOn`: "in the future and at most 365 days ahead ... (Default: 90 days ahead)".
 pub(crate) async fn p_token_expiry_default_and_maximum(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
     let management = ctx.target.management();
     let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
     spec.expires_on = None;
@@ -6014,6 +6181,8 @@ pub(crate) async fn p_token_expiry_default_and_maximum(ctx: Context) -> anyhow::
 
 /// The OpenAPI document: starting a rotation is 409 when "no root exists yet", and "The first token also creates the Agent Identity root".
 pub(crate) async fn p_rotation_without_root_conflicts(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
     expect_status(
         &ctx.target.control("reset", &json!({ "without_root": true })).await?,
         200,
@@ -6042,6 +6211,7 @@ pub(crate) async fn p_rotation_without_root_conflicts(ctx: Context) -> anyhow::R
 
 /// The OpenAPI document: starting a rotation is 409 when "the root key is unavailable", and creating the first token is 409 when "The first root cannot be created because the data encryption key is unavailable".
 pub(crate) async fn p_root_key_unavailable_conflicts(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Root CA
     let _ = issued(&ctx, "root-key").await?;
     let roots = trust_anchor_snapshot(&ctx.target.trust_anchor().await?)?;
     ctx.target.faults(&json!({ "root_key_unavailable": true })).await?;
@@ -6083,6 +6253,8 @@ pub(crate) async fn p_root_key_unavailable_conflicts(ctx: Context) -> anyhow::Re
 /// The OpenAPI document, on the settings: `authorityId` is "The authority_id agents receive at enrollment", and `isAgentChannelAvailable` is "Whether DVLS offers the agent channel: it is enabled and the hosting supports it".
 /// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`.
 pub(crate) async fn p_settings_read(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
     let (_, identity) = issued(&ctx, "settings").await?;
     let settings = ctx.target.management().settings().await?;
     ensure!(
@@ -6102,6 +6274,7 @@ pub(crate) async fn p_settings_read(ctx: Context) -> anyhow::Result<()> {
 
 /// The OpenAPI document, on a settings change: `certificateLifetimeDays` is "from 1 to 365 days" and `rotationNotificationsPerSecond` "from 1 to 1000".
 pub(crate) async fn p_settings_change_bounds(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
     require_settings_changes(&ctx)?;
     let management = ctx.target.management();
     let original = management.settings().await?;
@@ -6154,6 +6327,8 @@ pub(crate) async fn p_settings_change_bounds(ctx: Context) -> anyhow::Result<()>
 
 /// The OpenAPI document: `certificateLifetimeDays` is "The lifetime of the identity certificates issued from now on, in days".
 pub(crate) async fn p_settings_certificate_lifetime_applies_to_new_certificates(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Management API
     require_settings_changes(&ctx)?;
     let management = ctx.target.management();
     let original = management.settings().await?;
@@ -6220,6 +6395,7 @@ pub(crate) async fn p_settings_certificate_lifetime_applies_to_new_certificates(
 /// The OpenAPI document: `isAgentChannelEnabled` "turns the agent channel off behind a reverse proxy that breaks gRPC", and `isAgentChannelAvailable` is "Whether DVLS offers the agent channel: it is enabled and the hosting supports it".
 /// DVLS's intent, "Certificates and channel", offers the channel as `config.agent_channel_url`.
 pub(crate) async fn p_settings_channel_switch_withdraws_and_restores_channel_url(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
     require_settings_changes(&ctx)?;
     let management = ctx.target.management();
     let original = management.settings().await?;
@@ -6299,6 +6475,8 @@ async fn restoring_settings(
 }
 
 pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let token = token(&ctx, 2).await?;
     let invalid = ctx
         .target
@@ -6375,6 +6553,7 @@ pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn p_enroll_malformed_authorization_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 1).await?;
     let key = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": {} }))?;
@@ -6406,6 +6585,7 @@ pub(crate) async fn p_enroll_malformed_authorization_rejected(ctx: Context) -> a
 }
 
 pub(crate) async fn p_authentication_error_precedes_invalid_body(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let token = token(&ctx, 2).await?;
     let unknown_token = format!(
         "{}.{}",
@@ -6500,6 +6680,7 @@ pub(crate) async fn p_authentication_error_precedes_invalid_body(ctx: Context) -
 }
 
 pub(crate) async fn p_oversized_body_precedes_authentication(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let (_, identity) = issued(&ctx, "oversized-precedence").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let oversized = vec![b' '; 64 * 1024 + 1];
@@ -6571,6 +6752,7 @@ async fn post_with_headers(
 }
 
 pub(crate) async fn p_mock_fault_response_not_processed(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let token = token(&ctx, 1).await?;
     let key = KeyPair::generate()?;
     ctx.target
@@ -6665,6 +6847,7 @@ async fn signed_raw(target: &Target, identity: &Identity, endpoint: &str, body: 
 ///
 /// Every repeated member holds a valid value, so a parser that keeps either occurrence would accept the request.
 pub(crate) async fn p_duplicate_json_members_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let token = token(&ctx, 2).await?;
     let (first, second) = (KeyPair::generate()?, KeyPair::generate()?);
     let (a, b) = (&first.csr, &second.csr);
@@ -6901,6 +7084,7 @@ fn noncanonical_base64(canonical: &str) -> anyhow::Result<Vec<(&'static str, Str
 
 /// CONTRACT.agent-identity.md §1: "Senders use the canonical form of every `base64` and `base64url` value, so that each byte string has one encoding; a request body holding another form → `invalid_request`."
 pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let (token, identity) = issued(&ctx, "noncanonical-csr").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = key_with_rewritable_csr()?;
@@ -6928,6 +7112,7 @@ pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::
 ///
 /// The rewritten secrets decode to the same 32 bytes, so only a comparison of the exact text refuses them.
 pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     const URL_SAFE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
     let token = token(&ctx, 2).await?;
     let (prefix_and_bag, secret) = token.text.rsplit_once('.').context("token secret")?;
@@ -7009,6 +7194,7 @@ fn compressed_point_csr(key: &KeyPair) -> anyhow::Result<String> {
 
 /// CONTRACT.agent-identity.md §4: the server "only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256)".
 pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     let (token, identity) = issued(&ctx, "compressed-point").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let key = KeyPair::generate()?;
@@ -7028,6 +7214,7 @@ pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Res
 
 /// Shared intent, "Enrollment": "The result is trimmed, truncated to 255 Unicode scalar values without splitting one, and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`)".
 pub(crate) async fn p_friendly_name_white_space_and_truncation(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
     let cases = [
         ("\u{3000}\u{a0}name\u{2003}\u{1680}", "name".to_owned()),
         // U+200B ZERO WIDTH SPACE is not `White_Space`.
@@ -7062,6 +7249,8 @@ pub(crate) async fn p_friendly_name_white_space_and_truncation(ctx: Context) -> 
 ///
 /// A certificate is unexpired while `now <= notAfter` (CONTRACT.agent-identity.md §6), and renewal grace lasts while `now < notAfter + (notAfter − notBefore)`.
 pub(crate) async fn p_identity_statuses(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Terminology
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let management = ctx.target.management();
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 60 })).await?;
     let (_, pending_only) = issued(&ctx, "pending-only").await?;
