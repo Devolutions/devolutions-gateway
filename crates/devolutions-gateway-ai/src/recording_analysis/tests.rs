@@ -11,11 +11,25 @@ use crate::Provider;
 
 const MODEL: &str = "gpt-test";
 const REPORTED_MODEL: &str = "gpt-test-2026-09-30";
+/// Start of the summary prompt, which tells a summary request from a request for actions.
+const SUMMARY_PROMPT_START: &str = "You summarize";
 
-/// A mock OpenAI-compatible provider: `status` picks the answer of the n-th request, 0 being a valid answer.
+/// A mock OpenAI-compatible provider: `status` picks the answer of the n-th request, 0 being a valid answer, which is
+/// the action `Step n`, or `Summary n` for a summary request.
 ///
 /// Returns a client for it and the bodies of the requests it got.
 async fn spawn_provider(status: fn(usize) -> u16) -> (AiClient, Arc<Mutex<Vec<String>>>) {
+    spawn_provider_answering(status, |index| {
+        format!("{{\"line\":\"L1\",\"description\":\"Step {index}\"}}")
+    })
+    .await
+}
+
+/// Same as [`spawn_provider`], with `actions` giving the valid answer to the n-th request when it asks for actions.
+async fn spawn_provider_answering(
+    status: fn(usize) -> u16,
+    actions: fn(usize) -> String,
+) -> (AiClient, Arc<Mutex<Vec<String>>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let requests = Arc::new(Mutex::new(Vec::new()));
@@ -50,9 +64,11 @@ async fn spawn_provider(status: fn(usize) -> u16) -> (AiClient, Arc<Mutex<Vec<St
                     let mut body = vec![0; content_length];
                     stream.read_exact(&mut body).await.unwrap();
 
+                    let body = String::from_utf8(body).unwrap();
+                    let summary = body.contains(SUMMARY_PROMPT_START);
                     let index = {
                         let mut requests = requests.lock().unwrap();
-                        requests.push(String::from_utf8(body).unwrap());
+                        requests.push(body);
                         requests.len() - 1
                     };
 
@@ -65,7 +81,7 @@ async fn spawn_provider(status: fn(usize) -> u16) -> (AiClient, Arc<Mutex<Vec<St
                                     "index": 0,
                                     "message": {
                                         "role": "assistant",
-                                        "content": format!("{{\"line\":\"L1\",\"description\":\"Step {index}\"}}"),
+                                        "content": if summary { format!("Summary {index}") } else { actions(index) },
                                     },
                                     "finish_reason": "stop",
                                 }],
@@ -166,16 +182,18 @@ async fn finish(
     panic!("the events ended without a last event");
 }
 
-fn descriptions(log: &Utf8Path) -> Vec<String> {
+fn entries(log: &Utf8Path) -> Vec<serde_json::Value> {
     std::fs::read_to_string(log)
         .unwrap()
         .lines()
-        .map(|line| {
-            serde_json::from_str::<serde_json::Value>(line).unwrap()["description"]
-                .as_str()
-                .unwrap()
-                .to_owned()
-        })
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+fn descriptions(log: &Utf8Path) -> Vec<String> {
+    entries(log)
+        .iter()
+        .map(|entry| entry["description"].as_str().unwrap().to_owned())
         .collect()
 }
 
@@ -195,16 +213,34 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     assert_eq!(analysis.actions, 1);
     assert_eq!(analysis.model, REPORTED_MODEL);
     assert_eq!(
+        analysis.prompt_version,
+        format!(
+            "{}+{}",
+            crate::session_actions::PROMPT_VERSION,
+            crate::session_summary::PROMPT_VERSION
+        )
+    );
+    assert_eq!(
         analysis.usage,
         Some(Usage {
-            input_tokens: 10,
-            output_tokens: 20
-        })
+            input_tokens: 20,
+            output_tokens: 40
+        }),
+        "the summary request counts too"
     );
     assert_eq!(
         descriptions(&analysis.log_path),
         ["Session started", "Step 0", "Session ended"]
     );
+    let entries = entries(&analysis.log_path);
+    assert!(entries.iter().all(|entry| entry["source"] == "ai"), "{entries:?}");
+    assert_eq!(entries[0]["model"], REPORTED_MODEL);
+    assert_eq!(entries[0]["promptVersion"], analysis.prompt_version.as_str());
+    assert_eq!(
+        entries[0]["language"], "English",
+        "English unless the caller asks for another language"
+    );
+    assert_eq!(entries[2]["summary"], "Summary 1");
     assert!(!session.workspace().exists());
     let recording_size = std::fs::metadata(recording_dir(&session.manifest_path).join("recording-0.cast"))
         .unwrap()
@@ -251,7 +287,11 @@ async fn analysing_again_only_asks_about_the_chunks_left() {
 
     let analysis = session.analyze(&client).await.unwrap();
 
-    assert_eq!(requests.lock().unwrap().len(), 4, "only chunks 1 and 2 are sent again");
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        5,
+        "only chunks 1 and 2 are sent again, then the summary"
+    );
     assert_eq!(
         descriptions(&analysis.log_path),
         ["Session started", "Step 0", "Step 2", "Step 3", "Session ended"]
@@ -259,8 +299,8 @@ async fn analysing_again_only_asks_about_the_chunks_left() {
     assert_eq!(
         analysis.usage,
         Some(Usage {
-            input_tokens: 30,
-            output_tokens: 60
+            input_tokens: 40,
+            output_tokens: 80
         }),
         "chunk 0 counts from its checkpoint, the failed request not at all"
     );
@@ -287,7 +327,11 @@ async fn working_files_of_another_analysis_are_not_reused() {
 
     let analysis = session.analyze(&client).await.unwrap();
 
-    assert_eq!(requests.lock().unwrap().len(), 2, "the chunk is asked about again");
+    assert_eq!(
+        requests.lock().unwrap().len(),
+        3,
+        "the chunk is asked about again, then the summary"
+    );
     assert_eq!(
         descriptions(&analysis.log_path),
         ["Session started", "Step 1", "Session ended"]
@@ -371,9 +415,94 @@ async fn working_files_belong_to_their_owner() {
     analyze("task-b").await.1.unwrap();
     assert_eq!(
         requests.lock().unwrap().len(),
-        5,
-        "another owner asks about every chunk again"
+        6,
+        "another owner asks about every chunk again, then the summary"
     );
+}
+
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
+#[tokio::test]
+async fn the_language_reaches_every_request_and_keeps_its_own_working_files() {
+    // About 1 MB of transcript: three chunks.
+    let session = Session::new(10_000);
+    let (client, requests) = spawn_provider(|index| if index == 1 { 503 } else { 0 }).await;
+    let analyze = |language: &'static str| {
+        finish(
+            client
+                .analyze_recording(&session.manifest, &session.manifest_path)
+                .language(Language::new(language).unwrap())
+                .start(),
+        )
+    };
+
+    analyze("fr-CA").await.1.unwrap_err();
+    assert!(session.workspace().join("chunk-0000.json").exists());
+
+    let analysis = analyze("de-DE").await.1.unwrap();
+
+    let requests = requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        6,
+        "another language asks about every chunk again, then the summary"
+    );
+    assert!(requests[..2].iter().all(|request| request.contains("`fr-CA`")));
+    assert!(requests[2..].iter().all(|request| request.contains("`de-DE`")));
+    assert!(requests[5].contains(SUMMARY_PROMPT_START));
+    let entries = entries(&analysis.log_path);
+    assert_eq!(entries[0]["language"], "de-DE");
+    assert_eq!(entries[4]["summary"], "Summary 5");
+}
+
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
+#[tokio::test]
+async fn a_session_without_actions_has_no_summary() {
+    let session = Session::new(10);
+    let (client, requests) = spawn_provider_answering(|_| 0, |_| "{\"noActions\":true}".to_owned()).await;
+
+    let analysis = session.analyze(&client).await.unwrap();
+
+    assert_eq!(requests.lock().unwrap().len(), 1, "the summary is not asked for");
+    assert_eq!(analysis.actions, 0);
+    assert_eq!(analysis.model, REPORTED_MODEL);
+    assert_eq!(
+        analysis.prompt_version,
+        crate::session_actions::PROMPT_VERSION,
+        "no summary prompt was used"
+    );
+    let entries = entries(&analysis.log_path);
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[1]["event"], "session.end");
+    assert_eq!(entries[1].get("summary"), None);
+}
+
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
+#[tokio::test]
+async fn a_summary_worth_asking_again_fails_the_analysis() {
+    let session = Session::new(10);
+    // The chunk is request 0, the summary request 1.
+    let (client, _requests) = spawn_provider(|index| if index == 1 { 503 } else { 0 }).await;
+
+    let error = session.analyze(&client).await.unwrap_err();
+
+    assert!(matches!(error, RecordingAnalysisError::Ai(_)), "{error:?}");
+    assert!(error.is_transient());
+    assert!(session.workspace().join("chunk-0000.json").exists());
+    assert!(!recording_dir(&session.manifest_path).join(LOG_FILE).exists());
+}
+
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
+#[tokio::test]
+async fn a_summary_that_cannot_succeed_fails_the_analysis() {
+    let session = Session::new(10);
+    // The chunk is request 0, the summary request 1, which the provider refuses for good.
+    let (client, _requests) = spawn_provider(|index| if index == 1 { 400 } else { 0 }).await;
+
+    let error = session.analyze(&client).await.unwrap_err();
+
+    assert!(matches!(error, RecordingAnalysisError::Ai(_)), "{error:?}");
+    assert!(!error.is_transient());
+    assert!(!recording_dir(&session.manifest_path).join(LOG_FILE).exists());
 }
 
 #[tokio::test]
@@ -484,6 +613,7 @@ fn recordings_listed_out_of_order_are_read_in_time_order() {
         owner: None,
         prompt_version: "test".to_owned(),
         model: MODEL.to_owned(),
+        language: "English".to_owned(),
         chunk_len: MAX_CHUNK_LEN,
     };
 

@@ -27,6 +27,7 @@ enum Event<'a> {
         description: &'static str,
         model: &'a str,
         prompt_version: &'a str,
+        language: &'a str,
     },
     #[serde(rename = "session.action")]
     Action {
@@ -37,7 +38,11 @@ enum Event<'a> {
         parameters: Option<&'a BTreeMap<String, String>>,
     },
     #[serde(rename = "session.end")]
-    End { description: &'static str },
+    End {
+        description: &'static str,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        summary: Option<&'a str>,
+    },
 }
 
 #[derive(Serialize)]
@@ -46,7 +51,16 @@ enum Source {
     Ai,
 }
 
-/// Writes the log of a session entry by entry, so the actions never have to be all in memory.
+/// What `session.start` says about the session and the analysis.
+pub(super) struct LogHeader<'a> {
+    /// Unix seconds.
+    pub(super) start_time: i64,
+    pub(super) model: &'a str,
+    pub(super) prompt_version: &'a str,
+    pub(super) language: &'a str,
+}
+
+/// Writes the log of a session entry by entry.
 pub(super) struct SlogWriter<W> {
     out: W,
     start_time: i64,
@@ -54,22 +68,22 @@ pub(super) struct SlogWriter<W> {
 }
 
 impl<W: std::io::Write> SlogWriter<W> {
-    /// Writes `session.start` for a session that started at `start_time` (unix seconds), naming the model and the
-    /// versions of the prompts that found the actions.
-    pub(super) fn start(out: W, start_time: i64, model: &str, prompt_version: &str) -> anyhow::Result<Self> {
+    /// Writes `session.start`, naming the model, the versions of the prompts and the language of the analysis.
+    pub(super) fn start(out: W, header: LogHeader<'_>) -> anyhow::Result<Self> {
         let mut writer = Self {
             out,
-            start_time,
+            start_time: header.start_time,
             seq: 0,
         };
 
-        let timestamp = timestamp(start_time, Duration::ZERO)?;
+        let timestamp = timestamp(header.start_time, Duration::ZERO)?;
         writer.write(
             timestamp,
             Event::Start {
                 description: "Session started",
-                model,
-                prompt_version,
+                model: header.model,
+                prompt_version: header.prompt_version,
+                language: header.language,
             },
         )?;
 
@@ -89,14 +103,15 @@ impl<W: std::io::Write> SlogWriter<W> {
         )
     }
 
-    /// Writes `session.end` for a session that lasted `duration` seconds.
-    pub(super) fn finish(mut self, duration: i64) -> anyhow::Result<W> {
+    /// Writes `session.end` for a session that lasted `duration` seconds, with the summary of the session if any.
+    pub(super) fn finish(mut self, duration: i64, summary: Option<&str>) -> anyhow::Result<W> {
         let end_offset = Duration::from_secs(u64::try_from(duration).unwrap_or(0));
         let timestamp = timestamp(self.start_time, end_offset)?;
         self.write(
             timestamp,
             Event::End {
                 description: "Session ended",
+                summary,
             },
         )?;
         self.out.flush()?;
@@ -139,12 +154,18 @@ fn timestamp(start_time: i64, offset: Duration) -> anyhow::Result<String> {
 mod tests {
     use super::*;
 
-    fn write(start_time: i64, duration: i64, actions: &[Action]) -> String {
-        let mut writer = SlogWriter::start(Vec::new(), start_time, "gpt-test", "session-actions-3").expect("started");
+    fn write(start_time: i64, duration: i64, actions: &[Action], summary: Option<&str>) -> String {
+        let header = LogHeader {
+            start_time,
+            model: "gpt-test",
+            prompt_version: "session-actions-0123456789abcdef",
+            language: "fr-CA",
+        };
+        let mut writer = SlogWriter::start(Vec::new(), header).expect("started");
         for action in actions {
             writer.action(action).expect("written");
         }
-        String::from_utf8(writer.finish(duration).expect("finished")).expect("UTF-8")
+        String::from_utf8(writer.finish(duration, summary).expect("finished")).expect("UTF-8")
     }
 
     fn action(offset_ms: u64, description: &str, object: Option<&str>, parameters: &[(&str, &str)]) -> Action {
@@ -162,19 +183,19 @@ mod tests {
     // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
     // oracle: reference webapp/packages/session-recording-log/src/fixtures/sample-complete.slog
     #[test]
-    fn writes_the_shipped_schema_with_the_source_on_every_line() {
+    fn writes_the_shipped_schema_with_the_analysis_and_the_summary() {
         let actions = [
             action(1500, "Listed files", Some("/var/log"), &[("Command", "ls /var/log")]),
             action(62_250, "Closed the shell", None, &[]),
         ];
 
-        let slog = write(1_787_255_035, 90, &actions);
+        let slog = write(1_787_255_035, 90, &actions, Some("The user read the logs, then left."));
 
         let expected = [
-            r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"session-actions-3"}"#,
+            r#"{"timestamp":"2026-08-20T19:43:55.000Z","seq":0,"event":"session.start","description":"Session started","source":"ai","model":"gpt-test","promptVersion":"session-actions-0123456789abcdef","language":"fr-CA"}"#,
             r#"{"timestamp":"2026-08-20T19:43:56.500Z","seq":1,"event":"session.action","description":"Listed files","object":"/var/log","parameters":{"Command":"ls /var/log"},"source":"ai"}"#,
             r#"{"timestamp":"2026-08-20T19:44:57.250Z","seq":2,"event":"session.action","description":"Closed the shell","source":"ai"}"#,
-            r#"{"timestamp":"2026-08-20T19:45:25.000Z","seq":3,"event":"session.end","description":"Session ended","source":"ai"}"#,
+            r#"{"timestamp":"2026-08-20T19:45:25.000Z","seq":3,"event":"session.end","description":"Session ended","summary":"The user read the logs, then left.","source":"ai"}"#,
         ];
         let lines = |text: &str| -> Vec<serde_json::Value> {
             text.lines()
@@ -186,7 +207,7 @@ mod tests {
 
     #[test]
     fn a_session_without_actions_still_starts_and_ends() {
-        let slog = write(0, 5, &[]);
+        let slog = write(0, 5, &[], None);
 
         let events: Vec<serde_json::Value> = slog
             .lines()
@@ -197,6 +218,7 @@ mod tests {
         assert_eq!(events[1]["event"], "session.end");
         assert_eq!(events[1]["seq"], 1);
         assert_eq!(events[1]["timestamp"], "1970-01-01T00:00:05.000Z");
+        assert_eq!(events[1].get("summary"), None);
         assert!(events.iter().all(|event| event["source"] == "ai"));
     }
 }
