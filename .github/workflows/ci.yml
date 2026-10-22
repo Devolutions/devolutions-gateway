@@ -289,6 +289,14 @@ jobs:
         env:
           AWS_LC_SYS_NO_ASM: true
 
+      - name: Root-only tests
+        if: ${{ matrix.os == 'linux' }}
+        # Cargo builds as the runner user and runs only the test binary as root, so no build output is owned by root.
+        # UNTESTED: the test binary runs as root.
+        # A root-only test run without root skips and passes, so after changing this step, check that its log has no SKIP line.
+        run: |
+          cargo test --locked --target ${{ matrix.target }} --config "target.${{ matrix.target }}.runner='sudo'" -p device-key --lib root_only_
+
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
         shell: pwsh
