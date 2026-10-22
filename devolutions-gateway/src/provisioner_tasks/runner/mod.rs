@@ -546,7 +546,8 @@ impl ProvisionerTaskRunner {
                     self.end(task.as_ref(), task_id, job_token).await?;
                 }
                 // UNTESTED: a success that cannot be recorded fails the Task, which drops what the attempt made,
-                // because a retry would do the work again, such as paying for a second analysis.
+                // because a retry would do the work again, such as paying for a second analysis; no error may leave
+                // this branch before the failure is recorded.
                 Err(error) => {
                     error!(
                         task.id = %task_id,
@@ -554,11 +555,14 @@ impl ProvisionerTaskRunner {
                         "Failed to record the Task success; the Task fails instead"
                     );
 
-                    if let Err(error) = self
-                        .fail(task.as_ref(), task_id, job_token, &Permanent::Internal, &last)
-                        .await
-                    {
-                        error!(task.id = %task_id, error = format!("{error:#}"), "Failed to fail or end the Task");
+                    let payload = task.failed_payload(&Permanent::Internal, &last);
+
+                    match self.inner.store.fail(task_id, payload, OffsetDateTime::now_utc()).await {
+                        // The job retries only when the end could not be queued again, which then only ends the Task.
+                        Ok(_) => self.end(task.as_ref(), task_id, job_token).await?,
+                        Err(error) => {
+                            error!(task.id = %task_id, error = format!("{error:#}"), "Failed to fail the Task; it fails at its deadline");
+                        }
                     }
                 }
             },
