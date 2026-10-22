@@ -889,7 +889,8 @@ mod tests {
         plant(&name, BCRYPT_ECDSA_P384_ALGORITHM, 0, &trusted_sddl()?)?;
         let provider = Provider::open()?;
         let planted = provider.key(&name)?.context("planted machine key is missing")?;
-        // The key keeps every other rule, so only its algorithm can refuse it.
+        // The key keeps every other rule, so only its algorithm can refuse it, whether the algorithm check or reading
+        // its P-256 public key does.
         ensure_non_exportable(&planted)?;
         ensure_trusted_descriptor(&planted)?;
 
