@@ -216,14 +216,15 @@ fn required_tunnel_path(path: Option<Utf8PathBuf>) -> anyhow::Result<Utf8PathBuf
 ///
 /// Constructed from `dto::PsuConf` via `TryFrom<dto::PsuConf> for Option<PsuConf>`.
 /// Illegal states are made unrepresentable: a disabled PSU agent is `None`, and an
-/// enabled one is `Some(PsuConf)` with all required fields (server URL and application
-/// token) guaranteed present, and the server URL uses the `http` or `https` scheme.
+/// enabled one has an HTTP(S) server URL and exactly one configured authentication
+/// mode: a legacy application token or pinned device enrollment.
 #[derive(Clone)]
 pub struct PsuConf {
     pub server_url: Url,
     pub agent_id: Option<String>,
     pub display_name: Option<String>,
     pub app_token: String,
+    pub device_enrollment: Option<dto::PsuDeviceEnrollmentConf>,
     pub powershell: dto::PsuPowerShellConf,
 }
 
@@ -234,6 +235,7 @@ impl std::fmt::Debug for PsuConf {
             .field("agent_id", &self.agent_id)
             .field("display_name", &self.display_name)
             .field("app_token", &REDACTED)
+            .field("device_enrollment", &self.device_enrollment)
             .field("powershell", &self.powershell)
             .finish()
     }
@@ -270,16 +272,56 @@ impl TryFrom<dto::PsuConf> for Option<PsuConf> {
             "unsupported PSU agent ServerUrl scheme `{}`: expected http or https",
             server_url.scheme()
         );
-        let app_token = conf
-            .app_token
-            .filter(|token| !token.trim().is_empty())
-            .context("PSU agent enabled but AppToken is not configured")?;
+        let app_token = if let Some(device) = &conf.device_enrollment {
+            anyhow::ensure!(
+                conf.app_token.is_none(),
+                "PsuAgent.AppToken must be omitted in device mode"
+            );
+            anyhow::ensure!(
+                device.root_thumbprint.len() == 64
+                    && device.root_thumbprint.bytes().all(|byte| byte.is_ascii_hexdigit()),
+                "PsuAgent.DeviceEnrollment.RootThumbprint must be a SHA-256 hexadecimal fingerprint"
+            );
+            anyhow::ensure!(
+                server_url.username().is_empty()
+                    && server_url.password().is_none()
+                    && server_url.query().is_none()
+                    && server_url.fragment().is_none(),
+                "PSU device ServerUrl must not contain credentials, query or fragment"
+            );
+            if let Some(token) = &device.enrollment_token {
+                anyhow::ensure!(
+                    !token.trim().is_empty() && token.len() <= 16 * 1024,
+                    "PSU enrollment token must contain between 1 and 16384 bytes"
+                );
+            }
+            if let Some(hardware_id) = &device.hardware_id {
+                anyhow::ensure!(
+                    !hardware_id.trim().is_empty()
+                        && hardware_id.len() <= 256
+                        && !hardware_id.chars().any(char::is_control),
+                    "invalid PSU device HardwareId"
+                );
+            }
+            if let Some(directory) = &device.state_directory {
+                anyhow::ensure!(
+                    !directory.as_str().trim().is_empty(),
+                    "PSU device StateDirectory must not be empty"
+                );
+            }
+            String::new()
+        } else {
+            conf.app_token
+                .filter(|token| !token.trim().is_empty())
+                .context("PSU agent enabled but AppToken is not configured")?
+        };
 
         Ok(Some(PsuConf {
             server_url,
             agent_id: conf.agent_id,
             display_name: conf.display_name,
             app_token,
+            device_enrollment: conf.device_enrollment,
             powershell: conf.powershell,
         }))
     }
@@ -744,9 +786,12 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub display_name: Option<String>,
 
-        /// PSU application token used to authenticate the agent. Required when enabled.
+        /// PSU application token used in legacy mode. Omit in device mode.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         pub app_token: Option<String>,
+
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub device_enrollment: Option<PsuDeviceEnrollmentConf>,
 
         /// PowerShell child process configuration.
         #[serde(
@@ -765,7 +810,31 @@ pub mod dto {
                 .field("agent_id", &self.agent_id)
                 .field("display_name", &self.display_name)
                 .field("app_token", &self.app_token.as_ref().map(|_| REDACTED))
+                .field("device_enrollment", &self.device_enrollment)
                 .field("powershell", &self.powershell)
+                .finish()
+        }
+    }
+
+    #[derive(PartialEq, Eq, Clone, Serialize, Deserialize)]
+    #[serde(rename_all = "PascalCase", deny_unknown_fields)]
+    pub struct PsuDeviceEnrollmentConf {
+        pub root_thumbprint: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub enrollment_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub state_directory: Option<Utf8PathBuf>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pub hardware_id: Option<String>,
+    }
+
+    impl std::fmt::Debug for PsuDeviceEnrollmentConf {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("PsuDeviceEnrollmentConf")
+                .field("root_thumbprint", &self.root_thumbprint)
+                .field("enrollment_token", &self.enrollment_token.as_ref().map(|_| REDACTED))
+                .field("state_directory", &self.state_directory)
+                .field("hardware_id", &self.hardware_id)
                 .finish()
         }
     }

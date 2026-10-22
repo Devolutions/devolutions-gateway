@@ -4,6 +4,8 @@ mod process_tree;
 
 mod powershell;
 
+pub mod device;
+
 use std::collections::HashMap;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -64,9 +66,15 @@ impl Task for PsuAgentTask {
             .psu_agent
             .clone()
             .context("PSU agent task started but the PSU agent is disabled")?;
-        let agent = PsuAgent::new(conf).context("failed to initialize PSU agent")?;
-        agent.run(shutdown_signal).await
+        run_psu_agent(conf, shutdown_signal).await
     }
+}
+
+pub async fn run_psu_agent(conf: PsuConf, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+    PsuAgent::new(conf)
+        .context("failed to initialize PSU agent")?
+        .run(shutdown_signal)
+        .await
 }
 
 /// Timing parameters for the PSU gRPC connection and its reconnection policy.
@@ -111,6 +119,7 @@ struct PsuConnection {
     _client: AgentControlClient<Channel>,
     outgoing_tx: mpsc::Sender<AgentMessage>,
     response_stream: Streaming<protocol::ServerMessage>,
+    agent_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -149,10 +158,17 @@ impl PsuAgent {
     async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
         const RETRY_MULTIPLIER: f64 = 2.0;
 
+        let mut identity = self
+            .conf
+            .device_enrollment
+            .as_ref()
+            .map(|_| device::DeviceIdentity::open(&self.conf))
+            .transpose()?;
+
         if is_plaintext_to_remote_host(&self.conf.server_url) {
             warn!(
                 url = %self.display_url,
-                "PSU gRPC agent uses plaintext HTTP to a non-loopback host; the AppToken and job traffic are not encrypted"
+                "PSU gRPC agent uses plaintext HTTP to a non-loopback host; authentication and job traffic are not encrypted"
             );
         }
 
@@ -168,16 +184,36 @@ impl PsuAgent {
             // so it must not delay the service shutdown.
             let connection = tokio::select! {
                 _ = shutdown_signal.wait() => return Ok(()),
-                connection = self.connect() => connection,
+                connection = self.connect_authenticated(identity.as_mut()) => connection,
             };
 
             match connection {
                 Ok(connection) => {
                     let connected_at = Instant::now();
 
-                    match self.serve(connection, &mut shutdown_signal).await {
+                    let renewal_delay = identity
+                        .as_ref()
+                        .map(device::DeviceIdentity::renewal_delay)
+                        .transpose()?;
+                    let serve = self.serve(connection, &mut shutdown_signal);
+                    tokio::pin!(serve);
+                    let served = match renewal_delay {
+                        Some(delay) => tokio::select! {
+                            result = &mut serve => result,
+                            _ = tokio::time::sleep(delay) => {
+                                info!("Reconnecting PSU device to renew its certificate");
+                                Err(anyhow::anyhow!("PSU certificate renewal is due"))
+                            }
+                        },
+                        None => serve.await,
+                    };
+                    match served {
                         Ok(()) => return Ok(()),
                         Err(error) => {
+                            if identity.is_some() && device::terminal_authentication(&error) {
+                                return Err(error)
+                                    .context("PSU device authorization was withdrawn; operator action is required");
+                            }
                             warn!(url = %self.display_url, error = format!("{error:#}"), "PSU gRPC agent connection lost")
                         }
                     }
@@ -187,6 +223,9 @@ impl PsuAgent {
                     }
                 }
                 Err(error) => {
+                    if identity.is_some() && !device::retryable(&error) {
+                        return Err(error).context("PSU device authentication stopped; operator action is required");
+                    }
                     warn!(url = %self.display_url, error = format!("{error:#}"), "PSU gRPC agent connection failed")
                 }
             }
@@ -203,9 +242,21 @@ impl PsuAgent {
         }
     }
 
+    #[cfg(test)]
     async fn connect(&self) -> anyhow::Result<PsuConnection> {
+        self.connect_authenticated(None).await
+    }
+
+    async fn connect_authenticated(
+        &self,
+        identity: Option<&mut device::DeviceIdentity>,
+    ) -> anyhow::Result<PsuConnection> {
         // Resolved on every attempt so a secret vault that is not ready yet, or a rotated secret, is picked up.
-        let app_token = self.resolve_app_token().await?;
+        let app_token = if identity.is_none() {
+            Some(self.resolve_app_token().await?)
+        } else {
+            None
+        };
 
         let endpoint = psu_endpoint(self.conf.server_url.as_str(), &self.settings)?;
         // `Endpoint::connect_timeout` only bounds the TCP connection; this also bounds the TLS and HTTP/2 handshakes.
@@ -213,28 +264,45 @@ impl PsuAgent {
             .await
             .with_context(|| format!("timed out connecting PSU gRPC endpoint at {}", self.display_url))?
             .with_context(|| format!("failed to connect PSU gRPC endpoint at {}", self.display_url))?;
+        let (authorization, agent_id) = if let Some(identity) = identity {
+            identity
+                .prepare(channel.clone(), &self.conf, &self.machine_name)
+                .await?;
+            (identity.authorization()?, identity.device_id()?)
+        } else {
+            (
+                format!("Bearer {}", app_token.context("missing PSU application token")?),
+                self.agent_id.clone(),
+            )
+        };
         let mut client = AgentControlClient::new(channel);
 
         let (outgoing_tx, outgoing_rx) = mpsc::channel(256);
         let powershell_version = get_powershell_version(&self.powershell_executable).await;
+        let mut registration = self.create_registration_message(powershell_version);
+        registration.agent_id.clone_from(&agent_id);
+        if let Some(AgentPayload::RegisterAgent(register)) = &mut registration.payload {
+            register.agent_id.clone_from(&agent_id);
+        }
         outgoing_tx
-            .send(self.create_registration_message(powershell_version))
+            .send(registration)
             .await
             .context("failed to queue PSU gRPC agent registration")?;
 
-        let request = connect_request(ReceiverStream::new(outgoing_rx), Some(&app_token))?;
+        let request = connect_request(ReceiverStream::new(outgoing_rx), Some(&authorization))?;
         let response_stream = tokio::time::timeout(self.settings.stream_start_timeout, client.connect(request))
             .await
             .context("timed out starting PSU gRPC agent stream")?
             .context("failed to start PSU gRPC agent stream")?
             .into_inner();
 
-        info!(agent_id = %self.agent_id, url = %self.display_url, "Connected PSU gRPC agent");
+        info!(%agent_id, url = %self.display_url, "Connected PSU gRPC agent");
 
         Ok(PsuConnection {
             _client: client,
             outgoing_tx,
             response_stream,
+            agent_id,
         })
     }
 
@@ -243,6 +311,7 @@ impl PsuAgent {
             &mut connection.response_stream,
             &connection.outgoing_tx,
             shutdown_signal,
+            &connection.agent_id,
         )
         .await
     }
@@ -252,6 +321,7 @@ impl PsuAgent {
         messages: &mut S,
         outgoing_tx: &mpsc::Sender<AgentMessage>,
         shutdown_signal: &mut ShutdownSignal,
+        agent_id: &str,
     ) -> anyhow::Result<()>
     where
         S: Stream<Item = Result<protocol::ServerMessage, tonic::Status>> + Unpin,
@@ -285,6 +355,7 @@ impl PsuAgent {
                             &registry,
                             &mut process_tasks,
                             &mut connection_id,
+                            agent_id,
                         ) => Some(result),
                     };
 
@@ -314,6 +385,7 @@ impl PsuAgent {
         registry: &ProcessRegistry,
         process_tasks: &mut JoinSet<anyhow::Result<()>>,
         connection_id: &mut String,
+        agent_id: &str,
     ) -> anyhow::Result<()> {
         match message.payload {
             Some(ServerPayload::RegisterAccepted(accepted)) => {
@@ -321,7 +393,7 @@ impl PsuAgent {
                 info!(connection_id = %accepted.connection_id, "PSU gRPC agent registration accepted");
             }
             Some(ServerPayload::StartProcess(start_process)) => {
-                let agent_id = self.agent_id.clone();
+                let agent_id = agent_id.to_owned();
                 let connection_id = connection_id.clone();
                 let outgoing_tx = outgoing_tx.clone();
 
@@ -486,14 +558,13 @@ pub(crate) fn diagnostic(level: &str, message: String) -> AgentDiagnostic {
     }
 }
 
-fn connect_request<T>(stream: T, app_token: Option<&str>) -> anyhow::Result<Request<T>> {
+fn connect_request<T>(stream: T, authorization: Option<&str>) -> anyhow::Result<Request<T>> {
     let mut request = Request::new(stream);
 
-    if let Some(token) = app_token {
-        let authorization = format!("Bearer {token}");
+    if let Some(authorization) = authorization {
         request.metadata_mut().insert(
             "authorization",
-            MetadataValue::try_from(authorization).context("invalid PSU gRPC AppToken metadata")?,
+            MetadataValue::try_from(authorization).context("invalid PSU gRPC authentication metadata")?,
         );
     }
 
@@ -622,7 +693,7 @@ mod tests {
 
     #[test]
     fn connect_request_adds_authorization_with_app_token() {
-        let request = connect_request((), Some("token")).expect("create request");
+        let request = connect_request((), Some("Bearer token")).expect("create request");
 
         assert_eq!(
             request
@@ -650,6 +721,7 @@ mod tests {
             agent_id: Some("agent-01".to_owned()),
             display_name: None,
             app_token: app_token.to_owned(),
+            device_enrollment: None,
             powershell: dto::PsuPowerShellConf {
                 executable_path: Some("missing-pwsh".into()),
                 ..dto::PsuPowerShellConf::default()
@@ -882,7 +954,12 @@ mod tests {
 
         let serve = tokio::spawn(async move {
             agent
-                .serve_messages(&mut ReceiverStream::new(server_rx), &outgoing_tx, &mut shutdown_signal)
+                .serve_messages(
+                    &mut ReceiverStream::new(server_rx),
+                    &outgoing_tx,
+                    &mut shutdown_signal,
+                    &agent.agent_id,
+                )
                 .await
         });
 
