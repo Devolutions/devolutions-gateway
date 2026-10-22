@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::api::preflight::PreflightAlertStatus;
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
 use crate::provisioner_tasks::ai::AiProvider;
+use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -264,7 +265,7 @@ enum AiAnalysisErrorKind {
     Internal,
     /// Every attempt failed with a failure worth another attempt.
     AttemptsExhausted,
-    /// The Task did not start within 2 hours, or went 30 minutes without progress.
+    /// The Task did not start in time, or went too long without progress.
     DeadlinePassed,
     /// The job of the Task could not be queued.
     NotQueued,
@@ -304,6 +305,36 @@ enum AiAnalysisRecoverableErrorKind {
     /// Gateway could not read its own job queue.
     Storage,
 }
+
+// The error kinds are written out above for their descriptions, which utoipa drops from the variants without fields, so
+// these matches stop the build until a new kind is written out too.
+const _: fn(&Permanent) -> AiAnalysisErrorKind = |error| match error {
+    Permanent::AiRejected { .. } => AiAnalysisErrorKind::AiRejected,
+    Permanent::AiBadAnswer { .. } => AiAnalysisErrorKind::AiBadAnswer,
+    Permanent::KeyLost => AiAnalysisErrorKind::KeyLost,
+    Permanent::NoRecording => AiAnalysisErrorKind::NoRecording,
+    Permanent::MixedRecording => AiAnalysisErrorKind::MixedRecording,
+    Permanent::UnreadableRecording { .. } => AiAnalysisErrorKind::UnreadableRecording,
+    Permanent::InvalidTask => AiAnalysisErrorKind::InvalidTask,
+    Permanent::Panicked => AiAnalysisErrorKind::Panicked,
+    Permanent::Internal => AiAnalysisErrorKind::Internal,
+    Permanent::AttemptsExhausted { .. } => AiAnalysisErrorKind::AttemptsExhausted,
+    Permanent::DeadlinePassed => AiAnalysisErrorKind::DeadlinePassed,
+    Permanent::NotQueued => AiAnalysisErrorKind::NotQueued,
+};
+
+const _: fn(&Recoverable) -> AiAnalysisRecoverableErrorKind = |error| match error {
+    Recoverable::AiUnreachable => AiAnalysisRecoverableErrorKind::AiUnreachable,
+    Recoverable::AiBusy { .. } => AiAnalysisRecoverableErrorKind::AiBusy,
+    Recoverable::Storage => AiAnalysisRecoverableErrorKind::Storage,
+};
+
+const _: fn(&BadAnswer) -> AiAnalysisBadAnswer = |why| match why {
+    BadAnswer::Invalid => AiAnalysisBadAnswer::Invalid,
+    BadAnswer::Truncated => AiAnalysisBadAnswer::Truncated,
+    BadAnswer::Refused => AiAnalysisBadAnswer::Refused,
+    BadAnswer::NotExpectedJson => AiAnalysisBadAnswer::NotExpectedJson,
+};
 
 #[allow(unused)]
 #[derive(Serialize, utoipa::ToSchema)]
