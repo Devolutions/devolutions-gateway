@@ -4,7 +4,6 @@ use std::io;
 use axum::Json;
 use axum::extract::State;
 use camino::{Utf8Path, Utf8PathBuf};
-use serde_json::Value;
 use time::OffsetDateTime;
 use tokio::fs::File;
 use tokio::io::{AsyncBufReadExt as _, BufReader};
@@ -227,11 +226,31 @@ pub(crate) async fn search_recordings(
 }
 
 /// The query, lowercased the same way as the text it is compared with.
-struct SearchText(String);
+///
+/// It also keeps the buffers that matching a line fills, so that once they have grown, a line is matched without
+/// allocating.
+struct SearchText {
+    query: String,
+    /// The arrays and objects open where the scan of a JSON line has reached.
+    open: Vec<Container>,
+    /// The text being compared with the query, lowercased.
+    lowercase: String,
+}
 
 impl SearchText {
     fn new(query: &str) -> Option<Self> {
-        (!query.is_empty()).then(|| Self(lowercase_for_matching(query)))
+        if query.is_empty() {
+            return None;
+        }
+
+        let mut lowercase_query = String::new();
+        push_lowercase_for_matching(query, &mut lowercase_query);
+
+        Some(Self {
+            query: lowercase_query,
+            open: Vec::new(),
+            lowercase: String::new(),
+        })
     }
 
     /// Whether `line` matches the search text.
@@ -240,37 +259,257 @@ impl SearchText {
     /// `DOMAIN\user` matches the `"DOMAIN\\user"` a JSON writer stores.
     /// Any other line is compared as raw text, so that a line of plain text that happens to parse as JSON, such as
     /// `2026`, still matches.
-    fn is_in(&self, line: &[u8]) -> bool {
-        match serde_json::from_slice(line) {
-            Ok(object @ Value::Object(_)) => self.is_in_strings_of(&object),
-            _ => self.is_in_text(&String::from_utf8_lossy(line)),
+    fn is_in(&mut self, line: &[u8]) -> bool {
+        match self.scan_object(line) {
+            Some(found) => found,
+            None => self.is_in_text(&String::from_utf8_lossy(line)),
         }
     }
 
-    fn is_in_strings_of(&self, value: &Value) -> bool {
-        match value {
-            Value::String(text) => self.is_in_text(text),
-            Value::Array(values) => values.iter().any(|value| self.is_in_strings_of(value)),
-            Value::Object(fields) => fields.values().any(|value| self.is_in_strings_of(value)),
-            Value::Null | Value::Bool(_) | Value::Number(_) => false,
+    /// Reads `line` as one JSON object and tells whether one of its string values holds the query, or returns `None`
+    /// when the line is anything else.
+    ///
+    /// The open arrays and objects are kept in a list rather than followed by recursion, so that an object nested
+    /// however deep is still matched by its values.
+    fn scan_object(&mut self, line: &[u8]) -> Option<bool> {
+        let mut json = JsonCursor { bytes: line, at: 0 };
+        let mut found = false;
+        self.open.clear();
+
+        json.skip_whitespace();
+        if json.rest().first() != Some(&b'{') {
+            return None;
+        }
+
+        loop {
+            json.skip_whitespace();
+            match json.take_byte()? {
+                b'{' => {
+                    json.skip_whitespace();
+                    if !json.eat(b'}') {
+                        self.open.push(Container::Object);
+                        json.field_name()?;
+                        continue;
+                    }
+                }
+                b'[' => {
+                    json.skip_whitespace();
+                    if !json.eat(b']') {
+                        self.open.push(Container::Array);
+                        continue;
+                    }
+                }
+                b'"' if found => json.string(None)?,
+                b'"' => {
+                    self.lowercase.clear();
+                    json.string(Some(&mut self.lowercase))?;
+                    found = self.lowercase.contains(&self.query);
+                }
+                b't' => json.rest_of_word(b"true")?,
+                b'f' => json.rest_of_word(b"false")?,
+                b'n' => json.rest_of_word(b"null")?,
+                first @ (b'-' | b'0'..=b'9') => json.number(first)?,
+                _ => return None,
+            }
+
+            loop {
+                json.skip_whitespace();
+                let Some(&container) = self.open.last() else {
+                    return json.rest().is_empty().then_some(found);
+                };
+
+                match (json.take_byte()?, container) {
+                    (b',', Container::Object) => {
+                        json.field_name()?;
+                        break;
+                    }
+                    (b',', Container::Array) => break,
+                    (b'}', Container::Object) | (b']', Container::Array) => {
+                        self.open.pop();
+                    }
+                    _ => return None,
+                }
+            }
         }
     }
 
-    fn is_in_text(&self, text: &str) -> bool {
-        lowercase_for_matching(text).contains(&self.0)
+    fn is_in_text(&mut self, text: &str) -> bool {
+        self.lowercase.clear();
+        push_lowercase_for_matching(text, &mut self.lowercase);
+        self.lowercase.contains(&self.query)
     }
 }
 
-/// Lowercases `text`, with every sigma in its middle form.
+/// Appends `text` lowercased to `lowercase`, with every sigma in its middle form.
 ///
-/// `str::to_lowercase` turns a capital sigma that ends a word into a final sigma,
-/// so a query ending in "Σ" would not match the same letters inside a longer word.
-fn lowercase_for_matching(text: &str) -> String {
-    let lowercase = text.to_lowercase();
-    if lowercase.contains('ς') {
-        lowercase.replace('ς', "σ")
-    } else {
-        lowercase
+/// Greek ends a word with "ς" rather than "σ", so without this, a query that stops at a sigma would not match the same
+/// letters inside a longer word.
+fn push_lowercase_for_matching(text: &str, lowercase: &mut String) {
+    for character in text.chars().flat_map(char::to_lowercase) {
+        lowercase.push(if character == 'ς' { 'σ' } else { character });
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Container {
+    Object,
+    Array,
+}
+
+/// A position in a line read as JSON.
+struct JsonCursor<'a> {
+    bytes: &'a [u8],
+    at: usize,
+}
+
+impl<'a> JsonCursor<'a> {
+    fn rest(&self) -> &'a [u8] {
+        &self.bytes[self.at..]
+    }
+
+    fn take_byte(&mut self) -> Option<u8> {
+        let byte = *self.rest().first()?;
+        self.at += 1;
+        Some(byte)
+    }
+
+    fn eat(&mut self, byte: u8) -> bool {
+        let is_next = self.rest().first() == Some(&byte);
+        if is_next {
+            self.at += 1;
+        }
+        is_next
+    }
+
+    fn skip_whitespace(&mut self) {
+        let whitespace = self
+            .rest()
+            .iter()
+            .take_while(|&&byte| matches!(byte, b' ' | b'\t' | b'\n' | b'\r'))
+            .count();
+        self.at += whitespace;
+    }
+
+    /// Skips digits, and tells whether there was any.
+    fn digits(&mut self) -> bool {
+        let digits = self.rest().iter().take_while(|byte| byte.is_ascii_digit()).count();
+        self.at += digits;
+        0 < digits
+    }
+
+    /// Reads the rest of `word`, whose first letter was just read.
+    fn rest_of_word(&mut self, word: &[u8]) -> Option<()> {
+        let letters = &word[1..];
+        if !self.rest().starts_with(letters) {
+            return None;
+        }
+        self.at += letters.len();
+        Some(())
+    }
+
+    /// Reads the rest of a number whose first character, `first`, was just read.
+    fn number(&mut self, first: u8) -> Option<()> {
+        let first_digit = if first == b'-' { self.take_byte()? } else { first };
+        match first_digit {
+            b'0' => {}
+            b'1'..=b'9' => {
+                self.digits();
+            }
+            _ => return None,
+        }
+
+        if self.eat(b'.') && !self.digits() {
+            return None;
+        }
+
+        if self.eat(b'e') || self.eat(b'E') {
+            if !self.eat(b'+') {
+                self.eat(b'-');
+            }
+            if !self.digits() {
+                return None;
+            }
+        }
+
+        Some(())
+    }
+
+    /// Reads a field name and the colon after it.
+    fn field_name(&mut self) -> Option<()> {
+        self.skip_whitespace();
+        if !self.eat(b'"') {
+            return None;
+        }
+        self.string(None)?;
+        self.skip_whitespace();
+        self.eat(b':').then_some(())
+    }
+
+    /// Reads the rest of a string, and appends its text, unescaped and lowercased, to `text` when given one.
+    fn string(&mut self, mut text: Option<&mut String>) -> Option<()> {
+        loop {
+            let run = self
+                .rest()
+                .iter()
+                .position(|&byte| byte == b'"' || byte == b'\\' || byte < 0x20)?;
+            let unescaped = std::str::from_utf8(&self.rest()[..run]).ok()?;
+            self.at += run;
+            if let Some(text) = text.as_deref_mut() {
+                push_lowercase_for_matching(unescaped, text);
+            }
+
+            match self.take_byte()? {
+                b'"' => return Some(()),
+                b'\\' => {
+                    let character = self.escaped_character()?;
+                    if let Some(text) = text.as_deref_mut() {
+                        push_lowercase_for_matching(character.encode_utf8(&mut [0; 4]), text);
+                    }
+                }
+                _ => return None,
+            }
+        }
+    }
+
+    /// Reads the rest of an escape, after its backslash.
+    fn escaped_character(&mut self) -> Option<char> {
+        let character = match self.take_byte()? {
+            b'"' => '"',
+            b'\\' => '\\',
+            b'/' => '/',
+            b'b' => '\u{8}',
+            b'f' => '\u{c}',
+            b'n' => '\n',
+            b'r' => '\r',
+            b't' => '\t',
+            b'u' => {
+                let unit = self.hex_unit()?;
+                // A character past U+FFFF is escaped as two UTF-16 units.
+                let low_unit = if (0xD800..0xDC00).contains(&unit) {
+                    if !(self.eat(b'\\') && self.eat(b'u')) {
+                        return None;
+                    }
+                    Some(self.hex_unit()?)
+                } else {
+                    None
+                };
+                let utf16 = std::iter::once(unit).chain(low_unit);
+                char::decode_utf16(utf16).next()?.ok()?
+            }
+            _ => return None,
+        };
+        Some(character)
+    }
+
+    /// Reads the four hexadecimal digits of a `\u` escape.
+    fn hex_unit(&mut self) -> Option<u16> {
+        let digits = self.rest().get(..4)?;
+        // `from_str_radix` also takes a leading `+`.
+        if !digits.iter().all(u8::is_ascii_hexdigit) {
+            return None;
+        }
+        self.at += 4;
+        u16::from_str_radix(std::str::from_utf8(digits).ok()?, 16).ok()
     }
 }
 
@@ -622,6 +861,32 @@ mod tests {
         let search = search_log(query, line.as_bytes()).await;
 
         assert_eq!(hit_lines(&search), [(1, line)]);
+    }
+
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    #[tokio::test]
+    async fn matches_a_string_value_nested_at_any_depth_but_not_its_field_name() {
+        let depth = 10_000;
+        let (open, close) = ("[".repeat(depth), "]".repeat(depth));
+        let line = format!(r#"{{"description":{open}"DOMAIN\\user"{close}}}"#);
+
+        let value = search_log(r"DOMAIN\user", line.as_bytes()).await;
+        let field_name = search_log("description", line.as_bytes()).await;
+
+        assert_eq!(value.hits.len(), 1);
+        assert!(field_name.hits.is_empty());
+    }
+
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    #[tokio::test]
+    async fn matches_a_json_object_followed_by_more_text_as_raw_text() {
+        let line = br#"{"description":"DOMAIN\\user"} and more"#;
+
+        let field_name = search_log("description", line).await;
+        let value = search_log(r"DOMAIN\user", line).await;
+
+        assert_eq!(field_name.hits.len(), 1);
+        assert!(value.hits.is_empty());
     }
 
     #[tokio::test]
