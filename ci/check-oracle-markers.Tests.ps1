@@ -492,6 +492,8 @@ Describe 'New tests' {
         @{ Name = 'Rust test with a brace in a block comment, followed by a marked helper'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    /* { */`n}`n`nfn helper() {`n    // oracle: property round-trip`n}`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Rust test whose only marker sits in a raw string'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = r`"`n// oracle: property round-trip`n`";`n}`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Rust test whose only marker label is uppercase'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {} // ORACLE: property round-trip`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'xUnit fact after a marked one, each on one line'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact] public void A() { } // oracle: property round-trip`n    [Fact] public void B() { }`n}`n"; Line = 4; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'Rust test after a marked one, each on one line'; Path = 'src/a.rs'; Content = "#[test] fn a() {} // oracle: property round-trip`n#[test] fn b() {}`n"; Line = 2; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'xUnit fact followed by a marked helper'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n    }`n`n    void Helper() { } // oracle: property round-trip`n}`n"; Line = 3; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
     ) {
         Set-RepoFile $Repo $Path $Content
@@ -637,6 +639,28 @@ Describe 'New tests' {
         $Result = Invoke-Check $Repo $Base
 
         $Result.Output | Should -Be @("src/old.rs:1: new test has no '// oracle:' marker")
+    }
+
+    It 'Reports a new test whose name differs from an edited one only in case' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'dotnet/OldTests.cs' "class OldTests`n{`n    [Fact(Skip = `"flaky`")]`n    public void Old() { }`n`n    [Fact]`n    public void OLD() { }`n}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $Base
+
+        $Result.Output | Should -Be @("dotnet/OldTests.cs:6: new test has no '// oracle:' marker")
+    }
+
+    It 'Reports a Pester test replacing one whose name matches it up to an apostrophe' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'ci/apostrophe.Tests.ps1' "Describe 'd' {`n    It `"doesn't mutate input`" {`n    }`n}`n"
+        Invoke-Git $Repo add -A
+        Invoke-Git $Repo commit -q -m apostrophe
+        $ApostropheBase = (& git -C $Repo rev-parse HEAD)
+        Set-RepoFile $Repo 'ci/apostrophe.Tests.ps1' "Describe 'd' {`n    It `"doesn't retry a denial`" {`n    }`n}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $ApostropheBase
+
+        $Result.Output | Should -Be @("ci/apostrophe.Tests.ps1:2: new test has no '# oracle:' marker")
     }
 
     It 'Reports only the added one of two unmarked namesakes' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests

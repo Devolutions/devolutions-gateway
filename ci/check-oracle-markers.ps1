@@ -62,12 +62,12 @@ $TestAttributePatterns = @{
 $DeclarationPatterns = @{
     '.rs' = '\bfn\s+(?<name>\w+)'
     '.cs' = '\b(?:void|Task|ValueTask)\s+(?<name>\w+)\s*\('
-    '.ps1' = '^\s*It\s+(?:-Name\s+)?[''"](?<name>[^''"]*)'
+    '.ps1' = '^\s*It\s+(?:-Name\s+)?(?:''(?<name>(?:[^'']|'''')*)''|"(?<name>(?:[^"]|"")*)")'
 }
 $GitDeclarationPatterns = @{
     '.rs' = 'fn[[:space:]]+[A-Za-z0-9_]+'
     '.cs' = '(void|Task|ValueTask)[[:space:]]+[A-Za-z0-9_]+[[:space:]]*\('
-    '.ps1' = '^[[:space:]]*It[[:space:]]+(-Name[[:space:]]+)?[''"][^''"]*'
+    '.ps1' = '^[[:space:]]*It[[:space:]]+(-Name[[:space:]]+)?(''([^'']|'''')*''|"([^"]|"")*")'
 }
 # Lines that can sit between a marker and the declaration it heads.
 $PrefixPatterns = @{
@@ -515,10 +515,19 @@ function Get-Tests([string[]] $Lines, [string] $Extension) {
             if ($Depth -eq 0 -and $Attribute -lt 0 -and $Code[$Index] -match $Pattern) {
                 $Attribute = $Index
             }
-            $Depth += ([regex]::Matches($Code[$Index], '\[')).Count - ([regex]::Matches($Code[$Index], '\]')).Count
-            continue
-        }
-        if (-not $Code[$Index].Trim() -and $Lines[$Index].Trim()) {
+            $Rest = -1
+            foreach ($Bracket in [regex]::Matches($Code[$Index], '[\[\]]')) {
+                if ($Bracket.Value -eq '[') {
+                    $Depth++
+                } elseif (--$Depth -eq 0) {
+                    $Rest = $Bracket.Index + 1
+                }
+            }
+            # A declaration may follow its attributes on their line, as in `[Fact] public void A() { }`.
+            if ($Depth -ne 0 -or $Rest -lt 0 -or -not $Code[$Index].Substring($Rest).Trim()) {
+                continue
+            }
+        } elseif (-not $Code[$Index].Trim() -and $Lines[$Index].Trim()) {
             if ($Start -lt 0) {
                 $Start = $Index
             }
@@ -598,7 +607,7 @@ function Get-BaseFingerprints([string] $Extension, [string] $Name, $Touched) {
     $Pattern = switch ($Extension) {
         '.rs' { "fn[[:space:]]+$Escaped([^A-Za-z0-9_]|$)" }
         '.cs' { "(void|Task|ValueTask)[[:space:]]+$Escaped[[:space:]]*\(" }
-        '.ps1' { "It[[:space:]]+(-Name[[:space:]]+)?['`"]$Escaped['`"]" }
+        '.ps1' { "It[[:space:]]+(-Name[[:space:]]+)?('$Escaped'|`"$Escaped`")" }
     }
     $Case = if ($Extension -eq '.ps1') { '-i' } else { '--no-ignore-case' }
     $Fingerprints = [System.Collections.Generic.List[string]]::new()
@@ -643,7 +652,8 @@ function Test-NewTests {
         }
     }
 
-    foreach ($Group in $Added | Group-Object { "$([System.IO.Path]::GetExtension($_.File)):$($_.Name)" }) {
+    # Names compare ordinally, as the declaration counts do.
+    foreach ($Group in $Added | Group-Object -CaseSensitive { "$([System.IO.Path]::GetExtension($_.File)):$($_.Name)" }) {
         $Extension = [System.IO.Path]::GetExtension($Group.Group[0].File)
         $Name = $Group.Group[0].Name
         $New = [System.Collections.Generic.List[object]]::new()
