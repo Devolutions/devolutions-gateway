@@ -444,17 +444,8 @@ impl ProvisionerTask for RecordingAiAnalysis {
         let log_path = unlisted_log_path(&manifest_path, record.id);
         let _session = lock_session(session_id).await;
 
-        if record.state == ProvisionerTaskState::Succeeded {
-            // The success is recorded, so the log takes the place of the earlier analysis.
-            self.recordings
-                .replace_artifacts(session_id, ArtifactKind::AiAnalysis, &log_path)
-                .await
-                .context("list the AI analysis log in the session")?;
-        } else {
-            remove_if_exists(&log_path)
-                .await
-                .with_context(|| format!("remove {log_path}"))?;
-        }
+        self.end_log(session_id, &log_path, record.state == ProvisionerTaskState::Succeeded)
+            .await?;
 
         recording_analysis::discard(&manifest_path, Some(&record.id.to_string()))
             .await
@@ -578,6 +569,21 @@ impl RecordingAiAnalysis {
 }
 
 impl RecordingAiAnalysis {
+    /// What the end of a Task does to the log it left unlisted: the log of a Task whose success is recorded takes the
+    /// place of the earlier analysis, and any other log is removed.
+    async fn end_log(&self, session_id: Uuid, log_path: &Utf8Path, succeeded: bool) -> anyhow::Result<()> {
+        if succeeded {
+            self.recordings
+                .replace_artifacts(session_id, ArtifactKind::AiAnalysis, log_path)
+                .await
+                .with_context(|| format!("list {log_path}"))
+        } else {
+            remove_if_exists(log_path)
+                .await
+                .with_context(|| format!("remove {log_path}"))
+        }
+    }
+
     /// Does what the end of an earlier Task does to the log it left unlisted, since that end may still be due, so a
     /// newer Task never loses an analysis whose success is recorded: the log of a succeeded Task is listed, so it stays
     /// until a newer analysis succeeds, and the log of a failed or unknown one is removed.
@@ -593,15 +599,11 @@ impl RecordingAiAnalysis {
                 .await
                 .context("read the Task of an unlisted log")?
             {
-                Some(ProvisionerTaskState::Succeeded) => self
-                    .recordings
-                    .replace_artifacts(session_id, ArtifactKind::AiAnalysis, &log_path)
-                    .await
-                    .with_context(|| format!("list {log_path}"))?,
-                Some(ProvisionerTaskState::Failed) | None => remove_if_exists(&log_path)
-                    .await
-                    .with_context(|| format!("remove {log_path}"))?,
                 Some(ProvisionerTaskState::Queued | ProvisionerTaskState::Running) => {}
+                state => {
+                    self.end_log(session_id, &log_path, state == Some(ProvisionerTaskState::Succeeded))
+                        .await?
+                }
             }
         }
 
