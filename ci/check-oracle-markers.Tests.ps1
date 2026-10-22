@@ -602,6 +602,43 @@ Describe 'New tests' {
         $Result.ExitCode | Should -Be 0
     }
 
+    It 'Reports an unmarked copy of a marked test edited beside it' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'src/kept.rs' "#[test]`nfn kept() {} // oracle: property round-trip`n"
+        Invoke-Git $Repo add -A
+        Invoke-Git $Repo commit -q -m kept
+        $KeptBase = (& git -C $Repo rev-parse HEAD)
+        Set-RepoFile $Repo 'src/kept.rs' "#[tokio::test]`nasync fn kept() {} // oracle: property round-trip`n`nmod b {`n    #[test]`n    fn kept() {}`n}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $KeptBase
+
+        $Result.Output | Should -Be @("src/kept.rs:5: new test has no '// oracle:' marker")
+    }
+
+    It 'Reports a copy of a kept test when a namesake moves away' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'src/same.rs' "mod a {`n    #[test]`n    fn same() { let x = 1; }`n}`n`nmod b {`n    #[test]`n    fn same() { let x = 2; }`n}`n"
+        Invoke-Git $Repo add -A
+        Invoke-Git $Repo commit -q -m same
+        $SameBase = (& git -C $Repo rev-parse HEAD)
+        Set-RepoFile $Repo 'src/same.rs' "mod a {`n    #[test]`n    fn same() { let x = 1; }`n}`n`nmod c {`n    #[test]`n    fn same() { let x = 1; }`n}`n"
+        Set-RepoFile $Repo 'src/moved.rs' "mod b {`n    #[test]`n    fn same() { let x = 2; }`n}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $SameBase
+
+        $Result.Output | Should -Be @("src/same.rs:7: new test has no '// oracle:' marker")
+    }
+
+    It 'Reports an edited unmarked test whose name gains a test, since it cannot be told from a new one' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'src/old.rs' "#[tokio::test]`nasync fn old() {}`n"
+        Set-RepoFile $Repo 'src/z.rs' "#[test]`nfn old() {} // oracle: property round-trip`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $Base
+
+        $Result.Output | Should -Be @("src/old.rs:1: new test has no '// oracle:' marker")
+    }
+
     It 'Reports only the added one of two unmarked namesakes' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         Set-RepoFile $Repo 'src/old.rs' "#[test]`nfn old() {}`n`nmod b {`n    #[test]`n    fn old() {}`n}`n"
         Invoke-Git $Repo add -A

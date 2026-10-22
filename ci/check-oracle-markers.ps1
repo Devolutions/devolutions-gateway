@@ -560,7 +560,7 @@ function Get-PesterTests([string[]] $Lines) {
 }
 
 # Lists the tests of a file with their name, whether a marker sits in them, and a fingerprint:
-# their lines from the first attribute on, without markers or indentation, so a moved test matches its base occurrence.
+# their lines without indentation, markers included, so a moved test matches its base occurrence and an unmarked copy of a marked test does not.
 function Get-FileTests([string] $File, [string[]] $Lines) {
     $Extension = [System.IO.Path]::GetExtension($File)
     $MarkerLines = @(Get-FileMarkers $File $Lines | ForEach-Object { $_.Line })
@@ -569,7 +569,7 @@ function Get-FileTests([string] $File, [string[]] $Lines) {
         $Declaration = @($Lines[$Test.Declaration..$Test.End] -match $DeclarationPatterns[$Extension])[0]
         $Name = if ($Declaration -match $DeclarationPatterns[$Extension]) { $Matches.name }
         $Marked = @($MarkerLines | Where-Object { $_ -gt $Test.Start -and $_ -le $Test.End + 1 }).Count -gt 0
-        $Fingerprint = @($Lines[$Test.Attribute..$Test.End] | ForEach-Object { ($_ -creplace $MarkerPatterns[$Extension], '').Trim() }) -join "`n"
+        $Fingerprint = @($Lines[$Test.Start..$Test.End] | ForEach-Object { $_.Trim() }) -join "`n"
         $Test | Add-Member -NotePropertyName File -NotePropertyValue $File
         $Test | Add-Member -NotePropertyName Name -NotePropertyValue $Name
         $Test | Add-Member -NotePropertyName Marked -NotePropertyValue $Marked
@@ -592,8 +592,8 @@ function Get-AddedLines([string] $File) {
     , $Added
 }
 
-# Returns the fingerprints of the tests a name declares anywhere at the base.
-function Get-BaseFingerprints([string] $Extension, [string] $Name) {
+# Returns the fingerprints of the tests a name declares at the base in the files the diff touches.
+function Get-BaseFingerprints([string] $Extension, [string] $Name, $Touched) {
     $Escaped = $Name -replace '([\[\]\\^$.|?*+(){}])', '\$1'
     $Pattern = switch ($Extension) {
         '.rs' { "fn[[:space:]]+$Escaped([^A-Za-z0-9_]|$)" }
@@ -604,6 +604,9 @@ function Get-BaseFingerprints([string] $Extension, [string] $Name) {
     $Fingerprints = [System.Collections.Generic.List[string]]::new()
     foreach ($Entry in @(& git -C $Root -c core.quotePath=false grep -l -I -E $Case -e $Pattern $Base -- "*$Extension")) {
         $File = $Entry.Substring($Base.Length + 1)
+        if (-not $Touched.Contains($File)) {
+            continue
+        }
         $Lines = @(Invoke-Git show "${Base}:$File")
         foreach ($Test in @(Get-FileTests $File $Lines)) {
             if ($Test.Name -ceq $Name) {
@@ -614,24 +617,28 @@ function Get-BaseFingerprints([string] $Extension, [string] $Name) {
     , $Fingerprints
 }
 
-# A name has as many new tests as the tree declares it more often than at the base, and they are among the tests the diff adds.
-# A test the diff adds that matches a base occurrence of its name was moved, so it neither needs a marker nor lends one;
-# when the remaining tests carry fewer markers than the name gained, each unmarked one is reported.
+# A test the diff adds is new unless it exactly matches, marker included, a base occurrence of its name that the diff moved away,
+# and each new test needs its own marker. When the check cannot tell a new test from an edited or moved one, it counts it as new,
+# so the doubt costs a marker rather than letting an unmarked test through; a name declared no more often than at the base gains no test.
 function Test-NewTests {
     $ChangedFiles = @(Invoke-Git diff --name-only --diff-filter=AMR $Base -- '*.rs' '*.cs' '*.ps1')
     if ($ChangedFiles.Count -eq 0) {
         return
     }
+    $Touched = [System.Collections.Generic.HashSet[string]]::new([string[]] @(Invoke-Git diff --name-only --no-renames $Base -- '*.rs' '*.cs' '*.ps1'))
     $Before = Get-DeclarationCounts $Base
     $After = Get-DeclarationCounts
 
     $Added = [System.Collections.Generic.List[object]]::new()
+    $Kept = [System.Collections.Generic.List[object]]::new()
     foreach ($File in $ChangedFiles) {
         $Lines = @(Get-Content -LiteralPath (Join-Path $Root $File))
         $AddedLines = Get-AddedLines $File
         foreach ($Test in @(Get-FileTests $File $Lines)) {
             if ($AddedLines.Contains($Test.Attribute + 1) -or $AddedLines.Contains($Test.Declaration + 1)) {
                 $Added.Add($Test)
+            } else {
+                $Kept.Add($Test)
             }
         }
     }
@@ -639,26 +646,34 @@ function Test-NewTests {
     foreach ($Group in $Added | Group-Object { "$([System.IO.Path]::GetExtension($_.File)):$($_.Name)" }) {
         $Extension = [System.IO.Path]::GetExtension($Group.Group[0].File)
         $Name = $Group.Group[0].Name
-        $Candidates = @($Group.Group)
-        # A test whose name cannot be found counts as new.
-        $New = $Candidates.Count
-        if ($null -ne $Name) {
+        $New = [System.Collections.Generic.List[object]]::new()
+        if ($null -eq $Name) {
+            # A test whose name cannot be found counts as new.
+            $New.AddRange(@($Group.Group))
+        } else {
             $Key = "${Extension}:$Name"
-            $New = (Get-Count $After $Key) - (Get-Count $Before $Key)
-            if ($New -le 0) {
+            $Gain = (Get-Count $After $Key) - (Get-Count $Before $Key)
+            if ($Gain -le 0) {
                 continue
             }
-            if ($Candidates.Count -gt $New) {
-                $Fingerprints = Get-BaseFingerprints $Extension $Name
-                $Candidates = @($Candidates | Where-Object { -not $Fingerprints.Remove($_.Fingerprint) })
+            # The tests added beyond the gain may be moves, each from a base occurrence no kept test still holds.
+            $Moves = $Group.Count - $Gain
+            $Vacated = if ($Moves -gt 0) { Get-BaseFingerprints $Extension $Name $Touched }
+            if ($Moves -gt 0) {
+                foreach ($Test in $Kept | Where-Object { $_.Name -ceq $Name -and [System.IO.Path]::GetExtension($_.File) -eq $Extension }) {
+                    $Vacated.Remove($Test.Fingerprint) | Out-Null
+                }
+            }
+            foreach ($Test in $Group.Group) {
+                if ($Moves -gt 0 -and $Vacated.Remove($Test.Fingerprint)) {
+                    $Moves--
+                } else {
+                    $New.Add($Test)
+                }
             }
         }
-        $Missing = [Math]::Min($New, $Candidates.Count) - @($Candidates | Where-Object Marked).Count
-        if ($Missing -le 0) {
-            continue
-        }
         $Form = if ($Extension -eq '.ps1') { '# oracle:' } else { '// oracle:' }
-        foreach ($Test in $Candidates | Where-Object { -not $_.Marked } | Sort-Object File, Attribute) {
+        foreach ($Test in $New | Where-Object { -not $_.Marked } | Sort-Object File, Attribute) {
             Add-Violation $Test.File ($Test.Attribute + 1) "new test has no '$Form' marker"
         }
     }

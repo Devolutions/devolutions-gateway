@@ -47,7 +47,8 @@ A bad token or a rate limit fails the check rather than skip, because skipping o
 ## New tests
 
 On a pull request, every new test carries a marker.
-An existing unmarked test blocks nothing, and moving a test or editing its attributes or body does not make it new.
+An existing unmarked test blocks nothing, and moving a test or editing its attributes or body does not make it new, unless its name also gains a test in the same change.
+When the check cannot tell a new test from an edited or moved one, it counts it as new, so a doubt costs a marker rather than letting an unmarked test through.
 
 <a id="drift"></a>
 ## Drift report
