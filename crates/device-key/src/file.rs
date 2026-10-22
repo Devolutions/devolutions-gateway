@@ -1304,6 +1304,10 @@ mod tests {
         set_named_security_info(&path, SE_FILE_OBJECT, None, None, Some(&dacl), None)?;
 
         assert!(open(&backend, &name).is_err());
+        // oracle: intent crates/device-key/INTENT.md §Operations
+        assert_eq!(list(&backend, TEST_PREFIX)?, vec![name.clone()]);
+        delete(&backend, &name)?;
+        assert!(list(&backend, TEST_PREFIX)?.is_empty());
         Ok(())
     }
 
