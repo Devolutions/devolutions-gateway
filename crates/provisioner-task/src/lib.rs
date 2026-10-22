@@ -46,6 +46,8 @@ pub struct ProvisionerTaskRecord {
     pub started_at: Option<OffsetDateTime>,
     pub finished_at: Option<OffsetDateTime>,
     /// After this, an unfinished Task is failed, so a lost job can't block its target forever.
+    ///
+    /// It moves forward while the Task runs, each time an attempt starts or reports progress.
     pub deadline_at: OffsetDateTime,
     /// The job that may run this Task: a job with another token is stale or a duplicate, and must not run it.
     pub job_token: Uuid,
@@ -87,6 +89,10 @@ pub enum AttemptStart {
     Unknown,
 }
 
+/// Where Tasks are kept.
+///
+/// A Task past its deadline fails with the payload `{ "error": { "kind": "deadlinePassed" } }`, plus the `usage` of
+/// its last payload when it has one, so what it spent stays known.
 #[async_trait]
 pub trait ProvisionerTaskStore: Send + Sync {
     /// Records a new `queued` Task, unless the ID is known or its target is busy.
@@ -97,7 +103,8 @@ pub trait ProvisionerTaskStore: Send + Sync {
     /// Reads a Task, after failing it if it is past its deadline.
     async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTaskRecord>>;
 
-    /// Marks the start of one more attempt by the job holding `job_token`: `running`, with one more attempt counted.
+    /// Marks the start of one more attempt by the job holding `job_token`: `running`, with one more attempt counted and
+    /// its deadline moved to `deadline_at`.
     ///
     /// Only [`AttemptStart::Started`] lets the attempt run. A job that no longer holds the token gets
     /// [`AttemptStart::Superseded`], and nothing changes.
@@ -106,6 +113,7 @@ pub trait ProvisionerTaskStore: Send + Sync {
         id: Uuid,
         job_token: Uuid,
         payload: serde_json::Value,
+        deadline_at: OffsetDateTime,
         now: OffsetDateTime,
     ) -> anyhow::Result<AttemptStart>;
 
@@ -118,9 +126,15 @@ pub trait ProvisionerTaskStore: Send + Sync {
     /// Every unfinished Task, after failing those past their deadline.
     async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;
 
-    /// Replaces the payload of a `running` Task, e.g. to report progress. Returns `false` if it is not running, such
-    /// as when it was just failed for being past its deadline.
-    async fn update_running(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
+    /// Replaces the payload of a `running` Task and moves its deadline to `deadline_at`, e.g. to report progress.
+    /// Returns `false` if it is not running, such as when it was just failed for being past its deadline.
+    async fn update_running(
+        &self,
+        id: Uuid,
+        payload: serde_json::Value,
+        deadline_at: OffsetDateTime,
+        now: OffsetDateTime,
+    ) -> anyhow::Result<bool>;
 
     /// Ends a `running` Task as `succeeded`. Returns `false` if it is not running, such as when it was just failed for
     /// being past its deadline.

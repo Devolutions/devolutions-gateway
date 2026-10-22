@@ -8,60 +8,19 @@ use anyhow::Context as _;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 
+use crate::Response;
 use crate::session_actions::Action;
-use crate::{Response, Usage};
-
-/// Tokens counted by the AI provider, as kept in checkpoints.
-///
-/// It mirrors [`Usage`], so a change of [`Usage`] never changes the checkpoint format.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct TokenUsage {
-    input_tokens: u64,
-    output_tokens: u64,
-}
-
-impl From<Usage> for TokenUsage {
-    fn from(usage: Usage) -> Self {
-        Self {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-        }
-    }
-}
-
-impl From<TokenUsage> for Usage {
-    fn from(usage: TokenUsage) -> Self {
-        Self {
-            input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-        }
-    }
-}
 
 pub(super) fn path(workspace: &Utf8Path, index: usize) -> Utf8PathBuf {
     workspace.join(format!("chunk-{index:04}.json"))
 }
 
-/// Actions found in one chunk, with what the AI provider reported for the requests about it.
-#[derive(Debug, Clone, PartialEq)]
+/// Actions found in one chunk, with the model that described them.
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(super) struct DescribedChunk {
     pub(super) actions: Vec<Action>,
     /// Model that answered, as reported by the provider.
     pub(super) model: Option<String>,
-    /// Tokens of every request about the chunk, answers cut and asked again included; `None` when one was not reported.
-    pub(super) usage: Option<Usage>,
-}
-
-impl Default for DescribedChunk {
-    /// No action yet, and no token counted yet.
-    fn default() -> Self {
-        Self {
-            actions: Vec::new(),
-            model: None,
-            usage: Some(Usage::default()),
-        }
-    }
 }
 
 impl DescribedChunk {
@@ -69,7 +28,6 @@ impl DescribedChunk {
     pub(super) fn add(&mut self, response: Response<Vec<Action>>) {
         self.actions.extend(response.output);
         self.model = self.model.take().or(response.model);
-        self.usage = super::add_usage(self.usage, response.usage);
     }
 }
 
@@ -78,8 +36,6 @@ impl DescribedChunk {
 struct SavedChunk {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    usage: Option<TokenUsage>,
     actions: Vec<SavedAction>,
 }
 
@@ -100,7 +56,6 @@ pub(super) fn write(path: &Utf8Path, chunk: &DescribedChunk) -> anyhow::Result<(
 
     let saved = SavedChunk {
         model: chunk.model.clone(),
-        usage: chunk.usage.map(TokenUsage::from),
         actions: chunk
             .actions
             .iter()
@@ -141,7 +96,6 @@ pub(super) fn read(path: &Utf8Path) -> anyhow::Result<DescribedChunk> {
     Ok(DescribedChunk {
         actions,
         model: saved.model,
-        usage: saved.usage.map(Usage::from),
     })
 }
 
@@ -169,10 +123,6 @@ mod tests {
                 },
             ],
             model: Some("gpt-test-2026-09-30".to_owned()),
-            usage: Some(Usage {
-                input_tokens: 10,
-                output_tokens: 20,
-            }),
         };
 
         write(&path, &chunk).expect("written");
@@ -183,18 +133,17 @@ mod tests {
     }
 
     #[test]
-    fn unreported_model_and_usage_stay_unknown() {
+    fn an_unreported_model_stays_unknown() {
+        // oracle: property round-trip
         let dir = tempfile::tempdir().expect("temp dir");
         let path = path(Utf8Path::from_path(dir.path()).expect("UTF-8"), 0);
         let chunk = DescribedChunk {
             actions: Vec::new(),
             model: None,
-            usage: None,
         };
 
         write(&path, &chunk).expect("written");
 
-        assert_eq!(std::fs::read_to_string(&path).expect("checkpoint"), r#"{"actions":[]}"#);
         assert_eq!(read(&path).expect("read"), chunk);
     }
 }

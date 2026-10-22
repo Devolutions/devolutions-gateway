@@ -179,6 +179,23 @@ impl Harness {
             .expect("task exists")
     }
 
+    /// Runs the Tasks with an AI analysis that fails after `progress_timeout` without progress.
+    fn with_progress_timeout(&mut self, progress_timeout: time::Duration) {
+        let mut task = RecordingAiAnalysis::new(
+            self.state.conf_handle.clone(),
+            self.state.recordings.clone(),
+            self.state.secrets.clone(),
+            Arc::new(self.state.job_queue_handle.clone()),
+        );
+        task.progress_timeout = progress_timeout;
+        self.state.provisioner_tasks = ProvisionerTaskRunner::builder(
+            Arc::clone(self.state.provisioner_tasks.store()),
+            Arc::new(self.state.job_queue_handle.clone()),
+        )
+        .register(task)
+        .build();
+    }
+
     /// Working files of the AI analyses of session_id.
     fn workspace(&self, session_id: Uuid) -> Utf8PathBuf {
         self.recording_path.join(session_id.to_string()).join(".ai-analysis")
@@ -313,6 +330,7 @@ fn first_line(path: &Utf8Path) -> String {
         .to_owned()
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Secrets
 #[tokio::test]
 async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
     let mut harness = Harness::new().await;
@@ -334,10 +352,7 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
         json!({ "provider": "openai", "model": "gpt-test", "maxOutputTokens": null }),
         "neither the key nor the base URL is recorded"
     );
-    assert_eq!(
-        task.deadline_at - task.created_at,
-        ATTEMPT_START_WINDOW + ATTEMPT_TIMEOUT
-    );
+    assert_eq!(task.deadline_at - task.created_at, START_WINDOW);
 
     let access = harness.access(task_id).expect("key is kept");
     assert_eq!(access.base_url.expect("base URL").as_str(), "https://ai.example/v1/");
@@ -351,6 +366,7 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
     assert!(schedule_for.is_none());
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn asking_again_creates_nothing_new() {
     let mut harness = Harness::new().await;
@@ -392,6 +408,7 @@ async fn asking_again_creates_nothing_new() {
     assert!(harness.has_key(task_id), "the first key stays");
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn asking_again_returns_the_task_even_while_the_session_records_again() {
     let mut harness = Harness::new().await;
@@ -420,6 +437,7 @@ async fn asking_again_returns_the_task_even_while_the_session_records_again() {
     assert!(matches!(new_task, Err(StartError::RecordingActive)), "{new_task:?}");
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn refuses_a_session_without_recording() {
     let harness = Harness::new().await;
@@ -443,6 +461,7 @@ async fn refuses_a_session_without_recording() {
     assert!(!harness.has_key(task_id));
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn refuses_a_session_that_is_still_recording() {
     let harness = Harness::new().await;
@@ -467,6 +486,7 @@ async fn refuses_a_session_that_is_still_recording() {
     );
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn refuses_invalid_ai_settings() {
     let harness = Harness::new().await;
@@ -495,6 +515,7 @@ async fn refuses_invalid_ai_settings() {
     assert!(!harness.has_key(task_id));
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
     let harness = Harness::new().await;
@@ -514,6 +535,7 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
             "step": "describing",
             "done": 1,
             "total": 3,
+            "usage": { "inputTokens": 10, "outputTokens": 20, "unreportedRequests": 0 },
         })
     );
     assert!(harness.has_key(task_id), "the key is kept for the retry");
@@ -537,10 +559,10 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
         json!({
             "fileName": "ai-analysis-0.slog",
             "model": "gpt-test-2026-09-30",
-            "usage": { "inputTokens": 40, "outputTokens": 80 },
+            "usage": { "inputTokens": 40, "outputTokens": 80, "unreportedRequests": 0 },
             "promptVersion": format!("{PROMPT_VERSION}+{}", session_summary::PROMPT_VERSION),
         }),
-        "chunk 0 counts from its checkpoint, the failed request not at all"
+        "every attempt counts, and the refused request costs nothing"
     );
 
     let requests = requests.lock().clone();
@@ -574,6 +596,7 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
     assert!(!harness.has_key(task_id), "the key is dropped on success");
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn permanent_error_fails_without_retry() {
     let harness = Harness::new().await;
@@ -585,18 +608,20 @@ async fn permanent_error_fails_without_retry() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "permanent error");
-    assert!(
-        task.payload["details"].as_str().expect("details").contains("401"),
-        "{}",
-        task.payload
+    assert_eq!(
+        task.payload,
+        json!({
+            "error": { "kind": "aiRejected", "status": 401 },
+            "usage": { "inputTokens": 0, "outputTokens": 0, "unreportedRequests": 0 },
+        })
     );
-    assert_eq!(task.payload["attempts"], 1);
+    assert_eq!(task.attempts, 1);
     assert_eq!(requests.lock().len(), 1);
     assert!(!harness.workspace(session_id).exists());
     assert!(!harness.has_key(task_id));
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn a_session_mixing_terminal_and_video_fails() {
     let harness = Harness::new().await;
@@ -618,9 +643,10 @@ async fn a_session_mixing_terminal_and_video_fails() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "permanent error");
-    assert_eq!(task.payload["details"], "session mixes terminal and video recordings");
+    assert_eq!(task.payload["error"], json!({ "kind": "mixedRecording" }));
 }
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn recording_deleted_after_start_fails() {
     let harness = Harness::new().await;
@@ -632,10 +658,10 @@ async fn recording_deleted_after_start_fails() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "permanent error");
-    assert_eq!(task.payload["details"], "session has no recording");
+    assert_eq!(task.payload["error"], json!({ "kind": "noRecording" }));
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
     let harness = Harness::new().await;
@@ -653,23 +679,22 @@ async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
     assert_eq!(task.attempts, MAX_ATTEMPTS);
-    assert_eq!(task.payload["reason"], "attempts exhausted");
-    assert!(
-        task.payload["details"].as_str().expect("details").contains("503"),
-        "{}",
-        task.payload
+    assert_eq!(
+        task.payload["error"],
+        json!({ "kind": "attemptsExhausted", "last": { "kind": "aiBusy", "status": 503 } })
     );
     assert_eq!(requests.lock().len(), 5);
     assert!(!harness.workspace(session_id).exists());
     assert!(!harness.has_key(task_id));
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
-async fn slow_attempt_is_retried() {
+async fn an_analysis_without_progress_fails_at_its_deadline() {
     let mut harness = Harness::new().await;
     let session_id = harness.write_long_session(10);
 
-    // A provider that never answers makes the attempt outlast its timeout.
+    // A provider that never answers stops the progress of the analysis.
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("address");
     tokio::spawn(async move {
@@ -687,60 +712,24 @@ async fn slow_attempt_is_retried() {
         max_output_tokens: None,
     };
     let task_id = harness.start_created(session_id, settings).await;
+    harness.with_progress_timeout(time::Duration::seconds(2));
 
-    let mut task = RecordingAiAnalysis::new(
-        harness.state.conf_handle.clone(),
-        harness.state.recordings.clone(),
-        harness.state.secrets.clone(),
-        Arc::new(harness.state.job_queue_handle.clone()),
-    );
-    task.attempt_timeout = Duration::from_millis(500);
-    harness.state.provisioner_tasks = ProvisionerTaskRunner::builder(
-        Arc::clone(harness.state.provisioner_tasks.store()),
-        Arc::new(harness.state.job_queue_handle.clone()),
-    )
-    .register(task)
-    .build();
-
-    let error = harness.run(task_id).await.expect_err("timeout is retried");
-
-    assert!(error.to_string().contains("took longer than"), "{error:#}");
-    assert_eq!(harness.task(task_id).await.state, ProvisionerTaskState::Running);
-    assert!(harness.has_key(task_id));
-    assert!(
-        harness.workspace(session_id).join("plan.json").exists(),
-        "the chunks are kept for the retry"
-    );
-}
-
-#[tokio::test]
-async fn task_without_time_for_an_attempt_fails_without_calling_the_ai() {
-    let harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let (settings, requests) = spawn_ai_provider(|_| 0).await;
-    let task_id = Uuid::new_v4();
-    let now = OffsetDateTime::now_utc();
-    harness
-        .create_task(
-            task_id,
-            session_id,
-            "openai-compatible",
-            now,
-            now + ATTEMPT_TIMEOUT - time::Duration::minutes(1),
-        )
-        .await;
-    harness.insert_key(task_id, settings.base_url, now + time::Duration::hours(1));
-
-    harness.job(task_id).await.run().await.expect("no retry");
+    harness.run(task_id).await.expect("no retry");
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "timed out");
-    assert_eq!(task.attempts, 0);
-    assert!(requests.lock().is_empty());
+    assert_eq!(
+        task.payload,
+        json!({
+            "error": { "kind": "deadlinePassed" },
+            "usage": { "inputTokens": 0, "outputTokens": 0, "unreportedRequests": 0 },
+        })
+    );
+    assert!(!harness.workspace(session_id).exists());
     assert!(!harness.has_key(task_id));
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn lost_key_fails_the_task() {
     let harness = Harness::new().await;
@@ -757,11 +746,15 @@ async fn lost_key_fails_the_task() {
     assert_eq!(task.state, ProvisionerTaskState::Failed);
     assert_eq!(
         task.payload,
-        json!({ "reason": "key lost", "details": KEY_LOST, "attempts": 1 })
+        json!({
+            "error": { "kind": "keyLost" },
+            "usage": { "inputTokens": 0, "outputTokens": 0, "unreportedRequests": 0 },
+        })
     );
     assert!(!harness.workspace(session_id).exists());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn overdue_task_does_not_run() {
     let harness = Harness::new().await;
@@ -784,12 +777,17 @@ async fn overdue_task_does_not_run() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "timed out");
+    assert_eq!(
+        task.payload,
+        json!({ "error": { "kind": "deadlinePassed" } }),
+        "a Task that never ran spent nothing"
+    );
     assert_eq!(task.attempts, 0);
     assert!(!harness.has_key(task_id));
     assert!(!harness.workspace(session_id).exists());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn finished_task_does_not_run_again() {
     let harness = Harness::new().await;
@@ -829,6 +827,7 @@ impl ProvisionerTaskJobQueue for WithRemuxJobs {
     }
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn analysis_waits_for_the_remux_of_the_session() {
     let mut harness = Harness::new().await;
@@ -871,6 +870,42 @@ async fn analysis_waits_for_the_remux_of_the_session() {
     assert!(!requests.lock().is_empty());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn waiting_for_a_remux_is_no_progress() {
+    let mut harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, requests) = spawn_ai_provider(|_| 0).await;
+    let task_id = harness.start_created(session_id, settings).await;
+
+    let dir = harness.recording_path.join(session_id.to_string());
+    let queue: DynProvisionerTaskJobQueue = Arc::new(WithRemuxJobs {
+        queue: harness.state.job_queue_handle.clone(),
+        remux_jobs: Arc::new(Mutex::new(vec![
+            json!({ "input_path": dir.join("recording-1.webm") }).to_string(),
+        ])),
+    });
+    let mut task = RecordingAiAnalysis::new(
+        harness.state.conf_handle.clone(),
+        harness.state.recordings.clone(),
+        harness.state.secrets.clone(),
+        Arc::clone(&queue),
+    );
+    task.progress_timeout = time::Duration::seconds(2);
+    harness.state.provisioner_tasks =
+        ProvisionerTaskRunner::builder(Arc::clone(harness.state.provisioner_tasks.store()), queue)
+            .register(task)
+            .build();
+
+    harness.run(task_id).await.expect("no retry");
+
+    let task = harness.task(task_id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed);
+    assert_eq!(task.payload["error"], json!({ "kind": "deadlinePassed" }));
+    assert!(requests.lock().is_empty(), "the AI is never asked");
+}
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn analyses_of_one_session_run_one_at_a_time() {
     let session_id = Uuid::new_v4();
@@ -890,6 +925,7 @@ async fn analyses_of_one_session_run_one_at_a_time() {
         .expect("lock task");
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn working_files_left_by_an_earlier_task_go_with_the_task_that_ends() {
     let harness = Harness::new().await;
@@ -909,6 +945,7 @@ async fn working_files_left_by_an_earlier_task_go_with_the_task_that_ends() {
     assert!(!harness.workspace(session_id).exists());
     assert!(!log.exists());
 }
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn a_new_task_replaces_the_result_of_the_earlier_one() {
     let harness = Harness::new().await;
@@ -934,8 +971,9 @@ async fn a_new_task_replaces_the_result_of_the_earlier_one() {
     assert!(!dir.join("ai-analysis-1.slog").exists());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
-async fn a_new_task_that_fails_still_removes_the_earlier_analysis() {
+async fn a_new_task_that_fails_keeps_the_earlier_analysis() {
     let harness = Harness::new().await;
     let session_id = harness.write_session();
     let (settings, _requests) = spawn_ai_provider(|_| 0).await;
@@ -948,52 +986,79 @@ async fn a_new_task_that_fails_still_removes_the_earlier_analysis() {
 
     let task = harness.task(second).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "key lost");
+    assert_eq!(task.payload["error"], json!({ "kind": "keyLost" }));
     let dir = harness.recording_path.join(session_id.to_string());
-    assert_eq!(ai_analyses(&dir), json!([]));
-    assert!(!dir.join("ai-analysis-0.slog").exists());
+    assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
+    assert!(dir.join("ai-analysis-0.slog").exists());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
-async fn a_retry_of_an_attempt_that_never_got_the_session_removes_the_earlier_analysis() {
-    let mut harness = Harness::new().await;
+async fn a_failed_task_reports_the_tokens_it_spent() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    // The chunk is answered, then the provider refuses the summary request for good.
+    let (settings, _requests) = spawn_ai_provider(|index| if index == 1 { 401 } else { 0 }).await;
+    let task_id = harness.start_created(session_id, settings).await;
+
+    harness.run(task_id).await.expect("no retry");
+
+    let task = harness.task(task_id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed);
+    assert_eq!(
+        task.payload["usage"],
+        json!({ "inputTokens": 10, "outputTokens": 20, "unreportedRequests": 0 })
+    );
+}
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn a_task_that_fails_removes_its_unlisted_log() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let task_id = harness.start_created(session_id, openai("gpt-test")).await;
+    let dir = harness.recording_path.join(session_id.to_string());
+    let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
+    std::fs::write(&log, "an analysis whose success was never recorded").expect("unlisted log");
+    harness
+        .state
+        .provisioner_tasks
+        .store()
+        .fail(task_id, json!({}), OffsetDateTime::now_utc())
+        .await
+        .expect("fail the Task");
+
+    harness.run(task_id).await.expect("the job ends the Task");
+
+    assert!(!log.exists());
+    assert_eq!(ai_analyses(&dir), json!([]));
+}
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn a_success_cut_short_before_the_log_is_listed_is_finished_by_the_job() {
+    let harness = Harness::new().await;
     let session_id = harness.write_session();
     let (settings, _requests) = spawn_ai_provider(|_| 0).await;
-    let first = harness.start_created(session_id, settings.clone()).await;
-    harness.run(first).await.expect("first analysis");
-    let second = harness.start_created(session_id, settings).await;
+    let task_id = harness.start_created(session_id, settings).await;
+    harness.run(task_id).await.expect("analysis");
 
-    let mut task = RecordingAiAnalysis::new(
-        harness.state.conf_handle.clone(),
-        harness.state.recordings.clone(),
-        harness.state.secrets.clone(),
-        Arc::new(harness.state.job_queue_handle.clone()),
-    );
-    task.attempt_timeout = Duration::from_millis(500);
-    harness.state.provisioner_tasks = ProvisionerTaskRunner::builder(
-        Arc::clone(harness.state.provisioner_tasks.store()),
-        Arc::new(harness.state.job_queue_handle.clone()),
-    )
-    .register(task)
-    .build();
-
-    // Another analysis of the session holds it past the attempt timeout.
-    let session = lock_session(session_id).await;
-    let error = harness.run(second).await.expect_err("timeout is retried");
-    assert!(error.to_string().contains("took longer than"), "{error:#}");
-    drop(session);
-
-    harness.run(second).await.expect("second attempt");
-
-    let task = harness.task(second).await;
-    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
-    assert_eq!(task.attempts, 2);
+    // As if Gateway stopped right after recording the success, before the manifest listed the log.
     let dir = harness.recording_path.join(session_id.to_string());
-    assert_eq!(
-        ai_analyses(&dir),
-        json!([{ "fileName": "ai-analysis-0.slog" }]),
-        "one analysis per recording"
-    );
+    let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
+    std::fs::rename(dir.join("ai-analysis-0.slog"), &log).expect("unlist the log");
+    let manifest_path = dir.join("recording.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest")).expect("manifest JSON");
+    manifest["artifacts"] = json!({});
+    std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
+
+    // The job of the Task stays stored until it returns, so it runs again when Gateway starts.
+    harness.run(task_id).await.expect("the job ends the Task again");
+
+    assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
+    assert!(dir.join("ai-analysis-0.slog").exists());
+    assert!(!log.exists());
 }
 
 /// The AI analyses the manifest in `dir` lists.
@@ -1006,6 +1071,7 @@ fn ai_analyses(dir: &Utf8Path) -> serde_json::Value {
         .unwrap_or_else(|| json!([]))
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn the_analysis_is_in_the_language_of_the_request() {
     let harness = Harness::new().await;
@@ -1041,6 +1107,7 @@ async fn the_analysis_is_in_the_language_of_the_request() {
     );
 }
 
+// oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
 #[tokio::test]
 async fn the_analysis_is_in_english_without_a_language() {
     let harness = Harness::new().await;
@@ -1056,6 +1123,7 @@ async fn the_analysis_is_in_english_without_a_language() {
     assert!(requests.lock().iter().all(|request| request.contains("`English`")));
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn a_new_task_never_resumes_from_an_earlier_task() {
     let harness = Harness::new().await;
@@ -1084,6 +1152,7 @@ async fn a_new_task_never_resumes_from_an_earlier_task() {
     );
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn an_ended_task_leaves_the_working_files_of_another_task() {
     let harness = Harness::new().await;
@@ -1112,27 +1181,8 @@ async fn an_ended_task_leaves_the_working_files_of_another_task() {
         Arc::new(harness.state.job_queue_handle.clone()),
     );
 
-    task.on_end(&record).await;
+    task.on_end(&record).await.expect("end");
 
     assert!(workspace.exists(), "the newer Task still resumes from them");
     assert!(!harness.has_key(task_id));
-}
-
-#[test]
-fn unknown_usage_is_left_out_of_the_result() {
-    let analysis = Analysis {
-        file_name: "ai-analysis-0.slog".to_owned(),
-        model: "gpt-test-2026-09-30".to_owned(),
-        usage: None,
-        prompt_version: PROMPT_VERSION.to_owned(),
-    };
-
-    assert_eq!(
-        json!(analysis),
-        json!({
-            "fileName": "ai-analysis-0.slog",
-            "model": "gpt-test-2026-09-30",
-            "promptVersion": PROMPT_VERSION,
-        })
-    );
 }

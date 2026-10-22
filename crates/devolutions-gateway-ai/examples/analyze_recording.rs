@@ -246,10 +246,16 @@ async fn main() -> anyhow::Result<()> {
     print_actions(&std::fs::read_to_string(&analysis.log_path)?)?;
     println!();
 
-    let usage = analysis.usage.map_or_else(
-        || "not reported".to_owned(),
-        |usage| format!("{} in, {} out", usage.input_tokens, usage.output_tokens),
-    );
+    let usage = match analysis.usage.unreported_requests {
+        0 => format!(
+            "{} in, {} out",
+            analysis.usage.input_tokens, analysis.usage.output_tokens
+        ),
+        unreported => format!(
+            "{} in, {} out, and {unreported} requests not reported",
+            analysis.usage.input_tokens, analysis.usage.output_tokens
+        ),
+    };
     println!("  {}  {}", style(DIM, "model   "), analysis.model);
     println!("  {}  {}", style(DIM, "prompt  "), analysis.prompt_version);
     println!("  {}  {usage}", style(DIM, "tokens  "));

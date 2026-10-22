@@ -496,15 +496,17 @@ fn ai_analysis_conflict(code: AiAnalysisConflictCode, task_id: Option<Uuid>) -> 
 
 /// Starts an AI analysis of a recorded session
 ///
-/// Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a
-/// new log, listed under `artifacts.ai-analysis` in its manifest.
+/// Gateway asks the AI provider what the user did in the session recording, and puts the answer in the session as its
+/// log, listed under `artifacts.ai-analysis` in its manifest.
 /// The answer is in the `language` of the request, English without one.
 /// The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
 /// which the `Location` header of a 202 answer names.
 ///
 /// Sending the same request again returns the same Task and starts nothing new.
-/// A new Task for the session starts from scratch: it removes the earlier AI analysis of the session, even a succeeded
-/// one, so a session holds at most one.
+/// A new Task for the session starts from scratch, and replaces the earlier AI analysis of the session once its success
+/// is recorded, so a session holds at most one; a Task that fails leaves the earlier analysis in place and removes
+/// everything it made.
+/// A Task fails if it does not start within 2 hours, or, once it runs, after 30 minutes without progress.
 /// The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
 /// Tasks.
 #[cfg_attr(feature = "openapi", utoipa::path(
@@ -604,7 +606,8 @@ pub(crate) async fn start_ai_analysis(
 
 /// Gets an AI analysis of a recorded session
 ///
-/// Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over.
+/// Returns the Task of the analysis: its state, its progress while it runs, its result once it is over, and the tokens
+/// it used in every state but `queued`.
 /// Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
 #[cfg_attr(feature = "openapi", utoipa::path(
     get,
@@ -1224,6 +1227,7 @@ mod tests {
 
     use super::*;
 
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     #[tokio::test]
     async fn ai_analysis_of_a_session_still_recording_is_a_conflict() {
         use axum::extract::connect_info::MockConnectInfo;
