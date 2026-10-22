@@ -43,8 +43,8 @@ internal sealed class VectorAuthority
 
         if (vector.Endpoint == "connect")
         {
-            ChannelOpeningResult opening =
-                await Authenticator.AuthenticateChannelOpeningAsync(vector.Method, signatureInput, signature);
+            ChannelOpeningResult opening = await OpenChannelAsync(Authenticator, vector);
+
 
             return opening.Succeeded
                 ? VectorOutcome.Ok
@@ -64,6 +64,18 @@ internal sealed class VectorAuthority
             : new VectorOutcome(result.Error.Code.ToWireValue(), result.FailureDetail);
     }
 
+    /// <summary>
+    /// Authenticates the opening request of a <c>connect</c> case through the public API.
+    /// </summary>
+    public static ValueTask<ChannelOpeningResult> OpenChannelAsync(
+        RequestAuthenticator authenticator,
+        HttpSignatureCaseVector vector)
+    {
+        return authenticator.AuthenticateChannelOpeningAsync(
+            vector.Method,
+            Lines(vector.Headers.SignatureInput),
+            Lines(vector.Headers.Signature));
+    }
     /// <summary>
     /// The field lines of a vector header, which holds at most one.
     /// </summary>

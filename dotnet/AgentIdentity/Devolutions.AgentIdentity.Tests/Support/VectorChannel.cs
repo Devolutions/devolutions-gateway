@@ -47,7 +47,7 @@ internal static class VectorChannel
     /// Opens the stream through the public API, with the registry and the nonce store of <paramref name="authority"/>,
     /// which the test can then change before the handshake.
     /// </summary>
-    public static async Task<ChannelOpening> OpenAsync(
+    public static Task<ChannelOpening> OpenAsync(
         VectorAuthority authority,
         TimeProvider? clock = null,
         CertificateStatus? status = null)
@@ -57,17 +57,27 @@ internal static class VectorChannel
             RegisterDevice(authority.Registry, registeredStatus, identityRevoked: false);
         }
 
+        return OpenAsync(authority.Registry, authority.Nonces, clock);
+    }
+
+    /// <summary>
+    /// Opens the stream through the public API, over <paramref name="registry"/>,
+    /// which must answer for the device's certificate as the vector file registers it.
+    /// </summary>
+    public static async Task<ChannelOpening> OpenAsync(
+        ICertificateRegistry registry,
+        INonceStore? nonces = null,
+        TimeProvider? clock = null)
+    {
         RequestAuthenticator authenticator = new(
-            authority.Registry,
-            authority.Nonces,
+            registry,
+            nonces ?? new RecordingNonceStore(),
             clock ?? new FixedTimeProvider(OpeningTime),
             new ScriptedRandomNumberGenerator(Vectors.Challenge));
 
-        ChannelOpeningResult result = await authenticator.AuthenticateChannelOpeningAsync(
-            ConnectCase.Method,
-            VectorAuthority.Lines(ConnectCase.Headers.SignatureInput),
-            VectorAuthority.Lines(ConnectCase.Headers.Signature));
+        ChannelOpeningResult result = await VectorAuthority.OpenChannelAsync(authenticator, ConnectCase);
 
+        // oracle: reference docs/agent-identity/test-vectors.json channel_proof.connect_case
         Assert.True(result.Succeeded, result.FailureDetail);
         Assert.Equal(Vectors.Challenge, result.Opening.Challenge.Challenge.Challenge_.ToByteArray());
         return result.Opening;

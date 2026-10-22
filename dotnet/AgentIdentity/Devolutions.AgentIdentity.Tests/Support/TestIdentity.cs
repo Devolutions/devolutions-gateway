@@ -12,27 +12,17 @@ internal static class TestIdentity
     public static async Task<AuthenticatedIdentity> AuthenticateAsync(AgentOperation operation)
     {
         TestAuthority authority = new(TestAuthority.DefaultNow);
-        SignedHttpRequest request = authority.Valid(operation).ToHttpRequest();
 
         if (operation == AgentOperation.Connect)
         {
-            ChannelOpeningResult opening = await authority.Authenticator.AuthenticateChannelOpeningAsync(
-                request.Method,
-                request.SignatureInput,
-                request.Signature);
-            Assert.True(opening.Succeeded, opening.FailureDetail);
-
-            byte[] proof = TestChannelProof.Sign(
-                TestVectors.Instance.Key("device-a"),
-                opening.Opening.Challenge.Challenge.Challenge_.Span,
-                TestRequest.DefaultNonce);
-            ChannelHandshakeResult handshake =
-                await opening.Opening.VerifyHelloAsync(VectorChannel.HelloMessage(opening.Opening, proof));
+            ChannelOpening opening = await authority.OpenChannelAsync();
+            ChannelHandshakeResult handshake = await opening.VerifyHelloAsync(TestAuthority.ValidHello(opening));
             Assert.True(handshake.Succeeded, handshake.FailureDetail);
 
             return handshake.Identity;
         }
 
+        SignedHttpRequest request = authority.Valid(operation).ToHttpRequest();
         AuthenticationResult result = await authority.Authenticator.AuthenticateAsync(operation, request);
         Assert.True(result.Succeeded, result.FailureDetail);
 
