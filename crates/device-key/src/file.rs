@@ -1362,14 +1362,36 @@ mod tests {
         Ok(())
     }
 
-    // oracle: intent crates/device-key/INTENT.md §Operations
+    // oracle: intent crates/device-key/INTENT.md §File backend
     #[test]
-    fn a_valid_key_file_padded_past_the_size_bound_is_refused() -> anyhow::Result<()> {
+    fn key_files_open_up_to_64_kib_and_are_refused_past_it() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
+        let key = SigningKey::generate_from_rng(&mut rand::rng());
+        let pkcs8 = key.to_pkcs8_der()?;
+        let at_bound = pad_pkcs8(pkcs8.as_bytes(), 64 * 1024)?;
         let name = new_key_name(TEST_PREFIX);
-        let pkcs8 = SigningKey::generate_from_rng(&mut rand::rng()).to_pkcs8_der()?;
-        let pkcs8 = pkcs8.as_bytes();
+        create_restricted_file(&key_path(&directory.0, &name))?.write_all(&at_bound)?;
+        let opened = open(&backend, &name)?.context("a 64 KiB key file was refused")?;
+        // oracle: property round-trip
+        assert_eq!(opened.public_key(), *key.verifying_key());
+
+        // The first file is a valid key one byte past the bound.
+        // A reader that stops at the bound sees the key above in the second.
+        for past_bound in [
+            pad_pkcs8(pkcs8.as_bytes(), 64 * 1024 + 1)?,
+            [at_bound.as_slice(), &[0]].concat(),
+        ] {
+            let name = new_key_name(TEST_PREFIX);
+            create_restricted_file(&key_path(&directory.0, &name))?.write_all(&past_bound)?;
+            // An operation may skip an unexpected entry or fail, but never returns it as a key.
+            assert!(!matches!(open(&backend, &name), Ok(Some(_))));
+        }
+        Ok(())
+    }
+
+    /// Pads a PKCS#8 key to `len` bytes, near 64 KiB, with an attribute that keeps it a valid key.
+    fn pad_pkcs8(pkcs8: &[u8], len: usize) -> anyhow::Result<Vec<u8>> {
         // The key is a version 1 PrivateKeyInfo, whose optional attributes come last (RFC 5208 §5).
         // An attribute appended to its fields therefore keeps it a valid key.
         let header_len = match pkcs8.get(1) {
@@ -1378,23 +1400,30 @@ mod tests {
             None => anyhow::bail!("PKCS#8 key has no length"),
         };
         let fields = pkcs8.get(header_len..).context("PKCS#8 key is truncated")?;
-        // An attribute is a SEQUENCE of a type OID and a SET of values (X.501); this one holds a 64 KiB OCTET STRING.
+        // An attribute is a SEQUENCE of a type OID and a SET of values (X.501); its value is an OCTET STRING of zeros.
+        // At these lengths, each element's header is a tag, 0x82, then a 2-byte length (X.690 §8.1.3.5).
+        let zeros = len
+            .checked_sub(
+                4 /* PrivateKeyInfo header */
+                    + fields.len()
+                    + 4 /* attributes header */
+                    + 4 /* Attribute header */
+                    + 5 /* type OID */
+                    + 4 /* SET header */
+                    + 4, /* OCTET STRING header */
+            )
+            .context("PKCS#8 key is too long to pad")?;
         let attribute = der(
             0x30,
             &[
                 der(0x06, &[0x2A, 0x03, 0x04])?,
-                der(0x31, &der(0x04, &vec![0; 64 * 1024])?)?,
+                der(0x31, &der(0x04, &vec![0; zeros])?)?,
             ]
             .concat(),
         )?;
         let padded = der(0x30, &[fields, der(0xA0, &attribute)?.as_slice()].concat())?;
-        let mut file = create_restricted_file(&key_path(&directory.0, &name))?;
-        file.write_all(&padded)?;
-        drop(file);
-
-        // An operation may skip an unexpected entry or fail, but never returns it as a key.
-        assert!(!matches!(open(&backend, &name), Ok(Some(_))));
-        Ok(())
+        ensure!(padded.len() == len, "padded PKCS#8 key is {} bytes", padded.len());
+        Ok(padded)
     }
 
     /// Encodes one DER element with the definite, minimal length that X.690 §10.1 requires.

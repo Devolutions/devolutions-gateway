@@ -657,6 +657,7 @@ fn wide(string: &str) -> Vec<u16> {
 #[cfg(test)]
 mod tests {
     use p256::ecdsa::signature::Verifier as _;
+    use windows::Win32::Security::Cryptography::{BCRYPT_ECDSA_P384_ALGORITHM, NCRYPT_ALLOW_EXPORT_FLAG};
     use windows::Win32::Security::WinLocalSystemSid;
 
     use super::*;
@@ -782,6 +783,118 @@ mod tests {
         );
         println!("SKIP: machine-key test requires elevation");
         Ok(false)
+    }
+
+    /// Persists a machine key with the given algorithm, export policy and security descriptor, bypassing `generate`.
+    fn plant(name: &str, algorithm: PCWSTR, export_policy: u32, sddl: &str) -> anyhow::Result<()> {
+        let provider = Provider::open()?;
+        let wide_name = wide(name);
+        let mut handle = NCRYPT_KEY_HANDLE::default();
+        // SAFETY: The output pointer is writable and both algorithm and name are NUL-terminated.
+        unsafe {
+            NCryptCreatePersistedKey(
+                provider.0,
+                &mut handle,
+                algorithm,
+                PCWSTR::from_raw(wide_name.as_ptr()),
+                CERT_KEY_SPEC(0),
+                NCRYPT_MACHINE_KEY_FLAG,
+            )
+        }?;
+        let key = Key(handle);
+        // SAFETY: The export policy is one DWORD, valid for an unfinalized persisted key.
+        unsafe {
+            NCryptSetProperty(
+                NCRYPT_HANDLE(key.0.0),
+                NCRYPT_EXPORT_POLICY_PROPERTY,
+                &export_policy.to_le_bytes(),
+                NCRYPT_FLAGS(0),
+            )
+        }?;
+        let descriptor = SecurityDescriptor::new(sddl)?;
+        // SAFETY: The self-relative descriptor remains live for the entire call.
+        unsafe {
+            NCryptSetProperty(
+                NCRYPT_HANDLE(key.0.0),
+                NCRYPT_SECURITY_DESCR_PROPERTY,
+                descriptor.as_bytes(),
+                NCRYPT_FLAGS((OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION).0),
+            )
+        }?;
+        // SAFETY: This key was created but has not yet been finalized.
+        unsafe { NCryptFinalizeKey(key.0, NCRYPT_FLAGS(0)) }?;
+        Ok(())
+    }
+
+    fn trusted_sddl() -> anyhow::Result<String> {
+        let user = Token::current_process_token()
+            .sid_and_attributes()
+            .context("get process user SID")?
+            .sid;
+        Ok(key_descriptor_sddl(&user.to_string()))
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn an_exportable_machine_key_cannot_be_opened() -> anyhow::Result<()> {
+        if !run_machine_key_test()? {
+            return Ok(());
+        }
+        let name = crate::new_key_name("devolutions-agent-test");
+        let _cleanup = TestKey(name.clone());
+        plant(
+            &name,
+            BCRYPT_ECDSA_P256_ALGORITHM,
+            NCRYPT_ALLOW_EXPORT_FLAG,
+            &trusted_sddl()?,
+        )?;
+        let provider = Provider::open()?;
+        let planted = provider.key(&name)?.context("planted machine key is missing")?;
+        // The key keeps every other rule, so only its export policy can refuse it.
+        ensure_trusted_descriptor(&planted)?;
+        ensure_supported_algorithm(&planted)?;
+
+        assert!(open(&name).is_err());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Access
+    #[test]
+    fn a_machine_key_another_account_can_access_cannot_be_opened() -> anyhow::Result<()> {
+        if !run_machine_key_test()? {
+            return Ok(());
+        }
+        let name = crate::new_key_name("devolutions-agent-test");
+        let _cleanup = TestKey(name.clone());
+        let sddl = format!("{}(A;;GR;;;BU)", trusted_sddl()?);
+        plant(&name, BCRYPT_ECDSA_P256_ALGORITHM, 0, &sddl)?;
+        let provider = Provider::open()?;
+        let planted = provider.key(&name)?.context("planted machine key is missing")?;
+        // The key keeps every other rule, so only its descriptor can refuse it.
+        ensure_non_exportable(&planted)?;
+        ensure_supported_algorithm(&planted)?;
+
+        assert!(open(&name).is_err());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_machine_key_of_another_algorithm_cannot_be_opened() -> anyhow::Result<()> {
+        if !run_machine_key_test()? {
+            return Ok(());
+        }
+        let name = crate::new_key_name("devolutions-agent-test");
+        let _cleanup = TestKey(name.clone());
+        plant(&name, BCRYPT_ECDSA_P384_ALGORITHM, 0, &trusted_sddl()?)?;
+        let provider = Provider::open()?;
+        let planted = provider.key(&name)?.context("planted machine key is missing")?;
+        // The key keeps every other rule, so only its algorithm can refuse it.
+        ensure_non_exportable(&planted)?;
+        ensure_trusted_descriptor(&planted)?;
+
+        assert!(open(&name).is_err());
+        Ok(())
     }
 
     // oracle: intent crates/device-key/INTENT.md §Operations
