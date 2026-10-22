@@ -974,7 +974,7 @@ fn quick_reopening_stable_after(stable_after: Duration) -> Settings {
 async fn keeps_backing_off_after_a_stream_that_drops_soon_after_authenticating() -> anyhow::Result<()> {
     let mut authority = TestAuthority::start(Mode::Grpc).await?;
     let identity = Identity::from_vectors("device-a")?;
-    let settings = quick_reopening_stable_after(Duration::from_secs(1));
+    let settings = quick_reopening_stable_after(Duration::from_secs(3));
     let mut channel = client(&authority, settings)?.connect(identity.target(&authority.url))?;
     authority
         .next_opening()
@@ -986,7 +986,8 @@ async fn keeps_backing_off_after_a_stream_that_drops_soon_after_authenticating()
     let mut stream = authority.next_opening().await.accept();
     stream.challenge(&[7; 32]).await;
     let hello = stream.receive().await;
-    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // The 3 s stable time leaves a scheduling stall between `Welcome` and the closure room to pass.
+    tokio::time::sleep(Duration::from_millis(3500)).await;
     stream
         .send(
             &new_id(),
