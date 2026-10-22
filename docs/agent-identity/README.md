@@ -119,6 +119,9 @@ While no channel works, the agent checks in instead: an HTTPS request that fetch
 - Without an `agent_channel_url`, it checks in when the service starts or the device enrolls, then every 24 hours ±10%.
 - With one, it checks in once no stream has authenticated for an hour, then every 24 hours ±10% until a stream authenticates.
 
+When the authority turns the channel back on, an agent learns of it at its next check-in: by default an hour after its last stream ended, then every 24 hours ±10%.
+Restarting the agent service applies it at once.
+
 ### When an identity ends
 
 An identity ends when the authority revokes or deletes it, or refuses a renewal because the certificate expired beyond its grace.
