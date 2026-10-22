@@ -53,21 +53,22 @@ $Laws = @('round-trip', 'idempotent', 'involution', 'commutative', 'associative'
 $AnchorPattern = '<a\s+id="(?<id>[^"]+)"\s*>\s*</a>'
 # `<owner>/<repo>@<sha>:<path>`; a reference with `<owner>/<repo>:` but no valid pin is rejected.
 $CrossRepositoryPattern = '^(?<owner>[\w.-]+)/(?<repo>[\w.-]+)(?:@(?<pin>[^:\s]*))?:(?<path>\S+)$'
+# A test attribute may follow others in a C# attribute list, on its line or a continuation line.
 $TestAttributePatterns = @{
-    '.rs' = '^\s*#\[(?:test|tokio::test|rstest)\b'
-    '.cs' = '^\s*\[(?:Fact|Theory)\b'
+    '.rs' = '#\[(?:test|tokio::test|rstest)\b'
+    '.cs' = '(?:\[|,|^)\s*(?:Xunit\.)?(?:Fact|Theory)\b'
 }
 # A Rust or C# test is named by the function its attributes decorate, and a Pester test by the name its `It` gives;
 # the git forms match the same declarations.
 $DeclarationPatterns = @{
     '.rs' = '\bfn\s+(?<name>\w+)'
     '.cs' = '\b(?:void|Task|ValueTask)\s+(?<name>\w+)\s*\('
-    '.ps1' = '^\s*It\s+(?:-Name\s+)?(?:''(?<name>(?:[^'']|'''')*)''|"(?<name>(?:[^"]|"")*)")'
+    '.ps1' = '^\s*It\s+(?:-Name\s+)?(?:''(?<name>(?:[^'']|'''')*)''|"(?<name>(?:[^"`]|`.|"")*)")'
 }
 $GitDeclarationPatterns = @{
     '.rs' = 'fn[[:space:]]+[A-Za-z0-9_]+'
     '.cs' = '(void|Task|ValueTask)[[:space:]]+[A-Za-z0-9_]+[[:space:]]*\('
-    '.ps1' = '^[[:space:]]*It[[:space:]]+(-Name[[:space:]]+)?(''([^'']|'''')*''|"([^"]|"")*")'
+    '.ps1' = '^[[:space:]]*It[[:space:]]+(-Name[[:space:]]+)?(''([^'']|'''')*''|"([^"`]|`.|"")*")'
 }
 # Lines that can sit between a marker and the declaration it heads.
 $PrefixPatterns = @{
@@ -128,7 +129,7 @@ function Get-Outline([string[]] $Lines) {
             $Pending.Clear()
             continue
         }
-        foreach ($Anchor in [regex]::Matches($Line, $AnchorPattern)) {
+        foreach ($Anchor in [regex]::Matches(($Line -replace '(?<!`)(`+)(?!`).*?(?<!`)\1(?!`)', ''), $AnchorPattern)) {
             $Id = $Anchor.Groups['id'].Value
             if ($Seen.ContainsKey($Id)) {
                 $Duplicates.Add([pscustomobject]@{ Id = $Id; Index = $Index; First = $Seen[$Id] })
@@ -483,8 +484,8 @@ function Get-ItemEnd([string[]] $Code, [int] $From) {
     for ($Index = $From; $Index -lt $Code.Count; $Index++) {
         foreach ($Token in [regex]::Matches($Code[$Index], '[{}()\[\];]')) {
             switch ($Token.Value) {
-                '{' { $Depth++; $Opened = $true }
-                '}' { $Depth-- }
+                '{' { if ($Nesting -le 0) { $Depth++; $Opened = $true } }
+                '}' { if ($Nesting -le 0) { $Depth-- } }
                 { $_ -in '(', '[' } { $Nesting++ }
                 { $_ -in ')', ']' } { $Nesting-- }
                 ';' { if (-not $Opened -and $Nesting -le 0) { return $Index } }
@@ -512,7 +513,7 @@ function Get-Tests([string[]] $Lines, [string] $Extension) {
             if ($Start -lt 0) {
                 $Start = $Index
             }
-            if ($Depth -eq 0 -and $Attribute -lt 0 -and $Code[$Index] -match $Pattern) {
+            if ($Attribute -lt 0 -and $Code[$Index] -match $Pattern) {
                 $Attribute = $Index
             }
             $Rest = -1

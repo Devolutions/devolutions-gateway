@@ -273,6 +273,18 @@ Describe 'Repeated anchors' {
         $Result.ExitCode | Should -Be 1
     }
 
+    It 'Accepts an anchor shown in a code span beside the anchor it shows' { # oracle: intent ci/check-oracle-markers.intent.md §paths
+        $Repo = New-Repo
+        Set-RepoFile $Repo 'docs/shown.md' "Write ``<a id=`"channel`"></a>`` before a heading.`n`n<a id=`"channel`"></a>`n# Channel`n"
+        Set-RepoFile $Repo 'src/lib.rs' "fn f() {} // oracle: spec docs/shown.md §channel`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo
+
+        $Result.Output | Should -BeNullOrEmpty
+        $Result.ExitCode | Should -Be 0
+    }
+
     It 'Accepts the same anchor id in two files' { # oracle: intent ci/check-oracle-markers.intent.md §paths
         $Repo = New-Repo
         Set-RepoFile $Repo 'docs/one.md' "<a id=`"x`"></a>`n# A`n"
@@ -494,6 +506,8 @@ Describe 'New tests' {
         @{ Name = 'Rust test whose only marker label is uppercase'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {} // ORACLE: property round-trip`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'xUnit fact after a marked one, each on one line'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact] public void A() { } // oracle: property round-trip`n    [Fact] public void B() { }`n}`n"; Line = 4; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Rust test after a marked one, each on one line'; Path = 'src/a.rs'; Content = "#[test] fn a() {} // oracle: property round-trip`n#[test] fn b() {}`n"; Line = 2; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'xUnit fact after another attribute in its list'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Trait(`"Category`", `"Unit`"), Fact]`n    public void A() { }`n}`n"; Line = 3; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'xUnit theory on a continuation line of its attribute list'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Trait(`"Category`", `"Unit`"),`n     Theory]`n    [InlineData(1)]`n    public void A(int x) { }`n}`n"; Line = 4; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'xUnit fact followed by a marked helper'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n    }`n`n    void Helper() { } // oracle: property round-trip`n}`n"; Line = 3; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
     ) {
         Set-RepoFile $Repo $Path $Content
@@ -518,6 +532,7 @@ Describe 'New tests' {
         @{ Name = 'in its body after a raw string spanning lines'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = r`"`n}`n`";`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'in its body after a fixed-size array parameter'; Path = 'src/a.rs'; Content = "#[rstest]`n#[case::four([1, 2, 3, 4])]`nfn parses(#[case] bytes: [u8; 4]) {`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'in its body after a C# interpolated string holding a brace'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n        var text = `$`"{string.Join(`"}`", values)}`";`n        // oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'in its body after an attribute holding an array initializer'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Theory, InlineData(new int[] { 1, 2 })] public void A(int[] values)`n    {`n        // oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
     ) {
         Set-RepoFile $Repo $Path $Content
         Invoke-Git $Repo add -A
@@ -661,6 +676,19 @@ Describe 'New tests' {
         $Result = Invoke-Check $Repo $ApostropheBase
 
         $Result.Output | Should -Be @("ci/apostrophe.Tests.ps1:2: new test has no '# oracle:' marker")
+    }
+
+    It 'Reports a Pester test replacing one whose name matches it up to an escaped quote' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'ci/escaped.Tests.ps1' "Describe 'd' {`n    It `"accepts ```"allow```" policy`" {`n    }`n}`n"
+        Invoke-Git $Repo add -A
+        Invoke-Git $Repo commit -q -m escaped
+        $EscapedBase = (& git -C $Repo rev-parse HEAD)
+        Set-RepoFile $Repo 'ci/escaped.Tests.ps1' "Describe 'd' {`n    It `"accepts ```"deny```" policy`" {`n    }`n}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $EscapedBase
+
+        $Result.Output | Should -Be @("ci/escaped.Tests.ps1:2: new test has no '# oracle:' marker")
     }
 
     It 'Reports only the added one of two unmarked namesakes' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
