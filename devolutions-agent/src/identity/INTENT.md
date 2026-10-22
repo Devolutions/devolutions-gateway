@@ -18,6 +18,7 @@ The agent's generic command-line and configuration modules only route to them, s
   - `Enabled` defaults to `true`; the task is idle without a pending-enrollment file or a stored identity.
   - `KeyBackend` is a regular option that names a device-key backend by its technology: `WindowsSoftwareProvider` (the Windows default) or `File` (the default elsewhere); `Tpm` is added later.
     The agent reads every value on every platform; a backend that can't exist on the platform, or isn't available on the machine, is reported through the device-key crate's distinguishable error and stops the identity feature, as `crates/agent-identity/INTENT.md` specifies.
+    The agent then logs the error and raises system event 1100, "Agent Identity key backend unavailable", with the backend name and the error, because the device-key crate leaves reporting to its caller; the event ID never changes, since administrators' monitoring rules match it.
 - Test-only knobs live exclusively under `__debug__.identity`, as nested fields.
   - Like the agent's other `__debug__` knobs, they are unsupported and honored in every build; writing the configuration already requires administrator rights.
   - The agent logs a warning at start-up whenever the section contains a setting.
