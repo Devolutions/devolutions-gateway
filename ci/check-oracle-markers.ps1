@@ -55,8 +55,8 @@ $AnchorPattern = '<a\s+id="(?<id>[^"]+)"\s*>\s*</a>'
 $CrossRepositoryPattern = '^(?<owner>[\w.-]+)/(?<repo>[\w.-]+)(?:@(?<pin>[^:\s]*))?:(?<path>\S+)$'
 # A test attribute may follow others in a C# attribute list, on its line or a continuation line.
 $TestAttributePatterns = @{
-    '.rs' = '#\[(?:test|tokio::test|rstest)\b'
-    '.cs' = '(?:\[|,|^)\s*(?:Xunit\.)?(?:Fact|Theory)\b'
+    '.rs' = '#\[(?:test|tokio::test|rstest(?:::rstest)?)(?=[\]\(\s]|$)'
+    '.cs' = '(?:\[|,|^)\s*(?:Xunit\.)?(?:Fact|Theory)(?:Attribute)?\b'
 }
 # A Rust or C# test is named by the function its attributes decorate, and a Pester test by the name its `It` gives.
 $DeclarationPatterns = @{
@@ -702,6 +702,10 @@ function Get-DriftStatus($Marker) {
     $Current = Get-RemoteFile $Marker.Repository $Head.Sha $Marker.Path
     if ($Current.State -eq 'no-file') {
         return "removed: '$($Marker.Path)' no longer exists on $($Head.Branch); re-check the test"
+    }
+    # A pin into a file with a repeated anchor fails the check, so such a file is never proposed as the new pin.
+    if ($Current.State -eq 'ok' -and $Current.Outline.Duplicates.Count -gt 0) {
+        return "changed: '$($Marker.Path)' repeats an anchor on $($Head.Branch); re-check the test"
     }
     $CurrentSection = if ($Current.State -eq 'ok') { Find-Section $Current.Outline $Marker.Section }
     if (-not $CurrentSection) {
