@@ -471,7 +471,7 @@ public class ChannelHandshakeTests
     public async Task HandshakeReadsTheRegistryAfterTheHostAddsTheStream(string end)
     {
         LiveStreamRecordingRegistry registry = new();
-        ChannelOpening opening = await OpenAsync(registry);
+        ChannelOpening opening = await VectorChannel.OpenAsync(registry);
         registry.StreamAdded = true;
 
         await HandshakeEnds[end](opening);
@@ -924,42 +924,10 @@ public class ChannelHandshakeTests
     {
         DateTimeOffset opened = DeviceANotAfter.AddSeconds(-5);
         TestAuthority authority = new(opened, clock: new SteppingTimeProvider(opened, opened, handshakeTime));
-        SignedHttpRequest request = authority.Valid(AgentOperation.Connect).ToHttpRequest();
 
-        ChannelOpeningResult result = await authority.Authenticator.AuthenticateChannelOpeningAsync(
-            request.Method,
-            request.SignatureInput,
-            request.Signature);
+        ChannelOpening opening = await authority.OpenChannelAsync();
 
-        Assert.True(result.Succeeded, result.FailureDetail);
-        ChannelOpening opening = result.Opening;
-        byte[] proof = TestChannelProof.Sign(
-            DeviceA,
-            opening.Challenge.Challenge.Challenge_.Span,
-            TestRequest.DefaultNonce);
-
-        return (opening, VectorChannel.HelloMessage(opening, proof));
-    }
-
-    // Opens the vector stream as VectorChannel.OpenAsync does, but over the given registry.
-    private static async Task<ChannelOpening> OpenAsync(ICertificateRegistry registry)
-    {
-        ChannelProofVectors vectors = TestVectors.Instance.ChannelProof;
-        HttpSignatureCaseVector connect = TestVectors.Instance.HttpSignature.Case(vectors.ConnectCase);
-        RequestAuthenticator authenticator = new(
-            registry,
-            new RecordingNonceStore(),
-            new FixedTimeProvider(VectorChannel.OpeningTime),
-            new ScriptedRandomNumberGenerator(vectors.Challenge));
-
-        ChannelOpeningResult result = await authenticator.AuthenticateChannelOpeningAsync(
-            connect.Method,
-            VectorAuthority.Lines(connect.Headers.SignatureInput),
-            VectorAuthority.Lines(connect.Headers.Signature));
-
-        // oracle: reference docs/agent-identity/test-vectors.json channel_proof.connect_case
-        Assert.True(result.Succeeded, result.FailureDetail);
-        return result.Opening;
+        return (opening, TestAuthority.ValidHello(opening));
     }
 
     private static string NewId()

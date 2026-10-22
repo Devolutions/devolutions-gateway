@@ -25,7 +25,7 @@ public class ChannelOpeningTests
     {
         TestAuthority authority = new(TestAuthority.DefaultNow);
 
-        ChannelOpening opening = await OpenAsync(authority, TestRequest.DefaultNonce);
+        ChannelOpening opening = await authority.OpenChannelAsync();
 
         ServerMessage challenge = opening.Challenge;
         Assert.Equal(ServerMessage.PayloadOneofCase.Challenge, challenge.PayloadCase);
@@ -41,8 +41,8 @@ public class ChannelOpeningTests
     {
         TestAuthority authority = new(TestAuthority.DefaultNow);
 
-        ChannelOpening first = await OpenAsync(authority, TestRequest.DefaultNonce);
-        ChannelOpening second = await OpenAsync(authority, "EBESExQVFhcYGRobHB0eHw");
+        ChannelOpening first = await authority.OpenChannelAsync();
+        ChannelOpening second = await authority.OpenChannelAsync("EBESExQVFhcYGRobHB0eHw");
 
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         Assert.NotEqual(first.Challenge.Id, second.Challenge.Id);
@@ -69,10 +69,8 @@ public class ChannelOpeningTests
             TestVectors.Instance.HttpSignature.RegisteredCertificate(ChannelProof.Device);
         authority.Clock.Now = connect.Now;
 
-        ChannelOpeningResult result = await authority.Authenticator.AuthenticateChannelOpeningAsync(
-            connect.Method,
-            VectorAuthority.Lines(connect.Headers.SignatureInput),
-            VectorAuthority.Lines(connect.Headers.Signature));
+        ChannelOpeningResult result = await VectorAuthority.OpenChannelAsync(authority.Authenticator, connect);
+
 
         Assert.True(result.Succeeded);
         ChannelOpening opening = result.Opening;
@@ -93,7 +91,7 @@ public class ChannelOpeningTests
     public async Task KeptChallengeDoesNotFollowEditsOfTheMessage()
     {
         TestAuthority authority = new(TestAuthority.DefaultNow);
-        ChannelOpening opening = await OpenAsync(authority, TestRequest.DefaultNonce);
+        ChannelOpening opening = await authority.OpenChannelAsync();
         string sentId = opening.Challenge.Id;
         byte[] sentBytes = opening.Challenge.Challenge.Challenge_.ToByteArray();
 
@@ -114,24 +112,13 @@ public class ChannelOpeningTests
     {
         TestAuthority authority = new(TestAuthority.DefaultNow);
 
-        ChannelOpening opening = await OpenAsync(authority, TestRequest.DefaultNonce);
+        ChannelOpening opening = await authority.OpenChannelAsync();
 
         Assert.Equal(
             TestVectors.Instance.HttpSignature.RegisteredCertificate("device-a").NotAfter,
             opening.CertificateNotAfter);
     }
 
-    private static async Task<ChannelOpening> OpenAsync(TestAuthority authority, string nonce)
-    {
-        SignedHttpRequest request = authority.Valid(AgentOperation.Connect, nonce: nonce).ToHttpRequest();
-        ChannelOpeningResult result = await authority.Authenticator.AuthenticateChannelOpeningAsync(
-            request.Method,
-            request.SignatureInput,
-            request.Signature);
-
-        Assert.True(result.Succeeded, result.FailureDetail);
-        return result.Opening;
-    }
 
     // SEC 1 §2.3.3: an uncompressed point is 0x04, then X and Y.
     private static byte[] Sec1PublicKey(byte[] subjectPublicKeyInfo)

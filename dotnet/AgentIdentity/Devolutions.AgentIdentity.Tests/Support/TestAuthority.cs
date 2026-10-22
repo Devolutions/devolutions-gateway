@@ -1,3 +1,5 @@
+using Devolutions.Agent.Channel.V1;
+
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
@@ -54,10 +56,7 @@ internal sealed class TestAuthority
     {
         if (operation == AgentOperation.Connect)
         {
-            ChannelOpeningResult opening = await Authenticator.AuthenticateChannelOpeningAsync(
-                request.Method,
-                request.SignatureInput,
-                request.Signature);
+            ChannelOpeningResult opening = await AuthenticateChannelOpeningAsync(request);
 
             return opening.Succeeded ? "ok" : opening.Error.Code.ToWireValue();
         }
@@ -65,5 +64,36 @@ internal sealed class TestAuthority
         AuthenticationResult result = await Authenticator.AuthenticateAsync(operation, request);
 
         return result.Succeeded ? "ok" : result.Error.Code.ToWireValue();
+    }
+
+    /// <summary>
+    /// Opens a channel through the public API with a valid <c>connect</c> request of <c>device-a</c>.
+    /// </summary>
+    public async Task<ChannelOpening> OpenChannelAsync(string nonce = TestRequest.DefaultNonce)
+    {
+        ChannelOpeningResult result =
+            await AuthenticateChannelOpeningAsync(Valid(AgentOperation.Connect, nonce: nonce).ToHttpRequest());
+
+        Assert.True(result.Succeeded, result.FailureDetail);
+        return result.Opening;
+    }
+
+    /// <summary>
+    /// A <c>Hello</c> of <c>device-a</c> that answers the Challenge of an opening
+    /// that <see cref="OpenChannelAsync"/> made with the default nonce.
+    /// </summary>
+    public static AgentMessage ValidHello(ChannelOpening opening)
+    {
+        byte[] proof = TestChannelProof.Sign(
+            TestVectors.Instance.Key("device-a"),
+            opening.Challenge.Challenge.Challenge_.Span,
+            TestRequest.DefaultNonce);
+
+        return VectorChannel.HelloMessage(opening, proof);
+    }
+
+    private ValueTask<ChannelOpeningResult> AuthenticateChannelOpeningAsync(SignedHttpRequest request)
+    {
+        return Authenticator.AuthenticateChannelOpeningAsync(request.Method, request.SignatureInput, request.Signature);
     }
 }
