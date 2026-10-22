@@ -557,11 +557,18 @@ impl ProvisionerTaskRunner {
 
                     let payload = task.failed_payload(&Permanent::Internal, &last);
 
-                    match self.inner.store.fail(task_id, payload, OffsetDateTime::now_utc()).await {
+                    match store.fail(task_id, payload, OffsetDateTime::now_utc()).await {
                         // The job retries only when the end could not be queued again, which then only ends the Task.
                         Ok(_) => self.end(task.as_ref(), task_id, job_token).await?,
                         Err(error) => {
                             error!(task.id = %task_id, error = format!("{error:#}"), "Failed to fail the Task; it fails at its deadline");
+
+                            // The store fails the Task once its deadline passes, so a job that runs after it only ends it.
+                            let after_deadline = latest.lock().deadline_at + time::Duration::SECOND;
+
+                            if let Err(error) = self.enqueue(task_id, job_token, Some(after_deadline)).await {
+                                error!(task.id = %task_id, error = format!("{error:#}"), "Failed to queue the end of the Task");
+                            }
                         }
                     }
                 }
