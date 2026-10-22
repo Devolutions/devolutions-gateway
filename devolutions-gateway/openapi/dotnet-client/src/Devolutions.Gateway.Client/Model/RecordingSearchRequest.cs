@@ -43,7 +43,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="cursor">Where the page starts: the &#x60;nextCursor&#x60; of the previous page, sent unchanged with the same &#x60;query&#x60;, &#x60;recordings&#x60; and &#x60;startTime&#x60;..</param>
         /// <param name="maxHits">Most hits in the page, from 1 to 1000; 1000 when missing..</param>
-        /// <param name="query">Text to search for, ignoring case; leading and trailing spaces are part of it. (required).</param>
+        /// <param name="query">Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every line. (required).</param>
         /// <param name="recordings">recordings (required).</param>
         /// <param name="startTime">startTime.</param>
         public RecordingSearchRequest(string cursor = default(string), int? maxHits = default(int?), string query = default(string), RecordingSelection recordings = default(RecordingSelection), StartTimeRange startTime = default(StartTimeRange))
@@ -80,9 +80,9 @@ namespace Devolutions.Gateway.Client.Model
         public int? MaxHits { get; set; }
 
         /// <summary>
-        /// Text to search for, ignoring case; leading and trailing spaces are part of it.
+        /// Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every line.
         /// </summary>
-        /// <value>Text to search for, ignoring case; leading and trailing spaces are part of it.</value>
+        /// <value>Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every line.</value>
         [DataMember(Name = "query", IsRequired = true, EmitDefaultValue = true)]
         public string Query { get; set; }
 
@@ -141,12 +141,6 @@ namespace Devolutions.Gateway.Client.Model
             if (this.MaxHits < (int?)1)
             {
                 yield return new ValidationResult("Invalid value for MaxHits, must be a value greater than or equal to 1.", new [] { "MaxHits" });
-            }
-
-            // Query (string) minLength
-            if (this.Query != null && this.Query.Length < 1)
-            {
-                yield return new ValidationResult("Invalid value for Query, length must be greater than 1.", new [] { "Query" });
             }
 
             yield break;

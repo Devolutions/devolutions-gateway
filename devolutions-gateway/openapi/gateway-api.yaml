@@ -352,7 +352,7 @@ paths:
       - Jrec
       summary: Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
       description: |-
-        The query is a case-insensitive substring.
+        The query is a case-insensitive substring, and an empty query matches every line.
         In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
         once unescaped, so field names, numbers, booleans and null never match.
         Any other line, such as one still being written, is matched as raw text.
@@ -2300,8 +2300,9 @@ components:
           minimum: 1
         query:
           type: string
-          description: Text to search for, ignoring case; leading and trailing spaces are part of it.
-          minLength: 1
+          description: |-
+            Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every
+            line.
         recordings:
           $ref: '#/components/schemas/RecordingSelection'
         startTime:

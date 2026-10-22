@@ -24,7 +24,7 @@ export interface RecordingSearchRequest {
      */
     maxHits?: number | null;
     /**
-     * Text to search for, ignoring case; leading and trailing spaces are part of it.
+     * Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every line.
      */
     query: string;
     recordings: RecordingSelection;

@@ -7,7 +7,7 @@ Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
 **Cursor** | **string** | Where the page starts: the &#x60;nextCursor&#x60; of the previous page, sent unchanged with the same &#x60;query&#x60;, &#x60;recordings&#x60; and &#x60;startTime&#x60;. | [optional] 
 **MaxHits** | **int?** | Most hits in the page, from 1 to 1000; 1000 when missing. | [optional] 
-**Query** | **string** | Text to search for, ignoring case; leading and trailing spaces are part of it. | 
+**Query** | **string** | Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every line. | 
 **Recordings** | [**RecordingSelection**](RecordingSelection.md) |  | 
 **StartTime** | [**StartTimeRange**](StartTimeRange.md) |  | [optional] 
 
