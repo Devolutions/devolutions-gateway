@@ -83,7 +83,7 @@ impl SecretStore {
         {
             entry.expires_at = expires_at;
             // UNTESTED: the cleanup task wakes up for the new expiry, so a secret moved to an earlier expiry is still
-            // removed on time.
+            // removed on time; any change of an expiry must notify it.
             self.cleanup_notify.notify_one();
         }
     }
