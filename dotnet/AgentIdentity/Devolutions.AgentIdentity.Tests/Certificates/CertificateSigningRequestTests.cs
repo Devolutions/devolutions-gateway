@@ -69,6 +69,31 @@ public class CertificateSigningRequestTests
                 attributes: TestCsr.Tlv(0xA0, Attribute("1.2.4"), Attribute("1.2.3")));
             return TestCsr.Request(info, key);
         },
+
+        // The subject need not be DER, which writes its length in the fewest octets (X.690 §10.1).
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["subject with a longer length"] = key =>
+        {
+            byte[] subject = TestCsr.TlvWithLongerLength(0x30, []);
+            return TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject), key);
+        },
+
+        // Nor need anything inside it, here a relative distinguished name CN=a whose length takes one octet more.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["subject with a longer length inside"] = key =>
+        {
+            byte[] commonName = TestCsr.Sequence(TestCsr.Oid("2.5.4.3"), TestCsr.Tlv(0x0C, "a"u8.ToArray()));
+            byte[] subject = TestCsr.Sequence(TestCsr.TlvWithLongerLength(0x31, commonName));
+            return TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject), key);
+        },
+
+        // Nor need the attributes, here an empty attribute set whose length takes one octet more.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["attributes with a longer length"] = key =>
+        {
+            byte[] attributes = TestCsr.TlvWithLongerLength(0xA0, []);
+            return TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), attributes: attributes), key);
+        },
     };
 
     // X.690 §10.1: DER writes each length in the fewest octets.
@@ -77,13 +102,36 @@ public class CertificateSigningRequestTests
         // The self-signature covers only the request info, so the request still verifies with a longer outer length.
         ["CertificationRequest"] = () => TestCsr.TlvWithLongerLength(0x30, ValidVectorContents()),
 
-        // The same rule inside the request info, which a test can only change by signing the request again.
-        ["subject"] = () =>
+        // The same for the request info and its version, which a test can only change by signing the request again.
+        ["CertificationRequestInfo"] = () =>
         {
             using ECDsa key = NewKey();
-            byte[] subject = TestCsr.TlvWithLongerLength(0x30, []);
-            byte[] info = TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), subject);
+            byte[] spki = key.ExportSubjectPublicKeyInfo();
+            byte[] info = TestCsr.TlvWithLongerLength(
+                0x30,
+                [.. TestCsr.Integer(0), .. TestCsr.EmptySubject, .. spki, .. TestCsr.EmptyAttributes]);
             return TestCsr.Request(info, key);
+        },
+        ["version"] = () =>
+        {
+            using ECDsa key = NewKey();
+            byte[] info = TestCsr.Sequence(
+                TestCsr.TlvWithLongerLength(0x02, [0x00]),
+                TestCsr.EmptySubject,
+                key.ExportSubjectPublicKeyInfo(),
+                TestCsr.EmptyAttributes);
+            return TestCsr.Request(info, key);
+        },
+
+        // Another encoding of the key's SubjectPublicKeyInfo would give the key a second SHA-256.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        ["SubjectPublicKeyInfo"] = () =>
+        {
+            using ECDsa key = NewKey();
+            byte[] spki = TestCsr.TlvWithLongerLength(
+                0x30,
+                [.. TestCsr.P256Algorithm(), .. TestCsr.BitString(TestCsr.UncompressedPoint(key))]);
+            return TestCsr.Request(TestCsr.RequestInfo(spki), key);
         },
     };
 
@@ -347,7 +395,9 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate([.. valid, 0x00]));
     }
 
+    // A CSR is DER, except for the subject and the attributes, which the server ignores.
     // oracle: spec X.690 §10.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [MemberData(nameof(RequestWithALongerLengthNames))]
     public void RejectsLengthInMoreOctetsThanNeeded(string element)
