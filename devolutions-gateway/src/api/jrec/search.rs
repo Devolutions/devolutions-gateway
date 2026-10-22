@@ -34,8 +34,8 @@ const MAX_LINE_BYTES: usize = 256 * 1024;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RecordingSearchRequest {
-    /// Text to search for, ignoring case; leading and trailing spaces are part of it.
-    #[cfg_attr(feature = "openapi", schema(min_length = 1))]
+    /// Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every
+    /// line.
     query: String,
     /// The recordings to search.
     recordings: RecordingSelection,
@@ -148,7 +148,7 @@ pub(crate) struct RecordingSearchHit {
 
 /// Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
 ///
-/// The query is a case-insensitive substring.
+/// The query is a case-insensitive substring, and an empty query matches every line.
 /// In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
 /// once unescaped, so field names, numbers, booleans and null never match.
 /// Any other line, such as one still being written, is matched as raw text.
@@ -175,7 +175,7 @@ pub(crate) async fn search_recordings(
     _scope: RecordingsSearchScope,
     Json(request): Json<RecordingSearchRequest>,
 ) -> Result<Json<RecordingSearchResponse>, HttpError> {
-    let text = SearchText::new(&request.query).ok_or_else(|| HttpError::bad_request().msg("empty search text"))?;
+    let text = SearchText::new(&request.query);
 
     let recording_root = conf_handle.get_conf().recording_path.clone();
 
@@ -238,19 +238,15 @@ struct SearchText {
 }
 
 impl SearchText {
-    fn new(query: &str) -> Option<Self> {
-        if query.is_empty() {
-            return None;
-        }
-
+    fn new(query: &str) -> Self {
         let mut lowercase_query = String::new();
         push_lowercase_for_matching(query, &mut lowercase_query);
 
-        Some(Self {
+        Self {
             query: lowercase_query,
             open: Vec::new(),
             lowercase: String::new(),
-        })
+        }
     }
 
     /// Whether `line` matches the search text.
@@ -260,6 +256,11 @@ impl SearchText {
     /// Any other line is compared as raw text, so that a line of plain text that happens to parse as JSON, such as
     /// `2026`, still matches.
     fn is_in(&mut self, line: &[u8]) -> bool {
+        // An empty query matches every line, as in rg, even one with no string value to compare.
+        if self.query.is_empty() {
+            return true;
+        }
+
         match self.scan_object(line) {
             Some(found) => found,
             None => self.is_in_text(&String::from_utf8_lossy(line)),
@@ -805,7 +806,7 @@ mod tests {
         let path = Utf8PathBuf::from_path_buf(dir.path().join("ai-analysis-0.slog")).expect("UTF-8 path");
         std::fs::write(&path, content).expect("write log");
 
-        let mut search = Search::new(SearchText::new(query).expect("non-empty query"));
+        let mut search = Search::new(SearchText::new(query));
         search
             .search_file(Uuid::nil(), "ai-analysis-0.slog", &path)
             .await
@@ -887,6 +888,15 @@ mod tests {
 
         assert_eq!(field_name.hits.len(), 1);
         assert!(value.hits.is_empty());
+    }
+
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    // oracle: reference rg
+    #[tokio::test]
+    async fn matches_every_line_with_an_empty_query() {
+        let search = search_log("", b"{\"seq\":1}\n\nplain\n").await;
+
+        assert_eq!(hit_lines(&search), [(1, r#"{"seq":1}"#), (2, ""), (3, "plain")]);
     }
 
     #[tokio::test]
