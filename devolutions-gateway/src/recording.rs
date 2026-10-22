@@ -86,11 +86,14 @@ impl JrecManifest {
         use std::io::Write as _;
 
         let path = path.as_ref();
-        let partial = path.with_extension("json.partial");
+        // jrec never serves a name that starts with a dot, so a file a crash left behind is never downloaded.
+        let partial = path.with_file_name(".recording.json.partial");
         let json = serde_json::to_string_pretty(&self)?;
 
         let mut file = std::fs::File::create(&partial)?;
         file.write_all(json.as_bytes())?;
+        // UNTESTED: a crash leaves the old manifest or the new one, never half of it, only while the file is synced
+        // before the rename.
         file.sync_all()?;
         drop(file);
 
