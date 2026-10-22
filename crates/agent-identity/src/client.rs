@@ -13,7 +13,7 @@ use base64::engine::general_purpose::STANDARD;
 use camino::Utf8Path;
 use der::{Decode as _, Encode as _};
 use device_key::DeviceKey;
-use http_client_proxy::{AutomaticConfiguration, ProxyConfig};
+use http_client_proxy::{ProxyConfig, SystemProxySettings};
 use p256::ecdsa::VerifyingKey;
 use p256::pkcs8::EncodePublicKey as _;
 use reqwest::header::{CONTENT_TYPE, RETRY_AFTER};
@@ -213,7 +213,7 @@ impl Client {
         warn_on_automatic_configuration(
             &AUTOMATIC_CONFIGURATION_WARNED,
             &self.proxy,
-            http_client_proxy::system_automatic_configuration,
+            http_client_proxy::read_system_proxy_settings,
         );
         // UNTESTED: Each identity request must use the proxy selected for its own URL, including bypasses.
         // Reqwest otherwise applies environment proxies to bypassed targets.
@@ -467,27 +467,29 @@ fn check_proxy_is_usable(proxy: &Url) -> ClientResult<()> {
     Ok(())
 }
 
-/// Warns once, through `warned`, that System mode doesn't evaluate the Windows automatic proxy configuration `read`
-/// returns.
+/// Warns once, through `warned`, that System mode connects directly instead of evaluating the Windows automatic proxy
+/// configuration of the settings `read` returns.
 ///
-/// Until it does, identity requests connect directly (`crates/agent-identity/INTENT.md`, "Trust and transport").
-/// A configuration that can't be read logs no warning.
+/// It doesn't evaluate a PAC script or WPAD discovery yet (`crates/agent-identity/INTENT.md`, "Trust and transport").
+/// Settings that name a proxy, or that can't be read, log no warning.
 fn warn_on_automatic_configuration(
     warned: &AtomicBool,
     proxy: &ProxyConfig,
-    read: impl FnOnce() -> std::io::Result<AutomaticConfiguration>,
+    read: impl FnOnce() -> anyhow::Result<SystemProxySettings>,
 ) {
     if !matches!(proxy, ProxyConfig::System) || warned.load(Ordering::Relaxed) {
         return;
     }
-    let configuration = match read() {
-        Ok(configuration) => configuration,
+    let settings = match read() {
+        Ok(settings) => settings,
         Err(error) => {
-            debug!(%error, "Failed to read the Windows automatic proxy configuration");
+            debug!(error = format!("{error:#}"), "Failed to read the system proxy settings");
             return;
         }
     };
-    if (configuration.automatic_detection || configuration.configuration_script)
+    let configuration = settings.automatic_configuration;
+    if !settings.names_proxy
+        && (configuration.automatic_detection || configuration.configuration_script)
         && !warned.swap(true, Ordering::Relaxed)
     {
         warn!(
@@ -662,7 +664,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use http_client_proxy::ManualProxyConfig;
+    use http_client_proxy::{AutomaticConfiguration, ManualProxyConfig};
     use p256::ecdsa::{DerSignature, Signature, SigningKey};
     use rstest::rstest;
     use spki::SubjectPublicKeyInfoOwned;
@@ -1151,35 +1153,58 @@ mod tests {
         }
     }
 
-    fn automatic_configuration(automatic_detection: bool, configuration_script: bool) -> AutomaticConfiguration {
-        AutomaticConfiguration {
-            automatic_detection,
-            configuration_script,
+    fn without_a_proxy(automatic_detection: bool, configuration_script: bool) -> SystemProxySettings {
+        SystemProxySettings {
+            names_proxy: false,
+            automatic_configuration: AutomaticConfiguration {
+                automatic_detection,
+                configuration_script,
+            },
         }
     }
 
-    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
-    #[rstest]
-    #[case::automatic_detection(ProxyConfig::System, automatic_configuration(true, false), 1)]
-    #[case::configuration_script(ProxyConfig::System, automatic_configuration(false, true), 1)]
-    #[case::neither(ProxyConfig::System, automatic_configuration(false, false), 0)]
-    #[case::proxy_off(ProxyConfig::Off, automatic_configuration(true, true), 0)]
-    fn warns_once_per_run_that_system_mode_skips_automatic_proxy_configuration(
-        #[case] proxy: ProxyConfig,
-        #[case] configuration: AutomaticConfiguration,
-        #[case] expected_warnings: usize,
-    ) {
+    /// Returns how many warnings the first identity request of a run and a later one log.
+    fn warnings_of_two_requests(proxy: &ProxyConfig, settings: SystemProxySettings) -> usize {
         let warned = AtomicBool::new(false);
         let warnings = Arc::new(AtomicUsize::new(0));
         let subscriber = tracing_subscriber::registry().with(WarningCount(Arc::clone(&warnings)));
 
         tracing::subscriber::with_default(subscriber, || {
-            // The first identity request of the run, then a later one.
             for _ in 0..2 {
-                warn_on_automatic_configuration(&warned, &proxy, || Ok(configuration));
+                warn_on_automatic_configuration(&warned, proxy, || Ok(settings));
             }
         });
 
-        assert_eq!(warnings.load(Ordering::SeqCst), expected_warnings);
+        warnings.load(Ordering::SeqCst)
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    #[rstest]
+    #[case::automatic_detection(ProxyConfig::System, without_a_proxy(true, false), 1)]
+    #[case::configuration_script(ProxyConfig::System, without_a_proxy(false, true), 1)]
+    #[case::neither(ProxyConfig::System, without_a_proxy(false, false), 0)]
+    #[case::proxy_off(ProxyConfig::Off, without_a_proxy(true, true), 0)]
+    fn warns_once_per_run_that_system_mode_skips_automatic_proxy_configuration(
+        #[case] proxy: ProxyConfig,
+        #[case] settings: SystemProxySettings,
+        #[case] expected_warnings: usize,
+    ) {
+        assert_eq!(warnings_of_two_requests(&proxy, settings), expected_warnings);
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    #[test]
+    fn a_user_proxy_silences_the_warning_about_a_stale_machine_automatic_configuration() {
+        // The current user's settings name a proxy, which System mode uses without consulting the machine's settings,
+        // so identity requests go through it although the machine's settings still enable a PAC script and automatic
+        // detection.
+        let settings = SystemProxySettings {
+            names_proxy: true,
+            automatic_configuration: AutomaticConfiguration {
+                automatic_detection: true,
+                configuration_script: true,
+            },
+        };
+        assert_eq!(warnings_of_two_requests(&ProxyConfig::System, settings), 0);
     }
 }

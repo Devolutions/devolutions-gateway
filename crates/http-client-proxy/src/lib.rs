@@ -153,42 +153,65 @@ impl AutomaticConfiguration {
     }
 }
 
-/// Reads whether the WinINet settings that System mode reads enable automatic proxy configuration.
+/// What System mode reads of the system proxy settings, for a warning about the automatic configuration it skips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SystemProxySettings {
+    /// Whether the system settings name a proxy, which System mode selects from instead of connecting directly.
+    pub names_proxy: bool,
+    /// The automatic configuration that the WinINet settings of the current user or of the machine enable.
+    pub automatic_configuration: AutomaticConfiguration,
+}
+
+/// Reads whether the system settings name a proxy, and which automatic configuration the WinINet settings that System
+/// mode reads enable.
 ///
-/// System mode reads the settings of the current user and of the machine, and takes no proxy from settings that enable
-/// automatic configuration.
+/// System mode reads the WinINet settings of the current user and of the machine, and takes no proxy from settings that
+/// enable automatic configuration.
 /// Settings that were never saved enable none, as do platforms other than Windows.
-pub fn system_automatic_configuration() -> std::io::Result<AutomaticConfiguration> {
-    #[cfg(windows)]
-    {
-        use winreg::RegKey;
-        use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+pub fn read_system_proxy_settings() -> anyhow::Result<SystemProxySettings> {
+    // UNTESTED: these are the settings System mode selects from, so that a proxy they name, such as the current user's,
+    // silences a warning about the automatic configuration of other settings.
+    // When changing this, check that a proxy set for the service account with automatic configuration still enabled for
+    // the machine logs no warning.
+    let names_proxy = proxy_cfg::get_proxy_config()
+        .map_err(|e| anyhow::anyhow!("failed to detect proxy configuration: {e}"))?
+        .is_some();
+    Ok(SystemProxySettings {
+        names_proxy,
+        automatic_configuration: windows_automatic_configuration()?,
+    })
+}
 
-        const CONNECTIONS: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections";
+#[cfg(windows)]
+fn windows_automatic_configuration() -> std::io::Result<AutomaticConfiguration> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
 
-        // UNTESTED: the registry is machine state a unit test can't set without changing the machine.
-        // When changing this, check a PAC script and automatic detection, each set for the service account and for the
-        // machine, and a hive without the `Connections` key.
-        let mut configuration = AutomaticConfiguration::default();
-        for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
-            let settings = match RegKey::predef(hive)
-                .open_subkey(CONNECTIONS)
-                .and_then(|connections| connections.get_raw_value("DefaultConnectionSettings"))
-            {
-                Ok(settings) => settings,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(error),
-            };
-            let enabled = AutomaticConfiguration::from_default_connection_settings(&settings.bytes);
-            configuration.automatic_detection |= enabled.automatic_detection;
-            configuration.configuration_script |= enabled.configuration_script;
-        }
-        Ok(configuration)
+    const CONNECTIONS: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections";
+
+    // UNTESTED: the registry is machine state a unit test can't set without changing the machine.
+    // When changing this, check a PAC script and automatic detection, each set for the service account and for the
+    // machine, and a hive without the `Connections` key.
+    let mut configuration = AutomaticConfiguration::default();
+    for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        let settings = match RegKey::predef(hive)
+            .open_subkey(CONNECTIONS)
+            .and_then(|connections| connections.get_raw_value("DefaultConnectionSettings"))
+        {
+            Ok(settings) => settings,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let enabled = AutomaticConfiguration::from_default_connection_settings(&settings.bytes);
+        configuration.automatic_detection |= enabled.automatic_detection;
+        configuration.configuration_script |= enabled.configuration_script;
     }
-    #[cfg(not(windows))]
-    {
-        Ok(AutomaticConfiguration::default())
-    }
+    Ok(configuration)
+}
+
+#[cfg(not(windows))]
+fn windows_automatic_configuration() -> std::io::Result<AutomaticConfiguration> {
+    Ok(AutomaticConfiguration::default())
 }
 
 /// Generates a cache key for HTTP clients based on URL and proxy configuration.
