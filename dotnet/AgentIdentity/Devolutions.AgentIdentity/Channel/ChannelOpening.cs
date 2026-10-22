@@ -73,8 +73,14 @@ public sealed class ChannelOpening
     public ServerMessage Challenge { get; }
 
     /// <summary>
-    /// The thumbprint of the certificate that signed the opening request, for logs.
+    /// The thumbprint of the certificate that signed the opening request,
+    /// for logs and to key the stream among the host's live streams until the handshake reveals the identity.
     /// </summary>
+    /// <remarks>
+    /// The host adds the stream under this thumbprint to the live streams that its revocation and deletion paths
+    /// close before it ends the handshake, so that a revocation that commits after the handshake's registry read
+    /// still finds and closes the stream.
+    /// </remarks>
     public string CertificateThumbprint => Certificate.Thumbprint;
 
     /// <summary>
