@@ -226,6 +226,12 @@ impl Store {
         identity: &StoredIdentity,
     ) -> anyhow::Result<()> {
         self.validate_identity(identity)?;
+        // Checked before any key is deleted, so a refused identity leaves the previous file and its keys intact.
+        let bytes = serde_json::to_vec(identity).context("encode stored identity")?;
+        ensure!(
+            bytes.len() as u64 <= MAX_IDENTITY_BYTES,
+            "stored identity exceeds size limit"
+        );
         ensure!(
             previous.is_none_or(|previous| previous.authority_id == identity.authority_id),
             "stored identity authority changed"
@@ -269,7 +275,6 @@ impl Store {
                 }
             }
         }
-        let bytes = serde_json::to_vec(identity).context("encode stored identity")?;
         private_file::write_atomic(
             &self.data_dir,
             &self.identity_path(identity.authority_id),
@@ -1613,6 +1618,50 @@ mod tests {
                 "{size}"
             );
         }
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn an_identity_past_2_mib_is_never_written() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let old = enroll_locally(&store, &directory.0)?;
+        let path = store.identity_path(old.authority_id);
+        let old_bytes = fs::read(&path)?;
+        let token = token_for("https://other.test")?;
+        pending::write(&directory.0, &token, true)?;
+        let (progress, _key) = store
+            .begin_enrollment(&token)?
+            .context("new token was already processed")?;
+        let mut new = old.clone();
+        new.identity_id = Uuid::new_v4();
+        new.token_sha256 = token.sha256_hex();
+        new.keys.current.key_name = progress.key_name;
+        // A second chain entry pads the serialized identity to an exact size: `,"` before it and `"` after it.
+        let unpadded = serde_json::to_vec(&new)?.len();
+        let sized = |size: usize| {
+            let mut identity = new.clone();
+            let padding = "A".repeat(size - unpadded - r#","""#.len());
+            identity.keys.current.certificate_chain = Some(vec!["YWJj".into(), padding]);
+            identity
+        };
+        let oversized = sized(2 * 1024 * 1024 + 1);
+        assert_eq!(serde_json::to_vec(&oversized)?.len(), 2 * 1024 * 1024 + 1);
+
+        assert!(store.replace_identity(&old, &oversized).is_err());
+
+        assert_eq!(fs::read(&path)?, old_bytes);
+        // oracle: mutant size check moved after the replaced identity's keys are deleted
+        assert!(keys::open(store.key_backend(), &old.keys.current.key_name)?.is_some());
+
+        let at_limit = sized(2 * 1024 * 1024);
+        store.replace_identity(&old, &at_limit)?;
+        assert_eq!(fs::read(&path)?.len(), 2 * 1024 * 1024);
+        assert_eq!(store.read_identity(old.authority_id)?, Some(at_limit));
         Ok(())
     }
 
