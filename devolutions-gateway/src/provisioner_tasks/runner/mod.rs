@@ -147,10 +147,13 @@ impl Attempt {
         self.latest.lock().deadline_at
     }
 
-    /// State of another record, such as an earlier Task of the same target; `None` for an unknown one.
+    /// State of another record of the same target, such as an earlier Task; `None` for an unknown one or one of another
+    /// target. One past its deadline is failed first.
     pub async fn state_of(&self, task_id: Uuid) -> anyhow::Result<Option<ProvisionerTaskState>> {
         let record = self.store.get(task_id, OffsetDateTime::now_utc()).await?;
-        Ok(record.map(|record| record.state))
+        Ok(record
+            .filter(|record| record.target == self.target)
+            .map(|record| record.state))
     }
 
     /// Replaces the payload of the running record and moves its deadline ahead, so whoever asks about it sees how the
