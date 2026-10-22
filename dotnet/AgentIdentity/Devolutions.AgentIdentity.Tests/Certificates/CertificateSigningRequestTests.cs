@@ -216,11 +216,9 @@ public class CertificateSigningRequestTests
 
         // The specified form of the P-256 domain parameters,
         // which .NET writes for a key imported with explicit parameters.
-        ["specifiedCurve"] = key =>
-        {
-            using ECDsa explicitKey = ECDsa.Create(key.ExportExplicitParameters(includePrivateParameters: false));
-            return explicitKey.ExportSubjectPublicKeyInfo();
-        },
+        ["specifiedCurve"] = key => TestCsr.SubjectPublicKeyInfo(
+            TestCsr.Sequence(TestCsr.Oid(TestCsr.IdEcPublicKey), P256SpecifiedDomain()),
+            TestCsr.UncompressedPoint(key)),
     };
 
     // CONTRACT.agent-identity.md §4: an uncompressed point, so that each key has exactly one SubjectPublicKeyInfo.
@@ -717,6 +715,50 @@ public class CertificateSigningRequestTests
         byte[] spki = TestCsr.SubjectPublicKeyInfo(TestCsr.P256Algorithm(), point);
 
         return TestCsr.Request(TestCsr.RequestInfo(spki), signer);
+    }
+
+    // The ECParameters of P-256 (RFC 3279 §2.3.5), which SEC 1 §C.2 calls SpecifiedECDomain,
+    // written by hand because not every platform exports a named curve's explicit parameters.
+    // Each value is that of secp256r1 in SEC 2 §2.4.2.
+    private static byte[] P256SpecifiedDomain()
+    {
+        AsnWriter writer = new(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            // version: ecpVer1.
+            writer.WriteInteger(1);
+
+            // fieldID: prime-field, { id-fieldType 1 } (RFC 3279 §2.3.5), whose parameters are the prime p.
+            using (writer.PushSequence())
+            {
+                writer.WriteObjectIdentifier("1.2.840.10045.1.1");
+                writer.WriteIntegerUnsigned(
+                    Convert.FromHexString("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF"));
+            }
+
+            // curve: the coefficients a and b, each a field element of 32 octets (SEC 1 §2.3.5), and no seed.
+            using (writer.PushSequence())
+            {
+                writer.WriteOctetString(
+                    Convert.FromHexString("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFC"));
+                writer.WriteOctetString(
+                    Convert.FromHexString("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B"));
+            }
+
+            // base: the base point G in uncompressed form (SEC 1 §2.3.3).
+            writer.WriteOctetString(Convert.FromHexString(
+                "046B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296"
+                + "4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5"));
+
+            // order: n.
+            writer.WriteIntegerUnsigned(
+                Convert.FromHexString("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551"));
+
+            // cofactor: h.
+            writer.WriteInteger(1);
+        }
+
+        return writer.Encode();
     }
 
     // Each attempt signs a request info with another subject, so that the search does not rely on random signatures.
