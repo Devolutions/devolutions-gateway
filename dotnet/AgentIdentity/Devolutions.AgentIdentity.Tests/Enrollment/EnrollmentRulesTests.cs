@@ -21,6 +21,16 @@ public class EnrollmentRulesTests
         ["the key of a deleted identity"] = IssuedKeyMatch.ForDeletedIdentity(),
     };
 
+    // A decision of each outcome but the creation of an identity: an expired token's refusal and a replay.
+    private static Dictionary<EnrollmentOutcome, EnrollmentDecision> DecisionsButCreateIdentity => new()
+    {
+        [EnrollmentOutcome.Reject] = EnrollmentRules.Decide(Token(expired: true), null, Now),
+        [EnrollmentOutcome.ReturnExistingIdentity] = EnrollmentRules.Decide(
+            Token(),
+            IssuedKeyMatch.ForIdentity(IdentityId, true, false, CertificateStatus.Current),
+            Now),
+    };
+
     // A token creates an identity when it exists, has not been deleted,
     // has not expired, and fewer than `max_uses` identities have been created with it; (6) a new identity.
     // The rows are a usable token, one that expires one tick after now, and one that can create one more identity.
@@ -40,6 +50,43 @@ public class EnrollmentRulesTests
         Assert.Equal(EnrollmentOutcome.CreateIdentity, decision.Outcome);
         Assert.Null(decision.ExistingIdentityId);
         Assert.Null(decision.Error);
+    }
+
+    // Security invariant 2: the authority mints the identity's UUID,
+    // so a decision to create an identity carries one, not the nil UUID that an unset Guid holds.
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
+    [Fact]
+    public void CreateIdentityCarriesAnIdentityId()
+    {
+        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), null, Now);
+
+        Guid identityId = Assert.NotNull(decision.NewIdentityId);
+        Assert.NotEqual(Guid.Empty, identityId);
+    }
+
+    // Security invariant 2: the authority mints the identity's UUID, and an identity is never derived from the
+    // enrollment token, so two identities that one token creates get different IDs.
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
+    [Fact]
+    public void EachCreateIdentityCarriesADifferentIdentityId()
+    {
+        EnrollmentDecision first = EnrollmentRules.Decide(Token(), null, Now);
+        EnrollmentDecision second = EnrollmentRules.Decide(Token(), null, Now);
+
+        Assert.NotEqual(first.NewIdentityId, second.NewIdentityId);
+    }
+
+    // A refusal creates no identity, and a replay returns the identity that the key already belongs to.
+    [Theory]
+    // oracle: mutant a refusal that carries a new identity ID
+    [InlineData(EnrollmentOutcome.Reject)]
+    // oracle: mutant a replay that carries a new identity ID
+    [InlineData(EnrollmentOutcome.ReturnExistingIdentity)]
+    public void CarriesNoNewIdentityIdWhenCreatingNone(EnrollmentOutcome outcome)
+    {
+        EnrollmentDecision decision = DecisionsButCreateIdentity[outcome];
+
+        Assert.Null(decision.NewIdentityId);
     }
 
     // When several outcomes apply, the earliest wins:

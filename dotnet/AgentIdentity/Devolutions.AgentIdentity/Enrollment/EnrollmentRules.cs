@@ -19,7 +19,7 @@ public static class EnrollmentRules
     /// <c>token_invalid</c> for a deleted token,
     /// then <c>token_expired</c> once <paramref name="now"/> reaches its expiry;
     /// <c>token_exhausted</c> once it has created <see cref="EnrollmentTokenState.MaxUses"/> identities;
-    /// a new identity.
+    /// a new identity, whose ID, <see cref="EnrollmentDecision.NewIdentityId"/>, is minted at random for this decision.
     /// </para>
     /// <para>
     /// The CSR key lookup takes the first matching rule:
@@ -79,7 +79,7 @@ public static class EnrollmentRules
                 "The token has created its maximum number of identities.");
         }
 
-        return EnrollmentDecision.CreateIdentity;
+        return EnrollmentDecision.CreateIdentity(Guid.NewGuid());
     }
 
     // The key rules after the replay, in their order; a deleted identity matches only its own rule.

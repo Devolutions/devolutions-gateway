@@ -11,7 +11,7 @@ public enum EnrollmentOutcome
     // values start at 1 so that an uninitialized outcome is not a valid one.
 
     /// <summary>
-    /// Create a new identity, which counts one use of the token.
+    /// Create a new identity under <see cref="EnrollmentDecision.NewIdentityId"/>, which counts one use of the token.
     /// </summary>
     CreateIdentity = 1,
 

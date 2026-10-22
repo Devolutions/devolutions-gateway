@@ -20,8 +20,7 @@ public static class IdentityCertificateIssuer
     public static TimeSpan DefaultLifetime { get; } = TimeSpan.FromDays(90);
 
     /// <summary>
-    /// Issues the certificate of a new identity, whose ID the authority mints at enrollment,
-    /// for the key of a validated CSR.
+    /// Issues the certificate of the new identity that an enrollment decision creates, for the key of a validated CSR.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -29,7 +28,8 @@ public static class IdentityCertificateIssuer
     /// the subject alternative name URI <c>urn:uuid:&lt;identity ID&gt;</c>, the extended key usage clientAuth,
     /// the critical key usage digitalSignature, a subject key identifier,
     /// an authority key identifier equal to the issuer's subject key identifier, and no basic constraints.
-    /// The identity ID is written lowercase and hyphenated, and nothing else from the CSR reaches the certificate.
+    /// The identity ID is <see cref="EnrollmentDecision.NewIdentityId"/>, written lowercase and hyphenated,
+    /// and nothing else from the CSR reaches the certificate.
     /// </para>
     /// <para>
     /// It is valid from the current time, truncated to the second, for <paramref name="lifetime"/>,
@@ -38,23 +38,50 @@ public static class IdentityCertificateIssuer
     /// and <paramref name="issuer"/> signs it with SHA-256.
     /// </para>
     /// <para>
+    /// Taking the decision rather than an ID keeps the authority from certifying a key for an identity
+    /// that no enrollment created.
     /// A renewal certifies a key for an existing identity,
     /// so it uses the overload that takes the identity that the renew request proved.
     /// </para>
     /// </remarks>
-    /// <param name="identityId">The ID that the authority minted for the new identity.</param>
+    /// <param name="creating">
+    /// The decision of <see cref="EnrollmentRules.Decide"/> to create the identity,
+    /// whose <see cref="EnrollmentDecision.Outcome"/> is <see cref="EnrollmentOutcome.CreateIdentity"/>.
+    /// </param>
     /// <param name="csr">The validated CSR whose key the certificate is for.</param>
     /// <param name="issuer">The root that signs the certificate.</param>
     /// <param name="lifetime">The certificate lifetime, usually <see cref="DefaultLifetime"/>.</param>
     /// <param name="timeProvider">The clock, read once.</param>
     /// <param name="random">The source of the serial number.</param>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="creating"/> does not create an identity;
+    /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second.
+    /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="lifetime"/> is shorter than one second.
     /// </exception>
-    /// <exception cref="ArgumentException">
-    /// The issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second.
-    /// </exception>
     public static X509Certificate2 Issue(
+        EnrollmentDecision creating,
+        CertificateSigningRequest csr,
+        IRootSigner issuer,
+        TimeSpan lifetime,
+        TimeProvider timeProvider,
+        RandomNumberGenerator random)
+    {
+        ArgumentNullException.ThrowIfNull(creating);
+
+        if (creating.Outcome != EnrollmentOutcome.CreateIdentity)
+        {
+            throw new ArgumentException("The enrollment decision does not create an identity.", nameof(creating));
+        }
+
+        // A decision to create an identity always carries the ID minted for it.
+        return Issue(creating.NewIdentityId!.Value, csr, issuer, lifetime, timeProvider, random);
+    }
+
+    // Private so that a certificate is issued only for an identity ID taken from a proof of that identity.
+    private static X509Certificate2 Issue(
         Guid identityId,
         CertificateSigningRequest csr,
         IRootSigner issuer,
@@ -126,7 +153,8 @@ public static class IdentityCertificateIssuer
     /// Issues the pending certificate of a renewal, for the identity that signed the renew request.
     /// </summary>
     /// <remarks>
-    /// The certificate is the one that the other overload issues for <see cref="AuthenticatedIdentity.IdentityId"/>.
+    /// The certificate is the one that the other overload issues, with <see cref="AuthenticatedIdentity.IdentityId"/>
+    /// as the identity ID.
     /// Taking the identity that the signature check produced, rather than an ID,
     /// keeps a renewal from certifying a key for an identity that a request only named.
     /// </remarks>
