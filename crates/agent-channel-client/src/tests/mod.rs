@@ -11,6 +11,7 @@ use agent_channel_proto::{Ack, ConfigUpdate, Reconnect, RenewRequested, Welcome,
 use anyhow::anyhow;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
+use http::StatusCode;
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use p256::pkcs8::DecodePrivateKey as _;
 use rstest::rstest;
@@ -649,9 +650,10 @@ async fn an_untrusted_server_certificate_is_an_outage() -> anyhow::Result<()> {
 
 // oracle: intent crates/agent-channel-client/INTENT.md §Connection
 #[rstest]
-#[case::html_over_http2(Mode::Http2Page("text/html"))]
+#[case::html_over_http2(Mode::Http2Page(StatusCode::NOT_FOUND, "text/html"))]
+#[case::html_with_success_over_http2(Mode::Http2Page(StatusCode::OK, "text/html"))]
 // oracle: spec gRPC Web (grpc/grpc doc/PROTOCOL-WEB.md) §Protocol differences vs gRPC over HTTP2
-#[case::grpc_web_over_http2(Mode::Http2Page("application/grpc-web"))]
+#[case::grpc_web_over_http2(Mode::Http2Page(StatusCode::NOT_FOUND, "application/grpc-web"))]
 #[case::http1_without_alpn(Mode::Http1WithoutAlpn)]
 #[case::http1_alpn(Mode::Http1Alpn)]
 #[tokio::test]
@@ -662,6 +664,26 @@ async fn a_path_that_cannot_carry_grpc_is_reported_as_such(#[case] mode: Mode) -
 
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::NoGrpcPath));
+    Ok(())
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+// oracle: spec RFC 9110 §15.6
+// A 5xx status reports a failure of the server, such as a reverse proxy whose upstream is down, not a path that can't
+// carry gRPC.
+#[rstest]
+#[case::internal_server_error(StatusCode::INTERNAL_SERVER_ERROR)]
+#[case::bad_gateway(StatusCode::BAD_GATEWAY)]
+#[case::service_unavailable(StatusCode::SERVICE_UNAVAILABLE)]
+#[case::gateway_timeout(StatusCode::GATEWAY_TIMEOUT)]
+#[tokio::test]
+async fn a_non_grpc_server_error_is_an_outage(#[case] status: StatusCode) -> anyhow::Result<()> {
+    let authority = TestAuthority::start(Mode::Http2Page(status, "text/html")).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, Settings::default())?.connect(identity.target(&authority.url))?;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     Ok(())
 }
 

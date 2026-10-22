@@ -329,9 +329,21 @@ fn is_grpc(response: &Response<Incoming>) -> bool {
         && matches!(content_type.as_bytes().get(GRPC.len()), None | Some(b'+' | b';'))
 }
 
-/// A response that shows the path to the authority can't carry gRPC.
+/// A response without a gRPC content type.
 #[derive(Debug)]
 pub(crate) struct NotGrpc(http::StatusCode);
+
+impl NotGrpc {
+    /// Returns what the response shows: a 5xx status reports a failure of the server (RFC 9110 §15.6), such as
+    /// downtime behind a reverse proxy, and any other status a path that can't carry gRPC.
+    pub(crate) fn kind(&self) -> TransientKind {
+        if self.0.is_server_error() {
+            TransientKind::Outage
+        } else {
+            TransientKind::NoGrpcPath
+        }
+    }
+}
 
 impl fmt::Display for NotGrpc {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {

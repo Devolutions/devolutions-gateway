@@ -86,8 +86,8 @@ impl Closure {
     pub(crate) fn from_status(status: &tonic::Status) -> Self {
         let mut cause = status.source();
         while let Some(error) = cause {
-            if error.is::<NotGrpc>() {
-                return Self::transient(TransientKind::NoGrpcPath, error);
+            if let Some(not_grpc) = error.downcast_ref::<NotGrpc>() {
+                return Self::transient(not_grpc.kind(), error);
             }
             cause = error.source();
         }

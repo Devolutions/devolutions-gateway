@@ -36,8 +36,9 @@ pub(super) enum Mode {
     Grpc,
     /// A gRPC authority over HTTP/2 whose responses carry this content type.
     GrpcAs(&'static str),
-    /// HTTP/2 that answers every request with a page of this content type, like a reverse proxy without a gRPC route.
-    Http2Page(&'static str),
+    /// HTTP/2 that answers every request with a page of this status and content type, like a reverse proxy without a
+    /// gRPC route or in front of a server that is down.
+    Http2Page(http::StatusCode, &'static str),
     /// HTTP/1.1 without ALPN, like a reverse proxy that ignores the offer of HTTP/2.
     Http1WithoutAlpn,
     /// A server whose only ALPN protocol is `http/1.1`.
@@ -96,7 +97,7 @@ impl TestAuthority {
     pub(super) async fn start(mode: Mode) -> anyhow::Result<Self> {
         let pki = Pki::generate()?;
         let alpn: &[&[u8]] = match mode {
-            Mode::Grpc | Mode::GrpcAs(_) | Mode::Http2Page(_) => &[b"h2"],
+            Mode::Grpc | Mode::GrpcAs(_) | Mode::Http2Page(..) => &[b"h2"],
             Mode::Http1WithoutAlpn => &[],
             Mode::Http1Alpn => &[b"http/1.1"],
         };
@@ -122,7 +123,7 @@ impl TestAuthority {
                     match mode {
                         Mode::Grpc => serve_grpc(io, grpc, None).await,
                         Mode::GrpcAs(content_type) => serve_grpc(io, grpc, Some(content_type)).await,
-                        Mode::Http2Page(content_type) => serve_page(io, content_type).await,
+                        Mode::Http2Page(status, content_type) => serve_page(io, status, content_type).await,
                         Mode::Http1WithoutAlpn | Mode::Http1Alpn => answer_http1(io).await,
                     }
                 });
@@ -398,13 +399,13 @@ where
         .await;
 }
 
-async fn serve_page<IO>(io: IO, content_type: &'static str)
+async fn serve_page<IO>(io: IO, status: http::StatusCode, content_type: &'static str)
 where
     IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let service = hyper::service::service_fn(move |_request: http::Request<hyper::body::Incoming>| async move {
         let response = http::Response::builder()
-            .status(http::StatusCode::NOT_FOUND)
+            .status(status)
             .header(http::header::CONTENT_TYPE, content_type)
             .body(tonic::body::empty_body())
             .expect("valid response");
