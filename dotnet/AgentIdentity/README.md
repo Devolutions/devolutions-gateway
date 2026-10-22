@@ -38,6 +38,21 @@ The host provides these dependencies, with the guarantees the library relies on:
   Take the `now` of `EnrollmentRules.Decide` and the `serverTime` of every error from the same clock, since the agent corrects its own clock from `server_time`.
 - `RandomNumberGenerator` must be cryptographically secure, such as `RandomNumberGenerator.Create()`, since it supplies channel challenges, token secrets and certificate serial numbers.
 
+The library puts this load on the registry and the nonce store:
+
+- Each signed request that passes parsing, the tag and the time window costs one `FindByThumbprintAsync`, and only one whose signature verifies also costs one `TryRecordAsync` (CONTRACT.agent-identity.md [§6]).
+  The thumbprint comes from the request, so an unauthenticated client can drive lookups with random `keyid`s.
+- Each channel stream whose opening verifies costs two registry reads, one for the opening and one when the handshake ends, as CONTRACT.agent-identity.md [§7.4] requires, and one nonce write.
+
+To bear that load, it is safe to:
+
+- look certificates up through an index on their thumbprint;
+- cache a certificate's DER by thumbprint, since it never changes;
+- answer misses from a bounded negative cache, or rate-limit them per client;
+- index the nonce store by `keyid` and `nonce`, and expire each entry at its `retainUntil`.
+
+Never cache `Status` or `IdentityRevoked` beyond one request, nor whether the identity still exists: a revocation, a deletion or a retirement takes effect from the next request only if every lookup reads them afresh.
+
 `RequestAuthenticator` keeps no state between requests, so one instance can serve them all when its dependencies accept concurrent calls.
 Exceptions from the registry and the nonce store propagate to the caller.
 
@@ -60,8 +75,8 @@ Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normall
    Describe the match with `IssuedKeyMatch.ForIdentity` or `IssuedKeyMatch.ForDeletedIdentity`, or use null when there is none.
 5. Pass the token's `EnrollmentTokenState`, the match and the current time to `EnrollmentRules.Decide`, and act on its `Outcome`:
    - `Reject`: answer with `Error`.
-   - `ReturnExistingIdentity`: take identity `ExistingIdentityId`, and change nothing.
-   - `CreateIdentity`: take `NewIdentityId`, which the library minted, as the identity's ID, issue its certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata and the key's `SubjectPublicKeyInfoSha256`.
+   - `ReturnExistingIdentity`: take identity `ExistingIdentityId`, and change nothing, not even its `last_seen_at`, since a replay proves no current possession of the device key.
+   - `CreateIdentity`: take `NewIdentityId`, which the library minted, as the identity's ID, issue its certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata, the key's `SubjectPublicKeyInfoSha256`, and the current time as its `last_seen_at`.
      Create the identity and count the token use atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent enrollments.
 6. Answer with `ResponseBodies.Enroll`, given the authority ID and the ID taken in step 5, with that identity's current certificate chain, leaf first, and config (CONTRACT.agent-identity.md [§5.2]).
 
@@ -84,18 +99,18 @@ Each then acts for the result's `Identity` only.
    - `ReturnPendingCertificate`: keep the identity's pending certificate, which holds the key.
    - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the `AuthenticatedIdentity`, and store it as the identity's pending certificate, retiring the previous one.
      Store it atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent renewals.
-3. Replace the identity's metadata, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.agent-identity.md [§5.3]).
+3. Replace the identity's metadata, set its `last_seen_at` to the current time, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.agent-identity.md [§5.3]).
 
 ### `confirm`
 
 Parse the body with `ConfirmRequestBody.Parse`, and answer a non-empty body with the result's `Error` before changing any state (CONTRACT.agent-identity.md [§5.5]).
 When `Identity.CertificateStatus` is `CertificateStatus.Pending`, make the certificate current, retire the previous current certificate, and clear the request-renewal flag if it was set before the certificate was issued (CONTRACT.agent-identity.md [§8.2]).
 Then send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)` on each stream that the retired certificate opened, and close those streams with `OK` 60 s later (CONTRACT.agent-identity.md [§7.4]).
-Answer `204`, also when the certificate was already current (CONTRACT.agent-identity.md [§5.5]).
+Set the identity's `last_seen_at` to the current time and answer `204`, also when the certificate was already current (CONTRACT.agent-identity.md [§5.5]).
 
 ### `check-in`
 
-Replace the identity's metadata, and answer with `ResponseBodies.CheckIn`, given the identity's config and its request-renewal flag (CONTRACT.agent-identity.md [§5.6], [§8.2]).
+Replace the identity's metadata, set its `last_seen_at` to the current time, and answer with `ResponseBodies.CheckIn`, given the identity's config and its request-renewal flag (CONTRACT.agent-identity.md [§5.6], [§8.2]).
 
 ### Agent channel
 
@@ -104,17 +119,21 @@ The send limit is only a backstop, since `IdentityConfig.Create` refuses a confi
 
 1. Pass the request method and the values of the `signature-input` and `signature` request headers, in received order, to `RequestAuthenticator.AuthenticateChannelOpeningAsync`.
 2. Send the result's `Opening.Challenge` as the first message on the stream.
-3. Pass the first agent message to `Opening.VerifyHelloAsync`.
+3. Before any call of step 4, add the stream to the live streams that the revocation and deletion paths close, under `Opening.CertificateThumbprint` since its identity is still hidden, and remove it if the handshake fails.
+4. Pass the first agent message to `Opening.VerifyHelloAsync`.
    Call `Opening.HelloTimedOutAsync` instead when no message arrives within `ChannelHandshake.HelloTimeout`, when `Opening.CertificateNotAfter` passes first, or when the agent ends the stream without a message.
    Call `Opening.FirstMessageUnreadableAsync` instead when the first message cannot be decoded, for example because it exceeds `MaxReceiveMessageSize` or a protobuf `string` holds invalid UTF-8 (CONTRACT.agent-identity.md [§7.1], [§7.3] step 4).
    The first of these calls ends the handshake, and a second one throws `InvalidOperationException`.
-4. On success, replace the identity's metadata with `Metadata`, send `Welcome`, and only then treat the stream as authenticated for `Identity`.
-5. Send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.agent-identity.md [§7.3] steps 5 and 7).
-6. If `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: also send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)`, and close the stream with `OK` 60 s later, as for `confirm` (CONTRACT.agent-identity.md [§7.4]).
-7. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.agent-identity.md [§7.4]).
-8. When a later agent message cannot be decoded or exceeds `MaxReceiveMessageSize`, close the stream with `AgentIdentityError.From(AgentIdentityErrorCode.InvalidRequest).ToRpcException(serverTime)` (CONTRACT.agent-identity.md [§7.4]).
+5. On success, replace the identity's metadata with `Metadata`, set its `last_seen_at` to the current time, send `Welcome`, and only then treat the stream as authenticated for `Identity`.
+   Set `last_seen_at` again on every later agent message, but not when the stream closes, since a closure proves no possession of the device key (Configuration and metadata in [INTENT.agent-identity.md][last-seen-at]).
+6. Send `ChannelMessages.RenewRequested` if the identity's request-renewal flag is set, and `ChannelMessages.ConfigUpdate` if the `Revision` of its config is higher than `applied_state_versions["config"]` of the `Hello` (CONTRACT.agent-identity.md [§7.3] steps 5 and 7).
+7. If `Identity.CertificateStatus` is `CertificateStatus.Retired`, the certificate was retired during the handshake: also send `ChannelMessages.Reconnect(ReconnectReason.CertificateRotated)`, and close the stream with `OK` 60 s later, as for `confirm` (CONTRACT.agent-identity.md [§7.4]).
+8. Close the stream no later than `Identity.CertificateNotAfter` with `AgentIdentityErrorCode.CertificateExpired`, and when the identity is revoked with `AgentIdentityErrorCode.IdentityRevoked` (CONTRACT.agent-identity.md [§7.4]).
+9. When a later agent message cannot be decoded or exceeds `MaxReceiveMessageSize`, close the stream with `AgentIdentityError.From(AgentIdentityErrorCode.InvalidRequest).ToRpcException(serverTime)` (CONTRACT.agent-identity.md [§7.4]).
 
 `VerifyHelloAsync`, `HelloTimedOutAsync` and `FirstMessageUnreadableAsync` read the registry again, so a deletion, a revocation or the certificate's expiry since the opening closes the stream with its own error, ahead of the handshake failures (CONTRACT.agent-identity.md [§7.4]).
+Step 3 lets no revocation or deletion slip past that read: one that commits before the read fails the handshake, and one that commits after it finds the stream among the live streams.
+Without step 3, a stream whose identity is revoked just after the read would stay authenticated until `Identity.CertificateNotAfter`.
 A channel opening has no body: `VerifyHelloAsync` then checks the deadline, the message and its proof, and the metadata of the `Hello` last (CONTRACT.agent-identity.md [§7.3] step 4).
 
 When an identity's config changes, create its `IdentityConfig` again with a higher `Revision`, and send `ChannelMessages.ConfigUpdate` on each authenticated stream of the identity.
@@ -183,4 +202,5 @@ Implement the `AgentChannel` service with that package; a feed that serves this 
 [§8.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#server-certificate-state
 [§8.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#root-rotation
 [invariants]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/INTENT.agent-identity.md#security-invariants
+[last-seen-at]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/INTENT.agent-identity.md#configuration-and-metadata
 [errors]: #errors
