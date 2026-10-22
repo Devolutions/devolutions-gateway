@@ -36,7 +36,7 @@ const EXPIRY_CHECK_PERIOD: Duration = Duration::from_millis(250);
 /// The largest envelope either side accepts or sends, in bytes of serialized protobuf without gRPC's 5-byte message
 /// prefix ([CONTRACT.agent-identity.md][contract], "7.1 Service").
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#channel-service
 pub(crate) const ENVELOPE_LIMIT: usize = 64 * 1024;
 
 #[derive(Clone)]
@@ -50,7 +50,7 @@ pub(crate) type Received = Result<AgentMessage, Undecodable>;
 /// An agent message that cannot be decoded: malformed protobuf, or an envelope larger than [`ENVELOPE_LIMIT`], which
 /// [CONTRACT.agent-identity.md][contract] ("7.1 Service") treats alike.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#channel-service
 pub(crate) struct Undecodable;
 
 /// The channel's gRPC server, which reads and writes envelopes of at most [`ENVELOPE_LIMIT`] bytes.
@@ -66,7 +66,7 @@ pub(crate) fn grpc() -> tonic::server::Grpc<ChannelCodec> {
 /// Whether `config` fits the `ConfigUpdate` envelope that carries it ([CONTRACT.agent-identity.md][contract], "7.1
 /// Service"), serialized as the channel sends it, with the 36-character UUID `id` of every server message.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#channel-service
 pub(crate) fn config_fits_envelope(config: &Value) -> bool {
     let envelope = server_message(
         Uuid::nil().to_string(),
@@ -94,7 +94,7 @@ fn agent_messages(client: Streaming<Received>) -> impl Stream<Item = Result<Rece
 /// [CONTRACT.agent-identity.md][contract] ("7.4 Termination") closes an authenticated stream with `invalid_request`
 /// only for the former.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-termination
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#channel-termination
 pub(crate) struct ChannelCodec;
 
 impl Codec for ChannelCodec {

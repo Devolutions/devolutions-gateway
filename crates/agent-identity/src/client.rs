@@ -422,7 +422,7 @@ impl Client {
 /// Joins an operation's path onto `base_url` as text, without its trailing slashes ([CONTRACT.agent-identity.md §2
 /// "Enrollment token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
 fn operation_url(base_url: &str, operation: &str) -> String {
     format!("{}/api/agent-identity/v1/{operation}", base_url.trim_end_matches('/'))
 }

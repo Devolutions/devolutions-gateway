@@ -63,7 +63,7 @@ impl Token {
     /// Returns the token's `u` as received, without its trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment
     /// token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
     ///
-    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
     pub fn base_url(&self) -> &str {
         &self.base_url
     }
@@ -81,7 +81,7 @@ pub fn sha256_hex(value: &str) -> String {
 /// Returns whether `url` is an absolute `https` URL without a query or fragment ([CONTRACT.agent-identity.md §2
 /// "Enrollment token"][contract]).
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-enrollment-token
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
 pub(crate) fn is_base_url(url: &str) -> bool {
     Url::parse(url)
         .is_ok_and(|url| url.scheme() == "https" && url.has_host() && url.query().is_none() && url.fragment().is_none())

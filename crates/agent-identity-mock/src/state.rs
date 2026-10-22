@@ -649,7 +649,7 @@ impl State {
     /// When one config would not fit the `ConfigUpdate` envelope that carries it ([CONTRACT.agent-identity.md][contract],
     /// "7.1 Service"), it replaces none of them.
     ///
-    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-channel-service
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#channel-service
     fn replace_configs(&mut self, configs: Vec<(Uuid, Value)>) -> Result<usize, ApiError> {
         if !configs.iter().all(|(_, config)| config_fits_envelope(config)) {
             return Err(ApiError::invalid_request(
