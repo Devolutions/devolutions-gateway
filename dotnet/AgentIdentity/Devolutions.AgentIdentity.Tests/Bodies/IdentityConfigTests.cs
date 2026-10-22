@@ -57,35 +57,9 @@ public class IdentityConfigTests
         Assert.Equal(revision, config.Revision);
     }
 
-    // CONTRACT.agent-identity.md §5.2: `agent_channel_url` is an absolute `https` URL without a query or fragment.
-    // RFC 9110 §4.2.4: a sender does not generate user information in an `https` URI.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    [InlineData("")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    [InlineData("/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    [InlineData("host/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    [InlineData("http://host/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    [InlineData("wss://host/dvls")]
-    // oracle: spec RFC 9110 §4.2.2
-    [InlineData("https:///dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    [InlineData("https://host/dvls?tenant=1")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    // oracle: spec RFC 3986 §3.4
-    [InlineData("https://host/dvls?")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    [InlineData("https://host/dvls#top")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    // oracle: spec RFC 3986 §3.5
-    [InlineData("https://host/dvls#")]
-    // oracle: spec RFC 9110 §4.2.4
-    [InlineData("https://admin@host/dvls")]
-    // oracle: spec RFC 9110 §4.2.4
-    [InlineData("https://@host/dvls")]
+    [MemberData(nameof(UnacceptableUrls.Rows), MemberType = typeof(UnacceptableUrls))]
     public void CreateRejectsAnotherAgentChannelUrl(string agentChannelUrl)
     {
         ArgumentException exception =

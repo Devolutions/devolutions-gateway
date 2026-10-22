@@ -130,32 +130,10 @@ public class EnrollmentTokenTests
         Assert.Contains(creation, (Creation[])[Creation.Holding(normalized), Creation.Rejection]);
     }
 
-    // CONTRACT.agent-identity.md §2: `u` is an absolute `https` URL without a query or fragment.
-    // RFC 9110 §4.2.4 deprecates user information in an `https` URI and tells a recipient to treat it as an error.
-    private static readonly string[] UnacceptableUrls =
-    [
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-        "",
-        "/dvls",
-        "host/dvls",
-        "http://host/dvls",
-        "wss://host/dvls",
-        // oracle: spec RFC 9110 §4.2.2
-        "https:///dvls",
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-        "https://host/dvls?tenant=1",
-        "https://host/dvls?",
-        "https://host/dvls#top",
-        "https://host/dvls#",
-        // oracle: spec RFC 9110 §4.2.4
-        "https://admin@host/dvls",
-        "https://@host/dvls",
-    ];
-
     // The unacceptable URLs, and a URL one byte longer than the longest that fits in a token
     // (CONTRACT.agent-identity.md §2).
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-    public static TheoryData<string> RejectedUrlRows => new([.. UnacceptableUrls, UrlOfLength(3026)]);
+    public static TheoryData<string> RejectedUrlRows => new([.. UnacceptableUrls.All, UrlOfLength(3026)]);
 
     // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
