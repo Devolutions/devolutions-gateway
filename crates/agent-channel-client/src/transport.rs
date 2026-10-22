@@ -46,6 +46,8 @@ pub(crate) struct Transport {
     /// Verifies HTTPS proxies.
     proxy_tls: Arc<rustls::ClientConfig>,
     proxy: ProxyConfig,
+    /// Reads the system proxy for a URL; tests replace it, since the real settings are machine state.
+    pub(crate) system_proxy: fn(&Url) -> anyhow::Result<Option<String>>,
 }
 
 /// A connection the authority's TLS session runs over: direct, or tunnelled through a proxy.
@@ -80,6 +82,7 @@ impl Transport {
             tls: config(vec![ALPN_H2.to_vec()])?,
             proxy_tls: config(Vec::new())?,
             proxy,
+            system_proxy: http_client_proxy::system_proxy_for_url,
         })
     }
 
@@ -87,7 +90,9 @@ impl Transport {
     /// the HTTP/2 handshake.
     pub(crate) async fn connect(&self, url: &Url, keepalive_interval: Duration) -> Result<Http2Service, Closure> {
         let (server_name, origin) = endpoint(url).map_err(|error| Closure::outage(format!("{error:#}")))?;
-        let io: Box<dyn Io> = match http_client_proxy::proxy_for_url(url, &self.proxy) {
+        let proxy = http_client_proxy::try_proxy_for_url(url, &self.proxy, self.system_proxy)
+            .map_err(|error| Closure::outage(format!("system proxy: {error:#}")))?;
+        let io: Box<dyn Io> = match proxy {
             Some(proxy) => self.tunnel(&proxy, origin).await?,
             None => Box::new(tcp(origin).await.map_err(outage("connect"))?),
         };

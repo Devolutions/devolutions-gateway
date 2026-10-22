@@ -141,6 +141,8 @@ impl std::error::Error for ClientError {}
 
 pub struct Client {
     proxy: ProxyConfig,
+    /// Reads the system proxy for a URL; tests replace it, since the real settings are machine state.
+    system_proxy: fn(&Url) -> anyhow::Result<Option<String>>,
     extra_trusted_roots: Vec<reqwest::Certificate>,
     http: Mutex<HashMap<Url, reqwest::Client>>,
 }
@@ -200,6 +202,7 @@ impl Client {
         };
         Ok(Self {
             proxy,
+            system_proxy: http_client_proxy::system_proxy_for_url,
             extra_trusted_roots,
             http: Mutex::new(HashMap::new()),
         })
@@ -237,13 +240,20 @@ impl Client {
         for root in &self.extra_trusted_roots {
             builder = builder.add_root_certificate(root.clone());
         }
-        // A System proxy that reqwest would ignore is not checked yet, and still lets the request connect directly.
-        if let ProxyConfig::Manual(_) = self.proxy
-            && let Some(proxy) = http_client_proxy::proxy_for_url(url, &self.proxy)
-        {
-            check_proxy_is_usable(&proxy)?;
+        let proxy = http_client_proxy::try_proxy_for_url(url, &self.proxy, self.system_proxy).map_err(|error| {
+            warn!(error = format!("{error:#}"), "Failed to read the system proxy");
+            ClientError::local("system proxy unreadable")
+        })?;
+        if let Some(proxy) = proxy {
+            // A System proxy that reqwest would ignore is not checked yet, and still lets the request connect directly.
+            if let ProxyConfig::Manual(_) = self.proxy {
+                check_proxy_is_usable(&proxy)?;
+            }
+            let proxy = reqwest::Proxy::all(proxy).map_err(|_| ClientError::local("configure identity HTTP client"))?;
+            builder = builder.proxy(proxy);
         }
-        let client = http_client_proxy::build_client_with_proxy(builder, url, &self.proxy)
+        let client = builder
+            .build()
             .map_err(|_| ClientError::local("configure identity HTTP client"))?;
         clients.insert(url.clone(), client.clone());
         Ok(client)
@@ -1002,6 +1012,35 @@ mod tests {
         Ok(())
     }
 
+    fn unreadable_system_proxy(_: &Url) -> anyhow::Result<Option<String>> {
+        anyhow::bail!("system proxy settings unreadable")
+    }
+
+    fn unparseable_system_proxy(_: &Url) -> anyhow::Result<Option<String>> {
+        // The port is out of range.
+        Ok(Some("http://proxy.test:99999".to_owned()))
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    #[rstest]
+    #[case::detection_fails(unreadable_system_proxy)]
+    #[case::unparseable_proxy(unparseable_system_proxy)]
+    #[tokio::test]
+    async fn a_system_proxy_the_request_cannot_read_fails_it_without_connecting_directly(
+        #[case] system_proxy: fn(&Url) -> anyhow::Result<Option<String>>,
+        #[values(Request::Enroll, Request::CheckIn)] request: Request,
+    ) -> anyhow::Result<()> {
+        let authority = CountingListener::start().await?;
+        let mut client = Client::new(ProxyConfig::System, None)?;
+        client.system_proxy = system_proxy;
+
+        let error = request.send_with(client, &authority).await?;
+
+        assert!(matches!(error, Some(ClientError::Transient { .. })), "{error:?}");
+        assert_eq!(authority.connections(), 0);
+        Ok(())
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
     // oracle: reference reqwest 0.12.28 `IntoProxy`, which reads a proxy URL without a host as an `http://` URL
     #[tokio::test]
@@ -1067,7 +1106,11 @@ mod tests {
     impl Request {
         /// Sends this request to `authority` through `proxy`, and returns its error.
         async fn send(self, proxy: ProxyConfig, authority: &CountingListener) -> anyhow::Result<Option<ClientError>> {
-            let client = Client::new(proxy, None)?;
+            self.send_with(Client::new(proxy, None)?, authority).await
+        }
+
+        /// Sends this request to `authority` with `client`, and returns its error.
+        async fn send_with(self, client: Client, authority: &CountingListener) -> anyhow::Result<Option<ClientError>> {
             let key = TestKey(SigningKey::from_slice(&[7u8; 32])?);
             let error = match self {
                 Self::Enroll => {

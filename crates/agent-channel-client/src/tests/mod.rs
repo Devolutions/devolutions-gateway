@@ -3,6 +3,7 @@ mod proxy;
 mod socks;
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -1273,6 +1274,49 @@ async fn an_unsupported_proxy_scheme_is_an_outage_without_a_connection() -> anyh
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert!(proxy.heads().is_empty());
+    Ok(())
+}
+
+fn unreadable_system_proxy(_: &Url) -> anyhow::Result<Option<String>> {
+    anyhow::bail!("system proxy settings unreadable")
+}
+
+fn unparseable_system_proxy(_: &Url) -> anyhow::Result<Option<String>> {
+    // The port is out of range.
+    Ok(Some("http://proxy.test:99999".to_owned()))
+}
+
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+#[rstest]
+#[case::detection_fails(unreadable_system_proxy)]
+#[case::unparseable_proxy(unparseable_system_proxy)]
+#[tokio::test]
+async fn a_system_proxy_the_channel_cannot_read_is_an_outage_without_a_connection(
+    #[case] system_proxy: fn(&Url) -> anyhow::Result<Option<String>>,
+) -> anyhow::Result<()> {
+    // The authority counts the connections it receives and closes each one.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let url = Url::parse(&format!("https://127.0.0.1:{}/dvls", listener.local_addr()?.port()))?;
+    let connections = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&connections);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            counter.fetch_add(1, Ordering::SeqCst);
+            drop(stream);
+        }
+    });
+    let identity = Identity::from_vectors("device-a")?;
+    let mut client = ChannelClient::new(ProxyConfig::System, &[], Settings::default())?;
+    Arc::get_mut(&mut client.shared)
+        .ok_or_else(|| anyhow!("client shared"))?
+        .transport
+        .system_proxy = system_proxy;
+    let mut channel = client.connect(identity.target(&url))?;
+
+    let (closure, _) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(connections.load(Ordering::SeqCst), 0);
     Ok(())
 }
 

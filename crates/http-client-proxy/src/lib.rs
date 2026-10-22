@@ -285,15 +285,12 @@ impl ClientCache {
     }
 }
 
-/// Detects proxy configuration for a specific target URL using system settings.
-///
-/// This function uses `proxy_cfg::get_proxy_config()` and then calls
-/// `get_proxy_for_url()` method to detect proxy configuration from system
-/// settings (WinHTTP on Windows, environment variables on Unix).
-///
-/// Returns `Ok(None)` if no proxy is configured or if proxy detection fails.
-fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
-    // Try to detect proxy using system configuration.
+/// Reads the proxy that the system settings (WinHTTP on Windows, environment variables on Unix) name for `url`, as
+/// written there, or `None` when they name none, such as for a target in their bypass list.
+pub fn system_proxy_for_url(url: &Url) -> anyhow::Result<Option<String>> {
+    // UNTESTED: System mode uses the machine's proxy settings (environment variables or WinHTTP).
+    // A unit test can't set them without changing the machine or racing other tests over the environment.
+    // When changing this, check a target behind a system proxy and one in its bypass list.
     let proxy_config = match proxy_cfg::get_proxy_config()
         .map_err(|e| anyhow::anyhow!("failed to detect proxy configuration: {e}"))?
     {
@@ -301,16 +298,8 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
         None => return Ok(None),
     };
 
-    // Get the proxy URL for the specific target URL.
     // This handles NO_PROXY exclusions automatically.
-    let proxy_url = match proxy_config.get_proxy_for_url(url) {
-        Some(url) => url,
-        None => return Ok(None),
-    };
-
-    let proxy_url = parse_system_proxy(&proxy_url)?;
-
-    Ok(Some(proxy_url))
+    Ok(proxy_config.get_proxy_for_url(url))
 }
 
 /// Parses a proxy from system settings, reading one without a scheme, such as `10.0.0.1:8080`, as an `http://` URL,
@@ -338,22 +327,33 @@ fn read_as_http(proxy: Url) -> Url {
         .unwrap_or(proxy)
 }
 
-/// Returns the proxy that `config` selects for `url`, or `None` to connect directly.
+/// Returns the proxy that `config` selects for `url`, or `None` to connect directly, including when System mode can't
+/// read the system proxy settings or the proxy they name.
 ///
 /// Every client applies this one rule, so that the same target goes through the same proxy whichever client
 /// connects to it.
 pub fn proxy_for_url(url: &Url, config: &ProxyConfig) -> Option<Url> {
+    try_proxy_for_url(url, config, system_proxy_for_url).ok().flatten()
+}
+
+/// Returns the proxy that `config` selects for `url`, or `None` to connect directly, and fails when System mode can't
+/// read, through `system_proxy`, the system proxy settings or the proxy they name.
+///
+/// It selects as [`proxy_for_url`] does, for a client that must not connect directly around a proxy it can't read.
+/// `system_proxy` is [`system_proxy_for_url`] outside tests.
+pub fn try_proxy_for_url(
+    url: &Url,
+    config: &ProxyConfig,
+    system_proxy: impl FnOnce(&Url) -> anyhow::Result<Option<String>>,
+) -> anyhow::Result<Option<Url>> {
     match config {
-        ProxyConfig::Off => None,
-        // UNTESTED: System mode uses the machine's proxy settings (environment variables or WinHTTP).
-        // A unit test can't set them without changing the machine or racing other tests over the environment.
-        // When changing this arm, check a target behind a system proxy and one in its bypass list.
-        ProxyConfig::System => detect_system_proxy_for_url(url).ok().flatten(),
+        ProxyConfig::Off => Ok(None),
+        ProxyConfig::System => system_proxy(url)?.map(|proxy| parse_system_proxy(&proxy)).transpose(),
         ProxyConfig::Manual(manual) => {
             if manual.should_bypass(url) {
-                None
+                Ok(None)
             } else {
-                manual.select_proxy(url).cloned().map(read_as_http)
+                Ok(manual.select_proxy(url).cloned().map(read_as_http))
             }
         }
     }
