@@ -3,13 +3,27 @@
 //!
 //! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#7-channel-grpc
 
-use std::collections::VecDeque;
+use std::collections::BTreeSet;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use agent_channel_client::{Channel, Closure, ClosureClass, Event, TerminalCode};
-use tokio::sync::{mpsc, oneshot, watch};
+use agent_identity::client;
+use parking_lot::Mutex;
+use serde_json::Value;
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use url::Url;
+
+use super::runner::config_revision;
+
+/// The most acknowledgements a queued config holds, its own included.
+///
+/// A burst of pushes larger than this while the runner is busy loses the acknowledgements of the configs past it;
+/// `Hello` reconciles the config of the next stream anyway ([CONTRACT.agent-identity.md §7.3 "Sequence"][contract]).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
+const MAX_CONFIG_ACKS: usize = 32;
 
 /// What the identity needs from its agent channel.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,12 +52,89 @@ pub(super) enum Notice {
     CertificateExpired { key_name: String },
     /// The authority asked for a renewal on a stream of the key `key_name`.
     RenewRequested { key_name: String },
-    /// A config pushed on the stream `link`, to acknowledge with `id` once it is stored.
-    ConfigUpdate {
-        link: LinkId,
-        id: String,
-        config_json: String,
-    },
+    /// A config pushed on the streams.
+    ConfigUpdate(PushedConfig),
+}
+
+/// A config pushed on the streams, with the messages to acknowledge once it is stored.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct PushedConfig {
+    pub(super) config: Value,
+    /// The message that carried `config`, then those of the configs it superseded, by the stream each came on.
+    ///
+    /// INVARIANT: no config these messages carried has a higher revision than `config`, so that storing `config`
+    /// leaves each of them stored or not newer, which the acknowledgement requires.
+    pub(super) acks: Vec<(LinkId, String)>,
+}
+
+impl PushedConfig {
+    /// Returns the config of the higher revision, or `self` for equal revisions, with the acknowledgements of both, at
+    /// most [`MAX_CONFIG_ACKS`].
+    fn merge(self, other: Self) -> Self {
+        let (mut kept, superseded) = if config_revision(&self.config) < config_revision(&other.config) {
+            (other, self)
+        } else {
+            (self, other)
+        };
+        let room = MAX_CONFIG_ACKS.saturating_sub(kept.acks.len());
+        kept.acks.extend(superseded.acks.into_iter().take(room));
+        kept
+    }
+}
+
+/// The notices the identity hasn't handled yet, coalesced so that a flood of stream events doesn't grow them.
+///
+/// Each kind is kept once, or once per key for those naming a key, and only the pushed config with the highest
+/// revision is kept, since storing it supersedes the others.
+#[derive(Debug, Default)]
+pub(super) struct Notices {
+    terminal: Option<TerminalCode>,
+    certificate_expired: BTreeSet<String>,
+    renew_requested: BTreeSet<String>,
+    lost: bool,
+    stream_needed: bool,
+    config_update: Option<PushedConfig>,
+}
+
+impl Notices {
+    pub(super) fn push(&mut self, notice: Notice) {
+        match notice {
+            Notice::Lost => self.lost = true,
+            Notice::StreamNeeded => self.stream_needed = true,
+            Notice::Terminal(code) => self.terminal = Some(code),
+            Notice::CertificateExpired { key_name } => {
+                self.certificate_expired.insert(key_name);
+            }
+            Notice::RenewRequested { key_name } => {
+                self.renew_requested.insert(key_name);
+            }
+            Notice::ConfigUpdate(pushed) => {
+                self.config_update = Some(match self.config_update.take() {
+                    Some(queued) => queued.merge(pushed),
+                    None => pushed,
+                });
+            }
+        }
+    }
+
+    pub(super) fn pop(&mut self) -> Option<Notice> {
+        if let Some(code) = self.terminal.take() {
+            return Some(Notice::Terminal(code));
+        }
+        if let Some(key_name) = self.certificate_expired.pop_first() {
+            return Some(Notice::CertificateExpired { key_name });
+        }
+        if let Some(key_name) = self.renew_requested.pop_first() {
+            return Some(Notice::RenewRequested { key_name });
+        }
+        if std::mem::take(&mut self.lost) {
+            return Some(Notice::Lost);
+        }
+        if std::mem::take(&mut self.stream_needed) {
+            return Some(Notice::StreamNeeded);
+        }
+        self.config_update.take().map(Notice::ConfigUpdate)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,9 +164,17 @@ impl LinkChannel for Channel {
 /// Dropping it closes every stream.
 pub(super) struct Streams<C = Channel> {
     commands: mpsc::UnboundedSender<Command<C>>,
-    notices: mpsc::UnboundedReceiver<Notice>,
+    inbox: Arc<Inbox>,
     status: watch::Receiver<Status>,
     task: JoinHandle<()>,
+}
+
+/// The notices the task hands to the runner.
+#[derive(Default)]
+struct Inbox {
+    notices: Mutex<Notices>,
+    /// Wakes the runner once notices arrive.
+    arrived: Notify,
 }
 
 /// Starts a stream's channel.
@@ -108,17 +207,17 @@ impl<C: LinkChannel + Send + 'static> Streams<C> {
     /// Starts the task; it must be called within a Tokio runtime.
     pub(super) fn spawn() -> Self {
         let (commands, command_receiver) = mpsc::unbounded_channel();
-        let (notice_sender, notices) = mpsc::unbounded_channel();
+        let inbox = Arc::new(Inbox::default());
         let (status_sender, status) = watch::channel(Status::default());
         let task = tokio::spawn(run_streams(
             Links::new(),
             command_receiver,
-            notice_sender,
+            Arc::clone(&inbox),
             status_sender,
         ));
         Self {
             commands,
-            notices,
+            inbox,
             status,
             task,
         }
@@ -166,18 +265,17 @@ impl<C: LinkChannel + Send + 'static> Streams<C> {
         });
     }
 
-    /// Waits until the streams report a notice, which it returns, or their status changes.
-    pub(super) async fn wait(&mut self) -> Option<Notice> {
+    /// Waits until the streams report notices, which [`Streams::try_next_notice`] returns, or their status changes.
+    pub(super) async fn wait(&mut self) {
         tokio::select! {
-            Some(notice) = self.notices.recv() => Some(notice),
-            Ok(()) = self.status.changed() => None,
-            else => std::future::pending().await,
+            () = self.inbox.arrived.notified() => {}
+            Ok(()) = self.status.changed() => {}
         }
     }
 
     /// Returns the next notice if one is waiting.
     pub(super) fn try_next_notice(&mut self) -> Option<Notice> {
-        self.notices.try_recv().ok()
+        self.inbox.notices.lock().pop()
     }
 }
 
@@ -190,7 +288,7 @@ impl<C> Drop for Streams<C> {
 async fn run_streams<C: LinkChannel>(
     mut links: Links<C>,
     mut commands: mpsc::UnboundedReceiver<Command<C>>,
-    notices: mpsc::UnboundedSender<Notice>,
+    inbox: Arc<Inbox>,
     status: watch::Sender<Status>,
 ) {
     loop {
@@ -218,8 +316,13 @@ async fn run_streams<C: LinkChannel>(
             },
             (link, event) = links.next_event() => links.handle(link, event, Instant::now()),
         }
+        let mut arrived = false;
         while let Some(notice) = links.next_notice() {
-            let _ = notices.send(notice);
+            inbox.notices.lock().push(notice);
+            arrived = true;
+        }
+        if arrived {
+            inbox.arrived.notify_one();
         }
         let current = Status {
             authenticated: links.authenticated(),
@@ -255,7 +358,7 @@ pub(super) struct Links<C> {
     /// Whether the authority asked for a stream to replace `active`.
     reconnect: bool,
     next_id: u64,
-    notices: VecDeque<Notice>,
+    notices: Notices,
 }
 
 struct Link<C> {
@@ -290,7 +393,7 @@ impl<C: LinkChannel> Links<C> {
             ended: false,
             reconnect: false,
             next_id: 0,
-            notices: VecDeque::new(),
+            notices: Notices::default(),
         }
     }
 
@@ -396,9 +499,9 @@ impl<C: LinkChannel> Links<C> {
         }
     }
 
-    /// Returns the oldest notice the identity hasn't received.
+    /// Returns a notice the identity hasn't received.
     pub(super) fn next_notice(&mut self) -> Option<Notice> {
-        self.notices.pop_front()
+        self.notices.pop()
     }
 
     /// Waits for the next event of a stream; `None` means that the stream's channel has stopped.
@@ -439,7 +542,7 @@ impl<C: LinkChannel> Links<C> {
                 if let Some(link) = self.link(role) {
                     link.channel.ack(&id);
                     let key_name = link.key_name.clone();
-                    self.notices.push_back(Notice::RenewRequested { key_name });
+                    self.notices.push(Notice::RenewRequested { key_name });
                 }
             }
             Some(Event::Reconnect { reason, .. }) => {
@@ -448,16 +551,22 @@ impl<C: LinkChannel> Links<C> {
                     self.reconnect = true;
                 }
             }
-            Some(Event::ConfigUpdate { id, config_json }) => {
-                self.notices.push_back(Notice::ConfigUpdate { link, id, config_json });
-            }
+            Some(Event::ConfigUpdate { id, config_json }) => match client::parse_pushed_config(&config_json) {
+                Ok(config) => self.notices.push(Notice::ConfigUpdate(PushedConfig {
+                    config,
+                    acks: vec![(link, id)],
+                })),
+                // `CONTRACT.agent-identity.md` §5.2: a config with another version is a transient failure, and the
+                // stored config stays; the authority sends it again after the next `Hello`.
+                Err(error) => warn!(%error, "Ignoring an Agent Identity config pushed on the agent channel"),
+            },
             Some(Event::Closed { closure, reopen_after }) => self.closed(role, closure, reopen_after, now),
         }
         if was_authenticated && !self.authenticated() {
-            self.notices.push_back(Notice::Lost);
+            self.notices.push(Notice::Lost);
         }
         if self.needs_open() {
-            self.notices.push_back(Notice::StreamNeeded);
+            self.notices.push(Notice::StreamNeeded);
         }
     }
 
@@ -471,8 +580,8 @@ impl<C: LinkChannel> Links<C> {
         // A stream reopens only while it serves what the identity wants and nothing replaces it.
         let reopen_after = reopen_after.filter(|_| !superseded && self.serves(link));
         match closure.class {
-            ClosureClass::Terminal(code) => self.notices.push_back(Notice::Terminal(code)),
-            ClosureClass::CertificateExpired => self.notices.push_back(Notice::CertificateExpired { key_name }),
+            ClosureClass::Terminal(code) => self.notices.push(Notice::Terminal(code)),
+            ClosureClass::CertificateExpired => self.notices.push(Notice::CertificateExpired { key_name }),
             ClosureClass::Transient(_) => {}
         }
         if was_authenticated {
@@ -643,7 +752,13 @@ mod tests {
     /// Waits for a terminal notice, which the test, unlike a runner, doesn't act on.
     async fn wait_for_terminal(streams: &mut Streams<TestChannel>) {
         tokio::time::timeout(Duration::from_secs(10), async {
-            while !matches!(streams.wait().await, Some(Notice::Terminal(_))) {}
+            loop {
+                if std::iter::from_fn(|| streams.try_next_notice()).any(|notice| matches!(notice, Notice::Terminal(_)))
+                {
+                    return;
+                }
+                streams.wait().await;
+            }
         })
         .await
         .expect("no terminal notice in time");
@@ -695,6 +810,111 @@ mod tests {
 
         assert!(current_dropped.load(Ordering::SeqCst));
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_burst_of_config_updates_while_the_runner_is_busy_leaves_one_with_the_highest_revision()
+    -> anyhow::Result<()> {
+        let mut streams = Streams::spawn();
+        assert!(streams.reconcile(stream("current")).await);
+        let (events, _dropped) = open_stream(&streams, "current");
+        events.send(Event::Authenticated)?;
+        wait_until_authenticated(&mut streams).await;
+
+        for revision in [3, 5, 2, 4] {
+            events.send(config_update(revision))?;
+        }
+        // The task handles a stream's events in order, so the loss follows every config.
+        events.send(closed(
+            ClosureClass::Transient(TransientKind::Outage),
+            Some(Duration::from_secs(60)),
+        ))?;
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while streams.authenticated() {
+                streams.wait().await;
+            }
+        })
+        .await?;
+
+        let pushed: Vec<_> = std::iter::from_fn(|| streams.try_next_notice())
+            .filter_map(|notice| match notice {
+                Notice::ConfigUpdate(pushed) => Some(pushed),
+                _ => None,
+            })
+            .collect();
+        // oracle: mutant every pushed config stays queued until the runner takes it
+        let [pushed] = pushed.as_slice() else {
+            panic!("expected one queued config, got {pushed:?}");
+        };
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+        // Step 7: the agent stores a pushed config if its revision is higher and acknowledges every `ConfigUpdate`, so
+        // the highest revision ends stored and each message is acknowledged once it is.
+        assert_eq!(pushed.config, serde_json::json!({ "version": 1, "revision": 5 }));
+        let mut acknowledged: Vec<&str> = pushed.acks.iter().map(|(_, id)| id.as_str()).collect();
+        acknowledged.sort_unstable();
+        assert_eq!(acknowledged, ["update-2", "update-3", "update-4", "update-5"]);
+        Ok(())
+    }
+
+    fn config_update(revision: u64) -> Event {
+        Event::ConfigUpdate {
+            id: format!("update-{revision}"),
+            config_json: serde_json::json!({ "version": 1, "revision": revision }).to_string(),
+        }
+    }
+
+    #[test]
+    fn a_flood_of_pushed_configs_keeps_at_most_the_bound_of_acknowledgements_starting_with_the_highest() {
+        // oracle: mutant the acknowledgements of superseded configs grow without bound
+        let now = Instant::now();
+        let mut links = Links::new();
+        links.reconcile(stream("current"));
+        let (link, _dropped) = open(&mut links, "current", now);
+        links.handle(link, Some(Event::Authenticated), now);
+
+        for revision in 1..=100 {
+            links.handle(link, Some(config_update(revision)), now);
+        }
+
+        let queued = notices(&mut links);
+        let [Notice::ConfigUpdate(pushed)] = queued.as_slice() else {
+            panic!("expected one queued config");
+        };
+        assert_eq!(pushed.acks.len(), MAX_CONFIG_ACKS);
+        assert_eq!(pushed.acks[0], (link, "update-100".to_owned()));
+    }
+
+    #[test]
+    fn repeated_renewal_requests_and_stream_needs_leave_one_notice_each() {
+        // oracle: mutant every renewal request and stream need stays queued until the runner takes it
+        let now = Instant::now();
+        let mut links = Links::new();
+        links.reconcile(stream("current"));
+        let (link, _dropped) = open(&mut links, "current", now);
+        links.handle(link, Some(Event::Authenticated), now);
+        let reconnect = Event::Reconnect {
+            id: "reconnect".to_owned(),
+            reason: "maintenance".to_owned(),
+        };
+        links.handle(link, Some(reconnect), now);
+
+        for _ in 0..3 {
+            let renewal = Event::RenewRequested {
+                id: "renewal".to_owned(),
+                reason: "admin".to_owned(),
+            };
+            links.handle(link, Some(renewal), now);
+        }
+
+        assert_eq!(
+            notices(&mut links),
+            [
+                Notice::RenewRequested {
+                    key_name: "current".to_owned()
+                },
+                Notice::StreamNeeded
+            ]
+        );
     }
 
     // A stream that reopens with a retired key draws the terminal `identity_unknown` (step 4 of the signature checks),

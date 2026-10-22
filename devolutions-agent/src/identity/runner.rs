@@ -1,6 +1,6 @@
 //! The per-authority runner: renewal, confirmation, check-in and agent channel of one stored identity.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant, SystemTime};
@@ -19,7 +19,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::RetryState;
-use super::channel::{LinkId, Notice, Streams, Want};
+use super::channel::{Notice, Notices, PushedConfig, Streams, Want};
 use super::config::IdentityDebugConf;
 
 const CHECK_IN_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -98,7 +98,7 @@ struct Runner {
     warned_malformed_config: Option<Value>,
     streams: Streams,
     /// What the streams reported and the runner hasn't handled yet.
-    notices: VecDeque<Notice>,
+    notices: Notices,
     /// Whether a `confirm` may have succeeded without this run knowing it: one was sent and no `204` answered it
     /// since, or the run started with a pending slot.
     confirm_unknown: bool,
@@ -127,7 +127,7 @@ impl Runner {
             channel_url: None,
             warned_malformed_config: None,
             streams: Streams::spawn(),
-            notices: VecDeque::new(),
+            notices: Notices::default(),
             confirm_unknown: identity.keys.pending.is_some(),
             channel_after_confirm: false,
             config_revision: Arc::new(AtomicU64::new(0)),
@@ -177,7 +177,7 @@ impl Runner {
             // The streams wake the runner with a notice, which its next step handles, or a change of their status.
             tokio::select! {
                 _ = tokio::time::sleep_until(wake.into()) => {}
-                notice = self.streams.wait() => self.notices.extend(notice),
+                () = self.streams.wait() => {}
                 _ = shutdown.wait() => return,
             }
         }
@@ -472,8 +472,8 @@ impl Runner {
 
     /// Handles what the identity's streams reported since the previous step.
     fn handle_notices(&mut self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        while let Some(notice) = self.notices.pop_front().or_else(|| self.streams.try_next_notice()) {
-            match &notice {
+        while let Some(notice) = self.notices.pop().or_else(|| self.streams.try_next_notice()) {
+            match notice {
                 Notice::Lost => {
                     // UNTESTED: losing the last authenticated stream restarts the 1 h count before check-in resumes.
                     // When changing this, keep the count running from the loss, not from the runner's start.
@@ -486,7 +486,7 @@ impl Runner {
                 Notice::StreamNeeded => {}
                 Notice::Terminal(code) => self.reject(code.as_str()),
                 Notice::CertificateExpired { key_name } => {
-                    if *key_name == identity.keys.current.key_name {
+                    if key_name == identity.keys.current.key_name {
                         // `CONTRACT.agent-identity.md` §5.4: renew at once, signing with the expired certificate, and
                         // connect again only after `confirm`.
                         warn!(
@@ -501,15 +501,15 @@ impl Runner {
                     // UNTESTED: a request on a stream of a key that a confirmed renewal replaced starts no renewal, and
                     // one during a renewal is satisfied when that renewal is confirmed, which clears the flag.
                     // When changing this, keep one renewal for each request.
-                    if *key_name == identity.keys.current.key_name {
+                    if key_name == identity.keys.current.key_name {
                         self.renewal_requested = true;
                     }
                 }
-                Notice::ConfigUpdate { link, id, config_json } => {
+                Notice::ConfigUpdate(pushed) => {
                     // UNTESTED: a pushed config that can't be stored stays queued and is not acknowledged, so that a
                     // later step stores it; when changing this, acknowledge only a config that is stored or not newer.
-                    if let Err(error) = self.store_pushed_config(identity, *link, id, config_json) {
-                        self.notices.push_front(notice.clone());
+                    if let Err(error) = self.store_pushed_config(identity, &pushed) {
+                        self.notices.push(Notice::ConfigUpdate(pushed));
                         return Err(error);
                     }
                 }
@@ -518,32 +518,15 @@ impl Runner {
         Ok(())
     }
 
-    /// Stores a config pushed on the stream `link` if its revision is higher, then acknowledges it; the step applies
+    /// Stores a pushed config if its revision is higher, then acknowledges every message it answers; the step applies
     /// it to the streams afterwards (`CONTRACT.agent-identity.md` §7.3 step 7).
-    fn store_pushed_config(
-        &mut self,
-        identity: &mut StoredIdentity,
-        link: LinkId,
-        id: &str,
-        config_json: &str,
-    ) -> anyhow::Result<()> {
-        let config = match client::parse_pushed_config(config_json) {
-            Ok(config) => config,
-            Err(error) => {
-                // `CONTRACT.agent-identity.md` §5.2: a config with another version is a transient failure, and the
-                // stored config stays; the authority sends it again after the next `Hello`.
-                warn!(
-                    authority_id = %self.authority_id,
-                    %error,
-                    "Ignoring an Agent Identity config pushed on the agent channel"
-                );
-                return Ok(());
-            }
-        };
-        if self.shared.store.update_config(identity, config)? {
+    fn store_pushed_config(&mut self, identity: &mut StoredIdentity, pushed: &PushedConfig) -> anyhow::Result<()> {
+        if self.shared.store.update_config(identity, pushed.config.clone())? {
             info!(authority_id = %self.authority_id, "Agent Identity config updated");
         }
-        self.streams.ack(link, id);
+        for (link, id) in &pushed.acks {
+            self.streams.ack(*link, id);
+        }
         Ok(())
     }
 
@@ -771,8 +754,8 @@ fn certificate_chain(record: &KeyRecord) -> anyhow::Result<&[String]> {
         .context("identity key has no certificate chain")
 }
 
-/// Returns the revision of a stored config, which the store only accepts with one.
-fn config_revision(config: &Value) -> u64 {
+/// Returns the revision of a config, which the store and the config validation require.
+pub(super) fn config_revision(config: &Value) -> u64 {
     config.get("revision").and_then(Value::as_u64).unwrap_or_default()
 }
 
