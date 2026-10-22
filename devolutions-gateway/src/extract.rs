@@ -365,7 +365,9 @@ where
         match ScopeToken::from_request_parts(parts, state).await?.0.scope {
             AccessScope::Wildcard => Ok(Self),
             AccessScope::RecordingsSearch => Ok(Self),
-            _ => Err(HttpError::forbidden().msg("invalid scope for route")),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
         }
     }
 }

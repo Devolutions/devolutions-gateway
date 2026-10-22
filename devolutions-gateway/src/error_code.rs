@@ -145,3 +145,70 @@ impl<'s> utoipa::ToSchema<'s> for ErrorCode {
         ("ErrorCode", schema.into())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use expect_test::expect;
+
+    use super::*;
+
+    /// Codes are public API: existing codes are never renamed or removed, and new codes are appended.
+    #[test]
+    fn codes_are_stable() {
+        let codes = ErrorCode::ALL
+            .iter()
+            .map(|code| code.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        expect![[r#"
+            bad_request
+            unauthorized
+            forbidden
+            not_found
+            request_timeout
+            conflict
+            payload_too_large
+            internal_error
+            bad_gateway
+            service_unavailable
+            gateway_timeout
+            insufficient_storage
+            missing_token
+            malformed_token
+            bad_signature
+            unknown_subkey
+            expired
+            not_yet_valid
+            gateway_id_mismatch
+            revoked
+            unexpected_replay
+            invalid_token
+            wrong_token_type
+            insufficient_scope"#]]
+        .assert_eq(&codes);
+    }
+
+    #[test]
+    fn codes_are_unique_snake_case_and_documented() {
+        let mut seen = HashSet::new();
+
+        for code in ErrorCode::ALL {
+            let code_str = code.as_str();
+
+            assert!(seen.insert(code_str), "duplicated code: {code_str}");
+            assert!(
+                code_str.starts_with(|c: char| c.is_ascii_lowercase())
+                    && code_str.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+                "not snake_case: {code_str}"
+            );
+            assert!(!code.description().is_empty(), "undocumented code: {code_str}");
+            assert_eq!(
+                serde_json::to_value(code).expect("serialize the code"),
+                serde_json::Value::from(code_str)
+            );
+        }
+    }
+}
