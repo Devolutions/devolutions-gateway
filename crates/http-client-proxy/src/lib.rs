@@ -355,6 +355,7 @@ mod tests {
         #[case] target: &str,
         #[case] expected: Option<&str>,
     ) -> anyhow::Result<()> {
+        // oracle: mutant `proxy_for_url` selects no proxy, or ignores the exclude list
         let selected = proxy_for_url(&Url::parse(target)?, &config);
         assert_eq!(selected.as_ref().map(Url::as_str), expected);
         Ok(())
@@ -362,6 +363,7 @@ mod tests {
 
     #[test]
     fn domain_exclusion_respects_label_boundaries() -> anyhow::Result<()> {
+        // oracle: mutant an exclude entry `.corp.local` matches any host ending in `corp.local`, such as `evilcorp.local`
         let config = ManualProxyConfig {
             exclude: vec![".corp.local".to_owned()],
             ..Default::default()
