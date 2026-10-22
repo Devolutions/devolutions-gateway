@@ -234,7 +234,7 @@ mod tests {
 
     // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
     #[test]
-    fn rate_limits_server_and_network_errors_are_recoverable() {
+    fn transient_ai_errors_are_recoverable_and_the_others_permanent() {
         let attempt = |error: Error| AttemptError::from(RecordingAnalysisError::Ai(error));
         let status = |status, code: Option<&str>| Error::Status {
             status,
