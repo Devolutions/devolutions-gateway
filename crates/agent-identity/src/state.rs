@@ -332,20 +332,6 @@ impl Store {
         )
     }
 
-    pub fn remove_pending_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        if identity.keys.pending.is_none() {
-            return Ok(());
-        }
-        self.update(
-            identity,
-            |updated| {
-                updated.keys.pending = None;
-                Ok(())
-            },
-            || Ok(()),
-        )
-    }
-
     /// Stores the chain that renew returned for the pending key.
     pub fn store_pending_chain(&self, identity: &mut StoredIdentity, chain: Vec<String>) -> anyhow::Result<()> {
         self.update(
@@ -464,22 +450,6 @@ impl Store {
             },
             || Ok(()),
         )
-    }
-
-    pub fn remove_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
-        let _lock = self.lock()?;
-        self.remove_identity_locked(identity)
-    }
-
-    fn remove_identity_locked(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
-        ensure!(
-            self.read_stored_identity(identity.authority_id)?.as_ref() == Some(identity),
-            "stored identity changed; reload before deleting"
-        );
-        for key in identity.keys.records() {
-            keys::delete(&self.backend, &key.key_name)?;
-        }
-        private_file::remove_file(&self.identity_path(identity.authority_id))
     }
 
     /// Reuses an enrollment key, or skips a token already represented by an identity or rejection marker.
@@ -1782,7 +1752,9 @@ mod tests {
                 .context("identity disappeared")?,
             promoted
         );
-        assert!(store.remove_pending_key(&mut fresh).is_err());
+        let mut without_pending = fresh.clone();
+        without_pending.keys.pending = None;
+        assert!(store.replace_identity(&fresh, &without_pending).is_err());
         assert!(keys::open(store.key_backend(), &new_name)?.is_some());
 
         assert!(store.update_config(&mut stale, json!({"version": 1, "revision": 10}))?);

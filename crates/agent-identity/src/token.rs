@@ -1,5 +1,4 @@
 use std::fmt;
-use std::str::FromStr;
 
 use anyhow::{Context as _, ensure};
 use base64::Engine as _;
@@ -89,14 +88,6 @@ pub(crate) fn is_base_url(url: &str) -> bool {
 
 fn is_base64url(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
-}
-
-impl FromStr for Token {
-    type Err = anyhow::Error;
-
-    fn from_str(value: &str) -> anyhow::Result<Self> {
-        Self::parse(value)
-    }
 }
 
 impl fmt::Display for Token {
