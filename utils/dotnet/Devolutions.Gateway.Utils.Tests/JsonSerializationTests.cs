@@ -219,6 +219,7 @@ public class JsonSerializationTests
         Assert.Equal(EXPECTED, result);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Access
     [Fact]
     public void ScopeClaimsRecordingsSearch()
     {

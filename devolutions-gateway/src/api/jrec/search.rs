@@ -823,6 +823,7 @@ mod tests {
             .collect()
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[rstest]
     #[case::value_in_another_case("created USER")]
     #[case::event_name("session.action")]
@@ -837,6 +838,7 @@ mod tests {
         assert_eq!(hit_lines(&search), [(1, line)]);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[rstest]
     #[case::field_name("description")]
     #[case::nested_field_name("new name")]
@@ -853,6 +855,8 @@ mod tests {
         assert!(search.hits.is_empty());
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    // oracle: spec RFC 8259 §7
     #[rstest]
     #[case::backslash(r"IT-HELP\Administrator", r#"{"description":"Reset IT-HELP\\Administrator"}"#)]
     #[case::quote(r#""net user""#, r#"{"description":"Ran \"net user\""}"#)]
@@ -899,6 +903,7 @@ mod tests {
         assert_eq!(hit_lines(&search), [(1, r#"{"seq":1}"#), (2, ""), (3, "plain")]);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[tokio::test]
     async fn matches_a_line_of_plain_text_that_parses_as_a_json_number() {
         let search = search_log("2026", b"2026").await;
@@ -906,6 +911,8 @@ mod tests {
         assert_eq!(hit_lines(&search), [(1, "2026")]);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
     #[tokio::test]
     async fn matches_a_cut_line_that_no_longer_parses_as_raw_text() {
         let line = format!(r#"{{"description":"{}"}}"#, "x".repeat(MAX_LINE_BYTES));
@@ -916,6 +923,8 @@ mod tests {
         assert!(search.hits[0].truncated);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
     #[tokio::test]
     async fn matches_a_cut_line_by_its_string_values_when_what_was_read_parses() {
         let mut line = br#"{"description":"DOMAIN\\user"}"#.to_vec();
@@ -927,6 +936,7 @@ mod tests {
         assert!(search.hits[0].truncated);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[rstest]
     #[case::query_ending_in_a_capital_sigma("ΧΡΗΣ", "ΧΡΗΣΤΗΣ")]
     #[case::line_ending_in_a_capital_sigma("σ", "ΟΣ")]
@@ -937,6 +947,7 @@ mod tests {
         assert_eq!(hit_lines(&search), [(1, line)]);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[tokio::test]
     async fn keeps_the_spaces_of_the_query() {
         let search = search_log("user ", br#"{"name":"username"}"#).await;
@@ -944,6 +955,8 @@ mod tests {
         assert!(search.hits.is_empty());
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
     #[tokio::test]
     async fn returns_a_line_that_is_not_json() {
         let search = search_log("sess", br#"{"seq":12,"event":"sess"#).await;
@@ -951,6 +964,7 @@ mod tests {
         assert_eq!(hit_lines(&search), [(1, r#"{"seq":12,"event":"sess"#)]);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
     #[tokio::test]
     async fn gives_the_line_number_and_byte_offset_of_each_hit() {
         let search = search_log("hit", b"first\r\nsecond hit\r\nthird\r\nfourth hit\n").await;
@@ -963,6 +977,8 @@ mod tests {
         assert_eq!(positions, [(2, 7, "second hit"), (4, 26, "fourth hit")]);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
+    // oracle: reference webapp/packages/session-recording-log/src/parser.ts
     #[tokio::test]
     async fn keeps_a_line_at_the_limit_ending_with_crlf_whole() {
         let line = format!("hit{}", "x".repeat(MAX_LINE_BYTES - 3));
@@ -974,6 +990,7 @@ mod tests {
         assert!(!search.hits[0].truncated);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
     #[tokio::test]
     async fn cuts_a_longer_line_and_keeps_reading_after_it() {
         let content = format!("hit{}\nhit again\n", "x".repeat(MAX_LINE_BYTES));
@@ -986,6 +1003,7 @@ mod tests {
         assert_eq!(hit_lines(&search)[1], (2, "hit again"));
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
     #[tokio::test]
     async fn does_not_match_past_the_first_256_kib_of_a_line() {
         let content = format!("{}hit\n", "x".repeat(MAX_LINE_BYTES));
@@ -995,6 +1013,7 @@ mod tests {
         assert!(search.hits.is_empty());
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
     #[rstest]
     #[case::valid_text(b"hit".as_slice())]
     #[case::after_an_invalid_byte(b"\xFFhi".as_slice())]
@@ -1010,6 +1029,16 @@ mod tests {
         assert!(search.hits[0].line.ends_with('€'));
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Limits
+    #[test]
+    fn limits_match_the_intent() {
+        assert_eq!(MAX_LINE_BYTES, 256 * 1024);
+        assert_eq!(MAX_HITS, 1_000);
+        assert_eq!(MAX_SCANNED_BYTES, 16 * 1024 * 1024);
+    }
+
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Limits
     #[tokio::test]
     async fn stops_at_the_hit_limit() {
         let content = "hit\n".repeat(MAX_HITS + 1);
@@ -1020,6 +1049,7 @@ mod tests {
         assert!(search.limit_reached);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Limits
     #[tokio::test]
     async fn stops_inside_a_line_without_breaks_at_the_read_budget() {
         let budget = usize::try_from(MAX_SCANNED_BYTES).expect("budget fits in usize");
@@ -1034,6 +1064,7 @@ mod tests {
         assert!(search.scanned_bytes <= MAX_SCANNED_BYTES);
     }
 
+    // oracle: mutant limitReached set when the read budget runs out exactly where the log ends
     #[rstest]
     #[case::with_a_final_line_break(b"\n".as_slice())]
     #[case::without_one(b"".as_slice())]
@@ -1050,6 +1081,7 @@ mod tests {
         assert!(!search.limit_reached);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[tokio::test]
     async fn lists_a_log_once_when_the_manifest_repeats_it() {
         let root = tempfile::tempdir().expect("temp dir");
@@ -1080,6 +1112,7 @@ mod tests {
         recordings.iter().map(|recording| recording.recording_id).collect()
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
     #[tokio::test]
     async fn lists_recordings_that_start_together_highest_id_first() {
         let ids = list_recording_folders((1..=3).map(|id| Uuid::from_u128(id).to_string())).await;
@@ -1087,6 +1120,7 @@ mod tests {
         assert_eq!(ids, [3, 2, 1].map(Uuid::from_u128));
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[tokio::test]
     async fn lists_only_folders_named_by_the_hyphenated_id() {
         let id = Uuid::from_u128(1);
@@ -1102,6 +1136,7 @@ mod tests {
         Some(OffsetDateTime::from_unix_timestamp_nanos(unix_nanos).expect("valid time"))
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
     #[rstest]
     #[case::from_is_included(at(100 * SECOND), None, true)]
     #[case::from_a_fraction_later(at(100 * SECOND + SECOND / 2), None, false)]
@@ -1120,6 +1155,8 @@ mod tests {
         serde_json::from_str(&format!(r#"{{"query":"q",{fields}}}"#))
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
+    // oracle: spec RFC 3339 §5.6
     #[test]
     fn parses_start_times_with_fractions_and_offsets() {
         let request = parse_request(
@@ -1132,6 +1169,7 @@ mod tests {
         assert_eq!(start_time.from, start_time.to);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
     #[test]
     fn parses_all_recordings() {
         let request = parse_request(r#""recordings":"all""#).expect("valid request");
@@ -1142,6 +1180,7 @@ mod tests {
         ));
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
     #[rstest]
     #[case::ids(
         r#"["00000000-0000-0000-0000-000000000002","00000000-0000-0000-0000-000000000001"]"#,
@@ -1157,6 +1196,7 @@ mod tests {
         assert_eq!(recording_ids, expected);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
     #[rstest]
     #[case::other_word(r#""some""#)]
     #[case::all_in_a_list(r#"["all"]"#)]
@@ -1164,6 +1204,7 @@ mod tests {
         assert!(parse_request(&format!(r#""recordings":{recordings}"#)).is_err());
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
     #[rstest]
     #[case::in_the_request(r#""recordings":"all","mode":"regex""#)]
     #[case::in_the_start_time(r#""recordings":"all","startTime":{"until":"2026-10-10T00:00:00Z"}"#)]

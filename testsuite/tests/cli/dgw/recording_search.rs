@@ -163,6 +163,8 @@ fn hit_summaries(body: &serde_json::Value) -> anyhow::Result<Vec<(String, String
         .collect()
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
 #[tokio::test]
 async fn searches_the_slog_artifacts_of_every_recording_newest_first() -> anyhow::Result<()> {
     let (_recordings, config_handle, _process) = start_with_recordings().await?;
@@ -188,6 +190,7 @@ async fn searches_the_slog_artifacts_of_every_recording_newest_first() -> anyhow
     Ok(())
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
 #[tokio::test]
 async fn searches_each_listed_recording_once() -> anyhow::Result<()> {
     let (_recordings, config_handle, _process) = start_with_recordings().await?;
@@ -212,6 +215,7 @@ async fn searches_each_listed_recording_once() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
 #[tokio::test]
 async fn searches_only_the_recordings_started_in_the_time_range() -> anyhow::Result<()> {
     let recordings = tempfile::tempdir()?;
@@ -242,6 +246,7 @@ async fn searches_only_the_recordings_started_in_the_time_range() -> anyhow::Res
     Ok(())
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Access
 #[tokio::test]
 async fn rejects_a_token_without_the_search_scope() -> anyhow::Result<()> {
     let (_recordings, config_handle, _process) = start_with_recordings().await?;
