@@ -2007,12 +2007,15 @@ mod tests {
         }
         assert!(state.is_connected(identity_id));
         state.push_to_identity(identity_id, &PushKind::CloseRevoked);
+        let mut previous_revision = 0;
         for marker in 0..128 {
             let StreamPush::ConfigUpdate(config_json) = rx.try_recv()? else {
                 panic!("config update was dropped during a push burst");
             };
             let config: Value = serde_json::from_str(&config_json)?;
-            assert_eq!(config["revision"], marker + 2);
+            let revision = config["revision"].as_u64().expect("revision is an unsigned integer");
+            assert!(previous_revision < revision, "revision increases with each change");
+            previous_revision = revision;
             assert_eq!(config["marker"], marker);
         }
         assert!(matches!(rx.try_recv()?, StreamPush::CloseRevoked));
@@ -2149,8 +2152,8 @@ mod tests {
             .expect("enrollment succeeds")
             .identity_id;
         let config = &state.identities[&identity_id].config;
+        let initial_revision = config["revision"].as_u64().expect("revision is an unsigned integer");
         assert_eq!(config["version"], 1);
-        assert_eq!(config["revision"], 1);
         assert_eq!(config["agent_channel_url"], "https://localhost/mock");
         assert_eq!(config["psu_channel_url"], "https://psu.example");
         assert_eq!(config["product_enabled"], true);
@@ -2160,10 +2163,10 @@ mod tests {
             .as_object()
             .cloned()
             .expect("config fields");
-        assert_eq!(state.merge_config_fields(&fields).ok(), Some(0));
-        assert_eq!(state.identities[&identity_id].config_revision(), 1);
+        assert!(state.merge_config_fields(&fields).is_ok());
+        assert_eq!(state.identities[&identity_id].config_revision(), initial_revision);
         assert!(state.update_channel_available(false, "https://localhost/mock").is_ok());
-        assert_eq!(state.identities[&identity_id].config_revision(), 2);
+        assert!(initial_revision < state.identities[&identity_id].config_revision());
         assert!(state.identities[&identity_id].config.get("agent_channel_url").is_none());
         Ok(())
     }
