@@ -473,6 +473,7 @@ mod tests {
         }
     }
 
+    // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
     #[tokio::test]
     async fn job_definitions_lists_the_stored_jobs_of_one_name() {
         let conn = libsql::Builder::new_local(":memory:")

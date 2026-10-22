@@ -5,9 +5,16 @@ use provisioner_task::ProvisionerTaskState;
 
 use super::*;
 use crate::job_queue::{JobMessage, JobQueueReceiver};
+use crate::provisioner_tasks::Recoverable;
 use crate::token::AccessScope;
 
 const KIND: &str = "test.echo";
+
+/// A value whose attempt waits until it is cancelled.
+const HANG: u32 = u32::MAX;
+
+/// A value whose attempt reports progress five times, half a second apart, then succeeds.
+const PROGRESS: u32 = u32::MAX - 1;
 
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct EchoParams {
@@ -17,6 +24,7 @@ struct EchoParams {
 /// A task whose attempts return `outcome`, counting its runs and the records it ended.
 struct Echo {
     outcome: fn(u32) -> Result<serde_json::Value, AttemptError>,
+    progress_timeout: time::Duration,
     runs: Arc<AtomicUsize>,
     ended: Arc<Mutex<Vec<Uuid>>>,
 }
@@ -33,21 +41,44 @@ impl ProvisionerTask for Echo {
 
     type Output = serde_json::Value;
 
-    fn attempt_start_window(&self) -> time::Duration {
+    fn start_window(&self) -> time::Duration {
         time::Duration::hours(1)
     }
 
-    fn attempt_timeout(&self) -> std::time::Duration {
-        std::time::Duration::from_secs(5)
+    fn progress_timeout(&self) -> time::Duration {
+        self.progress_timeout
     }
 
-    async fn run(&self, _attempt: &Attempt, params: EchoParams) -> Result<serde_json::Value, AttemptError> {
+    fn starting_payload(&self, last: &serde_json::Value) -> serde_json::Value {
+        json!({ "after": last })
+    }
+
+    fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value {
+        json!({ "error": error, "last": last })
+    }
+
+    async fn run(&self, attempt: &Attempt, params: EchoParams) -> Result<serde_json::Value, AttemptError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
-        (self.outcome)(params.value)
+
+        match params.value {
+            HANG => {
+                attempt.cancel.cancelled().await;
+                Err(AttemptError::Recoverable(Recoverable::Storage))
+            }
+            PROGRESS => {
+                for step in 0..5 {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    attempt.report_progress(json!({ "step": step })).await;
+                }
+                Ok(json!("done"))
+            }
+            value => (self.outcome)(value),
+        }
     }
 
-    async fn on_end(&self, record: &ProvisionerTaskRecord) {
+    async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {
         self.ended.lock().push(record.id);
+        Ok(())
     }
 }
 
@@ -60,6 +91,13 @@ struct Harness {
 
 impl Harness {
     async fn new(outcome: fn(u32) -> Result<serde_json::Value, AttemptError>) -> Self {
+        Self::with_progress_timeout(outcome, time::Duration::hours(1)).await
+    }
+
+    async fn with_progress_timeout(
+        outcome: fn(u32) -> Result<serde_json::Value, AttemptError>,
+        progress_timeout: time::Duration,
+    ) -> Self {
         let conn = gateway_db::GatewayDb::open_path(":memory:")
             .await
             .expect("open gateway database")
@@ -78,6 +116,7 @@ impl Harness {
         let runner = ProvisionerTaskRunner::builder(store, Arc::new(job_queue))
             .register(Echo {
                 outcome,
+                progress_timeout,
                 runs: Arc::clone(&runs),
                 ended: Arc::clone(&ended),
             })
@@ -116,6 +155,7 @@ impl Harness {
     }
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn only_a_new_task_runs_on_created_and_gets_a_job() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
@@ -138,6 +178,7 @@ async fn only_a_new_task_runs_on_created_and_gets_a_job() {
     assert!(harness.job_queue_rx.try_recv().is_err(), "one job only");
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_task_whose_job_cannot_be_queued_fails() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
@@ -152,10 +193,11 @@ async fn a_task_whose_job_cannot_be_queued_fails() {
 
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "not queued");
+    assert_eq!(task.payload, json!({ "error": { "kind": "notQueued" }, "last": null }));
     assert_eq!(*harness.ended.lock(), [id], "what was set up for the Task is dropped");
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_task_that_cannot_be_prepared_fails_without_a_job() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
@@ -171,11 +213,12 @@ async fn a_task_that_cannot_be_prepared_fails_without_a_job() {
 
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["reason"], "not queued");
+    assert_eq!(task.payload["error"], json!({ "kind": "notQueued" }));
     assert!(harness.job_queue_rx.try_recv().is_err(), "no job is queued");
     assert_eq!(*harness.ended.lock(), [id]);
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_superseded_job_runs_nothing_once_the_task_is_resumed() {
     let mut harness = Harness::new(|value| Ok(json!({ "echo": value }))).await;
@@ -207,6 +250,7 @@ async fn a_superseded_job_runs_nothing_once_the_task_is_resumed() {
     );
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_task_that_cannot_be_queued_again_fails() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
@@ -218,7 +262,7 @@ async fn a_task_that_cannot_be_queued_again_fails() {
 
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed, "no job is left to run it");
-    assert_eq!(task.payload["reason"], "not queued");
+    assert_eq!(task.payload["error"], json!({ "kind": "notQueued" }));
     assert_eq!(*harness.ended.lock(), [id]);
 }
 
@@ -239,6 +283,7 @@ impl ProvisionerTaskJobQueue for StoredJobs {
     }
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn resume_queues_only_the_tasks_left_without_a_job() {
     let conn = gateway_db::GatewayDb::open_path(":memory:")
@@ -256,6 +301,7 @@ async fn resume_queues_only_the_tasks_left_without_a_job() {
     let runner = ProvisionerTaskRunner::builder(store, Arc::clone(&queue) as DynProvisionerTaskJobQueue)
         .register(Echo {
             outcome: |value| Ok(json!(value)),
+            progress_timeout: time::Duration::hours(1),
             runs: Arc::default(),
             ended: Arc::default(),
         })
@@ -292,6 +338,7 @@ async fn resume_queues_only_the_tasks_left_without_a_job() {
     );
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_panicking_attempt_fails_the_task() {
     let mut harness = Harness::new(|_| panic!("the attempt panics")).await;
@@ -303,30 +350,49 @@ async fn a_panicking_attempt_fails_the_task() {
     assert_eq!(task.state, ProvisionerTaskState::Failed);
     assert_eq!(
         task.payload,
-        json!({ "reason": "permanent error", "details": "the attempt panicked", "attempts": 1 })
+        json!({ "error": { "kind": "panicked" }, "last": { "after": null } }),
+        "the failure keeps what the attempt started with"
     );
     assert_eq!(*harness.ended.lock(), [id]);
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
-async fn a_failure_keeps_the_reason_of_its_kind() {
-    let mut harness = Harness::new(|_| {
-        Err(AttemptError::Failed {
-            reason: "key lost",
-            details: "gone".to_owned(),
-        })
-    })
-    .await;
+async fn a_permanent_failure_fails_the_task_at_once() {
+    let mut harness = Harness::new(|_| Err(AttemptError::Permanent(Permanent::KeyLost))).await;
     let id = harness.create(1).await;
 
     harness.queued_job().run().await.expect("no retry");
 
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed);
+    assert_eq!(task.attempts, 1);
+    assert_eq!(task.payload["error"], json!({ "kind": "keyLost" }));
+}
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
+#[tokio::test]
+async fn a_recoverable_failure_is_retried_up_to_the_last_attempt() {
+    let mut harness = Harness::new(|_| Err(AttemptError::Recoverable(Recoverable::AiBusy { status: 429 }))).await;
+    let id = harness.create(1).await;
+    let mut job = harness.queued_job();
+
+    for attempt in 1..MAX_ATTEMPTS {
+        job.run().await.expect_err("the job queue retries");
+        assert_eq!(harness.task(id).await.state, ProvisionerTaskState::Running, "{attempt}");
+    }
+    job.run().await.expect("the last attempt");
+
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed);
+    assert_eq!(task.attempts, MAX_ATTEMPTS);
     assert_eq!(
-        harness.task(id).await.payload,
-        json!({ "reason": "key lost", "details": "gone", "attempts": 1 })
+        task.payload["error"],
+        json!({ "kind": "attemptsExhausted", "last": { "kind": "aiBusy", "status": 429 } })
     );
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn invalid_parameters_and_unknown_kinds_fail_the_task() {
     let harness = Harness::new(|value| Ok(json!(value))).await;
@@ -355,55 +421,40 @@ async fn invalid_parameters_and_unknown_kinds_fail_the_task() {
 
         let task = harness.task(id).await;
         assert_eq!(task.state, ProvisionerTaskState::Failed, "{kind}");
-        assert_eq!(task.payload["reason"], "invalid task", "{kind}");
+        assert_eq!(task.payload["error"], json!({ "kind": "invalidTask" }), "{kind}");
     }
 
     assert_eq!(harness.runs.load(Ordering::SeqCst), 0);
 }
 
+// oracle: intent crates/provisioner-task/INTENT.md §Invariants
 #[tokio::test]
-async fn an_attempt_starts_only_if_it_can_finish_before_the_deadline() {
-    let harness = Harness::new(|value| Ok(json!(value))).await;
-    let store = harness.runner.store();
-    let now = OffsetDateTime::now_utc();
+async fn an_attempt_without_progress_is_cancelled_at_the_deadline() {
+    let mut harness = Harness::with_progress_timeout(|value| Ok(json!(value)), time::Duration::seconds(2)).await;
+    let id = harness.create(HANG).await;
 
-    // The echo attempt timeout is 5 seconds; 2 more or 2 less keep the test clear of whole-second rounding.
-    let needed = time::Duration::seconds(5) + time::Duration::try_from(ATTEMPT_END_GRACE).expect("grace");
-    for (left, state) in [
-        (needed + time::Duration::seconds(2), ProvisionerTaskState::Succeeded),
-        (needed - time::Duration::seconds(2), ProvisionerTaskState::Failed),
-    ] {
-        let id = Uuid::new_v4();
-        let job_token = Uuid::new_v4();
-        store
-            .create(
-                NewProvisionerTaskRecord {
-                    id,
-                    kind: KIND.to_owned(),
-                    target: id.to_string(),
-                    params: json!({ "value": 1 }),
-                    deadline_at: now + left,
-                    job_token,
-                },
-                now,
-            )
-            .await
-            .expect("create");
+    harness.queued_job().run().await.expect("no retry");
 
-        harness.runner.run_attempt(id, job_token).await.expect("no retry");
-
-        let task = harness.task(id).await;
-        assert_eq!(task.state, state, "{left} seconds left");
-        if state == ProvisionerTaskState::Failed {
-            assert_eq!(task.payload["reason"], "timed out");
-            assert_eq!(task.attempts, 0);
-            assert!(harness.ended.lock().contains(&id));
-        }
-    }
-
-    assert_eq!(harness.runs.load(Ordering::SeqCst), 1);
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed);
+    assert_eq!(task.payload["error"], json!({ "kind": "deadlinePassed" }));
+    assert_eq!(*harness.ended.lock(), [id]);
 }
 
+// oracle: intent crates/provisioner-task/INTENT.md §Invariants
+#[tokio::test]
+async fn progress_keeps_an_attempt_running_past_its_first_deadline() {
+    let mut harness = Harness::with_progress_timeout(|value| Ok(json!(value)), time::Duration::seconds(2)).await;
+    let id = harness.create(PROGRESS).await;
+
+    harness.queued_job().run().await.expect("no retry");
+
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
+    assert_eq!(task.payload, json!("done"));
+}
+
+// oracle: property round-trip
 #[tokio::test]
 async fn the_job_is_read_back_from_its_json() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;

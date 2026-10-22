@@ -7,11 +7,11 @@ use core::fmt;
 
 use anyhow::Context as _;
 use devolutions_gateway_ai::recording_analysis::RecordingAnalysisError;
-use devolutions_gateway_ai::{AiClient, BuildError, Provider};
+use devolutions_gateway_ai::{AiClient, BuildError, Error, Provider};
 use secrecy::{ExposeSecret as _, SecretString};
 use url::Url;
 
-use super::AttemptError;
+use super::{AttemptError, BadAnswer, Permanent, Recoverable};
 use crate::config::Conf;
 
 /// AI provider to ask; `openai-compatible` needs a base URL
@@ -194,77 +194,96 @@ impl AiSettings {
 impl From<RecordingAnalysisError> for AttemptError {
     fn from(error: RecordingAnalysisError) -> Self {
         match error {
-            RecordingAnalysisError::Cancelled => AttemptError::Cancelled,
-            error if error.is_transient() => AttemptError::Transient(error.to_string()),
-            error => AttemptError::Permanent(error.to_string()),
+            RecordingAnalysisError::Ai(error) => AttemptError::from(error),
+            RecordingAnalysisError::NoRecording => AttemptError::Permanent(Permanent::NoRecording),
+            RecordingAnalysisError::InvalidRecording { file_name, .. } => {
+                AttemptError::Permanent(Permanent::UnreadableRecording { file: file_name })
+            }
+            RecordingAnalysisError::Truncated => AttemptError::Permanent(Permanent::AiBadAnswer {
+                why: BadAnswer::Truncated,
+            }),
+            // The runner cancels an attempt only once its Task is past its deadline.
+            RecordingAnalysisError::Cancelled => AttemptError::Permanent(Permanent::DeadlinePassed),
+            _ => AttemptError::Permanent(Permanent::Internal),
+        }
+    }
+}
+
+impl From<Error> for AttemptError {
+    fn from(error: Error) -> Self {
+        let bad_answer = |why| AttemptError::Permanent(Permanent::AiBadAnswer { why });
+
+        match &error {
+            Error::Transport { .. } => AttemptError::Recoverable(Recoverable::AiUnreachable),
+            Error::Status { status, .. } if error.is_transient() => {
+                AttemptError::Recoverable(Recoverable::AiBusy { status: *status })
+            }
+            Error::Status { status, .. } => AttemptError::Permanent(Permanent::AiRejected { status: *status }),
+            Error::InvalidResponse { .. } => bad_answer(BadAnswer::Invalid),
+            Error::Truncated { .. } => bad_answer(BadAnswer::Truncated),
+            Error::Refused { .. } => bad_answer(BadAnswer::Refused),
+            Error::InvalidOutput { .. } => bad_answer(BadAnswer::NotExpectedJson),
+            _ => AttemptError::Permanent(Permanent::Internal),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use devolutions_gateway_ai::Error;
-
     use super::*;
 
+    // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
     #[test]
-    fn build_errors_map_to_settings_errors() {
-        assert_eq!(
-            AiSettingsError::from(&BuildError::MissingModel),
-            AiSettingsError::MissingModel
-        );
-        assert_eq!(
-            AiSettingsError::from(&BuildError::MissingApiKey(Provider::OpenAi)),
-            AiSettingsError::MissingApiKey
-        );
-        assert_eq!(
-            AiSettingsError::from(&BuildError::MissingBaseUrl(Provider::OpenAiCompatible)),
-            AiSettingsError::MissingBaseUrl
-        );
-        assert!(matches!(
-            AiSettingsError::from(&BuildError::InvalidApiKey),
-            AiSettingsError::Invalid(_)
-        ));
-    }
-
-    #[test]
-    fn rate_limits_server_and_network_errors_are_transient() {
+    fn rate_limits_server_and_network_errors_are_recoverable() {
         let attempt = |error: Error| AttemptError::from(RecordingAnalysisError::Ai(error));
-        let status = |status| Error::Status {
+        let status = |status, code: Option<&str>| Error::Status {
             status,
             message: "failed".to_owned(),
-            code: None,
+            code: code.map(str::to_owned),
             retry_after: None,
         };
 
         let network = Error::Transport {
             message: "connection refused".to_owned(),
         };
-        assert!(matches!(attempt(network), AttemptError::Transient(_)));
+        assert_eq!(attempt(network), AttemptError::Recoverable(Recoverable::AiUnreachable));
 
         for code in [429, 500, 503] {
-            assert!(matches!(attempt(status(code)), AttemptError::Transient(_)), "{code}");
+            assert_eq!(
+                attempt(status(code, None)),
+                AttemptError::Recoverable(Recoverable::AiBusy { status: code })
+            );
         }
 
         for code in [400, 401, 403, 404] {
-            assert!(matches!(attempt(status(code)), AttemptError::Permanent(_)), "{code}");
+            assert_eq!(
+                attempt(status(code, None)),
+                AttemptError::Permanent(Permanent::AiRejected { status: code })
+            );
         }
 
-        let invalid = Error::InvalidOutput {
-            reason: "no valid action line".to_owned(),
-        };
-        assert!(matches!(attempt(invalid), AttemptError::Permanent(_)));
-
-        assert!(matches!(
-            AttemptError::from(RecordingAnalysisError::Truncated),
-            AttemptError::Permanent(_)
-        ));
         assert_eq!(
-            AttemptError::from(RecordingAnalysisError::Cancelled),
-            AttemptError::Cancelled
+            attempt(status(429, Some("insufficient_quota"))),
+            AttemptError::Permanent(Permanent::AiRejected { status: 429 }),
+            "a spent quota"
+        );
+        assert_eq!(
+            AttemptError::from(RecordingAnalysisError::Truncated),
+            AttemptError::Permanent(Permanent::AiBadAnswer {
+                why: BadAnswer::Truncated
+            })
+        );
+        assert_eq!(
+            attempt(Error::Refused {
+                reason: "content filter".to_owned()
+            }),
+            AttemptError::Permanent(Permanent::AiBadAnswer {
+                why: BadAnswer::Refused
+            })
         );
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     #[test]
     fn providers_keep_their_wire_names() {
         for (provider, name) in [
