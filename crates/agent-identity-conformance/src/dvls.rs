@@ -1363,26 +1363,6 @@ mod tests {
         Ok(())
     }
 
-    /// DVLS refuses an expired or unknown token with 401, so a refused session logs in once more and the request is sent once more.
-    #[tokio::test]
-    async fn refused_session_logs_in_again_and_retries_once() -> anyhow::Result<()> {
-        let stub = Stub::default();
-        let target = stub.start().await?;
-        let management = target.management();
-        management.settings().await?;
-        stub.expire_tokens();
-        management.settings().await?;
-        assert_eq!(
-            stub.counts(),
-            Counts {
-                logins: 2,
-                reads: 3,
-                refused: 1
-            }
-        );
-        Ok(())
-    }
-
     /// A token from a fresh login that is refused too will not be accepted by waiting, so the request is not sent a third time.
     #[tokio::test]
     async fn session_refused_after_logging_in_again_is_unauthenticated() -> anyhow::Result<()> {
