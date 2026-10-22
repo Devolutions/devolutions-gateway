@@ -1733,6 +1733,9 @@ async fn assert_new_auth_precedes_old_close(
 }
 
 pub(crate) async fn a_pending_file_enroll_success(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -1753,6 +1756,7 @@ pub(crate) async fn a_pending_file_enroll_success(ctx: Context) -> anyhow::Resul
 }
 
 pub(crate) async fn a_bad_pending_files_do_not_reject_valid_tokens(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -1841,6 +1845,7 @@ pub(crate) async fn a_bad_pending_files_do_not_reject_valid_tokens(ctx: Context)
 }
 
 pub(crate) async fn a_undecryptable_pending_file_does_not_reject_token(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[cfg(windows)]
     {
         return with_agent(ctx, None, false, |case| {
@@ -1893,6 +1898,9 @@ pub(crate) async fn a_undecryptable_pending_file_does_not_reject_token(ctx: Cont
 }
 
 pub(crate) async fn a_untrusted_tls_server_keeps_pending_token(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity/INTENT.md §Trust and transport
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, false, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -1938,6 +1946,8 @@ pub(crate) async fn a_untrusted_tls_server_keeps_pending_token(ctx: Context) -> 
 }
 
 pub(crate) async fn a_enroll_lost_response_retried_across_restart(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -1989,6 +1999,7 @@ pub(crate) async fn a_enroll_lost_response_retried_across_restart(ctx: Context) 
 }
 
 pub(crate) async fn a_two_pending_tokens_same_authority_last_wins(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, false, |case| {
         Box::pin(async move {
             // The first token's retry must wait out the second token's enrollment.
@@ -2067,6 +2078,8 @@ pub(crate) async fn a_two_pending_tokens_same_authority_last_wins(ctx: Context) 
 pub(crate) async fn a_two_pending_tokens_different_authorities_progress_independently(
     ctx: Context,
 ) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
     with_agent(ctx, None, false, |case| {
         Box::pin(async move {
             // The first authority's retry must wait out the second authority's enrollment.
@@ -2140,6 +2153,8 @@ pub(crate) async fn a_two_pending_tokens_different_authorities_progress_independ
 }
 
 pub(crate) async fn a_enroll_revoked_before_response_is_permanent(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2216,6 +2231,8 @@ pub(crate) async fn a_enroll_revoked_before_response_is_permanent(ctx: Context) 
 }
 
 pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     for reason in ["token_invalid", "token_exhausted", "token_expired", "token_malformed"] {
         if reason == "token_expired" && !ctx.mock() {
             continue;
@@ -2282,6 +2299,9 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
 }
 
 pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx.clone(), None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2433,6 +2453,8 @@ fn is_error_level_log_line(line: &str) -> bool {
 }
 
 pub(crate) async fn a_unavailable_key_backend_stops_identity(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
     #[cfg(unix)]
     {
         let mut ctx = ctx;
@@ -2541,6 +2563,9 @@ async fn wait_for_injected_attempt(
 }
 
 pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2619,6 +2644,8 @@ pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: C
 }
 
 pub(crate) async fn a_check_in_transient_failures_retry_without_state_change(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
     with_agent(ctx, None, false, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2725,6 +2752,7 @@ pub(crate) async fn a_check_in_transient_failures_retry_without_state_change(ctx
 }
 
 pub(crate) async fn a_token_never_logged(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2738,6 +2766,7 @@ pub(crate) async fn a_token_never_logged(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn a_same_token_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2906,18 +2935,26 @@ async fn assert_replay_unchanged(
 }
 
 pub(crate) async fn a_same_token_after_token_exhausted_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     same_token_after_permanent_outcome(ctx, PermanentTokenOutcome::Exhausted).await
 }
 
 pub(crate) async fn a_same_token_after_token_invalid_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     same_token_after_permanent_outcome(ctx, PermanentTokenOutcome::Invalid).await
 }
 
 pub(crate) async fn a_same_token_after_token_malformed_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     same_token_after_permanent_outcome(ctx, PermanentTokenOutcome::Malformed).await
 }
 
 pub(crate) async fn a_same_token_after_identity_revoked_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2944,6 +2981,8 @@ pub(crate) async fn a_same_token_after_identity_revoked_no_enrollment(ctx: Conte
 }
 
 pub(crate) async fn a_same_token_rejected_identity_no_enrollment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -2998,6 +3037,7 @@ pub(crate) async fn a_same_token_rejected_identity_no_enrollment(ctx: Context) -
 }
 
 pub(crate) async fn a_different_token_replaces_identity(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -3031,6 +3071,8 @@ pub(crate) async fn a_different_token_replaces_identity(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn a_rejected_identity_replaced(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -3071,6 +3113,9 @@ pub(crate) async fn a_rejected_identity_replaced(ctx: Context) -> anyhow::Result
 }
 
 pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, false, |case| {
         Box::pin(async move {
             let token = new_token(case, 1).await?;
@@ -3240,6 +3285,8 @@ fn assert_no_pending_files(case: &AgentCase) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn a_cli_identity_enroll_stdin(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, false, |case| {
         Box::pin(async move {
             let token = new_token(case, 1).await?;
@@ -3289,6 +3336,9 @@ pub(crate) async fn a_cli_identity_enroll_stdin(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, Some(2), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -3409,6 +3459,9 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -3522,6 +3575,8 @@ pub(crate) async fn a_renewal_lost_response_retried(ctx: Context) -> anyhow::Res
 }
 
 pub(crate) async fn a_renewal_lost_confirm_response_retried(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -3652,6 +3707,9 @@ pub(crate) async fn a_renewal_lost_confirm_response_retried(ctx: Context) -> any
 }
 
 pub(crate) async fn a_confirm_barrier_blocks_channelless_traffic(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -3741,6 +3799,8 @@ pub(crate) async fn a_confirm_barrier_blocks_channelless_traffic(ctx: Context) -
 }
 
 pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx.clone(), Some(3), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4015,6 +4075,8 @@ pub(crate) async fn a_confirm_expired_pending_renews_with_fresh_key(ctx: Context
 }
 
 pub(crate) async fn a_confirm_expired_pending_beyond_grace_rejects(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     with_agent(ctx, Some(3), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4095,6 +4157,9 @@ pub(crate) async fn a_confirm_expired_pending_beyond_grace_rejects(ctx: Context)
 }
 
 pub(crate) async fn a_expired_current_renews_in_grace_or_rejects_beyond(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx.clone(), None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4177,6 +4242,9 @@ pub(crate) async fn a_expired_current_renews_in_grace_or_rejects_beyond(ctx: Con
 }
 
 pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    // oracle: intent docs/agent-identity/INTENT.DVLS.md §Identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4256,6 +4324,9 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
 }
 
 pub(crate) async fn a_make_before_break_on_renewal(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, Some(2), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4300,6 +4371,8 @@ pub(crate) async fn a_make_before_break_on_renewal(ctx: Context) -> anyhow::Resu
 }
 
 pub(crate) async fn a_old_key_deleted_after_confirm_without_channel(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, Some(8), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4402,6 +4475,9 @@ pub(crate) async fn a_old_key_deleted_after_confirm_without_channel(ctx: Context
 }
 
 pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4469,6 +4545,9 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4510,6 +4589,9 @@ pub(crate) async fn a_request_renewal_while_offline(ctx: Context) -> anyhow::Res
 }
 
 pub(crate) async fn a_request_renewal_without_channel(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // oracle: intent crates/device-key/INTENT.md §Operations
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4585,6 +4667,8 @@ pub(crate) async fn a_request_renewal_without_channel(ctx: Context) -> anyhow::R
 }
 
 pub(crate) async fn a_reconnect_make_before_break(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4647,6 +4731,8 @@ pub(crate) async fn a_reconnect_make_before_break(ctx: Context) -> anyhow::Resul
 }
 
 pub(crate) async fn a_revocation_stops_agent(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
     with_agent(ctx, Some(2), true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4675,6 +4761,8 @@ pub(crate) async fn a_revocation_stops_agent(ctx: Context) -> anyhow::Result<()>
 }
 
 pub(crate) async fn a_identity_unknown_recorded(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4703,6 +4791,8 @@ pub(crate) async fn a_identity_unknown_recorded(ctx: Context) -> anyhow::Result<
 }
 
 pub(crate) async fn a_signed_rejection_without_live_stream(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
     with_agent(ctx.clone(), None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4769,6 +4859,9 @@ pub(crate) async fn a_signed_rejection_without_live_stream(ctx: Context) -> anyh
 }
 
 pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
     let invalid_url_case = ctx.clone();
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
@@ -4910,16 +5003,22 @@ async fn no_channel_for_malformed_url(
 }
 
 pub(crate) async fn a_no_channel_url_with_query(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
     let expected_url = format!("{}?identity_probe=1", ctx.target.base_url);
     no_channel_for_malformed_url(ctx, "query", json!("query"), expected_url).await
 }
 
 pub(crate) async fn a_no_channel_url_with_fragment(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-url
     let expected_url = format!("{}#identity_probe", ctx.target.base_url);
     no_channel_for_malformed_url(ctx, "fragment", json!("fragment"), expected_url).await
 }
 
 pub(crate) async fn a_config_update_disables_channel(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -4977,6 +5076,8 @@ pub(crate) async fn a_config_update_disables_channel(ctx: Context) -> anyhow::Re
 }
 
 pub(crate) async fn a_check_in_enables_channel(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -5040,6 +5141,8 @@ pub(crate) async fn a_check_in_enables_channel(ctx: Context) -> anyhow::Result<(
 }
 
 pub(crate) async fn a_check_in_recovers_broken_channel(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -5109,6 +5212,9 @@ pub(crate) async fn a_check_in_recovers_broken_channel(ctx: Context) -> anyhow::
 }
 
 pub(crate) async fn a_config_unknown_fields_and_hello_revision(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -5246,6 +5352,8 @@ fn completed_check_ins(events: &[Value]) -> usize {
 }
 
 pub(crate) async fn a_config_unsupported_version_keeps_stored_config(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -5306,6 +5414,8 @@ pub(crate) async fn a_config_unsupported_version_keeps_stored_config(ctx: Contex
 }
 
 pub(crate) async fn a_config_unsupported_version_on_enroll_keeps_pending(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -5346,6 +5456,7 @@ pub(crate) async fn a_config_unsupported_version_on_enroll_keeps_pending(ctx: Co
 }
 
 pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             // oracle: intent crates/agent-identity/INTENT.md §Identities
@@ -5445,6 +5556,8 @@ pub(crate) async fn a_multi_authority(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn a_key_non_exportable(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/device-key/INTENT.md §Private keys
+    // oracle: intent crates/device-key/INTENT.md §Access
     #[cfg(windows)]
     {
         ensure!(
@@ -5517,6 +5630,8 @@ pub(crate) async fn a_key_non_exportable(ctx: Context) -> anyhow::Result<()> {
 }
 
 pub(crate) async fn a_file_backend_permissions(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/device-key/INTENT.md §Access
+    // oracle: intent crates/device-key/INTENT.md §File backend
     #[cfg(unix)]
     {
         ensure!(
@@ -5545,6 +5660,9 @@ pub(crate) async fn a_file_backend_permissions(ctx: Context) -> anyhow::Result<(
 }
 
 pub(crate) async fn a_rotation_migrates_connected_agent(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     ensure!(
         ctx.mock() || ctx.disposable_dvls_target,
         "DVLS rotation requires --disposable-dvls-target"
@@ -5636,6 +5754,9 @@ pub(crate) async fn a_rotation_migrates_connected_agent(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn a_rotation_migrates_through_check_in(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
@@ -5784,6 +5905,8 @@ pub(crate) async fn a_rotation_migrates_through_check_in(ctx: Context) -> anyhow
 }
 
 pub(crate) async fn a_rotation_migrates_on_schedule(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
     with_agent(ctx, Some(50), false, |case| {
         Box::pin(async move {
             let target = case.ctx.target.clone();
