@@ -8,7 +8,7 @@ public class IdentityConfigTests
 {
     // `config` holds `version`, which is 1, `revision` and `agent_channel_url`.
     // An agent reads both numbers as integers, so 1.0 or 3e0 would not do.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Fact]
     public void JsonHasTheContractMembers()
     {
@@ -27,8 +27,8 @@ public class IdentityConfigTests
 
     // CONTRACT.agent-identity.md §5.2: `agent_channel_url` is absent when the server does not offer the channel,
     // and §1 omits an absent field rather than writing null.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Fact]
     public void JsonOmitsAnAbsentAgentChannelUrl()
     {
@@ -42,7 +42,7 @@ public class IdentityConfigTests
 
     // `revision` is an unsigned 64-bit integer, with no starting value the agent assumes.
     // A double holds no more than 53 bits, so it would round the largest revisions.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Theory]
     [InlineData(0UL, "0")]
     [InlineData(9007199254740993UL, "9007199254740993")]
@@ -60,26 +60,26 @@ public class IdentityConfigTests
     // CONTRACT.agent-identity.md §5.2: `agent_channel_url` is an absolute `https` URL without a query or fragment.
     // RFC 9110 §4.2.4: a sender does not generate user information in an `https` URI.
     [Theory]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [InlineData("")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [InlineData("/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [InlineData("host/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [InlineData("http://host/dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [InlineData("wss://host/dvls")]
     // oracle: spec RFC 9110 §4.2.2
     [InlineData("https:///dvls")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [InlineData("https://host/dvls?tenant=1")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     // oracle: spec RFC 3986 §3.4
     [InlineData("https://host/dvls?")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [InlineData("https://host/dvls#top")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     // oracle: spec RFC 3986 §3.5
     [InlineData("https://host/dvls#")]
     // oracle: spec RFC 9110 §4.2.4
@@ -98,7 +98,7 @@ public class IdentityConfigTests
     // `agent_channel_url` is an absolute `https` URL without a query or fragment, which the config carries as the host
     // gave it.
     // Whether a URL ending in a slash is rejected or written without the slash is the library's choice.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Theory]
     [InlineData("https://host/dvls")]
     [InlineData("https://host")]
@@ -127,7 +127,7 @@ public class IdentityConfigTests
     }
 
     // Product-specific config fields, such as a PSU channel URL, may coexist with the others.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Fact]
     public void JsonHasTheProductFieldsBesideTheContractMembers()
     {
@@ -149,7 +149,7 @@ public class IdentityConfigTests
 
     // JSON keys are snake_case, lowercase words of letters and digits joined by single underscores.
     // zz09 starts and goes on with the last letter, and holds the first and last digits.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData("a")]
     [InlineData("psu_channel_url")]
@@ -164,17 +164,17 @@ public class IdentityConfigTests
     }
 
     [Theory]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("Channel")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("psuChannel")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("psu-channel")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("psu channel")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("psu\n")]
     public void CreateRejectsAProductFieldNameThatIsNotSnakeCase(string name)
     {
@@ -182,7 +182,7 @@ public class IdentityConfigTests
     }
 
     // CONTRACT.agent-identity.md §5.2 defines these members, so a product field of one of these names would repeat it.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     // oracle: spec RFC 8259 §4
     [Theory]
     [InlineData("version")]
@@ -213,7 +213,7 @@ public class IdentityConfigTests
     // RFC 8259 §8.1: JSON text exchanged between systems is UTF-8, which cannot encode an unpaired surrogate.
     // Failing here keeps every later serialization of the config from failing.
     [Theory]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("""{"\ud800": 1}""")]
     public void CreateRejectsAProductFieldValueThatIsNotUnicodeText(string value)
     {
@@ -222,7 +222,7 @@ public class IdentityConfigTests
 
     // JSON keys are snake_case, so the members inside a product field's value are too,
     // whether an object or an array holds them.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData("""{"maxSessions": 4}""")]
     [InlineData("""{"limits": {"max_sessions": 4, "Max_paths": 2}}""")]
@@ -260,7 +260,7 @@ public class IdentityConfigTests
     }
 
     // An absent field is omitted, never written as null, at any depth.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData("psu_channel_url", "null")]
     [InlineData("policy_limits", """{"proxy": null}""")]
@@ -272,8 +272,8 @@ public class IdentityConfigTests
 
     // RFC 8259 §4 asks for unique names within an object, and §5 makes array elements values rather than members.
     // A name repeats only within one object, and an array element is no field, so it may be null.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     // oracle: spec RFC 8259 §4
     // oracle: spec RFC 8259 §5
     [Fact]
@@ -320,7 +320,7 @@ public class IdentityConfigTests
     private const int LargestConfigJsonBytes = 65_490;
 
     // Each side of the agent channel accepts envelopes up to 65,536 bytes.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-service
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     [Fact]
     public void CreateAcceptsAConfigWhoseConfigUpdateIsExactly64KiB()
     {
@@ -333,7 +333,7 @@ public class IdentityConfigTests
     // Each side of the agent channel sends no envelope larger than 65,536 bytes,
     // so an authority never holds a config whose `ConfigUpdate` would exceed that.
     // One byte more JSON than the largest config makes a 65,537-byte envelope.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-service
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     // oracle: spec Protocol Buffers Encoding §Length-Delimited Records
     [Fact]
     public void CreateRejectsAConfigWhoseConfigUpdateWouldExceed64KiB()

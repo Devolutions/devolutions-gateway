@@ -55,7 +55,7 @@ public class StrictBase64Tests
         { "-_8", [0xFB, 0xFF] },
     };
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
     // oracle: spec RFC 4648 §10
     // oracle: spec RFC 4648 §4
     // oracle: spec RFC 4648 §5
@@ -69,8 +69,8 @@ public class StrictBase64Tests
 
     // Each row is a form that RFC 4648 §4, or §5 without padding, does not produce for any byte string,
     // so accepting it would give one value two encodings.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
     // oracle: spec RFC 4648 §4
     // oracle: spec RFC 4648 §5
     [Theory]
@@ -101,7 +101,7 @@ public class StrictBase64Tests
 
     // RFC 4648 §10 vectors with the number of bytes they encode; padding characters encode none.
     // oracle: spec RFC 4648 §10
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
     [Theory]
     [InlineData("base64", "", 0)]
     [InlineData("base64", "Zg==", 1)]
@@ -139,7 +139,7 @@ public class StrictBase64Tests
     }
 
     // CONTRACT.agent-identity.md Definitions: base64url is RFC 4648 §5 without padding.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
     // oracle: spec RFC 4648 §5
     // oracle: spec RFC 4648 §10
     [Theory]
@@ -154,7 +154,7 @@ public class StrictBase64Tests
     // Random values of every length up to 96 bytes end in each final-quantum shape many times.
     // oracle: spec RFC 4648 §4
     // oracle: spec RFC 4648 §5
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
     [Fact]
     public void DecodesAndEncodesEveryLengthLikeTheBcl()
     {
@@ -179,8 +179,8 @@ public class StrictBase64Tests
     // so trying every final quantum of one or two bytes checks that each value has exactly one accepted encoding.
     // oracle: spec RFC 4648 §3.5
     // oracle: spec RFC 4648 §4
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §Definitions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
     [Theory]
     [InlineData("base64")]
     [InlineData("base64url")]

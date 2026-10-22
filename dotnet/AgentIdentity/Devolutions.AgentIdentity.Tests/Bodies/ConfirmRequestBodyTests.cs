@@ -9,7 +9,7 @@ public class ConfirmRequestBodyTests
     private const string Secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
 
     // A confirm request carries no body.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.5
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     [Fact]
     public void AcceptsEmptyBody()
     {
@@ -20,7 +20,7 @@ public class ConfirmRequestBodyTests
     }
 
     // A body holding only white space, a byte order mark, an empty JSON object or a NUL byte is not empty.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.5
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     [Theory]
     [InlineData("empty JSON object", "{}")]
     [InlineData("JSON null", "null")]

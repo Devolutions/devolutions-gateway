@@ -35,7 +35,7 @@ public class RenewalRulesTests
     // If the CSR key is the key of the identity's pending certificate,
     // the server returns 200 with that pending chain, a retry after a lost response.
     // A renew request presents no enrollment token, so whatever the host says about one does not count.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -54,7 +54,7 @@ public class RenewalRulesTests
         Assert.Null(decision.Error);
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     [Theory]
     [MemberData(nameof(OtherIssuedKeyNames))]
     public async Task RejectsAnyOtherIssuedKeyWithInvalidRequest(string key)
@@ -65,7 +65,7 @@ public class RenewalRulesTests
 
         Assert.Equal(RenewalOutcome.Reject, decision.Outcome);
         Assert.Equal(AgentIdentityErrorCode.InvalidRequest, decision.Error?.Code);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         Assert.Equal(400, decision.Error?.HttpStatusCode);
         // oracle: mutant an empty failure detail for the CSR key of a deleted identity, of another identity,
         // or of a current or retired certificate of the renewing identity
@@ -74,7 +74,7 @@ public class RenewalRulesTests
 
     // If the CSR key was never issued, the server issues a new pending certificate
     // and retires the identity's previous pending certificate, if any.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     [Fact]
     public async Task IssuesAPendingCertificateForAKeyNeverIssued()
     {

@@ -17,11 +17,11 @@ public class AgentIdentityProtocolTests
 
     // CONTRACT.agent-identity.md §1: timestamps are RFC 3339 UTC strings ending in `Z`, such as 2026-09-24T12:00:00Z.
     [Theory]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("2026-09-24T12:00:00+00:00", "2026-09-24T12:00:00Z")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("2026-09-24T14:00:00+02:00", "2026-09-24T12:00:00Z")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [InlineData("2026-09-24T23:30:00-01:00", "2026-09-25T00:30:00Z")]
     public void FormatTimestampWritesUtcWholeSeconds(string instant, string expected)
     {
@@ -32,7 +32,7 @@ public class AgentIdentityProtocolTests
 
     // RFC 3339 dates are Gregorian, and §5.6 writes them in ASCII digits with fixed separators, whatever the culture.
     // A culture-sensitive format would write the Thai Buddhist year 2569 and the time separator of this culture.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // oracle: spec RFC 3339 §1
     // oracle: spec RFC 3339 §5.6
     [Fact]
@@ -58,8 +58,8 @@ public class AgentIdentityProtocolTests
     // CONTRACT.agent-identity.md §1: a thumbprint is base64url(SHA-256(certificate DER)).
     // CONTRACT.agent-identity.md §6: a request's `keyid` is the thumbprint of the certificate that signs it.
     // The vector file gives each certificate with its thumbprint, or a registered certificate with its keyid.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: reference docs/agent-identity/test-vectors.json
     [Theory]
     [MemberData(nameof(VectorCertificateNames))]
@@ -71,7 +71,7 @@ public class AgentIdentityProtocolTests
     }
 
     // Servers accept request bodies up to 64 KiB.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     [Fact]
     public void MaxRequestBodyBytesIs64KiB()
     {

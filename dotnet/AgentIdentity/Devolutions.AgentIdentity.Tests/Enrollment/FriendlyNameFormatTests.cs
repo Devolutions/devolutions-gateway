@@ -38,21 +38,21 @@ public class FriendlyNameFormatTests
     // the enrollment token's name; CONTRACT.agent-identity.md §3 lists the known metadata keys.
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
     [Theory]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{hostname}", "pc-042")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{fqdn}", "pc-042.corp.example")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{domain}", "corp.example")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{os_name}", "Windows")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{os_version}", "10.0.26100")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{arch}", "x86_64")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{agent_version}", "2026.3.0")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{machine_id}", "4c4c4544-0042-3510-8052-b4c04f4a4e32")]
     [InlineData("{token_name}", "Fleet")]
     // `{{` and `}}` escape braces, and other text is literal.
@@ -61,11 +61,11 @@ public class FriendlyNameFormatTests
     [InlineData("}}", "}")]
     [InlineData("}}{{", "}{")]
     [InlineData("{{hostname}}", "{hostname}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{{{hostname}}}", "{pc-042}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("Laptop {hostname} ({os_name}, {arch})", "Laptop pc-042 (Windows, x86_64)")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{token_name}/{hostname}{hostname}", "Fleet/pc-042pc-042")]
     public void EvaluatesThePlaceholdersAndTheLiteralText(string format, string expected)
     {
@@ -86,25 +86,25 @@ public class FriendlyNameFormatTests
     [InlineData("{{hostname}}}")]
     [InlineData("{{}")]
     [InlineData("}{")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{Hostname}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{HOSTNAME}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{ hostname }")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{hostname }")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{host{name}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{token}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{name}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{custom_key}")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{0}")]
     public void TryParseRejectsAnUnpairedBraceOrAnUnknownPlaceholder(string format)
     {
@@ -294,7 +294,7 @@ public class FriendlyNameFormatTests
     // INTENT.agent-identity.md, "Enrollment": an empty result falls back to the identity ID,
     // which CONTRACT.agent-identity.md §1 writes as a lowercase hyphenated UUID.
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [InlineData("{fqdn}", TokenName)]
     [InlineData("", TokenName)]
@@ -317,7 +317,7 @@ public class FriendlyNameFormatTests
         AgentMetadata withoutHostname = Validated(new Dictionary<string, string> { ["fqdn"] = "pc-042.corp.example" });
 
         Assert.Equal("pc-042", FriendlyNameFormat.Default.Evaluate(Metadata, TokenName, IdentityId));
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         Assert.Equal(
             "0f8fad5b-d9cb-469f-a165-70867728950e",
             FriendlyNameFormat.Default.Evaluate(withoutHostname, TokenName, IdentityId));

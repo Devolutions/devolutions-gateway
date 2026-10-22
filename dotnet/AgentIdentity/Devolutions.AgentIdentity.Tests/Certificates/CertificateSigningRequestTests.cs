@@ -37,14 +37,14 @@ public class CertificateSigningRequestTests
         },
 
         // The agent's CSR carries an empty attribute set, A0 00.
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         ["empty attribute set"] = key =>
             TestCsr.Request(TestCsr.RequestInfo(key.ExportSubjectPublicKeyInfo(), attributes: [0xA0, 0x00]), key),
 
         // CONTRACT.agent-identity.md §4: the server ignores an extensionRequest with an empty Extensions list,
         // which common CSR builders emit although RFC 5280 §4.1 gives Extensions SIZE (1..MAX).
         // The attribute is the PKCS #9 extensionRequest (RFC 2985 §5.4.2) with one value, an empty SEQUENCE.
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         ["extensionRequest with empty Extensions"] = key =>
         {
             byte[] extensionRequest = TestCsr.Sequence(
@@ -59,7 +59,7 @@ public class CertificateSigningRequestTests
         // CONTRACT.agent-identity.md §4: attributes need no "canonical DER form,
         // such as a sorted `SET OF`" (X.690 §11.6).
         // Their encodings first differ in the last arc of the OIDs, 04 then 03, so the set descends.
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         ["attributes out of DER order"] = key =>
         {
             static byte[] Attribute(string oid) =>
@@ -138,7 +138,7 @@ public class CertificateSigningRequestTests
     private static readonly Dictionary<string, Func<byte[]>> RequestsForAKeyNotNamedP256 = new()
     {
         // The key is a P-256 key.
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         ["P-384 key"] = () =>
         {
             using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP384);
@@ -146,7 +146,7 @@ public class CertificateSigningRequestTests
         },
 
         // secp256k1 (SEC 2 §2.4.1) points also take 65 octets uncompressed, so only the curve name tells them apart.
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         ["P-256 point named secp256k1"] = () =>
         {
             using ECDsa key = NewKey();
@@ -268,7 +268,7 @@ public class CertificateSigningRequestTests
 
     // test-vectors.json csr.<name>.expected, the outcome CONTRACT.agent-identity.md §4 gives each request.
     // oracle: reference docs/agent-identity/test-vectors.json csr
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(VectorData.CsrNames), MemberType = typeof(VectorData))]
     public void CsrVectorHasItsExpectedOutcome(string name)
@@ -293,13 +293,13 @@ public class CertificateSigningRequestTests
         CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(vector.Csr));
 
         Assert.Equal(expected, csr.SubjectPublicKeyInfo.ToArray());
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
         Assert.Equal(SHA256.HashData(expected), csr.SubjectPublicKeyInfoSha256.ToArray());
     }
 
     // A request written by .NET rather than by the test builder.
     // A P-256 key and ecdsa-with-SHA256, the profile .NET writes for this key.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void AcceptsRequestWrittenByDotNet()
     {
@@ -311,7 +311,7 @@ public class CertificateSigningRequestTests
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(RequestWithIgnoredContentsNames))]
     public void AcceptsAnySubjectAndAttributes(string request)
@@ -338,7 +338,7 @@ public class CertificateSigningRequestTests
 
     // A CSR is DER, the encoding of one request.
     // Bytes after the request would give one request many encodings.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Fact]
     public void RejectsTrailingBytes()
     {
@@ -423,7 +423,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(RequestsWithAnExtraElement[sequence](key)));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(RequestForAKeyNotNamedP256Names))]
     public void RejectsKeyNotNamedP256(string key)
@@ -433,7 +433,7 @@ public class CertificateSigningRequestTests
 
     // RFC 5480 §2.1.2: id-ecDH restricts the key to key agreement; CONTRACT.agent-identity.md §4 needs a signing key.
     // oracle: spec RFC 5480 §2.1.2
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void RejectsKeyRestrictedToKeyAgreement()
     {
@@ -455,7 +455,7 @@ public class CertificateSigningRequestTests
         AssertInvalid(CertificateSigningRequest.Validate(TestCsr.Request(TestCsr.RequestInfo(spki), key)));
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Theory]
     [MemberData(nameof(PointNotUncompressedNames))]
     public void RejectsPointNotUncompressed(string point)
@@ -469,7 +469,7 @@ public class CertificateSigningRequestTests
     // Flipping the low bit of y leaves the point off the curve,
     // since the only other point with the same x has y' = p - y, which is y + 1 or y - 1 only for y = (p ± 1) / 2.
     // No private key exists for such a point, so the key whose point was altered signs the request.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void RejectsPointOffTheCurve()
     {
@@ -515,7 +515,7 @@ public class CertificateSigningRequestTests
     }
 
     // The signature algorithm is ecdsa-with-SHA256, even when the signature verifies under it.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void RejectsAnotherSignatureAlgorithmOverASha256Signature()
     {
@@ -540,7 +540,7 @@ public class CertificateSigningRequestTests
     }
 
     // Security invariant 1: the self-signature is the proof of possession of the request's key.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void RejectsRequestSignedByAnotherKey()
     {
@@ -606,9 +606,9 @@ public class CertificateSigningRequestTests
     private static void AssertInvalid(CsrValidationResult result)
     {
         Assert.False(result.Succeeded);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         Assert.Equal(AgentIdentityErrorCode.InvalidRequest, result.Error.Code);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         Assert.Equal(400, result.Error.HttpStatusCode);
         // oracle: mutant an empty failure detail for a CSR that is followed by other bytes,
         // that has a version other than 0, or whose key is not an id-ecPublicKey key

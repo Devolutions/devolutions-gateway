@@ -253,7 +253,7 @@ public class RequestAuthenticatorProfileTests
 
     // A verifier that keeps the last of repeated keys, decodes leniently, or reads a parameter of another type
     // accepts a request whose signature data a proxy, a log or another parser can read differently.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Theory]
     [MemberData(nameof(StepOneViolationNames))]
     public async Task CorrectlySignedRequestBreakingAStepOneRuleIsSignatureInvalid(string violation)
@@ -267,7 +267,7 @@ public class RequestAuthenticatorProfileTests
 
     // Step 1: for renew and check-in, Content-Digest holds exactly one member, sha-256,
     // without parameters, in canonical base64.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Theory]
     [MemberData(nameof(ContentDigestViolationCases))]
     public async Task CorrectlySignedRequestBreakingAContentDigestRuleIsSignatureInvalid(
@@ -284,7 +284,7 @@ public class RequestAuthenticatorProfileTests
 
     // Parameters may appear in any order, and the verifier builds @signature-params
     // from the received member, so a verifier that copied the received text would reject these.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Theory]
     [MemberData(nameof(AcceptedFormNames))]
     public async Task RequestInAFormThatRfc8941AllowsIsAccepted(string form)
@@ -298,7 +298,7 @@ public class RequestAuthenticatorProfileTests
 
     // Step 1: a malformed Signature-Input draws signature_invalid,
     // as a result rather than an exception, and records no nonce.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Theory]
     [MemberData(nameof(MalformedSignatureInputNames))]
     public async Task MalformedSignatureInputIsSignatureInvalid(string form)
@@ -315,7 +315,7 @@ public class RequestAuthenticatorProfileTests
     // which CONTRACT.agent-identity.md §6 step 2 rejects for renew.
     // The signature covers the tag renew, which a parser that dropped the escaped character would read.
     // oracle: spec RFC 8941 §4.2.5
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Fact]
     public async Task TagWithAnEscapedBackslashIsAnotherTag()
     {

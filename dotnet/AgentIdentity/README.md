@@ -171,10 +171,10 @@ Implement the `AgentChannel` service with that package; a feed that serves this 
 [§5.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#51-get-trust-anchor
 [§5.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
 [§5.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#53-post-renew
-[§5.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-errors
+[§5.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#errors
 [§5.5]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#55-post-confirm
 [§5.6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#56-post-check-in-http-fallback
-[§6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#agent-identity-signatures
+[§6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#signatures
 [§7.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#71-service
 [§7.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#73-sequence
 [§7.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#74-termination

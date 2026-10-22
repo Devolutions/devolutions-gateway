@@ -30,8 +30,8 @@ public class ChannelMessagesTests
     public static TheoryData<string> MessageNames => new(Messages.Keys);
 
     // CONTRACT.agent-identity.md §1 and §7.3: envelope ids are lowercase hyphenated UUIDs.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     [Theory]
     [MemberData(nameof(MessageNames))]
     public void MessageHasALowercaseUuidId(string message)
@@ -42,8 +42,8 @@ public class ChannelMessagesTests
     }
 
     // Steps 5 and 7: the agent acknowledges a message by its id, so no two messages share one.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     [Theory]
     [MemberData(nameof(MessageNames))]
     public void EachMessageHasItsOwnId(string message)
@@ -53,9 +53,9 @@ public class ChannelMessagesTests
 
     // CONTRACT.agent-identity.md §7.3 step 7 and channel.proto: ConfigUpdate carries the config, in the shape of §5.2,
     // as a UTF-8 JSON object.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §5.2
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Fact]
     public void ConfigUpdateCarriesTheConfigJson()
     {
@@ -72,10 +72,10 @@ public class ChannelMessagesTests
 
     // channel.proto: the reason of RenewRequested is "admin" or "rotation";
     // CONTRACT.agent-identity.md §8.3 sends "rotation" at the start of a root rotation.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     [Theory]
     [InlineData(RenewalRequestReason.Admin, "admin")]
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §8.3
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §root-rotation
     [InlineData(RenewalRequestReason.Rotation, "rotation")]
     public void RenewRequestedCarriesItsReason(RenewalRequestReason reason, string expected)
     {
@@ -86,7 +86,7 @@ public class ChannelMessagesTests
     }
 
     // The streams of a retired certificate get Reconnect{reason:"certificate_rotated"}.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     [Fact]
     public void ReconnectCarriesItsReason()
     {

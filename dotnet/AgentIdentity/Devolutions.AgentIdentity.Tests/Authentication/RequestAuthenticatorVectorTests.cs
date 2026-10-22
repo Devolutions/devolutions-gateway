@@ -100,7 +100,7 @@ public class RequestAuthenticatorVectorTests
 
     // Nonces are committed only after the signature verifies, so garbage requests cannot burn nonces.
     // With an empty nonce store, every failing case fails before step 6.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Theory]
     [MemberData(nameof(FailingCaseNames))]
     public async Task FailingCaseRecordsNoNonce(string name)
@@ -137,7 +137,7 @@ public class RequestAuthenticatorVectorTests
 
     // CONTRACT.agent-identity.md §6 step 6 and the shared intent: the authority keeps each accepted nonce
     // until 60 s after its signature expires, the last moment the window could accept the signature again.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
     [Theory]
     [MemberData(nameof(OkCaseNames))]
@@ -161,7 +161,7 @@ public class RequestAuthenticatorVectorTests
     // such as the status that tells confirm whether to promote the certificate.
     // The registered certificates of the vector file state them, in Unix seconds, independently of any time zone.
     // oracle: reference docs/agent-identity/test-vectors.json http_signature.registered
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Theory]
     [MemberData(nameof(OkSignedRequestCaseNames))]
     public async Task OkCaseIdentityIsThatOfTheSigningCertificate(string name)

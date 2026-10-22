@@ -19,7 +19,7 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.Unavailable, "unavailable" },
     };
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     [Theory]
     [MemberData(nameof(WireValues))]
     public void WireValueIsTheContractCode(AgentIdentityErrorCode code, string expected)
@@ -30,23 +30,23 @@ public class AgentIdentityErrorCodeTests
     // CONTRACT.agent-identity.md §5.4, column "HTTP", for the codes to which it gives one status.
     public static TheoryData<AgentIdentityErrorCode, int> HttpStatusCodes => new()
     {
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.TokenInvalid, 401 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.TokenExhausted, 403 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.TokenExpired, 401 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.IdentityRevoked, 403 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.IdentityUnknown, 401 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.CertificateExpired, 401 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.SignatureInvalid, 401 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.ClockSkew, 401 },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.InvalidRequest, 400 },
     };
 
@@ -54,7 +54,7 @@ public class AgentIdentityErrorCodeTests
     // with the lowest and the highest status of the class: `unavailable` is 5xx.
     public static TheoryData<AgentIdentityErrorCode, int, int> HttpStatusClasses => new()
     {
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.Unavailable, 500, 599 },
     };
 
@@ -87,18 +87,18 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.TokenExhausted, StatusCode.Unauthenticated },
         // oracle: mutant the gRPC mapping throws for token_expired as for an undefined code
         { AgentIdentityErrorCode.TokenExpired, StatusCode.Unauthenticated },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         { AgentIdentityErrorCode.IdentityRevoked, StatusCode.PermissionDenied },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         { AgentIdentityErrorCode.IdentityUnknown, StatusCode.Unauthenticated },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         { AgentIdentityErrorCode.CertificateExpired, StatusCode.Unauthenticated },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         { AgentIdentityErrorCode.SignatureInvalid, StatusCode.Unauthenticated },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         { AgentIdentityErrorCode.ClockSkew, StatusCode.Unauthenticated },
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §7.3
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-termination
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
         { AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument },
         // oracle: spec gRPC status codes §Status codes and their use in gRPC
         { AgentIdentityErrorCode.Unavailable, StatusCode.Unavailable },
@@ -115,7 +115,7 @@ public class AgentIdentityErrorCodeTests
 
     // CONTRACT.agent-identity.md §5.4 lists exactly these ten codes.
     // A code added without a contract row would otherwise go untested in every table above.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     [Fact]
     public void EveryCodeHasAContractRow()
     {

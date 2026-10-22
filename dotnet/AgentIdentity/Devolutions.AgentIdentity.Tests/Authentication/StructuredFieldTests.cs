@@ -93,7 +93,7 @@ public class StructuredFieldTests
     // oracle: spec RFC 8941 §4.2.3.2
     [InlineData("sig=(\"@method\");")]
     // CONTRACT.agent-identity.md §6 step 1 rejects a repeated key, of which RFC 8941 §4.2.2 would keep the last.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [InlineData("sig=1, sig=2")]
     // A comma separates members, and none follows the last.
     // oracle: spec RFC 8941 §4.2.2

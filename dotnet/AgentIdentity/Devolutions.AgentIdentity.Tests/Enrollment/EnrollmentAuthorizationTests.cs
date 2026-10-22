@@ -20,18 +20,18 @@ public class EnrollmentAuthorizationTests
             Dictionary<string, string[]> fieldLines = new()
             {
                 // (1): `token_invalid` when the `Authorization` header is missing.
-                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
                 ["no field"] = [],
 
                 // (1): `token_invalid` when the `Authorization` header is repeated,
                 // even when every field line holds the same valid token.
-                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
                 ["the same token twice"] = ["Bearer " + Token, "Bearer " + Token],
                 ["a token, then an empty field"] = ["Bearer " + Token, ""],
                 ["an empty field, then a token"] = ["", "Bearer " + Token],
 
                 // (1): `token_invalid` when the `Authorization` header is not `Bearer`.
-                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
                 ["Basic"] = ["Basic " + Token],
                 ["DPoP"] = ["DPoP " + Token],
                 ["Bearers"] = ["Bearers " + Token],
@@ -48,7 +48,7 @@ public class EnrollmentAuthorizationTests
             };
 
             // (1): a field that holds no token gets `token_invalid`.
-            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
             foreach ((string name, string token) in MalformedTokens)
             {
                 fieldLines.Add(name, ["Bearer " + token]);
@@ -60,7 +60,7 @@ public class EnrollmentAuthorizationTests
 
     // A complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`.
     // The pattern covers the whole value, so a line terminator after the token is not part of a match.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     private static Dictionary<string, string> MalformedTokens => new()
     {
         ["another version"] = "dvaet2." + Bag + "." + Secret,
@@ -88,8 +88,8 @@ public class EnrollmentAuthorizationTests
 
     // CONTRACT.agent-identity.md §2.1: the authority finds the token whose SHA-256(secret) matches,
     // and §2 makes it match the secret text exactly.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [Theory]
     [InlineData("a bearer token", "Bearer " + Token)]
     // The authentication scheme is case-insensitive.
@@ -105,8 +105,8 @@ public class EnrollmentAuthorizationTests
     // and §2 makes the bag routing data that the authority never trusts, so it is not decoded.
     // The rows are a bag of an impossible base64url length, one that decodes to bytes that are not JSON,
     // and the bag of {"u":"https://other/psu"}.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [InlineData("a one-character bag", "Bearer dvaet1.A." + Secret)]
     [InlineData("a bag that is not JSON", "Bearer dvaet1._-_-." + Secret)]
     [InlineData("the bag of another URL", "Bearer dvaet1.eyJ1IjoiaHR0cHM6Ly9vdGhlci9wc3UifQ." + Secret)]
@@ -124,7 +124,7 @@ public class EnrollmentAuthorizationTests
         Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
     }
 
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     [Theory]
     [MemberData(nameof(FieldLinesWithoutABearerTokenNames))]
     public void RejectsFieldLinesWithoutABearerToken(string fieldLines)
@@ -137,7 +137,7 @@ public class EnrollmentAuthorizationTests
 
     // A token is at most 4096 bytes.
     // The bag is not decoded, so a bag of any length in the alphabet sets the token length.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [Fact]
     public void AcceptsATokenOf4096Bytes()
     {
@@ -152,8 +152,8 @@ public class EnrollmentAuthorizationTests
 
     // CONTRACT.agent-identity.md §2: a token is at most 4096 bytes;
     // §2.1 (1): a field that holds no token gets `token_invalid`.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     [Fact]
     public void RejectsATokenLongerThan4096Bytes()
     {
@@ -168,8 +168,8 @@ public class EnrollmentAuthorizationTests
     // The authority matches the `secret` text exactly.
     // Ending in '9' (sextet 61) instead of '8' (sextet 60) sets a pad bit,
     // so a lenient decoder reads the same 32 bytes, but the text, and so its hash, differs.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     [Fact]
     public void HashesANonCanonicalSecretAsItsText()
     {
@@ -206,7 +206,7 @@ public class EnrollmentAuthorizationTests
     {
         EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken(fieldLines);
 
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §2.1
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
         Assert.False(result.Succeeded);
         EnrollmentTokenAssert.RevealsNoPart(result.FailureDetail, Bag, Secret);
         EnrollmentTokenAssert.RevealsNoPart(result.Error.Message, Bag, Secret);
@@ -230,7 +230,7 @@ public class EnrollmentAuthorizationTests
     {
         Assert.False(result.Succeeded);
         Assert.Equal(AgentIdentityErrorCode.TokenInvalid, result.Error.Code);
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         Assert.Equal(401, result.Error.HttpStatusCode);
     }
 
