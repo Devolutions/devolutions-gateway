@@ -6,6 +6,7 @@
   Identity roots are trusted as received over that TLS connection.
 - Identity HTTP requests go through the agent's configured proxy, like the agent's other outbound HTTP, so that a device that reaches its authority only through a proxy can enroll.
   A configured proxy they cannot use, such as one with an unsupported scheme, is a transient error and never a reason to connect directly.
+  Windows automatic proxy configuration, a PAC script or WPAD discovery, is not evaluated yet: until it is, the agent connects directly and logs a warning once per run, because such scripts usually send internal authorities direct and refusing would block enrollment on most managed networks.
 
 ## Identities
 
