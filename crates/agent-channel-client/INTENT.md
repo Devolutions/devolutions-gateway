@@ -6,6 +6,8 @@ This crate is the agent's side of the channel defined in `agent-channel-proto`.
 - It sends an HTTP/2 keepalive every 30 s, and reconnects after a closed stream with a jittered exponential backoff from 1 s, unless the outcome is terminal.
   The backoff grows to 1 h when the response shows the path cannot carry gRPC, such as a reverse proxy that answers without HTTP/2 or gRPC, and to 5 min after network errors, server downtime, and any other transient refusal or closure of the stream, so that a device behind such a proxy stops retrying often while an outage still recovers quickly.
 - The backoff doubles from 1 s and is multiplied by a jitter drawn uniformly from `[0.5, 1.5]` before its cap, as the agent's other retries are.
+- The backoff restarts from 1 s only after a stream has stayed authenticated for 60 s, so that a stream that authenticates and then drops at once keeps backing off.
+  After such a long-lived stream closes, the first reconnect waits a delay drawn uniformly from `[0, 30 s]`, so that an authority restart doesn't bring every agent back within the same second.
 - A server message that cannot be decoded, or whose `id` is not a UUID, closes the stream as a transient failure without a reply, so the agent never echoes an unchecked `id` and never sends an envelope larger than `CONTRACT.agent-identity.md` §7.1 allows.
 
 ## Handshake
