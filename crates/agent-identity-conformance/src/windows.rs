@@ -845,6 +845,9 @@ mod tests {
     #[test]
     #[ignore = "spawned by the missing-PID cleanup test"]
     fn process_sentinel() {
+        // `system_agent_cleanup_finds_process_without_published_pid` needs this sentinel to catch its fault,
+        // so the sentinel carries that test's marker.
+        // oracle: mutant SYSTEM agent cleanup terminates none of the processes running the case agent's image
         if std::env::var_os("AGENT_IDENTITY_PROCESS_SENTINEL").is_some() {
             std::thread::sleep(std::time::Duration::from_secs(30));
         }
@@ -852,6 +855,7 @@ mod tests {
 
     #[test]
     fn system_agent_cleanup_finds_process_without_published_pid() -> anyhow::Result<()> {
+        // oracle: mutant SYSTEM agent cleanup terminates none of the processes running the case agent's image
         let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
@@ -897,6 +901,7 @@ mod tests {
 
     #[test]
     fn pending_file_dpapi_and_protected_acl() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
@@ -953,6 +958,7 @@ mod tests {
 
     #[test]
     fn pending_acl_rejects_extra_allow_ace() {
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         let sid = "S-1-5-21-42";
         assert!(has_only_required_aces("D:P(A;;FA;;;SY)(A;;FA;;;S-1-5-21-42)", sid));
         assert!(has_only_required_aces("D:P(A;;FA;;;SY)(A;;FA;;;LA)", "LA"));
@@ -965,6 +971,7 @@ mod tests {
 
     #[test]
     fn machine_key_acl_checks_principals_not_rights_or_ace_order() {
+        // oracle: intent crates/device-key/INTENT.md §Access
         let sid = "S-1-5-21-42";
         assert!(has_only_key_principals(
             "D:PAI(A;;0x10000;;;S-1-5-21-42)(A;;GR;;;SY)",
@@ -982,6 +989,8 @@ mod tests {
 
     #[test]
     fn canonical_sddl_sid_uses_windows_aliases() -> anyhow::Result<()> {
+        // oracle: spec MS-DTYP §2.4.2.4
+        // oracle: spec MS-DTYP §2.5.1.1
         assert_eq!(canonical_sddl_sid("S-1-5-18")?, "SY");
         assert_eq!(canonical_sddl_sid("S-1-5-32-544")?, "BA");
         let user = current_user_sid()?;
@@ -993,6 +1002,8 @@ mod tests {
 
     #[test]
     fn machine_key_cleanup_matches_only_the_run_prefix() {
+        // oracle: intent crates/device-key/INTENT.md §Operations
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         let prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
         let own = format!("{prefix}_{}", uuid::Uuid::new_v4());
         let other_run = format!("conformance-{}", uuid::Uuid::new_v4().simple());

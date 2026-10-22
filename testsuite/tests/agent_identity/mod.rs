@@ -307,6 +307,7 @@ async fn start_mock(state_dir: &Path) -> anyhow::Result<Mock> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn conformance() -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
     let project_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .context("workspace root")?;
@@ -373,6 +374,8 @@ async fn conformance() -> anyhow::Result<()> {
 #[test]
 #[ignore = "helper for the outer-timeout process-tree regression"]
 fn outer_timeout_runner_helper() -> anyhow::Result<()> {
+    // `outer_timeout_kills_agent_group` needs this helper to catch its fault, so the helper carries that test's marker.
+    // oracle: mutant dropping the runner kills the runner but not the agent processes it started
     let Some(pid_path) = std::env::var_os("AGENT_IDENTITY_TREE_PID_FILE") else {
         return Ok(());
     };
@@ -396,6 +399,8 @@ fn outer_timeout_runner_helper() -> anyhow::Result<()> {
 #[test]
 #[ignore = "helper for the outer-timeout process-tree regression"]
 fn outer_timeout_agent_helper() {
+    // `outer_timeout_kills_agent_group` needs this helper to catch its fault, so the helper carries that test's marker.
+    // oracle: mutant dropping the runner kills the runner but not the agent processes it started
     if std::env::var_os("AGENT_IDENTITY_TREE_SLEEP").is_some() {
         std::thread::sleep(Duration::from_secs(30));
     }
@@ -403,6 +408,7 @@ fn outer_timeout_agent_helper() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn outer_timeout_kills_agent_group() -> anyhow::Result<()> {
+    // oracle: mutant dropping the runner kills the runner but not the agent processes it started
     let work_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .context("workspace root")?

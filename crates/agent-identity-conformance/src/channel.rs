@@ -440,6 +440,8 @@ mod tests {
 
     #[test]
     fn refused_opening_requires_a_z_server_time_trailer() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         expect_refused_opening(
             &refusal(Some("2026-09-24T12:00:00Z"))?,
             Code::Unauthenticated,

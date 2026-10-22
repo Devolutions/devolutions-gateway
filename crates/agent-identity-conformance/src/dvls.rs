@@ -1210,6 +1210,7 @@ mod tests {
 
     #[test]
     fn records_ignore_unknown_fields_and_treat_null_optional_fields_as_absent() -> anyhow::Result<()> {
+        // oracle: mutant an identity record whose `metadata` member is null fails to parse
         let record: IdentityRecord = serde_json::from_value(identity())?;
         let mut noisy = identity();
         noisy["request_id"] = json!("different");
@@ -1265,6 +1266,7 @@ mod tests {
 
     #[test]
     fn secret_disclosure_is_found_in_member_names_and_values_but_not_in_redactions() {
+        // oracle: intent docs/agent-identity/INTENT.DVLS.md §Enrollment tokens
         let secret = "s3cr3t-text";
         let record = |extra: Value| {
             let mut record = json!({ "id": "token-id", "name": "test", "hint": "s3c…" });
@@ -1284,6 +1286,7 @@ mod tests {
 
     #[test]
     fn records_reject_null_or_malformed_required_fields() {
+        // oracle: mutant an identity record whose `isConnected` member is null parses as not connected
         for (name, value) in [
             ("status", Value::Null),
             ("status", json!("active")),
@@ -1307,6 +1310,7 @@ mod tests {
 
     #[test]
     fn refusals_require_the_documented_error_body() {
+        // oracle: mutant an error body member other than `errors` may hold any JSON type
         // The document: 400 carries a PublicApiValidationError, and 401, 403, 404, 409 and 422 a PublicApiError.
         // Every member of each schema is optional, its messages and fields are nullable, and it admits no other member.
         for (status, body, expected) in [
@@ -1350,6 +1354,7 @@ mod tests {
 
     #[test]
     fn identity_query_repeats_metadata_keys() -> anyhow::Result<()> {
+        // oracle: mutant the metadata keys are sent as one comma-separated `metadataKey` parameter
         // The document's example for `metadataKey`: "?metadataKey=hostname&metadataKey=os_name".
         let query = IdentityQuery::default()
             .metadata(&["hostname", "os_name"])
@@ -1381,6 +1386,7 @@ mod tests {
     /// A token from a fresh login that is refused too will not be accepted by waiting, so the request is not sent a third time.
     #[tokio::test]
     async fn session_refused_after_logging_in_again_is_unauthenticated() -> anyhow::Result<()> {
+        // oracle: mutant a request refused again after logging in again is retried once more
         let stub = Stub::default();
         stub.refuse_every_token();
         let target = stub.start().await?;
@@ -1399,6 +1405,7 @@ mod tests {
     /// DVLS's login reports no expiry, so a refused token's age is the lifetime a session observes, and it logs in again before a token reaches that age.
     #[tokio::test]
     async fn session_logs_in_again_before_reaching_the_age_of_a_refused_token() -> anyhow::Result<()> {
+        // oracle: mutant a refused token's age never shortens the session lifetime
         let stub = Stub::default();
         let target = stub.start().await?;
         let management = target.management();
@@ -1434,6 +1441,7 @@ mod tests {
     /// DVLS answers a request without a token with a 401 and no body.
     #[tokio::test]
     async fn request_without_a_token_is_unauthenticated_by_a_bodyless_401() -> anyhow::Result<()> {
+        // oracle: mutant a body-less 401 to a request without a token is rejected as malformed, not read as unauthenticated
         let stub = Stub::default();
         let target = stub.start().await?;
         assert_eq!(
@@ -1446,6 +1454,7 @@ mod tests {
     /// DVLS answers a request with a token it refuses with a `PublicApiError`, so a body-less 401 to one is malformed even when the session's retry then succeeds.
     #[tokio::test]
     async fn bodyless_401_to_a_session_fails_even_when_the_retry_succeeds() -> anyhow::Result<()> {
+        // oracle: mutant the refusal before logging in again is not checked once the retry succeeds
         let stub = Stub::default();
         stub.refuse_without_body();
         let target = stub.start().await?;
@@ -1471,6 +1480,7 @@ mod tests {
     /// A login response is a credential, so an error about a malformed one must not repeat it.
     #[tokio::test]
     async fn malformed_login_response_error_omits_the_token() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         let stub = Stub::default();
         stub.answer_logins_with_a_bare_token();
         let target = stub.start().await?;

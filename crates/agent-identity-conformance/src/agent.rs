@@ -5881,6 +5881,9 @@ mod tests {
 
     #[test]
     fn key_names_require_this_runs_prefix_and_a_canonical_uuid() -> anyhow::Result<()> {
+        // oracle: intent crates/device-key/INTENT.md §Key name
+        // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         let prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
         let key_uuid = uuid::Uuid::new_v4();
         let name = format!("{prefix}_{key_uuid}");
@@ -5929,6 +5932,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn error_log_level_is_distinct_from_message_text() {
+        // oracle: mutant a log line counts as an error when `ERROR` appears anywhere in it, including its message
         assert!(is_error_level_log_line(
             "2026-10-19T00:00:00Z ERROR devolutions_agent: unavailable backend"
         ));
@@ -5948,6 +5952,10 @@ mod tests {
 
     #[tokio::test]
     async fn orphan_audit_accepts_both_records_and_cleanup_is_prefix_scoped() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+        // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+        // oracle: intent crates/device-key/INTENT.md §Operations
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         let mut case = file_backend_case().await?;
         let prefix = case.ctx.key_name_prefix.clone();
         let fixture_token = "dvaet1.fixturebag.fixturesecret";
@@ -6191,6 +6199,7 @@ mod tests {
 
     #[tokio::test]
     async fn settled_key_check_accepts_a_current_key_retired_after_the_snapshot() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Stored identities
         let case = file_backend_case().await?;
         let authority = uuid::Uuid::new_v4().to_string();
         let (retired, retired_key) = new_file_key(&case)?;
@@ -6211,6 +6220,7 @@ mod tests {
 
     #[tokio::test]
     async fn settled_key_check_still_checks_the_current_key_of_the_latest_record() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Coverage
         let case = file_backend_case().await?;
         let authority = uuid::Uuid::new_v4().to_string();
         let (retired, retired_key) = new_file_key(&case)?;
@@ -6255,6 +6265,7 @@ mod tests {
 
     #[test]
     fn agent_metadata_requires_c14_fields_and_stable_platform_values() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
         let mut metadata = json!({
             "hostname": "test-host",
             "os_name": "Windows",

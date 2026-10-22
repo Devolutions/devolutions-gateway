@@ -70,27 +70,32 @@ fn assert_single_not_applicable(filter: &str) -> anyhow::Result<()> {
 
 #[test]
 fn missing_second_authority_is_skip() -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
     assert_single_skip("a_multi_authority")
 }
 
 #[test]
 fn dvls_stale_hello_without_config_fixture_is_skip() -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
     assert_single_skip("p_config_hello_reconciles_stale_revision")
 }
 
 #[test]
 fn mock_only_test_on_dvls_is_not_applicable() -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
     assert_single_not_applicable("p_token_expired")
 }
 
 #[cfg(windows)]
 #[test]
 fn unix_only_test_on_windows_is_not_applicable() -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
     assert_single_not_applicable("a_file_backend_permissions")
 }
 
 #[cfg(unix)]
 #[test]
 fn windows_only_test_on_unix_is_not_applicable() -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
     assert_single_not_applicable("a_key_non_exportable")
 }

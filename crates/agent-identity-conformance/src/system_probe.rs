@@ -337,6 +337,9 @@ mod tests {
 
     #[test]
     fn current_key_is_selected_only_from_the_matching_identity_and_run() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+        // oracle: intent crates/device-key/INTENT.md §Key name
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         let prefix = "conformance-4321";
         let name = format!("{prefix}_479e1d51-4038-4d09-b7f8-5bdff4489cad");
         let identity = json!({ "identity_id": "identity-a", "keys": { "current": { "key_name": name } } });
@@ -356,6 +359,9 @@ mod tests {
 
     #[test]
     fn system_identity_audit_rejects_token_fragments_and_private_key_material() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Coverage
+        // oracle: intent crates/agent-identity/INTENT.md §Identities
+        // oracle: intent crates/agent-identity/INTENT.md §Stored identities
         let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
@@ -400,6 +406,7 @@ mod tests {
 
     #[test]
     fn system_probe_waits_for_both_successful_pending_records_to_disappear() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
         let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")

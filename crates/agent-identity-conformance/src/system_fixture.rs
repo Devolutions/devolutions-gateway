@@ -734,6 +734,7 @@ mod tests {
 
     #[test]
     fn task_absence_requires_a_specific_not_found_result() -> anyhow::Result<()> {
+        // oracle: mutant every failed scheduled-task query reads as the task's absence
         let missing = Output {
             status: std::process::ExitStatus::from_raw(1),
             stdout: Vec::new(),
@@ -756,6 +757,7 @@ mod tests {
 
     #[tokio::test]
     async fn token_channel_filters_nonce_and_serves_once() -> anyhow::Result<()> {
+        // oracle: mutant the probe token channel serves the token to a connection that offers the wrong nonce
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let address = listener.local_addr()?;
         let nonce = uuid::Uuid::new_v4();

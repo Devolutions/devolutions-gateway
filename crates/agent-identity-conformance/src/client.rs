@@ -414,6 +414,8 @@ mod tests {
 
     #[test]
     fn error_body_server_time_must_end_in_z() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
         let reply = |server_time: &str| Reply {
             status: 401,
             body: json!({ "error": "clock_skew", "message": "skewed", "server_time": server_time }),
@@ -428,6 +430,8 @@ mod tests {
 
     #[test]
     fn enrollment_accepts_unknown_fields_but_not_null_known_fields() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let certificate = field(&vectors["keys"][0], "certificate")?;
         let mut reply = Reply {

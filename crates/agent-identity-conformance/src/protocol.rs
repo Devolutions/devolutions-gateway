@@ -297,7 +297,7 @@ fn assert_leaf_profile(
 ///
 /// The failure names each other extension's OID.
 fn assert_leaf_extensions(leaf: &Certificate) -> anyhow::Result<()> {
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     let allowed = [
         SubjectAltName::OID,
         ExtendedKeyUsage::OID,
@@ -931,7 +931,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         )?;
     }
     ctx.target.management().delete_identity(&identity.identity_id).await?;
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // Only a non-deleted identity's key is matched against its token, so a deleted identity's key gets `identity_revoked` whichever token presents it.
     for key in [&identity.key, &first_pending, &second_pending] {
         for bearer in [&other_token.text, &original_token.text] {
@@ -3774,7 +3774,7 @@ async fn stale_hello_reconciled(ctx: &Context) -> anyhow::Result<()> {
                 .await?;
         }
         let updated = check_in_config(&ctx.target, &identity).await?;
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-enroll
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         // oracle: intent docs/agent-identity/INTENT.DVLS.md §Certificates and channel
         ensure!(
             count(&updated, "revision")? > enrolled_revision && updated.get("agent_channel_url").is_some(),
@@ -3784,7 +3784,7 @@ async fn stale_hello_reconciled(ctx: &Context) -> anyhow::Result<()> {
         enrolled_revision
     };
     let current_revision = count(&identity.config, "revision")?;
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-identity-channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     let mut stale = channel::open(&ctx.target, &identity).await?;
     let challenge = stale.challenge().await?;
     let hello_id = stale
@@ -6748,7 +6748,7 @@ fn nested_body(csr: &str, depth: usize) -> String {
 
 /// CONTRACT.agent-identity.md §1: "A JSON request body with more than 64 nested objects and arrays, counting the top-level object, [...] → `invalid_request`".
 pub(crate) async fn p_json_body_nesting_limit(ctx: Context) -> anyhow::Result<()> {
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let token = token(&ctx, 2).await?;
     let (enrolled, renewed) = (KeyPair::generate()?, KeyPair::generate()?);
     expect_error(
@@ -6828,7 +6828,7 @@ fn bodies_with_string(csr: &str, content: &[u8]) -> [(&'static str, Vec<u8>); 2]
 
 /// CONTRACT.agent-identity.md §1: "A JSON request body [...] holding a string that is not valid Unicode, such as an escaped lone surrogate, in any member, including an unknown one → `invalid_request`".
 pub(crate) async fn p_invalid_unicode_json_strings_rejected(ctx: Context) -> anyhow::Result<()> {
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §1
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let token = token(&ctx, 2).await?;
     let (enrolled, renewed) = (KeyPair::generate()?, KeyPair::generate()?);
     for (variant, content) in INVALID_UNICODE {
@@ -7173,6 +7173,8 @@ mod tests {
 
     #[test]
     fn byte_sequence_rewrites_keep_lenient_bytes_but_lose_canonical_form() -> anyhow::Result<()> {
+        // oracle: spec RFC 4648 §3.2
+        // oracle: spec RFC 4648 §3.5
         use base64::engine::{DecodePaddingMode, GeneralPurpose, GeneralPurposeConfig};
 
         let lenient = GeneralPurpose::new(
@@ -7197,6 +7199,8 @@ mod tests {
 
     #[test]
     fn disposable_rotation_requires_an_isolated_old_root() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
+        // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
         let active = HashSet::from(["own".to_owned(), "other".to_owned()]);
         let error = require_isolated_old_root_fixture(&active, &["own"], false)
             .expect_err("occupied disposable DVLS fixture must be incomplete");
@@ -7215,6 +7219,8 @@ mod tests {
 
     #[test]
     fn trust_anchor_snapshot_ignores_unknown_fields() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
         let roots = json!({
             "roots": [{
                 "certificate": "root",
@@ -7245,6 +7251,10 @@ mod tests {
 
     #[test]
     fn chain_requires_published_root_validity_and_signed_p256_links() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §trust-anchor
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+        // oracle: spec RFC 5280 §6.1
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let leaf = field(&vectors["keys"][0], "certificate")?.to_owned();
         let root = field(&vectors["root"], "certificate")?.to_owned();
@@ -7275,6 +7285,8 @@ mod tests {
 
     #[test]
     fn chain_verifies_p384_intermediate_and_rejects_unknown_curve() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
         let ca = |name: &str| -> anyhow::Result<rcgen::CertificateParams> {
             let mut params = rcgen::CertificateParams::new(Vec::<String>::new())?;
             params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
@@ -7323,6 +7335,8 @@ mod tests {
 
     #[test]
     fn chain_requires_ca_intermediates_but_no_root_profile() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        // oracle: spec RFC 5280 §6.1.4
         let plain = |name: &str| -> anyhow::Result<rcgen::CertificateParams> {
             let mut params = rcgen::CertificateParams::new(Vec::<String>::new())?;
             params.distinguished_name.push(rcgen::DnType::CommonName, name);
@@ -7354,7 +7368,7 @@ mod tests {
     /// The conformance runs show the check passing a conforming leaf, but only a leaf with another extension shows it can fail.
     #[test]
     fn leaf_extensions_outside_the_profile_are_named() -> anyhow::Result<()> {
-        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
         let issuer_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
         let mut issuer = rcgen::CertificateParams::new(Vec::<String>::new())?;
         issuer.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);

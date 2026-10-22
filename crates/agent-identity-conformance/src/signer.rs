@@ -176,6 +176,7 @@ mod tests {
 
     #[test]
     fn signer_reproduces_vector_inputs_and_verifies_under_vector_keys() -> anyhow::Result<()> {
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
         const ALGORITHM_BEFORE_KEY_ID: [SignatureParameter; 6] = [
             SignatureParameter::Created,
             SignatureParameter::Expires,
