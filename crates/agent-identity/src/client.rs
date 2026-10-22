@@ -829,11 +829,6 @@ mod tests {
     fn parses_retry_after_seconds_and_http_date() {
         let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
         assert_eq!(parse_retry_after(" 15 ", now), Some(Duration::from_secs(15)));
-        // oracle: intent crates/agent-identity/INTENT.md §Schedules
-        assert_eq!(
-            parse_retry_after("18446744073709551616", now),
-            Some(Duration::from_secs(u64::MAX))
-        );
         assert_eq!(
             parse_retry_after(&httpdate::fmt_http_date(now + Duration::from_secs(10)), now),
             Some(Duration::from_secs(10))
@@ -843,6 +838,12 @@ mod tests {
             Some(Duration::ZERO)
         );
         assert_eq!(parse_retry_after("never", now), None);
+        // oracle: intent crates/agent-identity/INTENT.md §Schedules
+        // The agent waits at least the delay the authority asks for and never longer than 1 h, so a delay too large to
+        // represent must still ask for the full hour.
+        assert!(
+            parse_retry_after("18446744073709551616", now).is_some_and(|delay| delay >= Duration::from_secs(60 * 60))
+        );
     }
 
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
