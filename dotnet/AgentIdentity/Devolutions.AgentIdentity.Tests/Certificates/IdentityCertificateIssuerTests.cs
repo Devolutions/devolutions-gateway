@@ -33,10 +33,10 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     // What the injected generator draws for a serial number, by name:
     // all ones, which as drawn would encode a negative INTEGER,
     // and the top bit alone, which is zero once that bit is cleared, followed by a second draw.
-    private static readonly Dictionary<string, byte[][]> SerialNumberDraws = new()
+    private static readonly Dictionary<string, byte[]> SerialNumberDraws = new()
     {
-        ["all ones"] = [[.. Enumerable.Repeat((byte)0xFF, 16)]],
-        ["the top bit alone, then all 01"] = [[0x80, .. new byte[15]], [.. Enumerable.Repeat((byte)0x01, 16)]],
+        ["all ones"] = [.. Enumerable.Repeat((byte)0xFF, 16)],
+        ["the top bit alone, then all 01"] = [0x80, .. new byte[15], .. Enumerable.Repeat((byte)0x01, 16)],
     };
 
     public static TheoryData<string> SerialNumberDrawNames => new(SerialNumberDraws.Keys);
@@ -212,7 +212,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     [MemberData(nameof(SerialNumberDrawNames))]
     public void SerialNumberIsAPositiveIntegerOfAtMost20Octets(string draws)
     {
-        using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(SerialNumberDraws[draws]));
+        using X509Certificate2 leaf = Issue(random: new ScriptedRandomNumberGenerator(SerialNumberDraws[draws]));
 
         byte[] serialNumber = SerialNumber(leaf);
         Assert.True(new BigInteger(serialNumber, isUnsigned: false, isBigEndian: true) > 0);
@@ -229,7 +229,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     {
         byte[] draw = [.. Enumerable.Repeat((byte)0xFF, 16)];
 
-        using X509Certificate2 leaf = Issue(random: new SequenceRandomNumberGenerator(draw));
+        using X509Certificate2 leaf = Issue(random: new ScriptedRandomNumberGenerator(draw));
 
         Assert.Equal([0x7F, .. draw[1..]], SerialNumber(leaf));
     }
@@ -270,7 +270,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     [Fact]
     public void ReadsTheClockOnce()
     {
-        using X509Certificate2 leaf = Issue(clock: new AdvancingTimeProvider(Now, TimeSpan.FromHours(1)));
+        using X509Certificate2 leaf = Issue(clock: new SteppingTimeProvider(Now, Now.AddHours(1)));
 
         Assert.Equal(Lifetime, leaf.NotAfter.ToUniversalTime() - leaf.NotBefore.ToUniversalTime());
     }
@@ -538,41 +538,5 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         public X509Certificate2 Certificate => certificate;
 
         public X509SignatureGenerator SignatureGenerator => X509SignatureGenerator.CreateForECDsa(key);
-    }
-
-    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow()
-        {
-            return now;
-        }
-    }
-
-    // Moves forward by one step at each reading.
-    private sealed class AdvancingTimeProvider(DateTimeOffset start, TimeSpan step) : TimeProvider
-    {
-        private int _readings;
-
-        public override DateTimeOffset GetUtcNow()
-        {
-            return start + (step * _readings++);
-        }
-    }
-
-    // Returns the given draws in order and fails when asked for another.
-    private sealed class SequenceRandomNumberGenerator(params byte[][] draws) : RandomNumberGenerator
-    {
-        private int _next;
-
-        public override void GetBytes(byte[] data)
-        {
-            GetBytes(data.AsSpan());
-        }
-
-        public override void GetBytes(Span<byte> data)
-        {
-            byte[] draw = draws[_next++];
-            draw.CopyTo(data);
-        }
     }
 }
