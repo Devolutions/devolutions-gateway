@@ -842,7 +842,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        // oracle: mutant every pushed config stays queued until the runner takes it
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Channel
         let [pushed] = pushed.as_slice() else {
             panic!("expected one queued config, got {pushed:?}");
         };
@@ -865,7 +865,7 @@ mod tests {
 
     #[test]
     fn a_flood_of_pushed_configs_keeps_at_most_the_bound_of_acknowledgements_starting_with_the_highest() {
-        // oracle: mutant the acknowledgements of superseded configs grow without bound
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Channel
         let now = Instant::now();
         let mut links = Links::new();
         links.reconcile(stream("current"));
