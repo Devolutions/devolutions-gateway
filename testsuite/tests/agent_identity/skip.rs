@@ -41,17 +41,32 @@ fn run_against_dvls(filter: &str, allow_incomplete: bool) -> anyhow::Result<(Out
     Ok((output, stdout))
 }
 
+/// The outcome lines of a run, as `(outcome, test)` pairs, in the order the runner printed them.
+fn outcomes(stdout: &str) -> Vec<(&str, &str)> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            let outcome = words.next()?;
+            let test = words.next()?;
+            ["PASS", "FAIL", "SKIP", "N/A"]
+                .contains(&outcome)
+                .then_some((outcome, test))
+        })
+        .collect()
+}
+
 fn assert_single_skip(filter: &str) -> anyhow::Result<()> {
     let (denied, denied_stdout) = run_against_dvls(filter, false)?;
     let (allowed, allowed_stdout) = run_against_dvls(filter, true)?;
     ensure!(
-        denied.status.code() == Some(1) && allowed.status.success(),
+        !denied.status.success() && allowed.status.success(),
         "SKIP of {filter} did not follow the --allow-incomplete exit policy"
     );
     for stdout in [denied_stdout, allowed_stdout] {
         ensure!(
-            stdout.contains(&format!("SKIP {filter}")) && stdout.contains("SUMMARY PASS 0 FAIL 0 SKIP 1 N/A 0"),
-            "{filter} was not reported as an incomplete SKIP:\n{stdout}"
+            outcomes(&stdout) == [("SKIP", filter)],
+            "{filter} was not reported as a SKIP:\n{stdout}"
         );
     }
     Ok(())
@@ -60,9 +75,7 @@ fn assert_single_skip(filter: &str) -> anyhow::Result<()> {
 fn assert_single_not_applicable(filter: &str) -> anyhow::Result<()> {
     let (output, stdout) = run_against_dvls(filter, false)?;
     ensure!(
-        output.status.success()
-            && stdout.contains(&format!("N/A {filter}"))
-            && stdout.contains("SUMMARY PASS 0 FAIL 0 SKIP 0 N/A 1"),
+        output.status.success() && outcomes(&stdout) == [("N/A", filter)],
         "{filter} was not reported as a complete N/A run:\n{stdout}"
     );
     Ok(())

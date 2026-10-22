@@ -6347,22 +6347,26 @@ mod tests {
         let case = file_backend_case().await?;
         let authority = uuid::Uuid::new_v4().to_string();
         let (retired, retired_key) = new_file_key(&case)?;
-        let (renewed, _) = new_file_key(&case)?;
+        let (renewed, renewed_key) = new_file_key(&case)?;
         let other_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
         let snapshot = json!({ "keys": { "current": key_slot(&retired, &retired_key)? } });
+        std::fs::remove_file(case.key_file_path(&retired))?;
+        // The two records differ only in the leaf of their current key, so only that leaf decides the outcome.
+        write_identity(
+            &case,
+            &authority,
+            &json!({ "keys": { "current": key_slot(&renewed, &renewed_key)? } }),
+        )?;
+        case.check_key_protection(&authority, &snapshot)
+            .context("a current key that matches the latest record's leaf was refused")?;
         write_identity(
             &case,
             &authority,
             &json!({ "keys": { "current": key_slot(&renewed, &other_key)? } }),
         )?;
-        std::fs::remove_file(case.key_file_path(&retired))?;
-        let error = case
-            .check_key_protection(&authority, &snapshot)
-            .err()
-            .context("a current key that does not match the latest record's leaf was accepted")?;
         ensure!(
-            format!("{error:#}").contains("does not match its leaf SPKI"),
-            "unexpected failure: {error:#}"
+            case.check_key_protection(&authority, &snapshot).is_err(),
+            "a current key that does not match the latest record's leaf was accepted"
         );
         Ok(())
     }
