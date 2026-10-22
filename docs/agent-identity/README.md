@@ -170,6 +170,8 @@ Make the backend available, or set `KeyBackend` to one that is, then restart the
 ### Proxies and TLS
 
 Identity requests and the channel go through the proxy set in the `Proxy` section of `agent.json`, like the agent's other outbound HTTP requests.
+With a manual proxy the agent can't use, such as one with an unsupported scheme, identity requests fail as a transient error instead of connecting directly.
+Known limitation: Windows proxy auto-configuration (a PAC script or WPAD discovery) isn't evaluated; when the system settings name no proxy, the agent connects directly and logs a warning once per run.
 Known limitation: SOCKS4 and SOCKS4a proxies don't work, because the agent's HTTP library sends a malformed SOCKS4 request; use an HTTP, HTTPS, SOCKS5 or SOCKS5h proxy instead.
 
 The authority's HTTPS certificate must validate against the device's OS trust store; the agent supports no other trust path.
