@@ -687,6 +687,7 @@ mod tests {
         assert!(verify_unix_directory_access(0o700, agent, agent).is_ok());
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn recognizes_only_own_temporary_file_names() {
         let uuid = Uuid::new_v4();

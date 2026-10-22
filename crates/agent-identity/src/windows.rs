@@ -1308,6 +1308,7 @@ mod tests {
         Ok(path)
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn replacing_a_file_waits_for_a_reader_to_close_it() -> anyhow::Result<()> {
         // A reader holding the destination open, even one sharing deletion as the standard library does, makes

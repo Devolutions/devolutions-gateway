@@ -326,6 +326,7 @@ mod tests {
         );
         assert!(pending_hash_from_name(&format!("{token}.{EXTENSION}")).is_none());
         assert!(pending_hash_from_name(&format!("{}.{}", token_hash.to_uppercase(), EXTENSION)).is_none());
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
         assert!(is_owned_temporary_stem(&format!(".{token_hash}.{EXTENSION}")));
         Ok(())
     }
