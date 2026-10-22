@@ -379,17 +379,8 @@ async fn processes_a_message_as_large_as_an_envelope_may_be() -> anyhow::Result<
     stream.authenticate().await;
     assert_eq!(next_event(&mut channel).await, Event::Authenticated);
 
-    // A `RenewRequested` of 65,536 bytes, padded with a field the agent doesn't know, as a newer authority may add.
     let id = new_id();
-    let mut message = length_delimited(1 /* id */, id.as_bytes());
-    message.extend(length_delimited(
-        12, /* renew_requested */
-        &length_delimited(1 /* reason */, b"admin"),
-    ));
-    let padding = 65_536 - message.len() - 2 /* key of field 1000 */ - 3 /* length of the padding */;
-    message.extend(length_delimited(1000, &vec![0; padding]));
-    assert_eq!(message.len(), 65_536);
-    stream.send_encoded(&message);
+    stream.send_encoded(&padded_renewal(&id, 65_536));
 
     assert_eq!(
         next_event(&mut channel).await,
@@ -399,6 +390,37 @@ async fn processes_a_message_as_large_as_an_envelope_may_be() -> anyhow::Result<
         }
     );
     Ok(())
+}
+
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+// oracle: intent crates/agent-channel-client/INTENT.md §Connection
+#[tokio::test]
+async fn closes_without_reporting_a_message_larger_than_an_envelope_may_be() -> anyhow::Result<()> {
+    let mut authority = TestAuthority::start(Mode::Grpc).await?;
+    let identity = Identity::from_vectors("device-a")?;
+    let mut channel = client(&authority, quick_reopening())?.connect(identity.target(&authority.url))?;
+    let mut stream = authority.next_opening().await.accept();
+    stream.authenticate().await;
+    assert_eq!(next_event(&mut channel).await, Event::Authenticated);
+
+    stream.send_encoded(&padded_renewal(&new_id(), 65_537));
+
+    // Without a `RenewRequested` event, the caller has nothing to acknowledge.
+    let (closure, reopen_after) = next_closure(&mut channel).await;
+    assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
+    assert_eq!(reopen_after, Some(Duration::from_micros(15_625)));
+    assert!(!matches!(stream.receive_within(WAIT).await, Some(Ok(Some(_)))));
+    Ok(())
+}
+
+/// Encodes a `RenewRequested` under the envelope `id`, padded to `len` bytes with a field the agent doesn't know, as a
+/// newer authority may add.
+fn padded_renewal(id: &str, len: usize) -> Vec<u8> {
+    let mut message = encoded_renewal(id);
+    let padding = len - message.len() - 2 /* key of field 1000 */ - 3 /* length of the padding */;
+    message.extend(length_delimited(1000, &vec![0; padding]));
+    assert_eq!(message.len(), len);
+    message
 }
 
 /// Encodes a protobuf record of wire type `LEN` (protobuf encoding, "Length-Delimited Records").

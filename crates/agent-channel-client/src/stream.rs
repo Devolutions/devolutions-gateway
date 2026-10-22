@@ -25,6 +25,11 @@ use crate::{Event, Shared, Target};
 
 const CHANNEL_PROOF_DOMAIN: &[u8] = b"devolutions-agent-identity/v1/channel-proof";
 const CHALLENGE_LEN: usize = 32;
+/// The largest envelope, in bytes of serialized protobuf, that each side accepts ([CONTRACT.agent-identity.md §7.1
+/// "Service"][contract]).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#71-service
+const MAX_ENVELOPE_LEN: usize = 65_536;
 /// How long a stream the caller dropped waits for the authority to end its side.
 // UNTESTED: a dropped channel's stream releases its connection as soon as the authority ends its side.
 // Waiting out the whole timeout would hold a connection that the authority has already finished with.
@@ -308,7 +313,8 @@ async fn open(shared: &Shared, target: &Target, clock_offset: i64) -> Result<Ope
         .with_clock_offset(clock_offset)
         .layer(service);
     let (_, origin) = endpoint(&target.url).map_err(|error| Closure::outage(format!("{error:#}")))?;
-    let mut client = AgentChannelClient::with_origin(service, origin);
+    // A larger message fails to decode, which closes the stream as `trusted` says.
+    let mut client = AgentChannelClient::with_origin(service, origin).max_decoding_message_size(MAX_ENVELOPE_LEN);
     let (outbound, outbound_receiver) = mpsc::channel(16);
     let (handoff, nonce) = OpeningNonce::new();
     let mut request = tonic::Request::new(ReceiverStream::new(outbound_receiver));
