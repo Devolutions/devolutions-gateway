@@ -340,6 +340,35 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         None
     };
 
+    let provisioner_tasks_conn = gateway_db
+        .connect()
+        .await
+        .context("failed to connect the provisioner tasks to the gateway database")?;
+    let task_store: provisioner_task::DynProvisionerTaskStore = Arc::new(
+        provisioner_task_libsql::LibSqlProvisionerTaskStore::open(provisioner_tasks_conn)
+            .await
+            .context("failed to initialize the provisioner task store")?,
+    );
+
+    let secrets = devolutions_gateway::secret_store::SecretStore::default();
+
+    let provisioner_tasks = devolutions_gateway::provisioner_tasks::task_runner(
+        task_store,
+        Arc::new(job_queue_ctx.durable()),
+        conf_handle.clone(),
+        recording_manager_handle.clone(),
+        secrets.clone(),
+    );
+
+    // Before the job runner starts, so no job queued earlier runs an attempt meanwhile.
+    // Unfinished Tasks still fail at their deadline, so this must not keep the other features from starting.
+    if let Err(error) = provisioner_tasks.resume().await {
+        error!(
+            error = format!("{error:#}"),
+            "Failed to queue the unfinished provisioner tasks again"
+        );
+    }
+
     let state = DgwState {
         conf_handle: conf_handle.clone(),
         token_cache: Arc::clone(&token_cache),
@@ -354,6 +383,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
+        provisioner_tasks: provisioner_tasks.clone(),
+        secrets: secrets.clone(),
     };
 
     for listener in &conf.listeners {
@@ -387,6 +418,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::provisioning::CleanupTask { handle: provisioning });
 
+    tasks.register(devolutions_gateway::secret_store::CleanupTask { handle: secrets });
+
     tasks.register(devolutions_gateway::credential_injection::CleanupTask {
         handle: synthetic_kdc_registry,
     });
@@ -418,7 +451,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         job_queue_ctx.job_queue_handle.clone(),
     ));
 
-    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(&job_queue_ctx));
+    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(
+        &job_queue_ctx,
+        provisioner_tasks,
+    ));
     tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
 
     tasks.register(traffic_audit_task);

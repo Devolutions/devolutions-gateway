@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::api::preflight::PreflightAlertStatus;
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
+use crate::provisioner_tasks::ai::AiProvider;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -24,6 +25,8 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::list_recordings,
         crate::api::jrec::pull_recording_session,
         crate::api::jrec::pull_recording_file,
+        crate::api::jrec::start_ai_analysis,
+        crate::api::jrec::get_ai_analysis,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
         crate::api::update::get_update_products,
@@ -58,6 +61,17 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         ConfigPatch,
         crate::api::jrl::JrlInfo,
         crate::api::jrec::DeleteManyResult,
+        crate::api::jrec::AiAnalysisRequest,
+        crate::api::jrec::AiAnalysisConflict,
+        crate::api::jrec::AiAnalysisConflictCode,
+        AiProvider,
+        crate::api::tasks::TaskInfo,
+        crate::api::tasks::TaskState,
+        AiAnalysisParams,
+        AiAnalysisRunningPayload,
+        AiAnalysisSucceededPayload,
+        AiAnalysisUsage,
+        AiAnalysisFailedPayload,
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
@@ -134,6 +148,69 @@ struct SessionInfo {
     connection_mode: ConnectionMode,
     /// Destination Host
     destination_host: Option<String>,
+}
+
+/// Params of an AI analysis Task: what was asked, without the API key and the base URL
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisParams {
+    provider: AiProvider,
+    /// Model identifier, passed to the provider as is.
+    model: String,
+    /// Upper bound of tokens in each AI answer; null when not asked.
+    #[schema(value_type = Option<i64>, minimum = 0, maximum = 4_294_967_295_u64)]
+    max_output_tokens: Option<u32>,
+    /// Language the AI writes in; absent when not asked, so the AI writes in English.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+}
+
+/// Payload of a `running` AI analysis Task: its progress
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisRunningPayload {
+    /// Current step: `preparing` (the attempt starts), `reading` (the recordings are read), `describing` (the AI is
+    /// asked about the recording, part by part), then `writing` (the log is written).
+    step: String,
+    /// Work done in the step: bytes read while `reading`, parts described while `describing`.
+    done: Option<u64>,
+    /// Work the step has in all, in the same unit as `done`.
+    total: Option<u64>,
+}
+
+/// Payload of a `succeeded` AI analysis Task: the log it added to the session
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisSucceededPayload {
+    /// Name of the new log in the session manifest, such as `ai-analysis-0.slog`.
+    file_name: String,
+    /// Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+    model: String,
+    /// Tokens counted by the AI provider; absent when it did not report them for every request.
+    usage: Option<AiAnalysisUsage>,
+    /// Versions of the prompts that wrote the log, such as
+    /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
+    prompt_version: String,
+}
+
+/// Tokens counted by an AI provider
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+/// Payload of a `failed` AI analysis Task: why it failed
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisFailedPayload {
+    /// Kind of failure: `permanent error`, `attempts exhausted`, `key lost`, `timed out`, `invalid task` or `not queued`.
+    reason: String,
+    /// What went wrong: a text, except for `timed out`, where it is `{ "lastPayload": <payload before the timeout> }`.
+    details: serde_json::Value,
+    /// Number of attempts started.
+    attempts: u32,
 }
 
 #[allow(unused)]
