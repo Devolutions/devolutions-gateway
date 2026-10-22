@@ -292,9 +292,40 @@ impl RecordingAiAnalysis {
 }
 
 /// Where a Task leaves its log until its success is recorded: in the session folder, but not in the manifest, under a
-/// name that only this Task uses, so that removing the working files of another analysis never removes it.
+/// name of its own, so the end of another Task leaves it alone.
 fn unlisted_log_path(manifest_path: &Utf8Path, task_id: Uuid) -> Utf8PathBuf {
     manifest_path.with_file_name(format!(".ai-analysis-{task_id}.slog"))
+}
+
+/// Removes the logs that earlier Tasks of the session left unlisted, so the late end of an earlier Task finds nothing to
+/// list over a newer analysis.
+async fn remove_unlisted_logs(manifest_path: &Utf8Path) -> std::io::Result<()> {
+    let Some(dir) = manifest_path.parent() else {
+        return Ok(());
+    };
+    let mut entries = match tokio::fs::read_dir(dir).await {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+
+    while let Some(entry) = entries.next_entry().await? {
+        let name = entry.file_name();
+        let is_unlisted_log = name
+            .to_str()
+            .and_then(|name| name.strip_prefix(".ai-analysis-"))
+            .and_then(|name| name.strip_suffix(".slog"))
+            .is_some_and(|task_id| Uuid::parse_str(task_id).is_ok());
+
+        if is_unlisted_log {
+            match tokio::fs::remove_file(entry.path()).await {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+                _ => {}
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[async_trait]
@@ -347,12 +378,19 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
         // A new Task never resumes from what an earlier analysis left, while its retries resume from their own files.
         if attempt.attempts == 1 {
-            recording_analysis::discard(&self.manifest_path(session_id), None)
+            let manifest_path = self.manifest_path(session_id);
+
+            recording_analysis::discard(&manifest_path, None)
                 .await
                 .map_err(|error| {
                     error!(task.id = %attempt.task_id, %error, "Failed to remove the earlier AI analysis working files");
                     AttemptError::Permanent(Permanent::Internal)
                 })?;
+
+            remove_unlisted_logs(&manifest_path).await.map_err(|error| {
+                error!(task.id = %attempt.task_id, %error, "Failed to remove the earlier unlisted AI analysis logs");
+                AttemptError::Permanent(Permanent::Internal)
+            })?;
         }
 
         let secret = self.secrets.get(SecretId(attempt.task_id)).map_err(|error| {

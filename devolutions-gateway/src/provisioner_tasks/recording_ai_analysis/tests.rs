@@ -1063,6 +1063,40 @@ async fn a_success_cut_short_before_the_log_is_listed_is_finished_by_the_job() {
     assert!(!log.exists());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn a_late_end_of_an_earlier_task_never_lists_its_log_over_a_newer_analysis() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
+    let first = harness.start_created(session_id, settings.clone()).await;
+    harness.run(first).await.expect("first analysis");
+
+    // As if the end of the first Task failed before the manifest listed its log, so it is done again later.
+    let dir = harness.recording_path.join(session_id.to_string());
+    let first_log = dir.join(format!(".ai-analysis-{first}.slog"));
+    std::fs::remove_file(dir.join("ai-analysis-0.slog")).expect("unlist the log");
+    std::fs::write(&first_log, "the analysis of the first Task").expect("unlisted log");
+    let manifest_path = dir.join("recording.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest")).expect("manifest JSON");
+    manifest["artifacts"] = json!({});
+    std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
+
+    let second = harness.start_created(session_id, settings).await;
+    harness.run(second).await.expect("second analysis");
+    let newer = std::fs::read_to_string(dir.join("ai-analysis-0.slog")).expect("newer analysis");
+
+    harness.run(first).await.expect("the late end of the first Task");
+
+    assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("ai-analysis-0.slog")).expect("analysis"),
+        newer
+    );
+    assert!(!first_log.exists());
+}
+
 /// The AI analyses the manifest in `dir` lists.
 fn ai_analyses(dir: &Utf8Path) -> serde_json::Value {
     let manifest: serde_json::Value =
