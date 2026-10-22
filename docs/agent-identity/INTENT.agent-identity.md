@@ -134,7 +134,8 @@ Not intended:
   Single use across the nodes of a multi-node authority comes later.
 - A different key for each authority prevents reuse with another authority, and the operation tag prevents reuse at another endpoint.
 - mTLS and TLS channel binding are not used, because a TLS-terminating proxy or IIS in front of the authority breaks them; neither is a bearer token, because a captured one replays.
-- Requests are signed with RFC 9421 HTTP Message Signatures, a standard that both the agent and a .NET authority implement with maintained libraries.
+- Requests are signed with RFC 9421 HTTP Message Signatures, a standard with maintained implementations on both sides, so that an authority need not adopt an in-house format.
+  The agent signs with the `httpsig` crate; an authority may use a library or, as the .NET authority library does because NSign keeps the last of repeated parameters, which §6 step 1 forbids, implement the profile itself from the RFC.
   A hand-serialized JWS profile measured smaller and dependency-free, but it would be an in-house format that neither RFC 9421 nor RFC 9449 tooling understands.
 - Request authentication never covers the host or path: the operation tag, the per-authority key and the body digest bind a request to its endpoint, so an authority behind a rewriting proxy needs no setting.
   Signing the URL, as DPoP's `htu` does, would make the authority configure its external URL and compare it exactly, and would cost about 95 bytes per request.
