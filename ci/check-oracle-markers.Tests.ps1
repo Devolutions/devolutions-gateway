@@ -156,6 +156,7 @@ Describe 'Marker grammar and references' {
         @{ Name = 'a spec at a branch'; Marker = 'spec Devolutions/devolutions-gateway@master docs/JMUX-spec.md §Channels'; Message = 'looks like a URL or a path' } # oracle: intent ci/check-oracle-markers.intent.md §grammar
         @{ Name = 'a spec path in another case'; Marker = 'spec Docs/JMUX-spec.md §Channels'; Message = 'looks like a URL or a path' } # oracle: intent ci/check-oracle-markers.intent.md §grammar
         @{ Name = 'a spec path outside docs/'; Marker = 'spec crates/jmux-proto/SPEC.md §Channels'; Message = 'looks like a URL or a path' } # oracle: intent ci/check-oracle-markers.intent.md §grammar
+        @{ Name = 'a bare Markdown file name as a spec'; Marker = 'spec JMUX-spec.md §Channels'; Message = 'looks like a URL or a path' } # oracle: intent ci/check-oracle-markers.intent.md §grammar
         @{ Name = 'a missing spec under docs/'; Marker = 'spec docs/JET.md §Header'; Message = "spec file 'docs/JET.md' is not tracked" } # oracle: intent ci/check-oracle-markers.intent.md §paths
         @{ Name = 'a missing spec section under docs/'; Marker = 'spec docs/JMUX-spec.md §Sessions'; Message = "spec file 'docs/JMUX-spec.md' has no section 'Sessions'" } # oracle: intent ci/check-oracle-markers.intent.md §paths
         @{ Name = 'a contract that is not a CONTRACT*.md'; Marker = 'contract api/README.md §Framing'; Message = "contract 'api/README.md' is not a CONTRACT*.md file" } # oracle: intent ci/check-oracle-markers.intent.md §grammar
@@ -445,6 +446,8 @@ Describe 'New tests' {
         @{ Name = 'Rust test followed by a marked helper'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = `"}`";`n}`n`nfn helper() {`n    // oracle: property round-trip`n}`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Pester test'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' {`n        1 | Should -Be 1`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'Pester test followed by a marked one'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    It 'a' {`n    }`n`n    It 'b' {`n        1 | Should -Be 1 `# oracle: property round-trip`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'Pester test declared with a lowercase it'; Path = 'ci/a.Tests.ps1'; Content = "Describe 'd' {`n    it 'a' {`n    }`n}`n"; Line = 2; Form = '# oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'Rust test with a brace in a block comment, followed by a marked helper'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    /* { */`n}`n`nfn helper() {`n    // oracle: property round-trip`n}`n"; Line = 1; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
         @{ Name = 'xUnit fact followed by a marked helper'; Path = 'dotnet/ATests.cs'; Content = "class ATests`n{`n    [Fact]`n    public void A()`n    {`n    }`n`n    void Helper() { } // oracle: property round-trip`n}`n"; Line = 3; Form = '// oracle:' } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
     ) {
         Set-RepoFile $Repo $Path $Content
@@ -465,6 +468,9 @@ Describe 'New tests' {
         @{ Name = 'in its body'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'on a case row'; Path = 'src/a.rs'; Content = "#[rstest]`n#[case::empty(0)] // oracle: property round-trip`nfn a(#[case] n: u8) {}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
         @{ Name = 'in its body after a case spanning lines'; Path = 'src/a.rs'; Content = "#[rstest]`n#[case::one(`n    `"]`",`n)]`n#[tokio::test]`nasync fn a(#[case] s: &str) {`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'in its body after a raw string holding a quote and a brace'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = r#`"`"}`"#;`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'in its body after a raw string spanning lines'; Path = 'src/a.rs'; Content = "#[test]`nfn a() {`n    let s = r`"`n}`n`";`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
+        @{ Name = 'in its body after a fixed-size array parameter'; Path = 'src/a.rs'; Content = "#[rstest]`n#[case::four([1, 2, 3, 4])]`nfn parses(#[case] bytes: [u8; 4]) {`n    // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §languages
     ) {
         Set-RepoFile $Repo $Path $Content
         Invoke-Git $Repo add -A
@@ -511,6 +517,28 @@ Describe 'New tests' {
 
         $Result.Output | Should -BeNullOrEmpty
         $Result.ExitCode | Should -Be 0
+    }
+
+    It 'Exempts an existing unmarked test when <Name>' -ForEach @(
+        @{ Name = 'a marked namesake joins its file'; Path = 'src/old.rs'; Content = "#[test]`nfn old() {}`n`nmod b {`n    #[test]`n    fn old() {} // oracle: property round-trip`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        @{ Name = 'a marked Pester namesake joins its file'; Path = 'ci/old.Tests.ps1'; Content = "Describe 'd' {`n    It 'old' {`n        1 | Should -Be 1`n    }`n}`n`nDescribe 'e' {`n    It 'old' { `# oracle: property round-trip`n    }`n}`n" } # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+    ) {
+        Set-RepoFile $Repo $Path $Content
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $Base
+
+        $Result.Output | Should -BeNullOrEmpty
+        $Result.ExitCode | Should -Be 0
+    }
+
+    It 'Reports only the added one of two unmarked namesakes' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests
+        Set-RepoFile $Repo 'src/old.rs' "#[test]`nfn old() {}`n`nmod b {`n    #[test]`n    fn old() {}`n}`n"
+        Invoke-Git $Repo add -A
+
+        $Result = Invoke-Check $Repo $Base
+
+        $Result.Output | Should -Be @("src/old.rs:5: new test has no '// oracle:' marker")
     }
 
     It 'Ignores an unmarked test that already existed at the base' { # oracle: intent ci/check-oracle-markers.intent.md §new-tests

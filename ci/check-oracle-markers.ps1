@@ -301,7 +301,7 @@ function Test-SectionReference([string] $File, [int] $Line, [string] $Kind, [str
     # A spec outside `docs/` is named, not given as a path, and cannot be resolved,
     # so a URL, a ref, or another path in its place would escape every check.
     if ($Kind -ceq 'spec' -and -not $Document.StartsWith('docs/')) {
-        if ($Document -match '://|@' -or $Document -match '/[^/\s]*\.[A-Za-z0-9]+$') {
+        if ($Document -match '://|@' -or $Document -match '/[^/\s]*\.[A-Za-z0-9]+$' -or $Document -match '^[^/\s]+\.md$') {
             Add-Violation $File $Line "spec '$Document' looks like a URL or a path; name the spec, give a path under docs/, or pin it as '<owner>/<repo>@<sha>:<path>'"
         }
         return
@@ -386,11 +386,16 @@ function Test-Anchors {
     }
 }
 
-# Counts the declarations of each function name, per file extension, at a revision or in the working tree.
+# Counts the declarations of each name, per file extension, at a revision or in the working tree.
+# PowerShell command names ignore case, so `it` declares a Pester test as `It` does.
 function Get-DeclarationCounts([string] $Revision) {
     $Counts = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::Ordinal)
     foreach ($Extension in $GitDeclarationPatterns.Keys) {
-        $Arguments = @('grep', '-h', '-o', '-I', '-E', '-e', $GitDeclarationPatterns[$Extension])
+        $Arguments = @('grep', '-h', '-o', '-I', '-E')
+        if ($Extension -eq '.ps1') {
+            $Arguments += '-i'
+        }
+        $Arguments += @('-e', $GitDeclarationPatterns[$Extension])
         if ($Revision) {
             $Arguments += $Revision
         }
@@ -412,30 +417,56 @@ function Get-Count($Counts, [string] $Key) {
     if ($Counts.ContainsKey($Key)) { $Counts[$Key] } else { 0 }
 }
 
-# Blanks string and character literals and drops a line comment, so brackets and braces in them are not counted.
-function Get-CodeText([string] $Line) {
-    $Line -replace 'r#*"[^"]*"#*', '""' -replace '"(?:\\.|[^"\\])*"', '""' -replace "'(?:\\.|[^'\\])'", "''" -replace '//.*$', ''
+# Counts the declarations of each name in the lines of one file.
+function Get-LineDeclarationCounts([string[]] $Lines, [string] $Extension) {
+    $Counts = [System.Collections.Generic.Dictionary[string, int]]::new([System.StringComparer]::Ordinal)
+    foreach ($Line in $Lines) {
+        if ($Line -match $DeclarationPatterns[$Extension]) {
+            $Counts[$Matches.name] = (Get-Count $Counts $Matches.name) + 1
+        }
+    }
+    , $Counts
+}
+
+# Comments and string and character literals of Rust and C#, which may span lines.
+$LiteralPattern = @(
+    '/\*[\s\S]*?\*/'
+    '//[^\n]*'
+    '(?<![\w])b?r(?<hashes>#*)"[\s\S]*?"\k<hashes>'
+    '(?<quotes>"{3,})[\s\S]*?\k<quotes>'
+    '(?:\$@|@\$?)"(?:[^"]|"")*"'
+    '"(?:\\[\s\S]|[^"\\])*"'
+    "'(?:\\u\{[0-9a-fA-F]+\}|\\x[0-9a-fA-F]{2}|\\.|[^'\\\n])'"
+) -join '|'
+
+# Blanks comments and literals, keeping line breaks, so the brackets, braces, and semicolons left are code.
+function Get-CodeLines([string[]] $Lines) {
+    $Text = $Lines -join "`n"
+    $Blanked = [regex]::Replace($Text, $LiteralPattern, [System.Text.RegularExpressions.MatchEvaluator] { param($Match) $Match.Value -replace '[^\n]', ' ' })
+    , ($Blanked -split "`n")
 }
 
 # Returns the line on which the item declared at $From ends: where its braces balance again,
-# or its first `;` when it has no body, such as an expression-bodied member.
-function Get-ItemEnd([string[]] $Lines, [int] $From) {
+# or its first `;` outside parentheses and brackets when it has no body, such as an expression-bodied member.
+function Get-ItemEnd([string[]] $Code, [int] $From) {
     $Depth = 0
+    $Nesting = 0
     $Opened = $false
-    for ($Index = $From; $Index -lt $Lines.Count; $Index++) {
-        $Code = Get-CodeText $Lines[$Index]
-        foreach ($Token in [regex]::Matches($Code, '[{};]')) {
+    for ($Index = $From; $Index -lt $Code.Count; $Index++) {
+        foreach ($Token in [regex]::Matches($Code[$Index], '[{}()\[\];]')) {
             switch ($Token.Value) {
                 '{' { $Depth++; $Opened = $true }
                 '}' { $Depth-- }
-                ';' { if (-not $Opened) { return $Index } }
+                { $_ -in '(', '[' } { $Nesting++ }
+                { $_ -in ')', ']' } { $Nesting-- }
+                ';' { if (-not $Opened -and $Nesting -le 0) { return $Index } }
             }
             if ($Opened -and $Depth -eq 0) {
                 return $Index
             }
         }
     }
-    $Lines.Count - 1
+    $Code.Count - 1
 }
 
 # Lists the tests of a file. A test is a block of comments and attributes, an attribute spanning
@@ -443,34 +474,33 @@ function Get-ItemEnd([string[]] $Lines, [int] $From) {
 # so a marker in its comments, attributes, or body belongs to it and one in a later item does not.
 function Get-Tests([string[]] $Lines, [string] $Extension) {
     $Pattern = $TestAttributePatterns[$Extension]
+    $Code = Get-CodeLines $Lines
     $Tests = [System.Collections.Generic.List[object]]::new()
     $Start = -1
     $Attribute = -1
     $Depth = 0
     for ($Index = 0; $Index -lt $Lines.Count; $Index++) {
-        $Line = $Lines[$Index]
-        if ($Depth -gt 0 -or $Line -match '^\s*(#\[|\[)') {
+        if ($Depth -gt 0 -or $Code[$Index] -match '^\s*(#\[|\[)') {
             if ($Start -lt 0) {
                 $Start = $Index
             }
-            if ($Depth -eq 0 -and $Attribute -lt 0 -and $Line -match $Pattern) {
+            if ($Depth -eq 0 -and $Attribute -lt 0 -and $Code[$Index] -match $Pattern) {
                 $Attribute = $Index
             }
-            $Code = Get-CodeText $Line
-            $Depth += ([regex]::Matches($Code, '\[')).Count - ([regex]::Matches($Code, '\]')).Count
+            $Depth += ([regex]::Matches($Code[$Index], '\[')).Count - ([regex]::Matches($Code[$Index], '\]')).Count
             continue
         }
-        if ($Line -match '^\s*//') {
+        if (-not $Code[$Index].Trim() -and $Lines[$Index].Trim()) {
             if ($Start -lt 0) {
                 $Start = $Index
             }
             continue
         }
-        if ($Attribute -ge 0 -and $Line -match '^\s*$') {
+        if ($Attribute -ge 0 -and -not $Lines[$Index].Trim()) {
             continue
         }
         if ($Attribute -ge 0) {
-            $End = Get-ItemEnd $Lines $Index
+            $End = Get-ItemEnd $Code $Index
             $Tests.Add([pscustomobject]@{ Start = $Start; Attribute = $Attribute; Declaration = $Index; End = $End })
             $Index = $End
         }
@@ -501,8 +531,23 @@ function Get-PesterTests([string[]] $Lines, [string] $Path) {
     }
 }
 
-# A test is added when its name is declared more often than at the base,
-# so moving a test, or editing its attributes or body, does not count.
+# Returns the lines of a file the diff from the base adds, numbered from 1.
+function Get-AddedLines([string] $File) {
+    $Added = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($Line in Invoke-Git diff --no-color --no-ext-diff --unified=0 $Base -- $File) {
+        if ($Line -match '^@@ -\S+ \+(?<start>\d+)(?:,(?<count>\d+))? @@') {
+            $Count = if ($Matches.count) { [int] $Matches.count } else { 1 }
+            for ($Number = [int] $Matches.start; $Number -lt [int] $Matches.start + $Count; $Number++) {
+                $Added.Add($Number) | Out-Null
+            }
+        }
+    }
+    , $Added
+}
+
+# A name gains as many new tests in a file as both that file and the tree declare it more often than at the base,
+# so moving a test, or editing its attributes or body, adds none, and an existing namesake stays exempt.
+# Those new tests need markers; when the marked ones fall short, the unmarked ones the diff adds are reported first.
 function Test-NewTests {
     $ChangedFiles = @(Invoke-Git diff --name-only --diff-filter=AMR $Base -- '*.rs' '*.cs' '*.ps1')
     if ($ChangedFiles.Count -eq 0) {
@@ -514,20 +559,43 @@ function Test-NewTests {
     foreach ($File in $ChangedFiles) {
         $Extension = [System.IO.Path]::GetExtension($File)
         $Lines = @(Get-Content -LiteralPath (Join-Path $Root $File))
+        $BaseLines = @(& git -C $Root -c core.quotePath=false show "${Base}:$File" 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            $BaseLines = @()
+        }
+        $FileBefore = Get-LineDeclarationCounts $BaseLines $Extension
+        $FileAfter = Get-LineDeclarationCounts $Lines $Extension
+        $Added = $null
 
         $Tests = if ($Extension -eq '.ps1') { @(Get-PesterTests $Lines $File) } else { @(Get-Tests $Lines $Extension) }
         foreach ($Test in $Tests) {
             $Declaration = @($Lines[$Test.Declaration..$Test.End] -match $DeclarationPatterns[$Extension])[0]
+            $Name = if ($Declaration -match $DeclarationPatterns[$Extension]) { $Matches.name }
+            $Marked = [bool] ($Lines[$Test.Start..$Test.End] -match $MarkerPatterns[$Extension])
+            $Test | Add-Member -NotePropertyName Name -NotePropertyValue $Name
+            $Test | Add-Member -NotePropertyName Marked -NotePropertyValue $Marked
+        }
+
+        foreach ($Group in $Tests | Group-Object { "$($_.Name)" }) {
+            $Name = $Group.Group[0].Name
             # A test whose name cannot be found counts as added.
-            if ($Declaration -match $DeclarationPatterns[$Extension]) {
-                $Key = "${Extension}:$($Matches.name)"
-                if ((Get-Count $After $Key) -le (Get-Count $Before $Key)) {
-                    continue
-                }
+            $New = if ($null -eq $Name) {
+                $Group.Count
+            } else {
+                $Key = "${Extension}:$Name"
+                [Math]::Min((Get-Count $FileAfter $Name) - (Get-Count $FileBefore $Name), (Get-Count $After $Key) - (Get-Count $Before $Key))
             }
-            $HasMarker = $Lines[$Test.Start..$Test.End] -match $MarkerPatterns[$Extension]
-            if (-not $HasMarker) {
-                $Form = if ($Extension -eq '.ps1') { '# oracle:' } else { '// oracle:' }
+            $Unmarked = @($Group.Group | Where-Object { -not $_.Marked })
+            $Missing = $New - ($Group.Count - $Unmarked.Count)
+            if ($Missing -le 0) {
+                continue
+            }
+            if ($null -eq $Added) {
+                $Added = Get-AddedLines $File
+            }
+            $Ordered = $Unmarked | Sort-Object @{ Expression = { -not ($Added.Contains($_.Attribute + 1) -or $Added.Contains($_.Declaration + 1)) } }, @{ Expression = { $_.Attribute }; Descending = $true }
+            $Form = if ($Extension -eq '.ps1') { '# oracle:' } else { '// oracle:' }
+            foreach ($Test in @($Ordered)[0..([Math]::Min($Missing, $Unmarked.Count) - 1)] | Sort-Object Attribute) {
                 Add-Violation $File ($Test.Attribute + 1) "new test has no '$Form' marker"
             }
         }
