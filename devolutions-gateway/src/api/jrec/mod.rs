@@ -1,3 +1,5 @@
+pub(crate) mod search;
+
 use std::fs;
 use std::io::{self, Seek as _, Write as _};
 use std::net::SocketAddr;
@@ -12,7 +14,7 @@ use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderValue};
 use axum::response::Response;
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use bytes::Bytes;
 use cadeau::xmf;
@@ -59,6 +61,7 @@ pub fn make_router<S>(state: DgwState) -> Router<S> {
         .route("/play", get(get_player))
         .route("/play/{*path}", get(get_player))
         .route("/shadow/{id}", get(shadow_recording))
+        .route("/search", post(search::search_recordings))
         .with_state(state)
 }
 
