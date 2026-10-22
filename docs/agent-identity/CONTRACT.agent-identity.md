@@ -229,6 +229,8 @@ Request:
 - If the CSR key is the key of any other certificate the server has issued, including this identity's current or retired certificates and every certificate of another identity, the server returns `invalid_request`.
 - If the CSR key was never issued, the server issues a new pending certificate and retires the identity's previous pending certificate, if any.
 - Renew never promotes a certificate; only `confirm` does (§5.5).
+- The name `key_storage` is reserved in the `enroll` and `renew` `200` bodies for a later revision of this contract: an ordered list of suggested device-key backends for the identity's next keys, and a flag saying whether the agent must fail when none of them is available.
+  Until that revision, servers don't send it and agents ignore it, as any unknown field.
 
 <a id="errors"></a>
 
