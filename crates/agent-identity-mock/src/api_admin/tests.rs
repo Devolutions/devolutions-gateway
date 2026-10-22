@@ -136,7 +136,7 @@ async fn logout(app: &Arc<App>, headers: &[(&str, &str)]) -> anyhow::Result<RawR
     exchange(app, Method::POST, "/api/v1/logout", headers, None).await
 }
 
-// The following responses are DVLS's, as measured on DVLS built from RDM `c642866388b`.
+// The following responses are DVLS's, as measured on DVLS built from `Devolutions/RDM@c642866388b0`.
 
 /// DVLS's `401` to a route that requires a session when the request has no `tokenId` header.
 fn no_token_id_401() -> RawResponse {
@@ -256,6 +256,7 @@ async fn login_token_id_authenticates_requests() -> anyhow::Result<()> {
 }
 
 /// Each login opens another session with a new `tokenId`, and earlier sessions stay open.
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[tokio::test]
 async fn each_login_opens_another_session() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -270,6 +271,7 @@ async fn each_login_opens_another_session() -> anyhow::Result<()> {
 /// A DVLS `tokenId` expires 7 minutes after its login, however often it is used, and then gets DVLS's `401` for an
 /// unknown one; a new login opens another session.
 /// The lifetime runs on real time, which the mock clock that tests advance by days doesn't move.
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[tokio::test(start_paused = true)]
 async fn token_id_expires_its_lifetime_after_login() -> anyhow::Result<()> {
     const DVLS_TOKEN_LIFETIME: Duration = Duration::from_secs(7 * 60);
@@ -291,7 +293,7 @@ async fn token_id_expires_its_lifetime_after_login() -> anyhow::Result<()> {
 /// `LoginPublicApi_LogOut` "closes the session of the token sent in the tokenId header" with DVLS's logout response,
 /// after which that `tokenId` gets DVLS's `401` for an unknown one; other sessions stay open.
 // oracle: spec DVLS public OpenAPI document §LoginPublicApi_LogOut
-// oracle: reference DVLS built from RDM c642866388b
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[tokio::test]
 async fn logout_closes_its_session_only() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -305,7 +307,7 @@ async fn logout_closes_its_session_only() -> anyhow::Result<()> {
 }
 
 /// `LoginPublicApi_LogOut` answers like DVLS when the `tokenId` header names no session or is missing.
-// oracle: reference DVLS built from RDM c642866388b
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[rstest]
 #[case::missing(&[])]
 #[case::unknown(&[(TOKEN_ID_HEADER, "other")])]
@@ -317,7 +319,7 @@ async fn logout_without_a_session_is_200_without_body(#[case] headers: &[(&str, 
 }
 
 /// `LoginPublicApi_LogOut` is idempotent: logging out a session again answers like the first logout.
-// oracle: reference DVLS built from RDM c642866388b
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[tokio::test]
 async fn logout_is_idempotent() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -373,6 +375,7 @@ async fn login_refuses_a_member_outside_login_parameters() -> anyhow::Result<()>
     Ok(())
 }
 
+// oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
 #[rstest]
 #[case::app_key("admin", &[Permission::View, Permission::Manage, Permission::Revoke, Permission::RotateRoot])]
 #[case::unprivileged("admin-unprivileged", &[])]
@@ -385,6 +388,7 @@ fn key_holds_its_permissions(#[case] key: &str, #[case] expected: &[Permission])
     assert_eq!(held, expected);
 }
 
+// oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
 #[rstest]
 #[case::empty("")]
 #[case::other_key("other")]
@@ -503,7 +507,7 @@ async fn token_id_header_name_is_case_insensitive() -> anyhow::Result<()> {
 }
 
 /// A route that requires a session answers a request without a `tokenId` header like DVLS.
-// oracle: reference DVLS built from RDM c642866388b
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[tokio::test]
 async fn missing_token_id_is_401_without_body() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -512,7 +516,7 @@ async fn missing_token_id_is_401_without_body() -> anyhow::Result<()> {
 }
 
 /// A bearer `Authorization` header is no `tokenId` header, even when it carries an open session's `tokenId`.
-// oracle: reference DVLS built from RDM c642866388b
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[tokio::test]
 async fn bearer_authorization_is_a_missing_token_id() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -523,7 +527,7 @@ async fn bearer_authorization_is_a_missing_token_id() -> anyhow::Result<()> {
 }
 
 /// A route that requires a session answers a `tokenId` that no login returned like DVLS, while another session is open.
-// oracle: reference DVLS built from RDM c642866388b
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[rstest]
 #[case::unknown("other")]
 #[case::app_key(APP_KEY)]
@@ -537,7 +541,7 @@ async fn unknown_token_id_is_401_missing_or_invalid_token(#[case] token_id: &str
 }
 
 /// A request that repeats the `tokenId` header names no session, even when each header names the same open one.
-// oracle: reference DVLS built from RDM c642866388b
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[tokio::test]
 async fn repeated_token_id_header_is_401_missing_or_invalid_token() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -783,11 +787,10 @@ async fn create_token_accepts_a_config_at_the_envelope_limit() -> anyhow::Result
     Ok(())
 }
 
-/// Management API bodies follow the agent-facing body rule ([CONTRACT.agent-identity.md][contract], "1. Protocol
-/// conventions"), which refuses a member name repeated at any depth, as the mock's README states.
-///
-/// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#1-protocol-conventions
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
+/// The mock parses management API bodies with the agent-facing body parser, which refuses a member name repeated at any
+/// depth, as its README states.
+/// No DVLS document decides repeated member names; the test guards that the parser stays in place.
+// oracle: mutant a management API body parsed without refusing a repeated member name
 #[rstest]
 #[case::distinct_members(r#"{"flag":"first","other":"second"}"#, 201)]
 #[case::repeated_member(r#"{"flag":"first","flag":"second"}"#, 400)]

@@ -1437,6 +1437,7 @@ mod tests {
     /// CONTRACT.agent-identity.md §7.4 applies revocation to a stream awaiting `Hello` as well as `notAfter`.
     /// The identity's state comes before its certificate's, since `identity_revoked` is terminal (§5.4) where
     /// `certificate_expired` asks for a renewal.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[tokio::test(start_paused = true)]
     async fn revocation_wins_over_not_after_for_a_stream_awaiting_hello() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1477,6 +1478,7 @@ mod tests {
     /// CONTRACT.agent-identity.md §7.4: a stream awaiting `Hello` closes "no later than its certificate's `notAfter`",
     /// and "an identity revoked and then deleted during that wait gets `UNAUTHENTICATED` + `error-code:
     /// identity_unknown`".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[tokio::test(start_paused = true)]
     async fn deleted_identity_closes_a_stream_awaiting_hello_at_not_after() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;
@@ -1490,6 +1492,7 @@ mod tests {
     }
 
     /// As above, for a valid `Hello` that the `__mock__/handshake` pause holds, which no `Hello` timeout ends.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     #[tokio::test(start_paused = true)]
     async fn deleted_identity_closes_a_held_hello_at_not_after() -> anyhow::Result<()> {
         let enrolled = Enrolled::new().await?;

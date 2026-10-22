@@ -229,6 +229,7 @@ mod tests {
     }
 
     /// DVLS's `tokenId` lifetime, 7 minutes, is the default.
+    // oracle: reference DVLS built from Devolutions/RDM@c642866388b0
     #[rstest]
     #[case::default(&[], Duration::from_secs(7 * 60))]
     #[case::flag(&["--token-lifetime-secs", "30"], Duration::from_secs(30))]

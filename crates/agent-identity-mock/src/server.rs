@@ -579,6 +579,7 @@ mod tests {
     }
 
     /// A reset keeps the management API sessions, so that a tester stays logged in across the resets between its tests.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[tokio::test]
     async fn reset_keeps_management_sessions() -> anyhow::Result<()> {
         let app = App::for_test()?;
