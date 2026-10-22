@@ -9,45 +9,33 @@ namespace Devolutions.AgentIdentity;
 /// The body type: <see cref="EnrollRequestBody"/>, <see cref="RenewRequestBody"/>, <see cref="ConfirmRequestBody"/>
 /// or <see cref="CheckInRequestBody"/>.
 /// </typeparam>
-public sealed class RequestBodyParseResult<TBody>
+/// <remarks>
+/// The error is <c>400 invalid_request</c>.
+/// <see cref="AgentIdentityResult.FailureDetail"/> never repeats a value from the body, not even a metadata key:
+/// it names a metadata entry by its position.
+/// </remarks>
+public sealed class RequestBodyParseResult<TBody> : AgentIdentityResult
     where TBody : class
 {
     private static readonly AgentIdentityError InvalidRequest =
         AgentIdentityError.From(AgentIdentityErrorCode.InvalidRequest);
 
     private RequestBodyParseResult(TBody? body, AgentIdentityError? error, string? failureDetail)
+        : base(error, failureDetail)
     {
-        Succeeded = body is not null;
         Body = body;
-        Error = error;
-        FailureDetail = failureDetail;
     }
 
     /// <summary>
     /// Whether the body is valid.
     /// </summary>
     [MemberNotNullWhen(true, nameof(Body))]
-    [MemberNotNullWhen(false, nameof(Error), nameof(FailureDetail))]
-    public bool Succeeded { get; }
+    public override bool Succeeded => Body is not null;
 
     /// <summary>
     /// The validated body, when <see cref="Succeeded"/> is true.
     /// </summary>
     public TBody? Body { get; }
-
-    /// <summary>
-    /// <c>400 invalid_request</c>, when <see cref="Succeeded"/> is false.
-    /// </summary>
-    public AgentIdentityError? Error { get; }
-
-    /// <summary>
-    /// Why the body is invalid, for the host's logs, when <see cref="Succeeded"/> is false.
-    /// </summary>
-    /// <remarks>
-    /// The detail never repeats a value from the body, not even a metadata key:
-    /// it names a metadata entry by its position.
-    /// </remarks>
-    public string? FailureDetail { get; }
 
     internal static RequestBodyParseResult<TBody> Success(TBody body)
     {

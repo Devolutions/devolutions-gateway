@@ -5,43 +5,32 @@ namespace Devolutions.AgentIdentity;
 /// <summary>
 /// The outcome of <see cref="AgentMetadata.Validate"/>: valid metadata, or the error that rejects it.
 /// </summary>
-public sealed class MetadataValidationResult
+/// <remarks>
+/// The error is <c>400 invalid_request</c>.
+/// <see cref="AgentIdentityResult.FailureDetail"/> never repeats a key or value of the metadata:
+/// it names an entry by its position.
+/// </remarks>
+public sealed class MetadataValidationResult : AgentIdentityResult
 {
     private static readonly AgentIdentityError InvalidRequest =
         AgentIdentityError.From(AgentIdentityErrorCode.InvalidRequest);
 
     private MetadataValidationResult(AgentMetadata? metadata, AgentIdentityError? error, string? failureDetail)
+        : base(error, failureDetail)
     {
-        Succeeded = metadata is not null;
         Metadata = metadata;
-        Error = error;
-        FailureDetail = failureDetail;
     }
 
     /// <summary>
     /// Whether the metadata is valid.
     /// </summary>
     [MemberNotNullWhen(true, nameof(Metadata))]
-    [MemberNotNullWhen(false, nameof(Error), nameof(FailureDetail))]
-    public bool Succeeded { get; }
+    public override bool Succeeded => Metadata is not null;
 
     /// <summary>
     /// The validated metadata, when <see cref="Succeeded"/> is true.
     /// </summary>
     public AgentMetadata? Metadata { get; }
-
-    /// <summary>
-    /// <c>400 invalid_request</c>, when <see cref="Succeeded"/> is false.
-    /// </summary>
-    public AgentIdentityError? Error { get; }
-
-    /// <summary>
-    /// Why the metadata is invalid, for the host's logs, when <see cref="Succeeded"/> is false.
-    /// </summary>
-    /// <remarks>
-    /// The detail never repeats a key or value of the metadata: it names an entry by its position.
-    /// </remarks>
-    public string? FailureDetail { get; }
 
     internal static MetadataValidationResult Success(AgentMetadata metadata)
     {
