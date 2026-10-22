@@ -12,6 +12,7 @@ use p256::ecdsa::VerifyingKey;
 use rand::RngExt as _;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
+use tonic::Code;
 use uuid::Uuid;
 
 use crate::app::nanos;
@@ -401,6 +402,69 @@ pub(crate) fn stream_expired(not_after: i64, now: i64) -> bool {
     now >= not_after
 }
 
+/// The closure due to a stream opened with `cert`, which is `None` once deletion or reset removed it
+/// ([CONTRACT.agent-identity.md][contract], "7.4 Termination"): deletion first, then revocation, then `notAfter`.
+/// Returns `None` while the stream may stay open.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
+pub(crate) fn stream_closure(cert: Option<&RegisteredCert>, now: i64) -> Option<Rejection> {
+    match cert {
+        None => Some(Rejection::IdentityUnknown),
+        Some(cert) if cert.revoked => Some(Rejection::IdentityRevoked),
+        Some(cert) if stream_expired(cert.not_after, now) => Some(Rejection::CertificateExpired),
+        Some(_) => None,
+    }
+}
+
+/// How a channel stream ends ([CONTRACT.agent-identity.md][contract], "7.4 Termination").
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Termination {
+    /// End of stream with `OK`.
+    Ok,
+    /// A closure or a failed handshake, with the rejection's status and `error-code`.
+    Rejected(Rejection),
+    /// A message that cannot be decoded, or invalid `Hello` metadata.
+    InvalidRequest,
+}
+
+impl Termination {
+    /// How a [`StreamPush::Close`] carrying `rejection` ends its stream.
+    pub(crate) fn closed(rejection: Option<Rejection>) -> Self {
+        rejection.map_or(Self::Ok, Self::Rejected)
+    }
+
+    /// The stream's closing gRPC status code.
+    pub(crate) fn code(self) -> Code {
+        match self {
+            Self::Ok => Code::Ok,
+            Self::Rejected(Rejection::IdentityRevoked) => Code::PermissionDenied,
+            Self::Rejected(_) => Code::Unauthenticated,
+            Self::InvalidRequest => Code::InvalidArgument,
+        }
+    }
+
+    /// The name of [`Self::code`], as `stream_closed` events record it.
+    fn status(self) -> &'static str {
+        match self {
+            Self::Ok => "OK",
+            Self::Rejected(Rejection::IdentityRevoked) => "PERMISSION_DENIED",
+            Self::Rejected(_) => "UNAUTHENTICATED",
+            Self::InvalidRequest => "INVALID_ARGUMENT",
+        }
+    }
+
+    /// The `error-code` trailer, which every status but `OK` carries.
+    pub(crate) fn error_code(self) -> Option<&'static str> {
+        match self {
+            Self::Ok => None,
+            Self::Rejected(rejection) => Some(rejection.code()),
+            Self::InvalidRequest => Some("invalid_request"),
+        }
+    }
+}
+
 fn has_live_old_root_stream(identity: &Identity, streams: &HashMap<Uuid, StreamHandle>, root: &str, now: i64) -> bool {
     identity.certs.iter().any(|cert| {
         cert.active_on_root(root, now)
@@ -725,7 +789,7 @@ impl State {
                 sent_count += 1;
             } else if let Some(stream) = self.streams.get(&stream_id) {
                 let thumbprint = stream.cert_thumbprint.clone();
-                self.close_stream(stream_id, identity_id, &thumbprint, "OK", None);
+                self.close_stream(stream_id, identity_id, &thumbprint, Termination::Ok);
             }
         }
         sent_count
@@ -747,8 +811,7 @@ impl State {
         stream_id: Uuid,
         identity_id: Uuid,
         cert_thumbprint: &str,
-        status: &str,
-        error_code: Option<&str>,
+        termination: Termination,
     ) {
         self.streams.remove(&stream_id);
         self.challenged_streams.remove(&stream_id);
@@ -759,12 +822,23 @@ impl State {
         let mut fields = json!({
             "stream_id": stream_id,
             "cert_thumbprint": cert_thumbprint,
-            "status": status,
+            "status": termination.status(),
         });
-        if let Some(error_code) = error_code {
+        if let Some(error_code) = termination.error_code() {
             fields["error_code"] = json!(error_code);
         }
         self.record_event(identity_id, "stream_closed", fields);
+    }
+
+    /// Closes `stream`, already removed from the live or challenged streams, with `OK` or with `rejection`.
+    fn close_removed_stream(&mut self, stream_id: Uuid, stream: StreamHandle, rejection: Option<Rejection>) {
+        let _ = stream.tx.send(StreamPush::Close(rejection));
+        self.close_stream(
+            stream_id,
+            stream.identity_id,
+            &stream.cert_thumbprint,
+            Termination::closed(rejection),
+        );
     }
 
     /// Returns the newest root, which issues new leaves during DVLS rotation.
@@ -1209,8 +1283,7 @@ impl State {
                 stream_id,
                 identity_id,
                 &thumbprint,
-                "UNAUTHENTICATED",
-                Some("identity_unknown"),
+                Termination::Rejected(Rejection::IdentityUnknown),
             );
         }
         let removed = self.identities.remove(&identity_id).expect("identity exists");
@@ -1383,53 +1456,25 @@ impl State {
                 let cert = self
                     .lookup_cert(&stream.cert_thumbprint)
                     .filter(|cert| stream_expired(cert.not_after, now))?;
-                let reason = if cert.revoked {
-                    ("PERMISSION_DENIED", "identity_revoked", Rejection::IdentityRevoked)
-                } else {
-                    ("UNAUTHENTICATED", "certificate_expired", Rejection::CertificateExpired)
-                };
-                Some((*id, reason))
+                Some((*id, stream_closure(Some(&cert), now)?))
             })
             .collect::<Vec<_>>();
-        for (stream_id, (status, code, rejection)) in expired_challenges {
+        for (stream_id, rejection) in expired_challenges {
             if let Some(stream) = self.challenged_streams.remove(&stream_id) {
-                let _ = stream.tx.send(StreamPush::Close(Some(rejection)));
-                self.close_stream(
-                    stream_id,
-                    stream.identity_id,
-                    &stream.cert_thumbprint,
-                    status,
-                    Some(code),
-                );
+                self.close_removed_stream(stream_id, stream, Some(rejection));
             }
         }
         let expired = self
             .streams
             .iter()
             .filter_map(|(id, stream)| {
-                let reason = match self.lookup_cert(&stream.cert_thumbprint) {
-                    None => Some(("UNAUTHENTICATED", "identity_unknown", Rejection::IdentityUnknown)),
-                    Some(cert) if cert.revoked => {
-                        Some(("PERMISSION_DENIED", "identity_revoked", Rejection::IdentityRevoked))
-                    }
-                    Some(cert) if stream_expired(cert.not_after, now) => {
-                        Some(("UNAUTHENTICATED", "certificate_expired", Rejection::CertificateExpired))
-                    }
-                    Some(_) => None,
-                }?;
-                Some((*id, reason))
+                let cert = self.lookup_cert(&stream.cert_thumbprint);
+                Some((*id, stream_closure(cert.as_ref(), now)?))
             })
             .collect::<Vec<_>>();
-        for (stream_id, (status, code, rejection)) in expired {
+        for (stream_id, rejection) in expired {
             if let Some(stream) = self.streams.remove(&stream_id) {
-                let _ = stream.tx.send(StreamPush::Close(Some(rejection)));
-                self.close_stream(
-                    stream_id,
-                    stream.identity_id,
-                    &stream.cert_thumbprint,
-                    status,
-                    Some(code),
-                );
+                self.close_removed_stream(stream_id, stream, Some(rejection));
             }
         }
         let retired = self
@@ -1440,8 +1485,7 @@ impl State {
             .collect::<Vec<_>>();
         for stream_id in retired {
             if let Some(stream) = self.streams.remove(&stream_id) {
-                let _ = stream.tx.send(StreamPush::Close(None));
-                self.close_stream(stream_id, stream.identity_id, &stream.cert_thumbprint, "OK", None);
+                self.close_removed_stream(stream_id, stream, None);
             }
         }
         self.complete_rotation_if_ready(now);

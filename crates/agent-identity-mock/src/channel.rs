@@ -25,7 +25,7 @@ use uuid::Uuid;
 use crate::app::{App, rfc3339};
 use crate::name_eval;
 use crate::oracle::{CertStatus, Endpoint, Rejection, verify_channel_proof, verify_request};
-use crate::state::{State, StreamHandle, StreamPush, stream_expired};
+use crate::state::{State, StreamHandle, StreamPush, Termination, stream_closure, stream_expired};
 
 /// §7.3: the agent must answer the challenge within 10 s (real time).
 const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
@@ -141,11 +141,7 @@ fn error_status(code: Code, error_code: &'static str, now: i64) -> Status {
 }
 
 fn rejection_status(rejection: Rejection, now: i64) -> Status {
-    let code = match rejection {
-        Rejection::IdentityRevoked => Code::PermissionDenied,
-        _ => Code::Unauthenticated,
-    };
-    error_status(code, rejection.code(), now)
+    error_status(Termination::Rejected(rejection).code(), rejection.code(), now)
 }
 
 impl ChannelService {
@@ -256,106 +252,110 @@ fn server_message(id: String, correlation_id: Option<String>, payload: server_me
     }
 }
 
-async fn send(out: &mpsc::Sender<Result<ServerMessage, Status>>, message: ServerMessage) -> bool {
-    out.send(Ok(message)).await.is_ok()
-}
-
-async fn close_with(out: &mpsc::Sender<Result<ServerMessage, Status>>, status: Status) {
-    let _ = out.send(Err(status)).await;
-}
-
-async fn finish_stream(
-    app: &App,
-    stream_id: Uuid,
+/// The task's side of a channel stream whose opening request passed §6.
+struct ServerStream {
+    app: Arc<App>,
+    id: Uuid,
     identity_id: Uuid,
-    cert_thumbprint: &str,
-    status: &str,
-    error_code: Option<&str>,
-) {
-    app.state
-        .lock()
-        .await
-        .close_stream(stream_id, identity_id, cert_thumbprint, status, error_code);
+    cert_thumbprint: String,
+    out: mpsc::Sender<Result<ServerMessage, Status>>,
 }
 
-/// Closes a stream for an authentication failure or a §7.4 closure.
-async fn close_rejected(
-    app: &App,
-    out: &mpsc::Sender<Result<ServerMessage, Status>>,
-    stream_id: Uuid,
-    identity_id: Uuid,
-    cert_thumbprint: &str,
-    rejection: Rejection,
-) {
-    close_with(out, rejection_status(rejection, app.now())).await;
-    let status = if rejection == Rejection::IdentityRevoked {
-        "PERMISSION_DENIED"
-    } else {
-        "UNAUTHENTICATED"
-    };
-    finish_stream(
-        app,
-        stream_id,
-        identity_id,
-        cert_thumbprint,
-        status,
-        Some(rejection.code()),
-    )
-    .await;
-}
-
-/// Checks a stream awaiting `Hello` against the closures of [CONTRACT.agent-identity.md][contract] ("7.4 Termination"),
-/// on the identity first, then on the certificate that opened the stream, and returns that certificate's status when
-/// none applies.
-///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
-fn awaiting_closure(
-    state: &State,
-    identity_id: Uuid,
-    cert_thumbprint: &str,
-    now: i64,
-) -> Result<CertStatus, Rejection> {
-    let cert = state
-        .lookup_cert(cert_thumbprint)
-        .filter(|cert| cert.identity_id == identity_id)
-        .ok_or(Rejection::IdentityUnknown)?;
-    if cert.revoked {
-        return Err(Rejection::IdentityRevoked);
+impl ServerStream {
+    async fn send(&self, message: ServerMessage) -> bool {
+        self.out.send(Ok(message)).await.is_ok()
     }
-    if stream_expired(cert.not_after, now) {
-        return Err(Rejection::CertificateExpired);
-    }
-    Ok(cert.status)
-}
 
-/// The §7.4 closure due to a stream awaiting `Hello` once the clock reaches `not_after`, its [`Opening`] deadline.
-/// Revocation and deletion still win over expiry then, as [`awaiting_closure`] orders them.
-async fn expiry_closure(app: &App, identity_id: Uuid, cert_thumbprint: &str, not_after: i64) -> Option<Rejection> {
-    let now = app.now();
-    if !stream_expired(not_after, now) {
-        return None;
-    }
-    let closure = awaiting_closure(&*app.state.lock().await, identity_id, cert_thumbprint, now);
-    Some(closure.err().unwrap_or(Rejection::CertificateExpired))
-}
-
-async fn close_opening_push(
-    app: &App,
-    out: &mpsc::Sender<Result<ServerMessage, Status>>,
-    stream_id: Uuid,
-    identity_id: Uuid,
-    cert_thumbprint: &str,
-    push: Option<StreamPush>,
-) {
-    let rejection = match push {
-        Some(StreamPush::Close(None)) => {
-            finish_stream(app, stream_id, identity_id, cert_thumbprint, "OK", None).await;
-            return;
+    /// Sends the message that carries `push`, adding its `id` to `awaiting_ack` when the agent acknowledges it, and
+    /// returns how the stream ends when it must.
+    async fn deliver(&self, push: StreamPush, awaiting_ack: &mut HashSet<String>) -> Option<Termination> {
+        let (payload, acknowledged) = match push {
+            StreamPush::ConfigUpdate(config_json) => (
+                server_message::Payload::ConfigUpdate(ConfigUpdate { config_json }),
+                true,
+            ),
+            StreamPush::RenewRequested(reason) => (
+                server_message::Payload::RenewRequested(RenewRequested {
+                    reason: reason.to_owned(),
+                }),
+                true,
+            ),
+            StreamPush::Reconnect(reason) => (
+                server_message::Payload::Reconnect(Reconnect {
+                    reason: reason.to_owned(),
+                }),
+                false,
+            ),
+            // Make-before-break ends a retired certificate's stream with `OK`.
+            StreamPush::Close(rejection) => return Some(Termination::closed(rejection)),
+        };
+        let message = server_message(Uuid::new_v4().to_string(), None, payload);
+        if acknowledged {
+            awaiting_ack.insert(message.id.clone());
         }
-        Some(StreamPush::Close(Some(rejection))) => rejection,
-        _ => Rejection::SignatureInvalid,
-    };
-    close_rejected(app, out, stream_id, identity_id, cert_thumbprint, rejection).await;
+        (!self.send(message).await).then_some(Termination::Ok)
+    }
+
+    /// Ends the stream: sends its closing status unless it is `OK`, then records the closure.
+    async fn end(&self, termination: Termination) {
+        if let Some(error_code) = termination.error_code() {
+            let status = error_status(termination.code(), error_code, self.app.now());
+            let _ = self.out.send(Err(status)).await;
+        }
+        self.app
+            .state
+            .lock()
+            .await
+            .close_stream(self.id, self.identity_id, &self.cert_thumbprint, termination);
+    }
+
+    /// Checks a stream awaiting `Hello` against the closures of [CONTRACT.agent-identity.md][contract] ("7.4
+    /// Termination"), on the identity first, then on the certificate that opened the stream, and returns that
+    /// certificate's status when none applies.
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
+    fn awaiting_closure(&self, state: &State, now: i64) -> Result<CertStatus, Rejection> {
+        let cert = state
+            .lookup_cert(&self.cert_thumbprint)
+            .filter(|cert| cert.identity_id == self.identity_id);
+        match stream_closure(cert.as_ref(), now) {
+            Some(rejection) => Err(rejection),
+            None => cert.map(|cert| cert.status).ok_or(Rejection::IdentityUnknown),
+        }
+    }
+
+    /// The §7.4 closure due to a stream awaiting `Hello` once the clock reaches `not_after`, its [`Opening`] deadline.
+    /// Revocation and deletion still win over expiry then, as [`Self::awaiting_closure`] orders them.
+    async fn expiry_closure(&self, not_after: i64) -> Option<Rejection> {
+        let now = self.app.now();
+        if !stream_expired(not_after, now) {
+            return None;
+        }
+        let closure = self.awaiting_closure(&*self.app.state.lock().await, now);
+        Some(closure.err().unwrap_or(Rejection::CertificateExpired))
+    }
+}
+
+/// How a push to a stream awaiting `Hello` ends it: only a closure can reach such a stream.
+fn opening_push_termination(push: Option<StreamPush>) -> Termination {
+    match push {
+        Some(StreamPush::Close(rejection)) => Termination::closed(rejection),
+        _ => Termination::Rejected(Rejection::SignatureInvalid),
+    }
+}
+
+/// A `Hello` that passed §7.3 step 4.
+struct Hello {
+    id: String,
+    applied_config_revision: u64,
+    metadata: Map<String, Value>,
+}
+
+/// What the stream sends after `Welcome` to reconcile the agent's state (§7.3).
+struct Reconciliation {
+    /// The config JSON and its revision, when the agent's applied revision is older.
+    config_update: Option<(String, u64)>,
+    renewal_reason: Option<&'static str>,
 }
 
 async fn run_stream(
@@ -367,9 +367,31 @@ async fn run_stream(
     mut push_rx: mpsc::UnboundedReceiver<StreamPush>,
     out: mpsc::Sender<Result<ServerMessage, Status>>,
 ) {
+    let stream = ServerStream {
+        app,
+        id: stream_id,
+        identity_id: opening.auth.identity_id(),
+        cert_thumbprint: opening.auth.cert_thumbprint().to_owned(),
+        out,
+    };
+    let termination = match await_hello(&stream, &opening, &mut client, &mut push_rx).await {
+        Err(termination) => termination,
+        Ok(hello) => match authenticate(&stream, hello.applied_config_revision, hello.metadata, push_tx).await {
+            Err(rejection) => Termination::Rejected(rejection),
+            Ok(reconciliation) => serve(&stream, hello.id, reconciliation, &mut client, &mut push_rx).await,
+        },
+    };
+    stream.end(termination).await;
+}
+
+/// Sends the `Challenge` and waits for a `Hello` that passes §7.3 step 4, applying the §7.4 closures meanwhile.
+async fn await_hello(
+    stream: &ServerStream,
+    opening: &Opening,
+    client: &mut (impl Stream<Item = Result<Received, Status>> + Unpin),
+    push_rx: &mut mpsc::UnboundedReceiver<StreamPush>,
+) -> Result<Hello, Termination> {
     let Opening { auth, not_after } = opening;
-    let identity_id = auth.identity_id();
-    let cert_thumbprint = auth.cert_thumbprint().to_owned();
 
     // §7.3 step 2: the Challenge is the first server message.
     let mut challenge = [0u8; 32];
@@ -382,15 +404,14 @@ async fn run_stream(
             challenge: challenge.to_vec(),
         }),
     );
-    if !send(&out, challenge_msg).await {
-        finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
-        return;
+    if !stream.send(challenge_msg).await {
+        return Err(Termination::Ok);
     }
     // §7.4 closes a stream no later than its certificate's `notAfter`, which §6 still accepts for opening,
     // so a stream opened at `notAfter` closes right after its `Challenge`.
     {
-        let now = app.now();
-        app.state.lock().await.tick(now);
+        let now = stream.app.now();
+        stream.app.state.lock().await.tick(now);
     }
 
     // Step 3: wait for the Hello, bound to this stream's challenge and the connect nonce.
@@ -407,27 +428,21 @@ async fn run_stream(
                     Ok(Some(Ok(received))) => received.ok(),
                     Ok(Some(Err(_))) | Ok(None) | Err(_) => None,
                 },
-                push = push_rx.recv() => {
-                    close_opening_push(&app, &out, stream_id, identity_id, &cert_thumbprint, push).await;
-                    return;
-                }
+                push = push_rx.recv() => return Err(opening_push_termination(push)),
                 _ = expiry_check.tick() => {
-                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint, not_after).await {
-                        close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
-                        return;
+                    if let Some(rejection) = stream.expiry_closure(*not_after).await {
+                        return Err(Termination::Rejected(rejection));
                     }
                 }
             }
         }
     };
     // §7.4: revocation, deletion and `notAfter` close a stream awaiting `Hello` ahead of the step 4 failures.
-    let closure = {
-        let now = app.now();
-        awaiting_closure(&*app.state.lock().await, identity_id, &cert_thumbprint, now)
-    };
-    if let Err(rejection) = closure {
-        close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
-        return;
+    {
+        let now = stream.app.now();
+        stream
+            .awaiting_closure(&*stream.app.state.lock().await, now)
+            .map_err(Termination::Rejected)?;
     }
     let hello = hello.filter(|hello| {
         hello.correlation_id.as_deref() == Some(challenge_id.as_str())
@@ -444,21 +459,7 @@ async fn run_stream(
         ..
     }) = hello
     else {
-        close_with(
-            &out,
-            error_status(Code::Unauthenticated, "signature_invalid", app.now()),
-        )
-        .await;
-        finish_stream(
-            &app,
-            stream_id,
-            identity_id,
-            &cert_thumbprint,
-            "UNAUTHENTICATED",
-            Some("signature_invalid"),
-        )
-        .await;
-        return;
+        return Err(Termination::Rejected(Rejection::SignatureInvalid));
     };
     let applied_config_revision = hello_payload.applied_state_versions.get("config").copied().unwrap_or(0);
 
@@ -468,121 +469,140 @@ async fn run_stream(
         .map(|(k, v)| (k.clone(), Value::String(v.clone())))
         .collect();
     if name_eval::validate_metadata(&metadata).is_err() {
-        close_with(&out, error_status(Code::InvalidArgument, "invalid_request", app.now())).await;
-        finish_stream(
-            &app,
-            stream_id,
-            identity_id,
-            &cert_thumbprint,
-            "INVALID_ARGUMENT",
-            Some("invalid_request"),
-        )
-        .await;
-        return;
+        return Err(Termination::InvalidRequest);
     }
 
-    let mut gate = app.handshake_gate.subscribe();
-    if !*gate.borrow() {
-        app.state.lock().await.paused_hellos.insert(stream_id);
-        loop {
-            if *gate.borrow_and_update() {
-                break;
+    hold_at_handshake_gate(stream, *not_after, client, push_rx, &mut expiry_check).await?;
+    Ok(Hello {
+        id: hello_id,
+        applied_config_revision,
+        metadata,
+    })
+}
+
+/// Holds a valid `Hello` while the mock control pauses the handshake, applying the §7.4 closures meanwhile.
+async fn hold_at_handshake_gate(
+    stream: &ServerStream,
+    not_after: i64,
+    client: &mut (impl Stream<Item = Result<Received, Status>> + Unpin),
+    push_rx: &mut mpsc::UnboundedReceiver<StreamPush>,
+    expiry_check: &mut tokio::time::Interval,
+) -> Result<(), Termination> {
+    let mut gate = stream.app.handshake_gate.subscribe();
+    if *gate.borrow() {
+        return Ok(());
+    }
+    stream.app.state.lock().await.paused_hellos.insert(stream.id);
+    loop {
+        if *gate.borrow_and_update() {
+            break;
+        }
+        tokio::select! {
+            changed = gate.changed() => {
+                if changed.is_err() {
+                    break;
+                }
             }
-            tokio::select! {
-                changed = gate.changed() => {
-                    if changed.is_err() {
-                        break;
-                    }
+            push = push_rx.recv() => return Err(opening_push_termination(push)),
+            message = client.next() => {
+                if !matches!(message, Some(Ok(Ok(_)))) {
+                    return Err(Termination::Ok);
                 }
-                push = push_rx.recv() => {
-                    close_opening_push(&app, &out, stream_id, identity_id, &cert_thumbprint, push).await;
-                    return;
-                }
-                message = client.next() => {
-                    if !matches!(message, Some(Ok(Ok(_)))) {
-                        finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
-                        return;
-                    }
-                }
-                _ = expiry_check.tick() => {
-                    if let Some(rejection) = expiry_closure(&app, identity_id, &cert_thumbprint, not_after).await {
-                        close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
-                        return;
-                    }
+            }
+            _ = expiry_check.tick() => {
+                if let Some(rejection) = stream.expiry_closure(not_after).await {
+                    return Err(Termination::Rejected(rejection));
                 }
             }
         }
-        app.state.lock().await.paused_hellos.remove(&stream_id);
     }
+    stream.app.state.lock().await.paused_hellos.remove(&stream.id);
+    Ok(())
+}
+
+/// Completes §7.3 step 4 server-side: registers the stream as authenticated and records the agent's `Hello`.
+async fn authenticate(
+    stream: &ServerStream,
+    applied_config_revision: u64,
+    metadata: Map<String, Value>,
+    push_tx: mpsc::UnboundedSender<StreamPush>,
+) -> Result<Reconciliation, Rejection> {
+    let ServerStream {
+        app,
+        id: stream_id,
+        identity_id,
+        cert_thumbprint,
+        ..
+    } = stream;
+    let (stream_id, identity_id) = (*stream_id, *identity_id);
 
     // Step 4: only now does anything happen server-side.
     // A Hello held by the handshake barrier is checked against the §7.4 closures again when it is released.
-    let authentication = {
-        let now = app.now();
-        let mut state = app.state.lock().await;
-        state.tick(now);
-        let closure = awaiting_closure(&state, identity_id, &cert_thumbprint, now);
-        if let Err(rejection) = closure {
-            Err(rejection)
-        } else {
-            state.challenged_streams.remove(&stream_id);
-            if state.is_connected(identity_id) {
-                state.requests.overlap_open += 1;
+    let now = app.now();
+    let mut state = app.state.lock().await;
+    state.tick(now);
+    let cert_status = stream.awaiting_closure(&state, now)?;
+    state.challenged_streams.remove(&stream_id);
+    if state.is_connected(identity_id) {
+        state.requests.overlap_open += 1;
+    }
+    state.record_event(
+        identity_id,
+        "stream_authenticated",
+        serde_json::json!({
+            "stream_id": stream_id,
+            "cert_thumbprint": cert_thumbprint,
+            "applied_config_revision": applied_config_revision,
+        }),
+    );
+    let reconciliation = state
+        .identities
+        .get_mut(&identity_id)
+        .map(|identity| {
+            identity.metadata = metadata;
+            identity.last_seen_at = Some(now);
+            Reconciliation {
+                config_update: identity.config_update_after(applied_config_revision),
+                renewal_reason: identity.renewal_requested.as_ref().map(|f| f.reason.as_str()),
             }
-            state.record_event(
-                identity_id,
-                "stream_authenticated",
-                serde_json::json!({
-                    "stream_id": stream_id,
-                    "cert_thumbprint": cert_thumbprint,
-                    "applied_config_revision": applied_config_revision,
-                }),
-            );
-            let (reason, config_update) = state
-                .identities
-                .get_mut(&identity_id)
-                .map(|identity| {
-                    identity.metadata = metadata;
-                    identity.last_seen_at = Some(now);
-                    let update = identity.config_update_after(applied_config_revision);
-                    (identity.renewal_requested.as_ref().map(|f| f.reason.as_str()), update)
-                })
-                .expect("authenticated identity exists");
-            // §7.4: once the handshake completes, a stream whose certificate was retired while it awaited `Hello`
-            // gets the retired streams' `Reconnect`, after `Welcome`, and closes 60 s after it.
-            let retired = closure == Ok(CertStatus::Retired);
-            if retired && push_tx.send(StreamPush::Reconnect("certificate_rotated")).is_ok() {
-                state.record_event(
-                    identity_id,
-                    "reconnect_sent",
-                    serde_json::json!({
-                        "stream_id": stream_id,
-                        "cert_thumbprint": cert_thumbprint,
-                        "reason": "certificate_rotated",
-                    }),
-                );
-            }
-            state.streams.insert(
-                stream_id,
-                StreamHandle {
-                    identity_id,
-                    cert_thumbprint: cert_thumbprint.clone(),
-                    tx: push_tx,
-                    retire_at: retired.then(|| now.saturating_add(60)),
-                },
-            );
-            state.requests.authenticated_connects += 1;
-            Ok((reason, config_update))
-        }
-    };
-    let (renewal_reason, config_update) = match authentication {
-        Ok(result) => result,
-        Err(rejection) => {
-            close_rejected(&app, &out, stream_id, identity_id, &cert_thumbprint, rejection).await;
-            return;
-        }
-    };
+        })
+        .expect("authenticated identity exists");
+    // §7.4: once the handshake completes, a stream whose certificate was retired while it awaited `Hello`
+    // gets the retired streams' `Reconnect`, after `Welcome`, and closes 60 s after it.
+    let retired = cert_status == CertStatus::Retired;
+    if retired && push_tx.send(StreamPush::Reconnect("certificate_rotated")).is_ok() {
+        state.record_event(
+            identity_id,
+            "reconnect_sent",
+            serde_json::json!({
+                "stream_id": stream_id,
+                "cert_thumbprint": cert_thumbprint,
+                "reason": "certificate_rotated",
+            }),
+        );
+    }
+    state.streams.insert(
+        stream_id,
+        StreamHandle {
+            identity_id,
+            cert_thumbprint: cert_thumbprint.clone(),
+            tx: push_tx,
+            retire_at: retired.then(|| now.saturating_add(60)),
+        },
+    );
+    state.requests.authenticated_connects += 1;
+    Ok(reconciliation)
+}
 
+/// Sends `Welcome` and the reconciliation, then serves the authenticated stream until it ends (§7.3, §7.4).
+async fn serve(
+    stream: &ServerStream,
+    hello_id: String,
+    reconciliation: Reconciliation,
+    client: &mut (impl Stream<Item = Result<Received, Status>> + Unpin),
+    push_rx: &mut mpsc::UnboundedReceiver<StreamPush>,
+) -> Termination {
+    let app = &stream.app;
     let now = app.now();
     let welcome = server_message(
         Uuid::new_v4().to_string(),
@@ -591,49 +611,36 @@ async fn run_stream(
             server_time: Some(prost_types::Timestamp { seconds: now, nanos: 0 }),
         }),
     );
-    if !send(&out, welcome).await {
-        finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
-        return;
+    if !stream.send(welcome).await {
+        return Termination::Ok;
     }
 
     // §7.3: reconcile config and the renewal flag after Welcome.
     let mut awaiting_ack = HashSet::new();
-    if let Some((config_json, revision)) = config_update {
-        let message = server_message(
-            Uuid::new_v4().to_string(),
-            None,
-            server_message::Payload::ConfigUpdate(ConfigUpdate { config_json }),
-        );
-        awaiting_ack.insert(message.id.clone());
-        if !send(&out, message).await {
-            finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
-            return;
+    if let Some((config_json, revision)) = reconciliation.config_update {
+        if let Some(termination) = stream
+            .deliver(StreamPush::ConfigUpdate(config_json), &mut awaiting_ack)
+            .await
+        {
+            return termination;
         }
         app.state.lock().await.record_event(
-            identity_id,
+            stream.identity_id,
             "config_update_sent",
-            serde_json::json!({ "stream_id": stream_id, "revision": revision }),
+            serde_json::json!({ "stream_id": stream.id, "revision": revision }),
         );
     }
-    if let Some(reason) = renewal_reason {
-        let message = server_message(
-            Uuid::new_v4().to_string(),
-            None,
-            server_message::Payload::RenewRequested(RenewRequested {
-                reason: reason.to_owned(),
-            }),
-        );
-        awaiting_ack.insert(message.id.clone());
-        if !send(&out, message).await {
-            finish_stream(&app, stream_id, identity_id, &cert_thumbprint, "OK", None).await;
-            return;
-        }
+    if let Some(reason) = reconciliation.renewal_reason
+        && let Some(termination) = stream
+            .deliver(StreamPush::RenewRequested(reason), &mut awaiting_ack)
+            .await
+    {
+        return termination;
     }
 
     // §7.4 termination handling.
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    let mut termination = ("OK", None);
     loop {
         tokio::select! {
             message = client.next() => {
@@ -644,7 +651,7 @@ async fn run_stream(
                         // UNTESTED: any authenticated message, even an unknown payload, refreshes `last_seen_at`.
                         // The timestamp tracks key possession and drives the management API's last-seen filters.
                         // When changing this branch, check `lastSeenOn` after an `Ack` and an unknown payload.
-                        if let Some(identity) = state.identities.get_mut(&identity_id) {
+                        if let Some(identity) = state.identities.get_mut(&stream.identity_id) {
                             identity.last_seen_at = Some(now);
                         }
                         if let AgentMessage {
@@ -658,107 +665,29 @@ async fn run_stream(
                         }
                     }
                     // §7.4: a message that cannot be decoded closes an authenticated stream.
-                    Some(Ok(Err(_))) => {
-                        close_with(&out, error_status(Code::InvalidArgument, "invalid_request", app.now())).await;
-                        termination = ("INVALID_ARGUMENT", Some("invalid_request"));
-                        break;
-                    }
-                    Some(Err(_)) | None => break,
+                    Some(Ok(Err(_))) => return Termination::InvalidRequest,
+                    Some(Err(_)) | None => return Termination::Ok,
                 }
             }
             push = push_rx.recv() => {
-                match push {
-                    Some(StreamPush::ConfigUpdate(config_json)) => {
-                        let message = server_message(
-                            Uuid::new_v4().to_string(),
-                            None,
-                            server_message::Payload::ConfigUpdate(ConfigUpdate { config_json }),
-                        );
-                        awaiting_ack.insert(message.id.clone());
-                        if !send(&out, message).await {
-                            break;
-                        }
-                    }
-                    Some(StreamPush::RenewRequested(reason)) => {
-                        let message = server_message(
-                            Uuid::new_v4().to_string(),
-                            None,
-                            server_message::Payload::RenewRequested(RenewRequested {
-                                reason: reason.to_owned(),
-                            }),
-                        );
-                        awaiting_ack.insert(message.id.clone());
-                        if !send(&out, message).await {
-                            break;
-                        }
-                    }
-                    Some(StreamPush::Reconnect(reason)) => {
-                        let message = server_message(
-                            Uuid::new_v4().to_string(),
-                            None,
-                            server_message::Payload::Reconnect(Reconnect {
-                                reason: reason.to_owned(),
-                            }),
-                        );
-                        if !send(&out, message).await {
-                            break;
-                        }
-                    }
-                    // Make-before-break: end of stream with OK.
-                    Some(StreamPush::Close(None)) => break,
-                    Some(StreamPush::Close(Some(rejection))) => {
-                        close_with(&out, rejection_status(rejection, app.now())).await;
-                        termination = (
-                            if rejection == Rejection::IdentityRevoked {
-                                "PERMISSION_DENIED"
-                            } else {
-                                "UNAUTHENTICATED"
-                            },
-                            Some(rejection.code()),
-                        );
-                        break;
-                    }
-                    None => break,
+                let Some(push) = push else {
+                    return Termination::Ok;
+                };
+                if let Some(termination) = stream.deliver(push, &mut awaiting_ack).await {
+                    return termination;
                 }
             }
             _ = ticker.tick() => {
                 // The mock clock can jump (time/advance), so cert expiry, revocation
                 // races and resets are re-evaluated on a real-time ticker.
                 let now = app.now();
-                let outcome = {
-                    let state = app.state.lock().await;
-                    match state.lookup_cert(&cert_thumbprint) {
-                        None => Some(Rejection::IdentityUnknown),
-                        Some(cert) if cert.revoked => Some(Rejection::IdentityRevoked),
-                        Some(cert) if stream_expired(cert.not_after, now) => Some(Rejection::CertificateExpired),
-                        Some(_) => None,
-                    }
-                };
-                if let Some(rejection) = outcome {
-                    close_with(&out, rejection_status(rejection, app.now())).await;
-                    termination = (
-                        if rejection == Rejection::IdentityRevoked {
-                            "PERMISSION_DENIED"
-                        } else {
-                            "UNAUTHENTICATED"
-                        },
-                        Some(rejection.code()),
-                    );
-                    break;
+                let closure = stream_closure(app.state.lock().await.lookup_cert(&stream.cert_thumbprint).as_ref(), now);
+                if let Some(rejection) = closure {
+                    return Termination::Rejected(rejection);
                 }
             }
         }
     }
-
-    finish_stream(
-        &app,
-        stream_id,
-        identity_id,
-        &cert_thumbprint,
-        termination.0,
-        termination.1,
-    )
-    .await;
 }
 
 #[cfg(test)]
