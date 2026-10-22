@@ -24,6 +24,7 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use provisioner_task::{
     AttemptStart, CreateOutcome, DynProvisionerTaskStore, NewProvisionerTaskRecord, ProvisionerTaskRecord,
+    ProvisionerTaskState,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -144,6 +145,12 @@ impl Attempt {
     /// Deadline of the record, after which the attempt is cancelled.
     pub fn deadline(&self) -> OffsetDateTime {
         self.latest.lock().deadline_at
+    }
+
+    /// State of another record, such as an earlier Task of the same target; `None` for an unknown one.
+    pub async fn state_of(&self, task_id: Uuid) -> anyhow::Result<Option<ProvisionerTaskState>> {
+        let record = self.store.get(task_id, OffsetDateTime::now_utc()).await?;
+        Ok(record.map(|record| record.state))
     }
 
     /// Replaces the payload of the running record and moves its deadline ahead, so whoever asks about it sees how the

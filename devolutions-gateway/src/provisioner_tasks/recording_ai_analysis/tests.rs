@@ -1097,6 +1097,60 @@ async fn a_late_end_of_an_earlier_task_never_lists_its_log_over_a_newer_analysis
     assert!(!first_log.exists());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn a_new_task_that_fails_keeps_an_earlier_success_whose_log_was_not_listed_yet() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
+    let first = harness.start_created(session_id, settings.clone()).await;
+    harness.run(first).await.expect("first analysis");
+
+    // As if the end of the first Task failed before the manifest listed its log, so it is done again later.
+    let dir = harness.recording_path.join(session_id.to_string());
+    std::fs::remove_file(dir.join("ai-analysis-0.slog")).expect("unlist the log");
+    std::fs::write(
+        dir.join(format!(".ai-analysis-{first}.slog")),
+        "the analysis of the first Task",
+    )
+    .expect("unlisted log");
+    let manifest_path = dir.join("recording.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest")).expect("manifest JSON");
+    manifest["artifacts"] = json!({});
+    std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
+
+    let second = harness.start_created(session_id, settings).await;
+    harness.state.secrets.remove(SecretId(second));
+    harness.run(second).await.expect("no retry");
+    assert_eq!(harness.task(second).await.state, ProvisionerTaskState::Failed);
+
+    harness.run(first).await.expect("the late end of the first Task");
+
+    assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("ai-analysis-0.slog")).expect("analysis"),
+        "the analysis of the first Task"
+    );
+}
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn a_new_task_removes_a_log_left_unlisted_by_a_task_that_did_not_succeed() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let dir = harness.recording_path.join(session_id.to_string());
+    let unknown_log = dir.join(format!(".ai-analysis-{}.slog", Uuid::new_v4()));
+    std::fs::write(&unknown_log, "an analysis whose success was never recorded").expect("unlisted log");
+    let (settings, _requests) = spawn_ai_provider(|_| 401).await;
+    let task_id = harness.start_created(session_id, settings).await;
+
+    harness.run(task_id).await.expect("no retry");
+
+    assert!(!unknown_log.exists());
+    assert_eq!(ai_analyses(&dir), json!([]));
+}
+
 /// The AI analyses the manifest in `dir` lists.
 fn ai_analyses(dir: &Utf8Path) -> serde_json::Value {
     let manifest: serde_json::Value =
