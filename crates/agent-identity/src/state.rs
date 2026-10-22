@@ -59,6 +59,16 @@ pub struct KeyRecord {
     pub certificate_chain: Option<Vec<String>>,
 }
 
+impl KeyRecord {
+    /// A key slot recorded before the authority issued a certificate for it.
+    fn unissued(key_name: String) -> Self {
+        Self {
+            key_name,
+            certificate_chain: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EnrollmentDiscardReason {
     IdentityRevoked,
@@ -310,30 +320,30 @@ impl Store {
 
     /// Records a pending key's name durably before generating its private key.
     pub fn create_pending_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<Box<dyn DeviceKey>> {
-        ensure!(identity.keys.pending.is_none(), "identity already has a pending key");
         let name = keys::new_key_name(&self.key_prefix);
-        let previous = identity.clone();
-        let mut updated = previous.clone();
-        updated.keys.pending = Some(KeyRecord {
-            key_name: name.clone(),
-            certificate_chain: None,
-        });
-        let _lock = self.lock()?;
-        self.write_identity_locked(Some(&previous), &updated)?;
-        *identity = updated;
-        keys::generate(&self.backend, &name)
+        self.update(
+            identity,
+            |updated| {
+                ensure!(updated.keys.pending.is_none(), "identity already has a pending key");
+                updated.keys.pending = Some(KeyRecord::unissued(name.clone()));
+                Ok(())
+            },
+            || keys::generate(&self.backend, &name),
+        )
     }
 
     pub fn remove_pending_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        if identity.keys.pending.is_some() {
-            let previous = identity.clone();
-            let mut updated = previous.clone();
-            updated.keys.pending = None;
-            let _lock = self.lock()?;
-            self.write_identity_locked(Some(&previous), &updated)?;
-            *identity = updated;
+        if identity.keys.pending.is_none() {
+            return Ok(());
         }
-        Ok(())
+        self.update(
+            identity,
+            |updated| {
+                updated.keys.pending = None;
+                Ok(())
+            },
+            || Ok(()),
+        )
     }
 
     /// Stores the chain that renew returned for the pending key.
@@ -385,10 +395,7 @@ impl Store {
                     "pending identity key has no certificate chain"
                 );
                 updated.keys.previous = Some(expired);
-                updated.keys.pending = Some(KeyRecord {
-                    key_name: name.clone(),
-                    certificate_chain: None,
-                });
+                updated.keys.pending = Some(KeyRecord::unissued(name.clone()));
                 Ok(())
             },
             || keys::generate(&self.backend, &name),
@@ -402,10 +409,7 @@ impl Store {
             identity,
             |updated| {
                 ensure!(updated.keys.pending.is_some(), "identity has no pending key");
-                updated.keys.pending = Some(KeyRecord {
-                    key_name: name.clone(),
-                    certificate_chain: None,
-                });
+                updated.keys.pending = Some(KeyRecord::unissued(name.clone()));
                 Ok(())
             },
             || keys::generate(&self.backend, &name),
@@ -449,15 +453,17 @@ impl Store {
     }
 
     pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        if identity.keys.previous.is_some() {
-            let previous = identity.clone();
-            let mut updated = previous.clone();
-            updated.keys.previous = None;
-            let _lock = self.lock()?;
-            self.write_identity_locked(Some(&previous), &updated)?;
-            *identity = updated;
+        if identity.keys.previous.is_none() {
+            return Ok(());
         }
-        Ok(())
+        self.update(
+            identity,
+            |updated| {
+                updated.keys.previous = None;
+                Ok(())
+            },
+            || Ok(()),
+        )
     }
 
     pub fn remove_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
@@ -682,10 +688,7 @@ impl Store {
                     // renewal is confirmed.
                     let previous = identity.clone();
                     let name = keys::new_key_name(&self.key_prefix);
-                    identity.keys.pending = Some(KeyRecord {
-                        key_name: name.clone(),
-                        certificate_chain: None,
-                    });
+                    identity.keys.pending = Some(KeyRecord::unissued(name.clone()));
                     self.write_identity_locked(Some(&previous), &identity)?;
                     keys::generate(&self.backend, &name)?;
                 }
