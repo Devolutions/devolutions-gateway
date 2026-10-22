@@ -58,6 +58,7 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.Unavailable, 500, 599 },
     };
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     [Theory]
     [MemberData(nameof(HttpStatusCodes))]
     public void HttpStatusCodeIsTheContractStatus(AgentIdentityErrorCode code, int expected)
@@ -65,6 +66,7 @@ public class AgentIdentityErrorCodeTests
         Assert.Equal(expected, code.ToHttpStatusCode());
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     [Theory]
     [MemberData(nameof(HttpStatusClasses))]
     public void HttpStatusCodeIsInTheContractClass(AgentIdentityErrorCode code, int lowest, int highest)
@@ -102,6 +104,8 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.Unavailable, StatusCode.Unavailable },
     };
 
+    // Most rows follow the closures of the channel; each row's marker names the source that decides it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     [Theory]
     [MemberData(nameof(GrpcStatusCodes))]
     public void GrpcStatusCodeIsTheContractStatus(AgentIdentityErrorCode code, StatusCode expected)
