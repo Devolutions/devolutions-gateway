@@ -55,6 +55,7 @@ Opening a key that any other account can access fails, so a key created by a les
   Opening fails if the key breaks the access rule, is exportable, is a link, or uses an algorithm the crate does not support.
 - Deleting is idempotent: deleting a key that is already gone succeeds.
 - Listing under a prefix returns only well-formed names whose part before the first `_` equals that prefix, and never a link.
+- Listing and deleting treat a key that breaks the access rule like any other key: listing returns its name and deleting removes it, so that a caller can clean up a key it cannot open.
 - No leftover copy of a private key survives a later operation in the same key store.
   Another process's work in progress is never taken for a leftover, and the crate removes only files whose names follow its scheme for keys and their temporary and deleted copies, never anything else in the key store; within the key store the caller chose, a name in that scheme counts as the crate's own, whatever its prefix.
 - An unexpected entry in a key store never makes an operation panic, block, or read without bound: listing skips it, and any other operation skips it or fails promptly, because a key store can be shared with other software.
