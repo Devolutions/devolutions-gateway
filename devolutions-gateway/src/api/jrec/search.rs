@@ -879,7 +879,7 @@ mod tests {
     // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
     #[tokio::test]
     async fn matches_a_string_value_nested_at_any_depth_but_not_its_field_name() {
-        let depth = 10_000;
+        let depth = 100_000;
         let (open, close) = ("[".repeat(depth), "]".repeat(depth));
         let line = format!(r#"{{"description":{open}"DOMAIN\\user"{close}}}"#);
 
