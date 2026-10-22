@@ -102,9 +102,9 @@ pub struct DurableJobQueue(DynJobQueue);
 
 #[async_trait]
 impl ProvisionerTaskJobQueue for DurableJobQueue {
-    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
+    async fn push(&self, job: ProvisionerTaskJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
         let job: DynJob = Box::new(job);
-        self.0.push_job(&job, None).await
+        self.0.push_job(&job, schedule_for).await
     }
 
     async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>> {

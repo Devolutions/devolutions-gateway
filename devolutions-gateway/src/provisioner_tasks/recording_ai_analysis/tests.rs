@@ -814,8 +814,8 @@ struct WithRemuxJobs {
 
 #[async_trait]
 impl ProvisionerTaskJobQueue for WithRemuxJobs {
-    async fn push(&self, job: ProvisionerTaskJob) -> anyhow::Result<()> {
-        self.queue.push(job).await
+    async fn push(&self, job: ProvisionerTaskJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
+        self.queue.push(job, schedule_for).await
     }
 
     async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>> {
