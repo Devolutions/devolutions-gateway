@@ -367,7 +367,8 @@ impl ProvisionerTask for RecordingAiAnalysis {
             AttemptError::Permanent(Permanent::InvalidTask)
         })?;
 
-        // The API key is kept until the deadline, which the start of this attempt moved.
+        // UNTESTED: the key lives until the deadline, which this attempt start moved, so a retry hours after the Task was
+        // created still finds it; every move of the deadline must move the key's expiry too.
         self.secrets.set_expiry(SecretId(attempt.task_id), attempt.deadline());
 
         // Waiting for an earlier analysis of the session is no progress, so the deadline cancels it too.
