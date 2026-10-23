@@ -3,7 +3,7 @@
 - TLS server authentication uses the OS trust store, with no additional pinning.
   The test-only `__debug__.identity.extra_trusted_root` adds roots for the conformance mock and is never a production trust path.
   An authority whose TLS server certificate doesn't validate against the OS trust store is not supported.
-  Identity roots are trusted as received over that TLS connection.
+  Identity roots are trusted as received over that TLS connection, except as the rule on enrollments for a known authority ID at another base URL requires.
 - Identity HTTP requests go through the agent's configured proxy, like the agent's other outbound HTTP, so that a device that reaches its authority only through a proxy can enroll.
   A configured proxy they cannot use, such as one with an unsupported scheme, is a transient error and never a reason to connect directly.
   Windows automatic proxy configuration, a PAC script or WPAD discovery, is not evaluated yet: until it is, the agent connects directly and logs a warning once per run, because such scripts usually send internal authorities direct and refusing would block enrollment on most managed networks.
@@ -53,6 +53,7 @@ The location and format of the files below are stable, because the conformance t
 - One file per token, named `<hex>`:
   - Linux and macOS: `<data-dir>/identity/pending/<hex>.json`, mode `0600`, with content `{ "version": 1, "token": "<token>" }`.
     The agent does not enforce the file's owner, and ignores and keeps a file with any group or other permission bit.
+    The file holds the token in plaintext, protected only by its permissions, until the authority answers; that is accepted.
   - Windows: `<data-dir>\identity\pending\<hex>.dat`, whose content is DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)` of the same JSON; `.dat` because the content is an opaque blob, not JSON.
     The agent accepts exactly two forms and ignores and keeps any other file:
     - owned by SYSTEM or by the agent's user, with a protected DACL granting full control to SYSTEM only, plus the agent's user under `__debug__.identity.acl_grant_current_user`;
@@ -68,13 +69,13 @@ The location and format of the files below are stable, because the conformance t
   Nothing is discarded before enrollment completes, because the authority is known only from the enrollment response.
 - Outcomes:
   - On success, the key becomes the new identity's `current` key, and the pending file and in-progress record are deleted.
-  - A permanent outcome is a `token_*` error, `identity_revoked` (the identity this enrollment created was revoked before the agent received the response), or a locally malformed token.
+  - A permanent outcome is a `token_*` error, `identity_revoked` (the identity this enrollment created was revoked before the agent received the response), a locally malformed token, or an enrollment the agent refuses for claiming a known authority ID from another base URL.
     It deletes the pending file, its in-progress record and its enrollment key, and writes a rejection marker; the agent stores no identity, and recovery requires a different token.
   - A Windows pending file that cannot be decrypted is deleted with an error log and no rejection marker, because the token it holds may be valid; re-running the install command recovers.
   - A pending file in an accepted form whose content the agent cannot use (its name is not the hash of the token it holds, its version is unsupported, its content is not a JSON object, or it is oversized) is deleted with a warning log and no rejection marker.
     Only `identity enroll` writes pending files, so such a file was written by hand and never becomes usable, and a correct file for the same token can still enroll.
   - Any other failure keeps the pending state, and the agent retries.
-- A rejection marker is `<data-dir>/identity/rejected/<hex>.json` = `{ "version": 1, "token_sha256": "<hex>", "code": "<code>", "at": "<RFC 3339>" }`, where `code` is the contract error code or `token_malformed`.
+- A rejection marker is `<data-dir>/identity/rejected/<hex>.json` = `{ "version": 1, "token_sha256": "<hex>", "code": "<code>", "at": "<RFC 3339>" }`, where `code` is the contract error code or one of the local codes `token_malformed` and `authority_conflict`.
   It holds no secret and is never deleted while the agent stays installed; tokens are immutable at the authority, so a permanent outcome never becomes wrong.
   A marker is written only under the hash of a token read from a file named by that hash.
 - If a pending token's hash matches a stored identity, active or rejected, or a rejection marker, the agent deletes the pending state without sending a request.
@@ -82,6 +83,9 @@ The location and format of the files below are stable, because the conformance t
 - A token with a different hash always enrolls, as a new identity.
   On success, the new identity replaces any stored identity for the returned `authority_id`, and the agent deletes the old identity's keys.
   If two pending tokens enroll with the same authority, the last one to complete wins; the other identity stays on the authority for an administrator to revoke or delete.
+- When an enrollment returns the ID of an identity the agent holds for a different base URL, the agent accepts it only if the new certificate chain verifies against a root it already holds for that ID; otherwise it refuses the enrollment and keeps the stored identity and its keys.
+  Without this rule, a hostile or compromised authority could claim another authority's ID and take its place on the device; the chain proves the server holds that authority's CA key, so a legitimate move to a new base URL keeps working.
+  Two gaps are accepted: a move while the device holds only a root from before a rotation, which needs the device's state cleared, and a hostile authority that claims another authority's ID before the real one enrolls, which makes the real enrollment fail loudly.
 
 ### Stored identities
 
