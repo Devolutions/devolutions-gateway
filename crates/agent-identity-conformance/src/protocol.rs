@@ -5948,12 +5948,8 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         .await
         .context("revoked token is no longer readable")?;
     ensure!(
-        revoked.id == unrevoked.id
-            && revoked.name == unrevoked.name
-            && revoked.created_on == unrevoked.created_on
-            && revoked.expires_on == unrevoked.expires_on
-            && revoked.used_count == unrevoked.used_count,
-        "revocation changed the token's ID, name, creation, expiry or use count"
+        revoked.same_except_state(&unrevoked),
+        "revocation changed the token's record beyond its state"
     );
     let listed = management
         .all_tokens()

@@ -356,6 +356,16 @@ pub(crate) struct TokenRecord {
     friendly_name_format: Option<String>,
 }
 
+impl TokenRecord {
+    /// Whether two reads of one token agree on every member but `state`, the only one revocation changes.
+    pub(crate) fn same_except_state(&self, other: &Self) -> bool {
+        Self {
+            state: other.state,
+            ..self.clone()
+        } == *other
+    }
+}
+
 /// What a token creation request asks for.
 pub(crate) struct TokenSpec {
     pub(crate) name: String,
