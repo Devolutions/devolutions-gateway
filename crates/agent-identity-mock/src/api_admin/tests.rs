@@ -438,6 +438,7 @@ fn invalid_key_is_refused(#[case] key: &str) {
     "AgentIdentityView"
 )]
 // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+// oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
 #[case::revoke_token(
     Method::POST,
     "/enrollment-token/{id}/revoke",
@@ -841,10 +842,34 @@ async fn list_tokens_sorts_by_creation_time(#[case] query: &str, #[case] expecte
     Ok(())
 }
 
+/// Creates a token through the management API and returns its ID and the 32 bytes its secret encodes.
+async fn create_token_with_secret(app: &Arc<App>, body: Value) -> anyhow::Result<(String, [u8; 32])> {
+    let (status, created) = call(app, Method::POST, "/enrollment-token", Some(body)).await?;
+    assert_eq!(status, 201, "{created}");
+    let id = created["enrollmentToken"]["id"].as_str().context("token ID")?;
+    let (_, secret) = created["token"]
+        .as_str()
+        .and_then(|token| token.rsplit_once('.'))
+        .context("dvaet1 token")?;
+    let secret = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(secret)?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("token secret is not 32 bytes"))?;
+    Ok((id.to_owned(), secret))
+}
+
+/// Returns the DER of the CSR test vector `name`.
+fn csr_vector(name: &str) -> anyhow::Result<Vec<u8>> {
+    let vectors: Value = serde_json::from_str(include_str!("../../../../docs/agent-identity/test-vectors.json"))?;
+    let csr = vectors["csr"][name]["csr"].as_str().context("CSR vector")?;
+    Ok(STANDARD.decode(csr)?)
+}
+
 /// Revoking an enrollment token is `204`, and so is revoking it again; a revoked token stays stored with its name, so it
 /// is still read and listed.
 // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
 // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment tokens
+// oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 #[tokio::test]
 async fn revoked_token_stays_readable_and_listed() -> anyhow::Result<()> {
     let app = App::for_test()?;
@@ -864,40 +889,73 @@ async fn revoked_token_stays_readable_and_listed() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A revoked token is `token_invalid` for a key it never enrolled.
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+/// A revoked token's state is `Revoked`, in its record and in the token list, even once it has expired or used up its
+/// uses.
+/// The token enrolls `uses` identities, then the clock moves `later_secs` ahead, which leaves it in state `before`.
+// oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+#[rstest]
+#[case::active(0, 0, "Active")]
+#[case::expired(0, 2 * DAY, "Expired")]
+#[case::exhausted(1, 0, "Exhausted")]
 #[tokio::test]
-async fn revoked_token_enrolls_no_new_identity() -> anyhow::Result<()> {
-    let app = App::for_test()?;
-    let (status, created) = call(
-        &app,
-        Method::POST,
-        "/enrollment-token",
-        Some(json!({ "name": "t", "maxUses": 1 })),
-    )
-    .await?;
-    assert_eq!(status, 201, "{created}");
-    let id = created["enrollmentToken"]["id"].as_str().context("token ID")?;
-    let (_, secret) = created["token"]
-        .as_str()
-        .and_then(|token| token.rsplit_once('.'))
-        .context("dvaet1 token")?;
-    let secret: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(secret)?
-        .try_into()
-        .map_err(|_| anyhow::anyhow!("token secret is not 32 bytes"))?;
+async fn revoked_token_state_is_revoked(
+    #[case] uses: usize,
+    #[case] later_secs: i64,
+    #[case] before: &str,
+) -> anyhow::Result<()> {
+    let (app, now) = frozen_app()?;
+    let body = json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now + DAY) });
+    let (id, secret) = create_token_with_secret(&app, body).await?;
+    let csr = csr_vector("valid")?;
+    for _ in 0..uses {
+        let mut state = app.state.lock().await;
+        state
+            .enroll(&secret, &csr, serde_json::Map::new(), now, &app.base_url)
+            .map_err(|error| anyhow::anyhow!("enrollment failed: {}", error.message))?;
+    }
+    app.clock.freeze_at(now + later_secs);
+    let path = format!("/enrollment-token/{id}");
+    assert_eq!(call(&app, Method::GET, &path, None).await?.1["state"], before);
+
+    assert_eq!(call(&app, Method::POST, &format!("{path}/revoke"), None).await?.0, 204);
+    let (status, read) = call(&app, Method::GET, &path, None).await?;
+    assert_eq!((status, &read["state"]), (200, &json!("Revoked")));
+    let (_, page) = call(&app, Method::GET, "/enrollment-token", None).await?;
+    assert_eq!(page["data"][0]["state"], "Revoked");
+    Ok(())
+}
+
+/// A revoked token is `token_invalid` for a key it never enrolled, which wins over `token_expired` and
+/// `token_exhausted`.
+/// The token enrolls `uses` identities with another key, then the clock moves `later_secs` ahead.
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+#[rstest]
+#[case::usable(0, 0)]
+#[case::expired_and_exhausted(1, 2 * DAY)]
+#[tokio::test]
+async fn revoked_token_enrolls_no_new_identity(#[case] uses: usize, #[case] later_secs: i64) -> anyhow::Result<()> {
+    let (app, now) = frozen_app()?;
+    let body = json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now + DAY) });
+    let (id, secret) = create_token_with_secret(&app, body).await?;
+    let enrolled_csr = csr_vector("valid")?;
+    for _ in 0..uses {
+        let mut state = app.state.lock().await;
+        state
+            .enroll(&secret, &enrolled_csr, serde_json::Map::new(), now, &app.base_url)
+            .map_err(|error| anyhow::anyhow!("enrollment failed: {}", error.message))?;
+    }
+    app.clock.freeze_at(now + later_secs);
     let revoke = format!("/enrollment-token/{id}/revoke");
     assert_eq!(call(&app, Method::POST, &revoke, None).await?.0, 204);
 
-    let vectors: Value = serde_json::from_str(include_str!("../../../../docs/agent-identity/test-vectors.json"))?;
-    let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().context("valid CSR vector")?)?;
+    let csr = csr_vector("valid_with_empty_extension_request")?;
     let mut state = app.state.lock().await;
     let refused = state
         .enroll(&secret, &csr, serde_json::Map::new(), app.now(), &app.base_url)
         .err()
         .context("enrollment succeeded")?;
     assert_eq!((refused.status, refused.code), (401, "token_invalid"));
-    assert!(state.identities.is_empty());
+    assert_eq!(state.identities.len(), uses);
     Ok(())
 }
 
@@ -907,8 +965,10 @@ async fn revoked_token_enrolls_no_new_identity() -> anyhow::Result<()> {
 async fn token_has_no_delete_operation() -> anyhow::Result<()> {
     let app = App::for_test()?;
     let id = create_token(&app, json!({ "name": "t", "maxUses": 1 })).await?;
-    let (status, _) = call(&app, Method::DELETE, &format!("/enrollment-token/{id}"), None).await?;
-    assert_eq!(status, 405);
+    let path = format!("/enrollment-token/{id}");
+    let (status, _) = call(&app, Method::DELETE, &path, None).await?;
+    assert!(!(200..300).contains(&status), "{status}");
+    assert_eq!(call(&app, Method::GET, &path, None).await?.0, 200);
     Ok(())
 }
 

@@ -107,6 +107,7 @@ Any other key, including a scope with an empty or unknown permission name, fails
 ### Management API
 
 The [DVLS management API][dvls-management] has the operations, models, enums, paging and errors of DVLS's OpenAPI document for Agent Identity (`v1`, 14 operations), under `/api/v1/agent-identity`.
+One operation differs: the mock revokes a token with `POST /api/v1/agent-identity/enrollment-token/{id}/revoke`, where DVLS's OpenAPI document still deletes it with `DELETE`.
 A request carries the `tokenId` of a [session](#login) in the `tokenId` header.
 A request without one, even with an `Authorization` header, is 401 with no `Content-Type` and no body.
 A repeated, unknown, expired or logged-out `tokenId` is 401 with `Content-Type: application/json; charset=utf-8` and exactly `{"message":"Missing or invalid token"}`.
@@ -117,7 +118,7 @@ Each operation requires the permission the table lists, and a session without it
 
 Enums are PascalCase.
 An identity's `status` is `Active` (an unexpired current or pending certificate), `Grace` (no unexpired certificate, but one within renewal grace), `Expired` (beyond renewal grace) or `Revoked`, as the DVLS intent's "Terminology" defines.
-A certificate's `status` is `Pending`, `Current` or `Retired`, a token's `state` is `Active`, `Exhausted` or `Expired` (which wins), and the rotation's `phase` is `Idle` or `Rotating`.
+A certificate's `status` is `Pending`, `Current` or `Retired`, a token's `state` is `Active`, `Exhausted`, `Expired` or `Revoked` (each winning over those before it), and the rotation's `phase` is `Idle` or `Rotating`.
 Timestamps are RFC 3339 UTC with `Z` and named `*On`; certificate and root validity is `validFrom` and `validUntil`.
 A date-time parameter is UTC unless it carries an offset, and keeps its fraction of a second: token expiries, rotation deadlines and last-seen filters compare and return it exactly.
 List operations take `pageNumber` (default 1), `pageSize` (default 25, at most 100 identities or 500 tokens), `sortOrder` (`1` ascending by default, `0` descending) and `sortField`, and return `{ currentPage, data, pageSize, totalCount, totalPage }`.
@@ -130,7 +131,7 @@ An ID that is not a GUID is 404, like an unknown one.
 | POST | `/api/v1/agent-identity/enrollment-token` | Manage | Body `{ name (1..255 scalar values, not blank), maxUses (1..1_000_000), expiresOn? (future, ≤ now + 365 d, default now + 90 d), friendlyNameFormat? (≤ 1024 scalar values) }`; 201 → `{ enrollmentToken, token }`, the only response with the full `dvaet1` token. A friendly-name format with an unpaired brace or an unknown placeholder is 400. The first token creates the root, and is 409 when it cannot (`root_key_unavailable`). A base URL that carries a user name or password, which `--path-prefix` cannot produce, is 422 and creates no token, as DVLS answers without an https external URL. |
 | GET | `/api/v1/agent-identity/enrollment-token` | View | Page of every token, revoked ones included; `sortField` is `createdOn` (default), `name` or `expiresOn`, with ties in creation order. |
 | GET | `/api/v1/agent-identity/enrollment-token/{id}` | View | `AgentIdentityEnrollmentToken`, without the full token; 404 when unknown. |
-| POST | `/api/v1/agent-identity/enrollment-token/{id}/revoke` | Manage | 204, idempotent, or 404 when unknown. The token stays listed and readable, and its `state` does not show the revocation. It can still replay its own existing current key without side effects, while a new key gets `token_invalid`. |
+| POST | `/api/v1/agent-identity/enrollment-token/{id}/revoke` | Manage | 204, idempotent, or 404 when unknown. The token stays listed and readable, with `state` `Revoked`. It can still replay its own existing current key without side effects, while a new key gets `token_invalid`. |
 | GET | `/api/v1/agent-identity` | View | Page of identities in creation order (`sortField` is `createdOn` only). Query: `view=Summary\|Full`, repeated `metadataKey`, repeated `status`, repeated `enrollmentTokenId`, `issuerThumbprint` (the current certificate's issuer), `lastSeenFrom` and `lastSeenTo` (inclusive), and `search` (case-insensitive friendly-name substring); filters combine with AND. The Summary view carries `id`, `friendlyName`, `status`, `isConnected`, `lastSeenOn`, `certificate { issuerThumbprint, validUntil }` while the identity has a current certificate, and the requested `metadata` keys, omitted when none match. |
 | GET | `/api/v1/agent-identity/{id}` | View | Full view: the Summary members, all `metadata`, `certificates` (newest first), `createdOn`, `enrollmentTokenId`, `enrollmentTokenName`, `isRenewalRequested`, and `revokedOn` once revoked. |
 | PATCH | `/api/v1/agent-identity/{id}` | Manage | `{ friendlyName? }` (1..255 scalar values without leading or trailing white space); absent or `null` changes nothing; 200 → Full view. |
