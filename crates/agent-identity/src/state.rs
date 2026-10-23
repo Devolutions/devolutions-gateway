@@ -13,7 +13,7 @@ use uuid::{Uuid, Variant};
 
 pub use crate::private_file::UntrustedStoredIdentity;
 use crate::token::Token;
-use crate::{pending, private_file, rejected, state_lock};
+use crate::{chain, pending, private_file, rejected, state_lock};
 
 const MAX_IDENTITY_BYTES: u64 = 2 * 1024 * 1024;
 pub const IDENTITY_KEY_PREFIX: &str = "devolutions-agent-identity";
@@ -76,6 +76,16 @@ pub enum EnrollmentDiscardReason {
     TokenExhausted,
     TokenExpired,
     TokenMalformed,
+    AuthorityConflict,
+}
+
+/// What [`Store::store_enrolled_identity`] did with the identity an enrollment returned.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EnrolledIdentity {
+    /// The identity is stored.
+    Stored,
+    /// The enrollment is discarded as `authority_conflict`, and the held identity is unchanged.
+    AuthorityConflict,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -94,6 +104,7 @@ impl EnrollmentDiscardReason {
             Self::TokenExhausted => "token_exhausted",
             Self::TokenExpired => "token_expired",
             Self::TokenMalformed => "token_malformed",
+            Self::AuthorityConflict => "authority_conflict",
         }
     }
 }
@@ -230,13 +241,45 @@ impl Store {
         self.write_identity_locked(Some(previous), identity)
     }
 
-    /// Stores the identity an enrollment returned, replacing any identity held for its authority.
+    /// Stores the identity an enrollment returned, replacing any identity held for its authority, unless that identity
+    /// is held for another base URL and the returned chain doesn't verify against a root it holds.
     ///
-    /// The held identity is read and replaced under one state lock, so no concurrent change lands between the two.
-    pub fn store_enrolled_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
+    /// [`crates/agent-identity/INTENT.md`] ("Pending-enrollment files"): such an enrollment is a permanent outcome,
+    /// recorded as `authority_conflict`, that keeps the held identity and its keys.
+    /// The roots of a held identity are the last certificates of its chains.
+    /// The caller supplies an identity whose `token_sha256` is the hash of a token read from its matching pending file.
+    ///
+    /// UNTESTED: the held identity is read, checked, and replaced or kept under one state lock, so that a concurrent
+    /// change to it, such as a renewal that stores a chain from a new root, can't land between the check and the write.
+    /// No test can interleave a change there; when changing this, keep the read, the check and the write or discard in
+    /// one critical section.
+    ///
+    /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+    pub fn store_enrolled_identity(&self, identity: &StoredIdentity) -> anyhow::Result<EnrolledIdentity> {
         let _lock = self.lock()?;
         let held = self.read_stored_identity(identity.authority_id)?;
-        self.write_identity_locked(held.as_ref(), identity)
+        if let Some(held) = &held
+            && held.base_url != identity.base_url
+            && !chain::verifies_against(
+                identity.keys.current.certificate_chain.as_deref().unwrap_or_default(),
+                &held
+                    .keys
+                    .records()
+                    .filter_map(|key| key.certificate_chain.as_ref()?.last().map(String::as_str))
+                    .collect::<Vec<_>>(),
+            )
+        {
+            rejected::mark_rejected(
+                &self.data_dir,
+                &identity.token_sha256,
+                EnrollmentDiscardReason::AuthorityConflict.code(),
+                self.acl_grant_current_user,
+            )?;
+            self.discard_pending_state_locked(&identity.token_sha256)?;
+            return Ok(EnrolledIdentity::AuthorityConflict);
+        }
+        self.write_identity_locked(held.as_ref(), identity)?;
+        Ok(EnrolledIdentity::Stored)
     }
 
     fn write_identity_locked(
@@ -802,9 +845,23 @@ fn config_revision(config: &Value) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, UNIX_EPOCH};
+
     use base64::Engine as _;
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
+    use der::Encode as _;
+    use der::flagset::FlagSet;
+    use p256::ecdsa::{DerSignature, SigningKey, VerifyingKey};
+    use p256::pkcs8::EncodePublicKey as _;
     use serde_json::json;
+    use spki::SubjectPublicKeyInfoOwned;
+    use x509_cert::builder::profile::BuilderProfile;
+    use x509_cert::builder::{Builder as _, CertificateBuilder};
+    use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages};
+    use x509_cert::ext::{Extension, ToExtension as _};
+    use x509_cert::name::Name;
+    use x509_cert::serial_number::SerialNumber;
+    use x509_cert::time::{Time, Validity};
 
     use super::*;
 
@@ -908,6 +965,11 @@ mod tests {
     }
 
     fn enroll_locally(store: &Store, data_dir: &Utf8Path) -> anyhow::Result<StoredIdentity> {
+        enroll_with_chain(store, data_dir, vec!["YWJj".into()])
+    }
+
+    /// Enrolls an identity with `test_token`, whose current key holds `chain`.
+    fn enroll_with_chain(store: &Store, data_dir: &Utf8Path, chain: Vec<String>) -> anyhow::Result<StoredIdentity> {
         let token = test_token()?;
         pending::write(data_dir, &token, true).context("write test pending token")?;
         let (progress, _key) = store
@@ -924,7 +986,7 @@ mod tests {
             keys: KeySlots {
                 current: KeyRecord {
                     key_name: progress.key_name,
-                    certificate_chain: Some(vec!["YWJj".into()]),
+                    certificate_chain: Some(chain),
                 },
                 pending: None,
                 previous: None,
@@ -1683,6 +1745,400 @@ mod tests {
 
         assert_eq!(store.read_identity(old.authority_id)?, Some(new));
         assert!(keys::open(store.key_backend(), &old.keys.current.key_name)?.is_none());
+        Ok(())
+    }
+
+    const HELD_ROOT: &str = "CN=Held root";
+
+    /// A test certificate and its key, made in the test, so that whether a chain verifies follows from how the test
+    /// signed it.
+    struct TestCertificate {
+        key: SigningKey,
+        name: Name,
+        /// The certificate, `base64` DER.
+        der: String,
+    }
+
+    impl TestCertificate {
+        /// A self-signed CA certificate.
+        fn root(seed: u8, name: &str) -> anyhow::Result<Self> {
+            let key = SigningKey::from_slice(&[seed; 32])?;
+            let name: Name = name.parse()?;
+            let der = test_certificate(&key, &name, &name, key.verifying_key(), vec![ca(None)?])?;
+            Ok(Self { key, name, der })
+        }
+
+        /// A certificate this one signs, with basicConstraints `cA` set when `ca` holds, and no extension otherwise.
+        fn issue(&self, seed: u8, name: &str, ca: bool) -> anyhow::Result<Self> {
+            let extensions = if ca { vec![self::ca(None)?] } else { Vec::new() };
+            self.issue_with(seed, name, extensions)
+        }
+
+        /// A certificate this one signs, with `extensions`.
+        fn issue_with(&self, seed: u8, name: &str, extensions: Vec<Extension>) -> anyhow::Result<Self> {
+            let key = SigningKey::from_slice(&[seed; 32])?;
+            let name: Name = name.parse()?;
+            let der = test_certificate(&self.key, &self.name, &name, key.verifying_key(), extensions)?;
+            Ok(Self { key, name, der })
+        }
+    }
+
+    /// basicConstraints with `cA` set and `path_len` as its pathLenConstraint.
+    fn ca(path_len: Option<u8>) -> anyhow::Result<Extension> {
+        let constraints = BasicConstraints {
+            ca: true,
+            path_len_constraint: path_len,
+        };
+        Ok(constraints.to_extension(&Name::default(), &[])?)
+    }
+
+    fn key_usage(usages: FlagSet<KeyUsages>) -> anyhow::Result<Extension> {
+        Ok(KeyUsage(usages).to_extension(&Name::default(), &[])?)
+    }
+
+    struct TestProfile {
+        issuer: Name,
+        subject: Name,
+        extensions: Vec<Extension>,
+    }
+
+    impl BuilderProfile for TestProfile {
+        fn get_issuer(&self, _subject: &Name) -> Name {
+            self.issuer.clone()
+        }
+
+        fn get_subject(&self) -> Name {
+            self.subject.clone()
+        }
+
+        fn build_extensions(
+            &self,
+            _spk: spki::SubjectPublicKeyInfoRef<'_>,
+            _issuer_spk: spki::SubjectPublicKeyInfoRef<'_>,
+            _tbs: &x509_cert::certificate::TbsCertificate,
+        ) -> x509_cert::builder::Result<Vec<Extension>> {
+            Ok(self.extensions.clone())
+        }
+    }
+
+    /// Returns a `base64` DER certificate for `key` named `subject`, which `signer` signs under the issuer name `issuer`.
+    fn test_certificate(
+        signer: &SigningKey,
+        issuer: &Name,
+        subject: &Name,
+        key: &VerifyingKey,
+        extensions: Vec<Extension>,
+    ) -> anyhow::Result<String> {
+        let profile = TestProfile {
+            issuer: issuer.clone(),
+            subject: subject.clone(),
+            extensions,
+        };
+        let validity = Validity::new(
+            Time::try_from(UNIX_EPOCH + Duration::from_secs(1_700_000_000))?,
+            Time::try_from(UNIX_EPOCH + Duration::from_secs(1_900_000_000))?,
+        );
+        let spki = SubjectPublicKeyInfoOwned::try_from(key.to_public_key_der()?.as_bytes())?;
+        let certificate = CertificateBuilder::new(profile, SerialNumber::from(1u64), validity, spki)?
+            .build::<_, DerSignature>(signer)?;
+        Ok(STANDARD.encode(certificate.to_der()?))
+    }
+
+    /// Stores an identity at `https://example.test` whose chain ends in its root.
+    fn hold_identity_under(
+        store: &Store,
+        data_dir: &Utf8Path,
+        root: &TestCertificate,
+    ) -> anyhow::Result<StoredIdentity> {
+        let leaf = root.issue(11, "CN=Held identity", false)?;
+        enroll_with_chain(store, data_dir, vec![leaf.der, root.der.clone()])
+    }
+
+    /// Begins an enrollment with `token` and returns the identity it stores once the authority answers with
+    /// `authority_id` and `chain`.
+    fn enrollment_answer(
+        store: &Store,
+        data_dir: &Utf8Path,
+        token: &Token,
+        authority_id: Uuid,
+        chain: Vec<String>,
+    ) -> anyhow::Result<StoredIdentity> {
+        pending::write(data_dir, token, true)?;
+        let (progress, _key) = store
+            .begin_enrollment(token)?
+            .context("new token was already processed")?;
+        Ok(StoredIdentity {
+            version: 1,
+            authority_id,
+            identity_id: Uuid::new_v4(),
+            base_url: token.base_url().to_owned(),
+            config: json!({"version": 1, "revision": 1}),
+            token_sha256: token.sha256_hex(),
+            rejected: None,
+            keys: KeySlots {
+                current: KeyRecord {
+                    key_name: progress.key_name,
+                    certificate_chain: Some(chain),
+                },
+                pending: None,
+                previous: None,
+            },
+        })
+    }
+
+    /// Returns a chain that has no signature path to `held`, the root of the held identity.
+    type ChainOutsideHeldRoots = fn(&TestCertificate) -> anyhow::Result<Vec<String>>;
+
+    fn chain_from_another_root(_held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        let root = TestCertificate::root(30, "CN=Other root")?;
+        Ok(vec![root.issue(31, "CN=Claimed identity", false)?.der, root.der])
+    }
+
+    fn chain_from_a_root_with_the_held_root_s_name(_held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        let impostor = TestCertificate::root(32, HELD_ROOT)?;
+        Ok(vec![
+            impostor.issue(33, "CN=Claimed identity", false)?.der,
+            impostor.der,
+        ])
+    }
+
+    fn chain_signed_by_the_held_root_s_key_under_another_issuer_name(
+        held: &TestCertificate,
+    ) -> anyhow::Result<Vec<String>> {
+        let key = SigningKey::from_slice(&[34; 32])?;
+        let leaf = test_certificate(
+            &held.key,
+            &"CN=Other root".parse()?,
+            &"CN=Claimed identity".parse()?,
+            key.verifying_key(),
+            Vec::new(),
+        )?;
+        Ok(vec![leaf, held.der.clone()])
+    }
+
+    fn chain_through_a_leaf_of_the_held_root(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        // The leaf of another device, shaped as the contract's leaves are, signs with that device's key.
+        let device = held.issue_with(
+            35,
+            "CN=Other device",
+            vec![key_usage(KeyUsages::DigitalSignature.into())?],
+        )?;
+        let leaf = device.issue(36, "CN=Claimed identity", false)?;
+        Ok(vec![leaf.der, device.der, held.der.clone()])
+    }
+
+    fn chain_through_a_certificate_without_basic_constraints(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        let signer = held.issue(37, "CN=Not a CA", false)?;
+        let leaf = signer.issue(38, "CN=Claimed identity", false)?;
+        Ok(vec![leaf.der, signer.der, held.der.clone()])
+    }
+
+    fn chain_through_a_ca_without_key_cert_sign(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        let extensions = vec![ca(None)?, key_usage(KeyUsages::DigitalSignature.into())?];
+        let signer = held.issue_with(39, "CN=Intermediate", extensions)?;
+        let leaf = signer.issue(40, "CN=Claimed identity", false)?;
+        Ok(vec![leaf.der, signer.der, held.der.clone()])
+    }
+
+    fn chain_past_a_path_length_constraint(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        // No CA certificate may follow one whose pathLenConstraint is 0.
+        let limited = held.issue_with(41, "CN=Limited intermediate", vec![ca(Some(0))?])?;
+        let below = limited.issue(42, "CN=Intermediate", true)?;
+        let leaf = below.issue(43, "CN=Claimed identity", false)?;
+        Ok(vec![leaf.der, below.der, limited.der, held.der.clone()])
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[rstest::rstest]
+    #[case::from_another_root(chain_from_another_root)]
+    #[case::from_a_root_with_the_held_root_s_name(chain_from_a_root_with_the_held_root_s_name)]
+    // oracle: spec RFC 5280 §6.1.3
+    #[case::under_another_issuer_name(chain_signed_by_the_held_root_s_key_under_another_issuer_name)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[case::through_a_leaf_of_the_held_root(chain_through_a_leaf_of_the_held_root)]
+    // oracle: spec RFC 5280 §6.1.4
+    #[case::through_a_certificate_without_basic_constraints(chain_through_a_certificate_without_basic_constraints)]
+    // oracle: spec RFC 5280 §6.1.4
+    #[case::through_a_ca_without_key_cert_sign(chain_through_a_ca_without_key_cert_sign)]
+    // oracle: spec RFC 5280 §6.1.4
+    #[case::past_a_path_length_constraint(chain_past_a_path_length_constraint)]
+    fn an_enrollment_claiming_a_held_authority_from_another_base_url_without_a_held_root_is_refused(
+        #[case] claimed_chain: ChainOutsideHeldRoots,
+    ) -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(&store, &directory.0, &root)?;
+        let held_file = fs::read_to_string(store.identity_path(held.authority_id))?;
+        let token = token_for("https://other.test")?;
+        let hash_hex = token.sha256_hex();
+        let claim = enrollment_answer(&store, &directory.0, &token, held.authority_id, claimed_chain(&root)?)?;
+
+        let outcome = store.store_enrolled_identity(&claim)?;
+
+        assert_eq!(fs::read_to_string(store.identity_path(held.authority_id))?, held_file);
+        assert_eq!(outcome, EnrolledIdentity::AuthorityConflict);
+        assert!(keys::open(store.key_backend(), &held.keys.current.key_name)?.is_some());
+        let marker_path = directory
+            .0
+            .join("identity")
+            .join("rejected")
+            .join(format!("{hash_hex}.json"));
+        let marker: Value = serde_json::from_slice(&fs::read(marker_path)?)?;
+        assert_eq!(marker["code"], "authority_conflict");
+        assert!(!pending::file_path(&directory.0, &hash_hex)?.exists());
+        assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
+        assert!(keys::open(store.key_backend(), &claim.keys.current.key_name)?.is_none());
+        Ok(())
+    }
+
+    /// Stores an identity and returns it with a chain that has a signature path to one of its roots.
+    type HeldAndVerifiedChain = fn(&Store, &Utf8Path) -> anyhow::Result<(StoredIdentity, Vec<String>)>;
+
+    fn chain_from_the_held_root(store: &Store, data_dir: &Utf8Path) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(store, data_dir, &root)?;
+        Ok((held, vec![root.issue(40, "CN=Claimed identity", false)?.der, root.der]))
+    }
+
+    fn chain_through_an_intermediate_of_the_held_root(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(store, data_dir, &root)?;
+        let intermediate = root.issue(41, "CN=Intermediate", true)?;
+        let leaf = intermediate.issue(42, "CN=Claimed identity", false)?;
+        Ok((held, vec![leaf.der, intermediate.der, root.der]))
+    }
+
+    fn chain_through_an_intermediate_limited_to_no_further_ca(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(store, data_dir, &root)?;
+        let extensions = vec![ca(Some(0))?, key_usage(KeyUsages::KeyCertSign | KeyUsages::CRLSign)?];
+        let intermediate = root.issue_with(47, "CN=Limited intermediate", extensions)?;
+        let leaf = intermediate.issue(48, "CN=Claimed identity", false)?;
+        Ok((held, vec![leaf.der, intermediate.der, root.der]))
+    }
+
+    fn chain_from_a_new_root_the_held_root_cross_signed(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(store, data_dir, &root)?;
+        let cross_signed = root.issue(43, "CN=New root", true)?;
+        let leaf = cross_signed.issue(44, "CN=Claimed identity", false)?;
+        Ok((held, vec![leaf.der, cross_signed.der]))
+    }
+
+    fn chain_from_the_root_of_the_previous_slot(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let old_root = TestCertificate::root(10, HELD_ROOT)?;
+        let new_root = TestCertificate::root(12, "CN=Rotated root")?;
+        let mut held = hold_identity_under(store, data_dir, &old_root)?;
+        store.create_pending_key(&mut held)?;
+        let renewed = new_root.issue(13, "CN=Held identity", false)?;
+        store.store_pending_chain(&mut held, vec![renewed.der, new_root.der])?;
+        store.promote_pending(&mut held)?;
+        Ok((
+            held,
+            vec![old_root.issue(45, "CN=Claimed identity", false)?.der, old_root.der],
+        ))
+    }
+
+    fn chain_from_the_root_of_the_pending_slot(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let pending_root = TestCertificate::root(12, "CN=Rotated root")?;
+        let mut held = hold_identity_under(store, data_dir, &root)?;
+        store.create_pending_key(&mut held)?;
+        let renewed = pending_root.issue(13, "CN=Held identity", false)?;
+        store.store_pending_chain(&mut held, vec![renewed.der, pending_root.der.clone()])?;
+        Ok((
+            held,
+            vec![
+                pending_root.issue(46, "CN=Claimed identity", false)?.der,
+                pending_root.der,
+            ],
+        ))
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[rstest::rstest]
+    #[case::from_the_held_root(chain_from_the_held_root)]
+    #[case::through_an_intermediate(chain_through_an_intermediate_of_the_held_root)]
+    // oracle: spec RFC 5280 §6.1.4
+    #[case::through_an_intermediate_limited_to_no_further_ca(chain_through_an_intermediate_limited_to_no_further_ca)]
+    #[case::from_a_cross_signed_new_root(chain_from_a_new_root_the_held_root_cross_signed)]
+    #[case::from_the_root_of_the_previous_slot(chain_from_the_root_of_the_previous_slot)]
+    #[case::from_the_root_of_the_pending_slot(chain_from_the_root_of_the_pending_slot)]
+    fn an_enrollment_claiming_a_held_authority_from_another_base_url_through_a_held_root_replaces_it(
+        #[case] held_and_chain: HeldAndVerifiedChain,
+    ) -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let (held, chain) = held_and_chain(&store, &directory.0)?;
+        let token = token_for("https://other.test")?;
+        let claim = enrollment_answer(&store, &directory.0, &token, held.authority_id, chain)?;
+
+        let outcome = store.store_enrolled_identity(&claim)?;
+
+        assert_eq!(outcome, EnrolledIdentity::Stored);
+        assert_eq!(store.read_identity(held.authority_id)?, Some(claim));
+        for key in held.keys.records() {
+            assert!(
+                keys::open(store.key_backend(), &key.key_name)?.is_none(),
+                "{}",
+                key.key_name
+            );
+        }
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn an_enrollment_claiming_a_held_authority_from_its_base_url_replaces_it_whatever_its_chain() -> anyhow::Result<()>
+    {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(&store, &directory.0, &root)?;
+        // Another secret makes another token for the same base URL.
+        let token = Token::parse(&format!(
+            "dvaet1.{}.{}",
+            URL_SAFE_NO_PAD.encode(json!({ "u": held.base_url }).to_string()),
+            URL_SAFE_NO_PAD.encode([2u8; 32])
+        ))?;
+        let claim = enrollment_answer(
+            &store,
+            &directory.0,
+            &token,
+            held.authority_id,
+            chain_from_another_root(&root)?,
+        )?;
+
+        let outcome = store.store_enrolled_identity(&claim)?;
+
+        assert_eq!(outcome, EnrolledIdentity::Stored);
+        assert_eq!(store.read_identity(held.authority_id)?, Some(claim));
+        assert!(keys::open(store.key_backend(), &held.keys.current.key_name)?.is_none());
         Ok(())
     }
 

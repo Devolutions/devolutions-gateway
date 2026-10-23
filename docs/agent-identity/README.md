@@ -83,7 +83,7 @@ Agent Identity keeps its state in the `identity` folder of the agent's data dire
 | Path under `identity` | Content |
 | --- | --- |
 | `pending/` | Tokens waiting for enrollment: DPAPI-encrypted `.dat` files on Windows, `.json` files elsewhere |
-| `rejected/` | One marker per token the authority refused permanently, holding no secret |
+| `rejected/` | One marker per token refused permanently, by the authority or the agent, holding no secret |
 | `authorities/<authority_id>/identity.json` | The identity held with that authority: its IDs, config, certificate chains and key names |
 | `keys/` | Device keys of the `File` backend |
 
@@ -154,6 +154,7 @@ The service logs Agent Identity events in the agent's log files, in its data dir
 | `Agent Identity enrollment will retry` | Enrollment failed for the transient `reason` shown; the agent retries. Check the network path, proxy and TLS trust to the authority. |
 | `Discarded permanently rejected Agent Identity enrollment` | The authority refused the token as `token_invalid`, `token_expired` or `token_exhausted`, shown in `reason`. Enroll with a different token. |
 | `Discarded revoked Agent Identity enrollment` | The identity this token created was revoked. Enroll with a different token. |
+| `Discarded Agent Identity enrollment claiming a known authority from another base URL` | The authority at the token's URL returned the `authority_id` of an identity the device holds for another URL, with a certificate chain that doesn't lead to a root of that identity. The agent keeps that identity and records the token as `authority_conflict`. Check that the token comes from the authority you expect. If that authority did move to this URL after rotating its root, clear the device's Agent Identity state, then run the enrollment again. |
 | `Could not decrypt Agent Identity pending file; discarded it` | A Windows pending file couldn't be decrypted. Run the enrollment command again. |
 | `Agent Identity renewal will retry`, `Agent Identity confirmation will retry`, `Agent Identity check-in will retry` | The request failed for the transient `error` shown; the agent retries. |
 | `The Agent Identity is rejected; it stops renewing and checking in` | The identity ended for the reason in `code`; see [When an identity ends](#when-an-identity-ends). |

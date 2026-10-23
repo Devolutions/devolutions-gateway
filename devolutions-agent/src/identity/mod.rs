@@ -13,8 +13,8 @@ use agent_channel_client::{Backoff, ChannelClient, uniform_jitter};
 use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
 use agent_identity::pending::{self, PendingRead};
 use agent_identity::state::{
-    EnrollmentDiscardReason, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots, PendingDiscard, Store, StoredIdentity,
-    UntrustedStoredIdentity,
+    EnrolledIdentity, EnrollmentDiscardReason, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots, PendingDiscard, Store,
+    StoredIdentity, UntrustedStoredIdentity,
 };
 use agent_identity::token::Token;
 use agent_identity::{csr, metadata};
@@ -432,7 +432,19 @@ async fn enroll_pending(
                     previous: None,
                 },
             };
-            store.store_enrolled_identity(&identity)?;
+            match store.store_enrolled_identity(&identity)? {
+                EnrolledIdentity::Stored => {}
+                EnrolledIdentity::AuthorityConflict => {
+                    // UNTESTED: this warning names the authority but no base URL and no token material, because the
+                    // token's base URL comes from the token; no test captures service logs, so keep both out when
+                    // changing it.
+                    warn!(
+                        authority_id = %identity.authority_id,
+                        "Discarded Agent Identity enrollment claiming a known authority from another base URL"
+                    );
+                    return Ok(PendingOutcome::Completed);
+                }
+            }
             info!(authority_id = %identity.authority_id, identity_id = %identity.identity_id, "Agent Identity enrolled");
             // UNTESTED: the identity is stored, so its runner starts even when cleanup fails.
             // A remaining pending file is cleaned up when it is polled again, and a remaining in-progress record at the
