@@ -92,6 +92,13 @@ message StartProcess {
   string working_directory = 6;
   map<string, string> environment = 7;
   map<string, string> metadata = 8;
+  ProcessCredential credential = 9;
+}
+
+message ProcessCredential {
+  string username = 1;
+  string password = 2;
+  string domain = 3;
 }
 
 message StopProcess {
