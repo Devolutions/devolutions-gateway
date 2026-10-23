@@ -7106,9 +7106,9 @@ pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::
         .context("the canonical CSR of the same key was not accepted")
 }
 
-/// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`, which carries only routing data."
+/// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its `secret` alone, accepting only its canonical `base64url` form, and never checks the `bag`, which carries only routing data."
 ///
-/// The rewritten secrets decode to the same 32 bytes, so only a comparison of the exact text refuses them.
+/// The rewritten secrets decode to the same 32 bytes, so only the canonical-form rule refuses them.
 pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     const URL_SAFE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
