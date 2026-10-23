@@ -848,6 +848,35 @@ async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result
     Ok(())
 }
 
+/// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`'s `422`: "DVLS has no https external URL for the token to
+/// carry".
+/// DVLS has none when its external URL carries a user name or password, which a token's `u` never does
+/// (CONTRACT.agent-identity.md §2), so a mock whose base URL carries them creates no token.
+// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
+#[rstest]
+#[case::user_name("https://user@127.0.0.1:1/mock")]
+#[case::password("https://:pw@127.0.0.1:1/mock")]
+#[case::user_name_and_password("https://user:pw@127.0.0.1:1/mock")]
+#[tokio::test]
+async fn create_token_with_credentials_in_the_base_url_is_unprocessable(#[case] base_url: &str) -> anyhow::Result<()> {
+    let mut app = Arc::into_inner(App::for_test()?).context("a new app is not shared")?;
+    app.base_url = base_url.to_owned();
+    let app = Arc::new(app);
+    let (status, body) = call(
+        &app,
+        Method::POST,
+        "/enrollment-token",
+        Some(json!({ "name": "t", "maxUses": 1 })),
+    )
+    .await?;
+    assert_eq!(status, 422);
+    assert_public_api_error(&body);
+    assert!(app.state.lock().await.tokens.is_empty());
+    Ok(())
+}
+
 /// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens` returns a `PagedResultOfAgentIdentityEnrollmentToken`.
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens
 #[tokio::test]

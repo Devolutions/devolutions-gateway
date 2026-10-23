@@ -603,6 +603,12 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
     errors.finish()?;
     let name = name.expect("a missing name is a field error");
     let max_uses = max_uses.expect("a missing maxUses is a field error");
+    if has_credentials(&app.base_url) {
+        return Err(ManagementError::status(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "the mock's base URL carries a user name or password, which an enrollment token's URL never does",
+        ));
+    }
 
     let mut state = app.state.lock().await;
     if !config_fits_envelope(&state.enrollment_config(config, &app.base_url)) {
@@ -629,6 +635,16 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
         Json(json!({ "enrollmentToken": view, "token": token })),
     )
         .into_response())
+}
+
+/// Returns whether the authority of the absolute URL `url` carries a user name or password, which an enrollment token's
+/// `u` never does ([CONTRACT.agent-identity.md][contract], "2. Enrollment token").
+///
+/// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
+fn has_credentials(url: &str) -> bool {
+    url.split_once("://")
+        .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
+        .is_some_and(|authority| authority.contains('@'))
 }
 
 /// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens`.
