@@ -2294,7 +2294,14 @@ pub(crate) async fn a_enroll_revoked_before_response_is_permanent(ctx: Context) 
 pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
-    for reason in ["token_invalid", "token_exhausted", "token_expired", "token_malformed"] {
+    // Each case names the rejection code its marker records.
+    for (reason, code) in [
+        ("token_invalid", "token_invalid"),
+        ("token_exhausted", "token_exhausted"),
+        ("token_expired", "token_expired"),
+        ("token_malformed", "token_malformed"),
+        ("token_malformed, user name in u", "token_malformed"),
+    ] {
         if reason == "token_expired" && !ctx.mock() {
             continue;
         }
@@ -2333,9 +2340,30 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                         0,
                     )
                 }
+                "token_malformed, user name in u" => {
+                    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+                    // The bag decodes, and the token keeps the valid secret, so only the user name in `u` makes it malformed.
+                    let (prefix, secret) = token.text.rsplit_once('.').context("token structure")?;
+                    let (_, bag) = prefix.rsplit_once('.').context("token bag")?;
+                    let mut route: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(bag)?)?;
+                    let base_url = field(&route, "u")?.to_owned();
+                    let authority = base_url
+                        .strip_prefix("https://")
+                        .context("token base URL is not https")?;
+                    route["u"] = json!(format!("https://user@{authority}"));
+                    (
+                        format!(
+                            "dvaet1.{}.{secret}",
+                            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&route)?)
+                        ),
+                        token,
+                        0,
+                        0,
+                    )
+                }
                 _ => anyhow::bail!("unknown permanent error"),
             };
-            let ingress = if reason == "token_malformed" && case.ctx.mock() {
+            let ingress = if code == "token_malformed" && case.ctx.mock() {
                 Some(count(&target.requests(None).await?, "enroll_total")?)
             } else {
                 None
@@ -2349,6 +2377,12 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                     "malformed token was sent to the server instead of rejected locally"
                 );
             }
+            let marker: Value = serde_json::from_slice(&std::fs::read(case.rejection_path_for(&pending))?)?;
+            ensure!(
+                marker["code"] == code,
+                "rejection marker records {} instead of {code}",
+                marker["code"]
+            );
             Ok(())
         })
         .await
