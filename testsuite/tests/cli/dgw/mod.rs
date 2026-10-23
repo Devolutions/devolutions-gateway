@@ -1,6 +1,9 @@
 mod benign_disconnect;
 mod cli_args;
+mod fake_agent;
+mod fwd_tcp;
 mod heartbeat;
+mod jmux;
 mod kdc_proxy;
 mod preflight;
 mod recording_search;
