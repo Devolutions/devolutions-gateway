@@ -1,0 +1,14 @@
+[package]
+name = "private-fs"
+version = "0.0.0"
+authors = ["Devolutions Inc. <infos@devolutions.net>"]
+edition = "2024"
+description = "Unix helpers for files and directories that only their owner can access"
+publish = false
+
+[lints]
+workspace = true
+
+[target.'cfg(unix)'.dependencies]
+camino = "1"
+libc = "0.2"

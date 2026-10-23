@@ -63,43 +63,16 @@ impl Drop for TemporaryFile {
 pub(crate) fn create_directory(path: &Utf8Path) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
+        use std::os::unix::fs::PermissionsExt as _;
 
-        let mut missing = Vec::new();
-        let mut current = path;
-        loop {
-            match fs::symlink_metadata(current) {
-                Ok(metadata) => {
-                    ensure!(metadata.file_type().is_dir(), "identity path is not a directory");
-                    break;
-                }
-                Err(error) if error.kind() == ErrorKind::NotFound => {
-                    missing.push(current.to_owned());
-                    current = current
-                        .parent()
-                        .filter(|parent| !parent.as_str().is_empty())
-                        .unwrap_or_else(|| Utf8Path::new("."));
-                }
-                Err(error) => return Err(error).context("inspect identity directory"),
-            }
-        }
-        let mut builder = fs::DirBuilder::new();
-        builder.mode(0o700);
-        for directory in missing.iter().rev() {
-            match builder.create(directory) {
-                Ok(()) => {}
-                Err(error) if error.kind() == ErrorKind::AlreadyExists && fs::symlink_metadata(directory)?.is_dir() => {
-                }
-                Err(error) => return Err(error).context("create identity directory"),
-            }
-            sync_directory(directory)?;
-            sync_directory(
-                directory
-                    .parent()
-                    .filter(|parent| !parent.as_str().is_empty())
-                    .unwrap_or_else(|| Utf8Path::new(".")),
-            )?;
-        }
+        use private_fs::DirChainError;
+
+        private_fs::create_dir_chain(path).map_err(|error| match error {
+            DirChainError::NotADirectory(_) => anyhow::anyhow!("identity path is not a directory"),
+            DirChainError::Inspect(_, error) => anyhow::Error::new(error).context("inspect identity directory"),
+            DirChainError::Create(_, error) => anyhow::Error::new(error).context("create identity directory"),
+            DirChainError::Sync(_, error) => anyhow::Error::new(error).context("sync identity directory"),
+        })?;
         #[cfg(target_os = "macos")]
         crate::macos_acl::ensure_private_directory(&File::open(path)?)?;
         ensure!(
@@ -202,8 +175,7 @@ fn verify_authority_directory(
             .open(path)
             .context("open authority directory")?;
         let metadata = directory.metadata()?;
-        // SAFETY: Reading the process's effective UID has no preconditions.
-        let user = unsafe { libc::geteuid() };
+        let user = private_fs::effective_uid();
         verify_unix_directory_access(metadata.permissions().mode(), metadata.uid(), user)?;
         #[cfg(target_os = "macos")]
         crate::macos_acl::ensure_private_directory(&directory)?;
@@ -298,8 +270,7 @@ fn open_trusted_identity_file(path: &Utf8Path, grant_current_user: bool, read_da
         use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
         let _ = grant_current_user;
-        // SAFETY: Reading the process's effective UID has no preconditions.
-        let user = unsafe { libc::geteuid() };
+        let user = private_fs::effective_uid();
         verify_unix_file_permissions(metadata.permissions().mode(), metadata.uid(), Some(user))?;
         #[cfg(target_os = "macos")]
         crate::macos_acl::ensure_private_file(&file)?;
@@ -358,8 +329,7 @@ fn create_owned_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::
         }
         let metadata = fs::symlink_metadata(path)?;
         ensure!(metadata.file_type().is_dir(), "identity path is not a directory");
-        // SAFETY: Reading the process's effective UID has no preconditions.
-        let user = unsafe { libc::geteuid() };
+        let user = private_fs::effective_uid();
         ensure!(
             metadata.uid() == user,
             "identity directory owner is not the process user"
@@ -529,8 +499,7 @@ pub(crate) fn verify_open_file(file: &File) -> anyhow::Result<()> {
         {
             use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
-            // SAFETY: Reading the process's effective UID has no preconditions.
-            let user = unsafe { libc::geteuid() };
+            let user = private_fs::effective_uid();
             verify_unix_file_permissions(metadata.permissions().mode(), metadata.uid(), Some(user))?;
             #[cfg(target_os = "macos")]
             crate::macos_acl::ensure_private_file(file)?;
@@ -644,9 +613,7 @@ fn replace(from: &Utf8Path, to: &Utf8Path) -> anyhow::Result<()> {
 
 #[cfg(unix)]
 fn sync_directory(path: &Utf8Path) -> anyhow::Result<()> {
-    File::open(path)
-        .and_then(|file| file.sync_all())
-        .context("sync identity directory")
+    private_fs::sync_directory(path).context("sync identity directory")
 }
 
 #[cfg(test)]

@@ -146,6 +146,7 @@ dependencies = [
  "httpdate",
  "libc",
  "p256 0.14.0-rc.14",
+ "private-fs",
  "reqwest",
  "rstest",
  "rustls-pemfile 2.2.0",
@@ -1929,6 +1930,7 @@ dependencies = [
  "camino",
  "libc",
  "p256 0.14.0-rc.14",
+ "private-fs",
  "rand 0.10.2",
  "secure-memory",
  "serde_json",
@@ -6166,6 +6168,14 @@ dependencies = [
  "once_cell",
  "primefield",
  "serdect",
+]
+
+[[package]]
+name = "private-fs"
+version = "0.0.0"
+dependencies = [
+ "camino",
+ "libc",
 ]
 
 [[package]]

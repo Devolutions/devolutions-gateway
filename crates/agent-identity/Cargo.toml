@@ -39,6 +39,7 @@ zeroize = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+private-fs = { path = "../private-fs" }
 
 [target.'cfg(windows)'.dependencies]
 win-api-wrappers = { path = "../win-api-wrappers" }

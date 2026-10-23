@@ -203,34 +203,17 @@ fn directory_exists(dir: &Utf8Path) -> anyhow::Result<bool> {
 
 #[cfg(unix)]
 fn create_key_directory(dir: &Utf8Path) -> anyhow::Result<()> {
-    use std::os::unix::fs::DirBuilderExt as _;
+    use private_fs::DirChainError;
 
     ensure!(!dir.as_str().is_empty(), "key directory is empty");
-    let mut missing = Vec::new();
-    let mut path = dir;
-    while !directory_exists(path)? {
-        missing.push(path.to_owned());
-        path = match path.parent() {
-            Some(parent) if !parent.as_str().is_empty() => parent,
-            _ => Utf8Path::new("."),
-        };
-    }
-    let mut builder = fs::DirBuilder::new();
-    builder.mode(0o700);
-    for path in missing.iter().rev() {
-        if let Err(error) = builder.create(path)
-            && (error.kind() != ErrorKind::AlreadyExists || !directory_exists(path)?)
-        {
-            return Err(error).with_context(|| format!("create key directory {path}"));
+    private_fs::create_dir_chain(dir).map_err(|error| match error {
+        DirChainError::NotADirectory(_) => anyhow::anyhow!("key directory is not a directory"),
+        DirChainError::Inspect(path, error) => {
+            anyhow::Error::new(error).context(format!("inspect key directory {path}"))
         }
-        sync_directory(path)?;
-        let parent = path
-            .parent()
-            .filter(|parent| !parent.as_str().is_empty())
-            .unwrap_or_else(|| Utf8Path::new("."));
-        sync_directory(parent)?;
-    }
-    Ok(())
+        DirChainError::Create(path, error) => anyhow::Error::new(error).context(format!("create key directory {path}")),
+        DirChainError::Sync(path, error) => anyhow::Error::new(error).context(format!("sync key directory {path}")),
+    })
 }
 
 #[cfg(not(unix))]
@@ -457,9 +440,7 @@ fn listed_with_exact_name(dir: &Utf8Path, path: &Utf8Path) -> anyhow::Result<boo
 
 #[cfg(unix)]
 fn sync_directory(dir: &Utf8Path) -> anyhow::Result<()> {
-    File::open(dir)
-        .and_then(|file| file.sync_all())
-        .with_context(|| format!("sync key directory {dir}"))
+    private_fs::sync_directory(dir).with_context(|| format!("sync key directory {dir}"))
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -536,8 +517,7 @@ fn ensure_owner_only(metadata: &fs::Metadata) -> anyhow::Result<()> {
     use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     ensure!(metadata.permissions().mode() & 0o077 == 0, "key file is not owner-only");
-    // SAFETY: Reading the current effective UID has no preconditions.
-    let user = unsafe { libc::geteuid() };
+    let user = private_fs::effective_uid();
     ensure!(
         owner_is_trusted(metadata.uid(), user),
         "key file owner is neither the process user nor root"
