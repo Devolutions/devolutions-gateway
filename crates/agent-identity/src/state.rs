@@ -1593,7 +1593,7 @@ mod tests {
         };
         store.write_identity(&valid())?;
         type Change = fn(&mut StoredIdentity);
-        let invalid: [(&str, Change); 6] = [
+        let invalid: [(&str, Change); 7] = [
             ("version 2", |identity| identity.version = 2),
             ("http base URL", |identity| {
                 identity.base_url = "http://example.test/dvls".to_owned()
@@ -1602,6 +1602,11 @@ mod tests {
             // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
             ("base URL with a user name and password", |identity| {
                 identity.base_url = "https://user:pw@example.test/dvls".to_owned()
+            }),
+            // The token's `u` is read as text, so an upper-case scheme doesn't begin with `https://`.
+            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+            ("base URL with an upper-case scheme", |identity| {
+                identity.base_url = "HTTPS://example.test/dvls".to_owned()
             }),
             ("upper-case token hash", |identity| {
                 identity.token_sha256 = "AB".repeat(32)

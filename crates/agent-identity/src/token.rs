@@ -89,7 +89,7 @@ pub(crate) fn is_base_url(url: &str) -> bool {
 /// shared by a token's `u` ([CONTRACT.agent-identity.md §2 "Enrollment token"][token]) and `agent_channel_url`
 /// ([CONTRACT.agent-identity.md §5.2 "`POST enroll`"][enroll]).
 ///
-/// The URL is read as text first: it begins with `https://`, in that case, and contains no `@`, since any `@` counts
+/// The URL is read as text first: it begins with `https://`, compared as written, and contains no `@`, since any `@` counts
 /// as a user name even with nothing before it.
 /// URL parsers disagree on forms such as `https://@host` or `https:host`, which the `url` crate accepts as `https`
 /// URLs without a user name, so the text decides before the parsed URL is checked.
