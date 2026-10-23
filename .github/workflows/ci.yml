@@ -219,6 +219,21 @@ jobs:
           ./ci/check-oracle-markers.ps1 -Base $Base
         shell: pwsh
 
+  skill-links:
+    name: skill links
+    needs: [preflight]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Check skill links
+        run: ./ci/check-skill-links.ps1
+        shell: pwsh
+
   oracle-markers-tests:
     name: oracle marker check tests
     needs: [preflight]
@@ -1569,7 +1584,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, oracle-markers, oracle-markers-tests, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, oracle-markers, oracle-markers-tests, skill-links, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:
