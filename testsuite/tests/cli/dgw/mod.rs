@@ -1,6 +1,7 @@
 mod benign_disconnect;
 mod cli_args;
 mod heartbeat;
+mod jrec_push;
 mod kdc_proxy;
 mod preflight;
 mod recording_search;

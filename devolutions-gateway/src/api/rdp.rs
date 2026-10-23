@@ -72,7 +72,9 @@ async fn handle_socket(
     synthetic_kdc_registry: crate::credential_injection::SyntheticKdcRegistry,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) {
-    let (stream, close_handle) = crate::ws::handle(
+    let crate::ws::HandledWebSocket {
+        stream, close_handle, ..
+    } = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         Duration::from_secs(conf.debug.ws_keep_alive_interval),
