@@ -53,7 +53,9 @@ foreach ($Entry in Get-IndexEntries $LinksDir) {
     }
 
     $Name = $Matches[1]
-    $Target = & git -C $Root cat-file blob $Entry.Blob
+    # Capturing native output drops line terminators, so the blob size catches a target with a trailing newline.
+    $Size = & git -C $Root cat-file -s $Entry.Blob
+    $Target = (& git -C $Root cat-file blob $Entry.Blob) -join "`n"
     if ($LASTEXITCODE -ne 0) {
         throw "git cat-file failed for $($Entry.Path)"
     }
@@ -61,6 +63,8 @@ foreach ($Entry in Get-IndexEntries $LinksDir) {
     $Expected = "../../$SkillsDir/$Name"
     if ($Target -cne $Expected) {
         $Violations.Add("$($Entry.Path) points to '$Target' instead of '$Expected'")
+    } elseif ([int] $Size -ne [System.Text.Encoding]::UTF8.GetByteCount($Expected)) {
+        $Violations.Add("$($Entry.Path) target '$Target' ends with a line terminator")
     } elseif ($Name -cnotin $Skills) {
         $Violations.Add("$($Entry.Path) points to $SkillsDir/$Name, which has no SKILL.md")
     }
