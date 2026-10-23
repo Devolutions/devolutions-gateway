@@ -755,7 +755,6 @@ async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result
 /// (CONTRACT.agent-identity.md §2), so a mock whose base URL carries them creates no token.
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-// oracle: reference DVLS built from Devolutions/RDM@c642866388b0
 #[rstest]
 #[case::user_name("https://user@127.0.0.1:1/mock")]
 #[case::password("https://:pw@127.0.0.1:1/mock")]
