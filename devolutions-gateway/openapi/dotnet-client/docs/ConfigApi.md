@@ -88,7 +88,7 @@ void (empty response body)
 ### HTTP request headers
 
  - **Content-Type**: application/json
- - **Accept**: Not defined
+ - **Accept**: application/problem+json
 
 
 ### HTTP response details

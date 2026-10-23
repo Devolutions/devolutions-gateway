@@ -16,6 +16,7 @@ use smol_str::SmolStr;
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::error_code::ErrorCode;
 use crate::recording::ActiveRecordings;
 use crate::session::DisconnectedInfo;
 use crate::target_addr::TargetAddr;
@@ -893,6 +894,47 @@ pub enum TokenError {
     SubkeySignedAndTooLongLifetime,
     #[error("lifetime defined by `nbf` and `exp` claims is too long")]
     TooLongLifetime,
+}
+
+impl TokenError {
+    /// Returns the machine-readable code reported to the client.
+    ///
+    /// The signature is verified before any claim is checked.
+    /// Errors raised before the signature check map to `malformed_token`, `bad_signature` or `unknown_subkey`,
+    /// so a caller without a token signed by a trusted key learns nothing about the claims.
+    pub fn code(&self) -> ErrorCode {
+        use picky::jose::jwt::JwtError;
+
+        match self {
+            // Raised before the signature is verified.
+            Self::MissingDelegationKey | Self::Jwe { .. } | Self::JwePayload { .. } | Self::Jws { .. } => {
+                ErrorCode::MalformedToken
+            }
+            Self::SignatureVerification { .. } => ErrorCode::BadSignature,
+            Self::UnknownSubkey { .. } => ErrorCode::UnknownSubkey,
+
+            // Raised after the signature is verified.
+            Self::Jwt { source } => match source {
+                JwtError::Expired { .. } => ErrorCode::Expired,
+                JwtError::NotYetValid { .. } => ErrorCode::NotYetValid,
+                JwtError::Json { .. }
+                | JwtError::InvalidRegisteredClaimType { .. }
+                | JwtError::RequiredClaimMissing { .. } => ErrorCode::MalformedToken,
+                _ => ErrorCode::InvalidToken,
+            },
+            Self::BadContentType { .. } | Self::MalformedClaim { .. } | Self::InvalidClaimScheme { .. } => {
+                ErrorCode::MalformedToken
+            }
+            Self::GatewayIdScopeMismatch => ErrorCode::GatewayIdMismatch,
+            Self::Revoked => ErrorCode::Revoked,
+            Self::UnexpectedReplay { .. } => ErrorCode::UnexpectedReplay,
+            Self::ContentTypeNotAllowedForSubkey { .. }
+            | Self::PlaintextSecrets
+            | Self::OldJrl
+            | Self::SubkeySignedAndTooLongLifetime
+            | Self::TooLongLifetime => ErrorCode::InvalidToken,
+        }
+    }
 }
 
 #[derive(typed_builder::TypedBuilder)]
@@ -2005,6 +2047,94 @@ mod tests {
 
         for (recording_file_type, expected_content_type) in expected {
             assert_eq!(recording_file_type.content_type(), expected_content_type);
+        }
+    }
+
+    mod error_code {
+        use picky::jose::jwe::JweError;
+        use picky::jose::jws::JwsError;
+        use picky::jose::jwt::{JwtDate, JwtError};
+        use rstest::rstest;
+
+        use super::super::*;
+
+        fn invalid_utf8() -> std::str::Utf8Error {
+            std::str::from_utf8(std::hint::black_box(&[0xC0])).expect_err("invalid UTF-8")
+        }
+
+        fn json_error() -> serde_json::Error {
+            serde_json::from_str::<u8>("not JSON").expect_err("invalid JSON")
+        }
+
+        fn jws_error() -> JwsError {
+            JwsError::InvalidEncoding { input: String::new() }
+        }
+
+        // oracle: spec docs/API-spec.md §token-errors
+        #[rstest]
+        // Raised before the signature is verified.
+        #[case::missing_delegation_key(TokenError::MissingDelegationKey, ErrorCode::MalformedToken)]
+        #[case::jwe(TokenError::Jwe { source: JweError::AesGcm }, ErrorCode::MalformedToken)]
+        #[case::jwe_payload(TokenError::JwePayload { source: invalid_utf8() }, ErrorCode::MalformedToken)]
+        #[case::jws(TokenError::Jws { source: jws_error() }, ErrorCode::MalformedToken)]
+        #[case::signature_verification(
+            TokenError::SignatureVerification { source: jws_error(), key: "main provisioner key" },
+            ErrorCode::BadSignature
+        )]
+        #[case::unknown_subkey(TokenError::UnknownSubkey { provided_kid: String::new() }, ErrorCode::UnknownSubkey)]
+        // Raised after the signature is verified.
+        #[case::bad_content_type(
+            TokenError::BadContentType { source: "UNKNOWN".parse::<ContentType>().expect_err("unknown content type") },
+            ErrorCode::MalformedToken
+        )]
+        #[case::expired(
+            TokenError::Jwt { source: JwtError::Expired { not_after: 0, now: JwtDate::new(1) } },
+            ErrorCode::Expired
+        )]
+        #[case::not_yet_valid(
+            TokenError::Jwt { source: JwtError::NotYetValid { not_before: 1, now: JwtDate::new(0) } },
+            ErrorCode::NotYetValid
+        )]
+        #[case::required_claim_missing(
+            TokenError::Jwt { source: JwtError::RequiredClaimMissing { claim: "exp" } },
+            ErrorCode::MalformedToken
+        )]
+        #[case::invalid_registered_claim_type(
+            TokenError::Jwt { source: JwtError::InvalidRegisteredClaimType { claim: "exp" } },
+            ErrorCode::MalformedToken
+        )]
+        #[case::claims_json(TokenError::Jwt { source: JwtError::Json { source: json_error() } }, ErrorCode::MalformedToken)]
+        #[case::invalid_validator(
+            TokenError::Jwt { source: JwtError::InvalidValidator { description: "" } },
+            ErrorCode::InvalidToken
+        )]
+        #[case::content_type_not_allowed_for_subkey(
+            TokenError::ContentTypeNotAllowedForSubkey { content_type: ContentType::Scope },
+            ErrorCode::InvalidToken
+        )]
+        #[case::malformed_claim(
+            TokenError::MalformedClaim { name: "jet_gw_id", source: anyhow::anyhow!("invalid UUID") },
+            ErrorCode::MalformedToken
+        )]
+        #[case::gateway_id_scope_mismatch(TokenError::GatewayIdScopeMismatch, ErrorCode::GatewayIdMismatch)]
+        #[case::revoked(TokenError::Revoked, ErrorCode::Revoked)]
+        #[case::invalid_claim_scheme(
+            TokenError::InvalidClaimScheme { content_type: ContentType::Scope, source: json_error() },
+            ErrorCode::MalformedToken
+        )]
+        #[case::plaintext_secrets(TokenError::PlaintextSecrets, ErrorCode::InvalidToken)]
+        #[case::unexpected_replay(
+            TokenError::UnexpectedReplay { reason: "different source IP" },
+            ErrorCode::UnexpectedReplay
+        )]
+        #[case::old_jrl(TokenError::OldJrl, ErrorCode::InvalidToken)]
+        #[case::subkey_signed_and_too_long_lifetime(
+            TokenError::SubkeySignedAndTooLongLifetime,
+            ErrorCode::InvalidToken
+        )]
+        #[case::too_long_lifetime(TokenError::TooLongLifetime, ErrorCode::InvalidToken)]
+        fn token_error_code(#[case] error: TokenError, #[case] expected_code: ErrorCode) {
+            assert_eq!(error.code(), expected_code);
         }
     }
 }

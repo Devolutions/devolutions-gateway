@@ -9,6 +9,7 @@ docs/AgentApi.md
 docs/AgentDomainAdvertisement.md
 docs/AgentInfo.md
 docs/AgentStatus.md
+docs/ApiError.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
 docs/AppTokenContentType.md
@@ -24,6 +25,7 @@ docs/DeleteManyResult.md
 docs/DiagnosticsApi.md
 docs/EnrollRequest.md
 docs/EnrollResponse.md
+docs/ErrorCode.md
 docs/EventOutcomeResponse.md
 docs/GetUpdateProductsResponse.md
 docs/GetUpdateScheduleResponse.md
@@ -117,6 +119,7 @@ src/Devolutions.Gateway.Client/Model/AddressFamily.cs
 src/Devolutions.Gateway.Client/Model/AgentDomainAdvertisement.cs
 src/Devolutions.Gateway.Client/Model/AgentInfo.cs
 src/Devolutions.Gateway.Client/Model/AgentStatus.cs
+src/Devolutions.Gateway.Client/Model/ApiError.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
@@ -130,6 +133,7 @@ src/Devolutions.Gateway.Client/Model/DataEncoding.cs
 src/Devolutions.Gateway.Client/Model/DeleteManyResult.cs
 src/Devolutions.Gateway.Client/Model/EnrollRequest.cs
 src/Devolutions.Gateway.Client/Model/EnrollResponse.cs
+src/Devolutions.Gateway.Client/Model/ErrorCode.cs
 src/Devolutions.Gateway.Client/Model/EventOutcomeResponse.cs
 src/Devolutions.Gateway.Client/Model/GetUpdateProductsResponse.cs
 src/Devolutions.Gateway.Client/Model/GetUpdateScheduleResponse.cs

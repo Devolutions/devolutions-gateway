@@ -1,6 +1,6 @@
 = devolutions-gateway
 infos@devolutions.net
-2026.2.4
+2026.3.2
 :toc: left
 :numbered:
 :toclevels: 4
@@ -120,6 +120,9 @@ Delete an accepted agent by ID.
 
 -
 
+===== Content Type
+
+* application/problem+json
 
 ===== Responses
 
@@ -136,22 +139,22 @@ Delete an accepted agent by ID.
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 404
 | Agent not found
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -221,6 +224,7 @@ Requires a Bearer token: an `ENROLLMENT` JWT signed by the configured provisione
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -237,22 +241,22 @@ Requires a Bearer token: an `ENROLLMENT` JWT signed by the configured provisione
 
 | 400
 | Invalid agent name, request body, or certificate signing request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing enrollment token
-|  <<>>
+|  <<ApiError>>
 
 
 | 409
 | Agent ID or name already registered, agent key previously deleted, or enrollment token already used
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -322,6 +326,7 @@ Get a single agent by ID.
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -338,22 +343,22 @@ Get a single agent by ID.
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 404
 | Agent not found
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -403,6 +408,7 @@ array[<<AgentInfo>>]
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -419,17 +425,17 @@ array[<<AgentInfo>>]
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -501,6 +507,9 @@ Modifies configuration
 
 -
 
+===== Content Type
+
+* application/problem+json
 
 ===== Responses
 
@@ -517,22 +526,22 @@ Modifies configuration
 
 | 400
 | Bad patch request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Failed to patch configuration
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -640,6 +649,7 @@ This route primary function is to help with configuration diagnosis (e.g.: ID mi
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -656,17 +666,17 @@ This route primary function is to help with configuration diagnosis (e.g.: ID mi
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -865,6 +875,7 @@ Performs a heartbeat check
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -881,17 +892,17 @@ Performs a heartbeat check
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -965,6 +976,7 @@ If you try to delete more than 50,000 recordings at once, you should split the l
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -981,27 +993,27 @@ If you try to delete more than 50,000 recordings at once, you should split the l
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 409
 | A recording is still ongoing and can&#39;t be deleted yet (nothing is deleted)
-|  <<>>
+|  <<ApiError>>
 
 
 | 413
 | Request payload is too large
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1069,6 +1081,9 @@ Deletes a recording stored on this instance
 
 -
 
+===== Content Type
+
+* application/problem+json
 
 ===== Responses
 
@@ -1085,27 +1100,27 @@ Deletes a recording stored on this instance
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 404
 | The specified recording was not found
-|  <<>>
+|  <<ApiError>>
 
 
 | 409
 | The recording is still ongoing and can&#39;t be deleted yet
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1176,6 +1191,7 @@ Lists all recordings stored on this instance
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -1192,17 +1208,17 @@ Lists all recordings stored on this instance
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1278,7 +1294,12 @@ Retrieves a recording file for a given session
 
 ===== Content Type
 
+* video/webm
+* application/x-asciicast
+* application/x-ndjson
+* application/json
 * application/octet-stream
+* application/problem+json
 
 ===== Responses
 
@@ -1295,22 +1316,22 @@ Retrieves a recording file for a given session
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 404
 | File not found
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1466,6 +1487,7 @@ Retrieves current JRL (Json Revocation List) info
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -1482,22 +1504,22 @@ Retrieves current JRL (Json Revocation List) info
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Failed to update the JRL
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1545,6 +1567,9 @@ Updates JRL (Json Revocation List) using a JRL token
 
 -
 
+===== Content Type
+
+* application/problem+json
 
 ===== Responses
 
@@ -1561,22 +1586,22 @@ Updates JRL (Json Revocation List) using a JRL token
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Failed to update the JRL
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1631,6 +1656,7 @@ Lists network interfaces
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -1647,22 +1673,22 @@ Lists network interfaces
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1712,6 +1738,7 @@ Lists Gateway network scan sources.
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -1728,22 +1755,22 @@ Lists Gateway network scan sources.
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -1997,6 +2024,9 @@ The endpoint is upgraded from HTTP, so OpenAPI describes the **handshake**: the 
 
 -
 
+===== Content Type
+
+* application/problem+json
 
 ===== Responses
 
@@ -2018,17 +2048,17 @@ The endpoint is upgraded from HTTP, so OpenAPI describes the **handshake**: the 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2082,6 +2112,7 @@ Once the log is downloaded, gateway purges it from memory.
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2098,22 +2129,22 @@ Once the log is downloaded, gateway purges it from memory.
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2183,6 +2214,7 @@ Changes take effect immediately: - Starts any monitors newly defined in the payl
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2199,22 +2231,22 @@ Changes take effect immediately: - Starts any monitors newly defined in the payl
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error while starting monitors
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2288,6 +2320,7 @@ array[<<PreflightOutput>>]
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2304,17 +2337,17 @@ array[<<PreflightOutput>>]
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2368,6 +2401,7 @@ array[<<SessionInfo>>]
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2384,22 +2418,22 @@ array[<<SessionInfo>>]
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2467,6 +2501,9 @@ Terminate forcefully a running session
 
 -
 
+===== Content Type
+
+* application/problem+json
 
 ===== Responses
 
@@ -2483,27 +2520,27 @@ Terminate forcefully a running session
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 404
 | No running session found with provided ID
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Unexpected server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2577,6 +2614,7 @@ Acknowledge traffic audit events and remove them from the queue
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2593,27 +2631,27 @@ Acknowledge traffic audit events and remove them from the queue
 
 | 400
 | Invalid request body (empty ids array)
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 413
 | Payload too large (more than 10,000 IDs)
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Internal server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2689,6 +2727,7 @@ array[<<ClaimedTrafficEvent>>]
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2705,22 +2744,22 @@ array[<<ClaimedTrafficEvent>>]
 
 | 400
 | Invalid query parameters
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Internal server error
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2774,6 +2813,7 @@ Reads `update_status.json`, which is written by the Devolutions Agent on startup
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2790,22 +2830,22 @@ Reads `update_status.json`, which is written by the Devolutions Agent on startup
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Failed to read agent status file
-|  <<>>
+|  <<ApiError>>
 
 
 | 503
 | Agent updater service is unavailable
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2855,6 +2895,7 @@ Reads the `Schedule` field from `update_status.json`.  When the field is absent 
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2871,22 +2912,22 @@ Reads the `Schedule` field from `update_status.json`.  When the field is absent 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Failed to read agent status file
-|  <<>>
+|  <<ApiError>>
 
 
 | 503
 | Agent updater service is unavailable
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -2957,6 +2998,7 @@ Writes the `Schedule` field into `update.json`.  The agent watches this file and
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -2973,27 +3015,27 @@ Writes the `Schedule` field into `update.json`.  The agent watches this file and
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Failed to write update manifest
-|  <<>>
+|  <<ApiError>>
 
 
 | 503
 | Agent updater service is unavailable
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -3077,6 +3119,7 @@ Writes the requested version(s) into `Agent/update.json`, which is watched by De
 ===== Content Type
 
 * application/json
+* application/problem+json
 
 ===== Responses
 
@@ -3093,27 +3136,27 @@ Writes the requested version(s) into `Agent/update.json`, which is watched by De
 
 | 400
 | Bad request
-|  <<>>
+|  <<ApiError>>
 
 
 | 401
 | Invalid or missing authorization token
-|  <<>>
+|  <<ApiError>>
 
 
 | 403
 | Insufficient permissions
-|  <<>>
+|  <<ApiError>>
 
 
 | 500
 | Failed to write update manifest
-|  <<>>
+|  <<ApiError>>
 
 
 | 503
 | Agent updater service is unavailable
-|  <<>>
+|  <<ApiError>>
 
 |===
 
@@ -3542,6 +3585,51 @@ endif::internal-generation[]
 | unresponsive
 
 |===
+
+
+[#ApiError]
+=== _ApiError_ 
+
+Body of an API error response, as defined by RFC 9457 (problem details for HTTP APIs).
+
+The Gateway logs the details of the error, along with its code.
+
+
+[.fields-ApiError]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| error
+| X
+| 
+|   String  
+| Machine-readable error code; the `ErrorCode` schema lists the known values.  New codes can be added: treat unknown values as generic failures.
+|     
+
+| status
+| X
+| 
+|   Integer  
+| HTTP status code.
+| int32    
+
+| title
+| X
+| 
+|   String  
+| Reason phrase of the HTTP status.
+|     
+
+| type
+| X
+| 
+|   String  
+| Problem type, always `about:blank`: the HTTP status and the error code describe the problem.
+|     
+
+|===
+
 
 
 [#AppCredential]
@@ -4013,6 +4101,74 @@ Service configuration diagnostic
 
 |===
 
+
+
+[#ErrorCode]
+=== _ErrorCode_ 
+
+Machine-readable reason for a rejected request.
+
+New codes can be added, but existing codes are never renamed or removed. Clients must treat unknown codes as generic failures.
+
+- &#x60;bad_request&#x60;: The request is invalid.
+- &#x60;unauthorized&#x60;: The request is not authenticated.
+- &#x60;forbidden&#x60;: The request is not allowed.
+- &#x60;not_found&#x60;: The resource doesn&#39;t exist.
+- &#x60;request_timeout&#x60;: The request took too long to complete.
+- &#x60;conflict&#x60;: The request conflicts with the current state of the resource.
+- &#x60;payload_too_large&#x60;: The request is too large.
+- &#x60;internal_error&#x60;: The Gateway failed to process the request.
+- &#x60;bad_gateway&#x60;: The Gateway received an invalid response from an upstream server.
+- &#x60;service_unavailable&#x60;: The service is temporarily unavailable.
+- &#x60;gateway_timeout&#x60;: An upstream server didn&#39;t respond in time.
+- &#x60;insufficient_storage&#x60;: The Gateway is out of storage space.
+- &#x60;missing_token&#x60;: No token was found in the &#x60;Authorization&#x60; header or in the &#x60;token&#x60; query parameter.
+- &#x60;malformed_token&#x60;: The token can&#39;t be decoded or decrypted, or its claims don&#39;t match the schema expected for its type.
+- &#x60;bad_signature&#x60;: The token signature doesn&#39;t match the provisioner key of the Gateway.
+- &#x60;unknown_subkey&#x60;: The token refers to a key ID (&#x60;kid&#x60;) that doesn&#39;t match the sub provisioner key of the Gateway.
+- &#x60;expired&#x60;: The token has expired (&#x60;exp&#x60; claim); the clocks of the token issuer and of the Gateway may be out of sync.
+- &#x60;not_yet_valid&#x60;: The token is not valid yet (&#x60;nbf&#x60; claim); the clocks of the token issuer and of the Gateway may be out of sync.
+- &#x60;gateway_id_mismatch&#x60;: The token is restricted to another Gateway ID (&#x60;jet_gw_id&#x60; claim).
+- &#x60;revoked&#x60;: The token contains a value revoked by the JSON Revocation List (JRL) of the Gateway.
+- &#x60;unexpected_replay&#x60;: The token was already used, and can&#39;t be used again in this context.
+- &#x60;invalid_token&#x60;: The token is rejected for a reason not covered by another code.
+- &#x60;wrong_token_type&#x60;: The type of the token is not accepted by this route.
+- &#x60;insufficient_scope&#x60;: The scope of the token doesn&#39;t grant access to this route.
+
+
+
+
+[.fields-ErrorCode]
+[cols="1"]
+|===
+| Enum Values
+
+| bad_request
+| unauthorized
+| forbidden
+| not_found
+| request_timeout
+| conflict
+| payload_too_large
+| internal_error
+| bad_gateway
+| service_unavailable
+| gateway_timeout
+| insufficient_storage
+| missing_token
+| malformed_token
+| bad_signature
+| unknown_subkey
+| expired
+| not_yet_valid
+| gateway_id_mismatch
+| revoked
+| unexpected_replay
+| invalid_token
+| wrong_token_type
+| insufficient_scope
+
+|===
 
 
 [#EventOutcomeResponse]
