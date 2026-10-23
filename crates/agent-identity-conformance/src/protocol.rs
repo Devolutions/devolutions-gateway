@@ -856,6 +856,7 @@ pub(crate) async fn p_revoked_token_replays_own_key_only(ctx: Context) -> anyhow
         "a replay or refused enrollment changed the revoked token's record"
     );
     // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+    // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     ensure!(
         revoked.state == TokenState::Revoked,
         "revoked token's state is {:?} instead of Revoked",
@@ -5940,12 +5941,20 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
     // A revoked token stays stored, and revoking it again is accepted and changes nothing.
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment tokens
     // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+    let unrevoked = management.token(&token.id).await?;
     management.revoke_token(&token.id).await?;
     let revoked = management
         .token(&token.id)
         .await
         .context("revoked token is no longer readable")?;
-    ensure!(revoked.used_count == 1, "revocation changed the token's use count");
+    ensure!(
+        revoked.id == unrevoked.id
+            && revoked.name == unrevoked.name
+            && revoked.created_on == unrevoked.created_on
+            && revoked.expires_on == unrevoked.expires_on
+            && revoked.used_count == unrevoked.used_count,
+        "revocation changed the token's ID, name, creation, expiry or use count"
+    );
     let listed = management
         .all_tokens()
         .await?
@@ -5956,6 +5965,7 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         .revoke_token(&token.id)
         .await
         .context("revoking a revoked token was refused")?;
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     ensure!(
         management.token(&token.id).await? == revoked,
         "revoking a revoked token changed its record"
@@ -5966,6 +5976,8 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         "revoking an unknown token was not refused as not found"
     );
     // The state checks come last, so that a wrong state does not hide the outcomes above.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+    // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let mut states = vec![("exhausted, read", revoked.state), ("exhausted, listed", listed.state)];
     if let Some(expired) = expired {
         management.revoke_token(&expired.id).await?;
