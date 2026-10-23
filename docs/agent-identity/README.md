@@ -133,7 +133,7 @@ The agent also ends an identity whose current device key no longer exists, recor
 Revocation is final for the identity: it never authenticates again.
 Running the same token again is a no-op, so the agent never brings itself back; an enrollment with a different token enrolls the device again, as a new identity.
 This protects against mistakes, not against whoever controls the device: clearing the agent's state, as a full uninstall on Windows does (see below), lets any token that can still enroll bring the device back as a new identity.
-To keep a revoked device out, also delete every enrollment token it can still use.
+To keep a revoked device out, also revoke every enrollment token it can still use.
 The ended identity keeps its files and keys until a new identity replaces it or the agent is uninstalled.
 
 ### Upgrade and uninstall
