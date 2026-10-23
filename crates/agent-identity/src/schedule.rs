@@ -7,7 +7,7 @@ use url::Url;
 
 /// The `agent_channel_url` of a config, classified by [CONTRACT.agent-identity.md §5.2 "`POST enroll`"][contract].
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enroll
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ChannelUrl {
     Absent,
