@@ -12,7 +12,7 @@ use url::Url;
 pub enum ChannelUrl {
     Absent,
     Usable(Url),
-    /// Present but not an absolute `https` URL without a query or fragment.
+    /// Present but not an absolute `https` URL without a user name or password, a query or a fragment.
     Malformed,
 }
 
@@ -20,14 +20,7 @@ pub enum ChannelUrl {
 pub fn channel_url(config: &Value) -> ChannelUrl {
     match config.get("agent_channel_url") {
         None | Some(Value::Null) => ChannelUrl::Absent,
-        Some(Value::String(url)) => match Url::parse(url) {
-            Ok(url)
-                if url.scheme() == "https" && url.has_host() && url.query().is_none() && url.fragment().is_none() =>
-            {
-                ChannelUrl::Usable(url)
-            }
-            _ => ChannelUrl::Malformed,
-        },
+        Some(Value::String(url)) => crate::token::parse_base_url(url).map_or(ChannelUrl::Malformed, ChannelUrl::Usable),
         Some(_) => ChannelUrl::Malformed,
     }
 }
@@ -139,10 +132,10 @@ mod tests {
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     #[test]
-    fn only_an_absolute_https_channel_url_without_query_or_fragment_is_usable() {
-        // `CONTRACT.agent-identity.md` §5.2: `agent_channel_url` must be an absolute `https` URL without a query or
-        // fragment, and any other value is treated as absent with a warning; §1 accepts `null` for an absent optional
-        // field.
+    fn only_an_absolute_https_channel_url_without_credentials_query_or_fragment_is_usable() {
+        // `CONTRACT.agent-identity.md` §5.2: `agent_channel_url` must be an absolute `https` URL without a user name or
+        // password, a query or a fragment, and any other value is treated as absent with a warning; §1 accepts `null`
+        // for an absent optional field.
         let config = |url: Value| json!({"version": 1, "revision": 1, "agent_channel_url": url});
         assert_eq!(channel_url(&json!({"version": 1, "revision": 1})), ChannelUrl::Absent);
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
@@ -155,6 +148,12 @@ mod tests {
             json!("http://host/dvls"),
             json!("https://host/dvls?x=1"),
             json!("https://host/dvls#part"),
+            json!("https://user@host/dvls"),
+            json!("https://user:pw@host/dvls"),
+            json!("https://:pw@host/dvls"),
+            // An `@` in the authority counts as a user name, even with nothing before it.
+            json!("https://@host/dvls"),
+            json!("https://:@host/dvls"),
             json!("/dvls"),
             json!(42),
         ] {

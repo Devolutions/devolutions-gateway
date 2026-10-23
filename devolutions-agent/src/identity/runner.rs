@@ -687,7 +687,7 @@ impl Runner {
                 if self.warned_malformed_config.as_ref() != Some(&identity.config) {
                     warn!(
                         authority_id = %self.authority_id,
-                        "Agent Identity channel URL is not an absolute https URL without a query or fragment; ignoring it"
+                        "Agent Identity channel URL is not an absolute https URL without a user name or password, a query or a fragment; ignoring it"
                     );
                     self.warned_malformed_config = Some(identity.config.clone());
                 }

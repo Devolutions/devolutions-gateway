@@ -80,16 +80,26 @@ pub fn sha256_hex(value: &str) -> String {
 /// Returns whether `url` is an absolute `https` URL without a user name or password, a query or a fragment
 /// ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]).
 ///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
+pub(crate) fn is_base_url(url: &str) -> bool {
+    parse_base_url(url).is_some()
+}
+
+/// Parses `url` when it is an absolute `https` URL without a user name or password, a query or a fragment, the form
+/// shared by a token's `u` ([CONTRACT.agent-identity.md §2 "Enrollment token"][token]) and `agent_channel_url`
+/// ([CONTRACT.agent-identity.md §5.2 "`POST enroll`"][enroll]).
+///
 /// An `@` anywhere in the authority, the text after `//` and before the next `/`, counts as a user name even with
 /// nothing before it, as in `https://@host` and `https://:@host`, which URL parsing reads as having no user name.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
-pub(crate) fn is_base_url(url: &str) -> bool {
+/// [token]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
+/// [enroll]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enroll
+pub(crate) fn parse_base_url(url: &str) -> Option<Url> {
     let authority = url.split_once("//").and_then(|(_, rest)| rest.split('/').next());
     if authority.is_some_and(|authority| authority.contains('@')) {
-        return false;
+        return None;
     }
-    Url::parse(url).is_ok_and(|url| {
+    Url::parse(url).ok().filter(|url| {
         url.scheme() == "https"
             && url.has_host()
             && url.username().is_empty()
