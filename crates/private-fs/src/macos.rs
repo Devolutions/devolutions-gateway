@@ -24,6 +24,10 @@ impl Drop for Acl {
 }
 
 /// Reports whether the volume holding `file` ignores file ownership.
+///
+/// UNTESTED: a volume with "Ignore ownership on this volume" set reports `true`, and the boot volume `false`.
+/// No CI job runs tests on macOS, and a test would need such a volume; when changing this, check both on a Mac, because
+/// on a volume that ignores ownership every owner check of the callers passes whatever the file's owner.
 pub fn volume_ignores_ownership(file: &File) -> io::Result<bool> {
     let mut info = std::mem::MaybeUninit::<libc::statfs>::uninit();
     // SAFETY: The file stays open and the output buffer is writable.
@@ -44,6 +48,11 @@ pub enum ExtendedAclError {
 }
 
 /// Reports whether `file` has extended ACL entries.
+///
+/// UNTESTED: a file without an ACL reports `false`, a file after `chmod +a` reports `true`, and the same file after
+/// `chmod -N` reports `false` again.
+/// No CI job runs tests on macOS; when changing this, check the three cases on a Mac, because an extended ACL entry can
+/// grant another account access that the mode bits the callers check don't show.
 pub fn has_extended_acl(file: &File) -> Result<bool, ExtendedAclError> {
     // SAFETY: The file descriptor is live and ACL_TYPE_EXTENDED is supported on macOS.
     let raw = unsafe { acl_get_fd_np(file.as_raw_fd(), ACL_TYPE_EXTENDED) };
