@@ -2286,7 +2286,11 @@ pub(crate) async fn a_enroll_revoked_before_response_is_permanent(ctx: Context) 
                 && target.management().identity_count(&token).await? == 1,
             "revoked enrollment created another identity or consumed another use"
         );
-        let marker: Value = serde_json::from_slice(&std::fs::read(case.rejection_path_for(&token.text))?)?;
+        let marker_path = case.rejection_path_for(&token.text);
+        let marker: Value = serde_json::from_slice(
+            &std::fs::read(&marker_path)
+                .with_context(|| format!("read rejection marker {}", marker_path.display()))?,
+        )?;
         ensure!(
             marker["code"] == "identity_revoked",
             "rejection marker records {} instead of identity_revoked",
@@ -2394,7 +2398,11 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                     "malformed token was sent to the server instead of rejected locally"
                 );
             }
-            let marker: Value = serde_json::from_slice(&std::fs::read(case.rejection_path_for(&pending))?)?;
+            let marker_path = case.rejection_path_for(&pending);
+            let marker: Value = serde_json::from_slice(
+                &std::fs::read(&marker_path)
+                    .with_context(|| format!("read rejection marker {}", marker_path.display()))?,
+            )?;
             ensure!(
                 marker["code"] == code,
                 "rejection marker records {} instead of {code}",
