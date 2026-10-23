@@ -1,6 +1,5 @@
 using System.Buffers.Text;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace Devolutions.AgentIdentity.Tests;
@@ -23,17 +22,15 @@ public class EnrollmentTokenTests
         Assert.EndsWith("." + SecretText, token.Value, StringComparison.Ordinal);
     }
 
-    // The authority matches the `secret` text exactly,
-    // so it hashes the 43 characters rather than the bytes they encode.
+    // The authority stores the SHA-256 of the 32 bytes the secret encodes, not of its text.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     [Fact]
-    public void SecretHashIsTheSha256OfTheSecretText()
+    public void SecretHashIsTheSha256OfTheSecretBytes()
     {
         EnrollmentToken token =
             EnrollmentToken.Create("https://host/dvls", new ScriptedRandomNumberGenerator(SecretBytes));
 
-        Assert.Equal(SHA256.HashData(Encoding.ASCII.GetBytes(SecretText)), token.SecretHash.ToArray());
+        Assert.Equal(SHA256.HashData(SecretBytes), token.SecretHash.ToArray());
     }
 
     // A complete `dvaet1` token matches `^dvaet1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$`,
@@ -63,8 +60,7 @@ public class EnrollmentTokenTests
 
     // The authority stores SecretHash when it creates a token,
     // and finds the token of an enroll request by the hash that ReadBearerToken returns.
-    // CONTRACT.agent-identity.md §2: the authority matches the `secret` text exactly,
-    // so both hashes are the SHA-256 of the 43 ASCII characters of the token's secret.
+    // Both are the SHA-256 of the 32 bytes the token's secret encodes.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     [Fact]
@@ -80,7 +76,7 @@ public class EnrollmentTokenTests
                 random.NextBytes(bytes);
                 EnrollmentToken token =
                     EnrollmentToken.Create(productBaseUrl, new ScriptedRandomNumberGenerator(bytes));
-                byte[] expected = SHA256.HashData(Encoding.ASCII.GetBytes(token.Value.Split('.')[2]));
+                byte[] expected = SHA256.HashData(bytes);
 
                 EnrollmentAuthorizationResult result =
                     EnrollmentAuthorization.ReadBearerToken(["Bearer " + token.Value]);

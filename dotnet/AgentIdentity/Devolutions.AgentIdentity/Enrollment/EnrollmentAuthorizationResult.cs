@@ -22,7 +22,7 @@ public sealed class EnrollmentAuthorizationResult : AgentIdentityResult
     }
 
     /// <summary>
-    /// The SHA-256 of the ASCII text of the token's secret,
+    /// The SHA-256 of the 32 bytes that the token's secret encodes,
     /// which is the <see cref="EnrollmentToken.SecretHash"/> of the stored token;
     /// empty when <see cref="AgentIdentityResult.Succeeded"/> is false.
     /// </summary>
