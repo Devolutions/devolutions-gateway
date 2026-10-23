@@ -229,6 +229,7 @@ public sealed class AgentIdentityTests
         Assert.Equal(Execute.immediate, action.Execute);
         Assert.Equal(Return.check, action.Return);
         Assert.Equal(When.Before, action.When);
+        // oracle: mutant the file is read after EncodePropertyData copied an empty token
         Assert.Equal(ActionOf(nameof(CustomActions.EncodePropertyData)).Id.ToString(), action.Step.ToString());
     }
 

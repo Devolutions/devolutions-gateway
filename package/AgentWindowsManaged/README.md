@@ -44,8 +44,9 @@ msiexec /i DevolutionsAgent.msi /qn IDENTITY_ENROLLMENT_TOKEN_FILE=enrollment-to
 
 A relative path resolves against the folder of the `.msi`, so a deployment tool such as Intune can ship the file beside the installer.
 The file keeps the token off msiexec's command line, which security tools and process auditing record and Intune shows in the app's install command.
-The installer never deletes the file, so protect it like the token or delete it after the install.
-The install fails if the file is missing or its first line is empty.
+The installer never deletes the file, so protect it like the token.
+An upgrade whose command sets the property again reads the file again, so keep the file or leave the property out of that command.
+The install fails if the file is missing or its first line holds no token.
 
 You can instead set `IDENTITY_ENROLLMENT_TOKEN` to the token itself, but not both properties:
 
@@ -59,7 +60,7 @@ msiexec's command line then holds the token while the install runs, so run it el
 
 Either way, the installer keeps the token out of its log and passes it to the agent through standard input.
 The install fails if the agent rejects the token's format or can't store it.
-The agent then enrolls in the background once its service starts, and re-running the same command later, for example on an upgrade, is a no-op.
+The agent then enrolls in the background once its service starts, and re-running the command later with the same token enrolls nothing new.
 
 A full uninstall deletes the device's Agent Identity state and keys without contacting the authority, so a later install enrolls the device as new and uses up a token use.
 A major upgrade, a repair or a maintenance run keeps them.
