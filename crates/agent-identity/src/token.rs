@@ -80,8 +80,15 @@ pub fn sha256_hex(value: &str) -> String {
 /// Returns whether `url` is an absolute `https` URL without a user name or password, a query or a fragment
 /// ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]).
 ///
+/// An `@` anywhere in the authority, the text after `//` and before the next `/`, counts as a user name even with
+/// nothing before it, as in `https://@host` and `https://:@host`, which URL parsing reads as having no user name.
+///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
 pub(crate) fn is_base_url(url: &str) -> bool {
+    let authority = url.split_once("//").and_then(|(_, rest)| rest.split('/').next());
+    if authority.is_some_and(|authority| authority.contains('@')) {
+        return false;
+    }
     Url::parse(url).is_ok_and(|url| {
         url.scheme() == "https"
             && url.has_host()
@@ -165,6 +172,9 @@ mod tests {
             token_with_bag(r#"{"u":"https://user:pw@example.test/dvls"}"#),
             token_with_bag(r#"{"u":"https://:pw@example.test/dvls"}"#),
             token_with_bag(r#"{"u":"https://user:@example.test/dvls"}"#),
+            // An `@` in the authority counts as a user name, even with nothing before it.
+            token_with_bag(r#"{"u":"https://@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https://:@example.test/dvls"}"#),
             token_with_bag(r#"{"u":123}"#),
             format!("{valid}A"),
             valid[..valid.len() - 1].to_owned(),
