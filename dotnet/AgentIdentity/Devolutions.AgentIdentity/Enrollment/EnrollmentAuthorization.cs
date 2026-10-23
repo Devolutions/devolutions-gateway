@@ -19,7 +19,8 @@ public static class EnrollmentAuthorization
     /// <remarks>
     /// <para>
     /// The request gets <c>token_invalid</c> when the <c>Authorization</c> field is missing or repeated,
-    /// does not use the <c>Bearer</c> scheme, or holds no <c>dvaet1</c> token of at most 4096 bytes.
+    /// does not use the <c>Bearer</c> scheme, or holds no <c>dvaet1</c> token of at most 4096 bytes
+    /// whose secret is in canonical base64url form, with its pad bits zero.
     /// The scheme is case-insensitive, one or more spaces separate it from the token,
     /// and white space around the field value is ignored.
     /// </para>
@@ -78,7 +79,15 @@ public static class EnrollmentAuthorization
             return EnrollmentAuthorizationResult.Failure("The bearer token is not a dvaet1 enrollment token.");
         }
 
-        return EnrollmentAuthorizationResult.Success(EnrollmentToken.HashSecret(secret));
+        // CONTRACT.agent-identity.md §2 accepts only the canonical form of the secret,
+        // since a decoder that ignored the pad bits would read the same 32 bytes from four secret texts.
+        if (!StrictBase64.TryDecodeBase64Url(secret, out byte[]? secretBytes))
+        {
+            return EnrollmentAuthorizationResult.Failure(
+                "The secret of the bearer token is not in canonical base64url form.");
+        }
+
+        return EnrollmentAuthorizationResult.Success(EnrollmentToken.HashSecret(secretBytes));
     }
 
     // Matches the entire token, with nothing after the secret,

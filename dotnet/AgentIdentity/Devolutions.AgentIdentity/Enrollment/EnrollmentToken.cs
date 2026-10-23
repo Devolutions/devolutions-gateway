@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace Devolutions.AgentIdentity;
@@ -47,7 +46,7 @@ public sealed class EnrollmentToken
     public string Value { get; }
 
     /// <summary>
-    /// The SHA-256 of the ASCII text of the secret segment, under which the authority stores the token.
+    /// The SHA-256 of the 32 bytes that the secret segment encodes, under which the authority stores the token.
     /// </summary>
     /// <remarks>
     /// <see cref="EnrollmentAuthorization.ReadBearerToken"/> returns the same hash for the token text,
@@ -101,7 +100,7 @@ public sealed class EnrollmentToken
         randomNumberGenerator.GetBytes(secretBytes);
         string secret = StrictBase64.EncodeBase64Url(secretBytes);
 
-        return new EnrollmentToken(Prefix + "." + bag + "." + secret, HashSecret(secret));
+        return new EnrollmentToken(Prefix + "." + bag + "." + secret, HashSecret(secretBytes));
     }
 
     /// <summary>
@@ -113,17 +112,11 @@ public sealed class EnrollmentToken
     }
 
     /// <summary>
-    /// Computes the hash under which the authority stores a token: the SHA-256 of the ASCII text of its secret.
+    /// Computes the hash under which the authority stores a token: the SHA-256 of the 32 bytes its secret encodes.
     /// </summary>
-    /// <remarks>
-    /// The authority matches the secret text exactly, so the hash covers the text rather than the bytes it encodes.
-    /// </remarks>
-    /// <param name="secret">The secret segment of the token, in the base64url alphabet.</param>
-    internal static byte[] HashSecret(ReadOnlySpan<char> secret)
+    /// <param name="secretBytes">The 32 bytes that the secret segment of the token encodes.</param>
+    internal static byte[] HashSecret(ReadOnlySpan<byte> secretBytes)
     {
-        byte[] ascii = new byte[secret.Length];
-        Encoding.ASCII.GetBytes(secret, ascii);
-
-        return SHA256.HashData(ascii);
+        return SHA256.HashData(secretBytes);
     }
 }

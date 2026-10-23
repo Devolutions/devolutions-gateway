@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using System.Text;
 
 namespace Devolutions.AgentIdentity.Tests;
 
@@ -9,6 +8,10 @@ public class EnrollmentAuthorizationTests
     private const string Bag = "eyJ1IjoiaHR0cHM6Ly9ob3N0L2R2bHMifQ";
     private const string Secret = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
     private const string Token = "dvaet1." + Bag + "." + Secret;
+
+    // The authority stores the SHA-256 of the 32 bytes the secret encodes.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    private static readonly byte[] SecretHash = SHA256.HashData([.. Enumerable.Range(0, 32).Select(i => (byte)i)]);
 
     public static TheoryData<string> FieldLinesWithoutABearerTokenNames => new(FieldLinesWithoutABearerToken.Keys);
 
@@ -45,6 +48,16 @@ public class EnrollmentAuthorizationTests
                 ["no space"] = ["Bearer" + Token],
                 ["a tab"] = ["Bearer\t" + Token],
                 ["a space and a tab"] = ["Bearer \t" + Token],
+
+                // (1): the authority accepts a secret only in its canonical base64url form,
+                // whose two pad bits after the 256 bits of the secret are zero.
+                // The secret ends in '8' (sextet 60), and '9', '-' and '_' (sextets 61 to 63) set the pad bits,
+                // so a decoder that ignores them would read the stored token's 32 bytes from each.
+                // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+                // oracle: spec RFC 4648 §3.5
+                ["a secret with the low pad bit set"] = ["Bearer dvaet1." + Bag + "." + Secret[..42] + "9"],
+                ["a secret with the high pad bit set"] = ["Bearer dvaet1." + Bag + "." + Secret[..42] + "-"],
+                ["a secret with both pad bits set"] = ["Bearer dvaet1." + Bag + "." + Secret[..42] + "_"],
             };
 
             // (1): a field that holds no token gets `token_invalid`.
@@ -86,8 +99,8 @@ public class EnrollmentAuthorizationTests
         ["a second credential after the token"] = Token + ", Bearer " + Token,
     };
 
-    // CONTRACT.agent-identity.md §2.1: the authority finds the token whose SHA-256(secret) matches,
-    // and §2 makes it match the secret text exactly.
+    // CONTRACT.agent-identity.md §2.1: the authority finds the token whose stored hash matches
+    // the SHA-256 of the 32 bytes its secret encodes.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     [Theory]
@@ -101,7 +114,7 @@ public class EnrollmentAuthorizationTests
     // oracle: spec RFC 9110 §11.4
     [InlineData("two spaces", "Bearer  " + Token)]
     [InlineData("three spaces", "Bearer   " + Token)]
-    // CONTRACT.agent-identity.md §2.1 (1): the authority finds a token by `SHA-256(secret)` alone,
+    // CONTRACT.agent-identity.md §2.1 (1): the authority finds a token by the hash of its secret alone,
     // and §2 makes the bag routing data that the authority never trusts, so it is not decoded.
     // The rows are a bag of an impossible base64url length, one that decodes to bytes that are not JSON,
     // and the bag of {"u":"https://other/psu"}.
@@ -121,7 +134,7 @@ public class EnrollmentAuthorizationTests
         EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken([fieldValue]);
 
         Assert.True(result.Succeeded, name);
-        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
+        Assert.Equal(SecretHash, result.SecretHash.ToArray());
     }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
@@ -147,7 +160,7 @@ public class EnrollmentAuthorizationTests
 
         Assert.Equal(4096, token.Length);
         Assert.True(result.Succeeded);
-        Assert.Equal(HashOf(Secret), result.SecretHash.ToArray());
+        Assert.Equal(SecretHash, result.SecretHash.ToArray());
     }
 
     // CONTRACT.agent-identity.md §2: a token is at most 4096 bytes;
@@ -165,24 +178,6 @@ public class EnrollmentAuthorizationTests
         AssertTokenInvalid(result);
     }
 
-    // The authority matches the `secret` text exactly.
-    // Ending in '9' (sextet 61) instead of '8' (sextet 60) sets a pad bit,
-    // so a lenient decoder reads the same 32 bytes, but the text, and so its hash, differs.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
-    [Fact]
-    public void HashesANonCanonicalSecretAsItsText()
-    {
-        string nonCanonical = Secret[..42] + "9";
-
-        EnrollmentAuthorizationResult result = EnrollmentAuthorization.ReadBearerToken(
-            ["Bearer dvaet1." + Bag + "." + nonCanonical]);
-
-        Assert.True(result.Succeeded);
-        Assert.Equal(HashOf(nonCanonical), result.SecretHash.ToArray());
-        Assert.NotEqual(HashOf(Secret), result.SecretHash.ToArray());
-    }
-
     // INTENT.agent-identity.md, security invariant 9: tokens never appear in logs, not even partially,
     // and a host logs the failure detail, the error and the result of a refused enrollment.
     // Each row takes another failure path with the token's bag and secret in the field.
@@ -196,6 +191,7 @@ public class EnrollmentAuthorizationTests
         new[] { "Bearer" },
         new[] { "Bearer dvaet1." + Bag + new string('A', 4012) + "." + Secret },
         new[] { "Bearer " + Token + "\n" },
+        new[] { "Bearer dvaet1." + Bag + "." + Secret[..42] + "9" },
     };
 
     // Security invariant 9: tokens never appear in logs, not even partially.
@@ -232,10 +228,5 @@ public class EnrollmentAuthorizationTests
         Assert.Equal(AgentIdentityErrorCode.TokenInvalid, result.Error.Code);
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         Assert.Equal(401, result.Error.HttpStatusCode);
-    }
-
-    private static byte[] HashOf(string secret)
-    {
-        return SHA256.HashData(Encoding.ASCII.GetBytes(secret));
     }
 }
