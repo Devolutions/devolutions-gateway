@@ -195,7 +195,7 @@ namespace DevolutionsGateway.Resources
 		/// <summary>
 		/// Agent Tunnel
 		/// </summary>
-		public const string Group_AgentTunnel = "Group_AgentTunnel";
+		public const string Group_AgentTunnel = "Group_AgentTunnel";		
 		/// <summary>
 		/// External Access
 		/// </summary>
@@ -419,11 +419,11 @@ namespace DevolutionsGateway.Resources
 		/// <summary>
 		/// Enabled
 		/// </summary>
-		public const string Property_EnableAgentTunnel = "Property_EnableAgentTunnel";
+		public const string Property_EnableAgentTunnel = "Property_EnableAgentTunnel";		
 		/// <summary>
 		/// UDP Port
 		/// </summary>
-		public const string Property_AgentTunnelPort = "Property_AgentTunnelPort";
+		public const string Property_AgentTunnelPort = "Property_AgentTunnelPort";		
 		/// <summary>
 		/// Directory
 		/// </summary>
@@ -587,11 +587,11 @@ namespace DevolutionsGateway.Resources
 		/// <summary>
 		/// Enable Agent Tunnel
 		/// </summary>
-		public const string EnableAgentTunnel = "EnableAgentTunnel";
+		public const string EnableAgentTunnel = "EnableAgentTunnel";		
 		/// <summary>
 		/// UDP port
 		/// </summary>
-		public const string AgentTunnelUdpPort = "AgentTunnelUdpPort";
+		public const string AgentTunnelUdpPort = "AgentTunnelUdpPort";		
 		/// <summary>
 		/// Enable the Gateway web interface
 		/// </summary>
