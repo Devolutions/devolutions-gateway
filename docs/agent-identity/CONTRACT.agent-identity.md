@@ -74,14 +74,14 @@ Unless stated otherwise, implementations must follow these conventions.
 
 ### 2.1 Authority behavior
 
-- A token has a use limit (`max_uses`), an expiry and an optional product-specific contribution to each enrolled identity's config (§5.2).
-  None of them changes after creation, and a deleted token is never restored, so the `token_*` outcomes of §5.4 are permanent.
-- A token can create an identity only when it exists, has not been deleted, has not expired, and fewer than `max_uses` identities have been created with it.
+- A token has a use limit (`max_uses`) and an expiry.
+  Neither changes after creation, and a revoked token is never restored, so the `token_*` outcomes of §5.4 are permanent.
+- A token can create an identity only when it exists, has not been revoked, has not expired, and fewer than `max_uses` identities have been created with it.
 - Only the creation of a new identity counts toward `max_uses`; an enrollment replay, a failed enrollment, a renewal, a confirmation, a check-in and channel activity never do.
 - Re-enrollment with the same token and CSR public key returns the existing identity without counting a use.
-- Deleting a token retains its secret hash and `deleted_at` as a tombstone.
-  A deleted token authenticates only for an idempotent replay of an identity that it created; every other use returns `token_invalid`, whatever the CSR public key matches.
-- When several outcomes apply to one enrollment, the earliest in this list wins: (1) `token_invalid` when the `Authorization` header is missing, repeated, not `Bearer`, or holds no token whose stored hash matches `SHA-256` of the 32 bytes its secret encodes; (2) `invalid_request` for an invalid body, CSR or metadata; (3) the result of the CSR public key lookup below, except that a deleted token gets `token_invalid` for anything but an idempotent replay; (4) `token_invalid` for a deleted token, then `token_expired` for an expired one; (5) `token_exhausted`; (6) a new identity.
+- Revoking a token keeps its secret hash.
+  A revoked token authenticates only for an idempotent replay of an identity that it created; every other use returns `token_invalid`, whatever the CSR public key matches.
+- When several outcomes apply to one enrollment, the earliest in this list wins: (1) `token_invalid` when the `Authorization` header is missing, repeated, not `Bearer`, or holds no token whose stored hash matches `SHA-256` of the 32 bytes its secret encodes; (2) `invalid_request` for an invalid body, CSR or metadata; (3) the result of the CSR public key lookup below, except that a revoked token gets `token_invalid` for anything but an idempotent replay; (4) `token_invalid` for a revoked token, then `token_expired` for an expired one; (5) `token_exhausted`; (6) a new identity.
 - The server matches the CSR public key against every certificate it has issued using the first matching rule below:
   - The key of the current certificate of a non-revoked identity enrolled with the same token → `200` with that identity and its current chain, without counting a use or changing metadata.
   - The key of a non-deleted identity enrolled with a different token → `invalid_request`; a deleted identity's key falls to the last rule, since the server keeps no token for it.
@@ -248,7 +248,7 @@ This body is present on every non-2xx response under `{u}/api/agent-identity/v1/
 
 | Code                  | HTTP | Meaning                                                                      | Agent class                                       |
 | --------------------- | ---- | ---------------------------------------------------------------------------- | ------------------------------------------------- |
-| `token_invalid`       | 401  | Unknown or deleted token, bad secret                                         | permanent                                         |
+| `token_invalid`       | 401  | Unknown or revoked token, bad secret                                         | permanent                                         |
 | `token_exhausted`     | 403  | The token has created `max_uses` identities                                  | permanent                                         |
 | `token_expired`       | 401  | `now ≥ expires_at`                                                           | permanent                                         |
 | `identity_revoked`    | 403  | Identity revoked                                                             | terminal                                          |
