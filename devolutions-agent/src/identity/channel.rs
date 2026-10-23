@@ -880,7 +880,7 @@ mod tests {
         let [Notice::ConfigUpdate(pushed)] = queued.as_slice() else {
             panic!("expected one queued config");
         };
-        assert_eq!(config_revision(&pushed.config), 100);
+        assert_eq!(pushed.config, serde_json::json!({ "version": 1, "revision": 100 }));
         assert!(pushed.acks.contains(&(link, "update-100".to_owned())));
         // The highest config's own acknowledgement and at most 32 of the configs it superseded.
         assert!(pushed.acks.len() <= 1 + 32);
