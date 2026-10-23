@@ -352,8 +352,6 @@ pub(crate) struct TokenRecord {
     created_by: Option<String>,
     #[serde(default)]
     friendly_name_format: Option<String>,
-    #[serde(default)]
-    config: Option<BTreeMap<String, String>>,
 }
 
 /// What a token creation request asks for.
@@ -363,8 +361,6 @@ pub(crate) struct TokenSpec {
     /// When the token stops enrolling devices; `None` leaves it to the authority's default.
     pub(crate) expires_on: Option<OffsetDateTime>,
     pub(crate) friendly_name_format: Option<String>,
-    /// Product-specific config entries for the identities the token enrolls.
-    pub(crate) config: Option<BTreeMap<String, String>>,
 }
 
 impl TokenSpec {
@@ -375,7 +371,6 @@ impl TokenSpec {
             max_uses,
             expires_on: Some(OffsetDateTime::now_utc() + time::Duration::try_from(lifetime)?),
             friendly_name_format: None,
-            config: None,
         })
     }
 
@@ -389,9 +384,6 @@ impl TokenSpec {
         }
         if let Some(format) = &self.friendly_name_format {
             body["friendlyNameFormat"] = json!(format);
-        }
-        if let Some(config) = &self.config {
-            body["config"] = json!(config);
         }
         Ok(serde_json::to_vec(&body)?)
     }

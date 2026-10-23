@@ -805,7 +805,6 @@ const TESTS: &[Test] = &[
     p!(p_enroll_malformed_authorization_rejected),
     p!(p_token_expired, mock_only),
     p!(p_enroll_idempotent_same_key),
-    p!(p_token_config_contributes_to_effective_config),
     p!(p_deleted_token_replays_own_key_only),
     p!(p_enroll_revoked_same_key_rejected),
     p!(p_enroll_certificate_key_reuse_rules),

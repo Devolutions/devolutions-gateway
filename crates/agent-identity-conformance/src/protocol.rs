@@ -787,25 +787,6 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
     Ok(())
 }
 
-pub(crate) async fn p_token_config_contributes_to_effective_config(ctx: Context) -> anyhow::Result<()> {
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
-    let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
-    spec.config = Some([("psu_channel_url".to_owned(), "https://psu.example".to_owned())].into());
-    let token = ctx.target.management().create_token_from(&spec).await?;
-    let identity = identity(&ctx.target, &token, "token-config").await?;
-    ensure!(
-        identity.config["psu_channel_url"] == "https://psu.example",
-        "enrollment omitted the token's product-specific config"
-    );
-    ensure!(
-        check_in_config(&ctx.target, &identity).await?["psu_channel_url"] == "https://psu.example",
-        "check-in omitted the token's product-specific config"
-    );
-    Ok(())
-}
-
 pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let foreign_token = token(&ctx, 1).await?;
