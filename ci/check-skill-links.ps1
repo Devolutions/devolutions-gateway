@@ -5,8 +5,8 @@
 # each pointing at `../../.agents/skills/<name>`, because Claude Code discovers skills only there.
 # Reads the git index rather than the working tree,
 # so the result does not depend on whether the checkout created real symlinks.
-# UNTESTED: no test checks that the script fails on a missing link, a wrong target, a link to a
-# folder without SKILL.md, or a non-link file, so a passing run on a correct tree proves only half of it;
+# UNTESTED: no test checks that the script fails on a missing link, a wrong target, a target with a
+# trailing newline, a link to a folder without SKILL.md, or a non-link file, so a passing run on a correct tree proves only half of it;
 # after changing it, run it with -Root against a scratch repository whose index holds each of these.
 
 param(
