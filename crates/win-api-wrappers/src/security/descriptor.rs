@@ -189,6 +189,9 @@ impl SecurityDescriptor<'_> {
 
 impl Drop for SecurityDescriptor<'_> {
     fn drop(&mut self) {
+        // UNTESTED: an owned descriptor is freed exactly once, and a borrowed one never.
+        // A missing free leaks on every check, and freeing a borrowed descriptor corrupts its owner's heap; tests observe neither.
+        // When changing ownership, keep `owned` true only for descriptors that GetSecurityInfo or GetNamedSecurityInfoW allocated.
         if self.owned {
             // SAFETY: Per invariants, an owned descriptor is freed using LocalFree.
             unsafe { LocalFree(Some(HLOCAL(self.ptr.0))) };

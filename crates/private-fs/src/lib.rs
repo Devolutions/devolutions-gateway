@@ -52,11 +52,17 @@ pub fn create_dir_chain(dir: &Utf8Path) -> Result<(), DirChainError> {
     let mut builder = fs::DirBuilder::new();
     builder.mode(0o700);
     for &path in missing.iter().rev() {
+        // UNTESTED: a directory that another process creates between the check and `create` counts as created.
+        // Processes that create the same ancestors at once would otherwise fail at random; no test runs such a race.
+        // When changing this, keep accepting `AlreadyExists` for a path that is now a directory, and only then.
         if let Err(error) = builder.create(path)
             && (error.kind() != ErrorKind::AlreadyExists || !directory_exists(path)?)
         {
             return Err(DirChainError::Create(path.to_owned(), error));
         }
+        // UNTESTED: each created directory and its parent are synced before the next one is created.
+        // Without it, a power loss can drop a directory whose files a caller already reported as written; no test can cut power.
+        // When changing this loop, keep syncing both before creating the next directory.
         for synced in [path, parent_or_current(path)] {
             sync_directory(synced).map_err(|error| DirChainError::Sync(synced.to_owned(), error))?;
         }
