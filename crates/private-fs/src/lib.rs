@@ -40,7 +40,8 @@ pub enum DirChainError {
 /// Creates `dir` and its missing ancestors with mode `0700`, and syncs each directory it creates and that directory's
 /// parent.
 ///
-/// A link is never followed: every existing ancestor must be a directory itself.
+/// The first existing path on the chain and each directory created must be a directory and not a link; ancestors above
+/// the first existing one are not inspected.
 /// A directory that another process creates first counts as created.
 pub fn create_dir_chain(dir: &Utf8Path) -> Result<(), DirChainError> {
     let mut missing = Vec::new();

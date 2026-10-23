@@ -237,6 +237,7 @@ mod tests {
     }
 
     // oracle: spec MS-DTYP §2.5.1
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn an_unprotected_dacl_is_refused() -> anyhow::Result<()> {
         let descriptor = from_sddl("O:SYD:(A;;GA;;;SY)")?;
@@ -248,10 +249,23 @@ mod tests {
     }
 
     // oracle: spec MS-DTYP §2.5.1
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn a_null_dacl_is_refused() -> anyhow::Result<()> {
         let descriptor = from_sddl("O:SYD:PNO_ACCESS_CONTROL")?;
         assert!(matches!(descriptor.protected_allow_entries(), Err(DaclError::Missing)));
+        Ok(())
+    }
+
+    // oracle: spec MS-DTYP §2.5.1
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn a_dacl_with_a_deny_entry_is_refused() -> anyhow::Result<()> {
+        let descriptor = from_sddl("O:SYD:P(D;;GA;;;BU)")?;
+        assert!(matches!(
+            descriptor.protected_allow_entries(),
+            Err(DaclError::UnexpectedAceType)
+        ));
         Ok(())
     }
 }
