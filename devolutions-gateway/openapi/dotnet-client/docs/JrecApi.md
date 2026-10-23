@@ -9,6 +9,7 @@ All URIs are relative to *http://localhost*
 | [**ListRecordings**](JrecApi.md#listrecordings) | **GET** /jet/jrec/list | Lists all recordings stored on this instance |
 | [**PullRecordingFile**](JrecApi.md#pullrecordingfile) | **GET** /jet/jrec/pull/{id}/{filename} | Retrieves a recording file for a given session |
 | [**PullRecordingSession**](JrecApi.md#pullrecordingsession) | **GET** /jet/jrec/pull/{id} | Downloads an entire recorded session as a ZIP archive |
+| [**SearchRecordings**](JrecApi.md#searchrecordings) | **POST** /jet/jrec/search | Searches the &#x60;.slog&#x60; artifacts, such as AI analysis logs, of recordings stored on this instance |
 
 <a id="deletemanyrecordings"></a>
 # **DeleteManyRecordings**
@@ -510,6 +511,107 @@ catch (ApiException e)
 | **403** | Insufficient permissions |  -  |
 | **404** | Recording not found |  -  |
 | **413** | Recording package exceeds download size or file-count limits |  -  |
+
+[[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
+
+<a id="searchrecordings"></a>
+# **SearchRecordings**
+> RecordingSearchResponse SearchRecordings (RecordingSearchRequest recordingSearchRequest)
+
+Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+
+The query is a case-insensitive substring, and an empty query matches every line. In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read once unescaped, so field names, numbers, booleans and null never match. Any other line, such as one still being written, is matched as raw text. A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually matched as raw text. Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched. Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same `query`, `recordings` and `startTime` again, with the `nextCursor` of the previous page as `cursor`. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
+
+### Example
+```csharp
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net.Http;
+using Devolutions.Gateway.Client.Api;
+using Devolutions.Gateway.Client.Client;
+using Devolutions.Gateway.Client.Model;
+
+namespace Example
+{
+    public class SearchRecordingsExample
+    {
+        public static void Main()
+        {
+            Configuration config = new Configuration();
+            config.BasePath = "http://localhost";
+            // Configure Bearer token for authorization: scope_token
+            config.AccessToken = "YOUR_BEARER_TOKEN";
+
+            // create instances of HttpClient, HttpClientHandler to be reused later with different Api classes
+            HttpClient httpClient = new HttpClient();
+            HttpClientHandler httpClientHandler = new HttpClientHandler();
+            var apiInstance = new JrecApi(httpClient, config, httpClientHandler);
+            var recordingSearchRequest = new RecordingSearchRequest(); // RecordingSearchRequest | JSON-encoded search request
+
+            try
+            {
+                // Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+                RecordingSearchResponse result = apiInstance.SearchRecordings(recordingSearchRequest);
+                Debug.WriteLine(result);
+            }
+            catch (ApiException  e)
+            {
+                Debug.Print("Exception when calling JrecApi.SearchRecordings: " + e.Message);
+                Debug.Print("Status Code: " + e.ErrorCode);
+                Debug.Print(e.StackTrace);
+            }
+        }
+    }
+}
+```
+
+#### Using the SearchRecordingsWithHttpInfo variant
+This returns an ApiResponse object which contains the response data, status code and headers.
+
+```csharp
+try
+{
+    // Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+    ApiResponse<RecordingSearchResponse> response = apiInstance.SearchRecordingsWithHttpInfo(recordingSearchRequest);
+    Debug.Write("Status Code: " + response.StatusCode);
+    Debug.Write("Response Headers: " + response.Headers);
+    Debug.Write("Response Body: " + response.Data);
+}
+catch (ApiException e)
+{
+    Debug.Print("Exception when calling JrecApi.SearchRecordingsWithHttpInfo: " + e.Message);
+    Debug.Print("Status Code: " + e.ErrorCode);
+    Debug.Print(e.StackTrace);
+}
+```
+
+### Parameters
+
+| Name | Type | Description | Notes |
+|------|------|-------------|-------|
+| **recordingSearchRequest** | [**RecordingSearchRequest**](RecordingSearchRequest.md) | JSON-encoded search request |  |
+
+### Return type
+
+[**RecordingSearchResponse**](RecordingSearchResponse.md)
+
+### Authorization
+
+[scope_token](../README.md#scope_token)
+
+### HTTP request headers
+
+ - **Content-Type**: application/json
+ - **Accept**: application/json
+
+
+### HTTP response details
+| Status code | Description | Response headers |
+|-------------|-------------|------------------|
+| **200** | Matching log lines |  -  |
+| **400** | Bad request |  -  |
+| **401** | Invalid or missing authorization token |  -  |
+| **403** | Insufficient permissions |  -  |
 
 [[Back to top]](#) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to Model list]](../README.md#documentation-for-models) [[Back to README]](../README.md)
 
