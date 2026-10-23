@@ -146,9 +146,9 @@ pub(crate) struct RecordingSearchResponse {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct RecordingSearchHit {
-    /// The recording whose artifact holds the line.
+    /// The recording whose log holds the line.
     recording_id: Uuid,
-    /// Name of the `.slog` artifact holding the line, as listed in `recording.json`.
+    /// Name of the `.slog` file holding the line, as listed in `recording.json`.
     file_name: String,
     /// Number of the line in the file, counting from 1.
     #[cfg_attr(feature = "openapi", schema(minimum = 1))]
@@ -161,7 +161,7 @@ pub(crate) struct RecordingSearchHit {
     truncated: bool,
 }
 
-/// Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+/// Searches the `.slog` files of recordings stored on this instance, such as Active Directory Console logs
 ///
 /// The query is a case-insensitive substring, and an empty query matches every line.
 /// In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
@@ -169,7 +169,7 @@ pub(crate) struct RecordingSearchHit {
 /// Any other line, such as one still being written, is matched as raw text.
 /// A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually
 /// matched as raw text.
-/// Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched.
+/// Only the files listed in `recording.json` with the `slog` type are searched, under `files` and under `artifacts`.
 /// Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
 ///
 /// Results come in pages.
@@ -773,7 +773,7 @@ impl Search {
     }
 }
 
-/// The `.slog` artifacts of one recording.
+/// The `.slog` files of one recording.
 struct RecordingLogs {
     recording_id: Uuid,
     dir: Utf8PathBuf,
@@ -781,14 +781,22 @@ struct RecordingLogs {
     file_names: Vec<String>,
 }
 
-/// Lists the `.slog` artifacts of a recording, such as its AI analysis, from `recording.json`.
+/// Lists the `.slog` files of a recording from `recording.json`, those under `files` first, then the artifacts.
 async fn read_recording_logs(dir: Utf8PathBuf, recording_id: Uuid) -> Option<RecordingLogs> {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct Manifest {
         start_time: i64,
         #[serde(default)]
+        files: Vec<ManifestFile>,
+        #[serde(default)]
         artifacts: JrecArtifacts,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct ManifestFile {
+        file_name: String,
     }
 
     let path = dir.join("recording.json");
@@ -806,9 +814,10 @@ async fn read_recording_logs(dir: Utf8PathBuf, recording_id: Uuid) -> Option<Rec
     // A log listed twice would be searched twice.
     let mut seen = HashSet::new();
     let file_names = manifest
-        .artifacts
-        .into_file_names()
+        .files
         .into_iter()
+        .map(|file| file.file_name)
+        .chain(manifest.artifacts.into_file_names())
         .filter(|file_name| {
             is_safe_recording_file_name(file_name)
                 && Utf8Path::new(file_name)
@@ -1361,14 +1370,17 @@ mod tests {
     }
 
     // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    #[rstest]
+    #[case::twice_in_artifacts(
+        r#"{"startTime":100,"artifacts":{"ai-analysis":[{"fileName":"ai-analysis-0.slog"},{"fileName":"ai-analysis-0.slog"}]}}"#
+    )]
+    #[case::in_files_and_in_artifacts(
+        r#"{"startTime":100,"files":[{"fileName":"ai-analysis-0.slog"}],"artifacts":{"ai-analysis":[{"fileName":"ai-analysis-0.slog"}]}}"#
+    )]
     #[tokio::test]
-    async fn lists_a_log_once_when_the_manifest_repeats_it() {
+    async fn lists_a_log_once_when_the_manifest_repeats_it(#[case] manifest: &str) {
         let root = tempfile::tempdir().expect("temp dir");
-        std::fs::write(
-            root.path().join("recording.json"),
-            r#"{"startTime":100,"artifacts":{"ai-analysis":[{"fileName":"ai-analysis-0.slog"},{"fileName":"ai-analysis-0.slog"}]}}"#,
-        )
-        .expect("write manifest");
+        std::fs::write(root.path().join("recording.json"), manifest).expect("write manifest");
         let dir = Utf8PathBuf::from_path_buf(root.path().to_owned()).expect("UTF-8 path");
 
         let recording = read_recording_logs(dir, Uuid::nil()).await.expect("readable manifest");
