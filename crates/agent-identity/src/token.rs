@@ -77,13 +77,19 @@ pub fn sha256_hex(value: &str) -> String {
     hex::encode(Sha256::digest(value.as_bytes()))
 }
 
-/// Returns whether `url` is an absolute `https` URL without a query or fragment ([CONTRACT.agent-identity.md §2
-/// "Enrollment token"][contract]).
+/// Returns whether `url` is an absolute `https` URL without a user name or password, a query or a fragment
+/// ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]).
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
 pub(crate) fn is_base_url(url: &str) -> bool {
-    Url::parse(url)
-        .is_ok_and(|url| url.scheme() == "https" && url.has_host() && url.query().is_none() && url.fragment().is_none())
+    Url::parse(url).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.has_host()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+    })
 }
 
 fn is_base64url(byte: u8) -> bool {
@@ -104,6 +110,8 @@ impl fmt::Debug for Token {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
 
     fn token_with_bag(bag: &str) -> String {
@@ -165,5 +173,17 @@ mod tests {
             // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
             assert!(!error.to_string().contains(&raw), "{error}");
         }
+    }
+
+    /// CONTRACT.agent-identity.md §2: `u` is a URL "without a user name or password".
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    #[rstest]
+    #[case::user_name("https://user@example.test/dvls")]
+    #[case::user_name_and_password("https://user:pw@example.test/dvls")]
+    #[case::password_only("https://:pw@example.test/dvls")]
+    #[case::user_name_and_empty_password("https://user:@example.test/dvls")]
+    fn rejects_a_base_url_with_a_user_name_or_password(#[case] u: &str) {
+        let raw = token_with_bag(&serde_json::json!({ "u": u }).to_string());
+        assert!(Token::parse(&raw).is_err());
     }
 }
