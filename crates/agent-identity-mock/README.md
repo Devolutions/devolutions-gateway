@@ -59,7 +59,8 @@ An unexpected failure, such as issuing from an expired root or a handler panic, 
 Enrollment, renewal and check-in require a `metadata` object, which may be empty.
 A body that repeats a member name at any depth, holds more than 64 nested objects and arrays, counting the top-level object, or holds a string that is not valid Unicode, such as an escaped lone surrogate, is `invalid_request` (§1).
 So is a `csr` that is not canonical `base64` or a CSR key that is not an uncompressed P-256 point (§1, §4).
-A token authenticates by its exact secret text alone: the bag is never checked, and another encoding of the same secret bytes is `token_invalid` (§2).
+A token authenticates by its secret alone, in its canonical `base64url` form only: the bag is never checked, and another encoding of the same secret bytes is `token_invalid` (§2).
+The mock keeps SHA-256 of the 32 bytes the secret encodes, never the secret (§2).
 Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are limited to 64 KiB.
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.

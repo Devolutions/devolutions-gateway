@@ -520,7 +520,7 @@ struct IssuedKey {
 
 pub struct State {
     pub(crate) tokens: HashMap<Uuid, Token>,
-    /// SHA-256(secret) → token ID (§2).
+    /// SHA-256 of the 32 bytes a token's secret encodes → token ID (§2).
     pub(crate) token_hashes: HashMap<[u8; 32], Uuid>,
     pub(crate) identities: HashMap<Uuid, Identity>,
     /// Certificate thumbprint → identity.
@@ -992,7 +992,7 @@ impl State {
         Value::Object(config)
     }
 
-    /// §5.2 enroll. `secret` is the 32-byte token secret; only its SHA-256 is matched.
+    /// §5.2 enroll. `secret` is the 32 bytes the token's secret encodes; only their SHA-256 is matched.
     pub(crate) fn enroll(
         &mut self,
         secret: &[u8; 32],
@@ -1550,7 +1550,7 @@ impl State {
     }
 
     /// Creates a token record (validation done by the caller); returns the ID and the
-    /// 32-byte secret (only its SHA-256 is stored, §2).
+    /// 32 bytes the secret encodes (only their SHA-256 is stored, §2).
     pub(crate) fn create_token(
         &mut self,
         name: String,

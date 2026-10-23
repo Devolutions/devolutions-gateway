@@ -103,8 +103,9 @@ async fn trust_anchor(AxumState(app): AxumState<Arc<App>>) -> Response {
 /// Parses `Authorization: Bearer <token>`; the token must be well-formed
 /// (`dvaet1.<bag>.<secret>` with a 32-byte secret) to even reach the lookup, and a repeated header is `token_invalid`
 /// ([CONTRACT.agent-identity.md][contract], "2.1 Authority behavior").
-/// The token authenticates by its exact `secret` text alone and the `bag` is never checked (§2); the engine decodes only
-/// the canonical encoding (§1), so another encoding of the same secret bytes is `token_invalid`.
+/// The token authenticates by its `secret` alone, accepted only in its canonical `base64url` form, and the `bag` is never
+/// checked (§2); the engine decodes only the canonical encoding, so another encoding of the same secret bytes is
+/// `token_invalid`.
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#21-authority-behavior
 fn parse_bearer(headers: &HeaderMap) -> Result<[u8; 32], ApiError> {
@@ -566,19 +567,23 @@ mod tests {
         format!("{prefix}.{bag}.{secret}")
     }
 
-    /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
+    /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its `secret` alone, [...] and never checks
+    /// the `bag`".
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[rstest]
     #[case::issued_token(|token: &str| token.to_owned())]
     #[case::other_json_bag(|token: &str| with_bag(token, "e30"))]
     #[case::undecodable_bag(|token: &str| with_bag(token, "A"))]
     #[case::empty_bag(|token: &str| with_bag(token, ""))]
-    fn token_authenticates_by_its_secret_text_alone(#[case] alter: fn(&str) -> String) {
+    fn token_authenticates_by_its_secret_alone(#[case] alter: fn(&str) -> String) {
         let token = alter(&enrollment_token(BASE_URL, &[0; 32]));
         assert_eq!(parse_bearer(&bearer(&token)).ok(), Some([0; 32]));
     }
 
-    /// Any other secret text is another token, even a non-canonical `base64url` encoding of the same bytes (CONTRACT.agent-identity.md §1, §2).
+    /// CONTRACT.agent-identity.md §2: the authority authenticates a token by its secret, "accepting only its canonical
+    /// `base64url` form", so a padded secret, one whose last character sets the two bits that 32 bytes leave unused, and
+    /// one in the standard alphabet are `token_invalid`, though a lenient decoder may read the same bytes from them; so
+    /// is a token with another prefix.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[rstest]

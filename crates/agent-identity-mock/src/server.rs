@@ -494,7 +494,8 @@ mod tests {
         format!("{prefix}.{bag}.{secret}")
     }
 
-    /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its exact `secret` text alone and never checks the `bag`".
+    /// CONTRACT.agent-identity.md §2: "The authority authenticates a token by its `secret` alone, accepting only its
+    /// canonical `base64url` form, and never checks the `bag`".
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     #[rstest]
     #[case::issued_token(|token: &str| token.to_owned(), 200, Value::Null)]
@@ -502,7 +503,7 @@ mod tests {
     #[case::undecodable_bag(|token: &str| with_bag(token, "A"), 200, Value::Null)]
     #[case::padded_secret(|token: &str| format!("{token}="), 401, json!("token_invalid"))]
     #[tokio::test]
-    async fn enrollment_authenticates_the_token_by_its_secret_text(
+    async fn enrollment_authenticates_the_token_by_its_secret_alone(
         #[case] alter: fn(&str) -> String,
         #[case] expected_status: u16,
         #[case] expected_error: Value,
@@ -522,6 +523,41 @@ mod tests {
         let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
         let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
         assert_eq!((status, &enrolled["error"]), (expected_status, &expected_error));
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §2: "The authority stores `SHA-256` of the 32 bytes the secret encodes", and §2.1
+    /// answers `token_invalid` when the `Authorization` header "holds no token whose stored hash matches `SHA-256` of
+    /// the 32 bytes its secret encodes".
+    /// The token's record is stored under a digest computed outside the mock, so the enrollment succeeds only if the mock
+    /// hashes the bytes the secret encodes, not its text.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    #[tokio::test]
+    async fn enrollment_finds_the_token_by_the_sha256_of_its_secret_bytes() -> anyhow::Result<()> {
+        // The canonical `base64url` of the bytes 0x00 to 0x1f.
+        const SECRET: &str = "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8";
+        // SHA-256 of the bytes 0x00 to 0x1f, from Python: `hashlib.sha256(bytes(range(32))).hexdigest()`.
+        const STORED_HASH: &str = "630dcd2966c4336691125448bbb25b4ff412a49c732db2c8abc1b8581bd710dd";
+        let stored_hash: [u8; 32] = std::array::from_fn(|i| {
+            u8::from_str_radix(&STORED_HASH[2 * i..2 * i + 2], 16).expect("hexadecimal digest")
+        });
+        let app = App::for_test()?;
+        let now = app.now();
+        {
+            let mut state = app.state.lock().await;
+            let (token_id, _) =
+                state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+            state.token_hashes.clear();
+            state.token_hashes.insert(stored_hash, token_id);
+        }
+
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let authorization = format!("Bearer dvaet1.e30.{SECRET}");
+        let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
+        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
+        assert_eq!((status, &enrolled["error"]), (200, &Value::Null));
         Ok(())
     }
 
