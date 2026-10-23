@@ -64,6 +64,7 @@ Unless stated otherwise, implementations must follow these conventions.
   The agent ignores unknown fields.
   Fields:
   - `u` (required): absolute `https` product base URL without a user name or password, a query, a fragment or a trailing slash, e.g. `https://host/dvls`; the agent removes trailing slashes from a `u` that has them, so that `https://host/` and `https://host` name the same authority.
+    `u` is read as text: it begins with `https://` and contains no `@`, and any `@` counts as a user name, even with nothing before it as in `https://@host`, because URL parsers disagree on such forms.
 - `secret`: `base64url` of 32 random bytes; opaque to the agent beyond this format.
   The authority authenticates a token by its `secret` alone, accepting only its canonical `base64url` form, and never checks the `bag`, which carries only routing data.
   The authority stores `SHA-256` of the 32 bytes the secret encodes, never the secret itself.
@@ -213,7 +214,7 @@ Request:
   Later revisions are delivered through the agent channel (§7.3) or check-in (§5.6).
 - `config.agent_channel_url` is the base URL of the agent channel (§7).
   It is absent when the server does not offer the channel to this identity, and the agent then opens no agent channel for that authority.
-  It must be an absolute `https` URL without a query or fragment; an agent receiving any other value treats it as absent and logs a warning.
+  It must be an absolute `https` URL without a user name or password, a query or a fragment, read as text like `u` (§2); an agent receiving any other value treats it as absent and logs a warning.
   Product-specific config fields, such as a PSU channel URL, may coexist with it.
 - The agent's identity HTTP client never follows redirects and treats a `3xx` response as transient.
   It validates the server certificate and host name against the OS trust store.
@@ -376,7 +377,7 @@ An authority never holds an effective config whose `ConfigUpdate` envelope would
 
 - gRPC path: `<agent_channel_url path>/devolutions.agent.channel.v1.AgentChannel/Connect`.
   With `agent_channel_url = https://host/dvls`, the `:path` is `/dvls/devolutions.agent.channel.v1.AgentChannel/Connect`; the agent prepends the URL path when constructing `:path`.
-- `agent_channel_url` is an absolute `https` URL without a query, a fragment or a trailing slash; the agent removes trailing slashes from one that has them before prepending its path, so that `https://host/dvls/` and `https://host/dvls` open the same `:path`.
+- `agent_channel_url` is an absolute `https` URL without a user name or password, a query, a fragment or a trailing slash; the agent removes trailing slashes from one that has them before prepending its path, so that `https://host/dvls/` and `https://host/dvls` open the same `:path`.
 - The opening request carries `signature-input`, `signature` metadata with `tag="connect"`.
 
 <a id="channel-sequence"></a>
