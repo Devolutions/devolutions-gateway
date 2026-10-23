@@ -38,13 +38,10 @@ internal sealed class VectorAuthority
     public async Task<VectorOutcome> RunAsync(HttpSignatureCaseVector vector)
     {
         Clock.Now = vector.Now;
-        string[] signatureInput = Lines(vector.Headers.SignatureInput);
-        string[] signature = Lines(vector.Headers.Signature);
 
         if (vector.Endpoint == "connect")
         {
             ChannelOpeningResult opening = await OpenChannelAsync(Authenticator, vector);
-
 
             return opening.Succeeded
                 ? VectorOutcome.Ok
@@ -53,8 +50,8 @@ internal sealed class VectorAuthority
 
         SignedHttpRequest request = new(
             vector.Method,
-            signatureInput,
-            signature,
+            Lines(vector.Headers.SignatureInput),
+            Lines(vector.Headers.Signature),
             Lines(vector.Headers.ContentDigest),
             vector.BodyBytes);
         AuthenticationResult result = await Authenticator.AuthenticateAsync(Operation(vector.Endpoint), request);
@@ -76,6 +73,7 @@ internal sealed class VectorAuthority
             Lines(vector.Headers.SignatureInput),
             Lines(vector.Headers.Signature));
     }
+
     /// <summary>
     /// The field lines of a vector header, which holds at most one.
     /// </summary>

@@ -270,7 +270,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     [Fact]
     public void ReadsTheClockOnce()
     {
-        using X509Certificate2 leaf = Issue(clock: new SteppingTimeProvider(Now, Now.AddHours(1)));
+        using X509Certificate2 leaf = Issue(clock: new SteppingTimeProvider(Now, Now.AddHours(1), Now.AddHours(2)));
 
         Assert.Equal(Lifetime, leaf.NotAfter.ToUniversalTime() - leaf.NotBefore.ToUniversalTime());
     }

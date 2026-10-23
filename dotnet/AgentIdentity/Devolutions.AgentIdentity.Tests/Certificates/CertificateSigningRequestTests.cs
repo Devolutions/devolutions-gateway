@@ -440,6 +440,7 @@ public class CertificateSigningRequestTests
     public static TheoryData<string> RequestWithIgnoredContentsNames => new(RequestsWithIgnoredContents.Keys);
 
     public static TheoryData<string> InvalidRequestNames => new(InvalidRequests.Keys);
+
     // test-vectors.json csr.<name>.expected, the outcome CONTRACT.agent-identity.md §4 gives each request.
     // oracle: reference docs/agent-identity/test-vectors.json csr
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
