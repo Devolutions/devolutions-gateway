@@ -1484,15 +1484,13 @@ pub(crate) async fn p_renew_signature_rejected_on_connect(ctx: Context) -> anyho
     let csr = KeyPair::generate()?;
     let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
     let renew_tag = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
-    let status = channel::open_with_headers(&ctx.target, &identity, renew_tag)
-        .await
-        .err()
-        .context("renew-tagged signature opened a channel")?;
-    channel::expect_refused_opening(
-        status.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open_with_headers(&ctx.target, &identity, renew_tag),
+        "renew-tagged signature opened a channel",
         Code::Unauthenticated,
         "signature_invalid",
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -1502,15 +1500,13 @@ pub(crate) async fn p_channel_duplicate_signature_metadata_rejected(ctx: Context
     let (_, identity) = issued(&ctx, "duplicate-channel-signature").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     for name in ["signature-input", "signature"] {
-        let failure = channel::open_with_duplicate_header(&ctx.target, &identity, name)
-            .await
-            .err()
-            .with_context(|| format!("duplicate {name} metadata opened a channel"))?;
-        channel::expect_refused_opening(
-            failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        channel::expect_opening_refused(
+            channel::open_with_duplicate_header(&ctx.target, &identity, name),
+            format!("duplicate {name} metadata opened a channel"),
             Code::Unauthenticated,
             "signature_invalid",
-        )?;
+        )
+        .await?;
     }
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
@@ -1567,15 +1563,13 @@ pub(crate) async fn p_confirm_signature_rejected_on_connect(ctx: Context) -> any
     let (_, mut identity) = issued(&ctx, "confirm-to-connect").await?;
     let old_thumb = identity.thumbprint.clone();
     let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
-    let failure = channel::open_with_headers(&ctx.target, &identity, confirm_tag)
-        .await
-        .err()
-        .context("confirm-tagged signature opened a channel")?;
-    channel::expect_refused_opening(
-        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open_with_headers(&ctx.target, &identity, confirm_tag),
+        "confirm-tagged signature opened a channel",
         Code::Unauthenticated,
         "signature_invalid",
-    )?;
+    )
+    .await?;
     let pending_key = KeyPair::generate()?;
     let renewed = ctx.target.renew(&identity, &pending_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
@@ -1587,15 +1581,13 @@ pub(crate) async fn p_confirm_signature_rejected_on_connect(ctx: Context) -> any
         "confirm-to-Connect fixture did not issue a pending certificate"
     );
     let confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
-    let failure = channel::open_with_headers(&ctx.target, &identity, confirm_tag)
-        .await
-        .err()
-        .context("pending confirm-tagged signature opened a channel")?;
-    channel::expect_refused_opening(
-        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open_with_headers(&ctx.target, &identity, confirm_tag),
+        "pending confirm-tagged signature opened a channel",
         Code::Unauthenticated,
         "signature_invalid",
-    )?;
+    )
+    .await?;
     let unchanged = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
         !unchanged.connected
@@ -1765,15 +1757,14 @@ pub(crate) async fn p_check_in_signature_rejected_on_connect(ctx: Context) -> an
     let (_, identity) = issued(&ctx, "check-in-to-connect").await?;
     let body = serde_json::to_vec(&json!({ "metadata": {} }))?;
     let headers = identity.key.sign_now(&identity.thumbprint, "check-in", Some(&body));
-    let failure = channel::open_with_headers(&ctx.target, &identity, headers)
-        .await
-        .err()
-        .context("check-in-tagged signature opened a channel")?;
-    channel::expect_refused_opening(
-        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open_with_headers(&ctx.target, &identity, headers),
+        "check-in-tagged signature opened a channel",
         Code::Unauthenticated,
         "signature_invalid",
     )
+    .await?;
+    Ok(())
 }
 
 fn resign_input(key: &KeyPair, headers: &mut SignedHeaders) -> anyhow::Result<()> {
@@ -1927,15 +1918,13 @@ pub(crate) async fn p_same_tag_connect_components_rejected(ctx: Context) -> anyh
         ("duplicated", &["@method", "@method"][..]),
     ] {
         let signed = sign_with_components(&identity, "connect", None, &path, components)?;
-        let failure = channel::open_with_headers(&ctx.target, &identity, signed)
-            .await
-            .err()
-            .with_context(|| format!("{variant} connect components authenticated a channel"))?;
-        channel::expect_refused_opening(
-            failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        channel::expect_opening_refused(
+            channel::open_with_headers(&ctx.target, &identity, signed),
+            format!("{variant} connect components authenticated a channel"),
             Code::Unauthenticated,
             "signature_invalid",
-        )?;
+        )
+        .await?;
         ensure!(
             identity_record(&ctx.target, &identity.identity_id).await? == before,
             "{variant} connect components changed identity state"
@@ -1976,15 +1965,13 @@ pub(crate) async fn p_extra_signature_parameters_rejected_connect(ctx: Context) 
         let mut headers = identity.key.sign_now(&identity.thumbprint, "connect", None);
         headers.input.push_str(parameter);
         resign_input(&identity.key, &mut headers)?;
-        let failure = channel::open_with_headers(&ctx.target, &identity, headers)
-            .await
-            .err()
-            .with_context(|| format!("extra {parameter} parameter authenticated a channel"))?;
-        channel::expect_refused_opening(
-            failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        channel::expect_opening_refused(
+            channel::open_with_headers(&ctx.target, &identity, headers),
+            format!("extra {parameter} parameter authenticated a channel"),
             Code::Unauthenticated,
             "signature_invalid",
-        )?;
+        )
+        .await?;
         ensure!(
             identity_record(&ctx.target, &identity.identity_id).await? == before,
             "extra {parameter} connect signature parameter changed identity state"
@@ -2260,15 +2247,13 @@ pub(crate) async fn p_connect_signature_noncanonical_or_repeated_rejected(ctx: C
             with_repeated_signature_label(sign()),
         ),
     ] {
-        let failure = channel::open_with_headers(&ctx.target, &identity, headers)
-            .await
-            .err()
-            .with_context(|| format!("connect {variant} opened a channel"))?;
-        channel::expect_refused_opening(
-            failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+        channel::expect_opening_refused(
+            channel::open_with_headers(&ctx.target, &identity, headers),
+            "opened a channel",
             Code::Unauthenticated,
             "signature_invalid",
         )
+        .await
         .with_context(|| format!("connect {variant}"))?;
         ensure!(
             identity_record(&ctx.target, &identity.identity_id).await? == before,
@@ -2841,14 +2826,13 @@ pub(crate) async fn p_retired_pending_certificate_cannot_connect(ctx: Context) -
         key: first_key,
         ..identity
     };
-    let error = match channel::open(&ctx.target, &old).await {
-        Ok(_) => anyhow::bail!("retired pending certificate opened a channel"),
-        Err(error) => error,
-    };
-    let status = error
-        .downcast_ref::<tonic::Status>()
-        .context("no gRPC status for retired certificate")?;
-    channel::expect_refused_opening(status, Code::Unauthenticated, "identity_unknown")?;
+    channel::expect_opening_refused(
+        channel::open(&ctx.target, &old),
+        "retired pending certificate opened a channel",
+        Code::Unauthenticated,
+        "identity_unknown",
+    )
+    .await?;
     Ok(())
 }
 
@@ -2936,17 +2920,13 @@ pub(crate) async fn p_revocation_blocks_connect(ctx: Context) -> anyhow::Result<
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "revoked-connect").await?;
     ctx.target.management().revoke(&identity.identity_id).await?;
-    let status = channel::open(&ctx.target, &identity)
-        .await
-        .err()
-        .context("revoked cert connected")?;
-    channel::expect_refused_opening(
-        status
-            .downcast_ref::<tonic::Status>()
-            .context("revoked open did not yield gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open(&ctx.target, &identity),
+        "revoked cert connected",
         Code::PermissionDenied,
         "identity_revoked",
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -3006,17 +2986,13 @@ pub(crate) async fn p_deleted_certificate_cannot_connect(ctx: Context) -> anyhow
     let (_, identity) = issued(&ctx, "deleted-connect").await?;
     ctx.target.management().revoke(&identity.identity_id).await?;
     ctx.target.management().delete_identity(&identity.identity_id).await?;
-    let status = channel::open(&ctx.target, &identity)
-        .await
-        .err()
-        .context("deleted cert connected")?;
-    channel::expect_refused_opening(
-        status
-            .downcast_ref::<tonic::Status>()
-            .context("deleted open did not yield gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open(&ctx.target, &identity),
+        "deleted cert connected",
         Code::Unauthenticated,
         "identity_unknown",
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -3272,17 +3248,13 @@ pub(crate) async fn p_channel_proof_replay_fails(ctx: Context) -> anyhow::Result
         ensure!(record.metadata == initial.metadata, "{variant} changed metadata");
         replay_headers = Some(stream.headers);
     }
-    let replayed = channel::open_with_headers(&ctx.target, &identity, replay_headers.context("no opening headers")?)
-        .await
-        .err()
-        .context("reused opening headers were accepted")?;
-    channel::expect_refused_opening(
-        replayed
-            .downcast_ref::<tonic::Status>()
-            .context("missing replay gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open_with_headers(&ctx.target, &identity, replay_headers.context("no opening headers")?),
+        "reused opening headers were accepted",
         Code::Unauthenticated,
         "signature_invalid",
-    )?;
+    )
+    .await?;
     Ok(())
 }
 
@@ -3624,15 +3596,14 @@ pub(crate) async fn p_channel_clock_skew_refusal_carries_server_time(ctx: Contex
         created + 60,
         &fresh_nonce(),
     );
-    let failure = channel::open_with_headers(&ctx.target, &identity, headers)
-        .await
-        .err()
-        .context("stale connect signature opened a channel")?;
-    channel::expect_refused_opening(
-        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open_with_headers(&ctx.target, &identity, headers),
+        "stale connect signature opened a channel",
         Code::Unauthenticated,
         "clock_skew",
     )
+    .await?;
+    Ok(())
 }
 
 pub(crate) async fn p_channel_server_time_corrects_skew(ctx: Context) -> anyhow::Result<()> {
@@ -3640,12 +3611,13 @@ pub(crate) async fn p_channel_server_time_corrects_skew(ctx: Context) -> anyhow:
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "server-time-retry").await?;
     ctx.target.faults(&json!({ "clock_skew_secs": 900 })).await?;
-    let failure = channel::open(&ctx.target, &identity)
-        .await
-        .err()
-        .context("connect signature 900 seconds behind the authority opened a channel")?;
-    let status = failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?;
-    channel::expect_refused_opening(status, Code::Unauthenticated, "clock_skew")?;
+    let status = channel::expect_opening_refused(
+        channel::open(&ctx.target, &identity),
+        "connect signature 900 seconds behind the authority opened a channel",
+        Code::Unauthenticated,
+        "clock_skew",
+    )
+    .await?;
     let server_time = status
         .metadata()
         .get("server-time")
@@ -4406,15 +4378,13 @@ pub(crate) async fn p_expired_certificate_refused_at_stream_open(ctx: Context) -
             .await?,
         200,
     )?;
-    let failure = channel::open(&ctx.target, &identity)
-        .await
-        .err()
-        .context("expired certificate opened a stream")?;
-    channel::expect_refused_opening(
-        failure.downcast_ref::<tonic::Status>().context("missing gRPC status")?,
+    channel::expect_opening_refused(
+        channel::open(&ctx.target, &identity),
+        "expired certificate opened a stream",
         Code::Unauthenticated,
         "certificate_expired",
-    )?;
+    )
+    .await?;
     let after = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
         !after.connected

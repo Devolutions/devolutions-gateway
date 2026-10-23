@@ -211,6 +211,19 @@ pub(crate) fn expect_refused_opening(status: &Status, grpc_code: Code, error_cod
     expect_server_time(status)
 }
 
+/// Awaits `opening`, fails with `accepted` if it opens a stream, and checks its refusal with [`expect_refused_opening`].
+pub(crate) async fn expect_opening_refused(
+    opening: impl Future<Output = anyhow::Result<ChannelStream>>,
+    accepted: impl std::fmt::Display + Send + Sync + 'static,
+    grpc_code: Code,
+    error_code: &str,
+) -> anyhow::Result<Status> {
+    let failure = opening.await.err().context(accepted)?;
+    let status = failure.downcast::<Status>().ok().context("missing gRPC status")?;
+    expect_refused_opening(&status, grpc_code, error_code)?;
+    Ok(status)
+}
+
 /// Checks that an authentication failure, at opening or while the stream awaits `Hello`, carries the authority's time.
 ///
 /// See [CONTRACT.agent-identity.md] §7.4 "Termination" and §1 "Protocol conventions".
