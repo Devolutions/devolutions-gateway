@@ -66,10 +66,10 @@ A larger body gets `413 invalid_request` before authentication; otherwise an aut
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.
 Friendly names are stored server-side and appear only in the management API.
 Config revisions start at 1 and increase only on effective changes; `ConfigUpdate` follows `Welcome` for stale Hellos and is pushed to live streams after a change.
-A token's optional `config` object supplies product-specific fields to its enrolled identities; it cannot set `version`, `revision` or `agent_channel_url`.
+An enrollment token adds nothing to the config of the identities it enrolls.
 The mock holds no config whose `ConfigUpdate` envelope, measured with a 36-character `id`, would exceed 64 KiB (§7.1).
 A change that would grow one past that is refused and changes nothing.
-An enrollment whose token config no longer fits, because the channel offer or the version override grew it, is `500 unavailable` and does not count against the token's `maxUses`.
+An enrollment whose config would not fit, which only a base URL close to 64 KiB long can cause, is `500 unavailable` and does not count against the token's `maxUses`.
 The mock uses a test-only unbounded push queue so config bursts cannot silently detach authenticated streams or discard termination messages.
 `POST __mock__/config` adds unknown fields so tests can check that agents preserve them.
 Only confirm promotes a pending certificate: old streams receive `Reconnect{reason:"certificate_rotated"}` and close with `OK` after 60 mock-clock seconds if still open.
@@ -110,7 +110,7 @@ The [DVLS management API][dvls-management] has the operations, models, enums, pa
 A request carries the `tokenId` of a [session](#login) in the `tokenId` header.
 A request without one, even with an `Authorization` header, is 401 with no `Content-Type` and no body.
 A repeated, unknown, expired or logged-out `tokenId` is 401 with `Content-Type: application/json; charset=utf-8` and exactly `{"message":"Missing or invalid token"}`.
-Invalid parameters are 400 with a `PublicApiValidationError` body, `{ "errors": [ { "field", "message" } ] }`, where `field` names the camelCase member or query parameter, `config.<key>` for a token config entry, or is `null` for a malformed body or query string.
+Invalid parameters are 400 with a `PublicApiValidationError` body, `{ "errors": [ { "field", "message" } ] }`, where `field` names the camelCase member or query parameter, or is `null` for a malformed body or query string.
 Every other error is 403, 404, 409 or 422 with a `PublicApiError` body, `{ "message" }`.
 A request body is a JSON object; a member its schema does not define is 400, and so is a member name repeated at any depth, more than 64 nested objects and arrays, or a string that is not valid Unicode, as CONTRACT.agent-identity.md §1 requires of agent-facing bodies.
 Each operation requires the permission the table lists, and a session without it gets 403 before the request is processed.
@@ -127,7 +127,7 @@ An ID that is not a GUID is 404, like an unknown one.
 
 | Method | Path | Permission | Notes |
 |---|---|---|---|
-| POST | `/api/v1/agent-identity/enrollment-token` | Manage | Body `{ name (1..255 scalar values, not blank), maxUses (1..1_000_000), expiresOn? (future, ≤ now + 365 d, default now + 90 d), friendlyNameFormat? (≤ 1024 scalar values), config? }`; 201 → `{ enrollmentToken, token }`, the only response with the full `dvaet1` token. A friendly-name format with an unpaired brace or an unknown placeholder is 400. `config` holds at most 32 string entries, each key matching `^[a-z][a-z0-9_]{0,63}$` other than `version`, `revision` and `agent_channel_url`, each value at most 1024 bytes without control characters. A `config` that would give its identities a config past one channel envelope is 400 on `config`. The first token creates the root, and is 409 when it cannot (`root_key_unavailable`). A base URL that carries a user name or password, which `--path-prefix` cannot produce, is 422 and creates no token, as DVLS answers without an https external URL. |
+| POST | `/api/v1/agent-identity/enrollment-token` | Manage | Body `{ name (1..255 scalar values, not blank), maxUses (1..1_000_000), expiresOn? (future, ≤ now + 365 d, default now + 90 d), friendlyNameFormat? (≤ 1024 scalar values) }`; 201 → `{ enrollmentToken, token }`, the only response with the full `dvaet1` token. A friendly-name format with an unpaired brace or an unknown placeholder is 400. The first token creates the root, and is 409 when it cannot (`root_key_unavailable`). A base URL that carries a user name or password, which `--path-prefix` cannot produce, is 422 and creates no token, as DVLS answers without an https external URL. |
 | GET | `/api/v1/agent-identity/enrollment-token` | View | Page of the tokens that are not deleted; `sortField` is `createdOn` (default), `name` or `expiresOn`, with ties in creation order. |
 | GET | `/api/v1/agent-identity/enrollment-token/{id}` | View | `AgentIdentityEnrollmentToken`, without the full token; 404 when unknown or deleted. |
 | DELETE | `/api/v1/agent-identity/enrollment-token/{id}` | Manage | 204, or 404 when unknown or already deleted; the token can still replay its own existing current key without side effects, while a new key gets `token_invalid`. |

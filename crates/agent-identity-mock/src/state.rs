@@ -199,7 +199,6 @@ pub(crate) struct Token {
     /// Unix nanoseconds, since a management API date-time keeps its fraction of a second.
     pub(crate) expires_at_ns: i128,
     pub(crate) friendly_name_format: Option<String>,
-    pub(crate) config: Option<Value>,
     /// Unix seconds.
     pub(crate) created_at: i64,
     /// Strictly increasing creation order, even for tokens created in the same second.
@@ -965,21 +964,19 @@ impl State {
         self.complete_rotation_if_ready(now);
     }
 
-    /// Returns the effective config of an identity enrolled now with a token whose config is `token_config`: the token's
-    /// fields, `version`, `revision` 1 and, while the channel is offered, `agent_channel_url`
-    /// ([CONTRACT.agent-identity.md][contract], "5.2 `POST enroll`").
+    /// Returns the effective config of an identity enrolled now: `version`, `revision` 1 and, while the channel is
+    /// offered, `agent_channel_url` ([CONTRACT.agent-identity.md][contract], "5.2 `POST enroll`").
+    /// An enrollment token adds nothing to it ([INTENT.agent-identity.md][intent], "Configuration and metadata").
     ///
     /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
-    pub(crate) fn enrollment_config(&self, token_config: Option<&Value>, base_url: &str) -> Value {
-        let mut config = token_config
-            .map(|config| config.as_object().expect("token config is an object").clone())
-            .unwrap_or_default();
+    /// [intent]: ../../../docs/agent-identity/INTENT.agent-identity.md#configuration-and-metadata
+    fn enrollment_config(&self, base_url: &str) -> Value {
+        let mut config = Map::new();
         config.insert(
             "version".to_owned(),
             json!(self.faults.config_version.unwrap_or(CONFIG_VERSION)),
         );
         config.insert("revision".to_owned(), json!(1));
-        config.remove("agent_channel_url");
         if self.channel_offered() {
             let url = match self.faults.malformed_channel_url {
                 Some(MalformedChannelUrl::Http) => base_url.replacen("https://", "http://", 1),
@@ -1048,11 +1045,11 @@ impl State {
         if token.used_count >= token.max_uses {
             return Err(ApiError::token_exhausted());
         }
-        let config = self.enrollment_config(token.config.as_ref(), base_url);
+        let config = self.enrollment_config(base_url);
         if !config_fits_envelope(&config) {
-            // The channel offer and the version override can grow a token's config after the token is created.
+            // Only a base URL close to 64 KiB long can grow the config this far.
             return Err(ApiError::internal(
-                "token config would not fit a 64 KiB agent channel envelope",
+                "enrollment config would not fit a 64 KiB agent channel envelope",
             ));
         }
 
@@ -1557,7 +1554,6 @@ impl State {
         max_uses: u64,
         expires_at_ns: i128,
         friendly_name_format: Option<String>,
-        config: Option<Value>,
         now: i64,
     ) -> (Uuid, [u8; 32]) {
         let mut secret = [0u8; 32];
@@ -1569,7 +1565,6 @@ impl State {
             used_count: 0,
             expires_at_ns,
             friendly_name_format,
-            config,
             created_at: now,
             created_seq: self.next_token_seq,
             created_by: "mock-admin".to_owned(),
@@ -1821,29 +1816,31 @@ mod tests {
     /// CONTRACT.agent-identity.md §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope
     /// would exceed that limit", so an enrollment whose config would be one byte larger creates no identity, and §5.4
     /// counts a token's uses by the identities it created.
-    /// The management API refuses such a token config, but the channel offer and the version override can grow one
-    /// after the token is created.
+    /// Only the channel URL can grow an enrollment config, so the base URL makes it one byte too large.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     #[test]
     fn enrollment_past_the_envelope_limit_creates_no_identity() -> anyhow::Result<()> {
         let now = 1_790_000_000;
-        let base_url = "https://localhost/mock";
         let mut state = State::with_root(now)?;
-        // CONTRACT.agent-identity.md §5.2: the server adds `version`, `revision` and `agent_channel_url` to the token's
-        // fields.
-        let mut config = json!({ "version": 1, "revision": 1, "agent_channel_url": base_url });
-        pad_config(&mut config, ENVELOPE_LIMIT + 1);
-        let token_config = json!({ "pad": config["pad"] });
-        let (token_id, secret) =
-            state.create_token("test".to_owned(), 1, nanos(now + 3600), None, Some(token_config), now);
+        // CONTRACT.agent-identity.md §5.2: an enrollment config holds `version`, `revision` and `agent_channel_url`.
+        let base_url = |path_len: usize| format!("https://localhost/{}", "x".repeat(path_len));
+        let config_len =
+            |base_url: &str| config_update_len(&json!({ "version": 1, "revision": 1, "agent_channel_url": base_url }));
+        let mut path_len = 0;
+        // Each round moves the size by the difference; later rounds correct the lengths' varints, which grow with it.
+        for _ in 0..3 {
+            path_len = path_len + ENVELOPE_LIMIT + 1 - config_len(&base_url(path_len));
+        }
+        let base_url = base_url(path_len);
+        assert_eq!(config_len(&base_url), ENVELOPE_LIMIT + 1);
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
 
         let error = state
-            .enroll(&secret, &csr, Map::new(), now, base_url)
+            .enroll(&secret, &csr, Map::new(), now, &base_url)
             .err()
             .expect("enrollment fails");
         assert_eq!(error.status, 500);
@@ -1930,7 +1927,7 @@ mod tests {
     fn rotation_completes_during_last_identity_revocation() -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1959,7 +1956,7 @@ mod tests {
     fn old_root_certificate_counts_as_active_through_its_not_after() -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -1985,7 +1982,7 @@ mod tests {
     fn config_burst_preserves_stream_and_control_pushes() -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -2048,7 +2045,7 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let expired_root = state.issuing_root().not_after;
-        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(expired_root + 60), None, None, now);
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(expired_root + 60), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -2074,7 +2071,7 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         state.faults.root_key_unavailable = true;
-        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 60), None, None, now);
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 60), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -2092,10 +2089,8 @@ mod tests {
     fn issued_key_origin_and_time_survive_identity_deletion() -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
-        let (owner_token_id, owner_secret) =
-            state.create_token("owner".to_owned(), 1, nanos(now + 3600), None, None, now);
-        let (other_token_id, other_secret) =
-            state.create_token("other".to_owned(), 1, nanos(now + 3600), None, None, now);
+        let (owner_token_id, owner_secret) = state.create_token("owner".to_owned(), 1, nanos(now + 3600), None, now);
+        let (other_token_id, other_secret) = state.create_token("other".to_owned(), 1, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -2140,21 +2135,15 @@ mod tests {
         Ok(())
     }
 
+    /// An enrollment config holds `version`, `revision` and the channel URL, and nothing from the token; a later change
+    /// bumps the revision only when it changes the config.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Configuration and metadata
     #[test]
-    fn enrollment_includes_token_config_at_initial_revision() -> anyhow::Result<()> {
+    fn enrollment_config_takes_nothing_from_the_token() -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
-        let token_config = json!({ "psu_channel_url": "https://psu.example", "product_enabled": true });
-        let (token_id, secret) = state.create_token(
-            "test".to_owned(),
-            1,
-            nanos(now + 3600),
-            None,
-            Some(token_config.clone()),
-            now,
-        );
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -2164,20 +2153,22 @@ mod tests {
             .identity_id;
         let config = &state.identities[&identity_id].config;
         let initial_revision = config["revision"].as_u64().expect("revision is an unsigned integer");
-        assert_eq!(config["version"], 1);
-        assert_eq!(config["agent_channel_url"], "https://localhost/mock");
-        assert_eq!(config["psu_channel_url"], "https://psu.example");
-        assert_eq!(config["product_enabled"], true);
-        assert_eq!(state.tokens[&token_id].config, Some(token_config));
+        assert_eq!(
+            *config,
+            json!({ "version": 1, "revision": initial_revision, "agent_channel_url": "https://localhost/mock" })
+        );
 
         let fields = json!({ "psu_channel_url": "https://psu.example" })
             .as_object()
             .cloned()
             .expect("config fields");
         assert!(state.merge_config_fields(&fields).is_ok());
-        assert_eq!(state.identities[&identity_id].config_revision(), initial_revision);
+        let merged_revision = state.identities[&identity_id].config_revision();
+        assert!(initial_revision < merged_revision);
+        assert!(state.merge_config_fields(&fields).is_ok());
+        assert_eq!(state.identities[&identity_id].config_revision(), merged_revision);
         assert!(state.update_channel_available(false, "https://localhost/mock").is_ok());
-        assert!(initial_revision < state.identities[&identity_id].config_revision());
+        assert!(merged_revision < state.identities[&identity_id].config_revision());
         assert!(state.identities[&identity_id].config.get("agent_channel_url").is_none());
         Ok(())
     }
@@ -2189,7 +2180,7 @@ mod tests {
     fn config_version_override_reaches_live_and_reconnecting_streams() -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
-        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, None, now);
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
@@ -2251,7 +2242,7 @@ mod tests {
     fn token_enrolls_each_csr_key_as_its_own_identity() -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
-        let (token_id, secret) = state.create_token("test".to_owned(), 2, nanos(now + 3600), None, None, now);
+        let (token_id, secret) = state.create_token("test".to_owned(), 2, nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let mut enroll = |vector: &str| -> anyhow::Result<Uuid> {
             let csr = base64::engine::general_purpose::STANDARD

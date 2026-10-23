@@ -18,15 +18,11 @@ use uuid::Uuid;
 use super::{BASE_PATH, Permission, Permissions, TOKEN_ID_HEADER, key_permissions, router};
 use crate::app::{App, nanos, rfc3339};
 use crate::oracle::Rejection;
-use crate::state::{State, StreamPush, config_update_len};
+use crate::state::{State, StreamPush};
 
 const APP_KEY: &str = "admin";
 const APP_SECRET: &str = "secret";
 const DAY: i64 = 24 * 3600;
-
-/// CONTRACT.agent-identity.md §7.1: each side sends channel envelopes "up to 64 KiB (65,536 bytes) of serialized
-/// protobuf".
-const ENVELOPE_LIMIT: usize = 65_536;
 
 /// Returns an app whose clock is frozen at its current second, and that second.
 fn frozen_app() -> anyhow::Result<(Arc<App>, i64)> {
@@ -190,7 +186,7 @@ async fn enroll_with_chain(app: &Arc<App>, metadata: Value) -> anyhow::Result<(U
     let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
     let now = app.now();
     let mut state = app.state.lock().await;
-    let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + DAY), None, None, now);
+    let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + DAY), None, now);
     let metadata = metadata.as_object().cloned().expect("metadata is an object");
     let enrolled = state
         .enroll(&secret, &csr, metadata, now, &app.base_url)
@@ -223,10 +219,6 @@ fn names(page: &Value) -> Vec<&str> {
         .iter()
         .map(|item| item["name"].as_str().expect("token name"))
         .collect()
-}
-
-fn config_entries(count: usize) -> Value {
-    (0..count).map(|i| (format!("key_{i}"), json!("v"))).collect()
 }
 
 // ==== Authentication and permissions ====
@@ -559,7 +551,7 @@ async fn repeated_token_id_header_is_401_missing_or_invalid_token() -> anyhow::R
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken` returns `201` with an
 /// `AgentIdentityEnrollmentTokenCreated`, whose token `GetAgentIdentityEnrollmentToken` never returns.
-/// `expiresOn` defaults to 90 days ahead, and a token without a friendly-name format or config omits them.
+/// `expiresOn` defaults to 90 days ahead, and a token without a friendly-name format omits it.
 // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 #[tokio::test]
@@ -599,21 +591,19 @@ async fn create_token_returns_the_full_token_only_once() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// `AgentIdentityEnrollmentToken.friendlyNameFormat` and `config` echo the created token's.
+/// `AgentIdentityEnrollmentToken.friendlyNameFormat` echoes the created token's.
 // oracle: spec DVLS public OpenAPI document §AgentIdentityEnrollmentToken
 #[tokio::test]
-async fn create_token_keeps_its_format_and_config() -> anyhow::Result<()> {
+async fn create_token_keeps_its_format() -> anyhow::Result<()> {
     let app = App::for_test()?;
     let body = json!({
         "name": "t",
         "maxUses": 1,
         "friendlyNameFormat": "{hostname}-{os_name}",
-        "config": { "site": "paris" },
     });
     let (status, created) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
     assert_eq!(status, 201);
     assert_eq!(created["enrollmentToken"]["friendlyNameFormat"], "{hostname}-{os_name}");
-    assert_eq!(created["enrollmentToken"]["config"], json!({ "site": "paris" }));
     Ok(())
 }
 
@@ -624,9 +614,6 @@ async fn create_token_keeps_its_format_and_config() -> anyhow::Result<()> {
 #[case::expiry_365_days_ahead(|now| json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now + 365 * DAY) }))]
 #[case::name_255_scalar_values(|_| json!({ "name": "é".repeat(255), "maxUses": 1 }))]
 #[case::format_1024_scalar_values(|_| json!({ "name": "t", "maxUses": 1, "friendlyNameFormat": "é".repeat(1024) }))]
-#[case::config_32_entries(|_| json!({ "name": "t", "maxUses": 1, "config": config_entries(32) }))]
-#[case::config_key_64_bytes(|_| json!({ "name": "t", "maxUses": 1, "config": { "k".repeat(64): "v" } }))]
-#[case::config_value_1024_bytes(|_| json!({ "name": "t", "maxUses": 1, "config": { "site": "v".repeat(1024) } }))]
 #[tokio::test]
 async fn create_token_accepts_its_bounds(#[case] body: fn(i64) -> Value) -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
@@ -689,24 +676,10 @@ async fn token_expiry_keeps_its_fraction_of_a_second() -> anyhow::Result<()> {
     |_| json!({ "name": "t", "maxUses": 1, "friendlyNameFormat": "é".repeat(1025) }),
     "friendlyNameFormat"
 )]
-#[case::config_not_an_object(|_| json!({ "name": "t", "maxUses": 1, "config": "site=paris" }), "config")]
-#[case::config_33_entries(|_| json!({ "name": "t", "maxUses": 1, "config": config_entries(33) }), "config")]
-#[case::config_reserved_key(
-    |_| json!({ "name": "t", "maxUses": 1, "config": { "agent_channel_url": "https://elsewhere.example" } }),
-    "config.agent_channel_url"
-)]
-#[case::config_uppercase_key(|_| json!({ "name": "t", "maxUses": 1, "config": { "Site": "x" } }), "config.Site")]
-#[case::config_key_with_a_dash(|_| json!({ "name": "t", "maxUses": 1, "config": { "site-id": "x" } }), "config.site-id")]
-#[case::config_number_value(|_| json!({ "name": "t", "maxUses": 1, "config": { "site": 1 } }), "config.site")]
-#[case::config_control_character(
-    |_| json!({ "name": "t", "maxUses": 1, "config": { "site": "a\u{1}b" } }),
-    "config.site"
-)]
-#[case::config_value_1025_bytes(
-    |_| json!({ "name": "t", "maxUses": 1, "config": { "site": "v".repeat(1025) } }),
-    "config.site"
-)]
 #[case::unknown_member(|now| json!({ "name": "t", "maxUses": 1, "expiresAt": rfc3339(now + DAY) }), "expiresAt")]
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Configuration and metadata
+#[case::config(|_| json!({ "name": "t", "maxUses": 1, "config": { "site": "paris" } }), "config")]
 #[tokio::test]
 async fn create_token_refuses_an_invalid_member(
     #[case] body: fn(i64) -> Value,
@@ -719,96 +692,23 @@ async fn create_token_refuses_an_invalid_member(
     Ok(())
 }
 
-/// `AgentIdentityEnrollmentTokenCreateDTO.config` keys match `^[a-z][a-z0-9_]{0,63}$`, so at most 64 bytes.
-// oracle: spec DVLS public OpenAPI document §AgentIdentityEnrollmentTokenCreateDTO
-#[tokio::test]
-async fn create_token_refuses_a_65_byte_config_key() -> anyhow::Result<()> {
-    let app = App::for_test()?;
-    let key = "k".repeat(65);
-    let body = json!({ "name": "t", "maxUses": 1, "config": { key.clone(): "v" } });
-    let (status, refused) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
-    assert_eq!(status, 400);
-    assert_eq!(error_fields(&refused), [json!(format!("config.{key}"))]);
-    Ok(())
-}
-
-/// Returns a token config whose identities, enrolled with `base_url` offering the channel, start with a config that
-/// travels in a `ConfigUpdate` envelope of `envelope_len` bytes.
-/// It stays within `AgentIdentityEnrollmentTokenCreateDTO.config`'s limits, 32 entries of at most 1024 bytes, since an
-/// escaped `"` takes two bytes of JSON.
-fn token_config_for_envelope(base_url: &str, envelope_len: usize) -> Value {
-    // CONTRACT.agent-identity.md §5.2: the server adds `version`, `revision` and `agent_channel_url` to the token's
-    // fields.
-    let identity_config_len = |token_config: &serde_json::Map<String, Value>| {
-        let mut config = token_config.clone();
-        config.insert("version".to_owned(), json!(1));
-        config.insert("revision".to_owned(), json!(1));
-        config.insert("agent_channel_url".to_owned(), json!(base_url));
-        config_update_len(&Value::Object(config))
-    };
-    let mut config: serde_json::Map<String, Value> = (0..31)
-        .map(|i| (format!("quotes_{i}"), json!("\"".repeat(1024))))
-        .collect();
-    config.insert("last".to_owned(), json!("x".repeat(1024)));
-    let quotes = envelope_len - identity_config_len(&config);
-    let last = format!("{}{}", "\"".repeat(quotes), "x".repeat(1024 - quotes));
-    config.insert("last".to_owned(), json!(last));
-    assert_eq!(identity_config_len(&config), envelope_len);
-    Value::Object(config)
-}
-
-/// CONTRACT.agent-identity.md §7.1 holds no effective config past one channel envelope, so a token whose identities
-/// would start with a config one byte past it is refused on `config`, in a `PublicApiValidationError`, and not
-/// created.
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
-// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
-#[tokio::test]
-async fn create_token_refuses_a_config_past_the_envelope_limit() -> anyhow::Result<()> {
-    let app = App::for_test()?;
-    let config = token_config_for_envelope(&app.base_url, ENVELOPE_LIMIT + 1);
-    let body = json!({ "name": "t", "maxUses": 1, "config": config });
-    let (status, refused) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
-    assert_eq!(status, 400);
-    assert_eq!(error_fields(&refused), [json!("config")]);
-    assert!(app.state.lock().await.tokens.is_empty());
-    Ok(())
-}
-
-/// CONTRACT.agent-identity.md §7.1 accepts envelopes up to 64 KiB, so a token whose identities start with a config
-/// whose `ConfigUpdate` envelope is exactly that size is created.
-// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
-// oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
-#[tokio::test]
-async fn create_token_accepts_a_config_at_the_envelope_limit() -> anyhow::Result<()> {
-    let app = App::for_test()?;
-    let config = token_config_for_envelope(&app.base_url, ENVELOPE_LIMIT);
-    let body = json!({ "name": "t", "maxUses": 1, "config": config });
-    let (status, created) = call(&app, Method::POST, "/enrollment-token", Some(body)).await?;
-    assert_eq!(status, 201, "{created}");
-    Ok(())
-}
-
 /// The mock parses management API bodies with the agent-facing body parser, which refuses a member name repeated at any
 /// depth, as its README states.
 /// No DVLS document decides repeated member names; the test guards that the parser stays in place.
 // oracle: mutant a management API body parsed without refusing a repeated member name
 #[rstest]
-#[case::distinct_members(r#"{"flag":"first","other":"second"}"#, 201)]
-#[case::repeated_member(r#"{"flag":"first","flag":"second"}"#, 400)]
+#[case::distinct_members(r#"{"name":"t","maxUses":1}"#, 201)]
+#[case::repeated_member(r#"{"name":"t","name":"u","maxUses":1}"#, 400)]
 #[tokio::test]
-async fn create_token_refuses_a_repeated_member_name(
-    #[case] config: &str,
-    #[case] expected: u16,
-) -> anyhow::Result<()> {
+async fn create_token_refuses_a_repeated_member_name(#[case] body: &str, #[case] expected: u16) -> anyhow::Result<()> {
     let app = App::for_test()?;
     let token_id = login(&app, APP_KEY).await?;
-    let body = format!(r#"{{"name":"t","maxUses":1,"config":{config}}}"#);
     let (status, _) = send(
         &app,
         Method::POST,
         "/enrollment-token",
         &[(TOKEN_ID_HEADER, &token_id)],
-        Some(body),
+        Some(body.to_owned()),
     )
     .await?;
     assert_eq!(status, expected);

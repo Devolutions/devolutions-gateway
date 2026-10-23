@@ -779,7 +779,7 @@ mod tests {
             let csr = STANDARD.decode(vector["csr"].as_str().unwrap_or_default())?;
             let mut state = app.state.lock().await;
             let now = app.now();
-            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
             let identity_id = state
                 .enroll(&secret, &csr, Map::new(), now, &app.base_url)
                 .expect("enrollment succeeds")

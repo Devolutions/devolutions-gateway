@@ -299,7 +299,7 @@ mod tests {
             app.state
                 .lock()
                 .await
-                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
         let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
         let headers = vec![authorization.as_str(); header_count];
         let response = post(&app, "enroll", &headers, b"not json".to_vec()).await;
@@ -319,7 +319,7 @@ mod tests {
             app.state
                 .lock()
                 .await
-                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
         let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
@@ -346,7 +346,6 @@ mod tests {
                 "test".to_owned(),
                 1,
                 crate::app::nanos(root_not_after + 60),
-                None,
                 None,
                 root_not_after,
             );
@@ -409,7 +408,7 @@ mod tests {
             app.state
                 .lock()
                 .await
-                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
 
         let (status, faults) = post_json(&app, FAULTS, &[], json!({ "config_version": 7 }).to_string()).await;
@@ -446,7 +445,7 @@ mod tests {
         let mut stored_revision = {
             let mut state = app.state.lock().await;
             *state = State::with_root(now)?;
-            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+            let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
             let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
             let identity_id = state
                 .enroll(&secret, &csr, Map::new(), now, &app.base_url)
@@ -546,8 +545,7 @@ mod tests {
         let now = app.now();
         {
             let mut state = app.state.lock().await;
-            let (token_id, _) =
-                state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, None, now);
+            let (token_id, _) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
             state.token_hashes.clear();
             state.token_hashes.insert(stored_hash, token_id);
         }

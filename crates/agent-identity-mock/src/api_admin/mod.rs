@@ -23,7 +23,6 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::app::{App, nanos, parse_date_time, rfc3339, rfc3339_nanos};
-use crate::channel::config_fits_envelope;
 use crate::oracle::CertStatus;
 use crate::state::{ApiError, Cert, Identity, IdentityStatus, State, Token};
 
@@ -43,9 +42,6 @@ const MAX_TOKEN_LIFETIME_SECS: i64 = 365 * SECS_PER_DAY;
 const MAX_TOKEN_USES: i64 = 1_000_000;
 const MAX_TOKEN_NAME_CHARS: usize = 255;
 const MAX_FRIENDLY_NAME_FORMAT_CHARS: usize = 1024;
-const MAX_TOKEN_CONFIG_ENTRIES: usize = 32;
-const MAX_TOKEN_CONFIG_KEY_BYTES: usize = 64;
-const MAX_TOKEN_CONFIG_VALUE_BYTES: usize = 1024;
 const MAX_CERTIFICATE_LIFETIME_DAYS: i64 = 365;
 const MAX_ROTATION_NOTIFICATIONS_PER_SECOND: i64 = 1000;
 
@@ -505,60 +501,13 @@ fn token_view(token: &Token, now: i64) -> Value {
     if let Some(format) = &token.friendly_name_format {
         view["friendlyNameFormat"] = json!(format);
     }
-    if let Some(config) = &token.config {
-        view["config"] = config.clone();
-    }
     view
-}
-
-/// Checks `AgentIdentityEnrollmentTokenCreateDTO.config`: at most 32 entries, each key matching
-/// `^[a-z][a-z0-9_]{0,63}$` and other than `version`, `revision` and `agent_channel_url`, each value a string of at most
-/// 1024 UTF-8 bytes without control characters.
-fn validate_token_config(config: &Value, errors: &mut FieldErrors) {
-    let Some(entries) = config.as_object() else {
-        errors.add("config", "config must be an object");
-        return;
-    };
-    if MAX_TOKEN_CONFIG_ENTRIES < entries.len() {
-        errors.add(
-            "config",
-            format!("config allows at most {MAX_TOKEN_CONFIG_ENTRIES} entries"),
-        );
-    }
-    for (key, value) in entries {
-        let field = format!("config.{key}");
-        if !is_config_key(key) {
-            errors.add(&field, "config key must match ^[a-z][a-z0-9_]{0,63}$");
-        } else if matches!(key.as_str(), "version" | "revision" | "agent_channel_url") {
-            errors.add(&field, "config key is reserved");
-        }
-        match value.as_str() {
-            None => errors.add(&field, "config value must be a string"),
-            Some(text) if MAX_TOKEN_CONFIG_VALUE_BYTES < text.len() => {
-                errors.add(
-                    &field,
-                    format!("config value must be at most {MAX_TOKEN_CONFIG_VALUE_BYTES} bytes"),
-                );
-            }
-            Some(text) if text.chars().any(char::is_control) => {
-                errors.add(&field, "config value must not contain control characters");
-            }
-            Some(_) => {}
-        }
-    }
-}
-
-fn is_config_key(key: &str) -> bool {
-    let mut chars = key.chars();
-    chars.next().is_some_and(|first| first.is_ascii_lowercase())
-        && key.len() <= MAX_TOKEN_CONFIG_KEY_BYTES
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`.
 async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> ManagementResult {
     app.tick().await;
-    let body = parse_body(&body, &["name", "maxUses", "expiresOn", "friendlyNameFormat", "config"])?;
+    let body = parse_body(&body, &["name", "maxUses", "expiresOn", "friendlyNameFormat"])?;
     let now = app.now();
     let mut errors = FieldErrors::default();
 
@@ -596,10 +545,6 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
             errors.add("friendlyNameFormat", message);
         }
     }
-    let config = member(&body, "config");
-    if let Some(config) = config {
-        validate_token_config(config, &mut errors);
-    }
     errors.finish()?;
     let name = name.expect("a missing name is a field error");
     let max_uses = max_uses.expect("a missing maxUses is a field error");
@@ -611,19 +556,12 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
     }
 
     let mut state = app.state.lock().await;
-    if !config_fits_envelope(&state.enrollment_config(config, &app.base_url)) {
-        return Err(ManagementError::invalid(
-            "config",
-            "config would not fit a 64 KiB agent channel envelope",
-        ));
-    }
     state.ensure_root(now)?;
     let (id, secret) = state.create_token(
         name.to_owned(),
         u64::try_from(max_uses).expect("maxUses is at least 1"),
         expires_at_ns,
         friendly_name_format.map(ToOwned::to_owned),
-        config.cloned(),
         now,
     );
     let view = token_view(&state.tokens[&id], now);
