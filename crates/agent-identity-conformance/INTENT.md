@@ -38,8 +38,8 @@ The mock implements the contract's agent-facing operations and channel independe
 - **Tokens:**
   - use cap, including concurrent enrollments;
   - a failed enrollment consumes no use;
-  - distinct errors for deleted, exhausted and expired tokens;
-  - a lost enrollment response is recoverable with the same token and key, even after the token is exhausted, expired or deleted, and the replay changes nothing;
+  - distinct errors for revoked, exhausted and expired tokens;
+  - a lost enrollment response is recoverable with the same token and key, even after the token is exhausted, expired or revoked, and the replay changes nothing;
   - no public key is ever certified twice.
 - **Pending-enrollment files:**
   - consumed and deleted on success and on permanent errors, kept on transient ones;
