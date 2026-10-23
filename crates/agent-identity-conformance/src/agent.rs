@@ -2307,6 +2307,8 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
         ("token_expired", "token_expired"),
         ("token_malformed", "token_malformed"),
         ("token_malformed, user name in u", "token_malformed"),
+        ("token_malformed, empty user name in u", "token_malformed"),
+        ("token_malformed, @ in the path of u", "token_malformed"),
     ] {
         if reason == "token_expired" && !ctx.mock() {
             continue;
@@ -2314,6 +2316,23 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
         with_agent(ctx.clone(), None, true, async move |case| {
             let target = case.ctx.target.clone();
             let token = new_token(case, 2).await?;
+            // The rewritten token keeps the valid bag fields and secret, so only its new `u` can make it malformed.
+            let (head, secret) = token.text.rsplit_once('.').context("token structure")?;
+            let (_, bag) = head.rsplit_once('.').context("token bag")?;
+            let route: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(bag)?)?;
+            let secret = secret.to_owned();
+            let rest = field(&route, "u")?
+                .strip_prefix("https://")
+                .context("token base URL is not https")?
+                .to_owned();
+            let with_u = |u: String| -> anyhow::Result<String> {
+                let mut route = route.clone();
+                route["u"] = json!(u);
+                Ok(format!(
+                    "dvaet1.{}.{secret}",
+                    URL_SAFE_NO_PAD.encode(serde_json::to_vec(&route)?)
+                ))
+            };
             let (pending, attempted, identities, used) = match reason {
                 "token_invalid" => {
                     let (prefix, _) = token.text.rsplit_once('.').context("token structure")?;
@@ -2348,24 +2367,16 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                 }
                 "token_malformed, user name in u" => {
                     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-                    // The bag decodes, and the token keeps the valid secret, so only the user name in `u` makes it malformed.
-                    let (prefix, secret) = token.text.rsplit_once('.').context("token structure")?;
-                    let (_, bag) = prefix.rsplit_once('.').context("token bag")?;
-                    let mut route: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(bag)?)?;
-                    let base_url = field(&route, "u")?.to_owned();
-                    let authority = base_url
-                        .strip_prefix("https://")
-                        .context("token base URL is not https")?;
-                    route["u"] = json!(format!("https://user@{authority}"));
-                    (
-                        format!(
-                            "dvaet1.{}.{secret}",
-                            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&route)?)
-                        ),
-                        token,
-                        0,
-                        0,
-                    )
+                    (with_u(format!("https://user@{rest}"))?, token, 0, 0)
+                }
+                "token_malformed, empty user name in u" => {
+                    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+                    (with_u(format!("https://@{rest}"))?, token, 0, 0)
+                }
+                "token_malformed, @ in the path of u" => {
+                    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+                    // `u` may carry a path, so the `@` lies outside the authority, where a URL parser sees no user name.
+                    (with_u(format!("https://{rest}/a@b"))?, token, 0, 0)
                 }
                 _ => anyhow::bail!("unknown permanent error"),
             };
