@@ -578,7 +578,7 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
         .into_response())
 }
 
-/// Returns whether `url`, read as text, can be an enrollment token's `u`: it begins with `https://` and contains no `@`
+/// Returns whether `url`, read as text, begins with `https://` and contains no `@`, as an enrollment token's `u` must
 /// ([CONTRACT.agent-identity.md][contract], "2. Enrollment token").
 ///
 /// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token

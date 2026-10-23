@@ -874,7 +874,6 @@ fn csr_vector(name: &str) -> anyhow::Result<Vec<u8>> {
 /// Revoking an enrollment token is `204`, and so is revoking it again; a revoked token stays stored with its name, so it
 /// is still read and listed.
 // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
-// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment tokens
 // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 #[tokio::test]
 async fn revoked_token_stays_readable_and_listed() -> anyhow::Result<()> {
@@ -921,6 +920,7 @@ async fn revoked_token_state_is_revoked(
     }
     app.clock.freeze_at(now + later_secs);
     let path = format!("/enrollment-token/{id}");
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     assert_eq!(call(&app, Method::GET, &path, None).await?.1["state"], before);
 
     assert_eq!(call(&app, Method::POST, &format!("{path}/revoke"), None).await?.0, 204);
@@ -967,6 +967,7 @@ async fn revoked_token_enrolls_no_new_identity(#[case] uses: usize, #[case] late
 
 /// The mock keeps every token it created, so it offers no operation that deletes one.
 // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+// oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
 #[tokio::test]
 async fn token_has_no_delete_operation() -> anyhow::Result<()> {
     let app = App::for_test()?;
