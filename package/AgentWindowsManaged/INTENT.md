@@ -3,7 +3,8 @@
 - The token is passed as the `IDENTITY_ENROLLMENT_TOKEN` property, which is hidden so that it never appears in installer logs.
 - The installer also reads the token from a file named by the `IDENTITY_ENROLLMENT_TOKEN_FILE` property, so that the token stays off msiexec's command line, which security tools and process auditing record and Intune shows in the app's install command.
   A relative path resolves against the installer's own folder, and the token is the file's first line.
-  Setting both properties, or naming a missing or empty file, fails the install, and the installer never deletes the file.
+  Setting both properties, or naming a missing file or one whose first line holds no token, fails the install, and the installer never deletes the file.
+  Only a first install or a major upgrade reads the file.
 - The MSI hands the token to `identity enroll -` running as SYSTEM.
   It never writes the pending-enrollment file itself and never enrolls by itself.
 - Given a token, the MSI runs `identity enroll -` on a first install or a major upgrade, never on a repair, a maintenance change or an uninstall, and never without a token.
