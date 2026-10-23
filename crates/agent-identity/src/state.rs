@@ -230,6 +230,15 @@ impl Store {
         self.write_identity_locked(Some(previous), identity)
     }
 
+    /// Stores the identity an enrollment returned, replacing any identity held for its authority.
+    ///
+    /// The held identity is read and replaced under one state lock, so no concurrent change lands between the two.
+    pub fn store_enrolled_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
+        let _lock = self.lock()?;
+        let held = self.read_stored_identity(identity.authority_id)?;
+        self.write_identity_locked(held.as_ref(), identity)
+    }
+
     fn write_identity_locked(
         &self,
         previous: Option<&StoredIdentity>,

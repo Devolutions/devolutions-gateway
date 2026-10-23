@@ -432,11 +432,7 @@ async fn enroll_pending(
                     previous: None,
                 },
             };
-            if let Some(previous) = store.read_identity(identity.authority_id)? {
-                store.replace_identity(&previous, &identity)?;
-            } else {
-                store.write_identity(&identity)?;
-            }
+            store.store_enrolled_identity(&identity)?;
             info!(authority_id = %identity.authority_id, identity_id = %identity.identity_id, "Agent Identity enrolled");
             // UNTESTED: the identity is stored, so its runner starts even when cleanup fails.
             // A remaining pending file is cleaned up when it is polled again, and a remaining in-progress record at the
