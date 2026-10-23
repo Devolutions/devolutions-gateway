@@ -12,7 +12,8 @@ use url::Url;
 pub enum ChannelUrl {
     Absent,
     Usable(Url),
-    /// Present but not an absolute `https` URL without a user name or password, a query or a fragment.
+    /// Present but not an absolute `https` URL without a user name or password, a query or a fragment, read as text
+    /// like a token's `u`.
     Malformed,
 }
 
@@ -134,8 +135,8 @@ mod tests {
     #[test]
     fn only_an_absolute_https_channel_url_without_credentials_query_or_fragment_is_usable() {
         // `CONTRACT.agent-identity.md` §5.2: `agent_channel_url` must be an absolute `https` URL without a user name or
-        // password, a query or a fragment, and any other value is treated as absent with a warning; §1 accepts `null`
-        // for an absent optional field.
+        // password, a query or a fragment, read as text like `u` (§2: it begins with `https://` and contains no `@`),
+        // and any other value is treated as absent with a warning; §1 accepts `null` for an absent optional field.
         let config = |url: Value| json!({"version": 1, "revision": 1, "agent_channel_url": url});
         assert_eq!(channel_url(&json!({"version": 1, "revision": 1})), ChannelUrl::Absent);
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
@@ -144,25 +145,29 @@ mod tests {
             channel_url(&config(json!("https://host/dvls"))),
             ChannelUrl::Usable(Url::parse("https://host/dvls").expect("valid test URL"))
         );
-        for malformed in [
+        let malformed = [
             json!("http://host/dvls"),
             json!("https://host/dvls?x=1"),
             json!("https://host/dvls#part"),
             json!("https://user@host/dvls"),
             json!("https://user:pw@host/dvls"),
             json!("https://:pw@host/dvls"),
-            // An `@` in the authority counts as a user name, even with nothing before it.
             json!("https://@host/dvls"),
             json!("https://:@host/dvls"),
+            json!("https:@host/dvls"),
+            json!("https:host/dvls"),
+            json!("https:/@host/dvls"),
+            json!(r"https:\\@host/dvls"),
+            json!("https://host/p@x"),
+            json!("HTTPS://host/dvls"),
             json!("/dvls"),
             json!(42),
-        ] {
-            assert_eq!(
-                channel_url(&config(malformed.clone())),
-                ChannelUrl::Malformed,
-                "{malformed}"
-            );
-        }
+        ];
+        let usable: Vec<&Value> = malformed
+            .iter()
+            .filter(|url| channel_url(&config((*url).clone())) != ChannelUrl::Malformed)
+            .collect();
+        assert!(usable.is_empty(), "{usable:?}");
     }
 
     // oracle: intent crates/agent-identity/INTENT.md §Schedules
