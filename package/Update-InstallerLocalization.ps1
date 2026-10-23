@@ -52,12 +52,17 @@ foreach ($project in $projects) {
     # Use a temporary copy of the template (it must live next to the original: outputs are written beside the template).
     $temporaryTemplate = Join-Path $resources "_Strings.$([guid]::NewGuid().ToString('N')).tt"
     $text = [IO.File]::ReadAllText($template).Replace('$(SolutionDir)Resources\Newtonsoft.Json.dll', $newtonsoft)
+    # TextTransform.exe fails to compile a template with LF line endings (CS1519), so use CRLF whatever the checkout has.
+    $text = $text -replace '\r?\n', "`r`n"
     [IO.File]::WriteAllText($temporaryTemplate, $text)
 
     # T4 drops the byte order mark that some existing files carry; keep each file as it was.
+    # On failure T4 still overwrites its output with `ErrorGeneratingOutput`, so keep the original bytes to restore them.
+    $original = @{}
     $hadBom = @{}
     Get-ChildItem $resources -Include '*.wxl', 'Strings.g.cs' -File -Recurse | ForEach-Object {
         $bytes = [IO.File]::ReadAllBytes($_.FullName)
+        $original[$_.FullName] = $bytes
         $hadBom[$_.FullName] = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
     }
 
@@ -65,7 +70,11 @@ foreach ($project in $projects) {
         & $TextTransformPath $temporaryTemplate -out (Join-Path $resources 'Strings.g.cs')
 
         if ($LASTEXITCODE -ne 0) {
-            throw "TextTransform failed for $project"
+            foreach ($path in $original.Keys) {
+                [IO.File]::WriteAllBytes($path, $original[$path])
+            }
+
+            throw "TextTransform failed for $project; generated files were left unchanged"
         }
     }
     finally {
