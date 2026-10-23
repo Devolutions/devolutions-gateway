@@ -60,7 +60,10 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route(&path("/enrollment-token"), requires(Manage, post(create_token)))
         .route(&path("/enrollment-token"), requires(View, get(list_tokens)))
         .route(&path("/enrollment-token/{id}"), requires(View, get(get_token)))
-        .route(&path("/enrollment-token/{id}"), requires(Manage, delete(delete_token)))
+        .route(
+            &path("/enrollment-token/{id}/revoke"),
+            requires(Manage, post(revoke_token)),
+        )
         .route(&path("/rotation"), requires(View, get(get_rotation)))
         .route(&path("/rotation"), requires(RotateRoot, post(start_rotation)))
         .route(&path("/settings"), requires(View, get(get_settings)))
@@ -598,11 +601,7 @@ async fn list_tokens(
 
     let state = app.state.lock().await;
     let now = app.now();
-    let mut tokens: Vec<&Token> = state
-        .tokens
-        .values()
-        .filter(|token| token.deleted_at.is_none())
-        .collect();
+    let mut tokens: Vec<&Token> = state.tokens.values().collect();
     match paging.sort_field {
         "name" => tokens.sort_by(|a, b| {
             a.name
@@ -628,22 +627,20 @@ async fn get_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<String>) 
     let token = state
         .tokens
         .get(&id)
-        .filter(|token| token.deleted_at.is_none())
         .ok_or_else(|| ManagementError::not_found(TOKEN_NOT_FOUND))?;
     Ok(Json(token_view(token, app.now())).into_response())
 }
 
-/// `AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken`.
-async fn delete_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<String>) -> ManagementResult {
+/// Revokes an enrollment token; revoking a revoked token changes nothing.
+async fn revoke_token(AxumState(app): AxumState<Arc<App>>, Path(id): Path<String>) -> ManagementResult {
     app.tick().await;
     let id = parse_id(&id, TOKEN_NOT_FOUND)?;
     let mut state = app.state.lock().await;
     let token = state
         .tokens
         .get_mut(&id)
-        .filter(|token| token.deleted_at.is_none())
         .ok_or_else(|| ManagementError::not_found(TOKEN_NOT_FOUND))?;
-    token.deleted_at = Some(app.now());
+    token.revoked_at.get_or_insert_with(|| app.now());
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

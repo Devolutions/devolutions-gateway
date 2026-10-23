@@ -60,7 +60,7 @@ impl ApiError {
     }
 
     pub(crate) fn token_invalid() -> Self {
-        Self::new(401, "token_invalid", "unknown or deleted token")
+        Self::new(401, "token_invalid", "unknown or revoked token")
     }
 
     pub(crate) fn token_exhausted() -> Self {
@@ -204,8 +204,8 @@ pub(crate) struct Token {
     /// Strictly increasing creation order, even for tokens created in the same second.
     pub(crate) created_seq: u64,
     pub(crate) created_by: String,
-    /// Deletion keeps the secret hash for same-token idempotent recovery.
-    pub(crate) deleted_at: Option<i64>,
+    /// Unix seconds; a revoked token keeps its secret hash for same-token idempotent recovery.
+    pub(crate) revoked_at: Option<i64>,
 }
 
 impl Token {
@@ -1021,7 +1021,7 @@ impl State {
                     certificate_chain: chain,
                 });
             }
-            if token.deleted_at.is_some() {
+            if token.revoked_at.is_some() {
                 return Err(ApiError::token_invalid());
             }
             // No token is kept for a deleted identity's key, so it gets `identity_revoked` whatever the token (§2.1).
@@ -1036,7 +1036,7 @@ impl State {
             ));
         }
 
-        if token.deleted_at.is_some() {
+        if token.revoked_at.is_some() {
             return Err(ApiError::token_invalid());
         }
         if nanos(now) >= token.expires_at_ns {
@@ -1568,7 +1568,7 @@ impl State {
             created_at: now,
             created_seq: self.next_token_seq,
             created_by: "mock-admin".to_owned(),
-            deleted_at: None,
+            revoked_at: None,
         };
         self.next_token_seq += 1;
         use sha2::Digest as _;
@@ -2107,22 +2107,22 @@ mod tests {
                 .code
         };
 
-        state.tokens.get_mut(&owner_token_id).expect("owner token").deleted_at = Some(now);
+        state.tokens.get_mut(&owner_token_id).expect("owner token").revoked_at = Some(now);
         assert_eq!(
             state
                 .enroll(&owner_secret, &csr, Map::new(), now, "https://localhost/mock")
-                .expect("deleted token replays its current key")
+                .expect("revoked token replays its current key")
                 .identity_id,
             identity_id
         );
-        state.tokens.get_mut(&other_token_id).expect("other token").deleted_at = Some(now);
+        state.tokens.get_mut(&other_token_id).expect("other token").revoked_at = Some(now);
         assert_eq!(reject(&mut state, &other_secret), "token_invalid");
-        state.tokens.get_mut(&other_token_id).expect("other token").deleted_at = None;
+        state.tokens.get_mut(&other_token_id).expect("other token").revoked_at = None;
         assert_eq!(reject(&mut state, &other_secret), "invalid_request");
 
         state.revoke(identity_id, now).expect("revocation succeeds");
         assert_eq!(reject(&mut state, &owner_secret), "token_invalid");
-        state.tokens.get_mut(&owner_token_id).expect("owner token").deleted_at = None;
+        state.tokens.get_mut(&owner_token_id).expect("owner token").revoked_at = None;
         assert_eq!(reject(&mut state, &owner_secret), "identity_revoked");
         assert_eq!(reject(&mut state, &other_secret), "invalid_request");
 

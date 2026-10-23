@@ -437,9 +437,10 @@ fn invalid_key_is_refused(#[case] key: &str) {
     "manage+revoke+rotate-root",
     "AgentIdentityView"
 )]
-#[case::delete_token(
-    Method::DELETE,
-    "/enrollment-token/{id}",
+// oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+#[case::revoke_token(
+    Method::POST,
+    "/enrollment-token/{id}/revoke",
     "manage",
     "view+revoke+rotate-root",
     "AgentIdentityManage"
@@ -841,24 +842,74 @@ async fn list_tokens_sorts_by_creation_time(#[case] query: &str, #[case] expecte
     Ok(())
 }
 
-/// `AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken` returns `204`, then `404` "already deleted"; a deleted
-/// token is neither returned nor listed.
-// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken
+/// Revoking an enrollment token is `204`, and so is revoking it again; a revoked token stays stored with its name, so it
+/// is still read and listed.
+// oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+// oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment tokens
 #[tokio::test]
-async fn deleted_token_is_gone() -> anyhow::Result<()> {
+async fn revoked_token_stays_readable_and_listed() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let id = create_token(&app, json!({ "name": "revoked", "maxUses": 1 })).await?;
+    let path = format!("/enrollment-token/{id}");
+    let revoke = format!("{path}/revoke");
+    assert_eq!(call(&app, Method::POST, &revoke, None).await?, (204, Value::Null));
+    assert_eq!(call(&app, Method::POST, &revoke, None).await?, (204, Value::Null));
+
+    let (status, read) = call(&app, Method::GET, &path, None).await?;
+    assert_eq!(
+        (status, &read["id"], &read["name"]),
+        (200, &json!(id), &json!("revoked"))
+    );
+    let (_, page) = call(&app, Method::GET, "/enrollment-token", None).await?;
+    assert_eq!(names(&page), ["revoked"]);
+    Ok(())
+}
+
+/// A revoked token is `token_invalid` for a key it never enrolled.
+// oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+#[tokio::test]
+async fn revoked_token_enrolls_no_new_identity() -> anyhow::Result<()> {
+    let app = App::for_test()?;
+    let (status, created) = call(
+        &app,
+        Method::POST,
+        "/enrollment-token",
+        Some(json!({ "name": "t", "maxUses": 1 })),
+    )
+    .await?;
+    assert_eq!(status, 201, "{created}");
+    let id = created["enrollmentToken"]["id"].as_str().context("token ID")?;
+    let (_, secret) = created["token"]
+        .as_str()
+        .and_then(|token| token.rsplit_once('.'))
+        .context("dvaet1 token")?;
+    let secret: [u8; 32] = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(secret)?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("token secret is not 32 bytes"))?;
+    let revoke = format!("/enrollment-token/{id}/revoke");
+    assert_eq!(call(&app, Method::POST, &revoke, None).await?.0, 204);
+
+    let vectors: Value = serde_json::from_str(include_str!("../../../../docs/agent-identity/test-vectors.json"))?;
+    let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().context("valid CSR vector")?)?;
+    let mut state = app.state.lock().await;
+    let refused = state
+        .enroll(&secret, &csr, serde_json::Map::new(), app.now(), &app.base_url)
+        .err()
+        .context("enrollment succeeded")?;
+    assert_eq!((refused.status, refused.code), (401, "token_invalid"));
+    assert!(state.identities.is_empty());
+    Ok(())
+}
+
+/// The mock keeps every token it created, so it offers no operation that deletes one.
+// oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+#[tokio::test]
+async fn token_has_no_delete_operation() -> anyhow::Result<()> {
     let app = App::for_test()?;
     let id = create_token(&app, json!({ "name": "t", "maxUses": 1 })).await?;
-    let path = format!("/enrollment-token/{id}");
-    assert_eq!(call(&app, Method::DELETE, &path, None).await?, (204, Value::Null));
-
-    let (status, body) = call(&app, Method::GET, &path, None).await?;
-    assert_eq!(status, 404);
-    assert_public_api_error(&body);
-    let (status, body) = call(&app, Method::DELETE, &path, None).await?;
-    assert_eq!(status, 404);
-    assert_public_api_error(&body);
-    let (_, page) = call(&app, Method::GET, "/enrollment-token", None).await?;
-    assert_eq!(page["totalCount"], 0);
+    let (status, _) = call(&app, Method::DELETE, &format!("/enrollment-token/{id}"), None).await?;
+    assert_eq!(status, 405);
     Ok(())
 }
 
@@ -1178,8 +1229,8 @@ async fn request_renewal_of_a_revoked_identity_is_a_conflict() -> anyhow::Result
 #[case::request_renewal(Method::POST, "/{id}/request-renewal")]
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_GetAgentIdentityEnrollmentToken
 #[case::get_token(Method::GET, "/enrollment-token/{id}")]
-// oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_DeleteAgentIdentityEnrollmentToken
-#[case::delete_token(Method::DELETE, "/enrollment-token/{id}")]
+// oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+#[case::revoke_token(Method::POST, "/enrollment-token/{id}/revoke")]
 #[tokio::test]
 async fn unknown_record_is_404(
     #[case] method: Method,
