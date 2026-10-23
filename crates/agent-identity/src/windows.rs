@@ -10,10 +10,11 @@ use win_api_wrappers::identity::sid::{Sid, StringSid};
 use win_api_wrappers::process::Process;
 use win_api_wrappers::raw::Win32::Security::Authorization::GRANT_ACCESS;
 use win_api_wrappers::raw::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
-use win_api_wrappers::raw::Win32::System::SystemServices::ACCESS_ALLOWED_ACE_TYPE;
 use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
+use win_api_wrappers::security::descriptor::{DaclError, SecurityDescriptor};
 use win_api_wrappers::security::privilege;
+use win_api_wrappers::str::U16CString;
 use win_api_wrappers::token::Token;
 use windows::Win32::Foundation::{
     ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, ERROR_SHARING_VIOLATION, GENERIC_READ, GENERIC_WRITE,
@@ -22,16 +23,14 @@ use windows::Win32::Foundation::{
 use windows::Win32::Security::Authorization::{
     AUTHZ_CLIENT_CONTEXT_HANDLE, AUTHZ_RESOURCE_MANAGER_HANDLE, AUTHZ_RM_FLAG_NO_AUDIT, AuthzContextInfoGroupsSids,
     AuthzFreeContext, AuthzFreeResourceManager, AuthzGetInformationFromContext, AuthzInitializeContextFromSid,
-    AuthzInitializeResourceManager, GetNamedSecurityInfoW, GetSecurityInfo, SE_FILE_OBJECT,
+    AuthzInitializeResourceManager, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::Cryptography::{
     CRYPT_INTEGER_BLOB, CRYPTPROTECT_LOCAL_MACHINE, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData, CryptUnprotectData,
 };
 use windows::Win32::Security::{
-    self, ACCESS_ALLOWED_ACE, ACE_HEADER, ACL, DACL_SECURITY_INFORMATION, GetAce, GetSecurityDescriptorControl,
-    GetSecurityDescriptorDacl, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SE_DACL_PROTECTED,
-    SecurityImpersonation, SetKernelObjectSecurity, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE,
-    TOKEN_QUERY,
+    self, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, SecurityImpersonation,
+    SetKernelObjectSecurity, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_QUERY,
 };
 use windows::Win32::Storage::FileSystem::{
     CREATE_NEW, CreateFileW, DELETE, FILE_ADD_FILE, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT,
@@ -186,7 +185,7 @@ pub(crate) fn create_protected_directory(
     ensure_acl_volume(&directory)?;
     let (owner, descriptor) = owner_and_dacl(&directory)?;
     let owner_is_trusted = owner == system || owner == user;
-    if !owner_is_trusted || verify_dacl(descriptor.0, expected.clone()).is_err() {
+    if !owner_is_trusted || verify_dacl(descriptor.as_raw(), expected.clone()).is_err() {
         // A foreign owner could widen its own DACL again, so repair ownership and access together.
         if !owner_is_trusted {
             let original_id = file_id_info(&directory)?;
@@ -229,7 +228,7 @@ pub(crate) fn create_protected_directory(
             repaired_owner == system || repaired_owner == user,
             "identity directory owner is not trusted"
         );
-        verify_dacl(repaired.0, expected)?;
+        verify_dacl(repaired.as_raw(), expected)?;
     }
     Ok(())
 }
@@ -253,7 +252,7 @@ pub(crate) fn verify_protected_directory(
         "identity directory owner is not trusted"
     );
     verify_dacl(
-        descriptor.0,
+        descriptor.as_raw(),
         directory_aces(
             &system,
             &user,
@@ -700,7 +699,7 @@ pub(crate) fn verify_pending_read(file: &File, grant_current_user: bool) -> anyh
     );
     ensure_acl_volume(file)?;
     let (owner, descriptor) = owner_and_dacl(file)?;
-    verify_pending_owner_and_dacl(&owner, descriptor.0, grant_current_user)
+    verify_pending_owner_and_dacl(&owner, descriptor.as_raw(), grant_current_user)
 }
 
 pub(crate) fn verify_pending_path(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
@@ -710,7 +709,7 @@ pub(crate) fn verify_pending_path(path: &Utf8Path, grant_current_user: bool) -> 
         "pending enrollment path is not a regular file"
     );
     let (owner, descriptor) = named_owner_and_dacl(path)?;
-    verify_pending_owner_and_dacl(&owner, descriptor.0, grant_current_user)
+    verify_pending_owner_and_dacl(&owner, descriptor.as_raw(), grant_current_user)
 }
 
 fn verify_pending_owner_and_dacl(
@@ -747,7 +746,7 @@ fn pending_owner_is_allowed(system: &Sid, user: &Sid, owner: &Sid, administrator
 pub(crate) fn verify_trusted_state_file(file: &File) -> anyhow::Result<()> {
     ensure_acl_volume(file)?;
     let (owner, descriptor) = owner_and_dacl(file)?;
-    verify_trusted_owner_and_dacl(&owner, descriptor.0)
+    verify_trusted_owner_and_dacl(&owner, descriptor.as_raw())
 }
 
 /// Checks, without changing it, that an open `identity.json` has the owner and the protected DACL the agent provisions.
@@ -767,7 +766,7 @@ pub(crate) fn verify_trusted_state_path(path: &Utf8Path) -> anyhow::Result<()> {
         "identity state path is not a regular file"
     );
     let (owner, descriptor) = named_owner_and_dacl(path)?;
-    verify_trusted_owner_and_dacl(&owner, descriptor.0)
+    verify_trusted_owner_and_dacl(&owner, descriptor.as_raw())
 }
 
 fn verify_trusted_owner_and_dacl(owner: &Sid, descriptor: PSECURITY_DESCRIPTOR) -> anyhow::Result<()> {
@@ -889,11 +888,11 @@ pub(crate) fn set_test_owner(path: &Utf8Path, owner: Security::WELL_KNOWN_SID_TY
 }
 
 #[cfg(test)]
-fn test_wide_path(path: &Utf8Path) -> anyhow::Result<win_api_wrappers::str::U16CString> {
+fn test_wide_path(path: &Utf8Path) -> anyhow::Result<U16CString> {
     let parent = path.parent().context("test path has no parent")?;
     let name = path.file_name().context("test path has no name")?;
     let full_path = fs::canonicalize(parent)?.join(name);
-    Ok(win_api_wrappers::str::U16CString::from_os_str(full_path.as_os_str())?)
+    Ok(U16CString::from_os_str(full_path.as_os_str())?)
 }
 
 /// Returns the owner and DACL of a test path in SDDL, which shows inherited entries and DACL protection.
@@ -909,7 +908,7 @@ pub(crate) fn test_security(path: &Utf8Path) -> anyhow::Result<String> {
     // SAFETY: The descriptor stays live through the call and the output pointer is writable.
     unsafe {
         ConvertSecurityDescriptorToStringSecurityDescriptorW(
-            descriptor.0,
+            descriptor.as_raw(),
             SDDL_REVISION_1,
             OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
             &mut sddl,
@@ -991,17 +990,6 @@ fn expected_aces(principals: &[Sid], inheritance: Security::ACE_FLAGS) -> Vec<(S
         .cloned()
         .map(|sid| (sid, FILE_ALL_ACCESS.0, inheritance.0))
         .collect()
-}
-
-struct SecurityDescriptor(PSECURITY_DESCRIPTOR);
-
-impl Drop for SecurityDescriptor {
-    fn drop(&mut self) {
-        if !self.0.0.is_null() {
-            // SAFETY: GetSecurityInfo allocated this descriptor with LocalAlloc.
-            unsafe { LocalFree(Some(HLOCAL(self.0.0))) };
-        }
-    }
 }
 
 struct AuthzResourceManager(AUTHZ_RESOURCE_MANAGER_HANDLE);
@@ -1115,58 +1103,30 @@ fn authz_administrator_membership(owner: &Sid, administrators: &Sid) -> anyhow::
 fn require_protected_dacl(file: &File, expected_owner: &Sid, expected: Vec<(Sid, u32, u32)>) -> anyhow::Result<()> {
     let (owner, descriptor) = owner_and_dacl(file)?;
     ensure!(owner == *expected_owner, "identity file owner is not the expected user");
-    verify_dacl(descriptor.0, expected)
+    verify_dacl(descriptor.as_raw(), expected)
 }
 
-fn named_owner_and_dacl(path: &Utf8Path) -> anyhow::Result<(Sid, SecurityDescriptor)> {
+fn named_owner_and_dacl(path: &Utf8Path) -> anyhow::Result<(Sid, SecurityDescriptor<'static>)> {
     let parent = path.parent().context("identity state path has no parent")?;
     let name = path.file_name().context("identity state path has no name")?;
-    let full_path = fs::canonicalize(parent)?.join(name);
-    let wide: Vec<_> = full_path.as_os_str().encode_wide().chain(Some(0)).collect();
-    let mut descriptor = SecurityDescriptor(PSECURITY_DESCRIPTOR::default());
-    let mut owner = Security::PSID::default();
-    // SAFETY: The path is NUL-terminated and the security-descriptor outputs are writable.
-    let status = unsafe {
-        GetNamedSecurityInfoW(
-            PCWSTR::from_raw(wide.as_ptr()),
-            SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-            Some(&mut owner),
-            None,
-            None,
-            None,
-            &mut descriptor.0,
-        )
-    };
-    status.ok().context("inspect identity state DACL")?;
-    ensure!(!owner.0.is_null(), "identity state path has no owner");
-    // SAFETY: The owner SID points into the descriptor retained until this function returns.
-    let owner = unsafe { Sid::from_psid(owner) }.context("read identity state owner")?;
+    let full_path = U16CString::from_os_str(fs::canonicalize(parent)?.join(name).as_os_str())?;
+    let descriptor = SecurityDescriptor::of_path(&full_path, SE_FILE_OBJECT).context("inspect identity state DACL")?;
+    let owner = descriptor
+        .owner()
+        .context("read identity state owner")?
+        .context("identity state path has no owner")?;
     Ok((owner, descriptor))
 }
 
-fn owner_and_dacl(file: &File) -> anyhow::Result<(Sid, SecurityDescriptor)> {
+fn owner_and_dacl(file: &File) -> anyhow::Result<(Sid, SecurityDescriptor<'static>)> {
     use std::os::windows::io::AsRawHandle as _;
 
-    let mut descriptor = SecurityDescriptor(PSECURITY_DESCRIPTOR::default());
-    let mut owner = Security::PSID::default();
-    // SAFETY: The file handle is live and both output pointers are writable.
-    let status = unsafe {
-        GetSecurityInfo(
-            HANDLE(file.as_raw_handle()),
-            SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-            Some(&mut owner),
-            None,
-            None,
-            None,
-            Some(&mut descriptor.0),
-        )
-    };
-    status.ok().context("inspect identity file DACL")?;
-    ensure!(!owner.0.is_null(), "identity file has no owner");
-    // SAFETY: The owner SID points into the descriptor retained until this function returns.
-    let owner = unsafe { Sid::from_psid(owner) }.context("read identity file owner")?;
+    let descriptor = SecurityDescriptor::of_handle(HANDLE(file.as_raw_handle()), SE_FILE_OBJECT)
+        .context("inspect identity file DACL")?;
+    let owner = descriptor
+        .owner()
+        .context("read identity file owner")?
+        .context("identity file has no owner")?;
     Ok((owner, descriptor))
 }
 
@@ -1179,42 +1139,20 @@ fn verify_dacl(descriptor: PSECURITY_DESCRIPTOR, mut expected: Vec<(Sid, u32, u3
 }
 
 fn read_dacl(descriptor: PSECURITY_DESCRIPTOR) -> anyhow::Result<Vec<(Sid, u32, u32)>> {
-    let mut control = 0;
-    let mut revision = 0;
-    // SAFETY: The descriptor remains live through this call.
-    unsafe { GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) }?;
-    ensure!(
-        control & SE_DACL_PROTECTED.0 != 0,
-        "identity file DACL is not protected"
-    );
-
-    let mut present = BOOL::default();
-    let mut defaulted = BOOL::default();
-    let mut acl: *mut ACL = std::ptr::null_mut();
-    // SAFETY: The descriptor remains live and output pointers are writable.
-    unsafe { GetSecurityDescriptorDacl(descriptor, &mut present, &mut acl, &mut defaulted) }?;
-    ensure!(present.as_bool() && !acl.is_null(), "identity file has no DACL");
-    // SAFETY: GetSecurityDescriptorDacl returned a live ACL within the descriptor.
-    let count = unsafe { (*acl).AceCount };
-    let mut actual = Vec::new();
-    for index in 0..u32::from(count) {
-        let mut raw = std::ptr::null_mut();
-        // SAFETY: The index is less than the ACL's ACE count.
-        unsafe { GetAce(acl, index, &mut raw) }?;
-        ensure!(!raw.is_null(), "identity file has an invalid ACE");
-        // SAFETY: GetAce returned a live entry with an ACE_HEADER.
-        let header = unsafe { &*raw.cast::<ACE_HEADER>() };
-        ensure!(
-            u32::from(header.AceType) == ACCESS_ALLOWED_ACE_TYPE,
-            "identity file has an unexpected ACE type"
-        );
-        // SAFETY: This is an access-allowed ACE, so Mask and SidStart exist.
-        let entry = unsafe { &*raw.cast::<ACCESS_ALLOWED_ACE>() };
-        // SAFETY: GetAce returned a live access-allowed ACE with a valid SID.
-        let sid = unsafe { Sid::from_psid(Security::PSID(std::ptr::addr_of!(entry.SidStart).cast_mut().cast())) }?;
-        actual.push((sid, entry.Mask, u32::from(header.AceFlags)));
-    }
-    Ok(actual)
+    // SAFETY: Callers pass a descriptor that stays live through this call.
+    let descriptor = unsafe { SecurityDescriptor::from_raw(descriptor) };
+    let entries = descriptor.protected_allow_entries().map_err(|error| match error {
+        DaclError::NotProtected => anyhow::anyhow!("identity file DACL is not protected"),
+        DaclError::Missing => anyhow::anyhow!("identity file has no DACL"),
+        DaclError::InvalidAce => anyhow::anyhow!("identity file has an invalid ACE"),
+        DaclError::UnexpectedAceType => anyhow::anyhow!("identity file has an unexpected ACE type"),
+        DaclError::Sid(error) => error.into(),
+        DaclError::Windows(error) => error.into(),
+    })?;
+    Ok(entries
+        .into_iter()
+        .map(|entry| (entry.sid, entry.mask, entry.flags))
+        .collect())
 }
 
 fn blob(bytes: &[u8]) -> anyhow::Result<CRYPT_INTEGER_BLOB> {
@@ -1806,7 +1744,7 @@ mod tests {
         let (owner, descriptor) = named_owner_and_dacl(&directory)?;
         assert!(owner == system || owner == user);
         verify_dacl(
-            descriptor.0,
+            descriptor.as_raw(),
             expected_aces(&allowed_principals(&system, &user, true), inheritance),
         )?;
         for (path, contents) in &state {

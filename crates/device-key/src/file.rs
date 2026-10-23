@@ -554,9 +554,10 @@ pub(crate) fn owner_is_trusted(owner: libc::uid_t, user: libc::uid_t) -> bool {
 fn ensure_private_file(file: &File) -> anyhow::Result<()> {
     use std::os::windows::io::AsRawHandle as _;
 
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
-    use windows::Win32::Security::{self, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+    use win_api_wrappers::security::descriptor::SecurityDescriptor;
+    use windows::Win32::Foundation::{HANDLE, WIN32_ERROR};
+    use windows::Win32::Security;
+    use windows::Win32::Security::Authorization::SE_FILE_OBJECT;
     use windows::Win32::Storage::FileSystem::GetVolumeInformationByHandleW;
 
     let handle = HANDLE(file.as_raw_handle());
@@ -569,26 +570,14 @@ fn ensure_private_file(file: &File) -> anyhow::Result<()> {
         "key file volume does not enforce ACLs"
     );
 
-    let mut owner = Security::PSID::default();
-    let mut raw = Security::PSECURITY_DESCRIPTOR::default();
-    // SAFETY: The file handle is live and both output pointers are writable.
-    let status = unsafe {
-        GetSecurityInfo(
-            handle,
-            SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-            Some(&mut owner),
-            None,
-            None,
-            None,
-            Some(&mut raw),
-        )
-    };
-    let descriptor = crate::windows_acl::OwnedDescriptor(raw);
-    ensure!(status.0 == 0, "read key file ACL failed ({})", status.0);
-    ensure!(!owner.0.is_null(), "key file has no owner");
-    // SAFETY: GetSecurityInfo returned a live owner SID within the owned descriptor.
-    let owner = unsafe { Sid::from_psid(owner) }.context("read key file owner")?;
+    let descriptor = SecurityDescriptor::of_handle(handle, SE_FILE_OBJECT).map_err(|error| {
+        let status = WIN32_ERROR::from_error(&error).map_or_else(|| error.code().0.cast_unsigned(), |status| status.0);
+        anyhow::anyhow!("read key file ACL failed ({status})")
+    })?;
+    let owner = descriptor
+        .owner()
+        .context("read key file owner")?
+        .context("key file has no owner")?;
     let user = win_api_wrappers::token::Token::current_process_token()
         .sid_and_attributes()
         .context("get process user SID")?
@@ -599,7 +588,7 @@ fn ensure_private_file(file: &File) -> anyhow::Result<()> {
     if user != system {
         expected.push(user);
     }
-    crate::windows_acl::require_protected_dacl(descriptor.0, expected)
+    crate::windows_acl::require_protected_dacl(descriptor.as_raw(), expected)
 }
 
 #[cfg(windows)]
