@@ -1593,10 +1593,15 @@ mod tests {
         };
         store.write_identity(&valid())?;
         type Change = fn(&mut StoredIdentity);
-        let invalid: [(&str, Change); 5] = [
+        let invalid: [(&str, Change); 6] = [
             ("version 2", |identity| identity.version = 2),
             ("http base URL", |identity| {
                 identity.base_url = "http://example.test/dvls".to_owned()
+            }),
+            // The stored base URL is the token's `u`, which never carries a user name or password.
+            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+            ("base URL with a user name and password", |identity| {
+                identity.base_url = "https://user:pw@example.test/dvls".to_owned()
             }),
             ("upper-case token hash", |identity| {
                 identity.token_sha256 = "AB".repeat(32)
