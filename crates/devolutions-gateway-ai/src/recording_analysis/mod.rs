@@ -33,8 +33,8 @@ use std::fmt;
 use std::fs::File;
 use std::io::{self, BufWriter};
 use std::ops::Range;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -51,7 +51,7 @@ use self::transcript::TranscriptError;
 use self::video::VideoError;
 use crate::screen_actions::Screenshot;
 use crate::session_actions::Action;
-use crate::{AiClient, Error, Language, Usage};
+use crate::{AiClient, Error, Language, Response, Usage};
 
 /// Input tokens sent in one AI request, estimated at 4 characters per token.
 const MAX_INPUT_TOKENS_PER_REQUEST: usize = 100_000;
@@ -105,13 +105,14 @@ pub enum Progress {
     ///
     /// Sent every half second while it lasts.
     Reading { read_bytes: u64, total_bytes: u64 },
-    /// Asking the AI: chunks already described, out of all chunks.
+    /// Asking the AI: chunks already described, out of all chunks, and the tokens of the requests sent so far.
     ///
-    /// Sent before each chunk, then once all are described. That last event also covers the summary request, which
-    /// follows when the chunks have actions.
+    /// Sent before and after each request to the AI, and once all chunks are described.
+    /// A request counts as unreported until its answer comes, so usage cut off with a request is never shown as complete.
     Describing {
         described_chunks: usize,
         total_chunks: usize,
+        usage: UsageSoFar,
     },
     /// Writing the log from the answers.
     Writing,
@@ -138,6 +139,7 @@ impl Progress {
             Self::Describing {
                 described_chunks,
                 total_chunks,
+                ..
             } => Some((
                 u64::try_from(described_chunks).unwrap_or(u64::MAX),
                 u64::try_from(total_chunks).unwrap_or(u64::MAX),
@@ -175,11 +177,38 @@ impl fmt::Display for Progress {
             Self::Describing {
                 described_chunks,
                 total_chunks,
+                ..
             } => write!(
                 f,
                 "asking the AI: {described_chunks} of {total_chunks} chunks described"
             ),
             Self::Writing => f.write_str("writing the log"),
+        }
+    }
+}
+
+/// Tokens the provider counted for the requests of an analysis, and the requests it did not count.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UsageSoFar {
+    /// Tokens of the prompts and the inputs.
+    pub input_tokens: u64,
+    /// Tokens of the answers.
+    pub output_tokens: u64,
+    /// Requests that may have cost tokens the provider did not report, such as an answer without a token count, a request
+    /// that got no answer, or one still waiting for it; while it is not zero, the two counts are short of what the
+    /// provider billed.
+    pub unreported_requests: u64,
+}
+
+impl UsageSoFar {
+    /// Counts the tokens of one more request, `None` when the provider did not report them.
+    fn add(&mut self, usage: Option<Usage>) {
+        match usage {
+            Some(usage) => {
+                self.input_tokens = self.input_tokens.saturating_add(usage.input_tokens);
+                self.output_tokens = self.output_tokens.saturating_add(usage.output_tokens);
+            }
+            None => self.unreported_requests = self.unreported_requests.saturating_add(1),
         }
     }
 }
@@ -203,10 +232,10 @@ pub struct RecordingAnalysis {
     /// Versions of the prompts that wrote the log, such as
     /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
     pub prompt_version: String,
-    /// Tokens the provider counted for the whole analysis, answers cut and asked again included.
+    /// Tokens of the requests this analysis sent, answers cut and asked again included.
     ///
-    /// `None` when the provider did not report them for every request.
-    pub usage: Option<Usage>,
+    /// An analysis that resumed from the working files of an earlier one does not count the requests of that one.
+    pub usage: UsageSoFar,
 }
 
 /// Error returned when an analysis fails.
@@ -354,8 +383,9 @@ impl AnalyzeRecording<'_> {
     /// Starts the analysis on the Tokio runtime and returns its events.
     ///
     /// The events are [`RecordingAnalysisEvent::Progress`] while it runs, then [`RecordingAnalysisEvent::Complete`]
-    /// or [`RecordingAnalysisEvent::Failure`], which is always the last one. Progress events are dropped while the
-    /// channel is full, so a slow reader only misses some of them; the last event is never dropped.
+    /// or [`RecordingAnalysisEvent::Failure`], which is always the last one.
+    /// [`Progress::Reading`] events are dropped while the channel is full, so a slow reader only misses some of them;
+    /// the other events never are, so the last [`Progress::Describing`] counts every request sent before a failure.
     /// The channel ending without a last event means the analysis panicked.
     ///
     /// Dropping the receiver cancels the analysis.
@@ -387,6 +417,7 @@ impl AnalyzeRecording<'_> {
             max_output_tokens: self.max_output_tokens,
             cancel,
             events,
+            usage: Mutex::new(UsageSoFar::default()),
         };
 
         tokio::spawn(async move {
@@ -428,6 +459,7 @@ struct Run {
     max_output_tokens: Option<u32>,
     cancel: CancellationToken,
     events: mpsc::Sender<RecordingAnalysisEvent>,
+    usage: Mutex<UsageSoFar>,
 }
 
 impl Run {
@@ -461,7 +493,7 @@ impl Run {
             move || prepare(&manifest, &dir, &workspace, &settings, &read_bytes, &cancel)
         });
         // The first event of an analysis is always the start of the reading, however quickly the files are read.
-        self.report(Progress::Reading {
+        self.report_reading(Progress::Reading {
             read_bytes: 0,
             total_bytes,
         });
@@ -478,7 +510,7 @@ impl Run {
                         .map_err(|_| RecordingAnalysisError::Files("an AI analysis step panicked".to_owned()))??;
                 }
                 _ = ticks.tick() => {
-                    self.report(Progress::Reading {
+                    self.report_reading(Progress::Reading {
                         read_bytes: read_bytes.load(Ordering::Relaxed),
                         total_bytes,
                     });
@@ -500,19 +532,13 @@ impl Run {
                 continue;
             }
 
-            self.report(Progress::Describing {
-                described_chunks: index,
-                total_chunks: total,
-            });
-
             let described = match chunk {
                 Chunk::Transcript { file } => {
                     let transcript = tokio::fs::read_to_string(workspace.join(file))
                         .await
                         .map_err(|error| files_error(&error))?;
 
-                    let describe =
-                        describe_transcript(&self.client, self.max_output_tokens, &self.language, &transcript);
+                    let describe = self.describe_transcript(index, total, &transcript);
 
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
@@ -526,13 +552,7 @@ impl Run {
                         None => None,
                     };
 
-                    let describe = describe_screenshots(
-                        &self.client,
-                        self.max_output_tokens,
-                        &self.language,
-                        &frames,
-                        context.as_ref(),
-                    );
+                    let describe = self.describe_screenshots(index, total, &frames, context.as_ref());
 
                     tokio::select! {
                         () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
@@ -545,19 +565,15 @@ impl Run {
                 index,
                 actions = described.actions.len(),
                 model = ?described.model,
-                usage = ?described.usage,
                 "Chunk described"
             );
 
             blocking(move || checkpoint::write(&checkpoint, &described).map_err(|error| files_error(&error))).await?;
         }
 
-        self.report(Progress::Describing {
-            described_chunks: total,
-            total_chunks: total,
-        });
+        self.report_describing(total, total).await;
 
-        let DescribedChunk { actions, model, usage } = blocking({
+        let DescribedChunk { actions, model } = blocking({
             let workspace = workspace.clone();
             let cancel = cancel.clone();
             move || read_checkpoints(&workspace, total, &cancel)
@@ -575,17 +591,15 @@ impl Run {
 
             let summary = tokio::select! {
                 () = cancel.cancelled() => return Err(RecordingAnalysisError::Cancelled),
-                summary = request.send() => summary,
+                summary = self.ask(request.send(), total, total) => summary,
             };
 
             Some(summary?)
         };
 
-        let (model, usage) = match &summary {
-            Some(summary) => (model.or_else(|| summary.model.clone()), add_usage(usage, summary.usage)),
-            None => (model, usage),
-        };
-        let model = model.unwrap_or_else(|| self.client.model().to_owned());
+        let model = model
+            .or_else(|| summary.as_ref().and_then(|summary| summary.model.clone()))
+            .unwrap_or_else(|| self.client.model().to_owned());
         let prompt_version = match &summary {
             Some(_) => format!(
                 "{}+{}",
@@ -596,7 +610,7 @@ impl Run {
         };
         let action_count = actions.len();
 
-        self.report(Progress::Writing);
+        self.report(Progress::Writing).await;
 
         blocking({
             let workspace = workspace.clone();
@@ -642,12 +656,170 @@ impl Run {
             actions: action_count,
             model,
             prompt_version,
-            usage,
+            usage: self.usage(),
         })
     }
 
-    /// Sends a progress event, unless the reader is behind; a reader that went away cancels the analysis.
-    fn report(&self, progress: Progress) {
+    /// Asks the AI about one transcript chunk, the chunk `index` of `total`; a truncated answer is asked again as two
+    /// halves.
+    async fn describe_transcript(
+        &self,
+        index: usize,
+        total: usize,
+        chunk: &str,
+    ) -> Result<DescribedChunk, RecordingAnalysisError> {
+        let mut parts = VecDeque::from([chunk]);
+        let mut described = DescribedChunk::default();
+
+        while let Some(part) = parts.pop_front() {
+            let mut request = self
+                .client
+                .describe_session_actions(part)
+                .language(self.language.clone());
+
+            if let Some(max_output_tokens) = self.max_output_tokens {
+                request = request.max_output_tokens(max_output_tokens);
+            }
+
+            let answer = self.ask(request.send(), index, total).await;
+
+            match answer {
+                Ok(response) => described.add(response),
+                Err(Error::Truncated { .. }) => {
+                    let Some((first, second)) = split_in_half(part) else {
+                        return Err(RecordingAnalysisError::Truncated);
+                    };
+
+                    debug!(part_len = part.len(), "AI answer truncated; asking again in two halves");
+                    parts.push_front(second);
+                    parts.push_front(first);
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+
+        Ok(described)
+    }
+
+    /// Asks the AI about one chunk of screenshots, the chunk `index` of `total`, in parts that fit in a request; a
+    /// truncated answer is asked again as two halves.
+    ///
+    /// Each part starts with the screenshot before it as context: `context` for the first part.
+    async fn describe_screenshots(
+        &self,
+        index: usize,
+        total: usize,
+        frames: &[LoadedScreenshot],
+        context: Option<&LoadedScreenshot>,
+    ) -> Result<DescribedChunk, RecordingAnalysisError> {
+        let mut parts = VecDeque::from(split_by_size(frames));
+        let mut described = DescribedChunk::default();
+
+        while let Some(part) = parts.pop_front() {
+            let before = match part.start {
+                0 => context,
+                start => frames.get(start - 1),
+            };
+
+            let screenshots = before
+                .map(|before| before.as_screenshot(true))
+                .into_iter()
+                .chain(frames[part.clone()].iter().map(|frame| frame.as_screenshot(false)))
+                .collect::<Vec<_>>();
+
+            let mut request = self
+                .client
+                .describe_screen_actions(&screenshots)
+                .language(self.language.clone());
+
+            if let Some(max_output_tokens) = self.max_output_tokens {
+                request = request.max_output_tokens(max_output_tokens);
+            }
+
+            let answer = self.ask(request.send(), index, total).await;
+
+            match answer {
+                Ok(response) => described.add(response),
+                Err(Error::Truncated { .. }) => {
+                    if part.len() < 2 {
+                        return Err(RecordingAnalysisError::Truncated);
+                    }
+
+                    let middle = part.start + part.len() / 2;
+                    debug!(
+                        screenshots = part.len(),
+                        "AI answer truncated; asking again in two halves"
+                    );
+                    parts.push_front(middle..part.end);
+                    parts.push_front(part.start..middle);
+                }
+                Err(error) => return Err(error.into()),
+            }
+        }
+
+        Ok(described)
+    }
+
+    /// Sends one request to the AI and counts its tokens, reporting them with the chunks described so far before the
+    /// request, as one unreported request, and again once it is answered.
+    async fn ask<T>(
+        &self,
+        request: impl Future<Output = Result<Response<T>, Error>>,
+        described_chunks: usize,
+        total_chunks: usize,
+    ) -> Result<Response<T>, Error> {
+        self.usage.lock().unwrap_or_else(PoisonError::into_inner).add(None);
+        self.report_describing(described_chunks, total_chunks).await;
+
+        let answer = request.await;
+
+        {
+            let mut usage = self.usage.lock().unwrap_or_else(PoisonError::into_inner);
+            usage.unreported_requests -= 1;
+
+            match &answer {
+                Ok(response) => usage.add(response.usage),
+                Err(Error::Truncated { usage: reported }) => usage.add(*reported),
+                // An error status means the provider turned the request down instead of answering it.
+                Err(Error::Status { .. }) => {}
+                // The answer, if any, was lost or unreadable, so the provider may have counted tokens we never saw.
+                Err(_) => usage.add(None),
+            }
+        }
+
+        self.report_describing(described_chunks, total_chunks).await;
+
+        answer
+    }
+
+    fn usage(&self) -> UsageSoFar {
+        *self.usage.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    async fn report_describing(&self, described_chunks: usize, total_chunks: usize) {
+        self.report(Progress::Describing {
+            described_chunks,
+            total_chunks,
+            usage: self.usage(),
+        })
+        .await;
+    }
+
+    /// Sends a progress event, waiting while the reader is behind; a reader that went away cancels the analysis.
+    async fn report(&self, progress: Progress) {
+        if self
+            .events
+            .send(RecordingAnalysisEvent::Progress(progress))
+            .await
+            .is_err()
+        {
+            self.cancel.cancel();
+        }
+    }
+
+    /// Sends a reading event, unless the reader is behind, since another one follows soon; a reader that went away
+    /// cancels the analysis.
+    fn report_reading(&self, progress: Progress) {
         if let Err(mpsc::error::TrySendError::Closed(_)) =
             self.events.try_send(RecordingAnalysisEvent::Progress(progress))
         {
@@ -677,43 +849,6 @@ fn open_counted(path: &Utf8Path, read_bytes: &Arc<AtomicU64>) -> io::Result<Coun
         read_bytes: Arc::clone(read_bytes),
     })
 }
-/// Asks the AI about one transcript chunk; a truncated answer is asked again as two halves.
-async fn describe_transcript(
-    client: &AiClient,
-    max_output_tokens: Option<u32>,
-    language: &Language,
-    chunk: &str,
-) -> Result<DescribedChunk, RecordingAnalysisError> {
-    let mut parts = VecDeque::from([chunk]);
-    let mut described = DescribedChunk::default();
-
-    while let Some(part) = parts.pop_front() {
-        let mut request = client.describe_session_actions(part).language(language.clone());
-
-        if let Some(max_output_tokens) = max_output_tokens {
-            request = request.max_output_tokens(max_output_tokens);
-        }
-
-        match request.send().await {
-            Ok(response) => described.add(response),
-            Err(Error::Truncated { usage }) => {
-                described.usage = add_usage(described.usage, usage);
-
-                let Some((first, second)) = split_in_half(part) else {
-                    return Err(RecordingAnalysisError::Truncated);
-                };
-
-                debug!(part_len = part.len(), "AI answer truncated; asking again in two halves");
-                parts.push_front(second);
-                parts.push_front(first);
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-
-    Ok(described)
-}
-
 /// A screenshot read back from the working files.
 struct LoadedScreenshot {
     frame: PlannedFrame,
@@ -748,62 +883,6 @@ async fn read_screenshots(
     }
 
     Ok(loaded)
-}
-
-/// Asks the AI about one chunk of screenshots, in parts that fit in a request; a truncated answer is asked again as
-/// two halves.
-///
-/// Each part starts with the screenshot before it as context: `context` for the first part.
-async fn describe_screenshots(
-    client: &AiClient,
-    max_output_tokens: Option<u32>,
-    language: &Language,
-    frames: &[LoadedScreenshot],
-    context: Option<&LoadedScreenshot>,
-) -> Result<DescribedChunk, RecordingAnalysisError> {
-    let mut parts = VecDeque::from(split_by_size(frames));
-    let mut described = DescribedChunk::default();
-
-    while let Some(part) = parts.pop_front() {
-        let before = match part.start {
-            0 => context,
-            start => frames.get(start - 1),
-        };
-
-        let screenshots = before
-            .map(|before| before.as_screenshot(true))
-            .into_iter()
-            .chain(frames[part.clone()].iter().map(|frame| frame.as_screenshot(false)))
-            .collect::<Vec<_>>();
-
-        let mut request = client.describe_screen_actions(&screenshots).language(language.clone());
-
-        if let Some(max_output_tokens) = max_output_tokens {
-            request = request.max_output_tokens(max_output_tokens);
-        }
-
-        match request.send().await {
-            Ok(response) => described.add(response),
-            Err(Error::Truncated { usage }) => {
-                described.usage = add_usage(described.usage, usage);
-
-                if part.len() < 2 {
-                    return Err(RecordingAnalysisError::Truncated);
-                }
-
-                let middle = part.start + part.len() / 2;
-                debug!(
-                    screenshots = part.len(),
-                    "AI answer truncated; asking again in two halves"
-                );
-                parts.push_front(middle..part.end);
-                parts.push_front(part.start..middle);
-            }
-            Err(error) => return Err(error.into()),
-        }
-    }
-
-    Ok(described)
 }
 
 /// Cuts `frames` into consecutive parts of at most [`MAX_SCREENSHOT_BYTES_PER_REQUEST`] bytes, each with one
@@ -1035,11 +1114,6 @@ fn in_time_order<R: Clone>(recordings: &[R], start_time: impl Fn(&R) -> i64) -> 
     sorted
 }
 
-/// Sums token counts; the total is unknown as soon as one count is.
-fn add_usage(total: Option<Usage>, more: Option<Usage>) -> Option<Usage> {
-    Some(total? + more?)
-}
-
 /// Cuts `part` on the line boundary closest to its middle, unless it is too short to split.
 fn split_in_half(part: &str) -> Option<(&str, &str)> {
     if part.len() < MIN_SPLIT_LEN {
@@ -1068,8 +1142,7 @@ fn split_in_half(part: &str) -> Option<(&str, &str)> {
     Some(part.split_at(cut))
 }
 
-/// Reads the actions of every checkpoint, in time order, with the first model reported for a chunk and the tokens of
-/// all of them.
+/// Reads the actions of every checkpoint, in time order, with the first model reported for a chunk.
 fn read_checkpoints(
     workspace: &Utf8Path,
     total: usize,
@@ -1084,7 +1157,6 @@ fn read_checkpoints(
 
         let described = checkpoint::read(&checkpoint::path(workspace, index)).map_err(|error| files_error(&error))?;
         all.model = all.model.or(described.model);
-        all.usage = add_usage(all.usage, described.usage);
         all.actions.extend(described.actions);
     }
 

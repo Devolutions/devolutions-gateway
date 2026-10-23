@@ -5,6 +5,8 @@ use uuid::Uuid;
 
 use crate::api::preflight::PreflightAlertStatus;
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
+use crate::provisioner_tasks::ai::AiProvider;
+use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -25,6 +27,8 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::pull_recording_session,
         crate::api::jrec::pull_recording_file,
         crate::api::jrec::search::search_recordings,
+        crate::api::jrec::start_ai_analysis,
+        crate::api::jrec::get_ai_analysis,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
         crate::api::update::get_update_products,
@@ -64,6 +68,22 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::search::StartTimeRange,
         crate::api::jrec::search::RecordingSearchResponse,
         crate::api::jrec::search::RecordingSearchHit,
+        crate::api::jrec::AiAnalysisRequest,
+        crate::api::jrec::AiAnalysisConflict,
+        crate::api::jrec::AiAnalysisConflictCode,
+        AiProvider,
+        crate::api::tasks::TaskInfo,
+        crate::api::tasks::TaskState,
+        AiAnalysisParams,
+        AiAnalysisRunningPayload,
+        AiAnalysisSucceededPayload,
+        AiAnalysisUsage,
+        AiAnalysisFailedPayload,
+        AiAnalysisError,
+        AiAnalysisErrorKind,
+        AiAnalysisBadAnswer,
+        AiAnalysisRecoverableError,
+        AiAnalysisRecoverableErrorKind,
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
@@ -141,6 +161,180 @@ struct SessionInfo {
     /// Destination Host
     destination_host: Option<String>,
 }
+
+/// Params of an AI analysis Task: what was asked, without the API key and the base URL
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisParams {
+    provider: AiProvider,
+    /// Model identifier, passed to the provider as is.
+    model: String,
+    /// Upper bound of tokens in each AI answer; null when not asked.
+    #[schema(value_type = Option<i64>, minimum = 0, maximum = 4_294_967_295_u64)]
+    max_output_tokens: Option<u32>,
+    /// Language the AI writes in; absent when not asked, so the AI writes in English.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+}
+
+/// Payload of a `running` AI analysis Task: its progress, and the tokens it used so far
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisRunningPayload {
+    /// Current step: `preparing` (the attempt starts), `reading` (the recordings are read), `describing` (the AI is
+    /// asked about the recording, part by part), then `writing` (the log is written).
+    step: String,
+    /// Work done in the step: bytes read while `reading`, parts described while `describing`; absent in the other steps.
+    done: Option<u64>,
+    /// Work the step has in all, in the same unit as `done`; absent in the other steps.
+    total: Option<u64>,
+    usage: AiAnalysisUsage,
+}
+
+/// Payload of a `succeeded` AI analysis Task: the log it put in the session
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisSucceededPayload {
+    /// Name of the log in the session manifest, such as `ai-analysis-0.slog`.
+    file_name: String,
+    /// Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+    model: String,
+    usage: AiAnalysisUsage,
+    /// Versions of the prompts that wrote the log, such as
+    /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
+    prompt_version: String,
+}
+
+/// Tokens the AI provider counted for an AI analysis Task, over all its attempts
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    /// Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one
+    /// still waiting for it; while it is not 0, `inputTokens` and `outputTokens` are short of what the provider billed.
+    unreported_requests: u64,
+}
+
+/// Payload of a `failed` AI analysis Task: why it failed, and the tokens it used
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisFailedPayload {
+    error: AiAnalysisError,
+    /// Absent only for a Task that never ran before its deadline passed, since it used no token.
+    usage: Option<AiAnalysisUsage>,
+}
+
+/// Why an AI analysis Task failed: a kind, with the fields of that kind; there is no text for people, so the caller
+/// words it
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisError {
+    kind: AiAnalysisErrorKind,
+    /// HTTP status the AI provider answered, for `aiRejected`.
+    status: Option<u16>,
+    /// What was wrong with the answer, for `aiBadAnswer`.
+    why: Option<AiAnalysisBadAnswer>,
+    /// Recording file that cannot be read, for `unreadableRecording`.
+    file: Option<String>,
+    /// Failure of the last attempt, for `attemptsExhausted`.
+    last: Option<AiAnalysisRecoverableError>,
+}
+
+/// Kind of failure of an AI analysis Task
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+enum AiAnalysisErrorKind {
+    /// The AI provider refused the request for good, such as for a wrong API key (401) or a spent quota.
+    AiRejected,
+    /// The AI provider answered, but not with something usable.
+    AiBadAnswer,
+    /// The API key is gone, such as after a Gateway restart.
+    KeyLost,
+    /// The session has no recording, or it was deleted.
+    NoRecording,
+    /// The session mixes terminal and video recordings.
+    MixedRecording,
+    /// A recording file of the session cannot be read.
+    UnreadableRecording,
+    /// The Task itself is not valid, such as with parameters this Gateway cannot read.
+    InvalidTask,
+    /// The attempt panicked.
+    Panicked,
+    /// Something went wrong inside Gateway, such as a file it could not write.
+    Internal,
+    /// Every attempt failed with a failure worth another attempt.
+    AttemptsExhausted,
+    /// The Task did not start in time, or went too long without progress.
+    DeadlinePassed,
+    /// The job of the Task could not be queued.
+    NotQueued,
+}
+
+/// What was wrong with an answer of the AI provider
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+enum AiAnalysisBadAnswer {
+    /// The answer is not in the format of the provider API.
+    Invalid,
+    /// The answer was cut short by the output token limit or the context window.
+    Truncated,
+    /// The provider refused to answer, such as when its content filter blocked the request.
+    Refused,
+    /// The model did not answer in the format it was asked for.
+    NotExpectedJson,
+}
+
+/// A failure of an attempt that was worth another attempt
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AiAnalysisRecoverableError {
+    kind: AiAnalysisRecoverableErrorKind,
+    /// HTTP status the AI provider answered, for `aiBusy`.
+    status: Option<u16>,
+}
+
+/// Kind of a failure worth another attempt
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+enum AiAnalysisRecoverableErrorKind {
+    /// The AI provider could not be reached, or did not answer in time.
+    AiUnreachable,
+    /// The AI provider is busy or failing for now, such as with a rate limit (429) or a server error (5xx).
+    AiBusy,
+    /// Gateway could not read its own job queue.
+    Storage,
+}
+
+// The error kinds are written out above for their descriptions, which utoipa drops from the variants without fields, so
+// these matches stop the build until a new kind or field is written out too.
+const _: fn(&Permanent) -> AiAnalysisErrorKind = |error| match error {
+    Permanent::AiRejected { status: _ } => AiAnalysisErrorKind::AiRejected,
+    Permanent::AiBadAnswer { why: _ } => AiAnalysisErrorKind::AiBadAnswer,
+    Permanent::KeyLost => AiAnalysisErrorKind::KeyLost,
+    Permanent::NoRecording => AiAnalysisErrorKind::NoRecording,
+    Permanent::MixedRecording => AiAnalysisErrorKind::MixedRecording,
+    Permanent::UnreadableRecording { file: _ } => AiAnalysisErrorKind::UnreadableRecording,
+    Permanent::InvalidTask => AiAnalysisErrorKind::InvalidTask,
+    Permanent::Panicked => AiAnalysisErrorKind::Panicked,
+    Permanent::Internal => AiAnalysisErrorKind::Internal,
+    Permanent::AttemptsExhausted { last: _ } => AiAnalysisErrorKind::AttemptsExhausted,
+    Permanent::DeadlinePassed => AiAnalysisErrorKind::DeadlinePassed,
+    Permanent::NotQueued => AiAnalysisErrorKind::NotQueued,
+};
+
+const _: fn(&Recoverable) -> AiAnalysisRecoverableErrorKind = |error| match error {
+    Recoverable::AiUnreachable => AiAnalysisRecoverableErrorKind::AiUnreachable,
+    Recoverable::AiBusy { status: _ } => AiAnalysisRecoverableErrorKind::AiBusy,
+    Recoverable::Storage => AiAnalysisRecoverableErrorKind::Storage,
+};
+
+const _: fn(&BadAnswer) -> AiAnalysisBadAnswer = |why| match why {
+    BadAnswer::Invalid => AiAnalysisBadAnswer::Invalid,
+    BadAnswer::Truncated => AiAnalysisBadAnswer::Truncated,
+    BadAnswer::Refused => AiAnalysisBadAnswer::Refused,
+    BadAnswer::NotExpectedJson => AiAnalysisBadAnswer::NotExpectedJson,
+};
 
 #[allow(unused)]
 #[derive(Serialize, utoipa::ToSchema)]

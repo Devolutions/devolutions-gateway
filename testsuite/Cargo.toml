@@ -62,6 +62,7 @@ sysevent.path = "../crates/sysevent"
 sysevent-codes.path = "../crates/sysevent-codes"
 tempfile = "3"
 test-utils.path = "../crates/test-utils"
+time = { version = "0.3", default-features = false, features = ["std", "parsing"] }
 tokio-rustls = { version = "0.26", features = ["ring"] }
 uuid = { version = "1", features = ["v4"] }
 
