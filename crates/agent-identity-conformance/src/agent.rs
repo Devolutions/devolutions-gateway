@@ -97,7 +97,7 @@ fn canonical_authority_dir(path: &Path) -> bool {
         == Some(true)
 }
 
-pub(crate) fn contains_pkcs8_material(contents: &[u8]) -> bool {
+fn contains_pkcs8_material(contents: &[u8]) -> bool {
     const PEM_MARKERS: [&[u8]; 2] = [b"-----BEGIN PRIVATE KEY-----", b"-----BEGIN ENCRYPTED PRIVATE KEY-----"];
     PEM_MARKERS
         .iter()
@@ -142,7 +142,7 @@ fn temporary_name(name: &str, expected: &str) -> bool {
             .any(|extension| suffix.ends_with(extension))
 }
 
-pub(crate) fn is_temporary_sibling(path: &Path, documented: &HashSet<PathBuf>, key_prefix: &str) -> bool {
+fn is_temporary_sibling(path: &Path, documented: &HashSet<PathBuf>, key_prefix: &str) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -185,7 +185,7 @@ pub(crate) fn is_temporary_sibling(path: &Path, documented: &HashSet<PathBuf>, k
 /// That keeps the record whole when stopping the agent cuts a write short, but nothing promises that the temporary file is then removed.
 ///
 /// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
-pub(crate) fn is_record_temporary(path: &Path) -> bool {
+fn is_record_temporary(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
         return false;
     };
@@ -248,7 +248,7 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
     Ok(())
 }
 
-pub(crate) fn assert_no_token_fragments(contents: &[u8], token: &str, path: &Path) -> anyhow::Result<()> {
+fn assert_no_token_fragments(contents: &[u8], token: &str, path: &Path) -> anyhow::Result<()> {
     let mut parts = token.split('.');
     let _ = parts.next();
     let bag = parts.next().context("registered token has no bag")?;
@@ -271,6 +271,424 @@ pub(crate) fn assert_no_token_fragments(contents: &[u8], token: &str, path: &Pat
         );
     }
     Ok(())
+}
+
+/// The SPKI of the leaf certificate that a stored key slot holds, or `None` while the slot holds no chain.
+pub(crate) fn expected_spki(stored: &Value) -> anyhow::Result<Option<Vec<u8>>> {
+    stored["certificate_chain"]
+        .as_array()
+        .map(|chain| -> anyhow::Result<Vec<u8>> {
+            let leaf = chain
+                .first()
+                .and_then(Value::as_str)
+                .context("stored certificate chain is empty")?;
+            let certificate = Certificate::from_der(&decoded_certificate(leaf)?)?;
+            Ok(certificate.tbs_certificate().subject_public_key_info().to_der()?)
+        })
+        .transpose()
+}
+
+/// An agent data directory, as the audits read it.
+///
+/// The suite audits the directory of each agent it runs, and the SYSTEM probe that of the agent it runs as SYSTEM, with the same checks.
+pub(crate) struct DataDir<'a> {
+    pub(crate) path: &'a Path,
+    pub(crate) key_backend: KeyBackend,
+    pub(crate) key_name_prefix: &'a str,
+    /// The tokens of the pending-enrollment files written to the directory.
+    pub(crate) tokens: &'a [String],
+    /// Whether `identity/keys` may hold a leftover copy of a deleted key, which only warns.
+    pub(crate) leftover_key_copies: bool,
+}
+
+impl DataDir<'_> {
+    fn pending_path_for(&self, token: &str) -> PathBuf {
+        #[cfg(windows)]
+        let extension = "dat";
+        #[cfg(not(windows))]
+        let extension = "json";
+        self.path
+            .join("identity")
+            .join("pending")
+            .join(format!("{}.{extension}", token_file_id(token)))
+    }
+
+    fn identity_path(&self, authority_id: &str) -> PathBuf {
+        self.path
+            .join("identity")
+            .join("authorities")
+            .join(authority_id)
+            .join("identity.json")
+    }
+
+    fn in_progress_path_for(&self, token: &str) -> PathBuf {
+        self.path
+            .join("identity")
+            .join("pending")
+            .join(format!("{}.in-progress.json", token_file_id(token)))
+    }
+
+    fn key_file_path(&self, name: &str) -> PathBuf {
+        self.path.join("identity").join("keys").join(format!("{name}.p8"))
+    }
+
+    fn in_progress_for(&self, token: &str) -> anyhow::Result<Option<Value>> {
+        let path = self.in_progress_path_for(token);
+        if !path.exists() {
+            return Ok(None);
+        }
+        let record: Value = serde_json::from_slice(&std::fs::read(path)?).context("read pending in-progress record")?;
+        ensure!(record["version"] == 1, "in-progress enrollment has wrong version");
+        ensure!(
+            record["token_sha256"] == token_file_id(token),
+            "in-progress record does not belong to its pending token"
+        );
+        validate_key_name(self.key_name_prefix, field(&record, "key_name")?)?;
+        Ok(Some(record))
+    }
+
+    fn state(&self, authority_id: &str) -> anyhow::Result<Value> {
+        // UNTESTED: on Windows, the suite reads the agent's files with read, write and delete sharing, the default of `std::fs`, so polling never blocks the agent's replace of a record.
+        // A reader without delete sharing makes that replace fail until the reader closes the file, which delays the agent and keeps its temporary file meanwhile.
+        // When reading the agent's files through another API, keep `FILE_SHARE_DELETE`.
+        serde_json::from_slice(&std::fs::read(self.identity_path(authority_id))?).context("read stored identity")
+    }
+
+    pub(crate) fn audit_identity_tree(&self) -> anyhow::Result<()> {
+        let identity = self.path.join("identity");
+        let metadata = match std::fs::symlink_metadata(&identity) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        ensure!(
+            metadata.file_type().is_dir(),
+            "identity directory is not a real directory"
+        );
+        let authorities = identity.join("authorities");
+        let keys = identity.join("keys");
+        let pending = identity.join("pending");
+        let recorded_keys = self.recorded_key_names()?;
+        let recorded_files = if self.key_backend == KeyBackend::File {
+            recorded_keys
+                .iter()
+                .map(|name| self.key_file_path(name))
+                .collect::<HashSet<_>>()
+        } else {
+            HashSet::new()
+        };
+        let mut documented = recorded_files.clone();
+        for token in self.tokens {
+            documented.insert(self.pending_path_for(token));
+            documented.insert(self.in_progress_path_for(token));
+        }
+        if authorities.exists() {
+            for entry in std::fs::read_dir(&authorities)? {
+                let entry = entry?;
+                if entry.file_type()?.is_dir() && canonical_authority_dir(&entry.path()) {
+                    documented.insert(entry.path().join("identity.json"));
+                }
+            }
+        }
+
+        let mut directories = vec![identity];
+        while let Some(directory) = directories.pop() {
+            for entry in std::fs::read_dir(directory)? {
+                let entry = entry?;
+                let path = entry.path();
+                let file_type = entry.file_type()?;
+                let known_directory = path == pending
+                    || path == keys
+                    || path == authorities
+                    || path.parent() == Some(authorities.as_path()) && canonical_authority_dir(&path);
+                if file_type.is_dir() {
+                    if !known_directory {
+                        eprintln!("WARN unknown identity directory {}", path.display());
+                    }
+                    directories.push(path);
+                    continue;
+                }
+                ensure!(
+                    !known_directory,
+                    "documented identity directory {} is not a directory",
+                    path.display()
+                );
+                let recorded = recorded_files.contains(&path);
+                ensure!(
+                    !path
+                        .extension()
+                        .and_then(|extension| extension.to_str())
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("p8"))
+                        || recorded,
+                    "unrecorded private key file {}",
+                    path.display()
+                );
+                let file_name = entry.file_name();
+                let file_name = file_name.to_string_lossy();
+                if self.leftover_key_copies
+                    && path.parent() == Some(keys.as_path())
+                    && let Some(key) = embedded_key_name(&file_name, self.key_name_prefix)
+                    && !recorded_keys.contains(key)
+                {
+                    // A leftover copy of a deleted key survives only until a later operation in its key store (`crates/device-key/INTENT.md`, "Operations"), and the agent's last operation may have left it.
+                    eprintln!("WARN leftover copy of deleted key {key}: {}", path.display());
+                    continue;
+                }
+                let temporary = is_temporary_sibling(&path, &documented, self.key_name_prefix);
+                // A record's atomic write can leave its temporary file when it does not complete, as when the agent is stopped mid-write (`is_record_temporary`); any other temporary sibling is a leftover.
+                ensure!(
+                    !temporary || is_record_temporary(&path),
+                    "leftover identity temporary file {}",
+                    path.display()
+                );
+                if file_type.is_file() && !recorded {
+                    ensure!(
+                        !contains_pkcs8_material(&std::fs::read(&path)?),
+                        "unrecorded PKCS#8 private key in {}",
+                        path.display()
+                    );
+                }
+                if documented.contains(&path) {
+                    ensure!(
+                        file_type.is_file(),
+                        "documented identity file {} is not a file",
+                        path.display()
+                    );
+                } else if temporary {
+                    eprintln!("WARN temporary file of an interrupted record write {}", path.display());
+                } else {
+                    eprintln!("WARN unknown identity file {}", path.display());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn file_keys_with_prefix(&self) -> anyhow::Result<HashSet<String>> {
+        let dir = self.path.join("identity").join("keys");
+        let mut keys = HashSet::new();
+        if dir.exists() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let file_name = entry.file_name();
+                let Some(name) = file_name.to_str().and_then(|name| name.strip_suffix(".p8")) else {
+                    continue;
+                };
+                if key_belongs_to_run(name, self.key_name_prefix) {
+                    ensure!(
+                        entry.file_type()?.is_file(),
+                        "key file {} is not a regular file",
+                        entry.path().display()
+                    );
+                    keys.insert(name.to_owned());
+                }
+            }
+        }
+        Ok(keys)
+    }
+
+    fn recorded_key_names(&self) -> anyhow::Result<HashSet<String>> {
+        let mut recorded = HashSet::new();
+        let authorities = self.path.join("identity").join("authorities");
+        if authorities.exists() {
+            for authority in std::fs::read_dir(authorities)? {
+                let authority = authority?;
+                if !authority.file_type()?.is_dir() || !canonical_authority_dir(&authority.path()) {
+                    continue;
+                }
+                let path = authority.path().join("identity.json");
+                if path.exists() {
+                    let state: Value = serde_json::from_slice(&std::fs::read(&path)?)
+                        .with_context(|| format!("read {}", path.display()))?;
+                    for slot in ["current", "pending", "previous"] {
+                        if let Some(name) = state["keys"][slot]["key_name"].as_str() {
+                            validate_key_name(self.key_name_prefix, name)?;
+                            recorded.insert(name.to_owned());
+                        }
+                    }
+                }
+            }
+        }
+        for token in self.tokens {
+            if let Some(progress) = self.in_progress_for(token)? {
+                recorded.insert(field(&progress, "key_name")?.to_owned());
+            }
+        }
+        Ok(recorded)
+    }
+
+    pub(crate) fn audit_orphan_keys(&self) -> anyhow::Result<()> {
+        let recorded = self.recorded_key_names()?;
+        let existing = self.file_keys_with_prefix()?;
+        #[cfg(windows)]
+        let existing = {
+            let mut existing = existing;
+            existing.extend(crate::windows::machine_keys_with_prefix(self.key_name_prefix)?);
+            existing
+        };
+        let mut orphaned = existing.difference(&recorded).cloned().collect::<Vec<_>>();
+        orphaned.sort_unstable();
+        ensure!(
+            orphaned.is_empty(),
+            "unrecorded identity keys with run prefix: {}",
+            orphaned.join(", ")
+        );
+        Ok(())
+    }
+
+    fn audit_stored_keys(&self) -> anyhow::Result<()> {
+        let authorities = self.path.join("identity").join("authorities");
+        if !authorities.exists() {
+            return Ok(());
+        }
+        for authority in std::fs::read_dir(authorities)? {
+            let authority = authority?;
+            if !authority.file_type()?.is_dir() || !canonical_authority_dir(&authority.path()) {
+                continue;
+            }
+            let path = authority.path().join("identity.json");
+            if path.exists() {
+                let state: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+                let id = field(&state, "authority_id")?;
+                self.check_key_protection(id, &state, false)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks every key that `state` names and that exists.
+    ///
+    /// The agent records a key's name before it creates the key, and deletes the key before it removes the name ([agent intent], "Stored identities"), so a record can name a key that does not exist.
+    /// A missing key fails only as the current key of a settled identity (`require_current`) that the stored identity still names as current.
+    /// When the stored identity names another current key, a renewal has retired the missing one, and the check runs again on the stored identity.
+    ///
+    /// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
+    pub(crate) fn check_key_protection(
+        &self,
+        authority_id: &str,
+        state: &Value,
+        require_current: bool,
+    ) -> anyhow::Result<()> {
+        // Each further read needs another renewal to have retired the current key meanwhile, and the agent renews at most every few seconds.
+        const READS: usize = 3;
+
+        let mut latest;
+        let mut state = state;
+        for _ in 0..READS {
+            if require_current {
+                ensure!(
+                    state["keys"]["current"]["key_name"].is_string(),
+                    "settled identity has no current key name"
+                );
+            }
+            let mut missing_current = None;
+            for slot in ["current", "pending", "previous"] {
+                let Some(name) = state["keys"][slot]["key_name"].as_str() else {
+                    continue;
+                };
+                let exists = self.check_key_if_exists(slot, name, &state["keys"][slot])?;
+                if !exists && require_current && slot == "current" {
+                    missing_current = Some(name.to_owned());
+                }
+            }
+            let Some(missing) = missing_current else {
+                return Ok(());
+            };
+            latest = self.state(authority_id)?;
+            ensure!(
+                latest["keys"]["current"]["key_name"] != missing,
+                "settled current key {missing} is missing"
+            );
+            state = &latest;
+        }
+        anyhow::bail!("settled current key changed on each of {READS} reads of the stored identity")
+    }
+
+    /// Checks the key `name` that `slot` stores, and returns `false` if the key does not exist.
+    fn check_key_if_exists(&self, slot: &str, name: &str, stored: &Value) -> anyhow::Result<bool> {
+        validate_key_name(self.key_name_prefix, name)?;
+        match self.check_key(slot, name, expected_spki(stored)?.as_deref()) {
+            // UNTESTED: a key deleted during its checks counts as missing, not as a failed check.
+            // Each check opens the key again, and a key deleted in between fails that check in a backend-specific way; the agent deletes keys during every renewal.
+            // When changing the checks, keep attributing a failure to the deletion only when the key is gone afterwards.
+            Err(_) if !self.key_exists(name)? => Ok(false),
+            checked => checked,
+        }
+    }
+
+    fn key_exists(&self, name: &str) -> anyhow::Result<bool> {
+        validate_key_name(self.key_name_prefix, name)?;
+        #[cfg(windows)]
+        if self.key_backend == KeyBackend::WindowsSoftwareProvider {
+            return crate::windows::machine_key_exists(name);
+        }
+        Ok(self.key_file_path(name).exists())
+    }
+
+    /// Checks the key `name` that `slot` stores against `expected_spki`, and returns `false` if the key does not exist.
+    pub(crate) fn check_key(&self, slot: &str, name: &str, expected_spki: Option<&[u8]>) -> anyhow::Result<bool> {
+        #[cfg(windows)]
+        if self.key_backend == KeyBackend::WindowsSoftwareProvider {
+            if !crate::windows::machine_key_exists(name)? {
+                return Ok(false);
+            }
+            crate::windows::assert_non_exportable(name)?;
+            crate::windows::assert_machine_key_acl(name)?;
+            if let Some(expected) = expected_spki {
+                let key = VerifyingKey::from_sec1_bytes(&crate::windows::machine_public_key(name)?)?;
+                ensure!(
+                    key.to_public_key_der()?.as_bytes() == expected,
+                    "{slot} machine key does not match its leaf SPKI"
+                );
+            }
+            return Ok(true);
+        }
+        #[cfg(any(unix, windows))]
+        if self.key_backend == KeyBackend::File {
+            let path = self.key_file_path(name);
+            if !path.exists() {
+                return Ok(false);
+            }
+            #[cfg(unix)]
+            assert_file_key_access(&path)?;
+            if let Some(expected) = expected_spki {
+                let key = SigningKey::from_pkcs8_der(&std::fs::read(&path)?)?;
+                ensure!(
+                    key.verifying_key().to_public_key_der()?.as_bytes() == expected,
+                    "{slot} file key does not match its leaf SPKI"
+                );
+            }
+            return Ok(true);
+        }
+        #[cfg(not(any(unix, windows)))]
+        let _ = (slot, name, expected_spki);
+        Ok(true)
+    }
+
+    /// Checks that no file under `root`, other than `excluded` and the pending-enrollment files, holds a fragment of a token.
+    pub(crate) fn audit_tokens(&self, root: &Path, excluded: Option<&Path>) -> anyhow::Result<()> {
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if excluded == Some(path.as_path())
+                    || self.tokens.iter().any(|token| path == self.pending_path_for(token))
+                {
+                    continue;
+                }
+                let contents = std::fs::read(&path)?;
+                for token in self.tokens {
+                    assert_no_token_fragments(&contents, token, &path)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 struct AgentCase {
@@ -364,15 +782,18 @@ impl AgentCase {
         self.dir.path()
     }
 
+    fn data_dir(&self) -> DataDir<'_> {
+        DataDir {
+            path: self.path(),
+            key_backend: self.ctx.key_backend,
+            key_name_prefix: &self.ctx.key_name_prefix,
+            tokens: &self.tokens,
+            leftover_key_copies: true,
+        }
+    }
+
     fn pending_path_for(&self, token: &str) -> PathBuf {
-        #[cfg(windows)]
-        let extension = "dat";
-        #[cfg(not(windows))]
-        let extension = "json";
-        self.path()
-            .join("identity")
-            .join("pending")
-            .join(format!("{}.{extension}", token_file_id(token)))
+        self.data_dir().pending_path_for(token)
     }
 
     fn pending_path(&self) -> PathBuf {
@@ -380,18 +801,11 @@ impl AgentCase {
     }
 
     fn identity_path(&self, authority_id: &str) -> PathBuf {
-        self.path()
-            .join("identity")
-            .join("authorities")
-            .join(authority_id)
-            .join("identity.json")
+        self.data_dir().identity_path(authority_id)
     }
 
     fn in_progress_path_for(&self, token: &str) -> PathBuf {
-        self.path()
-            .join("identity")
-            .join("pending")
-            .join(format!("{}.in-progress.json", token_file_id(token)))
+        self.data_dir().in_progress_path_for(token)
     }
 
     fn in_progress_path(&self) -> PathBuf {
@@ -461,7 +875,7 @@ impl AgentCase {
     }
 
     fn key_file_path(&self, name: &str) -> PathBuf {
-        self.path().join("identity").join("keys").join(format!("{name}.p8"))
+        self.data_dir().key_file_path(name)
     }
 
     fn in_progress(&self) -> anyhow::Result<Option<Value>> {
@@ -469,25 +883,11 @@ impl AgentCase {
     }
 
     fn in_progress_for(&self, token: &str) -> anyhow::Result<Option<Value>> {
-        let path = self.in_progress_path_for(token);
-        if !path.exists() {
-            return Ok(None);
-        }
-        let record: Value = serde_json::from_slice(&std::fs::read(path)?).context("read pending in-progress record")?;
-        ensure!(record["version"] == 1, "in-progress enrollment has wrong version");
-        ensure!(
-            record["token_sha256"] == token_file_id(token),
-            "in-progress record does not belong to its pending token"
-        );
-        validate_key_name(&self.ctx.key_name_prefix, field(&record, "key_name")?)?;
-        Ok(Some(record))
+        self.data_dir().in_progress_for(token)
     }
 
     fn state(&self, authority_id: &str) -> anyhow::Result<Value> {
-        // UNTESTED: on Windows, the suite reads the agent's files with read, write and delete sharing, the default of `std::fs`, so polling never blocks the agent's replace of a record.
-        // A reader without delete sharing makes that replace fail until the reader closes the file, which delays the agent and keeps its temporary file meanwhile.
-        // When reading the agent's files through another API, keep `FILE_SHARE_DELETE`.
-        serde_json::from_slice(&std::fs::read(self.identity_path(authority_id))?).context("read stored identity")
+        self.data_dir().state(authority_id)
     }
 
     fn has_stored_identity(&self) -> anyhow::Result<bool> {
@@ -745,7 +1145,7 @@ impl AgentCase {
                 && !self.in_progress_path_for(pending).exists()
                 && self.rejection_path_for(pending).exists()
                 && !self.has_stored_identity()?
-                && self.file_keys_with_prefix()?.is_empty()
+                && self.data_dir().file_keys_with_prefix()?.is_empty()
                 && machine_keys_gone
             {
                 let marker: Value = serde_json::from_slice(&std::fs::read(self.rejection_path_for(pending))?)?;
@@ -850,9 +1250,9 @@ impl AgentCase {
 
     async fn finish(&mut self) -> anyhow::Result<()> {
         let stopped = self.stop().await;
-        let layout = self.audit_identity_tree();
-        let protected = self.audit_stored_keys();
-        let orphaned = self.audit_orphan_keys();
+        let layout = self.data_dir().audit_identity_tree();
+        let protected = self.data_dir().audit_stored_keys();
+        let orphaned = self.data_dir().audit_orphan_keys();
         let tokens = self.audit_tokens();
         let cleaned = self.cleanup_run_keys();
         self.cleaned = cleaned.is_ok();
@@ -864,189 +1264,8 @@ impl AgentCase {
         cleaned
     }
 
-    fn audit_identity_tree(&self) -> anyhow::Result<()> {
-        let identity = self.path().join("identity");
-        let metadata = match std::fs::symlink_metadata(&identity) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-            Err(error) => return Err(error.into()),
-        };
-        ensure!(
-            metadata.file_type().is_dir(),
-            "identity directory is not a real directory"
-        );
-        let authorities = identity.join("authorities");
-        let keys = identity.join("keys");
-        let pending = identity.join("pending");
-        let recorded_keys = self.recorded_key_names()?;
-        let recorded_files = if self.ctx.key_backend == KeyBackend::File {
-            recorded_keys
-                .iter()
-                .map(|name| self.key_file_path(name))
-                .collect::<HashSet<_>>()
-        } else {
-            HashSet::new()
-        };
-        let mut documented = recorded_files.clone();
-        for token in &self.tokens {
-            documented.insert(self.pending_path_for(token));
-            documented.insert(self.in_progress_path_for(token));
-        }
-        if authorities.exists() {
-            for entry in std::fs::read_dir(&authorities)? {
-                let entry = entry?;
-                if entry.file_type()?.is_dir() && canonical_authority_dir(&entry.path()) {
-                    documented.insert(entry.path().join("identity.json"));
-                }
-            }
-        }
-
-        let mut directories = vec![identity];
-        while let Some(directory) = directories.pop() {
-            for entry in std::fs::read_dir(directory)? {
-                let entry = entry?;
-                let path = entry.path();
-                let file_type = entry.file_type()?;
-                let known_directory = path == pending
-                    || path == keys
-                    || path == authorities
-                    || path.parent() == Some(authorities.as_path()) && canonical_authority_dir(&path);
-                if file_type.is_dir() {
-                    if !known_directory {
-                        eprintln!("WARN unknown identity directory {}", path.display());
-                    }
-                    directories.push(path);
-                    continue;
-                }
-                ensure!(
-                    !known_directory,
-                    "documented identity directory {} is not a directory",
-                    path.display()
-                );
-                let recorded = recorded_files.contains(&path);
-                ensure!(
-                    !path
-                        .extension()
-                        .and_then(|extension| extension.to_str())
-                        .is_some_and(|extension| extension.eq_ignore_ascii_case("p8"))
-                        || recorded,
-                    "unrecorded private key file {}",
-                    path.display()
-                );
-                let file_name = entry.file_name();
-                let file_name = file_name.to_string_lossy();
-                if path.parent() == Some(keys.as_path())
-                    && let Some(key) = embedded_key_name(&file_name, &self.ctx.key_name_prefix)
-                    && !recorded_keys.contains(key)
-                {
-                    // A leftover copy of a deleted key survives only until a later operation in its key store (`crates/device-key/INTENT.md`, "Operations"), and the agent's last operation may have left it.
-                    eprintln!("WARN leftover copy of deleted key {key}: {}", path.display());
-                    continue;
-                }
-                let temporary = is_temporary_sibling(&path, &documented, &self.ctx.key_name_prefix);
-                // A record's atomic write can leave its temporary file when it does not complete, as when the agent is stopped mid-write (`is_record_temporary`); any other temporary sibling is a leftover.
-                ensure!(
-                    !temporary || is_record_temporary(&path),
-                    "leftover identity temporary file {}",
-                    path.display()
-                );
-                if file_type.is_file() && !recorded {
-                    ensure!(
-                        !contains_pkcs8_material(&std::fs::read(&path)?),
-                        "unrecorded PKCS#8 private key in {}",
-                        path.display()
-                    );
-                }
-                if documented.contains(&path) {
-                    ensure!(
-                        file_type.is_file(),
-                        "documented identity file {} is not a file",
-                        path.display()
-                    );
-                } else if temporary {
-                    eprintln!("WARN temporary file of an interrupted record write {}", path.display());
-                } else {
-                    eprintln!("WARN unknown identity file {}", path.display());
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn file_keys_with_prefix(&self) -> anyhow::Result<HashSet<String>> {
-        let dir = self.path().join("identity").join("keys");
-        let mut keys = HashSet::new();
-        if dir.exists() {
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let file_name = entry.file_name();
-                let Some(name) = file_name.to_str().and_then(|name| name.strip_suffix(".p8")) else {
-                    continue;
-                };
-                if key_belongs_to_run(name, &self.ctx.key_name_prefix) {
-                    ensure!(
-                        entry.file_type()?.is_file(),
-                        "key file {} is not a regular file",
-                        entry.path().display()
-                    );
-                    keys.insert(name.to_owned());
-                }
-            }
-        }
-        Ok(keys)
-    }
-
-    fn recorded_key_names(&self) -> anyhow::Result<HashSet<String>> {
-        let mut recorded = HashSet::new();
-        let authorities = self.path().join("identity").join("authorities");
-        if authorities.exists() {
-            for authority in std::fs::read_dir(authorities)? {
-                let authority = authority?;
-                if !authority.file_type()?.is_dir() || !canonical_authority_dir(&authority.path()) {
-                    continue;
-                }
-                let path = authority.path().join("identity.json");
-                if path.exists() {
-                    let state: Value = serde_json::from_slice(&std::fs::read(&path)?)
-                        .with_context(|| format!("read {}", path.display()))?;
-                    for slot in ["current", "pending", "previous"] {
-                        if let Some(name) = state["keys"][slot]["key_name"].as_str() {
-                            validate_key_name(&self.ctx.key_name_prefix, name)?;
-                            recorded.insert(name.to_owned());
-                        }
-                    }
-                }
-            }
-        }
-        for token in &self.tokens {
-            if let Some(progress) = self.in_progress_for(token)? {
-                recorded.insert(field(&progress, "key_name")?.to_owned());
-            }
-        }
-        Ok(recorded)
-    }
-
-    fn audit_orphan_keys(&self) -> anyhow::Result<()> {
-        let recorded = self.recorded_key_names()?;
-        let existing = self.file_keys_with_prefix()?;
-        #[cfg(windows)]
-        let existing = {
-            let mut existing = existing;
-            existing.extend(crate::windows::machine_keys_with_prefix(&self.ctx.key_name_prefix)?);
-            existing
-        };
-        let mut orphaned = existing.difference(&recorded).cloned().collect::<Vec<_>>();
-        orphaned.sort_unstable();
-        ensure!(
-            orphaned.is_empty(),
-            "unrecorded identity keys with run prefix: {}",
-            orphaned.join(", ")
-        );
-        Ok(())
-    }
-
     fn cleanup_run_keys(&self) -> anyhow::Result<()> {
-        let files = self.file_keys_with_prefix();
+        let files = self.data_dir().file_keys_with_prefix();
         #[cfg(windows)]
         let machine_cleanup = crate::windows::cleanup_machine_keys(&self.ctx.key_name_prefix);
         for name in files? {
@@ -1058,138 +1277,8 @@ impl AgentCase {
         Ok(())
     }
 
-    fn audit_stored_keys(&self) -> anyhow::Result<()> {
-        let authorities = self.path().join("identity").join("authorities");
-        if !authorities.exists() {
-            return Ok(());
-        }
-        for authority in std::fs::read_dir(authorities)? {
-            let authority = authority?;
-            if !authority.file_type()?.is_dir() || !canonical_authority_dir(&authority.path()) {
-                continue;
-            }
-            let path = authority.path().join("identity.json");
-            if path.exists() {
-                let state: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
-                let id = field(&state, "authority_id")?;
-                self.check_key_protection_inner(id, &state, false)?;
-            }
-        }
-        Ok(())
-    }
-
     fn check_key_protection(&self, authority_id: &str, state: &Value) -> anyhow::Result<()> {
-        self.check_key_protection_inner(authority_id, state, true)
-    }
-
-    /// Checks every key that `state` names and that exists.
-    ///
-    /// The agent records a key's name before it creates the key, and deletes the key before it removes the name ([agent intent], "Stored identities"), so a record can name a key that does not exist.
-    /// A missing key fails only as the current key of a settled identity (`require_current`) that the stored identity still names as current.
-    /// When the stored identity names another current key, a renewal has retired the missing one, and the check runs again on the stored identity.
-    ///
-    /// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
-    fn check_key_protection_inner(
-        &self,
-        authority_id: &str,
-        state: &Value,
-        require_current: bool,
-    ) -> anyhow::Result<()> {
-        // Each further read needs another renewal to have retired the current key meanwhile, and the agent renews at most every few seconds.
-        const READS: usize = 3;
-
-        let mut latest;
-        let mut state = state;
-        for _ in 0..READS {
-            if require_current {
-                ensure!(
-                    state["keys"]["current"]["key_name"].is_string(),
-                    "settled identity has no current key name"
-                );
-            }
-            let mut missing_current = None;
-            for slot in ["current", "pending", "previous"] {
-                let Some(name) = state["keys"][slot]["key_name"].as_str() else {
-                    continue;
-                };
-                let exists = self.check_key_if_exists(slot, name, &state["keys"][slot])?;
-                if !exists && require_current && slot == "current" {
-                    missing_current = Some(name.to_owned());
-                }
-            }
-            let Some(missing) = missing_current else {
-                return Ok(());
-            };
-            latest = self.state(authority_id)?;
-            ensure!(
-                latest["keys"]["current"]["key_name"] != missing,
-                "settled current key {missing} is missing"
-            );
-            state = &latest;
-        }
-        anyhow::bail!("settled current key changed on each of {READS} reads of the stored identity")
-    }
-
-    /// Checks the key `name` that `slot` stores, and returns `false` if the key does not exist.
-    fn check_key_if_exists(&self, slot: &str, name: &str, stored: &Value) -> anyhow::Result<bool> {
-        validate_key_name(&self.ctx.key_name_prefix, name)?;
-        let expected_spki = stored["certificate_chain"]
-            .as_array()
-            .map(|chain| -> anyhow::Result<Vec<u8>> {
-                let leaf = chain
-                    .first()
-                    .and_then(Value::as_str)
-                    .context("stored certificate chain is empty")?;
-                let certificate = Certificate::from_der(&decoded_certificate(leaf)?)?;
-                Ok(certificate.tbs_certificate().subject_public_key_info().to_der()?)
-            })
-            .transpose()?;
-        match self.check_key(slot, name, expected_spki.as_deref()) {
-            // UNTESTED: a key deleted during its checks counts as missing, not as a failed check.
-            // Each check opens the key again, and a key deleted in between fails that check in a backend-specific way; the agent deletes keys during every renewal.
-            // When changing the checks, keep attributing a failure to the deletion only when the key is gone afterwards.
-            Err(_) if !key_exists(self, name)? => Ok(false),
-            checked => checked,
-        }
-    }
-
-    fn check_key(&self, slot: &str, name: &str, expected_spki: Option<&[u8]>) -> anyhow::Result<bool> {
-        #[cfg(windows)]
-        if self.ctx.key_backend == KeyBackend::WindowsSoftwareProvider {
-            if !crate::windows::machine_key_exists(name)? {
-                return Ok(false);
-            }
-            crate::windows::assert_non_exportable(name)?;
-            crate::windows::assert_machine_key_acl(name)?;
-            if let Some(expected) = expected_spki {
-                let key = VerifyingKey::from_sec1_bytes(&crate::windows::machine_public_key(name)?)?;
-                ensure!(
-                    key.to_public_key_der()?.as_bytes() == expected,
-                    "{slot} machine key does not match its leaf SPKI"
-                );
-            }
-            return Ok(true);
-        }
-        #[cfg(any(unix, windows))]
-        if self.ctx.key_backend == KeyBackend::File {
-            let path = self.key_file_path(name);
-            if !path.exists() {
-                return Ok(false);
-            }
-            #[cfg(unix)]
-            assert_file_key_access(&path)?;
-            if let Some(expected) = expected_spki {
-                let key = SigningKey::from_pkcs8_der(&std::fs::read(&path)?)?;
-                ensure!(
-                    key.verifying_key().to_public_key_der()?.as_bytes() == expected,
-                    "{slot} file key does not match its leaf SPKI"
-                );
-            }
-            return Ok(true);
-        }
-        #[cfg(not(any(unix, windows)))]
-        let _ = (slot, name, expected_spki);
-        Ok(true)
+        self.data_dir().check_key_protection(authority_id, state, true)
     }
 
     fn audit_tokens(&self) -> anyhow::Result<()> {
@@ -1197,27 +1286,7 @@ impl AgentCase {
     }
 
     fn audit_tokens_excluding(&self, excluded: Option<&Path>) -> anyhow::Result<()> {
-        let mut stack = vec![self.path().to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.is_dir() {
-                    stack.push(path);
-                    continue;
-                }
-                if excluded == Some(path.as_path())
-                    || self.tokens.iter().any(|token| path == self.pending_path_for(token))
-                {
-                    continue;
-                }
-                let contents = std::fs::read(&path)?;
-                for token in &self.tokens {
-                    assert_no_token_fragments(&contents, token, &path)?;
-                }
-            }
-        }
-        Ok(())
+        self.data_dir().audit_tokens(self.path(), excluded)
     }
 }
 
@@ -1234,10 +1303,10 @@ impl Drop for AgentCase {
             }
         }
         if !self.cleaned {
-            if let Err(error) = self.audit_identity_tree() {
+            if let Err(error) = self.data_dir().audit_identity_tree() {
                 eprintln!("agent-case identity tree audit failed: {error:#}");
             }
-            if let Err(error) = self.audit_orphan_keys() {
+            if let Err(error) = self.data_dir().audit_orphan_keys() {
                 eprintln!("agent-case orphan audit failed: {error:#}");
             }
             if let Err(error) = self.audit_tokens() {
@@ -1597,12 +1666,7 @@ fn renew_keyids_since<'a>(requests: &'a Value, earlier: &Value) -> anyhow::Resul
 }
 
 fn key_exists(case: &AgentCase, name: &str) -> anyhow::Result<bool> {
-    validate_key_name(&case.ctx.key_name_prefix, name)?;
-    #[cfg(windows)]
-    if case.ctx.key_backend == KeyBackend::WindowsSoftwareProvider {
-        return crate::windows::machine_key_exists(name);
-    }
-    Ok(case.key_file_path(name).exists())
+    case.data_dir().key_exists(name)
 }
 
 #[cfg(unix)]
@@ -2486,7 +2550,7 @@ pub(crate) async fn a_unavailable_key_backend_stops_identity(ctx: Context) -> an
                         "unavailable backend processed the pending token"
                     );
                     ensure!(
-                        case.file_keys_with_prefix()?.is_empty() && !case.has_stored_identity()?,
+                        case.data_dir().file_keys_with_prefix()?.is_empty() && !case.has_stored_identity()?,
                         "unavailable backend created a key or identity"
                     );
                     Ok(())
@@ -3360,7 +3424,7 @@ pub(crate) async fn a_renewal_happy_path(ctx: Context) -> anyhow::Result<()> {
                     break record;
                 }
                 if let Ok(state) = case.state(&authority) {
-                    case.check_key_protection_inner(&authority, &state, false)?;
+                    case.data_dir().check_key_protection(&authority, &state, false)?;
                 }
                 if !key_exists(case, &old_key)? {
                     let confirmed = current_thumbprint(&case.identity_record(&target, &id).await?)
@@ -6136,11 +6200,11 @@ mod tests {
         std::fs::write(case.key_file_path(&foreign), b"foreign-key")?;
         std::fs::write(case.key_file_path(&overlapping), b"other-run-key")?;
         ensure!(
-            case.audit_identity_tree().is_err(),
+            case.data_dir().audit_identity_tree().is_err(),
             "an unexpected key file in the identity tree was accepted"
         );
         ensure!(
-            case.audit_orphan_keys().is_err(),
+            case.data_dir().audit_orphan_keys().is_err(),
             "an unrecorded file-backed key was accepted"
         );
         std::fs::create_dir_all(case.in_progress_path().parent().context("pending directory")?)?;
@@ -6148,13 +6212,13 @@ mod tests {
             case.in_progress_path(),
             serde_json::to_vec(&json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }))?,
         )?;
-        case.audit_orphan_keys()?;
+        case.data_dir().audit_orphan_keys()?;
         std::fs::remove_file(case.key_file_path(&foreign))?;
         std::fs::remove_file(case.key_file_path(&overlapping))?;
-        case.audit_identity_tree()?;
+        case.data_dir().audit_identity_tree()?;
         case.ctx.key_backend = KeyBackend::WindowsSoftwareProvider;
         ensure!(
-            case.audit_identity_tree().is_err(),
+            case.data_dir().audit_identity_tree().is_err(),
             "Windows software provider backend accepted a file-backed key"
         );
         case.ctx.key_backend = KeyBackend::File;
@@ -6185,7 +6249,7 @@ mod tests {
             "settled identity accepted a missing current key"
         );
         write_run_key(&case.key_file_path(&name))?;
-        case.audit_orphan_keys()?;
+        case.data_dir().audit_orphan_keys()?;
         std::fs::remove_file(&identity)?;
         std::fs::write(
             case.in_progress_path(),
@@ -6203,22 +6267,22 @@ mod tests {
         );
         std::fs::remove_file(case.key_file_path(&foreign))?;
         std::fs::remove_file(case.key_file_path(&overlapping))?;
-        case.audit_identity_tree()?;
+        case.data_dir().audit_identity_tree()?;
         let unknown = case.path().join("identity").join("notes").join("unknown.bin");
         std::fs::create_dir_all(unknown.parent().context("unknown entry parent")?)?;
         std::fs::write(&unknown, b"non-key data")?;
-        case.audit_identity_tree()?;
+        case.data_dir().audit_identity_tree()?;
         let unexpected_key = unknown.with_file_name("other.p8");
         std::fs::write(&unexpected_key, b"not even a PKCS#8 key")?;
         ensure!(
-            case.audit_identity_tree().is_err(),
+            case.data_dir().audit_identity_tree().is_err(),
             "nested unrecorded .p8 file was accepted"
         );
         std::fs::remove_file(unexpected_key)?;
         let pkcs8 = p256::SecretKey::generate_from_rng(&mut rand::rng()).to_pkcs8_der()?;
         std::fs::write(&unknown, pkcs8.as_bytes())?;
         ensure!(
-            case.audit_identity_tree().is_err(),
+            case.data_dir().audit_identity_tree().is_err(),
             "unrecorded PKCS#8 DER was accepted"
         );
         std::fs::write(
@@ -6229,7 +6293,7 @@ mod tests {
             ),
         )?;
         ensure!(
-            case.audit_identity_tree().is_err(),
+            case.data_dir().audit_identity_tree().is_err(),
             "unrecorded PKCS#8 PEM was accepted"
         );
         let encrypted_pkcs8 = base64::engine::general_purpose::STANDARD.decode(
@@ -6237,17 +6301,17 @@ mod tests {
         )?;
         std::fs::write(&unknown, encrypted_pkcs8)?;
         ensure!(
-            case.audit_identity_tree().is_err(),
+            case.data_dir().audit_identity_tree().is_err(),
             "unrecorded encrypted PKCS#8 DER was accepted"
         );
         std::fs::remove_file(unknown)?;
         let unrelated = identity.with_file_name(".identity.json.notes");
         std::fs::write(&unrelated, b"not a temporary file")?;
-        case.audit_identity_tree()?;
+        case.data_dir().audit_identity_tree()?;
         std::fs::remove_file(unrelated)?;
         let template = identity.with_file_name(".identity.json.template");
         std::fs::write(&template, b"also not a temporary file")?;
-        case.audit_identity_tree()?;
+        case.data_dir().audit_identity_tree()?;
         std::fs::remove_file(template)?;
         // A record's atomic write can leave its temporary file when the agent is stopped mid-write.
         for leftover in [
@@ -6255,11 +6319,12 @@ mod tests {
             case.in_progress_path().with_extension("json.tmp"),
         ] {
             std::fs::write(&leftover, b"temp")?;
-            case.audit_identity_tree()
+            case.data_dir()
+                .audit_identity_tree()
                 .with_context(|| format!("temporary record file {} was rejected", leftover.display()))?;
             std::fs::write(&leftover, pkcs8.as_bytes())?;
             ensure!(
-                case.audit_identity_tree().is_err(),
+                case.data_dir().audit_identity_tree().is_err(),
                 "a temporary record file holding a private key was accepted"
             );
             std::fs::remove_file(leftover)?;
@@ -6271,14 +6336,14 @@ mod tests {
         ] {
             std::fs::write(&leftover, b"temp")?;
             ensure!(
-                case.audit_identity_tree().is_err(),
+                case.data_dir().audit_identity_tree().is_err(),
                 "leftover pending or key-file sibling was accepted"
             );
             std::fs::remove_file(leftover)?;
         }
         std::fs::remove_file(case.in_progress_path())?;
         ensure!(
-            case.recorded_key_names()?.is_empty(),
+            case.data_dir().recorded_key_names()?.is_empty(),
             "the removed key is still recorded"
         );
         let untracked_pending = case
@@ -6288,7 +6353,7 @@ mod tests {
             .join(format!("{}.json.tmp", token_file_id("untracked-token")));
         std::fs::write(&untracked_pending, b"partial temporary file")?;
         ensure!(
-            case.audit_identity_tree().is_err(),
+            case.data_dir().audit_identity_tree().is_err(),
             "temporary sibling survived after its record was removed"
         );
         std::fs::remove_file(untracked_pending)?;
@@ -6298,7 +6363,8 @@ mod tests {
                 .with_file_name(format!(".{name}-{}.deleted", uuid::Uuid::new_v4())),
         ] {
             std::fs::write(&copy, pkcs8.as_bytes())?;
-            case.audit_identity_tree()
+            case.data_dir()
+                .audit_identity_tree()
                 .context("a leftover copy of a deleted key before a later key-store operation was rejected")?;
             ensure!(
                 assert_no_copy_of_deleted_key(&case, &name).is_err(),
@@ -6306,7 +6372,7 @@ mod tests {
             );
             std::fs::remove_file(copy)?;
         }
-        case.audit_identity_tree()?;
+        case.data_dir().audit_identity_tree()?;
         let unknown_authority = case
             .path()
             .join("identity")
@@ -6314,9 +6380,9 @@ mod tests {
             .join("not-an-authority");
         std::fs::create_dir_all(&unknown_authority)?;
         std::fs::write(unknown_authority.join("identity.json"), b"not an identity")?;
-        case.audit_identity_tree()?;
-        case.audit_stored_keys()?;
-        case.audit_orphan_keys()?;
+        case.data_dir().audit_identity_tree()?;
+        case.data_dir().audit_stored_keys()?;
+        case.data_dir().audit_orphan_keys()?;
         std::fs::remove_dir_all(unknown_authority)?;
         case.finish().await?;
         Ok(())

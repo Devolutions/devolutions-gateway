@@ -1,18 +1,14 @@
-use std::collections::HashSet;
 use std::io::{Read as _, Write as _};
 use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, ensure};
-use der::{Decode as _, Encode as _};
-use p256::ecdsa::VerifyingKey;
-use p256::pkcs8::EncodePublicKey as _;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use x509_cert::Certificate;
 
-use crate::client::decoded_certificate;
+use crate::KeyBackend;
+use crate::agent::{DataDir, expected_spki};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Request {
@@ -46,102 +42,69 @@ fn matching_key(identity: &Value, identity_id: &str, prefix: &str) -> anyhow::Re
     Ok(Some(name.to_owned()))
 }
 
-fn stored_keys(request: &Request) -> anyhow::Result<(Value, HashSet<String>)> {
+fn data_dir<'a>(request: &'a Request, tokens: &'a [String]) -> DataDir<'a> {
+    DataDir {
+        path: &request.case_dir,
+        key_backend: KeyBackend::WindowsSoftwareProvider,
+        key_name_prefix: &request.key_name_prefix,
+        tokens,
+        // The SYSTEM agent stores its keys as machine keys, so a run-prefixed file under `identity/keys` is never a key store's leftover copy.
+        leftover_key_copies: false,
+    }
+}
+
+/// The stored identity of the enrolled identity, which must be the only one.
+fn enrolled_identity(request: &Request) -> anyhow::Result<Value> {
     let id = request
         .identity_id
         .as_deref()
         .context("SYSTEM probe has no enrolled identity ID")?;
     let authorities = request.case_dir.join("identity").join("authorities");
     let mut identities = Vec::new();
-    let mut recorded = HashSet::new();
     for entry in std::fs::read_dir(authorities).context("read SYSTEM-only stored identities")? {
         let path = entry?.path().join("identity.json");
         if !path.is_file() {
             continue;
         }
         let identity: Value = serde_json::from_slice(&std::fs::read(path)?)?;
-        for slot in ["current", "pending", "previous"] {
-            if let Some(name) = identity["keys"][slot]["key_name"].as_str() {
-                validate_run_key(name, &request.key_name_prefix)?;
-                recorded.insert(name.to_owned());
-            }
-        }
         if matching_key(&identity, id, &request.key_name_prefix)?.is_some() {
             identities.push(identity);
-        }
-    }
-    let pending = request.case_dir.join("identity").join("pending");
-    if pending.is_dir() {
-        for entry in std::fs::read_dir(pending)? {
-            let path = entry?.path();
-            if path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name.ends_with(".in-progress.json"))
-            {
-                let record: Value = serde_json::from_slice(&std::fs::read(path)?)?;
-                let name = record["key_name"]
-                    .as_str()
-                    .context("in-progress record has no key name")?;
-                validate_run_key(name, &request.key_name_prefix)?;
-                recorded.insert(name.to_owned());
-            }
         }
     }
     ensure!(
         identities.len() == 1,
         "expected exactly one SYSTEM stored identity for enrolled identity"
     );
-    Ok((identities.remove(0), recorded))
+    Ok(identities.remove(0))
 }
 
-fn assert_matching_certificate(name: &str, slot: &Value) -> anyhow::Result<()> {
-    let leaf = slot["certificate_chain"]
-        .as_array()
-        .and_then(|chain| chain.first())
-        .and_then(Value::as_str)
-        .context("SYSTEM stored key has no leaf certificate")?;
-    let certificate = Certificate::from_der(&decoded_certificate(leaf)?)?;
-    let expected = certificate.tbs_certificate().subject_public_key_info().to_der()?;
-    let actual = VerifyingKey::from_sec1_bytes(&crate::windows::machine_public_key(name)?)?;
-    ensure!(
-        actual.to_public_key_der()?.as_bytes() == expected,
-        "SYSTEM-only machine key does not match its stored certificate"
-    );
-    Ok(())
-}
-
-fn assert_stored_keys(identity: &Value) -> anyhow::Result<()> {
+/// Checks every key that the enrolled identity names, with the suite's per-key checks.
+///
+/// Unlike the suite's agent cases, which tolerate a renewal retiring a key during the checks, the probe runs once after enrollment settles, so any failed check fails: the current key must exist and be certified, and a key deleted during its checks fails too.
+fn check_stored_keys(dir: &DataDir<'_>, identity: &Value) -> anyhow::Result<()> {
     for slot in ["current", "pending", "previous"] {
-        let Some(name) = identity["keys"][slot]["key_name"].as_str() else {
+        let stored = &identity["keys"][slot];
+        let Some(name) = stored["key_name"].as_str() else {
             continue;
         };
-        let exists = crate::windows::machine_key_exists(name)?;
+        validate_run_key(name, dir.key_name_prefix)?;
+        let expected = expected_spki(stored)?;
         ensure!(
-            exists || slot != "current",
+            expected.is_some() || slot != "current",
+            "SYSTEM stored key has no leaf certificate"
+        );
+        ensure!(
+            dir.check_key(slot, name, expected.as_deref())? || slot != "current",
             "settled SYSTEM current machine key is missing"
         );
-        if exists {
-            crate::windows::assert_non_exportable(name)?;
-            crate::windows::assert_machine_key_acl(name)?;
-            if identity["keys"][slot]["certificate_chain"].is_array() || slot == "current" {
-                assert_matching_certificate(name, &identity["keys"][slot])?;
-            }
-        }
     }
     Ok(())
 }
 
-fn assert_no_orphan_keys(prefix: &str, recorded: &HashSet<String>) -> anyhow::Result<()> {
-    let existing = crate::windows::machine_keys_with_prefix(prefix)?;
-    let mut orphaned = existing.difference(recorded).collect::<Vec<_>>();
-    orphaned.sort_unstable();
-    ensure!(
-        orphaned.is_empty(),
-        "unrecorded SYSTEM-only machine keys with run prefix: {}",
-        orphaned.iter().map(|name| name.as_str()).collect::<Vec<_>>().join(", ")
-    );
-    Ok(())
+/// Audits the identity tree, which only SYSTEM can read, including for token fragments.
+fn audit_identity_files(dir: &DataDir<'_>) -> anyhow::Result<()> {
+    dir.audit_identity_tree()?;
+    dir.audit_tokens(&dir.path.join("identity"), None)
 }
 
 pub(crate) fn read_token(request: &Request) -> anyhow::Result<String> {
@@ -191,84 +154,6 @@ fn wait_for_pending_cleanup(request: &Request, token: &str, timeout: Duration) -
     }
 }
 
-fn audit_identity_tree(request: &Request, token: &str) -> anyhow::Result<()> {
-    let identity = request.case_dir.join("identity");
-    let authorities = identity.join("authorities");
-    let pending = identity.join("pending");
-    let keys = identity.join("keys");
-    let pending_file = pending.join(format!("{}.dat", crate::agent::token_file_id(token)));
-    let mut documented = HashSet::from([
-        pending_file.clone(),
-        pending.join(format!("{}.in-progress.json", crate::agent::token_file_id(token))),
-    ]);
-    if authorities.is_dir() {
-        for entry in std::fs::read_dir(&authorities)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                documented.insert(path.join("identity.json"));
-            }
-        }
-    }
-    let mut directories = vec![identity];
-    while let Some(directory) = directories.pop() {
-        for entry in std::fs::read_dir(directory)? {
-            let entry = entry?;
-            let path = entry.path();
-            let file_type = entry.file_type()?;
-            let known_directory = path == authorities
-                || path == pending
-                || path == keys
-                || path.parent() == Some(authorities.as_path())
-                    && path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| uuid::Uuid::parse_str(name).is_ok_and(|id| id.to_string() == name));
-            if file_type.is_dir() {
-                if !known_directory {
-                    eprintln!("WARN unknown SYSTEM identity directory");
-                }
-                directories.push(path);
-                continue;
-            }
-            ensure!(!known_directory, "documented identity directory is not a directory");
-            ensure!(
-                !path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("p8")),
-                "unexpected private key file under SYSTEM identity"
-            );
-            let temporary = crate::agent::is_temporary_sibling(&path, &documented, &request.key_name_prefix);
-            // A record's atomic write can leave its temporary file when it does not complete, as when the agent is stopped mid-write (`is_record_temporary`); any other temporary sibling is a leftover.
-            ensure!(
-                !temporary || crate::agent::is_record_temporary(&path),
-                "leftover SYSTEM identity temporary file"
-            );
-            if file_type.is_file() {
-                let contents = std::fs::read(&path)?;
-                ensure!(
-                    !crate::agent::contains_pkcs8_material(&contents),
-                    "unrecorded PKCS#8 private key under SYSTEM identity"
-                );
-                if path != pending_file {
-                    crate::agent::assert_no_token_fragments(&contents, token, Path::new("SYSTEM identity file"))?;
-                }
-            }
-            if documented.contains(&path) {
-                ensure!(
-                    file_type.is_file(),
-                    "documented SYSTEM identity file is not a regular file"
-                );
-            } else if temporary {
-                eprintln!("WARN SYSTEM identity temporary file of an interrupted record write");
-            } else {
-                eprintln!("WARN unknown SYSTEM identity file");
-            }
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn run(request_path: &Path, result_path: &Path) -> anyhow::Result<()> {
     ensure!(crate::windows::running_as_system()?, "SYSTEM probe must run as SYSTEM");
     let request: Request = serde_json::from_slice(&std::fs::read(request_path)?)?;
@@ -288,10 +173,12 @@ pub(crate) fn run(request_path: &Path, result_path: &Path) -> anyhow::Result<()>
     } else {
         match read_token(&request).and_then(|token| {
             wait_for_pending_cleanup(&request, &token, Duration::from_secs(20))?;
-            let (identity, recorded) = stored_keys(&request)?;
-            assert_stored_keys(&identity)?;
-            assert_no_orphan_keys(&request.key_name_prefix, &recorded)?;
-            audit_identity_tree(&request, &token)
+            let tokens = [token];
+            let dir = data_dir(&request, &tokens);
+            let identity = enrolled_identity(&request)?;
+            check_stored_keys(&dir, &identity)?;
+            dir.audit_orphan_keys()?;
+            audit_identity_files(&dir)
         }) {
             Ok(()) => {}
             Err(error) => errors.push(format!("inspect SYSTEM-only key: {error:#}")),
@@ -333,7 +220,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{Request, audit_identity_tree, matching_key, wait_for_pending_cleanup};
+    use super::{Request, audit_identity_files, data_dir, matching_key, wait_for_pending_cleanup};
 
     #[test]
     fn current_key_is_selected_only_from_the_matching_identity_and_run() -> anyhow::Result<()> {
@@ -384,23 +271,30 @@ mod tests {
             token_nonce: None,
             cleanup_only: true,
         };
-        let token = format!("dvaet1.bag.{}", "A".repeat(43));
-        audit_identity_tree(&request, &token)?;
+        let tokens = [format!("dvaet1.bag.{}", "A".repeat(43))];
+        let token = &tokens[0];
+        let audited = data_dir(&request, &tokens);
+        audit_identity_files(&audited)?;
         // A stop can leave the temporary file of a record's atomic write.
         let interrupted = authority.join(format!(".identity.json-{}.tmp", uuid::Uuid::new_v4()));
         std::fs::write(&interrupted, b"{")?;
-        audit_identity_tree(&request, &token)?;
+        audit_identity_files(&audited)?;
         std::fs::remove_file(interrupted)?;
         let leaked = authority.join("debug.log");
         std::fs::write(&leaked, &token.as_bytes()[token.len() - 12..])?;
-        assert!(audit_identity_tree(&request, &token).is_err());
+        assert!(audit_identity_files(&audited).is_err());
         std::fs::remove_file(leaked)?;
         let private = keys.join("extra.p8");
         std::fs::write(&private, b"private key")?;
-        assert!(audit_identity_tree(&request, &token).is_err());
+        assert!(audit_identity_files(&audited).is_err());
         std::fs::remove_file(private)?;
+        // The probe's machine-key store keeps no file copies, so an unrecorded run key file is never a leftover copy.
+        let run_key_copy = keys.join(format!("conformance-unit_{}.p8.tmp", uuid::Uuid::new_v4()));
+        std::fs::write(&run_key_copy, b"-----BEGIN PRIVATE KEY-----")?;
+        assert!(audit_identity_files(&audited).is_err());
+        std::fs::remove_file(run_key_copy)?;
         std::fs::write(keys.join("extra.bin"), b"-----BEGIN PRIVATE KEY-----")?;
-        assert!(audit_identity_tree(&request, &token).is_err());
+        assert!(audit_identity_files(&audited).is_err());
         Ok(())
     }
 
