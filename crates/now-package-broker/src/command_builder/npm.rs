@@ -43,11 +43,11 @@ pub fn build_npm_command(request: &PackageRequest) -> anyhow::Result<Vec<String>
 }
 
 fn validate_npm_request(request: &PackageRequest) -> anyhow::Result<()> {
-    if request.client.requested_elevation == Elevation::Elevated {
-        bail!("npm elevated operations are not supported by the broker");
-    }
     if request.options.scope == Some(Scope::Machine) {
         bail!("npm machine-scope operations are not supported by the broker");
+    }
+    if crate::evaluator::effective_execution_elevation(request) == Elevation::Elevated {
+        bail!("npm elevated operations are not supported by the broker");
     }
     if request.source.url.is_some() {
         bail!("npm package sources with URLs are not supported by the broker");
@@ -323,10 +323,20 @@ mod tests {
     fn elevated_requests_are_rejected() {
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = None;
 
         let error = build_npm_command(&request).expect_err("elevated npm should fail");
 
         assert!(error.to_string().contains("elevated"));
+    }
+
+    #[test]
+    fn elevated_user_scope_requests_run_with_the_standard_token() {
+        let mut request = make_request();
+        request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = Some(Scope::User);
+
+        build_npm_command(&request).expect("elevated user-scope npm runs with the standard token");
     }
 
     #[test]

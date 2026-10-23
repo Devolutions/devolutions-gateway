@@ -73,6 +73,37 @@ pub(super) fn find_user_session(user_sid: &Sid) -> anyhow::Result<(u32, Token)> 
     bail!("no active session found for user SID '{user_sid}'")
 }
 
+/// Return the user token of the active session `session_id`, requiring it to belong to `user_sid`.
+///
+/// Execution uses the session of the authenticated pipe client rather than any session of the
+/// same user, so a user logged on several times only affects the requesting session.
+/// The caller must have the SeTcb privilege enabled (required by `WTSQueryUserToken`).
+pub(super) fn user_session_token(session_id: u32, user_sid: &Sid) -> anyhow::Result<Token> {
+    if session_id == 0 {
+        bail!("the pipe client runs in session 0, which has no interactive user");
+    }
+
+    let sessions = wts::get_sessions().context("failed to enumerate WTS sessions")?;
+    let is_active = sessions
+        .iter()
+        .any(|session| session.session_id == session_id && session.state == wts::WTSConnectState::Active);
+    if !is_active {
+        bail!("pipe client session {session_id} is not an active session");
+    }
+
+    let token = Token::for_session(session_id)
+        .with_context(|| format!("failed to query the user token of session {session_id}"))?;
+    let session_user = token
+        .sid_and_attributes()
+        .with_context(|| format!("failed to query the user of session {session_id}"))?
+        .sid;
+    if session_user != *user_sid {
+        bail!("session {session_id} belongs to '{session_user}', not to the pipe client user '{user_sid}'");
+    }
+
+    Ok(token)
+}
+
 /// Attempt to obtain an elevated (linked) token from a filtered/limited token.
 ///
 /// On UAC-enabled systems with split tokens, the standard user token has a linked

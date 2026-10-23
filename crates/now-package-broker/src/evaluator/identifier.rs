@@ -120,6 +120,15 @@ pub(super) fn embedded_package_names(manager: ManagerName, identifier: &str) -> 
     }
 }
 
+/// Whether the requested `value` selects the package `identifier`, with the fail-closed
+/// comparison Deny rules use (letter case ignored, decorated identifiers included).
+pub(super) fn selects_identifier(manager: ManagerName, value: &str, identifier: &str) -> bool {
+    let target = identifier_key(manager, identifier, Decision::Deny);
+    std::iter::once(value)
+        .chain(embedded_package_names(manager, value))
+        .any(|candidate| identifier_key(manager, candidate, Decision::Deny) == target)
+}
+
 /// Strip a `#ref` Git reference and an `@version` suffix, keeping a leading `@` scope.
 fn strip_version_suffix(specifier: &str) -> &str {
     let specifier = specifier
