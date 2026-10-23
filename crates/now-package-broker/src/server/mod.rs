@@ -113,6 +113,23 @@ struct EvaluatedRequest {
     command: Vec<String>,
 }
 
+/// `Retry-After` value, in seconds, sent with busy replies.
+const BUSY_RETRY_AFTER_SECONDS: &str = "1";
+
+/// Build a router that answers every request with a busy error, for clients over a connection limit.
+pub(crate) fn build_busy_router() -> axum::Router {
+    axum::Router::new().fallback(|| async {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(axum::http::header::RETRY_AFTER, BUSY_RETRY_AFTER_SECONDS)],
+            Json(error_response(
+                ErrorCode::BrokerPaused,
+                "package broker is busy; retry later",
+            )),
+        )
+    })
+}
+
 /// Build the axum router for a single authenticated pipe client.
 pub(crate) fn build_router_for_client(state: Arc<BrokerState>, client: PipeClient) -> axum::Router {
     let server: SharedPackageBrokerServer = Arc::new(BrokerConnection {
