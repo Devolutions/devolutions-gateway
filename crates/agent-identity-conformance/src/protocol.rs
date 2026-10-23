@@ -698,12 +698,12 @@ pub(crate) async fn p_token_errors_distinct(ctx: Context) -> anyhow::Result<()> 
         .await?;
     expect_error(&exhausted, 403, "token_exhausted")?;
     let other = token(&ctx, 1).await?;
-    ctx.target.management().delete_token(&other.id).await?;
-    let deleted = ctx
+    ctx.target.management().revoke_token(&other.id).await?;
+    let revoked = ctx
         .target
         .enroll(&other.text, &KeyPair::generate()?, &json!({}))
         .await?;
-    expect_error(&deleted, 401, "token_invalid")?;
+    expect_error(&revoked, 401, "token_invalid")?;
     Ok(())
 }
 
@@ -787,8 +787,9 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
     Ok(())
 }
 
-pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn p_revoked_token_replays_own_key_only(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    let management = ctx.target.management();
     let foreign_token = token(&ctx, 1).await?;
     let token = token(&ctx, 2).await?;
     let key = KeyPair::generate()?;
@@ -800,11 +801,12 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
     let identity_id = field(&first.body, "identity_id")?;
     let before = identity_record(&ctx.target, identity_id).await?;
     let foreign = identity(&ctx.target, &foreign_token, "foreign").await?;
-    ctx.target.management().delete_token(&token.id).await?;
-    ensure!(
-        refusal(ctx.target.management().token(&token.id).await)? == Refusal::NotFound,
-        "deleted token is still listed"
-    );
+    management.revoke_token(&token.id).await?;
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment tokens
+    let revoked = management
+        .token(&token.id)
+        .await
+        .context("revoked token is no longer readable")?;
     let replay = ctx
         .target
         .enroll(&token.text, &key, &json!({ "hostname": "must-not-replace" }))
@@ -813,12 +815,12 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
     ensure!(
         replay.body["identity_id"] == first.body["identity_id"]
             && replay.body["certificate_chain"] == first.body["certificate_chain"],
-        "deleted token could not recover its own committed enrollment"
+        "revoked token could not recover its own committed enrollment"
     );
     let after = identity_record(&ctx.target, identity_id).await?;
     ensure!(
         after.metadata == before.metadata && after.last_seen_at == before.last_seen_at,
-        "deleted-token replay changed identity state"
+        "revoked-token replay changed identity state"
     );
     expect_error(
         &ctx.target
@@ -832,13 +834,13 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
         401,
         "token_invalid",
     )?;
-    ctx.target.management().revoke(&foreign.identity_id).await?;
+    management.revoke(&foreign.identity_id).await?;
     expect_error(
         &ctx.target.enroll(&token.text, &foreign.key, &json!({})).await?,
         401,
         "token_invalid",
     )?;
-    ctx.target.management().delete_identity(&foreign.identity_id).await?;
+    management.delete_identity(&foreign.identity_id).await?;
     expect_error(
         &ctx.target.enroll(&token.text, &foreign.key, &json!({})).await?,
         401,
@@ -846,9 +848,18 @@ pub(crate) async fn p_deleted_token_replays_own_key_only(ctx: Context) -> anyhow
     )?;
     expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)?;
     ensure!(
-        ctx.target.management().identity_count(&token).await? == 1
-            && identity_record(&ctx.target, identity_id).await? == before,
-        "deleted token issued another identity or changed its own replayed identity"
+        management.identity_count(&token).await? == 1 && identity_record(&ctx.target, identity_id).await? == before,
+        "revoked token issued another identity or changed its own replayed identity"
+    );
+    ensure!(
+        management.token(&token.id).await? == revoked,
+        "a replay or refused enrollment changed the revoked token's record"
+    );
+    // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+    ensure!(
+        revoked.state == TokenState::Revoked,
+        "revoked token's state is {:?} instead of Revoked",
+        revoked.state
     );
     Ok(())
 }
@@ -5894,19 +5905,17 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         record.state == TokenState::Exhausted && record.used_count == 1,
         "exhausted state incorrect"
     );
-    if ctx.mock() {
+    let expired = if ctx.mock() {
         let expiring = management.create_token(1, Duration::from_secs(2), None).await?;
         ctx.target.advance(4).await?;
         ensure!(
             management.token(&expiring.id).await?.state == TokenState::Expired,
             "expired token did not enter expired state"
         );
-    }
-    management.delete_token(&token.id).await?;
-    ensure!(
-        refusal(management.token(&token.id).await)? == Refusal::NotFound,
-        "deleted token is still readable"
-    );
+        Some(expiring)
+    } else {
+        None
+    };
     // DVLS's intent, "Enrollment tokens": a token allows from 1 to 1,000,000 uses and expires at most 365 days ahead.
     for uses in [0, 1_000_001] {
         let spec = TokenSpec::new(uses, TOKEN_LIFETIME)?;
@@ -5928,6 +5937,44 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
             "token page {number} of size {size} was accepted"
         );
     }
+    // A revoked token stays stored, and revoking it again is accepted and changes nothing.
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment tokens
+    // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
+    management.revoke_token(&token.id).await?;
+    let revoked = management
+        .token(&token.id)
+        .await
+        .context("revoked token is no longer readable")?;
+    ensure!(revoked.used_count == 1, "revocation changed the token's use count");
+    let listed = management
+        .all_tokens()
+        .await?
+        .into_iter()
+        .find(|record| record.id == token.id)
+        .context("revoked token is no longer listed")?;
+    management
+        .revoke_token(&token.id)
+        .await
+        .context("revoking a revoked token was refused")?;
+    ensure!(
+        management.token(&token.id).await? == revoked,
+        "revoking a revoked token changed its record"
+    );
+    let unknown = uuid::Uuid::new_v4().to_string();
+    ensure!(
+        refusal(management.revoke_token(&unknown).await)? == Refusal::NotFound,
+        "revoking an unknown token was not refused as not found"
+    );
+    // The state checks come last, so that a wrong state does not hide the outcomes above.
+    let mut states = vec![("exhausted, read", revoked.state), ("exhausted, listed", listed.state)];
+    if let Some(expired) = expired {
+        management.revoke_token(&expired.id).await?;
+        states.push(("expired, read", management.token(&expired.id).await?.state));
+    }
+    ensure!(
+        states.iter().all(|(_, state)| *state == TokenState::Revoked),
+        "revoked tokens report states other than Revoked: {states:?}"
+    );
     Ok(())
 }
 
@@ -6125,7 +6172,7 @@ pub(crate) async fn p_token_expiry_default_and_maximum(ctx: Context) -> anyhow::
         "a token that has already expired was accepted"
     );
     for token in [default, longest] {
-        management.delete_token(&token.id).await?;
+        management.revoke_token(&token.id).await?;
     }
     Ok(())
 }

@@ -331,6 +331,8 @@ pub(crate) enum TokenState {
     Active,
     Exhausted,
     Expired,
+    /// Wins over `Expired` and `Exhausted`.
+    Revoked,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -814,7 +816,7 @@ pub(crate) fn routes(
         ),
         route(Method::GET, "/enrollment-token".to_owned(), None, 200, Permission::View),
         route(Method::GET, token.clone(), None, 200, Permission::View),
-        route(Method::DELETE, token, None, 204, Permission::Manage),
+        route(Method::POST, format!("{token}/revoke"), None, 204, Permission::Manage),
         route(
             Method::GET,
             format!("?enrollmentTokenId={token_id}"),
@@ -1042,8 +1044,9 @@ impl<'a> Management<'a> {
         Ok(tokens)
     }
 
-    pub(crate) async fn delete_token(&self, id: &str) -> anyhow::Result<()> {
-        self.request(Method::DELETE, &format!("/enrollment-token/{id}"), None, 204)
+    /// Revokes a token, which stays listed and readable.
+    pub(crate) async fn revoke_token(&self, id: &str) -> anyhow::Result<()> {
+        self.request(Method::POST, &format!("/enrollment-token/{id}/revoke"), None, 204)
             .await
             .map(drop)
     }

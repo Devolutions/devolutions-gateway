@@ -165,7 +165,7 @@ impl Target {
         let identity = Identity::from_enrollment(key, &reply)?;
         management.revoke(&identity.identity_id).await?;
         management.delete_identity(&identity.identity_id).await?;
-        management.delete_token(&token.id).await?;
+        management.revoke_token(&token.id).await?;
         Ok(identity.agent_channel_url.is_some())
     }
 
