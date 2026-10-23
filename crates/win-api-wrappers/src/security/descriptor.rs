@@ -198,3 +198,60 @@ impl Drop for SecurityDescriptor<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::WinLocalSystemSid;
+    use windows::core::HSTRING;
+
+    use super::*;
+
+    fn from_sddl(sddl: &str) -> windows::core::Result<SecurityDescriptor<'static>> {
+        let mut ptr = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: The SDDL string is NUL-terminated, and the descriptor output pointer is writable.
+        unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(&HSTRING::from(sddl), SDDL_REVISION_1, &mut ptr, None)
+        }?;
+        // SAFETY: On success, the conversion returned a descriptor allocated with LocalAlloc.
+        Ok(unsafe { SecurityDescriptor::from_local_alloc(ptr) })
+    }
+
+    // oracle: spec MS-DTYP §2.5.1
+    #[test]
+    fn a_protected_dacl_yields_its_owner_and_allow_entries() -> anyhow::Result<()> {
+        let system = Sid::from_well_known(WinLocalSystemSid, None)?;
+        let descriptor = from_sddl("O:SYD:P(A;;GA;;;SY)")?;
+        assert_eq!(descriptor.owner()?, Some(system.clone()));
+        assert_eq!(
+            descriptor.protected_allow_entries()?,
+            [AllowEntry {
+                sid: system,
+                mask: 0x1000_0000, // GENERIC_ALL
+                flags: 0,
+            }]
+        );
+        Ok(())
+    }
+
+    // oracle: spec MS-DTYP §2.5.1
+    #[test]
+    fn an_unprotected_dacl_is_refused() -> anyhow::Result<()> {
+        let descriptor = from_sddl("O:SYD:(A;;GA;;;SY)")?;
+        assert!(matches!(
+            descriptor.protected_allow_entries(),
+            Err(DaclError::NotProtected)
+        ));
+        Ok(())
+    }
+
+    // oracle: spec MS-DTYP §2.5.1
+    #[test]
+    fn a_null_dacl_is_refused() -> anyhow::Result<()> {
+        let descriptor = from_sddl("O:SYD:PNO_ACCESS_CONTROL")?;
+        assert!(matches!(descriptor.protected_allow_entries(), Err(DaclError::Missing)));
+        Ok(())
+    }
+}
