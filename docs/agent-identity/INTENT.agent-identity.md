@@ -11,12 +11,14 @@ Features that need push, such as PEDM policies, require that channel.
 Agent Tunnel currently has its own enrollment, against a root owned by Gateway.
 Later, it is expected to move onto Agent Identity, and its current enrollment to be deprecated:
 
-- DVLS registers each identity's certificate thumbprint with the Gateway, and keeps it current on every renewal, revocation and deletion;
+- DVLS registers with the Gateway the certificate thumbprint of each identity accepted for tunneling, and keeps it current on every renewal, revocation and deletion;
 - DVLS delivers the Gateway URL through the identity's config;
 - the agent authenticates to the Gateway over mTLS with the device key of its identity; Agent Tunnel's existing keys are not imported.
 
 A relying party such as the Gateway never accepts the request authentication or channel proofs the agent sends to its authority.
 It authenticates the device with a protocol bound to itself, so that neither side can relay the other's authentication.
+A service such as the Gateway never accepts a device, for example as a tunnel agent, only because the authority signed its identity.
+For example, DVLS gives the Gateway the identities accepted for tunneling beforehand, and the Gateway accepts only those; that works because an identity can't be impersonated.
 
 The design must not preclude this migration.
 
@@ -42,7 +44,8 @@ Later:
 
 - a UI, including generating the install command;
 - CRL and OCSP;
-- an enrollment approval queue, if customers ask for one;
+- an enrollment approval queue, if users ask for one;
+- proof from outside Agent Identity at enrollment, such as an Entra device certificate, which the design must not preclude but doesn't require;
 - PEDM payloads on the agent channel;
 - TPM-backed keys;
 - moving Agent Tunnel and other relying parties onto Agent Identity (see Overview).
@@ -75,6 +78,10 @@ Not intended:
    No metadata update or server push happens before the challenge succeeds.
 8. A stream is bound to the certificate that opened it and is closed no later than that certificate's `notAfter`.
 9. Enrollment tokens never appear in logs, not even partially.
+10. An identity proves which device is speaking; whether it grants any privilege is a separate decision.
+    Least privilege is the default: devices enroll first, and an administrator then assigns them permissions and roles on the authority side.
+11. An authority treats a new identity as an unknown device: neither the authority nor a third-party system should send it a secret until the identity has been explicitly vetted, for example by an administrator marking it as trusted or by a user identifying themselves through it.
+    Once it is vetted, the authority may send it secrets.
 
 ## Design choices
 
@@ -89,6 +96,14 @@ Not intended:
   The stable prefix makes tokens easy for secret scanners to recognize, and a new prefix lets older agents reject an incompatible format.
 - The unsigned bag only tells the agent where to enroll; it never carries anything an authority trusts.
 - The secret authenticates the token, and the authority stores only its hash.
+- Protecting the token against TLS interception, including a user's own inspection proxy and its logs, is not intended: the token stays an opaque bearer secret for simplicity, and a stronger scheme would later be a migration to a new prefix.
+  Proof of possession was considered and rejected for the complexity it adds.
+  The secret could have been a P-256 private key, used as is without changing the token's shape, with its public key replacing the hash the authority stores, so that the token would never travel on the wire and a stolen authority database would hold no working token.
+- Every authority enforces a maximum on a token's number of uses and on its lifetime.
+- Every authority lets administrators find the identities each token enrolled.
+  The address an enrollment came from is deliberately not recorded, because it has too little value: behind a reverse proxy it is the proxy's, and forwarded headers can be forged.
+- Anyone holding a token can use up its remaining uses; that risk is accepted, and a warning near the limit would mostly be noise, since a token is usually created with N uses for N machines.
+- The token's base URL never carries a user name or password, which could make an address read as one host while it reaches another; this can be revisited if it blocks a user.
 - The token is deliberately not a JWT.
   The authority already needs stored state for use limits, deletion and retry recovery, and an unenrolled agent has no authority key with which to verify a signed token.
 - Deleting a token keeps a tombstone.
@@ -150,6 +165,7 @@ Not intended:
 
 - `Hello` and `Welcome` reconcile state after each connection.
   Push messages are only an optimization.
+- `agent_channel_url` is a base URL rather than the exact endpoint, so that the agent selects the version of the channel service it calls.
 - Protecting against an active intermediary that can decrypt the TLS connection and relay or alter its traffic is not intended, because it would need TLS channel binding, which a TLS-terminating proxy or IIS in front of the authority breaks.
 
 ### Root rotation
