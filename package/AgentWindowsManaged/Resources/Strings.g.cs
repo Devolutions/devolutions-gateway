@@ -105,6 +105,18 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string Dotnet48IsRequired = "Dotnet48IsRequired";		
 		/// <summary>
+		/// Set IDENTITY_ENROLLMENT_TOKEN or IDENTITY_ENROLLMENT_TOKEN_FILE, not both.
+		/// </summary>
+		public const string IdentityEnrollmentTokenBothSet = "IdentityEnrollmentTokenBothSet";		
+		/// <summary>
+		/// Can't read the enrollment token file {0}: {1}
+		/// </summary>
+		public const string IdentityEnrollmentTokenFileUnreadable = "IdentityEnrollmentTokenFileUnreadable";		
+		/// <summary>
+		/// The first line of the enrollment token file {0} is empty.
+		/// </summary>
+		public const string IdentityEnrollmentTokenFileEmpty = "IdentityEnrollmentTokenFileEmpty";		
+		/// <summary>
 		/// View
 		/// </summary>
 		public const string ViewButton = "ViewButton";		

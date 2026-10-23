@@ -69,6 +69,24 @@ internal static class AgentActions
     };
 
     /// <summary>
+    /// Set the Agent Identity enrollment token from the file <c>IDENTITY_ENROLLMENT_TOKEN_FILE</c> names, so that
+    /// <see cref="encodePropertyData"/> hands it to <see cref="enrollAgentIdentity"/>
+    /// </summary>
+    /// <remarks>
+    /// Its condition mirrors <see cref="enrollAgentIdentity"/>'s, so that a repair, a maintenance run or an uninstall
+    /// never reads the file.
+    /// </remarks>
+    private static readonly ManagedAction readIdentityEnrollmentTokenFile = new(
+        new Id($"CA.{nameof(readIdentityEnrollmentTokenFile)}"),
+        CustomActions.ReadIdentityEnrollmentTokenFile,
+        Return.check, When.Before, new Step(encodePropertyData.Id),
+        new Condition($"NOT Installed AND {AgentProperties.IdentityEnrollmentTokenFile}"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+    };
+
+    /// <summary>
     /// Set the ARP installation location to the chosen install directory
     /// </summary>
     private static readonly SetPropertyAction setArpInstallLocation = new("ARPINSTALLLOCATION", $"[{AgentProperties.InstallDir}]")
@@ -554,6 +572,7 @@ internal static class AgentActions
         isUninstalling,
         isMaintenance,
         setInstallId,
+        readIdentityEnrollmentTokenFile,
         encodePropertyData,
         getNetFxInstalledVersion,
         checkNetFxInstalledVersion,

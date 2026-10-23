@@ -726,6 +726,51 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
+        public static ActionResult ReadIdentityEnrollmentTokenFile(Session session)
+        {
+            ActionResult Fail(string id, params object[] args)
+            {
+                string message = string.Format(Program.Localize(session.Property("ProductLanguage"), id), args);
+                session.Log(message);
+                using Record record = new(0) { FormatString = EscapeFormatted(message) };
+                session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+                return ActionResult.Failure;
+            }
+
+            if (!string.IsNullOrEmpty(session.Property(AgentProperties.IdentityEnrollmentToken)))
+            {
+                return Fail(Strings.IdentityEnrollmentTokenBothSet);
+            }
+
+            string path = session.Property(AgentProperties.IdentityEnrollmentTokenFile);
+            string token;
+
+            try
+            {
+                // A relative path resolves against the folder of the .msi, so that a deployment can ship the file
+                // beside it.
+                path = Path.Combine(Path.GetDirectoryName(session.Property("OriginalDatabase")), path);
+
+                using StreamReader reader = new(path);
+                token = reader.ReadLine()?.Trim() ?? string.Empty;
+            }
+            catch (Exception e)
+            {
+                return Fail(Strings.IdentityEnrollmentTokenFileUnreadable, path, e.Message);
+            }
+
+            if (token.Length == 0)
+            {
+                return Fail(Strings.IdentityEnrollmentTokenFileEmpty, path);
+            }
+
+            session[AgentProperties.IdentityEnrollmentToken] = token;
+            session.Log($"Read the Agent Identity enrollment token from {path}");
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
         public static ActionResult RemoveAgentIdentity(Session session)
         {
             // UNTESTED: a failure to list or delete a key, or to delete the identity folder, is logged and the cleanup

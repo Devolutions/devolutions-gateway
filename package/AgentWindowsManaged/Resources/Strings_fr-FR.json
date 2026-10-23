@@ -75,6 +75,18 @@
         {
           "id": "Dotnet48IsRequired",
           "text": "Le produit nécessite Microsoft .NET Framework 4.8. Souhaiteriez-vous le télécharger maintenant?"
+        },
+        {
+          "id": "IdentityEnrollmentTokenBothSet",
+          "text": "Définissez IDENTITY_ENROLLMENT_TOKEN ou IDENTITY_ENROLLMENT_TOKEN_FILE, mais pas les deux."
+        },
+        {
+          "id": "IdentityEnrollmentTokenFileUnreadable",
+          "text": "Impossible de lire le fichier de jeton d'enrôlement {0} : {1}"
+        },
+        {
+          "id": "IdentityEnrollmentTokenFileEmpty",
+          "text": "La première ligne du fichier de jeton d'enrôlement {0} est vide."
         }
       ],
       "buttons": [

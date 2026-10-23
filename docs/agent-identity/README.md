@@ -12,7 +12,7 @@ Get an enrollment token from your authority.
 A token starts with `dvaet1.`, can enroll many devices up to its use limit, and expires.
 Treat it as a secret, because anyone holding it can enroll new devices with your authority.
 
-To enroll while installing on Windows, set the installer's `IDENTITY_ENROLLMENT_TOKEN` property, as described in the [installer README][installer].
+To enroll while installing on Windows, set the installer's `IDENTITY_ENROLLMENT_TOKEN_FILE` property to a file holding the token, as described in the [installer README][installer].
 
 To enroll an installed agent, pass the token on standard input:
 

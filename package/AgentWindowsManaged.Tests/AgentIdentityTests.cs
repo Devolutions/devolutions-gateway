@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
 
 using DevolutionsAgent.Actions;
 using DevolutionsAgent.Helpers;
@@ -22,6 +24,9 @@ public sealed class AgentIdentityTests
     // A well-formed token (crates/agent-identity/src/token.rs) whose bag names https://example.test/dvls.
     private const string Token = "dvaet1.eyJ1IjoiaHR0cHM6Ly9leGFtcGxlLnRlc3QvZHZscyJ9.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+    // The secret part of Token, after its last `.`.
+    private const string TokenSecret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
     [Theory]
@@ -35,6 +40,18 @@ public sealed class AgentIdentityTests
 
         Assert.True(property.Hidden);
         // oracle: spec Windows Installer §SecureCustomProperties property
+        Assert.True(property.Secure);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    // oracle: spec Windows Installer §SecureCustomProperties property
+    [Fact]
+    public void TokenFilePropertyIsSecure()
+    {
+        // Secure lets a path given on the msiexec command line reach the execute sequence, which reads the file.
+        Property property = Assert.Single(
+            Program.CreateIdentityEnrollmentProperties(), p => p.Name == "IDENTITY_ENROLLMENT_TOKEN_FILE");
+
         Assert.True(property.Secure);
     }
 
@@ -200,6 +217,243 @@ public sealed class AgentIdentityTests
         Assert.Equal(Output, shown);
     }
 
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    // oracle: spec Windows Installer §Deferred Execution Custom Actions
+    [Fact]
+    public void TokenFileIsReadBeforeTheTokenIsEncodedAndFailsTheInstall()
+    {
+        // The enrollment action receives the encoded token, which EncodePropertyData copies from
+        // IDENTITY_ENROLLMENT_TOKEN, and only an immediate action can set that property for a later action.
+        ManagedAction action = ActionOf(nameof(CustomActions.ReadIdentityEnrollmentTokenFile));
+
+        Assert.Equal(Execute.immediate, action.Execute);
+        Assert.Equal(Return.check, action.Return);
+        Assert.Equal(When.Before, action.When);
+        Assert.Equal(ActionOf(nameof(CustomActions.EncodePropertyData)).Id.ToString(), action.Step.ToString());
+    }
+
+    [Theory]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("first install with a token file", true, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("major upgrade with a token file", true, "WIX_UPGRADE_DETECTED={00000000-0000-0000-0000-000000000001}", "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("first install without a token file", false)]
+    // Enrollment never runs on these, so a token file that is gone by then must not fail them.
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("maintenance with a token file", false, "Installed=00:00:00", "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("repair with a token file", false, "Installed=00:00:00", "REINSTALL=ALL", "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("full uninstall with a token file", false, "Installed=00:00:00", "REMOVE=ALL", "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt")]
+    public void TokenFileIsReadOnlyOnAnInstallOrUpgradeThatNamesOne(string scenario, bool expected, params string[] properties)
+    {
+        ManagedAction action = ActionOf(nameof(CustomActions.ReadIdentityEnrollmentTokenFile));
+
+        Assert.True(expected == EvaluateCondition(action.Condition.ToString(), properties), scenario);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Fact]
+    public void TokenFileRelativePathResolvesAgainstTheInstallerFolder()
+    {
+        // The package's folder isn't the working directory, which holds no file of that name.
+        using TempFolder folder = new();
+        string name = $"token-{Guid.NewGuid():N}.txt";
+        System.IO.File.WriteAllText(Path.Combine(folder.Path, name), Token + "\r\n");
+
+        (ActionResult result, string token, _) = ReadTokenFile(folder.Path, "IDENTITY_ENROLLMENT_TOKEN_FILE=" + name);
+
+        Assert.Equal(ActionResult.Success, result);
+        Assert.Equal(Token, token);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Theory]
+    [InlineData("")]
+    [InlineData("\r\n")]
+    [InlineData("\n")]
+    [InlineData("\r\nsecond line\r\n")]
+    public void TokenIsTheFirstLineOfTheFile(string afterToken)
+    {
+        using TempFolder folder = new();
+        System.IO.File.WriteAllText(Path.Combine(folder.Path, "token.txt"), Token + afterToken);
+
+        (_, string token, _) = ReadTokenFile(folder.Path, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt");
+
+        Assert.Equal(Token, token);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Theory]
+    // UTF-8 with a byte order mark, as Windows PowerShell's `Set-Content -Encoding UTF8` writes it.
+    // oracle: spec RFC 3629 §6
+    [InlineData(65001)]
+    // UTF-16 LE with a byte order mark, as Windows PowerShell's `Out-File` and `>` write it.
+    // oracle: spec RFC 2781 §3.2
+    [InlineData(1200)]
+    public void ByteOrderMarkIsNotPartOfTheToken(int codePage)
+    {
+        // A byte order mark labels the encoding and isn't part of the text.
+        Encoding encoding = Encoding.GetEncoding(codePage);
+        using TempFolder folder = new();
+        System.IO.File.WriteAllBytes(
+            Path.Combine(folder.Path, "token.txt"),
+            [.. encoding.GetPreamble(), .. encoding.GetBytes(Token + "\r\n")]);
+
+        (_, string token, _) = ReadTokenFile(folder.Path, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt");
+
+        Assert.Equal(Token, token);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Fact]
+    public void MissingTokenFileFailsTheInstall()
+    {
+        using TempFolder folder = new();
+
+        (ActionResult result, _, _) = ReadTokenFile(folder.Path, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt");
+
+        Assert.Equal(ActionResult.Failure, result);
+    }
+
+    [Theory]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("")]
+    // A blank first line holds no token, and an install that went on without one would report success for a machine
+    // that can't enroll.
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData("\r\n" + Token + "\r\n")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [InlineData(" \t\r\n" + Token + "\r\n")]
+    public void TokenFileWithoutATokenOnItsFirstLineFailsTheInstall(string content)
+    {
+        using TempFolder folder = new();
+        System.IO.File.WriteAllText(Path.Combine(folder.Path, "token.txt"), content);
+
+        (ActionResult result, _, _) = ReadTokenFile(folder.Path, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt");
+
+        Assert.Equal(ActionResult.Failure, result);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Fact]
+    public void SettingBothTokenPropertiesFailsTheInstall()
+    {
+        // Both name the same token, so only the use of both properties can fail the install.
+        using TempFolder folder = new();
+        System.IO.File.WriteAllText(Path.Combine(folder.Path, "token.txt"), Token + "\r\n");
+
+        (ActionResult result, _, _) = ReadTokenFile(
+            folder.Path, "IDENTITY_ENROLLMENT_TOKEN=" + Token, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt");
+
+        Assert.Equal(ActionResult.Failure, result);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Theory]
+    [InlineData("token read", Token + "\r\n")]
+    [InlineData("first line blank", "\r\n" + Token + "\r\n")]
+    [InlineData("both properties set", Token + "\r\n", "IDENTITY_ENROLLMENT_TOKEN=" + Token)]
+    public void InstallerNeverDeletesTheTokenFile(string scenario, string content, params string[] properties)
+    {
+        using TempFolder folder = new();
+        string path = Path.Combine(folder.Path, "token.txt");
+        System.IO.File.WriteAllText(path, content);
+
+        ReadTokenFile(folder.Path, [.. properties, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt"]);
+
+        Assert.True(System.IO.File.Exists(path), scenario);
+    }
+
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
+    [Theory]
+    [InlineData("token read", Token + "\r\n")]
+    [InlineData("first line blank", "\r\n" + Token + "\r\n")]
+    [InlineData("both properties set", Token + "\r\n", "IDENTITY_ENROLLMENT_TOKEN=" + Token)]
+    public void TokenFileNeverPutsTheTokenInAMessage(string scenario, string content, params string[] properties)
+    {
+        // Every message the session sends, an error shown to the user included, also goes to the installer log.
+        using TempFolder folder = new();
+        System.IO.File.WriteAllText(Path.Combine(folder.Path, "token.txt"), content);
+
+        (_, _, List<(InstallMessage Type, string Text)> messages) =
+            ReadTokenFile(folder.Path, [.. properties, "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt"]);
+
+        string leak = messages.Select(m => m.Text).FirstOrDefault(m => m.Contains(TokenSecret));
+        Assert.True(leak is null, $"{scenario}: {leak}");
+    }
+
+    // oracle: mutant the error ignores the installer's language
+    [Fact]
+    public void TokenFileErrorIsInTheInstallerLanguage()
+    {
+        using TempFolder folder = new();
+
+        string ErrorIn(string productLanguage)
+        {
+            (_, _, List<(InstallMessage Type, string Text)> messages) = ReadTokenFile(
+                folder.Path,
+                "ProductLanguage=" + productLanguage,
+                "IDENTITY_ENROLLMENT_TOKEN=" + Token,
+                "IDENTITY_ENROLLMENT_TOKEN_FILE=token.txt");
+
+            return Assert.Single(messages, m => m.Type == InstallMessage.Error).Text;
+        }
+
+        string english = ErrorIn("1033");
+
+        Assert.NotEqual(english, ErrorIn("1036"));
+        Assert.NotEqual(english, ErrorIn("1053"));
+        // Windows Installer applies no language transform for German, so the rest of the installer is in English too.
+        Assert.Equal(english, ErrorIn("1031"));
+    }
+
+    /// <summary>
+    /// The installer's action that runs the custom action <paramref name="methodName"/>.
+    /// </summary>
+    private static ManagedAction ActionOf(string methodName) =>
+        Assert.Single(AgentActions.Actions.OfType<ManagedAction>(), a => a.MethodName == methodName);
+
+    /// <summary>
+    /// Runs the custom action that reads the enrollment token file, in a session of a package in
+    /// <paramref name="folder"/> where <paramref name="properties"/> (<c>NAME=value</c>) are set.
+    /// </summary>
+    /// <returns>
+    /// The action's result, the token it leaves in <c>IDENTITY_ENROLLMENT_TOKEN</c>, and every message the session
+    /// sent, log lines included.
+    /// </returns>
+    private static (ActionResult Result, string Token, List<(InstallMessage Type, string Text)> Messages) ReadTokenFile(
+        string folder, params string[] properties)
+    {
+        List<(InstallMessage Type, string Text)> messages = [];
+        ExternalUIHandler previous = MsiInstaller.SetExternalUI(
+            (ExternalUIHandler)((type, message, _, _, _) =>
+            {
+                if (message is not null)
+                {
+                    messages.Add((type, message));
+                }
+
+                return MessageResult.OK;
+            }),
+            InstallLogModes.FatalExit | InstallLogModes.Error | InstallLogModes.Warning | InstallLogModes.User
+            | InstallLogModes.Info | InstallLogModes.Verbose | InstallLogModes.ExtraDebug);
+
+        try
+        {
+            return WithSession(folder, properties, session =>
+            {
+                ActionResult result = CustomActions.ReadIdentityEnrollmentTokenFile(session);
+                return (result, session["IDENTITY_ENROLLMENT_TOKEN"], messages);
+            });
+        }
+        finally
+        {
+            MsiInstaller.SetExternalUI(previous, InstallLogModes.None);
+        }
+    }
+
     /// <summary>
     /// Evaluates <paramref name="condition"/> with the Windows Installer engine, in a session where
     /// <paramref name="properties"/> (<c>NAME=value</c>) are set.
@@ -207,13 +461,16 @@ public sealed class AgentIdentityTests
     private static bool EvaluateCondition(string condition, string[] properties) =>
         WithSession(properties, session => session.EvaluateCondition(condition));
 
+    private static T WithSession<T>(string[] properties, Func<Session, T> action) =>
+        WithSession(AppContext.BaseDirectory, properties, action);
+
     /// <summary>
-    /// Runs <paramref name="action"/> in a Windows Installer session of an empty package where
-    /// <paramref name="properties"/> (<c>NAME=value</c>) are set.
+    /// Runs <paramref name="action"/> in a Windows Installer session of an empty package in <paramref name="folder"/>
+    /// where <paramref name="properties"/> (<c>NAME=value</c>) are set.
     /// </summary>
-    private static T WithSession<T>(string[] properties, Func<Session, T> action)
+    private static T WithSession<T>(string folder, string[] properties, Func<Session, T> action)
     {
-        string path = Path.Combine(AppContext.BaseDirectory, $"session-{Guid.NewGuid():N}.msi");
+        string path = Path.Combine(folder, $"session-{Guid.NewGuid():N}.msi");
 
         try
         {
@@ -241,5 +498,17 @@ public sealed class AgentIdentityTests
         {
             System.IO.File.Delete(path);
         }
+    }
+
+    /// <summary>
+    /// A new, empty folder under the temporary directory, deleted with its content on disposal.
+    /// </summary>
+    private sealed class TempFolder : IDisposable
+    {
+        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"agent-identity-{Guid.NewGuid():N}");
+
+        public TempFolder() => Directory.CreateDirectory(Path);
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
     }
 }

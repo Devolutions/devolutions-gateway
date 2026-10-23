@@ -22,6 +22,9 @@
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
                 <String Id="Dotnet48IsRequired">The product requires Microsoft .NET Framework 4.8. Would you like to download it now?</String>
+                <String Id="IdentityEnrollmentTokenBothSet">Set IDENTITY_ENROLLMENT_TOKEN or IDENTITY_ENROLLMENT_TOKEN_FILE, not both.</String>
+                <String Id="IdentityEnrollmentTokenFileEmpty">The first line of the enrollment token file {0} is empty.</String>
+                <String Id="IdentityEnrollmentTokenFileUnreadable">Can't read the enrollment token file {0}: {1}</String>
                 <String Id="NewerInstalled">A newer version of this product is already installed.</String>
                 <String Id="OS2Old">This product requires at least Windows 8 / Windows Server 2012 R2</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">There is a problem with the entered data. Please correct the issue and try again.</String>

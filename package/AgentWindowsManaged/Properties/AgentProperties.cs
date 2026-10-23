@@ -54,6 +54,11 @@ namespace DevolutionsAgent.Properties
 
         public static string IdentityEnrollmentTokenEncoded = "IDENTITY_ENROLLMENT_TOKEN_ENCODED";
 
+        /// <summary>
+        /// Path of a file whose first line is the Agent Identity enrollment token
+        /// </summary>
+        public static string IdentityEnrollmentTokenFile = "IDENTITY_ENROLLMENT_TOKEN_FILE";
+
         public AgentProperties(ISession runtimeSession)
         {
             this.runtimeSession = runtimeSession;

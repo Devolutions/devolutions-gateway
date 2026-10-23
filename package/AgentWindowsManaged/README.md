@@ -36,7 +36,18 @@ When upgrading from a release without the UniGetUI Package Broker option, setup 
 
 ## Agent Identity
 
-Set `IDENTITY_ENROLLMENT_TOKEN` to enroll the device with Agent Identity during an install or a major upgrade:
+To enroll the device with Agent Identity during an install or a major upgrade, put the enrollment token on the first line of a file and set `IDENTITY_ENROLLMENT_TOKEN_FILE` to the file's path:
+
+```powershell
+msiexec /i DevolutionsAgent.msi /qn IDENTITY_ENROLLMENT_TOKEN_FILE=enrollment-token.txt
+```
+
+A relative path resolves against the folder of the `.msi`, so a deployment tool such as Intune can ship the file beside the installer.
+The file keeps the token off msiexec's command line, which security tools and process auditing record and Intune shows in the app's install command.
+The installer never deletes the file, so protect it like the token or delete it after the install.
+The install fails if the file is missing or its first line is empty.
+
+You can instead set `IDENTITY_ENROLLMENT_TOKEN` to the token itself, but not both properties:
 
 ```powershell
 $Token = (Get-Content -Raw 'C:\Secure\enrollment-token.txt').Trim()
@@ -44,8 +55,9 @@ msiexec /i DevolutionsAgent.msi /qn "IDENTITY_ENROLLMENT_TOKEN=$Token"
 ```
 
 Take the token from a protected file or a secure channel, such as your deployment tool's secret store, never from a literal in a shared script or command line.
-The installer keeps the token out of its log and passes it to the agent through standard input.
-msiexec's own command line still holds the token while the install runs, so run it elevated or from your deployment tool, where only administrators can read it.
+msiexec's command line then holds the token while the install runs, so run it elevated or from your deployment tool, where only administrators can read it.
+
+Either way, the installer keeps the token out of its log and passes it to the agent through standard input.
 The install fails if the agent rejects the token's format or can't store it.
 The agent then enrolls in the background once its service starts, and re-running the same command later, for example on an upgrade, is a no-op.
 
