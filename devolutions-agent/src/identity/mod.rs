@@ -601,7 +601,7 @@ mod tests {
                     previous: None,
                 },
             };
-            store.write_identity(&identity)?;
+            store.store_enrolled_identity(&identity)?;
             let path = store.identity_path(identity.authority_id);
             let contents = std::fs::read(&path)?;
             std::fs::remove_file(&path)?;

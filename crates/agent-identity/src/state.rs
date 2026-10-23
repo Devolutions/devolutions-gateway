@@ -230,13 +230,20 @@ impl Store {
     }
 
     /// Creates an identity only if its authority has no stored identity yet.
-    pub fn write_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
+    ///
+    /// Test-only: production stores enrolled identities through [`Store::store_enrolled_identity`], which applies the
+    /// rule on a known authority ID at another base URL.
+    #[cfg(test)]
+    pub(crate) fn write_identity(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
         let _lock = self.lock()?;
         self.write_identity_locked(None, identity)
     }
 
     /// Replaces an identity only while the expected snapshot is still current.
-    pub fn replace_identity(&self, previous: &StoredIdentity, identity: &StoredIdentity) -> anyhow::Result<()> {
+    ///
+    /// Test-only, like [`Store::write_identity`].
+    #[cfg(test)]
+    pub(crate) fn replace_identity(&self, previous: &StoredIdentity, identity: &StoredIdentity) -> anyhow::Result<()> {
         let _lock = self.lock()?;
         self.write_identity_locked(Some(previous), identity)
     }
