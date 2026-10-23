@@ -551,10 +551,10 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
     errors.finish()?;
     let name = name.expect("a missing name is a field error");
     let max_uses = max_uses.expect("a missing maxUses is a field error");
-    if has_credentials(&app.base_url) {
+    if !is_token_url(&app.base_url) {
         return Err(ManagementError::status(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "the mock's base URL carries a user name or password, which an enrollment token's URL never does",
+            "the mock's base URL does not begin with https:// or contains an @, which an enrollment token's URL never does",
         ));
     }
 
@@ -578,14 +578,12 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
         .into_response())
 }
 
-/// Returns whether the authority of the absolute URL `url` carries a user name or password, which an enrollment token's
-/// `u` never does ([CONTRACT.agent-identity.md][contract], "2. Enrollment token").
+/// Returns whether `url`, read as text, can be an enrollment token's `u`: it begins with `https://` and contains no `@`
+/// ([CONTRACT.agent-identity.md][contract], "2. Enrollment token").
 ///
 /// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
-fn has_credentials(url: &str) -> bool {
-    url.split_once("://")
-        .and_then(|(_, rest)| rest.split(['/', '?', '#']).next())
-        .is_some_and(|authority| authority.contains('@'))
+fn is_token_url(url: &str) -> bool {
+    url.starts_with("https://") && !url.contains('@')
 }
 
 /// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens`.

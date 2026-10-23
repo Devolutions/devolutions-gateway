@@ -752,16 +752,22 @@ async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`'s `422`: "DVLS has no https external URL for the token to
 /// carry".
-/// DVLS has none when its external URL carries a user name or password, which a token's `u` never does
-/// (CONTRACT.agent-identity.md §2), so a mock whose base URL carries them creates no token.
+/// A token's `u` is read as text: it begins with `https://` and contains no `@`, wherever it is
+/// (CONTRACT.agent-identity.md §2), so a mock whose base URL is not such a text creates no token.
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
 #[rstest]
 #[case::user_name("https://user@127.0.0.1:1/mock")]
 #[case::password("https://:pw@127.0.0.1:1/mock")]
 #[case::user_name_and_password("https://user:pw@127.0.0.1:1/mock")]
+#[case::empty_user_name("https://@127.0.0.1:1/mock")]
+#[case::at_without_slashes("https:@127.0.0.1:1/mock")]
+#[case::no_slashes("https:127.0.0.1:1/mock")]
+#[case::at_in_the_path("https://127.0.0.1:1/mock@path")]
 #[tokio::test]
-async fn create_token_with_credentials_in_the_base_url_is_unprocessable(#[case] base_url: &str) -> anyhow::Result<()> {
+async fn create_token_for_a_base_url_that_is_no_token_url_is_unprocessable(
+    #[case] base_url: &str,
+) -> anyhow::Result<()> {
     let mut app = Arc::into_inner(App::for_test()?).context("a new app is not shared")?;
     app.base_url = base_url.to_owned();
     let app = Arc::new(app);
