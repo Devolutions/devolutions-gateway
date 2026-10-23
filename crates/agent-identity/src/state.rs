@@ -857,6 +857,7 @@ mod tests {
     use base64::Engine as _;
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
     use der::Encode as _;
+    use der::asn1::OctetString;
     use der::flagset::FlagSet;
     use p256::ecdsa::{DerSignature, SigningKey, VerifyingKey};
     use p256::pkcs8::EncodePublicKey as _;
@@ -1965,6 +1966,30 @@ mod tests {
         Ok(vec![leaf.der, below.der, limited.der, held.der.clone()])
     }
 
+    fn chain_through_a_ca_with_an_unreadable_key_usage(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        // A critical keyUsage whose value is a NULL rather than a BIT STRING.
+        let mut key_usage = key_usage(KeyUsages::KeyCertSign.into())?;
+        key_usage.critical = true;
+        key_usage.extn_value = OctetString::new([0x05, 0x00])?;
+        let signer = held.issue_with(50, "CN=Intermediate", vec![ca(None)?, key_usage])?;
+        let leaf = signer.issue(51, "CN=Claimed identity", false)?;
+        Ok(vec![leaf.der, signer.der, held.der.clone()])
+    }
+
+    fn chain_with_a_leaf_naming_another_signature_algorithm(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        // The held root signs the leaf with `ecdsa-with-SHA256` (1.2.840.10045.4.3.2), whose DER is this; the last copy
+        // is the leaf's signatureAlgorithm, outside the signed part, and its last byte turns it into `ecdsa-with-SHA384`
+        // (1.2.840.10045.4.3.3).
+        const ECDSA_WITH_SHA256_DER: [u8; 10] = [0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x04, 0x03, 0x02];
+        let mut leaf = STANDARD.decode(held.issue(52, "CN=Claimed identity", false)?.der)?;
+        let algorithm = leaf
+            .windows(ECDSA_WITH_SHA256_DER.len())
+            .rposition(|window| window == ECDSA_WITH_SHA256_DER)
+            .context("leaf without ecdsa-with-SHA256")?;
+        leaf[algorithm + ECDSA_WITH_SHA256_DER.len() - 1] = 0x03;
+        Ok(vec![STANDARD.encode(leaf), held.der.clone()])
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[rstest::rstest]
     #[case::from_another_root(chain_from_another_root)]
@@ -1979,6 +2004,12 @@ mod tests {
     #[case::through_a_ca_without_key_cert_sign(chain_through_a_ca_without_key_cert_sign)]
     // oracle: spec RFC 5280 §6.1.4
     #[case::past_a_path_length_constraint(chain_past_a_path_length_constraint)]
+    // A critical extension that the agent cannot process rejects its certificate.
+    // oracle: spec RFC 5280 §4.2
+    #[case::through_a_ca_with_an_unreadable_key_usage(chain_through_a_ca_with_an_unreadable_key_usage)]
+    // A signature verifies only under the algorithm its certificate names, which must be the one in the signed part.
+    // oracle: spec RFC 5280 §4.1.1.2
+    #[case::with_a_leaf_naming_another_signature_algorithm(chain_with_a_leaf_naming_another_signature_algorithm)]
     fn an_enrollment_claiming_a_held_authority_from_another_base_url_without_a_held_root_is_refused(
         #[case] claimed_chain: ChainOutsideHeldRoots,
     ) -> anyhow::Result<()> {
@@ -2044,6 +2075,19 @@ mod tests {
         Ok((held, vec![leaf.der, intermediate.der, root.der]))
     }
 
+    fn chain_through_a_self_issued_ca_below_an_intermediate_limited_to_no_further_ca(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(store, data_dir, &root)?;
+        let limited = root.issue_with(53, "CN=Limited intermediate", vec![ca(Some(0))?])?;
+        // Self-issued: the limited intermediate's name over a new key, as when a CA changes keys.
+        let rekeyed = limited.issue(54, "CN=Limited intermediate", true)?;
+        let leaf = rekeyed.issue(55, "CN=Claimed identity", false)?;
+        Ok((held, vec![leaf.der, rekeyed.der, limited.der, root.der]))
+    }
+
     fn chain_from_a_new_root_the_held_root_cross_signed(
         store: &Store,
         data_dir: &Utf8Path,
@@ -2097,6 +2141,11 @@ mod tests {
     #[case::through_an_intermediate(chain_through_an_intermediate_of_the_held_root)]
     // oracle: spec RFC 5280 §6.1.4
     #[case::through_an_intermediate_limited_to_no_further_ca(chain_through_an_intermediate_limited_to_no_further_ca)]
+    // A pathLenConstraint counts no self-issued certificate.
+    // oracle: spec RFC 5280 §6.1.4
+    #[case::through_a_self_issued_ca_below_a_limited_intermediate(
+        chain_through_a_self_issued_ca_below_an_intermediate_limited_to_no_further_ca
+    )]
     #[case::from_a_cross_signed_new_root(chain_from_a_new_root_the_held_root_cross_signed)]
     #[case::from_the_root_of_the_previous_slot(chain_from_the_root_of_the_previous_slot)]
     #[case::from_the_root_of_the_pending_slot(chain_from_the_root_of_the_pending_slot)]
