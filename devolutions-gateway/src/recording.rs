@@ -1374,6 +1374,7 @@ mod tests {
         assert_eq!(state.borrow().lifecycle, StreamLifecycle::Ended);
     }
 
+    // oracle: intent devolutions-gateway/src/recording.intent.md §Ending a recording
     #[tokio::test]
     async fn a_recording_its_producer_ended_ends_without_waiting_for_a_reconnection() {
         let harness = Harness::start();

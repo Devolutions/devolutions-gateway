@@ -107,6 +107,7 @@ async fn push_and_close(http_port: u16, session_id: Uuid, code: CloseCode) {
     }
 }
 
+// oracle: intent devolutions-gateway/src/recording.intent.md §Ending a recording
 #[tokio::test]
 async fn a_push_closed_as_ended_leaves_the_active_recordings_without_waiting_for_a_reconnection() {
     let recordings = tempfile::tempdir().expect("create recording dir");
@@ -136,6 +137,7 @@ async fn a_push_closed_as_ended_leaves_the_active_recordings_without_waiting_for
     }
 }
 
+// oracle: intent devolutions-gateway/src/recording.intent.md §Ending a recording
 #[tokio::test]
 async fn a_push_closed_normally_keeps_the_recording_open_for_a_reconnection() {
     let recordings = tempfile::tempdir().expect("create recording dir");
