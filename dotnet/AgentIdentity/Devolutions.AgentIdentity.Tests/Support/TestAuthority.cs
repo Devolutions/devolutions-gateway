@@ -79,15 +79,14 @@ internal sealed class TestAuthority
     }
 
     /// <summary>
-    /// A <c>Hello</c> of <c>device-a</c> that answers the Challenge of an opening
-    /// that <see cref="OpenChannelAsync"/> made with the default nonce.
+    /// A <c>Hello</c> of <c>device-a</c> that answers the Challenge of an opening of <c>device-a</c>.
     /// </summary>
     public static AgentMessage ValidHello(ChannelOpening opening)
     {
         byte[] proof = TestChannelProof.Sign(
             TestVectors.Instance.Key("device-a"),
             opening.Challenge.Challenge.Challenge_.Span,
-            TestRequest.DefaultNonce);
+            opening.ConnectNonce);
 
         return VectorChannel.HelloMessage(opening, proof);
     }

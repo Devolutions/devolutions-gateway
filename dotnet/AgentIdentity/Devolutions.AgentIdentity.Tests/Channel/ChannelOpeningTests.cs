@@ -71,7 +71,6 @@ public class ChannelOpeningTests
 
         ChannelOpeningResult result = await VectorAuthority.OpenChannelAsync(authority.Authenticator, connect);
 
-
         Assert.True(result.Succeeded);
         ChannelOpening opening = result.Opening;
         Assert.Equal(ChannelProof.ConnectNonce, opening.ConnectNonce);
@@ -118,7 +117,6 @@ public class ChannelOpeningTests
             TestVectors.Instance.HttpSignature.RegisteredCertificate("device-a").NotAfter,
             opening.CertificateNotAfter);
     }
-
 
     // SEC 1 §2.3.3: an uncompressed point is 0x04, then X and Y.
     private static byte[] Sec1PublicKey(byte[] subjectPublicKeyInfo)
