@@ -70,7 +70,7 @@ Not intended:
    It blocks authentication and renewal, closes live streams, and never makes an issued public key reusable, so a revoked identity never authenticates again.
    The agent never undoes a revocation on its own: it doesn't enroll again with the token that created the revoked identity.
    That is a safeguard on the device, not a control, because enrollment authenticates the token, not the device: whoever controls the device can clear its state, then enroll it with any token that can still enroll, as a new identity that uses up a token use.
-   Keeping a revoked device out therefore also takes deleting every token it can still use.
+   Keeping a revoked device out therefore also takes revoking every token it can still use.
 6. Reported metadata is informational (display, friendly-name evaluation).
    It is never used for authorization.
 7. An agent channel stream is authenticated only once the device has signed a fresh challenge for that stream.
@@ -105,13 +105,13 @@ Not intended:
 - Anyone holding a token can use up its remaining uses; that risk is accepted, and a warning near the limit would mostly be noise, since a token is usually created with N uses for N machines.
 - The token's base URL never carries a user name or password, which could make an address read as one host while it reaches another; this can be revisited if it blocks a user.
 - The token is deliberately not a JWT.
-  The authority already needs stored state for use limits, deletion and retry recovery, and an unenrolled agent has no authority key with which to verify a signed token.
-- Deleting a token keeps a tombstone.
-  This lets a device recover a lost enrollment response without allowing the deleted token to create another identity.
+  The authority already needs stored state for use limits, revocation and retry recovery, and an unenrolled agent has no authority key with which to verify a signed token.
+- A token that is no longer wanted is revoked, not deleted: it stays stored with its name.
+  This lets a device recover a lost enrollment response without allowing the revoked token to create another identity, and keeps the token's name on the identities it enrolled.
 
 ### Enrollment
 
-- A lost enrollment response can be recovered by retrying the same token and CSR while the created identity remains non-revoked, even after the token expires, reaches its use limit or is deleted.
+- A lost enrollment response can be recovered by retrying the same token and CSR while the created identity remains non-revoked, even after the token expires, reaches its use limit or is revoked.
   The retry consumes no extra use and changes no identity state because the CSR proves past possession of the key, not current possession.
 - The authority creates the friendly name once during enrollment, and later metadata updates never rename the identity.
   The agent never receives the name, because an administrator can rename the identity and the agent's copy would go stale.
@@ -136,6 +136,8 @@ Not intended:
   Creating the identity initializes it; every accepted renew, confirm (including an already-current retry) and check-in, every authenticated `Hello`, and every later agent message on an authenticated stream sets it to the authority's current time.
 - Check-in is only a fallback for configuration and renewal requests while no channel is working.
   Features that need server push require the agent channel.
+- An enrollment token adds nothing to an identity's config.
+  An administrator assigns product settings to identities after they enroll, for example by selecting several identities and assigning them as tunnel agents of one Gateway; the authority then updates their config and gives that Gateway those identities, so that settings follow an administrator's decision about each device rather than the token it used.
 
 ### Errors
 
