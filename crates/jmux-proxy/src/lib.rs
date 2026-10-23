@@ -429,7 +429,7 @@ struct JmuxSenderTask<T: AsyncWrite + Unpin + Send + 'static> {
 impl<T: AsyncWrite + Unpin + Send + 'static> JmuxSenderTask<T> {
     fn spawn(self, span: Span) -> ChildTask<anyhow::Result<()>> {
         let fut = self.run().instrument(span);
-        ChildTask(tokio::spawn(fut))
+        ChildTask::from(tokio::spawn(fut))
     }
 
     #[instrument("sender", skip_all)]
@@ -513,7 +513,7 @@ impl<T: AsyncRead + Unpin + Send + 'static> JmuxSchedulerTask<T> {
     fn spawn(self) -> ChildTask<anyhow::Result<()>> {
         let parent_span = self.parent_span.clone();
         let fut = scheduler_task_impl(self).instrument(parent_span);
-        ChildTask(tokio::spawn(fut))
+        ChildTask::from(tokio::spawn(fut))
     }
 }
 
@@ -1090,7 +1090,7 @@ impl DataReaderTask {
             }
             .instrument(span),
         );
-        ChildTask(handle)
+        ChildTask::from(handle)
     }
 
     async fn run(self) -> anyhow::Result<()> {
@@ -1222,7 +1222,7 @@ impl DataWriterTask {
             .instrument(span),
         );
 
-        ChildTask(handle)
+        ChildTask::from(handle)
     }
 }
 
@@ -1255,7 +1255,7 @@ impl StreamResolverTask {
             .instrument(span),
         );
 
-        ChildTask(handle)
+        ChildTask::from(handle)
     }
 
     async fn run(self) -> anyhow::Result<()> {
@@ -1397,28 +1397,43 @@ impl StreamResolverTask {
     }
 }
 
-/// Aborts the running task when dropped.
+/// Aborts the running task when dropped, unless it was detached.
 /// Also see https://github.com/tokio-rs/tokio/issues/1830 for some background.
 #[must_use]
-struct ChildTask<T>(JoinHandle<T>);
+struct ChildTask<T> {
+    handle: JoinHandle<T>,
+    detached: bool,
+}
 
 impl<T> ChildTask<T> {
     async fn join(mut self) -> Result<T, tokio::task::JoinError> {
-        (&mut self.0).await
+        (&mut self.handle).await
     }
 
     fn abort(&self) {
-        self.0.abort()
+        self.handle.abort()
     }
 
-    fn detach(self) {
-        core::mem::forget(self);
+    fn detach(mut self) {
+        // The handle is still dropped, because a forgotten `JoinHandle` keeps the finished task allocated.
+        self.detached = true;
+    }
+}
+
+impl<T> From<JoinHandle<T>> for ChildTask<T> {
+    fn from(value: JoinHandle<T>) -> Self {
+        Self {
+            handle: value,
+            detached: false,
+        }
     }
 }
 
 impl<T> Drop for ChildTask<T> {
     fn drop(&mut self) {
-        self.abort();
+        if !self.detached {
+            self.abort();
+        }
     }
 }
 
@@ -1526,5 +1541,24 @@ mod tests {
             .await
             .expect("sender task panicked")
             .expect("sender task failed");
+    }
+
+    // oracle: regression #1973
+    #[tokio::test]
+    async fn detached_task_releases_its_output_once_finished() {
+        let output = Arc::new(());
+        let task_output = Arc::clone(&output);
+        let (finished_tx, finished_rx) = oneshot::channel();
+
+        ChildTask::from(tokio::spawn(async move {
+            let _ = finished_tx.send(());
+            task_output
+        }))
+        .detach();
+
+        finished_rx.await.expect("detached task was aborted");
+
+        // The current-thread runtime completes the task before this test resumes.
+        assert_eq!(Arc::strong_count(&output), 1, "detached task kept its output alive");
     }
 }
