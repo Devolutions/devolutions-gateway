@@ -2380,7 +2380,12 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                 "token_malformed, @ in the path of u" => {
                     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
                     // `u` may carry a path, so the `@` lies outside the authority, where a URL parser sees no user name.
-                    (with_u(format!("https://{rest}/a@b"))?, token, 0, 0)
+                    (
+                        with_u(format!("https://{}/a@b", rest.trim_end_matches('/')))?,
+                        token,
+                        0,
+                        0,
+                    )
                 }
                 _ => anyhow::bail!("unknown permanent error"),
             };
