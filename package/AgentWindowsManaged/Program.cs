@@ -462,6 +462,28 @@ internal class Program
             RegistryKeyAction = RegistryKeyAction.create,
         };
 
+    /// <summary>
+    /// The installer strings of <paramref name="culture"/> by ID, read from the localization file embedded in this
+    /// assembly.
+    /// </summary>
+    private static Dictionary<string, string> LoadStrings(string culture)
+    {
+        using Stream stream = Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream($"DevolutionsAgent.Resources.{Languages[culture]}");
+
+        XmlDocument xml = new();
+        xml.Load(stream);
+
+        Dictionary<string, string> strings = new();
+
+        foreach (XmlNode s in xml.GetElementsByTagName("String"))
+        {
+            strings.Add(s.Attributes["Id"].Value, s.InnerText);
+        }
+
+        return strings;
+    }
+
     private static void Project_UnhandledException(ExceptionEventArgs e)
     {
         string errorMessage =
@@ -484,18 +506,7 @@ internal class Program
             _ => enUS.Key,
         };
 
-        using Stream stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream($"DevolutionsAgent.Resources.{Languages[lcid]}");
-
-        XmlDocument xml = new();
-        xml.Load(stream);
-
-        Dictionary<string, string> strings = new();
-
-        foreach (XmlNode s in xml.GetElementsByTagName("String"))
-        {
-            strings.Add(s.Attributes["Id"].Value, s.InnerText);
-        }
+        Dictionary<string, string> strings = LoadStrings(lcid);
 
         string I18n(string key)
         {
