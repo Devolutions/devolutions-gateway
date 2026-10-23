@@ -37,6 +37,7 @@ The command only validates the token's format and stores the token in a pending-
 It prints the file's path and exits with status 0, or exits with a nonzero status if the token is malformed or can't be stored.
 The agent service then enrolls in the background: it reads pending files when it starts and every 5 seconds.
 On success, it logs `Agent Identity enrolled` with the authority and identity IDs.
+On Linux and macOS, the pending-enrollment file holds the token in plaintext until the authority answers, protected only by its permissions (mode `0600`).
 
 Running the command again with the same token is a no-op, whether the device enrolled or the authority refused the token.
 An install command that runs again, for example on an upgrade, therefore changes nothing.
