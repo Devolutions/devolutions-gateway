@@ -2286,6 +2286,12 @@ pub(crate) async fn a_enroll_revoked_before_response_is_permanent(ctx: Context) 
                 && target.management().identity_count(&token).await? == 1,
             "revoked enrollment created another identity or consumed another use"
         );
+        let marker: Value = serde_json::from_slice(&std::fs::read(case.rejection_path_for(&token.text))?)?;
+        ensure!(
+            marker["code"] == "identity_revoked",
+            "rejection marker records {} instead of identity_revoked",
+            marker["code"]
+        );
         Ok(())
     })
     .await
