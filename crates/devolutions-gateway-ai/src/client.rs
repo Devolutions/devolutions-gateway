@@ -6,6 +6,7 @@ use secrecy::{ExposeSecret as _, SecretString};
 use tracing::debug;
 use url::Url;
 
+use crate::language::Language;
 use crate::wire::{Api, Stop, anthropic, openai};
 use crate::{Error, Response, error};
 
@@ -211,6 +212,72 @@ pub(crate) struct Prompt<'a> {
     /// Data the purpose works on, such as a session transcript or screenshots, in order.
     pub(crate) input: &'a [Input<'a>],
     pub(crate) max_output_tokens: u32,
+}
+
+/// Instructions of a purpose with its language `rule` added as their last line, `{language}` in it replaced by
+/// `language`.
+pub(crate) fn with_language(instructions: &str, rule: &str, language: &Language) -> String {
+    format!("{instructions}\n{}", rule.replace("{language}", language.as_str()))
+}
+
+/// Version of a prompt: `name`, a hyphen, and the FNV-1a hash of `texts` in 16 hex digits, such as
+/// `session-actions-3f9a1c2b7e4d0a51`.
+///
+/// It is computed at compile time, so it changes whenever the prompt does.
+macro_rules! prompt_version {
+    ($name:literal, $($text:expr),+ $(,)?) => {{
+        const LEN: usize = $name.len() + 17;
+        const BYTES: [u8; LEN] = $crate::client::prompt_version_bytes($name, $crate::client::fnv1a(&[$($text),+]));
+        match ::core::str::from_utf8(&BYTES) {
+            Ok(version) => version,
+            Err(_) => panic!("a prompt version is ASCII"),
+        }
+    }};
+}
+
+pub(crate) use prompt_version;
+
+/// 64-bit FNV-1a hash of `texts`, each followed by a 0xFF byte, which never occurs in UTF-8.
+pub(crate) const fn fnv1a(texts: &[&str]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    let mut hash = OFFSET_BASIS;
+    let mut text = 0;
+    while text < texts.len() {
+        let bytes = texts[text].as_bytes();
+        let mut byte = 0;
+        while byte < bytes.len() {
+            // `u64::from` cannot be called in a const fn.
+            hash = (hash ^ bytes[byte] as u64).wrapping_mul(PRIME);
+            byte += 1;
+        }
+        hash = (hash ^ 0xff).wrapping_mul(PRIME);
+        text += 1;
+    }
+    hash
+}
+
+/// `name`, a hyphen, and `hash` in 16 lowercase hex digits; `N` must be the length of `name` plus 17.
+pub(crate) const fn prompt_version_bytes<const N: usize>(name: &str, hash: u64) -> [u8; N] {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+    let name = name.as_bytes();
+    let mut bytes = [0; N];
+    let mut i = 0;
+    while i < name.len() {
+        bytes[i] = name[i];
+        i += 1;
+    }
+    bytes[i] = b'-';
+
+    let mut digit = 0;
+    while digit < 16 {
+        let nibble = (hash >> (60 - 4 * digit)) & 0xf;
+        bytes[i + 1 + digit] = DIGITS[nibble as usize];
+        digit += 1;
+    }
+    bytes
 }
 
 /// Part of the data a purpose works on.
@@ -452,6 +519,39 @@ mod tests {
         ] {
             assert_eq!(strip_think_blocks(text.to_owned()), text, "{text:?}");
         }
+    }
+
+    // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
+    #[test]
+    fn the_language_rule_names_the_language() {
+        let language = Language::new("français").expect("language");
+
+        assert_eq!(
+            with_language("Rules:", "- Write in `{language}`.", &language),
+            "Rules:\n- Write in `français`."
+        );
+    }
+
+    #[test]
+    fn a_prompt_version_is_the_name_and_the_hash_of_the_texts() {
+        const VERSION: &str = prompt_version!("test", "a", "b");
+
+        // oracle: reference FNV-1a 64 of the bytes 61 FF 62 FF, computed by hand with a separate model
+        assert_eq!(VERSION, "test-d2b371819297f98a");
+        // oracle: intent crates/devolutions-gateway-ai/INTENT.md §Analyze Recording
+        assert_ne!(fnv1a(&["a", "b"]), fnv1a(&["ab"]));
+        assert_ne!(fnv1a(&["a", "b"]), fnv1a(&["a", "c"]));
+    }
+
+    // oracle: reference servo/rust-fnv 1.0.7 basic_tests, FNV-1a 64 of "" and "a"
+    #[test]
+    fn fnv1a_matches_the_reference_value() {
+        const PRIME: u64 = 0x0000_0100_0000_01b3;
+        // FNV-1a 64 of "a", from the reference test vectors, then the 0xFF byte that ends each text.
+        let a: u64 = 0xaf63_dc4c_8601_ec8c;
+
+        assert_eq!(fnv1a(&[]), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a(&["a"]), (a ^ 0xff).wrapping_mul(PRIME));
     }
 
     #[test]

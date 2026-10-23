@@ -7,15 +7,14 @@ use std::time::Duration;
 use serde::Deserialize;
 use tracing::warn;
 
-use crate::client::{AiClient, Input, Prompt};
-use crate::{Error, Response};
+use crate::client::{AiClient, Input, Prompt, prompt_version, with_language};
+use crate::{Error, Language, Response};
 
-/// Version of the prompt of this purpose.
+/// Version of the prompt of this purpose, a hash of the prompt and its language rule.
 ///
 /// Results do not carry it: a caller that stores results should store it with them, so readers know which prompt
 /// produced them.
-/// Bump it whenever the prompt changes.
-pub const PROMPT_VERSION: &str = "session-actions-3";
+pub const PROMPT_VERSION: &str = prompt_version!("session-actions", PROMPT, LANGUAGE_RULE);
 
 const PROMPT: &str = r#"You read the transcript of a remote session and list what the user did.
 
@@ -36,6 +35,9 @@ Rules:
 - Ignore noise, such as prompt redraws, cursor movement, and output that has no user action.
 - Never copy passwords, secrets, or tokens. Write "[redacted]" instead.
 - If the user did nothing, write only this line: {"noActions":true}"#;
+
+/// Last rule of the prompt, naming the language of the descriptions.
+pub(crate) const LANGUAGE_RULE: &str = r#"- Write every description in the language `{language}`; keep the JSON field names and "[redacted]" as they are."#;
 
 /// The same limit DVLS and RDM use for Claude. Reasoning models count their reasoning in it, so it cannot be small.
 pub(crate) const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 16_000;
@@ -63,6 +65,7 @@ impl AiClient {
         DescribeSessionActions {
             client: self,
             transcript,
+            language: Language::default(),
             max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
         }
     }
@@ -73,6 +76,7 @@ impl AiClient {
 pub struct DescribeSessionActions<'a> {
     client: &'a AiClient,
     transcript: &'a str,
+    language: Language,
     max_output_tokens: u32,
 }
 
@@ -82,12 +86,19 @@ impl fmt::Debug for DescribeSessionActions<'_> {
         f.debug_struct("DescribeSessionActions")
             .field("client", self.client)
             .field("transcript_len", &self.transcript.len())
+            .field("language", &self.language)
             .field("max_output_tokens", &self.max_output_tokens)
             .finish()
     }
 }
 
 impl DescribeSessionActions<'_> {
+    /// Language the descriptions are written in; the default is English.
+    pub fn language(mut self, language: Language) -> Self {
+        self.language = language;
+        self
+    }
+
     /// Upper bound of tokens in the answer; the default is 16000.
     ///
     /// Some models accept less, such as older Claude models, and the provider then refuses the request: lower it for
@@ -109,9 +120,10 @@ impl DescribeSessionActions<'_> {
     /// A refusal of the provider is [`Error::Refused`], never an empty list.
     pub async fn send(self) -> Result<Response<Vec<Action>>, Error> {
         let (labeled, times) = label_lines(self.transcript);
+        let system = with_language(PROMPT, LANGUAGE_RULE, &self.language);
 
         let prompt = Prompt {
-            system: PROMPT,
+            system: &system,
             input: &[Input::Text(&labeled)],
             max_output_tokens: self.max_output_tokens,
         };
