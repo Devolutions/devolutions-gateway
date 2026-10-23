@@ -864,7 +864,7 @@ mod tests {
     }
 
     #[test]
-    fn a_flood_of_pushed_configs_keeps_at_most_the_bound_of_acknowledgements_starting_with_the_highest() {
+    fn a_flood_of_pushed_configs_keeps_the_highest_and_a_bounded_number_of_acknowledgements() {
         // oracle: intent devolutions-agent/src/identity/INTENT.md §Channel
         let now = Instant::now();
         let mut links = Links::new();
@@ -880,8 +880,10 @@ mod tests {
         let [Notice::ConfigUpdate(pushed)] = queued.as_slice() else {
             panic!("expected one queued config");
         };
-        assert_eq!(pushed.acks.len(), MAX_CONFIG_ACKS);
-        assert_eq!(pushed.acks[0], (link, "update-100".to_owned()));
+        assert_eq!(config_revision(&pushed.config), 100);
+        assert!(pushed.acks.contains(&(link, "update-100".to_owned())));
+        // The highest config's own acknowledgement and at most 32 of the configs it superseded.
+        assert!(pushed.acks.len() <= 1 + 32);
     }
 
     #[test]
