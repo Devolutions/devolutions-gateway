@@ -1816,11 +1816,13 @@ mod tests {
     }
 
     /// CONTRACT.agent-identity.md §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope
-    /// would exceed that limit", so an enrollment whose config would be one byte larger creates no identity, and §5.4
+    /// would exceed that limit", so an enrollment whose config would be one byte larger creates no identity, and §2.1
     /// counts a token's uses by the identities it created.
     /// Only the channel URL can grow an enrollment config, so the base URL makes it one byte too large.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     #[test]
     fn enrollment_past_the_envelope_limit_creates_no_identity() -> anyhow::Result<()> {
         let now = 1_790_000_000;
