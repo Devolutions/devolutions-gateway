@@ -48,7 +48,9 @@ A page carries a `nextCursor` until every log is read, and a page with fewer hit
 
 Gateway keeps no state between pages; the cursor holds where the next page starts.
 A cursor is accepted only with the same `query`, `recordings` and `startTime` as the page that gave it.
-The hit that does not fit in a page opens the next one, so that every page moves the search forward and returns each hit once.
+A page ends only between hits, so no hit is split across pages or cut short to fit one.
+A hit that would exceed `maxHits` opens the next page, so that every page moves the search forward and returns each hit once.
+A hit on the line that crosses the read limit stays in that page rather than moving to the next, since the next page would read that line again.
 Pages never go back: a recording that starts, or a log that grows, behind the cursor while paging is not searched.
 A log replaced while paging, as an AI analysis rerun does, is read from the cursor's byte offset on, so lines can be missed or misnumbered; this is accepted for now.
 
