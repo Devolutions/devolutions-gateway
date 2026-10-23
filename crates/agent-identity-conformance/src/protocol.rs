@@ -1107,7 +1107,7 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
 
 pub(crate) async fn p_friendly_name_format(ctx: Context) -> anyhow::Result<()> {
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let management = ctx.target.management();
     let token = management
         .create_token(2, TOKEN_LIFETIME, Some("  {hostname}-{{ok}}-{token_name}-{fqdn}  "))
@@ -5880,7 +5880,7 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
 }
 
 pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let management = ctx.target.management();
     let token = token(&ctx, 1).await?;
     let record = management.token(&token.id).await?;
@@ -5991,7 +5991,7 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
 }
 
 pub(crate) async fn p_management_requires_auth(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
+    // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     assert_management_routes_denied(&ctx, Credential::Absent, |_| true, Refusal::Unauthenticated).await?;
     // oracle: spec DVLS public API contract §6
     let unknown = unknown_token_id();
@@ -6108,7 +6108,7 @@ async fn assert_management_routes_denied(
 ///
 /// Each route group, the settings included, is called with a credential lacking that group's permission; on the mock it holds every other permission, so none stands in for the missing one.
 pub(crate) async fn p_management_permission_denied(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
+    // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Management API
     for permission in Permission::ALL {
         let session =
             dvls::session_lacking(&ctx, permission).ok_or(crate::Incomplete("requires --unprivileged-app-key"))?;
@@ -6163,7 +6163,7 @@ pub(crate) async fn p_rotation_start_requires_auth(ctx: Context) -> anyhow::Resu
 
 /// The OpenAPI document, on a token's `expiresOn`: "in the future and at most 365 days ahead ... (Default: 90 days ahead)".
 pub(crate) async fn p_token_expiry_default_and_maximum(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
+    // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     let management = ctx.target.management();
     let mut spec = TokenSpec::new(1, TOKEN_LIFETIME)?;
     spec.expires_on = None;

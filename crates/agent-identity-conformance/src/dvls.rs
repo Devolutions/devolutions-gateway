@@ -1261,7 +1261,7 @@ mod tests {
 
     #[test]
     fn secret_disclosure_is_found_in_member_names_and_values_but_not_in_redactions() {
-        // oracle: intent Devolutions/RDM@0acd9d2474bf9fd4a030e146a28097bf4ddf391a:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
+        // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
         let secret = "s3cr3t-text";
         let record = |extra: Value| {
             let mut record = json!({ "id": "token-id", "name": "test", "hint": "s3c…" });
