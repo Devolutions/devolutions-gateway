@@ -75,7 +75,7 @@ The location and format of the files below are stable, because the conformance t
   - A pending file in an accepted form whose content the agent cannot use (its name is not the hash of the token it holds, its version is unsupported, its content is not a JSON object, or it is oversized) is deleted with a warning log and no rejection marker.
     Only `identity enroll` writes pending files, so such a file was written by hand and never becomes usable, and a correct file for the same token can still enroll.
   - Any other failure keeps the pending state, and the agent retries.
-- A rejection marker is `<data-dir>/identity/rejected/<hex>.json` = `{ "version": 1, "token_sha256": "<hex>", "code": "<code>", "at": "<RFC 3339>" }`, where `code` is the contract error code or one of the local codes `token_malformed` and `authority_conflict`.
+- A rejection marker is `<data-dir>/identity/rejected/<hex>.json` = `{ "version": 1, "token_sha256": "<hex>", "code": "<code>", "at": "<RFC 3339>" }`, where `code` is the contract error code or one of the local codes `token_malformed`, `authority_conflict` and `authority_url_mismatch`.
   It holds no secret and is never deleted while the agent stays installed; tokens are immutable at the authority, so a permanent outcome never becomes wrong.
   A marker is written only under the hash of a token read from a file named by that hash.
 - If a pending token's hash matches a stored identity, active or rejected, or a rejection marker, the agent deletes the pending state without sending a request.
@@ -86,7 +86,8 @@ The location and format of the files below are stable, because the conformance t
 - When an enrollment returns the ID of an identity the agent holds for a different base URL, the agent accepts it only if a signature path runs from the new leaf, through certificates of the new chain that are CAs (basicConstraints with `cA` set, and `keyCertSign` when they carry key usage), to a root it already holds for that ID; otherwise it refuses the enrollment and keeps the stored identity and its keys.
   The roots it holds for an ID are the last certificates of that identity's current, pending and previous chains, and validity periods are not checked.
   Without this rule, a hostile or compromised authority could claim another authority's ID and take its place on the device; the chain shows the server obtained a certificate from that authority's CA, so a legitimate move to a new base URL keeps working, and requiring CA certificates keeps a device's own certificate and key from standing in for that CA.
-  Three gaps are accepted: a move while the device holds only a root from before a rotation, which needs the device's state cleared; a hostile authority that claims another authority's ID before the real one enrolls, which makes the real enrollment fail loudly; and a server holding a valid enrollment token of the real authority, which can relay the device's request and sit between the device and that authority, since an administrator must already have submitted its token.
+  Two gaps are accepted: a move while the device holds only a root from before a rotation, which needs the device's state cleared, and a hostile authority that claims another authority's ID before the real one enrolls, which makes the real enrollment fail loudly.
+- Every enrollment's CSR and leaf name the `u` of the token the agent used: the authority refuses a CSR naming another URL, and the agent refuses a certificate naming another URL with marker code `authority_url_mismatch`, so that a server holding another authority's token cannot relay the device's request.
 
 ### Stored identities
 

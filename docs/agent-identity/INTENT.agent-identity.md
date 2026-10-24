@@ -104,6 +104,7 @@ Not intended:
   The address an enrollment came from is deliberately not recorded, because it has too little value: behind a reverse proxy it is the proxy's, and forwarded headers can be forged.
 - Anyone holding a token can use up its remaining uses; that risk is accepted, and a warning near the limit would mostly be noise, since a token is usually created with N uses for N machines.
 - The token's base URL never carries a user name or password, which could make an address read as one host while it reaches another; this can be revisited if it blocks a user.
+- A token works only at the base URL it names: the authority refuses a request naming another, and names that URL in every certificate it issues for the identity, so that a server relaying a token from another address is refused.
 - The token is deliberately not a JWT.
   The authority already needs stored state for use limits, revocation and retry recovery, and an unenrolled agent has no authority key with which to verify a signed token.
 - A token that is no longer wanted is revoked, not deleted: it stays stored with its name.
