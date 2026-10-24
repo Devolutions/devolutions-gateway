@@ -24,12 +24,16 @@ use x509_cert::ext::pkix::{
     AuthorityKeyIdentifier, BasicConstraints, ExtendedKeyUsage, KeyUsage, SubjectAltName, SubjectKeyIdentifier,
 };
 
-use crate::client::{Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field};
+use crate::client::{
+    Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field, token_base_url,
+};
 use crate::dvls::{
     self, CertificateStatus, Credential, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal,
     RotationDeadline, RotationStatus, Settings, SettingsChange, TokenSpec, TokenState, refusal,
 };
-use crate::signer::{KeyPair, SignatureParameter, SignedHeaders, thumbprint};
+use crate::signer::{
+    ENROLLMENT_URL_EXTENSION, KeyPair, SignatureParameter, SignedHeaders, enrollment_url_extension, thumbprint,
+};
 use crate::{Context, channel};
 
 const TOKEN_LIFETIME: Duration = Duration::from_secs(3600);
@@ -42,7 +46,7 @@ async fn token(ctx: &Context, max_uses: u64) -> anyhow::Result<Token> {
 }
 
 async fn identity(target: &Target, token: &Token, hostname: &str) -> anyhow::Result<Identity> {
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&target.base_url)?;
     let reply = target
         .enroll(&token.text, &key, &json!({ "hostname": hostname }))
         .await?;
@@ -51,6 +55,8 @@ async fn identity(target: &Target, token: &Token, hostname: &str) -> anyhow::Res
         reply.body["config"]["version"] == 1,
         "enrollment config.version is not 1"
     );
+    let leaf = Certificate::from_der(&decoded_certificate(&identity.certificate_chain[0])?)?;
+    assert_enrollment_url(&leaf, &token_base_url(&token.text)?).context("enrolled leaf")?;
     if let Some(known) = target.authority_id {
         ensure!(
             identity.authority_id == known.to_string(),
@@ -237,6 +243,7 @@ fn assert_leaf_profile(
     identity_id: &str,
     key: &KeyPair,
     lifetime_secs: u64,
+    enrollment_url: &str,
 ) -> anyhow::Result<()> {
     let cert = Certificate::from_der(&decoded_certificate(leaf)?)?;
     let root = Certificate::from_der(&decoded_certificate(root)?)?;
@@ -274,7 +281,7 @@ fn assert_leaf_profile(
         .get_extension::<KeyUsage>()?
         .context("leaf lacks key usage")?;
     ensure!(key_usage.digital_signature(), "leaf lacks digitalSignature key usage");
-    assert_leaf_extensions(&cert)?;
+    assert_leaf_extensions(&cert, enrollment_url)?;
     let validity = cert.tbs_certificate().validity();
     ensure!(
         validity.not_before.to_unix_duration() < validity.not_after.to_unix_duration(),
@@ -293,10 +300,10 @@ fn assert_leaf_profile(
     Ok(())
 }
 
-/// CONTRACT.agent-identity.md §4: "The leaf carries no other extension except an authority key identifier and a subject key identifier; in particular it carries no basicConstraints".
+/// CONTRACT.agent-identity.md §4: "The leaf carries no other extension except an authority key identifier, a subject key identifier and the enrollment URL extension; in particular it carries no basicConstraints", and it carries that extension naming `enrollment_url`.
 ///
 /// The failure names each other extension's OID.
-fn assert_leaf_extensions(leaf: &Certificate) -> anyhow::Result<()> {
+fn assert_leaf_extensions(leaf: &Certificate, enrollment_url: &str) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     let allowed = [
         SubjectAltName::OID,
@@ -304,6 +311,7 @@ fn assert_leaf_extensions(leaf: &Certificate) -> anyhow::Result<()> {
         KeyUsage::OID,
         AuthorityKeyIdentifier::OID,
         SubjectKeyIdentifier::OID,
+        ENROLLMENT_URL_EXTENSION,
     ];
     let others = leaf
         .tbs_certificate()
@@ -315,8 +323,38 @@ fn assert_leaf_extensions(leaf: &Certificate) -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     ensure!(
         others.is_empty(),
-        "leaf carries extensions other than SAN, EKU, KeyUsage, AKI and SKI: {}",
+        "leaf carries extensions other than SAN, EKU, KeyUsage, AKI, SKI and the enrollment URL: {}",
         others.join(", ")
+    );
+    assert_enrollment_url(leaf, enrollment_url)
+}
+
+/// CONTRACT.agent-identity.md §4: "The enrollment URL extension, [...] non-critical, holds as an `IA5String` the `u` of the token that enrolled the identity".
+///
+/// `expected` is that `u` without its trailing slashes, which is how an authority's own tokens carry it, and the value must match it byte for byte.
+fn assert_enrollment_url(leaf: &Certificate, expected: &str) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    let extensions = leaf
+        .tbs_certificate()
+        .extensions()
+        .into_iter()
+        .flatten()
+        .filter(|extension| extension.extn_id == ENROLLMENT_URL_EXTENSION)
+        .collect::<Vec<_>>();
+    let [extension] = extensions.as_slice() else {
+        anyhow::bail!(
+            "leaf carries {} enrollment URL extensions instead of one",
+            extensions.len()
+        );
+    };
+    ensure!(!extension.critical, "leaf's enrollment URL extension is critical");
+    let url = der::asn1::Ia5String::from_der(extension.extn_value.as_bytes())
+        .context("leaf's enrollment URL extension does not hold an IA5String")?;
+    ensure!(
+        url.as_str() == expected,
+        "leaf names the enrollment URL {:?} instead of {expected:?}",
+        url.as_str()
     );
     Ok(())
 }
@@ -332,8 +370,7 @@ async fn chain_evaluation_time(ctx: &Context) -> anyhow::Result<i64> {
 
 /// Validates an issued chain against the published roots.
 ///
-/// The root profile and the number of CA tiers are each authority's choice ([CONTRACT.agent-identity.md] §4 "Certificates"), so only RFC 5280 path rules apply: intermediates must be CAs allowed to sign certificates, while the trust anchor needs no extensions.
-/// An issuer signature algorithm this tester cannot verify makes the test incomplete rather than failed.
+/// The root profile and the number of CA tiers are each authority's choice within one rule ([CONTRACT.agent-identity.md] §4 "Certificates"): every certificate of the chain, the root's self-signature included, is signed with `ecdsa-with-SHA256` by a P-256 key or with `ecdsa-with-SHA384` by a P-384 key, and every CA certificate, the root included, carries basicConstraints with `cA` set and key usage with `keyCertSign`.
 ///
 /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()> {
@@ -342,15 +379,17 @@ fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()>
         .iter()
         .map(|encoded| Certificate::from_der(&decoded_certificate(encoded)?).map_err(anyhow::Error::from))
         .collect::<anyhow::Result<Vec<_>>>()?;
-    for intermediate in &certs[1..certs.len() - 1] {
-        let basic = intermediate.tbs_certificate().get_extension::<BasicConstraints>()?;
+    for (position, ca) in certs.iter().enumerate().skip(1) {
+        let basic = ca.tbs_certificate().get_extension::<BasicConstraints>()?;
         ensure!(
             basic.is_some_and(|(_, basic)| basic.ca),
-            "chain intermediate is not a CA"
+            "chain certificate {position} is an issuer without basicConstraints cA"
         );
-        if let Some((_, usage)) = intermediate.tbs_certificate().get_extension::<KeyUsage>()? {
-            ensure!(usage.key_cert_sign(), "chain intermediate lacks keyCertSign");
-        }
+        let usage = ca.tbs_certificate().get_extension::<KeyUsage>()?;
+        ensure!(
+            usage.is_some_and(|(_, usage)| usage.key_cert_sign()),
+            "chain certificate {position} is an issuer without keyCertSign key usage"
+        );
     }
     let anchors = roots["roots"].as_array().context("missing trust anchors")?;
     let root_der = decoded_certificate(chain.last().context("missing chain root")?)?;
@@ -371,35 +410,50 @@ fn verify_chain(chain: &[String], roots: &Value, now: i64) -> anyhow::Result<()>
             "certificate chain element is not valid at evaluation time"
         );
     }
-    for pair in certs.windows(2) {
+    for (position, pair) in certs.windows(2).enumerate() {
         ensure!(
             pair[0].tbs_certificate().issuer() == pair[1].tbs_certificate().subject(),
             "certificate issuer mismatch"
         );
-        let issuer_key = pair[1].tbs_certificate().subject_public_key_info();
-        let curve = (issuer_key.algorithm.oid == ObjectIdentifier::new_unwrap("1.2.840.10045.2.1"))
-            .then_some(issuer_key.algorithm.parameters.as_ref())
-            .flatten()
-            .and_then(|parameters| parameters.decode_as::<ObjectIdentifier>().ok());
-        let algorithm = pair[0].signature_algorithm().oid;
-        let signed_bytes = pair[0].tbs_certificate().to_der()?;
-        let signature = pair[0].signature().as_bytes().context("certificate signature")?;
-        if curve == Some(ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7"))
-            && algorithm == ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2")
-        {
+        verify_certificate_signature(&pair[0], &pair[1]).with_context(|| format!("chain certificate {position}"))?;
+    }
+    let root = certs.last().context("missing chain root")?;
+    verify_certificate_signature(root, root).context("chain root")
+}
+
+/// Verifies the signature of `cert` with the key of `issuer`, which must be `ecdsa-with-SHA256` by a P-256 key or `ecdsa-with-SHA384` by a P-384 key ([CONTRACT.agent-identity.md] §4 "Certificates").
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+fn verify_certificate_signature(cert: &Certificate, issuer: &Certificate) -> anyhow::Result<()> {
+    // id-ecPublicKey and the named curves secp256r1 and secp384r1, RFC 5480 §2.1.1.
+    const EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
+    const P256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+    const P384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
+    // ecdsa-with-SHA256 and ecdsa-with-SHA384, RFC 5758 §3.2.
+    const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+    const ECDSA_WITH_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+
+    let issuer_key = issuer.tbs_certificate().subject_public_key_info();
+    let curve = (issuer_key.algorithm.oid == EC_PUBLIC_KEY)
+        .then_some(issuer_key.algorithm.parameters.as_ref())
+        .flatten()
+        .and_then(|parameters| parameters.decode_as::<ObjectIdentifier>().ok());
+    let algorithm = cert.signature_algorithm().oid;
+    let signed_bytes = cert.tbs_certificate().to_der()?;
+    let signature = cert.signature().as_bytes().context("certificate signature")?;
+    match (curve, algorithm) {
+        (Some(P256), ECDSA_WITH_SHA256) => {
             let key = VerifyingKey::from_public_key_der(&issuer_key.to_der()?)?;
             key.verify(&signed_bytes, &Signature::from_der(signature)?)?;
-        } else if curve == Some(ObjectIdentifier::new_unwrap("1.3.132.0.34"))
-            && algorithm == ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3")
-        {
+        }
+        (Some(P384), ECDSA_WITH_SHA384) => {
             let key = VerifyingKey384::from_public_key_der(&issuer_key.to_der()?)?;
             key.verify(&signed_bytes, &Signature384::from_der(signature)?)?;
-        } else {
-            return Err(crate::Incomplete(
-                "the tester cannot verify the issuer's certificate signature algorithm; only P-256 with SHA-256 and P-384 with SHA-384 are supported",
-            )
-            .into());
         }
+        _ => anyhow::bail!(
+            "certificate is signed with {algorithm} by a {} key on curve {curve:?}, not with ecdsa-with-SHA256 by a P-256 key or ecdsa-with-SHA384 by a P-384 key",
+            issuer_key.algorithm.oid
+        ),
     }
     Ok(())
 }
@@ -417,7 +471,7 @@ pub(crate) async fn p_trust_anchor_lists_roots(ctx: Context) -> anyhow::Result<(
     for root in entries {
         assert_root(root)?;
     }
-    let (_, identity) = issued(&ctx, "anchor").await?;
+    let (token, identity) = issued(&ctx, "anchor").await?;
     verify_chain(&identity.certificate_chain, &roots, chain_evaluation_time(&ctx).await?)?;
     ensure!(
         uuid::Uuid::parse_str(&identity.authority_id).is_ok(),
@@ -433,6 +487,7 @@ pub(crate) async fn p_trust_anchor_lists_roots(ctx: Context) -> anyhow::Result<(
         &identity.identity_id,
         &identity.key,
         ctx.leaf_lifetime_secs,
+        &token_base_url(&token.text)?,
     )?;
     Ok(())
 }
@@ -498,7 +553,7 @@ pub(crate) async fn p_token_n_uses_consumed_then_exhausted(ctx: Context) -> anyh
     }
     let reply = ctx
         .target
-        .enroll(&token.text, &KeyPair::generate()?, &json!({}))
+        .enroll(&token.text, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
         .await?;
     expect_error(&reply, 403, "token_exhausted")?;
     Ok(())
@@ -512,7 +567,7 @@ pub(crate) async fn p_token_concurrent_enrollment_respects_max_uses(ctx: Context
     for index in 0..20 {
         let target = ctx.target.clone();
         let secret = token.text.clone();
-        let key = KeyPair::generate()?;
+        let key = KeyPair::generate(&ctx.target.base_url)?;
         let barrier = Arc::clone(&barrier);
         tasks.spawn(async move {
             barrier.wait().await;
@@ -559,7 +614,7 @@ pub(crate) async fn p_token_concurrent_enrollment_respects_max_uses(ctx: Context
 pub(crate) async fn p_concurrent_same_key_enroll_replays_winner(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 1).await?;
-    let csr = KeyPair::generate()?.csr;
+    let csr = KeyPair::generate(&ctx.target.base_url)?.csr;
     let body = json!({ "csr": csr, "metadata": { "hostname": "shared-key" } });
     let barrier = Arc::new(Barrier::new(3));
     let mut tasks = tokio::task::JoinSet::new();
@@ -595,7 +650,7 @@ pub(crate) async fn p_concurrent_same_key_renew_replays_winner(ctx: Context) -> 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let (token, identity) = issued(&ctx, "shared-renew").await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "shared-renewal" } }))?;
     let barrier = Arc::new(Barrier::new(3));
     let mut tasks = tokio::task::JoinSet::new();
@@ -669,7 +724,11 @@ pub(crate) async fn p_failed_enrollment_consumes_nothing(ctx: Context) -> anyhow
     }
     let invalid = ctx
         .target
-        .enroll(&token.text, &KeyPair::generate()?, &json!({ "hostname": 3 }))
+        .enroll(
+            &token.text,
+            &KeyPair::generate(&ctx.target.base_url)?,
+            &json!({ "hostname": 3 }),
+        )
         .await?;
     expect_error(&invalid, 400, "invalid_request")?;
     let record = ctx.target.management().token(&token.id).await?;
@@ -688,20 +747,20 @@ pub(crate) async fn p_token_errors_distinct(ctx: Context) -> anyhow::Result<()> 
     );
     let invalid = ctx
         .target
-        .enroll(&wrong_secret, &KeyPair::generate()?, &json!({}))
+        .enroll(&wrong_secret, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
         .await?;
     expect_error(&invalid, 401, "token_invalid")?;
     let _ = identity(&ctx.target, &first_token, "exhaust").await?;
     let exhausted = ctx
         .target
-        .enroll(&first_token.text, &KeyPair::generate()?, &json!({}))
+        .enroll(&first_token.text, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
         .await?;
     expect_error(&exhausted, 403, "token_exhausted")?;
     let other = token(&ctx, 1).await?;
     ctx.target.management().revoke_token(&other.id).await?;
     let revoked = ctx
         .target
-        .enroll(&other.text, &KeyPair::generate()?, &json!({}))
+        .enroll(&other.text, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
         .await?;
     expect_error(&revoked, 401, "token_invalid")?;
     Ok(())
@@ -718,7 +777,7 @@ pub(crate) async fn p_token_expired(ctx: Context) -> anyhow::Result<()> {
     ctx.target.advance(5).await?;
     let expired = ctx
         .target
-        .enroll(&token.text, &KeyPair::generate()?, &json!({}))
+        .enroll(&token.text, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
         .await?;
     expect_error(&expired, 401, "token_expired")?;
     let record = ctx.target.management().token(&token.id).await?;
@@ -731,7 +790,7 @@ pub(crate) async fn p_enroll_idempotent_same_key(ctx: Context) -> anyhow::Result
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     let token = token(&ctx, 1).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let first = ctx
         .target
         .enroll(&token.text, &key, &json!({ "hostname": "original" }))
@@ -792,7 +851,7 @@ pub(crate) async fn p_revoked_token_replays_own_key_only(ctx: Context) -> anyhow
     let management = ctx.target.management();
     let foreign_token = token(&ctx, 1).await?;
     let token = token(&ctx, 2).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let first = ctx
         .target
         .enroll(&token.text, &key, &json!({ "hostname": "original" }))
@@ -824,7 +883,7 @@ pub(crate) async fn p_revoked_token_replays_own_key_only(ctx: Context) -> anyhow
     );
     expect_error(
         &ctx.target
-            .enroll(&token.text, &KeyPair::generate()?, &json!({}))
+            .enroll(&token.text, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
             .await?,
         401,
         "token_invalid",
@@ -868,7 +927,7 @@ pub(crate) async fn p_revoked_token_replays_own_key_only(ctx: Context) -> anyhow
 pub(crate) async fn p_enroll_revoked_same_key_rejected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 2).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let enrolled = ctx.target.enroll(&token.text, &key, &json!({})).await?;
     let identity = Identity::from_enrollment(key, &enrolled)?;
     ctx.target.management().revoke(&identity.identity_id).await?;
@@ -882,7 +941,7 @@ pub(crate) async fn p_enroll_revoked_same_key_rejected(ctx: Context) -> anyhow::
 pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let original_token = token(&ctx, 1).await?;
-    let original_key = KeyPair::generate()?;
+    let original_key = KeyPair::generate(&ctx.target.base_url)?;
     let first = ctx
         .target
         .enroll(&original_token.text, &original_key, &json!({ "hostname": "original" }))
@@ -915,7 +974,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
             && replayed_record.friendly_name == original_name,
         "current-key replay changed identity metadata, last_seen_at or friendly name"
     );
-    let first_pending = KeyPair::generate()?;
+    let first_pending = KeyPair::generate(&ctx.target.base_url)?;
     expect_status(&ctx.target.renew(&identity, &first_pending, &json!({})).await?, 200)?;
     let pending_before = identity_record(&ctx.target, &identity.identity_id).await?;
     for bearer in [&other_token.text, &original_token.text] {
@@ -926,7 +985,7 @@ pub(crate) async fn p_enroll_certificate_key_reuse_rules(ctx: Context) -> anyhow
         )?;
     }
     assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &pending_before).await?;
-    let second_pending = KeyPair::generate()?;
+    let second_pending = KeyPair::generate(&ctx.target.base_url)?;
     expect_status(&ctx.target.renew(&identity, &second_pending, &json!({})).await?, 200)?;
     let retired_before = identity_record(&ctx.target, &identity.identity_id).await?;
     for bearer in [&other_token.text, &original_token.text] {
@@ -981,7 +1040,7 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
         )?;
         assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &initial).await?;
     }
-    let pending = KeyPair::generate()?;
+    let pending = KeyPair::generate(&ctx.target.base_url)?;
     let first = ctx.target.renew(&identity, &pending, &json!({})).await?;
     expect_status(&first, 200)?;
     let replay = ctx.target.renew(&identity, &pending, &json!({})).await?;
@@ -990,7 +1049,7 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
         replay.body["certificate_chain"] == first.body["certificate_chain"],
         "pending-key retry did not replay the pending chain"
     );
-    let replacement = KeyPair::generate()?;
+    let replacement = KeyPair::generate(&ctx.target.base_url)?;
     expect_status(&ctx.target.renew(&identity, &replacement, &json!({})).await?, 200)?;
     let renewed = identity_record(&ctx.target, &identity.identity_id).await?;
     expect_error(
@@ -999,9 +1058,9 @@ pub(crate) async fn p_renew_certificate_key_reuse_rules(ctx: Context) -> anyhow:
         "invalid_request",
     )?;
     assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &renewed).await?;
-    let other_pending = KeyPair::generate()?;
+    let other_pending = KeyPair::generate(&ctx.target.base_url)?;
     expect_status(&ctx.target.renew(&other, &other_pending, &json!({})).await?, 200)?;
-    let other_replacement = KeyPair::generate()?;
+    let other_replacement = KeyPair::generate(&ctx.target.base_url)?;
     expect_status(&ctx.target.renew(&other, &other_replacement, &json!({})).await?, 200)?;
     for key in [&other.key, &other_pending, &other_replacement] {
         expect_error(
@@ -1055,10 +1114,13 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
         Value::Object(oversized_object),
     ];
     for metadata in invalid {
-        let reply = ctx.target.enroll(&token.text, &KeyPair::generate()?, &metadata).await?;
+        let reply = ctx
+            .target
+            .enroll(&token.text, &KeyPair::generate(&ctx.target.base_url)?, &metadata)
+            .await?;
         expect_error(&reply, 400, "invalid_request")?;
     }
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     for body in [
         json!({ "csr": key.csr }),
         json!({ "csr": key.csr, "metadata": null }),
@@ -1077,7 +1139,11 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
         .collect::<serde_json::Map<_, _>>();
     let escaped = ctx
         .target
-        .enroll(&token.text, &KeyPair::generate()?, &Value::Object(within_limit))
+        .enroll(
+            &token.text,
+            &KeyPair::generate(&ctx.target.base_url)?,
+            &Value::Object(within_limit),
+        )
         .await?;
     expect_status(&escaped, 200)?;
     let record = ctx.target.management().token(&token.id).await?;
@@ -1087,11 +1153,15 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
     );
     expect_status(
         &ctx.target
-            .enroll(&token.text, &KeyPair::generate()?, &Value::Object(exactly_16_kib))
+            .enroll(
+                &token.text,
+                &KeyPair::generate(&ctx.target.base_url)?,
+                &Value::Object(exactly_16_kib),
+            )
             .await?,
         200,
     )?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let enrolled = ctx
         .target
         .enroll(&token.text, &key, &json!({ "custom_key": "kept" }))
@@ -1155,7 +1225,7 @@ pub(crate) async fn p_identity_cannot_impersonate_another(ctx: Context) -> anyho
     let (_, a) = issued(&ctx, "alpha").await?;
     let (b_token, b) = issued(&ctx, "bravo").await?;
     let b_before = identity_record(&ctx.target, &b.identity_id).await?;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({
         "csr": new_key.csr,
         "identity_id": b.identity_id,
@@ -1229,7 +1299,7 @@ pub(crate) async fn p_renew_digest_integrity(ctx: Context) -> anyhow::Result<()>
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "original").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let original = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "original" } }))?;
     let changed = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "tampered" } }))?;
     let mut last_nonce = String::new();
@@ -1279,7 +1349,7 @@ async fn renew_in_alternate_parameter_order(ctx: &Context) -> anyhow::Result<(Id
     use SignatureParameter::{Algorithm, Created, Expires, KeyId, Nonce, Tag};
 
     let (_, mut identity) = issued(ctx, "parameter-order").await?;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({
         "csr": new_key.csr,
         "metadata": { "hostname": "renewed-in-alternate-order" },
@@ -1359,11 +1429,18 @@ pub(crate) async fn p_renew_rejects_sha384_csr(ctx: Context) -> anyhow::Result<(
 pub(crate) async fn p_replay_nonce_rejected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "replay").await?;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": {} }))?;
     let nonce = fresh_nonce();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let bad = KeyPair::generate()?.sign(&identity.thumbprint, "renew", Some(&body), now, now + 60, &nonce);
+    let bad = KeyPair::generate(&ctx.target.base_url)?.sign(
+        &identity.thumbprint,
+        "renew",
+        Some(&body),
+        now,
+        now + 60,
+        &nonce,
+    );
     expect_error(
         &ctx.target.signed_renew(&body, &bad, None).await?,
         401,
@@ -1404,7 +1481,7 @@ pub(crate) async fn p_replay_nonce_rejected(ctx: Context) -> anyhow::Result<()> 
 pub(crate) async fn p_replay_window_rejected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "window").await?;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": {} }))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     for (created, expires) in [
@@ -1461,7 +1538,7 @@ pub(crate) async fn p_replay_window_rejected(ctx: Context) -> anyhow::Result<()>
 pub(crate) async fn p_connect_signature_replayed_to_renew(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "cross-tag").await?;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": {} }))?;
     let mut connect_tag = identity.key.sign_now(&identity.thumbprint, "connect", None);
     attach_content_digest(&mut connect_tag, &body);
@@ -1474,7 +1551,7 @@ pub(crate) async fn p_renew_signature_rejected_on_connect(ctx: Context) -> anyho
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "reverse-cross-tag").await?;
-    let csr = KeyPair::generate()?;
+    let csr = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
     let renew_tag = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
     channel::expect_opening_refused(
@@ -1520,7 +1597,7 @@ pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> any
         401,
         "signature_invalid",
     )?;
-    let csr = KeyPair::generate()?;
+    let csr = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
     let renew_tag = identity.key.sign_now(&old_thumb, "renew", Some(&body));
     expect_error(
@@ -1528,11 +1605,11 @@ pub(crate) async fn p_confirm_cross_tag_signatures_rejected(ctx: Context) -> any
         401,
         "signature_invalid",
     )?;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &new_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
-    let csr = KeyPair::generate()?;
+    let csr = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
     let mut confirm_tag = identity.key.sign_now(&identity.thumbprint, "confirm", None);
     attach_content_digest(&mut confirm_tag, &body);
@@ -1563,7 +1640,7 @@ pub(crate) async fn p_confirm_signature_rejected_on_connect(ctx: Context) -> any
         "signature_invalid",
     )
     .await?;
-    let pending_key = KeyPair::generate()?;
+    let pending_key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &pending_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], pending_key)?;
@@ -1630,7 +1707,7 @@ pub(crate) async fn p_check_in_current_and_pending(ctx: Context) -> anyhow::Resu
         "current-certificate check-in did not return config or refresh metadata and the last-seen time"
     );
     ctx.target.management().request_renewal(&identity.identity_id).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -1725,7 +1802,7 @@ pub(crate) async fn p_check_in_cross_tag_signatures_rejected(ctx: Context) -> an
             "signature_invalid",
         )?;
     }
-    let csr = KeyPair::generate()?;
+    let csr = KeyPair::generate(&ctx.target.base_url)?;
     let renew_body = serde_json::to_vec(&json!({ "csr": csr.csr, "metadata": {} }))?;
     let renew_tag = identity.key.sign_now(&identity.thumbprint, "renew", Some(&renew_body));
     expect_error(
@@ -1842,7 +1919,7 @@ pub(crate) async fn p_same_tag_covered_components_rejected(ctx: Context) -> anyh
         .path()
         .trim_end_matches('/')
         .to_owned();
-    let next_key = KeyPair::generate()?;
+    let next_key = KeyPair::generate(&ctx.target.base_url)?;
     for tag in ["renew", "check-in", "confirm"] {
         let path = format!("{http_prefix}/api/agent-identity/v1/{tag}");
         for variant in ["over-covered", "reordered", "duplicated"] {
@@ -1930,7 +2007,7 @@ pub(crate) async fn p_extra_signature_parameters_rejected_renew(ctx: Context) ->
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "extra-renew-parameter").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "unchanged" } }))?;
     for parameter in [";conformance=\"extra\"", ";conformance"] {
         let mut headers = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
@@ -1977,7 +2054,7 @@ pub(crate) async fn p_signature_parser_wire_negatives(ctx: Context) -> anyhow::R
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "wire-negatives").await?;
     let original = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "rejected" } }))?;
     for variant in [
         "missing_digest",
@@ -2142,7 +2219,7 @@ pub(crate) async fn p_signature_noncanonical_base64_rejected(ctx: Context) -> an
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let (_, identity) = issued(&ctx, "noncanonical-base64").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "rejected" } }))?;
     let sign = || identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
     for (variant, headers) in [
@@ -2178,7 +2255,7 @@ pub(crate) async fn p_signature_repeated_raw_items_rejected(ctx: Context) -> any
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "repeated-raw-items").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": { "hostname": "rejected" } }))?;
     let sign = || identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
     for (variant, headers) in [
@@ -2345,9 +2422,9 @@ fn without_padding(value: &str) -> anyhow::Result<String> {
 pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    let (_, mut identity) = issued(&ctx, "unchanged").await?;
+    let (token, mut identity) = issued(&ctx, "unchanged").await?;
     let original_name = identity_record(&ctx.target, &identity.identity_id).await?.friendly_name;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let reply = signed_renew(&ctx.target, &identity, &new_key, &json!({ "hostname": "updated" })).await?;
     expect_status(&reply, 200)?;
     let new_chain = reply.body["certificate_chain"]
@@ -2368,6 +2445,7 @@ pub(crate) async fn p_renew_happy_path(ctx: Context) -> anyhow::Result<()> {
         &identity.identity_id,
         &new_key,
         ctx.leaf_lifetime_secs,
+        &token_base_url(&token.text)?,
     )?;
     identity.adopt_certificate(&reply.body["certificate_chain"], new_key)?;
     let pending = identity_record(&ctx.target, &identity.identity_id).await?;
@@ -2451,7 +2529,7 @@ pub(crate) async fn p_confirm_promotes_and_is_idempotent(ctx: Context) -> anyhow
         );
     }
 
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -2501,7 +2579,7 @@ pub(crate) async fn p_confirm_retired_certificate_rejected(ctx: Context) -> anyh
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     let (_, identity) = issued(&ctx, "retired-confirm").await?;
-    let first_key = KeyPair::generate()?;
+    let first_key = KeyPair::generate(&ctx.target.base_url)?;
     let first = ctx.target.renew(&identity, &first_key, &json!({})).await?;
     expect_status(&first, 200)?;
     let first_thumb = thumbprint(
@@ -2509,7 +2587,10 @@ pub(crate) async fn p_confirm_retired_certificate_rejected(ctx: Context) -> anyh
             .as_str()
             .context("first pending leaf")?,
     )?;
-    let second = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
+    let second = ctx
+        .target
+        .renew(&identity, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+        .await?;
     expect_status(&second, 200)?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     ensure!(
@@ -2537,7 +2618,7 @@ pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context)
         key: identity.key.key.clone(),
         csr: identity.key.csr.clone(),
     };
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -2579,7 +2660,7 @@ pub(crate) async fn p_confirm_expired_pending_certificate_rejected(ctx: Context)
 pub(crate) async fn p_confirm_nonempty_body_rejected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §confirm
     let (_, mut identity) = issued(&ctx, "confirm-body").await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -2600,7 +2681,7 @@ pub(crate) async fn p_confirm_faults_do_not_duplicate_promotion(ctx: Context) ->
     // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let (_, mut identity) = issued(&ctx, "confirm-faults").await?;
     let old_thumb = identity.thumbprint.clone();
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -2656,7 +2737,7 @@ pub(crate) async fn p_confirm_faults_do_not_duplicate_promotion(ctx: Context) ->
 pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     let (_, identity) = issued(&ctx, "lost-renew").await?;
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     expect_status(
         &ctx.target
             .control("retry-barrier", &json!({ "endpoint": "renew", "pause": true }))
@@ -2702,7 +2783,7 @@ pub(crate) async fn p_renew_idempotent_lost_response(ctx: Context) -> anyhow::Re
 pub(crate) async fn p_mock_enroll_retry_barrier(ctx: Context) -> anyhow::Result<()> {
     // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let token = token(&ctx, 1).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     expect_status(
         &ctx.target
             .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": true }))
@@ -2760,11 +2841,11 @@ pub(crate) async fn p_mock_enroll_retry_barrier(ctx: Context) -> anyhow::Result<
 pub(crate) async fn p_renew_second_pending_retires_first(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     let (_, identity) = issued(&ctx, "pending").await?;
-    let first_key = KeyPair::generate()?;
+    let first_key = KeyPair::generate(&ctx.target.base_url)?;
     let first = ctx.target.renew(&identity, &first_key, &json!({})).await?;
     expect_status(&first, 200)?;
     let first_thumb = thumbprint(first.body["certificate_chain"][0].as_str().context("first leaf")?)?;
-    let second_key = KeyPair::generate()?;
+    let second_key = KeyPair::generate(&ctx.target.base_url)?;
     let second = ctx.target.renew(&identity, &second_key, &json!({})).await?;
     expect_status(&second, 200)?;
     let second_thumb = thumbprint(second.body["certificate_chain"][0].as_str().context("second leaf")?)?;
@@ -2789,7 +2870,9 @@ pub(crate) async fn p_renew_second_pending_retires_first(ctx: Context) -> anyhow
         ..identity
     };
     expect_error(
-        &ctx.target.renew(&old, &KeyPair::generate()?, &json!({})).await?,
+        &ctx.target
+            .renew(&old, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+            .await?,
         401,
         "identity_unknown",
     )?;
@@ -2801,11 +2884,13 @@ pub(crate) async fn p_retired_pending_certificate_cannot_connect(ctx: Context) -
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
     let (_, identity) = issued(&ctx, "retired-connect").await?;
-    let first_key = KeyPair::generate()?;
+    let first_key = KeyPair::generate(&ctx.target.base_url)?;
     let first = ctx.target.renew(&identity, &first_key, &json!({})).await?;
     expect_status(&first, 200)?;
     expect_status(
-        &ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?,
+        &ctx.target
+            .renew(&identity, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+            .await?,
         200,
     )?;
     let old = Identity {
@@ -2833,9 +2918,9 @@ pub(crate) async fn p_renew_within_grace(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 4 })).await?;
-    let (_, identity) = issued(&ctx, "grace").await?;
+    let (token, identity) = issued(&ctx, "grace").await?;
     ctx.target.advance(5).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let reply = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&reply, 200)?;
     let chain = reply.body["certificate_chain"]
@@ -2855,6 +2940,7 @@ pub(crate) async fn p_renew_within_grace(ctx: Context) -> anyhow::Result<()> {
         &identity.identity_id,
         &key,
         4,
+        &token_base_url(&token.text)?,
     )?;
     Ok(())
 }
@@ -2865,7 +2951,10 @@ pub(crate) async fn p_renew_beyond_grace(ctx: Context) -> anyhow::Result<()> {
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 4 })).await?;
     let (_, identity) = issued(&ctx, "too-late").await?;
     ctx.target.advance(9).await?;
-    let reply = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
+    let reply = ctx
+        .target
+        .renew(&identity, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+        .await?;
     expect_error(&reply, 401, "certificate_expired")?;
     Ok(())
 }
@@ -2876,7 +2965,10 @@ pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyho
     let (_, identity) = issued(&ctx, "revoke").await?;
     ctx.target.management().revoke(&identity.identity_id).await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let reply = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
+    let reply = ctx
+        .target
+        .renew(&identity, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+        .await?;
     expect_error(&reply, 403, "identity_revoked")?;
     expect_error(&ctx.target.confirm(&identity).await?, 403, "identity_revoked")?;
     expect_error(
@@ -2886,7 +2978,7 @@ pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyho
         403,
         "identity_revoked",
     )?;
-    let next = KeyPair::generate()?;
+    let next = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": next.csr, "metadata": { "hostname": "correct" } }))?;
     let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
     let altered = serde_json::to_vec(&json!({ "csr": next.csr, "metadata": { "hostname": "tampered" } }))?;
@@ -2895,7 +2987,7 @@ pub(crate) async fn p_revocation_blocks_renew_and_connect(ctx: Context) -> anyho
         403,
         "identity_revoked",
     )?;
-    let wrong_signer = KeyPair::generate()?.sign_now(&identity.thumbprint, "renew", Some(&body));
+    let wrong_signer = KeyPair::generate(&ctx.target.base_url)?.sign_now(&identity.thumbprint, "renew", Some(&body));
     expect_error(
         &ctx.target.signed_renew(&body, &wrong_signer, None).await?,
         403,
@@ -2935,7 +3027,10 @@ pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> any
     );
     management.revoke(&identity.identity_id).await?;
     management.delete_identity(&identity.identity_id).await?;
-    let reply = ctx.target.renew(&identity, &KeyPair::generate()?, &json!({})).await?;
+    let reply = ctx
+        .target
+        .renew(&identity, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+        .await?;
     expect_error(&reply, 401, "identity_unknown")?;
     expect_error(&ctx.target.confirm(&identity).await?, 401, "identity_unknown")?;
     expect_error(
@@ -2945,7 +3040,7 @@ pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> any
         401,
         "identity_unknown",
     )?;
-    let next = KeyPair::generate()?;
+    let next = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": next.csr, "metadata": { "hostname": "correct" } }))?;
     let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
     let altered = serde_json::to_vec(&json!({ "csr": next.csr, "metadata": { "hostname": "tampered" } }))?;
@@ -2954,7 +3049,7 @@ pub(crate) async fn p_delete_only_when_revoked_then_unknown(ctx: Context) -> any
         401,
         "identity_unknown",
     )?;
-    let wrong_signer = KeyPair::generate()?.sign_now(&identity.thumbprint, "renew", Some(&body));
+    let wrong_signer = KeyPair::generate(&ctx.target.base_url)?.sign_now(&identity.thumbprint, "renew", Some(&body));
     expect_error(
         &ctx.target.signed_renew(&body, &wrong_signer, None).await?,
         401,
@@ -3636,7 +3731,7 @@ pub(crate) async fn p_channel_unavailable_no_channel_url(ctx: Context) -> anyhow
     // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     ctx.target.faults(&json!({ "channel_available": false })).await?;
     let token = token(&ctx, 1).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let reply = ctx
         .target
         .enroll(&token.text, &key, &json!({ "hostname": "unavailable" }))
@@ -3798,7 +3893,7 @@ pub(crate) async fn p_config_revision_monotonic_changes(ctx: Context) -> anyhow:
             && count(&check_in_config(&ctx.target, &other).await?, "revision")? > other_disabled,
         "replacing a field did not advance both identity revisions"
     );
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -4125,7 +4220,7 @@ pub(crate) async fn p_request_renewal_flag_cleared_only_on_confirm(ctx: Context)
             .renewal_requested,
         "offline renewal request flag was not set"
     );
-    let next_key = KeyPair::generate()?;
+    let next_key = KeyPair::generate(&ctx.target.base_url)?;
     let pending = ctx.target.renew(&identity, &next_key, &json!({})).await?;
     expect_status(&pending, 200)?;
     identity.adopt_certificate(&pending.body["certificate_chain"], next_key)?;
@@ -4163,7 +4258,7 @@ pub(crate) async fn p_request_renewal_flag_cleared_after_new_cert(ctx: Context) 
     ctx.target.management().request_renewal(&identity.identity_id).await?;
     let request = old.next().await?;
     old.ack(&request).await?;
-    let next_key = KeyPair::generate()?;
+    let next_key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &next_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], next_key)?;
@@ -4440,7 +4535,7 @@ pub(crate) async fn p_pending_cert_auth_does_not_promote(ctx: Context) -> anyhow
     let old_thumb = identity.thumbprint.clone();
     let mut old = channel::open(&ctx.target, &identity).await?;
     old.hello(&identity, &[]).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -4564,7 +4659,7 @@ pub(crate) async fn p_confirm_reconnects_and_closes_retired_stream_at_grace(ctx:
     let old_thumb = identity.thumbprint.clone();
     let mut old = channel::open(&ctx.target, &identity).await?;
     old.hello(&identity, &[]).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -4671,7 +4766,7 @@ pub(crate) async fn p_channel_retired_before_hello_completes_then_reconnects(ctx
         anyhow::bail!("stream missing challenge");
     };
     let old_proof = identity.key.channel_proof(&payload.challenge, &stream.headers.nonce);
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -4791,7 +4886,7 @@ pub(crate) async fn p_rotation_status_counts(ctx: Context) -> anyhow::Result<()>
             && identity_record(&ctx.target, &b.identity_id).await?.renewal_requested,
         "rotation did not flag offline old-root identities"
     );
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&a, &new_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     a.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
@@ -4851,7 +4946,7 @@ pub(crate) async fn p_rotation_completes_early_when_last_identity_migrates(ctx: 
     ensure!(new_root != old_root, "rotation did not create a new root");
 
     for (remaining, identity) in [(1, &mut first), (0, &mut last)] {
-        let new_key = KeyPair::generate()?;
+        let new_key = KeyPair::generate(&ctx.target.base_url)?;
         let renewed = ctx.target.renew(identity, &new_key, &json!({})).await?;
         expect_status(&renewed, 200)?;
         identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
@@ -4943,14 +5038,19 @@ pub(crate) async fn p_rotation_deadline_bound(ctx: Context) -> anyhow::Result<()
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 240 })).await?;
     expect_status(
         &ctx.target
-            .renew(&pending_only, &KeyPair::generate()?, &json!({}))
+            .renew(&pending_only, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
             .await?,
         200,
     )?;
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
     let (_, both) = issued(&ctx, "current-and-pending-old-root").await?;
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 180 })).await?;
-    expect_status(&ctx.target.renew(&both, &KeyPair::generate()?, &json!({})).await?, 200)?;
+    expect_status(
+        &ctx.target
+            .renew(&both, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+            .await?,
+        200,
+    )?;
     ctx.target.advance(61).await?;
 
     let expired_record = identity_record(&ctx.target, &expired.identity_id).await?;
@@ -5034,7 +5134,9 @@ pub(crate) async fn p_rotation_disposable_deadline_above_own_max_rejected(ctx: C
     let (_, first) = issued(&ctx, "disposable-deadline-first").await?;
     let (_, second) = issued(&ctx, "disposable-deadline-second").await?;
     expect_status(
-        &ctx.target.renew(&second, &KeyPair::generate()?, &json!({})).await?,
+        &ctx.target
+            .renew(&second, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+            .await?,
         200,
     )?;
     if let Err(error) =
@@ -5120,7 +5222,7 @@ pub(crate) async fn p_rotation_disposable_completes_before_future_deadline(ctx: 
         "disposable target does not have exactly one active old-root identity"
     );
     let new_root = started.new_root()?.to_owned();
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &new_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], new_key)?;
@@ -5203,7 +5305,7 @@ pub(crate) async fn p_rotation_grace_renewal_after_early_completion(ctx: Context
         "an identity whose only certificate expired within renewal grace is not in grace"
     );
 
-    let new_key = KeyPair::generate()?;
+    let new_key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&expired, &new_key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     let chain = renewed.body["certificate_chain"]
@@ -5435,7 +5537,7 @@ pub(crate) async fn p_rotation_old_root_cert_renewable_after_deadline(ctx: Conte
             .all(|root| root["thumbprint"] != original_root),
         "old root remained published after emergency deadline"
     );
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&old, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     let new_chain = renewed.body["certificate_chain"]
@@ -5540,7 +5642,7 @@ pub(crate) async fn p_rotation_pending_only_old_root_receives_push(ctx: Context)
         .context("identity has no current certificate")?
         .unix_timestamp();
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 120 })).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let renewed = ctx.target.renew(&identity, &key, &json!({})).await?;
     expect_status(&renewed, 200)?;
     identity.adopt_certificate(&renewed.body["certificate_chain"], key)?;
@@ -5706,7 +5808,7 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
     let management = ctx.target.management();
     let decoy_token = token(&ctx, 1).await?;
     let token = token(&ctx, 5).await?;
-    let active_key = KeyPair::generate()?;
+    let active_key = KeyPair::generate(&ctx.target.base_url)?;
     let active_reply = ctx
         .target
         .enroll(
@@ -5827,7 +5929,11 @@ pub(crate) async fn p_listing_views_filters_and_bounds(ctx: Context) -> anyhow::
     }
     expect_status(
         &ctx.target
-            .renew(&active, &KeyPair::generate()?, &json!({ "hostname": "filter-host" }))
+            .renew(
+                &active,
+                &KeyPair::generate(&ctx.target.base_url)?,
+                &json!({ "hostname": "filter-host" }),
+            )
             .await?,
         200,
     )?;
@@ -6363,7 +6469,9 @@ pub(crate) async fn p_settings_certificate_lifetime_applies_to_new_certificates(
         let issued_from = time::OffsetDateTime::now_utc();
         let (_, later) = issued(&ctx, "lifetime-after").await?;
         expect_status(
-            &ctx.target.renew(&earlier, &KeyPair::generate()?, &json!({})).await?,
+            &ctx.target
+                .renew(&earlier, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+                .await?,
             200,
         )?;
         let issued_until = time::OffsetDateTime::now_utc();
@@ -6502,13 +6610,13 @@ pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
                 token.text.rsplit_once('.').context("token structure")?.0,
                 base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0x19; 32])
             ),
-            &KeyPair::generate()?,
+            &KeyPair::generate(&ctx.target.base_url)?,
             &json!({}),
         )
         .await?;
     expect_error(&unknown, 401, "token_invalid")?;
     let issued = identity(&ctx.target, &token, "errors").await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": {} }))?;
     let mut wrong_tag = issued.key.sign_now(&issued.thumbprint, "connect", None);
     attach_content_digest(&mut wrong_tag, &body);
@@ -6561,7 +6669,7 @@ pub(crate) async fn p_error_body_shape(ctx: Context) -> anyhow::Result<()> {
 pub(crate) async fn p_enroll_malformed_authorization_rejected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     let token = token(&ctx, 1).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": key.csr, "metadata": {} }))?;
     let bearer = format!("Bearer {}", token.text);
     for (variant, values) in [
@@ -6630,7 +6738,7 @@ pub(crate) async fn p_authentication_error_precedes_invalid_body(ctx: Context) -
     let identity = identity(&ctx.target, &token, "auth-precedence").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
     let invalid_renew = serde_json::to_vec(&json!({ "csr": "not base64!", "metadata": { "Bad Key": 1 } }))?;
-    let impostor = KeyPair::generate()?;
+    let impostor = KeyPair::generate(&ctx.target.base_url)?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     let unknown_keyid = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0x33; 32]);
     for (variant, headers, status, code) in [
@@ -6704,7 +6812,7 @@ pub(crate) async fn p_oversized_body_precedes_authentication(ctx: Context) -> an
         "invalid_request",
     )
     .context("oversized enroll without Authorization")?;
-    let impostor = KeyPair::generate()?;
+    let impostor = KeyPair::generate(&ctx.target.base_url)?;
     expect_error(
         &ctx.target
             .signed_renew(
@@ -6760,7 +6868,7 @@ async fn post_with_headers(
 pub(crate) async fn p_mock_fault_response_not_processed(ctx: Context) -> anyhow::Result<()> {
     // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let token = token(&ctx, 1).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     ctx.target
         .faults(&json!({ "fail_next_response": { "endpoint": "enroll", "status": 503 } }))
         .await?;
@@ -6789,7 +6897,7 @@ pub(crate) async fn p_mock_fault_response_not_processed(ctx: Context) -> anyhow:
     let enrolled = ctx.target.enroll(&token.text, &key, &json!({})).await?;
     let identity = Identity::from_enrollment(key, &enrolled)?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let next_key = KeyPair::generate()?;
+    let next_key = KeyPair::generate(&ctx.target.base_url)?;
     ctx.target
         .faults(&json!({
             "fail_next_response": { "endpoint": "renew", "status": 400, "error": "token_invalid" }
@@ -6855,7 +6963,10 @@ async fn signed_raw(target: &Target, identity: &Identity, endpoint: &str, body: 
 pub(crate) async fn p_duplicate_json_members_rejected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let token = token(&ctx, 2).await?;
-    let (first, second) = (KeyPair::generate()?, KeyPair::generate()?);
+    let (first, second) = (
+        KeyPair::generate(&ctx.target.base_url)?,
+        KeyPair::generate(&ctx.target.base_url)?,
+    );
     let (a, b) = (&first.csr, &second.csr);
     for (variant, body) in [
         ("csr", format!(r#"{{"csr":"{a}","csr":"{b}","metadata":{{}}}}"#)),
@@ -6939,7 +7050,10 @@ fn nested_body(csr: &str, depth: usize) -> String {
 pub(crate) async fn p_json_body_nesting_limit(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let token = token(&ctx, 2).await?;
-    let (enrolled, renewed) = (KeyPair::generate()?, KeyPair::generate()?);
+    let (enrolled, renewed) = (
+        KeyPair::generate(&ctx.target.base_url)?,
+        KeyPair::generate(&ctx.target.base_url)?,
+    );
     expect_error(
         &enroll_raw(&ctx.target, &token, nested_body(&enrolled.csr, 65).as_bytes()).await?,
         400,
@@ -7019,7 +7133,10 @@ fn bodies_with_string(csr: &str, content: &[u8]) -> [(&'static str, Vec<u8>); 2]
 pub(crate) async fn p_invalid_unicode_json_strings_rejected(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let token = token(&ctx, 2).await?;
-    let (enrolled, renewed) = (KeyPair::generate()?, KeyPair::generate()?);
+    let (enrolled, renewed) = (
+        KeyPair::generate(&ctx.target.base_url)?,
+        KeyPair::generate(&ctx.target.base_url)?,
+    );
     for (variant, content) in INVALID_UNICODE {
         for (member, body) in bodies_with_string(&enrolled.csr, content) {
             expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
@@ -7065,9 +7182,9 @@ pub(crate) async fn p_invalid_unicode_json_strings_rejected(ctx: Context) -> any
 }
 
 /// A CSR whose canonical `base64` encoding has padding and uses both `+` or `/` characters, so that every non-canonical rewrite applies.
-fn key_with_rewritable_csr() -> anyhow::Result<KeyPair> {
+fn key_with_rewritable_csr(base_url: &str) -> anyhow::Result<KeyPair> {
     for _ in 0..64 {
-        let key = KeyPair::generate()?;
+        let key = KeyPair::generate(base_url)?;
         if key.csr.ends_with('=') && key.csr.contains(['+', '/']) {
             return Ok(key);
         }
@@ -7093,7 +7210,7 @@ pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let (token, identity) = issued(&ctx, "noncanonical-csr").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = key_with_rewritable_csr()?;
+    let key = key_with_rewritable_csr(&ctx.target.base_url)?;
     for (variant, csr) in noncanonical_base64(&key.csr)? {
         let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
         expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
@@ -7139,7 +7256,9 @@ pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::R
         ("padded secret", format!("{prefix_and_bag}.{secret}=")),
     ] {
         expect_error(
-            &ctx.target.enroll(&text, &KeyPair::generate()?, &json!({})).await?,
+            &ctx.target
+                .enroll(&text, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
+                .await?,
             401,
             "token_invalid",
         )
@@ -7161,7 +7280,7 @@ pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::R
         &ctx.target
             .enroll(
                 &format!("{prefix}.{reencoded_bag}.{secret}"),
-                &KeyPair::generate()?,
+                &KeyPair::generate(&ctx.target.base_url)?,
                 &json!({}),
             )
             .await?,
@@ -7170,7 +7289,7 @@ pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::R
     .context("a token with another bag and the exact secret text was not accepted")?;
     expect_status(
         &ctx.target
-            .enroll(&token.text, &KeyPair::generate()?, &json!({}))
+            .enroll(&token.text, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
             .await?,
         200,
     )
@@ -7203,7 +7322,7 @@ pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Res
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     let (token, identity) = issued(&ctx, "compressed-point").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = KeyPair::generate()?;
+    let key = KeyPair::generate(&ctx.target.base_url)?;
     let body = serde_json::to_vec(&json!({ "csr": compressed_point_csr(&key)?, "metadata": {} }))?;
     expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
         .context("enroll CSR with a compressed point")?;
@@ -7216,6 +7335,202 @@ pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Res
     assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &before).await?;
     expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)
         .context("the uncompressed CSR of the same key was not accepted")
+}
+
+/// The extensions a CSR's `extensionRequest` holds, or `None` for a CSR without one.
+type RequestedExtensions = Option<Vec<x509_cert::ext::Extension>>;
+
+/// What a CSR to the authority whose tokens carry `url` may request instead of the enrollment URL extension naming `url`, each named for how it differs.
+///
+/// The trailing slash and the upper-case scheme and host name URLs that a URL parser reads as `url` itself, so that only comparing the text byte for byte refuses them.
+fn other_enrollment_url_requests(url: &str) -> anyhow::Result<Vec<(&'static str, RequestedExtensions)>> {
+    let rest = url.strip_prefix("https://").context("enrollment URL is not https")?;
+    let (authority, path) = rest.find('/').map_or((rest, ""), |slash| rest.split_at(slash));
+    // Another OID of the RFC 5612 documentation arc, which no party gives a meaning.
+    let mut other_oid = enrollment_url_extension(url)?;
+    other_oid.extn_id = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.2");
+    let naming =
+        |text: &str| -> anyhow::Result<RequestedExtensions> { Ok(Some(vec![enrollment_url_extension(text)?])) };
+    Ok(vec![
+        ("without an extensionRequest", None),
+        ("requesting the URL under another extension OID", Some(vec![other_oid])),
+        ("naming another host", naming(&format!("https://relay.invalid{path}"))?),
+        ("naming another path", naming(&format!("{url}/relay"))?),
+        ("naming the URL with a trailing slash", naming(&format!("{url}/"))?),
+        (
+            "naming the URL with an upper-case scheme and host",
+            naming(&format!("HTTPS://{}{path}", authority.to_ascii_uppercase()))?,
+        ),
+    ])
+}
+
+/// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u`, with `invalid_request`, and creates nothing".
+///
+/// Each refused CSR is for the key of the accepted one and differs from it only in its attribute, so that only the enrollment URL rule refuses it.
+pub(crate) async fn p_enroll_csr_must_name_token_url(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    let management = ctx.target.management();
+    let token = token(&ctx, 1).await?;
+    let url = token_base_url(&token.text)?;
+    let key = KeyPair::generate(&url)?;
+    for (variant, extensions) in other_enrollment_url_requests(&url)? {
+        let body = serde_json::to_vec(&json!({ "csr": key.csr_requesting(extensions.as_deref())?, "metadata": {} }))?;
+        expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
+            .with_context(|| format!("enrollment CSR {variant}"))?;
+        ensure!(
+            management.token(&token.id).await?.used_count == 0 && management.identity_count(&token).await? == 0,
+            "the enrollment CSR {variant} created an identity or counted a token use"
+        );
+    }
+    expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)
+        .context("the CSR of the same key naming the token's URL was not accepted")?;
+    ensure!(
+        management.token(&token.id).await?.used_count == 1,
+        "the accepted enrollment did not count the token's only use"
+    );
+    Ok(())
+}
+
+/// Sends an enrollment of `key` with `token` whose CSR names `elsewhere`, which must be refused with `invalid_request`, then one with the key's own CSR, and returns the reply to the latter.
+async fn enroll_elsewhere_then_here(
+    target: &Target,
+    token: &Token,
+    key: &KeyPair,
+    elsewhere: &str,
+    case: &str,
+) -> anyhow::Result<Reply> {
+    let csr = key.csr_requesting(Some(&[enrollment_url_extension(elsewhere)?]))?;
+    let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
+    expect_error(&enroll_raw(target, token, &body).await?, 400, "invalid_request")
+        .with_context(|| format!("CSR naming another URL for {case}"))?;
+    target.enroll(&token.text, key, &json!({})).await
+}
+
+/// CONTRACT.agent-identity.md §2.1: "(2) `invalid_request` for an invalid body, CSR or metadata" wins over "(3) the result of the CSR public key lookup", "(4) `token_invalid` for a revoked token" and "(5) `token_exhausted`".
+///
+/// Each case sends a CSR naming another URL, then the key's own CSR, whose outcome shows which later rule would decide the case.
+pub(crate) async fn p_enroll_csr_url_refusal_precedes_key_lookup_and_token_state(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    let management = ctx.target.management();
+    let token = token(&ctx, 2).await?;
+    let url = token_base_url(&token.text)?;
+    let elsewhere = format!("{url}/relay");
+    let replayed = identity(&ctx.target, &token, "replayed").await?;
+    let revoked = identity(&ctx.target, &token, "revoked").await?;
+    management.revoke(&revoked.identity_id).await?;
+    let fresh = KeyPair::generate(&url)?;
+    let replay = enroll_elsewhere_then_here(&ctx.target, &token, &replayed.key, &elsewhere, "a replayed key").await?;
+    expect_status(&replay, 200)?;
+    ensure!(
+        replay.body["identity_id"] == replayed.identity_id.as_str(),
+        "the replayed key did not return its identity"
+    );
+    expect_error(
+        &enroll_elsewhere_then_here(
+            &ctx.target,
+            &token,
+            &revoked.key,
+            &elsewhere,
+            "a revoked identity's key",
+        )
+        .await?,
+        403,
+        "identity_revoked",
+    )?;
+    expect_error(
+        &enroll_elsewhere_then_here(&ctx.target, &token, &fresh, &elsewhere, "an exhausted token").await?,
+        403,
+        "token_exhausted",
+    )?;
+    management.revoke_token(&token.id).await?;
+    let replay = enroll_elsewhere_then_here(
+        &ctx.target,
+        &token,
+        &replayed.key,
+        &elsewhere,
+        "a replayed key of a revoked token",
+    )
+    .await?;
+    expect_status(&replay, 200)?;
+    expect_error(
+        &enroll_elsewhere_then_here(&ctx.target, &token, &fresh, &elsewhere, "a revoked token").await?,
+        401,
+        "token_invalid",
+    )?;
+    ensure!(
+        management.token(&token.id).await?.used_count == 2 && management.identity_count(&token).await? == 2,
+        "a CSR naming another URL created an identity or counted a token use"
+    );
+    Ok(())
+}
+
+/// CONTRACT.agent-identity.md §2.1: "(2) `invalid_request` for an invalid body, CSR or metadata" wins over "`token_expired` for an expired one", and over the replay of an expired token's own key.
+pub(crate) async fn p_enroll_csr_url_refusal_precedes_token_expiry(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    let token = token(&ctx, 2).await?;
+    let url = token_base_url(&token.text)?;
+    let elsewhere = format!("{url}/relay");
+    let replayed = identity(&ctx.target, &token, "replayed").await?;
+    ctx.target.advance(i64::try_from(TOKEN_LIFETIME.as_secs())? + 1).await?;
+    let replay = enroll_elsewhere_then_here(
+        &ctx.target,
+        &token,
+        &replayed.key,
+        &elsewhere,
+        "a replayed key of an expired token",
+    )
+    .await?;
+    expect_status(&replay, 200)?;
+    expect_error(
+        &enroll_elsewhere_then_here(
+            &ctx.target,
+            &token,
+            &KeyPair::generate(&url)?,
+            &elsewhere,
+            "an expired token",
+        )
+        .await?,
+        401,
+        "token_expired",
+    )?;
+    let management = ctx.target.management();
+    ensure!(
+        management.token(&token.id).await?.used_count == 1 && management.identity_count(&token).await? == 1,
+        "a CSR naming another URL created an identity or counted a token use"
+    );
+    Ok(())
+}
+
+/// CONTRACT.agent-identity.md §4: at renewal the server "ignores the value" the CSR requests, and "every certificate issued for that identity carries the same value", the `u` of the token that enrolled it.
+pub(crate) async fn p_renew_ignores_csr_enrollment_url(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    let (token, mut identity) = issued(&ctx, "renewal-url").await?;
+    let url = token_base_url(&token.text)?;
+    for (variant, extensions) in [
+        (
+            "naming another URL",
+            Some(vec![enrollment_url_extension(&format!("{url}/relay"))?]),
+        ),
+        ("without an extensionRequest", None),
+    ] {
+        let next = KeyPair::generate(&url)?;
+        let body = serde_json::to_vec(&json!({ "csr": next.csr_requesting(extensions.as_deref())?, "metadata": {} }))?;
+        let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
+        let reply = ctx.target.signed_renew(&body, &signed, None).await?;
+        expect_status(&reply, 200).with_context(|| format!("renewal CSR {variant}"))?;
+        let leaf = reply.body["certificate_chain"][0]
+            .as_str()
+            .context("renewal chain has no leaf")?;
+        assert_enrollment_url(&Certificate::from_der(&decoded_certificate(leaf)?)?, &url)
+            .with_context(|| format!("leaf renewed by a CSR {variant}"))?;
+        identity.adopt_certificate(&reply.body["certificate_chain"], next)?;
+        expect_status(&ctx.target.confirm(&identity).await?, 204)?;
+    }
+    Ok(())
 }
 
 /// Shared intent, "Enrollment": "The result is trimmed, truncated to 255 Unicode scalar values without splitting one, and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`)".
@@ -7263,7 +7578,7 @@ pub(crate) async fn p_identity_statuses(ctx: Context) -> anyhow::Result<()> {
     ctx.target.faults(&json!({ "leaf_lifetime_secs": 600 })).await?;
     expect_status(
         &ctx.target
-            .renew(&pending_only, &KeyPair::generate()?, &json!({}))
+            .renew(&pending_only, &KeyPair::generate(&ctx.target.base_url)?, &json!({}))
             .await?,
         200,
     )?;
@@ -7478,21 +7793,34 @@ mod tests {
         Ok(())
     }
 
+    /// A certificate's parameters with `name` as its common name, `is_ca` and `key_usages`.
+    fn certificate_params(
+        name: &str,
+        is_ca: rcgen::IsCa,
+        key_usages: Vec<rcgen::KeyUsagePurpose>,
+    ) -> anyhow::Result<rcgen::CertificateParams> {
+        let mut params = rcgen::CertificateParams::new(Vec::<String>::new())?;
+        params.is_ca = is_ca;
+        params.key_usages = key_usages;
+        params.distinguished_name.push(rcgen::DnType::CommonName, name);
+        Ok(params)
+    }
+
+    fn ca_params(name: &str) -> anyhow::Result<rcgen::CertificateParams> {
+        certificate_params(
+            name,
+            rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained),
+            vec![rcgen::KeyUsagePurpose::KeyCertSign],
+        )
+    }
+
     #[test]
-    fn chain_verifies_p384_intermediate_and_rejects_unknown_curve() -> anyhow::Result<()> {
+    fn chain_verifies_p384_intermediate_and_refuses_other_algorithms() -> anyhow::Result<()> {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
-        let ca = |name: &str| -> anyhow::Result<rcgen::CertificateParams> {
-            let mut params = rcgen::CertificateParams::new(Vec::<String>::new())?;
-            params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-            params.key_usages = vec![rcgen::KeyUsagePurpose::KeyCertSign];
-            params.distinguished_name.push(rcgen::DnType::CommonName, name);
-            Ok(params)
-        };
         let root_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-        let root = ca("root")?.self_signed(&root_key)?;
+        let root = ca_params("root")?.self_signed(&root_key)?;
         let issuer_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P384_SHA384)?;
-        let issuer = ca("p384 issuer")?.signed_by(&issuer_key, &root, &root_key)?;
+        let issuer = ca_params("p384 issuer")?.signed_by(&issuer_key, &root, &root_key)?;
         let leaf_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
         let leaf =
             rcgen::CertificateParams::new(vec!["leaf.local".to_owned()])?.signed_by(&leaf_key, &issuer, &issuer_key)?;
@@ -7502,86 +7830,131 @@ mod tests {
             STANDARD.encode(root.der()),
         ];
         let roots = json!({ "roots": [{ "certificate": chain[2] }] });
-        verify_chain(&chain, &roots, time::OffsetDateTime::now_utc().unix_timestamp())?;
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        verify_chain(&chain, &roots, now)?;
         let mut bad_leaf = leaf.der().as_ref().to_vec();
         *bad_leaf.last_mut().context("leaf signature missing")? ^= 1;
         let tampered = vec![STANDARD.encode(bad_leaf), chain[1].clone(), chain[2].clone()];
         ensure!(
-            verify_chain(&tampered, &roots, time::OffsetDateTime::now_utc().unix_timestamp()).is_err(),
+            verify_chain(&tampered, &roots, now).is_err(),
             "invalid P-384-signed certificate was accepted"
         );
-        let mut unknown_curve = issuer.der().as_ref().to_vec();
+        // secp384r1 becomes 1.3.132.0.35, secp521r1 (RFC 5480 §2.1.1.1), which the contract excludes.
+        let mut other_curve = issuer.der().as_ref().to_vec();
         let p384_oid = [0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22];
-        let offset = unknown_curve
+        let offset = other_curve
             .windows(p384_oid.len())
             .position(|window| window == p384_oid)
             .context("issuer does not use secp384r1")?;
-        unknown_curve[offset + p384_oid.len() - 1] = 0x23;
-        let unsupported = vec![chain[0].clone(), STANDARD.encode(unknown_curve), chain[2].clone()];
+        other_curve[offset + p384_oid.len() - 1] = 0x23;
+        let excluded = vec![chain[0].clone(), STANDARD.encode(other_curve), chain[2].clone()];
+        let error = verify_chain(&excluded, &roots, now).expect_err("an issuer key on secp521r1 was accepted");
         ensure!(
-            verify_chain(&unsupported, &roots, time::OffsetDateTime::now_utc().unix_timestamp())
-                .expect_err("unverifiable issuer curve was accepted")
-                .downcast_ref::<crate::Incomplete>()
-                .is_some(),
-            "an issuer algorithm the tester cannot verify was reported as a conformance failure"
+            error.downcast_ref::<crate::Incomplete>().is_none(),
+            "an issuer algorithm the contract excludes was reported as a missing fixture"
         );
         Ok(())
     }
 
     #[test]
-    fn chain_requires_ca_intermediates_but_no_root_profile() -> anyhow::Result<()> {
+    fn chain_requires_ca_extensions_on_every_issuer() -> anyhow::Result<()> {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-        // oracle: spec RFC 5280 §6.1.4
-        let plain = |name: &str| -> anyhow::Result<rcgen::CertificateParams> {
-            let mut params = rcgen::CertificateParams::new(Vec::<String>::new())?;
-            params.distinguished_name.push(rcgen::DnType::CommonName, name);
-            Ok(params)
+        use rcgen::{BasicConstraints, IsCa, KeyUsagePurpose};
+
+        let ca = || IsCa::Ca(BasicConstraints::Unconstrained);
+        let chain_with = |root: rcgen::CertificateParams,
+                          intermediate: rcgen::CertificateParams|
+         -> anyhow::Result<(Vec<String>, Value)> {
+            let root_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+            let root = root.self_signed(&root_key)?;
+            let intermediate_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+            let intermediate = intermediate.signed_by(&intermediate_key, &root, &root_key)?;
+            let leaf_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
+            let leaf = certificate_params("leaf", IsCa::NoCa, Vec::new())?.signed_by(
+                &leaf_key,
+                &intermediate,
+                &intermediate_key,
+            )?;
+            let roots = json!({ "roots": [{ "certificate": STANDARD.encode(root.der()) }] });
+            Ok((
+                vec![
+                    STANDARD.encode(leaf.der()),
+                    STANDARD.encode(intermediate.der()),
+                    STANDARD.encode(root.der()),
+                ],
+                roots,
+            ))
         };
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let root_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-        let root = plain("root without extensions")?.self_signed(&root_key)?;
-        let leaf_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-        let leaf = plain("leaf")?.signed_by(&leaf_key, &root, &root_key)?;
-        let roots = json!({ "roots": [{ "certificate": STANDARD.encode(root.der()) }] });
-        verify_chain(&[STANDARD.encode(leaf.der()), STANDARD.encode(root.der())], &roots, now)
-            .context("a root without CA extensions was rejected")?;
-        let intermediate_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-        let intermediate = plain("non-CA intermediate")?.signed_by(&intermediate_key, &root, &root_key)?;
-        let leaf = plain("leaf")?.signed_by(&leaf_key, &intermediate, &intermediate_key)?;
-        let chain = [
-            STANDARD.encode(leaf.der()),
-            STANDARD.encode(intermediate.der()),
-            STANDARD.encode(root.der()),
-        ];
-        ensure!(
-            verify_chain(&chain, &roots, now).is_err(),
-            "a non-CA intermediate was accepted"
-        );
+        let (chain, roots) = chain_with(ca_params("root")?, ca_params("intermediate")?)?;
+        verify_chain(&chain, &roots, now).context("a chain of CA issuers was refused")?;
+        for (variant, root, intermediate) in [
+            (
+                "a root without basicConstraints",
+                certificate_params("root", IsCa::NoCa, vec![KeyUsagePurpose::KeyCertSign])?,
+                ca_params("intermediate")?,
+            ),
+            (
+                "a root without key usage",
+                certificate_params("root", ca(), Vec::new())?,
+                ca_params("intermediate")?,
+            ),
+            (
+                "an intermediate whose basicConstraints lack cA",
+                ca_params("root")?,
+                certificate_params("intermediate", IsCa::ExplicitNoCa, vec![KeyUsagePurpose::KeyCertSign])?,
+            ),
+            (
+                "an intermediate without key usage",
+                ca_params("root")?,
+                certificate_params("intermediate", ca(), Vec::new())?,
+            ),
+            (
+                "an intermediate whose key usage lacks keyCertSign",
+                ca_params("root")?,
+                certificate_params("intermediate", ca(), vec![KeyUsagePurpose::DigitalSignature])?,
+            ),
+        ] {
+            let (chain, roots) = chain_with(root, intermediate)?;
+            ensure!(
+                verify_chain(&chain, &roots, now).is_err(),
+                "a chain with {variant} was accepted"
+            );
+        }
         Ok(())
     }
 
-    /// The conformance runs show the check passing a conforming leaf, but only a leaf with another extension shows it can fail.
+    /// The conformance runs show the check passing a conforming leaf, but only nonconforming leaves show it can fail.
     #[test]
     fn leaf_extensions_outside_the_profile_are_named() -> anyhow::Result<()> {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        let url = "https://host/dvls";
+        let oid = ENROLLMENT_URL_EXTENSION.arcs().map(u64::from).collect::<Vec<_>>();
+        let url_extension = |value: Vec<u8>, critical: bool| {
+            let mut extension = rcgen::CustomExtension::from_oid_content(&oid, value);
+            extension.set_criticality(critical);
+            extension
+        };
+        let ia5 = |text: &str| -> anyhow::Result<Vec<u8>> { Ok(der::asn1::Ia5String::new(text)?.to_der()?) };
+        let conforming = || -> anyhow::Result<rcgen::CustomExtension> { Ok(url_extension(ia5(url)?, false)) };
         let issuer_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-        let mut issuer = rcgen::CertificateParams::new(Vec::<String>::new())?;
-        issuer.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-        let issuer = issuer.self_signed(&issuer_key)?;
+        let issuer = ca_params("issuer")?.self_signed(&issuer_key)?;
         let leaf_key = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)?;
-        let leaf = |is_ca: rcgen::IsCa| -> anyhow::Result<Certificate> {
+        let leaf = |is_ca: rcgen::IsCa, extensions: Vec<rcgen::CustomExtension>| -> anyhow::Result<Certificate> {
             let mut params = rcgen::CertificateParams::new(vec!["leaf.local".to_owned()])?;
             params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ClientAuth];
             params.key_usages = vec![rcgen::KeyUsagePurpose::DigitalSignature];
             params.use_authority_key_identifier_extension = true;
             params.is_ca = is_ca;
+            params.custom_extensions = extensions;
             Ok(Certificate::from_der(
                 params.signed_by(&leaf_key, &issuer, &issuer_key)?.der(),
             )?)
         };
-        assert_leaf_extensions(&leaf(rcgen::IsCa::NoCa)?).context("SAN, EKU, KeyUsage and AKI were refused")?;
+        assert_leaf_extensions(&leaf(rcgen::IsCa::NoCa, vec![conforming()?])?, url)
+            .context("SAN, EKU, KeyUsage, AKI and the enrollment URL were refused")?;
         // `ExplicitNoCa` adds a subject key identifier and a basicConstraints without cA.
-        let error = assert_leaf_extensions(&leaf(rcgen::IsCa::ExplicitNoCa)?)
+        let error = assert_leaf_extensions(&leaf(rcgen::IsCa::ExplicitNoCa, vec![conforming()?])?, url)
             .expect_err("a leaf with basicConstraints was accepted")
             .to_string();
         // oracle: spec RFC 5280 §4.2.1.9
@@ -7589,6 +7962,30 @@ mod tests {
             error.ends_with(": 2.5.29.19"),
             "the failure does not name basicConstraints alone: {error}"
         );
+        for (variant, extensions) in [
+            ("without the enrollment URL extension", Vec::new()),
+            (
+                "with the enrollment URL extension twice",
+                vec![conforming()?, conforming()?],
+            ),
+            (
+                "with a critical enrollment URL extension",
+                vec![url_extension(ia5(url)?, true)],
+            ),
+            (
+                "holding the enrollment URL as a UTF8String",
+                vec![url_extension(der::asn1::Utf8StringRef::new(url)?.to_der()?, false)],
+            ),
+            (
+                "naming the enrollment URL with a trailing slash",
+                vec![url_extension(ia5(&format!("{url}/"))?, false)],
+            ),
+        ] {
+            ensure!(
+                assert_leaf_extensions(&leaf(rcgen::IsCa::NoCa, extensions)?, url).is_err(),
+                "a leaf {variant} was accepted"
+            );
+        }
         Ok(())
     }
 }

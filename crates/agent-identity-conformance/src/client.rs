@@ -160,7 +160,7 @@ impl Target {
     pub(crate) async fn channel_available(&self) -> anyhow::Result<bool> {
         let management = self.management();
         let token = management.create_token(1, Duration::from_secs(3600), None).await?;
-        let key = KeyPair::generate()?;
+        let key = KeyPair::generate(&self.base_url)?;
         let reply = self.enroll(&token.text, &key, &json!({})).await?;
         let identity = Identity::from_enrollment(key, &reply)?;
         management.revoke(&identity.identity_id).await?;
@@ -402,6 +402,20 @@ pub(crate) fn count(value: &Value, key: &str) -> anyhow::Result<u64> {
         .with_context(|| format!("missing number field {key}"))
 }
 
+/// The `u` that the bag of `token` carries, without its trailing slashes, which is the URL the token's certificates name ([CONTRACT.agent-identity.md] §2 "Enrollment token" and §4 "Certificates").
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) fn token_base_url(token: &str) -> anyhow::Result<String> {
+    let bag = token.split('.').nth(1).context("token has no bag")?;
+    let route: Value = serde_json::from_slice(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .decode(bag)
+            .context("decode token bag")?,
+    )
+    .context("parse token bag")?;
+    Ok(field(&route, "u")?.trim_end_matches('/').to_owned())
+}
+
 pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(certificate)
@@ -446,19 +460,19 @@ mod tests {
         reply.body["channel_url"] = Value::Null;
         reply.body["extra_response_field"] = json!({ "nested": true });
         reply.body["config"]["product_field"] = json!("product-specific");
-        let identity = Identity::from_enrollment(KeyPair::generate()?, &reply)?;
+        let identity = Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &reply)?;
         ensure!(
             identity.agent_channel_url.is_none() && identity.config["product_field"] == "product-specific",
             "unknown response fields or omitted config.agent_channel_url were not accepted"
         );
         reply.body["config"]["agent_channel_url"] = Value::Null;
         ensure!(
-            Identity::from_enrollment(KeyPair::generate()?, &reply).is_err(),
+            Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &reply).is_err(),
             "explicit null config.agent_channel_url was accepted"
         );
         reply.body["config"]["agent_channel_url"] = json!("https://host/mock");
         ensure!(
-            Identity::from_enrollment(KeyPair::generate()?, &reply)?
+            Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &reply)?
                 .agent_channel_url
                 .as_deref()
                 == Some("https://host/mock"),
@@ -468,7 +482,7 @@ mod tests {
             let mut invalid = reply.clone();
             invalid.body[name] = Value::Null;
             ensure!(
-                Identity::from_enrollment(KeyPair::generate()?, &invalid).is_err(),
+                Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &invalid).is_err(),
                 "explicit null {name} was accepted"
             );
         }
@@ -476,7 +490,7 @@ mod tests {
             let mut invalid = reply.clone();
             invalid.body["config"][name] = Value::Null;
             ensure!(
-                Identity::from_enrollment(KeyPair::generate()?, &invalid).is_err(),
+                Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &invalid).is_err(),
                 "explicit null config.{name} was accepted"
             );
         }

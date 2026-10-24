@@ -2,13 +2,27 @@ use anyhow::Context as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use der::Encode as _;
+use der::asn1::{BitString, Ia5String, ObjectIdentifier, OctetString, SetOfVec};
 use p256::ecdsa::signature::Signer as _;
 use p256::ecdsa::{DerSignature, Signature, SigningKey};
 use p256::elliptic_curve::Generate as _;
 use rand::RngExt as _;
 use sha2::{Digest as _, Sha256};
-use x509_cert::builder::{Builder as _, RequestBuilder};
+use x509_cert::attr::Attribute;
+use x509_cert::ext::Extension;
 use x509_cert::name::Name;
+use x509_cert::request::{CertReq, CertReqInfo, ExtensionReq, Version};
+use x509_cert::spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned};
+
+/// The OID of the enrollment URL extension that [CONTRACT.agent-identity.md] §4 "Certificates" defines.
+///
+/// The contract's OID, `2.25.123288656976046528792596909476335030418`, has an arc wider than the 32 bits `x509-cert` parses, so the parties use `1.3.6.1.4.1.32473.1.1`, from the documentation arc of RFC 5612, until the extension moves under Devolutions' private enterprise number.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) const ENROLLMENT_URL_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.1");
+
+/// `ecdsa-with-SHA256`, RFC 5758 §3.2.
+const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 
 pub(crate) struct KeyPair {
     pub(crate) key: SigningKey,
@@ -35,21 +49,43 @@ const DEFAULT_PARAMETER_ORDER: [SignatureParameter; 6] = [
 ];
 
 impl KeyPair {
-    pub(crate) fn generate() -> anyhow::Result<Self> {
-        let key = SigningKey::generate_from_rng(&mut rand::rng());
+    /// A new key with a CSR that requests the enrollment URL extension naming `base_url`, as an agent's CSR to the authority at `base_url` does ([CONTRACT.agent-identity.md] §4 "Certificates").
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    pub(crate) fn generate(base_url: &str) -> anyhow::Result<Self> {
+        let mut pair = Self {
+            key: SigningKey::generate_from_rng(&mut rand::rng()),
+            csr: String::new(),
+        };
+        pair.csr = pair.csr_requesting(Some(&[enrollment_url_extension(base_url)?]))?;
+        Ok(pair)
+    }
+
+    /// A CSR for this key whose one attribute is an `extensionRequest` holding `extensions`, or that has no attribute when `extensions` is `None`, encoded `base64`.
+    pub(crate) fn csr_requesting(&self, extensions: Option<&[Extension]>) -> anyhow::Result<String> {
+        let mut attributes = SetOfVec::new();
+        if let Some(extensions) = extensions {
+            attributes.insert(Attribute::try_from(ExtensionReq(extensions.to_vec()))?)?;
+        }
         let subject: Name = "CN=conformance request subject ignored"
             .parse()
             .context("parse CSR subject")?;
-        let csr = RequestBuilder::new(subject)
-            .context("build CSR")?
-            .build::<_, DerSignature>(&key)
-            .context("sign CSR")?
-            .to_der()
-            .context("encode CSR")?;
-        Ok(Self {
-            key,
-            csr: STANDARD.encode(csr),
-        })
+        let info = CertReqInfo {
+            version: Version::V1,
+            subject,
+            public_key: SubjectPublicKeyInfoOwned::from_key(self.key.verifying_key()).context("encode CSR key")?,
+            attributes,
+        };
+        let signature: DerSignature = self.key.try_sign(&info.to_der()?).context("sign CSR")?;
+        let request = CertReq {
+            info,
+            algorithm: AlgorithmIdentifierOwned {
+                oid: ECDSA_WITH_SHA256,
+                parameters: None,
+            },
+            signature: BitString::from_bytes(signature.as_bytes())?,
+        };
+        Ok(STANDARD.encode(request.to_der().context("encode CSR")?))
     }
 
     pub(crate) fn sign(
@@ -166,6 +202,17 @@ pub(crate) fn thumbprint(cert_base64: &str) -> anyhow::Result<String> {
     Ok(URL_SAFE_NO_PAD.encode(Sha256::digest(cert)))
 }
 
+/// The non-critical enrollment URL extension holding `url` as an `IA5String` ([CONTRACT.agent-identity.md] §4 "Certificates").
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) fn enrollment_url_extension(url: &str) -> anyhow::Result<Extension> {
+    Ok(Extension {
+        extn_id: ENROLLMENT_URL_EXTENSION,
+        critical: false,
+        extn_value: OctetString::new(Ia5String::new(url).context("enrollment URL is not ASCII")?.to_der()?)?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use p256::ecdsa::VerifyingKey;
@@ -273,6 +320,53 @@ mod tests {
             rfc["signature_base"].as_str().context("rfc base")?.as_bytes(),
             &signature,
         )?;
+        Ok(())
+    }
+
+    /// A CSR the suite sends must look like the agent's, so that an authority refusing it refuses the agent too.
+    #[test]
+    fn csr_requests_only_the_enrollment_url_extension() -> anyhow::Result<()> {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        // oracle: spec RFC 2986 §4.1
+        // oracle: spec RFC 5272 §3.1
+        use der::Decode as _;
+        use p256::pkcs8::EncodePublicKey as _;
+
+        let url = "https://host:8443/dvls";
+        let pair = KeyPair::generate(url)?;
+        let request = CertReq::from_der(&STANDARD.decode(&pair.csr)?)?;
+        let [attribute] = request.info.attributes.as_slice() else {
+            anyhow::bail!("the CSR does not carry exactly one attribute");
+        };
+        // id-ExtensionReq, PKCS #9 (RFC 2985 §5.4.2).
+        assert_eq!(attribute.oid, ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.14"));
+        let [value] = attribute.values.as_slice() else {
+            anyhow::bail!("the extensionRequest attribute does not hold exactly one value");
+        };
+        let extensions: Vec<Extension> = value.decode_as()?;
+        let [extension] = extensions.as_slice() else {
+            anyhow::bail!("the extensionRequest does not hold exactly one extension");
+        };
+        assert_eq!(extension.extn_id, ENROLLMENT_URL_EXTENSION);
+        assert!(!extension.critical, "the enrollment URL extension is critical");
+        assert_eq!(Ia5String::from_der(extension.extn_value.as_bytes())?.as_str(), url);
+        assert_eq!(request.algorithm.oid, ECDSA_WITH_SHA256);
+        assert_eq!(
+            request.info.public_key.to_der()?,
+            pair.key.verifying_key().to_public_key_der()?.as_bytes()
+        );
+        pair.key
+            .verifying_key()
+            .verify(
+                &request.info.to_der()?,
+                &DerSignature::from_bytes(request.signature.raw_bytes())?,
+            )
+            .context("the CSR self-signature does not verify")?;
+        let bare = CertReq::from_der(&STANDARD.decode(pair.csr_requesting(None)?)?)?;
+        assert!(
+            bare.info.attributes.is_empty(),
+            "a CSR without extensions carries an attribute"
+        );
         Ok(())
     }
 

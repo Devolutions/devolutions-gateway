@@ -22,7 +22,7 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
-use crate::client::{Target, Token, count, decoded_certificate, expect_status, field};
+use crate::client::{Target, Token, count, decoded_certificate, expect_error, expect_status, field};
 use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
 use crate::{Context, KeyBackend};
 
@@ -2347,7 +2347,7 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                         .management()
                         .create_token(1, Duration::from_secs(3600), None)
                         .await?;
-                    let key = crate::signer::KeyPair::generate()?;
+                    let key = crate::signer::KeyPair::generate(&target.base_url)?;
                     expect_status(&target.enroll(&once.text, &key, &json!({})).await?, 200)?;
                     (once.text.clone(), once, 1, 1)
                 }
@@ -2533,6 +2533,78 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
         .await?;
     }
     Ok(())
+}
+
+/// `token` with the `u` of its bag replaced by `url`, keeping its other bag fields and its secret.
+fn with_bag_url(token: &str, url: &str) -> anyhow::Result<String> {
+    let (head, secret) = token.rsplit_once('.').context("token structure")?;
+    let (prefix, bag) = head.rsplit_once('.').context("token bag")?;
+    let mut route: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(bag)?)?;
+    route["u"] = json!(url);
+    Ok(format!(
+        "{prefix}.{}.{secret}",
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&route)?)
+    ))
+}
+
+/// A server holding another authority's token relays a device's enrollment from its own address, so the token's `u` names the relay, and so does the agent's CSR, which the authority refuses with `invalid_request` ([CONTRACT.agent-identity.md] §4 "Certificates").
+/// `invalid_request` is transient (§5.4 "Errors"), so the agent keeps the pending state and retries, and the authority creates nothing.
+///
+/// The mock's TLS certificate names both `127.0.0.1` and `localhost`, and the mock never reads a token's bag, so the token rewritten to the other name reaches the same mock as a relay reaches the authority.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) async fn a_relayed_enrollment_kept_pending(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    with_agent(ctx, None, true, async move |case| {
+        let target = case.ctx.target.clone();
+        let token = new_token(case, 1).await?;
+        let relay = if let Some(rest) = target.base_url.strip_prefix("https://127.0.0.1:") {
+            format!("https://localhost:{rest}")
+        } else if let Some(rest) = target.base_url.strip_prefix("https://localhost:") {
+            format!("https://127.0.0.1:{rest}")
+        } else {
+            anyhow::bail!("the mock's base URL names neither 127.0.0.1 nor localhost");
+        };
+        let relayed = with_bag_url(&token.text, &relay)?;
+        let initial = count(&target.requests(Some(&token)).await?, "enroll")?;
+        case.write_pending(&relayed)?;
+        poll!(case, WAIT, POLL, "agent did not retry the relayed enrollment", async {
+            Ok((initial + 2 <= count(&target.requests(Some(&token)).await?, "enroll")?).then_some(()))
+        });
+        let progress = case
+            .in_progress()?
+            .context("agent dropped the in-progress record of the relayed enrollment")?;
+        ensure!(
+            key_exists(case, field(&progress, "key_name")?)?,
+            "agent deleted the enrollment key of the relayed enrollment"
+        );
+        ensure!(
+            case.pending_path().exists(),
+            "agent deleted the pending file of the relayed enrollment"
+        );
+        ensure!(
+            !case.rejection_path_for(&relayed).exists() && !case.has_stored_identity()?,
+            "agent rejected the relayed token or stored an identity"
+        );
+        let management = target.management();
+        ensure!(
+            management.identity_count(&token).await? == 0 && management.token(&token.id).await?.used_count == 0,
+            "the relayed enrollment created an identity or counted a token use"
+        );
+        // The agent's requests reached the mock, and this one shows the answer they got.
+        expect_error(
+            &target
+                .enroll(&relayed, &crate::signer::KeyPair::generate(&relay)?, &json!({}))
+                .await?,
+            400,
+            "invalid_request",
+        )
+        .context("the mock did not refuse a CSR naming the relay")?;
+        case.check_running()
+    })
+    .await
 }
 
 /// Removes the ANSI escape sequences that colour the agent's console log, which it writes even when its output is a file.
@@ -2938,7 +3010,7 @@ async fn same_token_after_permanent_outcome(ctx: Context, outcome: PermanentToke
         let token = new_token(case, 1).await?;
         let (pending, expected_identities, expected_uses) = match outcome {
             PermanentTokenOutcome::Exhausted => {
-                let key = crate::signer::KeyPair::generate()?;
+                let key = crate::signer::KeyPair::generate(&target.base_url)?;
                 expect_status(&target.enroll(&token.text, &key, &json!({})).await?, 200)?;
                 (token.text.clone(), 1, 1)
             }
