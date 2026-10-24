@@ -83,9 +83,10 @@ The location and format of the files below are stable, because the conformance t
 - A token with a different hash always enrolls, as a new identity.
   On success, the new identity replaces any stored identity for the returned `authority_id`, and the agent deletes the old identity's keys.
   If two pending tokens enroll with the same authority, the last one to complete wins; the other identity stays on the authority for an administrator to revoke or delete.
-- When an enrollment returns the ID of an identity the agent holds for a different base URL, the agent accepts it only if the new certificate chain verifies against a root it already holds for that ID; otherwise it refuses the enrollment and keeps the stored identity and its keys.
-  Without this rule, a hostile or compromised authority could claim another authority's ID and take its place on the device; the chain proves the server holds that authority's CA key, so a legitimate move to a new base URL keeps working.
-  Two gaps are accepted: a move while the device holds only a root from before a rotation, which needs the device's state cleared, and a hostile authority that claims another authority's ID before the real one enrolls, which makes the real enrollment fail loudly.
+- When an enrollment returns the ID of an identity the agent holds for a different base URL, the agent accepts it only if a signature path runs from the new leaf, through certificates of the new chain that are CAs (basicConstraints with `cA` set, and `keyCertSign` when they carry key usage), to a root it already holds for that ID; otherwise it refuses the enrollment and keeps the stored identity and its keys.
+  The roots it holds for an ID are the last certificates of that identity's current, pending and previous chains, and validity periods are not checked.
+  Without this rule, a hostile or compromised authority could claim another authority's ID and take its place on the device; the chain shows the server obtained a certificate from that authority's CA, so a legitimate move to a new base URL keeps working, and requiring CA certificates keeps a device's own certificate and key from standing in for that CA.
+  Three gaps are accepted: a move while the device holds only a root from before a rotation, which needs the device's state cleared; a hostile authority that claims another authority's ID before the real one enrolls, which makes the real enrollment fail loudly; and a server holding a valid enrollment token of the real authority, which can relay the device's request and sit between the device and that authority, since an administrator must already have submitted its token.
 
 ### Stored identities
 
