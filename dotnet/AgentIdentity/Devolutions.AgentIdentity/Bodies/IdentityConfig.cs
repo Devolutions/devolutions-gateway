@@ -76,13 +76,13 @@ public sealed class IdentityConfig
     /// <param name="revision">The revision of the config.</param>
     /// <param name="agentChannelUrl">
     /// The absolute <c>https</c> base URL of the agent channel, such as <c>https://host/dvls</c>,
-    /// without user information, query or fragment;
+    /// without user information or any other <c>@</c>, query or fragment;
     /// null when the authority does not offer the channel to the identity, so that the agent opens none.
     /// </param>
     /// <param name="productFields">The product-specific fields, if any.</param>
     /// <exception cref="ArgumentException">
     /// <paramref name="agentChannelUrl"/> is not an absolute <c>https</c> URL,
-    /// or has user information, a query or a fragment;
+    /// or has user information or any other <c>@</c>, a query or a fragment;
     /// or a product-specific field has no name, a name that is not snake_case or that the contract gives a member,
     /// no value, the value <c>null</c>, or a value that UTF-8 JSON cannot carry, such as a lone surrogate;
     /// or a member inside a value has a name that is not snake_case or that its object repeats, or the value

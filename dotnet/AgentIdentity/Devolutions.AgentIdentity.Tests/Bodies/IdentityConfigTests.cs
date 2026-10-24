@@ -69,8 +69,8 @@ public class IdentityConfigTests
         Assert.Equal("agentChannelUrl", exception.ParamName);
     }
 
-    // `agent_channel_url` is an absolute `https` URL without a query or fragment, which the config carries as the host
-    // gave it.
+    // `agent_channel_url` is an absolute `https` URL without an `@`, a query or a fragment,
+    // which the config carries as the host gave it.
     // Whether a URL ending in a slash is rejected or written without the slash is the library's choice.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Theory]
