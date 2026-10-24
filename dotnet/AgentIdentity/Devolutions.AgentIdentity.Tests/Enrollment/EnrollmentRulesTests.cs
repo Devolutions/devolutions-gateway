@@ -325,6 +325,34 @@ public class EnrollmentRulesTests
         Assert.Equal(parameter, exception.ParamName);
     }
 
+    // The token's `u` is an absolute https URL (CONTRACT.agent-identity.md §2), so none is empty once its trailing
+    // slashes are removed, and the CSR's enrollment URL is compared with it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Theory]
+    [InlineData("")]
+    [InlineData("/")]
+    public void TokenStateRejectsAnEmptyProductBaseUrl(string productBaseUrl)
+    {
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => new EnrollmentTokenState(false, productBaseUrl, Now, maxUses: 10, identitiesCreated: 0));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("productBaseUrl", exception.ParamName);
+    }
+
+    // A null argument throws ArgumentNullException, whose ParamName names it.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Fact]
+    public void TokenStateRejectsANullProductBaseUrl()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
+            () => new EnrollmentTokenState(false, null!, Now, maxUses: 10, identitiesCreated: 0));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("productBaseUrl", exception.ParamName);
+    }
+
     // Statuses start at 1, so a status that the host never set is not a valid one,
     // and a value after the last status is not one either.
     // Framework Design Guidelines: validate enum arguments, and throw the most derived ArgumentException naming them.

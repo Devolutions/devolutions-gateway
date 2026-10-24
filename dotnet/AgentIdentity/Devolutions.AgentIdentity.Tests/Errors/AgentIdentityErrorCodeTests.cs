@@ -118,7 +118,7 @@ public class AgentIdentityErrorCodeTests
         Assert.Equal(expected, code.ToGrpcStatusCode());
     }
 
-    // CONTRACT.agent-identity.md §5.4 lists exactly these ten codes.
+    // CONTRACT.agent-identity.md §5.4 lists exactly these eleven codes.
     // A code added without a contract row would otherwise go untested in every table above.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     [Fact]

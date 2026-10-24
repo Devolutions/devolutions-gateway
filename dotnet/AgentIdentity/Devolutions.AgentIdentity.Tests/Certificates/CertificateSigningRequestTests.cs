@@ -542,8 +542,33 @@ public class CertificateSigningRequestTests
                 return request.CreateSigningRequest();
             },
             "https://host/dvls"),
+        // A critical flag on a requested extension changes nothing the server reads.
+        // oracle: spec RFC 5280 §4.1
+        ["the extension marked critical"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.Attributes(TestEnrollmentUrl.CriticalExtension("https://host/dvls"))),
+            "https://host/dvls"),
+        // The server ignores every other attribute, whatever its contents.
+        ["after another attribute whose values are not a SET"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.AttributesAfter(
+                    TestCsr.Sequence(TestCsr.Oid("1.2.840.113549.1.9.7"), [0x04, 0x00]),
+                    TestEnrollmentUrl.Extension("https://host/dvls"))),
+            "https://host/dvls"),
+        // The attributes need not be DER, such as an indefinite length.
+        ["in an attribute set of indefinite length"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.IndefiniteLength(
+                    TestEnrollmentUrl.Attributes(TestEnrollmentUrl.Extension("https://host/dvls")))),
+            "https://host/dvls"),
         // The agent's CSR before it named an enrollment URL: an empty attribute set, A0 00.
         ["no attributes"] = (TestCsr.For, null),
+        // An attribute that is not a SEQUENCE names nothing, and the server ignores it.
+        ["an attribute that is not a SEQUENCE"] =
+            (key => TestEnrollmentUrl.Request(key, [0xA0, 0x02, 0x04, 0x00]), null),
         ["an extensionRequest without the extension"] = (
             key => TestEnrollmentUrl.Request(
                 key,

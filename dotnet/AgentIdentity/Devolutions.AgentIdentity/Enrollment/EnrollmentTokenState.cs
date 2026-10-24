@@ -20,6 +20,9 @@ public sealed class EnrollmentTokenState
     /// <param name="maxUses">The number of identities that the token may create.</param>
     /// <param name="identitiesCreated">The number of identities that the token has created.</param>
     /// <exception cref="ArgumentNullException"><paramref name="productBaseUrl"/> is null.</exception>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="productBaseUrl"/> is empty once its trailing slashes are removed.
+    /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="maxUses"/> or <paramref name="identitiesCreated"/> is negative.
     /// </exception>
@@ -31,6 +34,11 @@ public sealed class EnrollmentTokenState
         int identitiesCreated)
     {
         ArgumentNullException.ThrowIfNull(productBaseUrl);
+        if (productBaseUrl.TrimEnd('/').Length == 0)
+        {
+            throw new ArgumentException("The product base URL is empty.", nameof(productBaseUrl));
+        }
+
         ArgumentOutOfRangeException.ThrowIfNegative(maxUses);
         ArgumentOutOfRangeException.ThrowIfNegative(identitiesCreated);
 

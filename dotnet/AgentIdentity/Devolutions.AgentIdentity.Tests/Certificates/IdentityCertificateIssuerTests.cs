@@ -447,6 +447,12 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
 
     public static TheoryData<string> IssuersOutsideTheChainProfileNames => new(IssuersOutsideTheChainProfile.Keys);
 
+    private static Dictionary<string, ECCurve> Curves => new()
+    {
+        ["P-256"] = ECCurve.NamedCurves.nistP256,
+        ["P-384"] = ECCurve.NamedCurves.nistP384,
+    };
+
     // A root of each allowed curve signs the certificate with the signature algorithm of its curve,
     // and the certificate chains to it: ecdsa-with-SHA256 for P-256 and ecdsa-with-SHA384 for P-384 (RFC 5758 §3.2).
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
@@ -456,8 +462,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     [InlineData("P-384", "1.2.840.10045.4.3.3")]
     public void SignsWithTheAlgorithmOfTheIssuerCurve(string curve, string signatureAlgorithm)
     {
-        using OwnedRootSigner root = EcdsaProfileRoot(
-            curve == "P-256" ? ECCurve.NamedCurves.nistP256 : ECCurve.NamedCurves.nistP384);
+        using OwnedRootSigner root = EcdsaProfileRoot(Curves[curve]);
 
         using X509Certificate2 leaf = IdentityCertificateIssuer.Issue(
             _creating,
@@ -499,6 +504,17 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
                 certificate,
                 X509SignatureGenerator.CreateForRSA(key, RSASignaturePadding.Pkcs1),
                 key);
+        },
+        // Its signer holds another key than its certificate's, so the certificates it signs do not chain to it.
+        // oracle: spec RFC 5280 §6.1
+        ["a P-256 certificate whose signer holds another P-256 key"] = () =>
+        {
+            ECDsa certificateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            X509Certificate2 certificate =
+                ProfileRoot(new CertificateRequest(RootName, certificateKey, HashAlgorithmName.SHA256));
+            certificateKey.Dispose();
+            return new OwnedRootSigner(certificate, X509SignatureGenerator.CreateForECDsa(key), key);
         },
         ["no basicConstraints"] = () => EcdsaProfileRoot(ECCurve.NamedCurves.nistP256, [CaKeyUsage()]),
         ["basicConstraints without cA"] = () => EcdsaProfileRoot(

@@ -40,6 +40,45 @@ internal static class TestEnrollmentUrl
     }
 
     /// <summary>
+    /// The enrollment URL extension of a URL with its critical flag set.
+    /// </summary>
+    public static byte[] CriticalExtension(string url)
+    {
+        AsnWriter writer = new(AsnEncodingRules.DER);
+        using (writer.PushSequence())
+        {
+            writer.WriteObjectIdentifier(Oid);
+            writer.WriteBoolean(true);
+            writer.WriteOctetString(IA5String(url));
+        }
+
+        return writer.Encode();
+    }
+
+    /// <summary>
+    /// The <c>[0]</c> attributes of a CSR holding another attribute, given whole, then one extensionRequest.
+    /// </summary>
+    public static byte[] AttributesAfter(byte[] otherAttribute, params byte[][] extensions)
+    {
+        byte[] attributes = Attributes(extensions);
+        AsnReader reader = new AsnReader(attributes, AsnEncodingRules.DER)
+            .ReadSetOf(new Asn1Tag(TagClass.ContextSpecific, 0));
+        byte[] extensionRequest = reader.ReadEncodedValue().ToArray();
+
+        return TestCsr.Tlv(0xA0, otherAttribute, extensionRequest);
+    }
+
+    /// <summary>
+    /// The same constructed element with an indefinite length (X.690 §8.1.3.6): its tag, 80, its contents, then 00 00.
+    /// </summary>
+    public static byte[] IndefiniteLength(byte[] element)
+    {
+        AsnDecoder.ReadEncodedValue(element, AsnEncodingRules.DER, out int contentOffset, out int contentLength, out _);
+
+        return [element[0], 0x80, .. element.AsSpan(contentOffset, contentLength), 0x00, 0x00];
+    }
+
+    /// <summary>
     /// The enrollment URL extension of a URL, as the agent's CSR requests it.
     /// </summary>
     public static byte[] Extension(string url)

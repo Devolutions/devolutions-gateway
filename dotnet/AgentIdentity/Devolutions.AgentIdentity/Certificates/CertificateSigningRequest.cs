@@ -73,7 +73,10 @@ public sealed class CertificateSigningRequest
     /// </summary>
     /// <remarks>
     /// A valid request has version 0 and no trailing bytes, and is DER except for the subject and the attributes,
-    /// which the server ignores: each need only be a BER element of its type, a SEQUENCE and a constructed <c>[0]</c>.
+    /// which the server ignores but for the enrollment URL that <see cref="EnrollmentUrl"/> holds:
+    /// each need only be a BER element of its type, a SEQUENCE and a constructed <c>[0]</c>,
+    /// and the attributes never make the request invalid; the values of attributes other than extensionRequest stay
+    /// unread.
     /// Its key is <c>id-ecPublicKey</c> on the named curve P-256, as an uncompressed point on the curve (RFC 5480).
     /// Its signature algorithm is <c>ecdsa-with-SHA256</c> without parameters (RFC 5758),
     /// and its signature verifies under its key over the exact bytes of its <c>certificationRequestInfo</c>.
@@ -115,8 +118,9 @@ public sealed class CertificateSigningRequest
             return CsrValidationResult.Failure("The CSR version is not 0.");
         }
 
-        // The subject and the attributes are read only as BER elements of their type, and never parsed,
-        // because nothing the server decides depends on them; the self-signature still covers their bytes.
+        // The subject and the attributes are read only as BER elements of their type, since nothing the server decides
+        // depends on them but the enrollment URL, whose reading never makes the request invalid;
+        // the self-signature still covers their bytes.
         fields = fields[length..];
         AsnDecoder.ReadSequence(fields.Span, AsnEncodingRules.BER, out _, out _, out length);
 
@@ -176,10 +180,16 @@ public sealed class CertificateSigningRequest
             while (attributeSet.HasData)
             {
                 AsnReader attribute = attributeSet.ReadSequence();
-                string type = attribute.ReadObjectIdentifier();
+
+                // The values of every other attribute stay unread, since the server ignores them.
+                if (attribute.ReadObjectIdentifier() != ExtensionRequest)
+                {
+                    continue;
+                }
+
                 AsnReader attributeValues = attribute.ReadSetOf(skipSortOrderValidation: true);
 
-                while (type == ExtensionRequest && attributeValues.HasData)
+                while (attributeValues.HasData)
                 {
                     AsnReader extensions = attributeValues.ReadSequence();
 

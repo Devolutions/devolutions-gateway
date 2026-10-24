@@ -80,7 +80,7 @@ public static class IdentityCertificateIssuer
     /// or the issuer is outside the chain profile of CONTRACT.agent-identity.md §4:
     /// its certificate has neither a P-256 nor a P-384 key, no basicConstraints with cA set or no key usage with
     /// keyCertSign, or its generator does not sign with ecdsa-with-SHA256 for a P-256 key or ecdsa-with-SHA384 for a
-    /// P-384 key.
+    /// P-384 key, or holds another key than its certificate's.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="lifetime"/> is shorter than one second.
@@ -145,11 +145,23 @@ public static class IdentityCertificateIssuer
                 "The issuer certificate's key is neither a P-256 nor a P-384 key.",
                 nameof(issuer));
 
-        byte[] signatureAlgorithm = issuer.SignatureGenerator.GetSignatureAlgorithmIdentifier(hash);
+        // Read once, so that every check acts on the generator that signs.
+        X509SignatureGenerator generator = issuer.SignatureGenerator;
+        byte[] signatureAlgorithm = generator.GetSignatureAlgorithmIdentifier(hash);
         if (!signatureAlgorithm.AsSpan().SequenceEqual(expectedAlgorithm))
         {
             throw new ArgumentException(
                 "The issuer does not sign with the ECDSA algorithm of its key's curve.",
+                nameof(issuer));
+        }
+
+        // A generator over another key would sign certificates that do not chain to the issuer certificate.
+        PublicKey signerKey = generator.PublicKey;
+        byte[] issuerKeyValue = issuerCertificate.PublicKey.EncodedKeyValue.RawData;
+        if (!signerKey.EncodedKeyValue.RawData.AsSpan().SequenceEqual(issuerKeyValue))
+        {
+            throw new ArgumentException(
+                "The issuer's generator signs with another key than its certificate's.",
                 nameof(issuer));
         }
 
@@ -212,7 +224,7 @@ public static class IdentityCertificateIssuer
 
         return request.Create(
             issuerCertificate.SubjectName,
-            issuer.SignatureGenerator,
+            generator,
             notBefore,
             notAfter,
             NewSerialNumber(random));
@@ -241,6 +253,7 @@ public static class IdentityCertificateIssuer
 
         return null;
     }
+
     /// <summary>
     /// Issues the pending certificate of a renewal, for the identity that signed the renew request.
     /// </summary>
@@ -271,7 +284,7 @@ public static class IdentityCertificateIssuer
     /// or the issuer is outside the chain profile of CONTRACT.agent-identity.md §4:
     /// its certificate has neither a P-256 nor a P-384 key, no basicConstraints with cA set or no key usage with
     /// keyCertSign, or its generator does not sign with ecdsa-with-SHA256 for a P-256 key or ecdsa-with-SHA384 for a
-    /// P-384 key.
+    /// P-384 key, or holds another key than its certificate's.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="lifetime"/> is shorter than one second.
