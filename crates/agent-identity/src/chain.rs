@@ -3,24 +3,28 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use der::{Decode as _, Encode as _};
-use p256::ecdsa::signature::Verifier as _;
-use p256::ecdsa::{DerSignature, VerifyingKey};
 use p256::pkcs8::DecodePublicKey as _;
+use signature::Verifier as _;
 use spki::ObjectIdentifier;
 use x509_cert::Certificate;
 use x509_cert::ext::pkix::{BasicConstraints, KeyUsage};
 
-/// `ecdsa-with-SHA256` ([RFC 5758 §3.2]), the signature algorithm of P-256 keys, the only key type the contract names for
-/// identity certificates.
+/// `ecdsa-with-SHA256` ([RFC 5758 §3.2]), which the contract allows with a P-256 key.
 ///
 /// [RFC 5758 §3.2]: https://www.rfc-editor.org/rfc/rfc5758#section-3.2
 const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 
+/// `ecdsa-with-SHA384` ([RFC 5758 §3.2]), which the contract allows with a P-384 key.
+///
+/// [RFC 5758 §3.2]: https://www.rfc-editor.org/rfc/rfc5758#section-3.2
+const ECDSA_WITH_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+
 /// Returns whether a signature path runs from the leaf of `chain`, through the chain's own certificates in order, to the
 /// public key of one of `roots`; both hold `base64` DER certificates, and `chain` is leaf first.
 ///
-/// Each step follows [RFC 5280 §6.1]: the certificate's issuer name equals its signer's subject, and its
-/// `ecdsa-with-SHA256` signature verifies under the signer's P-256 key.
+/// Each step follows [RFC 5280 §6.1]: the certificate's issuer name equals its signer's subject, and its signature
+/// verifies under the signer's key with an algorithm the contract allows, `ecdsa-with-SHA256` by a P-256 key or
+/// `ecdsa-with-SHA384` by a P-384 key, never RSA.
 /// A signer from `chain` must be a CA that may sign certificates, so that no leaf, such as the one the authority issued
 /// to another device, signs for the authority; a root is trusted as is, as RFC 5280 trusts an anchor.
 /// Validity periods are not checked, because the path only has to prove that the server holds the CA key of a root.
@@ -86,17 +90,30 @@ fn may_sign_certificates(certificate: &Certificate, intermediates: usize) -> boo
 }
 
 /// Returns whether `signer` signed `certificate`: under the issuer name `certificate` gives, with `ecdsa-with-SHA256`
-/// and the signer's P-256 key.
+/// and a P-256 signer key or `ecdsa-with-SHA384` and a P-384 one ([CONTRACT.agent-identity.md §4 "Certificates"]).
+///
+/// The signature algorithm the certificate names picks the verifier, and the verifier accepts only a signer key on
+/// its curve, so any other pairing, an RSA key included, does not verify.
+///
+/// [CONTRACT.agent-identity.md §4 "Certificates"]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#certificates
 fn is_signed_by(certificate: &Certificate, signer: &Certificate) -> bool {
     return certificate.tbs_certificate().issuer() == signer.tbs_certificate().subject()
-        && certificate.signature_algorithm().oid == ECDSA_WITH_SHA256
         && signature_verifies(certificate, signer).is_some();
 
     fn signature_verifies(certificate: &Certificate, signer: &Certificate) -> Option<()> {
         let key = signer.tbs_certificate().subject_public_key_info().to_der().ok()?;
-        let key = VerifyingKey::from_public_key_der(&key).ok()?;
-        let signature = DerSignature::from_bytes(certificate.signature().as_bytes()?).ok()?;
-        key.verify(&certificate.tbs_certificate().to_der().ok()?, &signature)
-            .ok()
+        let message = certificate.tbs_certificate().to_der().ok()?;
+        let signature = certificate.signature().as_bytes()?;
+        match certificate.signature_algorithm().oid {
+            ECDSA_WITH_SHA256 => p256::ecdsa::VerifyingKey::from_public_key_der(&key)
+                .ok()?
+                .verify(&message, &p256::ecdsa::DerSignature::from_bytes(signature).ok()?)
+                .ok(),
+            ECDSA_WITH_SHA384 => p384::ecdsa::VerifyingKey::from_public_key_der(&key)
+                .ok()?
+                .verify(&message, &p384::ecdsa::DerSignature::from_bytes(signature).ok()?)
+                .ok(),
+            _ => None,
+        }
     }
 }

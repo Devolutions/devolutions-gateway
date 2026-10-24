@@ -856,13 +856,17 @@ mod tests {
 
     use base64::Engine as _;
     use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
-    use der::Encode as _;
-    use der::asn1::OctetString;
+    use der::asn1::{Any, BitString, OctetString};
     use der::flagset::FlagSet;
-    use p256::ecdsa::{DerSignature, SigningKey, VerifyingKey};
+    use der::{Decode as _, Encode as _, Tag};
+    use p256::ecdsa::{DerSignature, SigningKey};
     use p256::pkcs8::EncodePublicKey as _;
     use serde_json::json;
-    use spki::SubjectPublicKeyInfoOwned;
+    use sha2::{Digest, Sha256, Sha384};
+    use signature::Keypair as _;
+    use signature::hazmat::PrehashSigner as _;
+    use spki::{AlgorithmIdentifierOwned, ObjectIdentifier, SubjectPublicKeyInfoOwned};
+    use x509_cert::Certificate;
     use x509_cert::builder::profile::BuilderProfile;
     use x509_cert::builder::{Builder as _, CertificateBuilder};
     use x509_cert::ext::pkix::{BasicConstraints, KeyUsage, KeyUsages};
@@ -1768,21 +1772,35 @@ mod tests {
 
     const HELD_ROOT: &str = "CN=Held root";
 
+    /// `ecdsa-with-SHA256` ([RFC 5758 §3.2]).
+    ///
+    /// [RFC 5758 §3.2]: https://www.rfc-editor.org/rfc/rfc5758#section-3.2
+    const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+
+    /// `ecdsa-with-SHA384` ([RFC 5758 §3.2]).
+    ///
+    /// [RFC 5758 §3.2]: https://www.rfc-editor.org/rfc/rfc5758#section-3.2
+    const ECDSA_WITH_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.3");
+
     /// A test certificate and its key, made in the test, so that whether a chain verifies follows from how the test
     /// signed it.
     struct TestCertificate {
-        key: SigningKey,
+        key: TestKey,
         name: Name,
         /// The certificate, `base64` DER.
         der: String,
     }
 
     impl TestCertificate {
-        /// A self-signed CA certificate.
+        /// A self-signed CA certificate for a P-256 key.
         fn root(seed: u8, name: &str) -> anyhow::Result<Self> {
-            let key = SigningKey::from_slice(&[seed; 32])?;
+            Self::root_for(TestKey::p256(seed)?, name)
+        }
+
+        /// A self-signed CA certificate for `key`.
+        fn root_for(key: TestKey, name: &str) -> anyhow::Result<Self> {
             let name: Name = name.parse()?;
-            let der = test_certificate(&key, &name, &name, key.verifying_key(), vec![ca(None)?])?;
+            let der = test_certificate(&key, &name, &name, &key, vec![ca(None)?])?;
             Ok(Self { key, name, der })
         }
 
@@ -1792,13 +1810,109 @@ mod tests {
             self.issue_with(seed, name, extensions)
         }
 
-        /// A certificate this one signs, with `extensions`.
+        /// A certificate for a P-256 key that this one signs, with `extensions`.
         fn issue_with(&self, seed: u8, name: &str, extensions: Vec<Extension>) -> anyhow::Result<Self> {
-            let key = SigningKey::from_slice(&[seed; 32])?;
+            self.issue_for(TestKey::p256(seed)?, name, extensions)
+        }
+
+        /// A certificate for `key` that this one signs, with `extensions`.
+        fn issue_for(&self, key: TestKey, name: &str, extensions: Vec<Extension>) -> anyhow::Result<Self> {
             let name: Name = name.parse()?;
-            let der = test_certificate(&self.key, &self.name, &name, key.verifying_key(), extensions)?;
+            let der = test_certificate(&self.key, &self.name, &name, &key, extensions)?;
             Ok(Self { key, name, der })
         }
+    }
+
+    /// The key of a test certificate, which signs with the algorithm the contract pairs with its type.
+    enum TestKey {
+        /// Signs with `ecdsa-with-SHA256`.
+        P256(SigningKey),
+        /// Signs with `ecdsa-with-SHA384`.
+        P384(p384::ecdsa::SigningKey),
+        /// Signs with `sha256WithRSAEncryption`.
+        Rsa(rsa::pkcs1v15::SigningKey<Sha256>),
+    }
+
+    impl TestKey {
+        fn p256(seed: u8) -> anyhow::Result<Self> {
+            Ok(Self::P256(SigningKey::from_slice(&[seed; 32])?))
+        }
+
+        fn p384(seed: u8) -> anyhow::Result<Self> {
+            Ok(Self::P384(p384::ecdsa::SigningKey::from_slice(&[seed; 48])?))
+        }
+
+        /// An RSA key whose primes are the Mersenne primes 2^521 - 1 and 2^607 - 1, so that no slow key generation
+        /// runs; whether a chain may use RSA doesn't depend on the key's strength.
+        fn rsa() -> anyhow::Result<Self> {
+            let mersenne_prime = |exponent: usize| {
+                let mut bytes = vec![0xffu8; exponent.div_ceil(8)];
+                bytes[0] >>= 8 * bytes.len() - exponent;
+                rsa::BoxedUint::from_be_slice_vartime(&bytes)
+            };
+            let key = rsa::RsaPrivateKey::from_p_q(
+                mersenne_prime(521),
+                mersenne_prime(607),
+                rsa::BoxedUint::from(65_537u32),
+            )?;
+            Ok(Self::Rsa(rsa::pkcs1v15::SigningKey::new(key)))
+        }
+
+        fn public_key(&self) -> anyhow::Result<SubjectPublicKeyInfoOwned> {
+            let der = match self {
+                Self::P256(key) => key.verifying_key().to_public_key_der()?,
+                Self::P384(key) => key.verifying_key().to_public_key_der()?,
+                Self::Rsa(key) => key.verifying_key().to_public_key_der()?,
+            };
+            Ok(SubjectPublicKeyInfoOwned::try_from(der.as_bytes())?)
+        }
+
+        /// Signs the `D` digest of `message` with this ECDSA key, whichever digest the contract pairs with its curve.
+        fn sign_ecdsa_digest<D: Digest>(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
+            let digest = D::digest(message);
+            Ok(match self {
+                Self::P256(key) => {
+                    let signature: p256::ecdsa::Signature = key.sign_prehash(&digest)?;
+                    signature.to_der().as_bytes().to_vec()
+                }
+                Self::P384(key) => {
+                    let signature: p384::ecdsa::Signature = key.sign_prehash(&digest)?;
+                    signature.to_der().as_bytes().to_vec()
+                }
+                Self::Rsa(_) => anyhow::bail!("an RSA key does not sign with ECDSA"),
+            })
+        }
+    }
+
+    /// Returns `certificate` with its signed part naming `signed` as its signature algorithm, signed again by `sign`, and
+    /// with `outer` as its signatureAlgorithm.
+    ///
+    /// `signed` must encode to the length of the algorithm it replaces, as every `ecdsa-with-SHA*` identifier does.
+    fn re_signed(
+        certificate: &str,
+        signed: ObjectIdentifier,
+        outer: ObjectIdentifier,
+        sign: impl FnOnce(&[u8]) -> anyhow::Result<Vec<u8>>,
+    ) -> anyhow::Result<String> {
+        let algorithm = |oid| AlgorithmIdentifierOwned { oid, parameters: None }.to_der();
+        let certificate = Certificate::from_der(&STANDARD.decode(certificate)?)?;
+        let mut tbs = certificate.tbs_certificate().to_der()?;
+        let current = certificate.tbs_certificate().signature().to_der()?;
+        let replacement = algorithm(signed)?;
+        ensure!(
+            replacement.len() == current.len(),
+            "the signature algorithms differ in length"
+        );
+        // The signature algorithm is the first algorithm identifier of the signed part, after its version and serial
+        // number.
+        let position = tbs
+            .windows(current.len())
+            .position(|window| window == current)
+            .context("signed part without its signature algorithm")?;
+        tbs[position..position + current.len()].copy_from_slice(&replacement);
+        let signature = BitString::from_bytes(&sign(&tbs)?)?.to_der()?;
+        let contents = [tbs, algorithm(outer)?, signature].concat();
+        Ok(STANDARD.encode(Any::new(Tag::Sequence, contents)?.to_der()?))
     }
 
     /// basicConstraints with `cA` set and `path_len` as its pathLenConstraint.
@@ -1841,10 +1955,10 @@ mod tests {
 
     /// Returns a `base64` DER certificate for `key` named `subject`, which `signer` signs under the issuer name `issuer`.
     fn test_certificate(
-        signer: &SigningKey,
+        signer: &TestKey,
         issuer: &Name,
         subject: &Name,
-        key: &VerifyingKey,
+        key: &TestKey,
         extensions: Vec<Extension>,
     ) -> anyhow::Result<String> {
         let profile = TestProfile {
@@ -1856,9 +1970,12 @@ mod tests {
             Time::try_from(UNIX_EPOCH + Duration::from_secs(1_700_000_000))?,
             Time::try_from(UNIX_EPOCH + Duration::from_secs(1_900_000_000))?,
         );
-        let spki = SubjectPublicKeyInfoOwned::try_from(key.to_public_key_der()?.as_bytes())?;
-        let certificate = CertificateBuilder::new(profile, SerialNumber::from(1u64), validity, spki)?
-            .build::<_, DerSignature>(signer)?;
+        let builder = CertificateBuilder::new(profile, SerialNumber::from(1u64), validity, key.public_key()?)?;
+        let certificate = match signer {
+            TestKey::P256(signer) => builder.build::<_, DerSignature>(signer)?,
+            TestKey::P384(signer) => builder.build::<_, p384::ecdsa::DerSignature>(signer)?,
+            TestKey::Rsa(signer) => builder.build::<_, rsa::pkcs1v15::Signature>(signer)?,
+        };
         Ok(STANDARD.encode(certificate.to_der()?))
     }
 
@@ -1923,12 +2040,11 @@ mod tests {
     fn chain_signed_by_the_held_root_s_key_under_another_issuer_name(
         held: &TestCertificate,
     ) -> anyhow::Result<Vec<String>> {
-        let key = SigningKey::from_slice(&[34; 32])?;
         let leaf = test_certificate(
             &held.key,
             &"CN=Other root".parse()?,
             &"CN=Claimed identity".parse()?,
-            key.verifying_key(),
+            &TestKey::p256(34)?,
             Vec::new(),
         )?;
         Ok(vec![leaf, held.der.clone()])
@@ -1990,6 +2106,29 @@ mod tests {
         Ok(vec![STANDARD.encode(leaf), held.der.clone()])
     }
 
+    fn chain_with_a_leaf_the_held_p256_root_signs_with_sha384(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        let leaf = held.issue(60, "CN=Claimed identity", false)?;
+        let leaf = re_signed(&leaf.der, ECDSA_WITH_SHA384, ECDSA_WITH_SHA384, |tbs| {
+            held.key.sign_ecdsa_digest::<Sha384>(tbs)
+        })?;
+        Ok(vec![leaf, held.der.clone()])
+    }
+
+    fn chain_through_a_p384_intermediate_signing_with_sha256(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        let intermediate = held.issue_for(TestKey::p384(61)?, "CN=Intermediate", vec![ca(None)?])?;
+        let leaf = intermediate.issue(62, "CN=Claimed identity", false)?;
+        let leaf = re_signed(&leaf.der, ECDSA_WITH_SHA256, ECDSA_WITH_SHA256, |tbs| {
+            intermediate.key.sign_ecdsa_digest::<Sha256>(tbs)
+        })?;
+        Ok(vec![leaf, intermediate.der, held.der.clone()])
+    }
+
+    fn chain_through_an_rsa_intermediate(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
+        let intermediate = held.issue_for(TestKey::rsa()?, "CN=Intermediate", vec![ca(None)?])?;
+        let leaf = intermediate.issue(63, "CN=Claimed identity", false)?;
+        Ok(vec![leaf.der, intermediate.der, held.der.clone()])
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[rstest::rstest]
     #[case::from_another_root(chain_from_another_root)]
@@ -2010,6 +2149,13 @@ mod tests {
     // A signature verifies only under the algorithm its certificate names, which must be the one in the signed part.
     // oracle: spec RFC 5280 §4.1.1.2
     #[case::with_a_leaf_naming_another_signature_algorithm(chain_with_a_leaf_naming_another_signature_algorithm)]
+    // A P-256 key signs only with `ecdsa-with-SHA256`, and a P-384 key only with `ecdsa-with-SHA384`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[case::with_a_p256_key_signing_with_sha384(chain_with_a_leaf_the_held_p256_root_signs_with_sha384)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[case::with_a_p384_key_signing_with_sha256(chain_through_a_p384_intermediate_signing_with_sha256)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[case::through_an_rsa_intermediate(chain_through_an_rsa_intermediate)]
     fn an_enrollment_claiming_a_held_authority_from_another_base_url_without_a_held_root_is_refused(
         #[case] claimed_chain: ChainOutsideHeldRoots,
     ) -> anyhow::Result<()> {
@@ -2135,6 +2281,26 @@ mod tests {
         ))
     }
 
+    fn chain_through_a_p384_intermediate_of_the_held_root(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root(10, HELD_ROOT)?;
+        let held = hold_identity_under(store, data_dir, &root)?;
+        let intermediate = root.issue_for(TestKey::p384(56)?, "CN=Intermediate", vec![ca(None)?])?;
+        let leaf = intermediate.issue(57, "CN=Claimed identity", false)?;
+        Ok((held, vec![leaf.der, intermediate.der, root.der]))
+    }
+
+    fn chain_from_a_held_p384_root(
+        store: &Store,
+        data_dir: &Utf8Path,
+    ) -> anyhow::Result<(StoredIdentity, Vec<String>)> {
+        let root = TestCertificate::root_for(TestKey::p384(58)?, HELD_ROOT)?;
+        let held = hold_identity_under(store, data_dir, &root)?;
+        Ok((held, vec![root.issue(59, "CN=Claimed identity", false)?.der, root.der]))
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[rstest::rstest]
     #[case::from_the_held_root(chain_from_the_held_root)]
@@ -2149,6 +2315,11 @@ mod tests {
     #[case::from_a_cross_signed_new_root(chain_from_a_new_root_the_held_root_cross_signed)]
     #[case::from_the_root_of_the_previous_slot(chain_from_the_root_of_the_previous_slot)]
     #[case::from_the_root_of_the_pending_slot(chain_from_the_root_of_the_pending_slot)]
+    // A P-384 key signs with `ecdsa-with-SHA384`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[case::through_a_p384_intermediate(chain_through_a_p384_intermediate_of_the_held_root)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[case::from_a_held_p384_root(chain_from_a_held_p384_root)]
     fn an_enrollment_claiming_a_held_authority_from_another_base_url_through_a_held_root_replaces_it(
         #[case] held_and_chain: HeldAndVerifiedChain,
     ) -> anyhow::Result<()> {
