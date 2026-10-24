@@ -2525,6 +2525,53 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
     Ok(())
 }
 
+/// CONTRACT.agent-identity.md §5.2: "The agent refuses a response whose leaf lacks the enrollment URL extension or names another URL than its token's `u`, as a permanent outcome", which the agent records with the local marker code `authority_url_mismatch`.
+///
+/// A repeated extension and a value that is not an `IA5String` name no single URL of the token, so they are refused the same way.
+/// The mock issues each leaf through its `malformed_enrollment_url` fault, which still creates the identity and counts the use, as a nonconforming authority would.
+pub(crate) async fn a_enrollment_leaf_naming_another_url_refused(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    for (shape, fault) in [
+        ("without the extension", json!("missing")),
+        ("with the extension twice", json!("repeated")),
+        ("with the URL as a UTF8String", json!("not_ia5")),
+        (
+            "naming another URL",
+            json!({ "other_url": "https://relay.invalid/mock" }),
+        ),
+    ] {
+        with_agent(ctx.clone(), None, true, async move |case| {
+            let target = case.ctx.target.clone();
+            target.faults(&json!({ "malformed_enrollment_url": fault })).await?;
+            let token = new_token(case, 2).await?;
+            case.write_pending(&token.text)?;
+            poll!(case, WAIT, POLL, "the mock did not enroll the agent", async {
+                Ok((target.management().identity_count(&token).await? == 1).then_some(()))
+            });
+            case.until_pending_deleted(&target, &token.text, &token, 1, 1).await?;
+            let marker_path = case.rejection_path_for(&token.text);
+            let marker: Value = serde_json::from_slice(
+                &std::fs::read(&marker_path)
+                    .with_context(|| format!("read rejection marker {}", marker_path.display()))?,
+            )?;
+            ensure!(
+                marker["code"] == "authority_url_mismatch",
+                "rejection marker records {} instead of authority_url_mismatch",
+                marker["code"]
+            );
+            ensure!(
+                count(&target.requests(Some(&token)).await?, "enroll")? == 1,
+                "agent retried the enrollment it refused permanently"
+            );
+            target.faults(&json!({ "malformed_enrollment_url": null })).await
+        })
+        .await
+        .with_context(|| format!("enrollment leaf {shape}"))?;
+    }
+    Ok(())
+}
+
 /// A server holding another authority's token relays a device's enrollment from its own address, so the token's `u` names the relay, and so does the agent's CSR, which the authority refuses with `invalid_request` ([CONTRACT.agent-identity.md] §4 "Certificates").
 /// `invalid_request` is transient (§5.4 "Errors"), so the agent keeps the pending state and retries, and the authority creates nothing.
 ///

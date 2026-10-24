@@ -7259,6 +7259,51 @@ pub(crate) async fn p_token_secret_must_match_exactly(ctx: Context) -> anyhow::R
     Ok(())
 }
 
+/// A CSR for `key` naming `base_url` whose self-signature does not verify, but whose DER is still valid.
+///
+/// The CSR signature is a DER `SEQUENCE` of `r` and `s` that ends with the low byte of `s` (RFC 5480 §2.2.2 "ECDSA-Sig-Value"), and changing that byte keeps every length and the integer's minimal encoding.
+fn bad_self_signature_csr(key: &KeyPair, base_url: &str) -> anyhow::Result<String> {
+    let mut request = x509_cert::request::CertReq::from_der(&decoded_certificate(&key.csr(base_url)?)?)?;
+    let mut signature = request
+        .signature
+        .as_bytes()
+        .context("CSR signature has unused bits")?
+        .to_vec();
+    *signature.last_mut().context("empty CSR signature")? ^= 1;
+    p256::ecdsa::DerSignature::from_bytes(&signature).context("the altered signature is not valid DER")?;
+    request.signature = der::asn1::BitString::from_bytes(&signature)?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(request.to_der()?))
+}
+
+/// CONTRACT.agent-identity.md §4: the server "verifies the CSR self-signature (else `invalid_request`)".
+///
+/// The refused CSR names the token's URL, so only its self-signature can refuse it.
+pub(crate) async fn p_csr_bad_self_signature_rejected(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    let (token, identity) = issued(&ctx, "bad-self-signature").await?;
+    let before = identity_record(&ctx.target, &identity.identity_id).await?;
+    let key = KeyPair::generate()?;
+    let body =
+        serde_json::to_vec(&json!({ "csr": bad_self_signature_csr(&key, &identity.base_url)?, "metadata": {} }))?;
+    expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
+        .context("enroll CSR with a bad self-signature")?;
+    expect_error(
+        &signed_raw(&ctx.target, &identity, "renew", &body).await?,
+        400,
+        "invalid_request",
+    )
+    .context("renew CSR with a bad self-signature")?;
+    assert_identity_metadata_and_certificates_unchanged(&ctx.target, &identity.identity_id, &before).await?;
+    let management = ctx.target.management();
+    ensure!(
+        management.token(&token.id).await?.used_count == 1 && management.identity_count(&token).await? == 1,
+        "a CSR with a bad self-signature created an identity or counted a token use"
+    );
+    expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)
+        .context("the validly signed CSR of the same key was not accepted")
+}
+
 /// A CSR for `key` naming `base_url` whose public key is the compressed form of its point, validly self-signed.
 fn compressed_point_csr(key: &KeyPair, base_url: &str) -> anyhow::Result<String> {
     let mut request = x509_cert::request::CertReq::from_der(&decoded_certificate(&key.csr(base_url)?)?)?;
@@ -7298,15 +7343,17 @@ pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Res
 /// A CSR's `extensionRequest` holds these extensions, or a CSR without one has `None`.
 type RequestedExtensions = Option<Vec<x509_cert::ext::Extension>>;
 
+/// Another OID of the RFC 5612 documentation arc, which no party gives a meaning.
+const UNASSIGNED_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.2");
+
 /// Returns what a CSR to the authority whose tokens carry `url` may request instead of the enrollment URL extension naming `url`, each named for how it differs.
 ///
 /// The trailing slash and the upper-case scheme and host name URLs that a URL parser reads as `url` itself, so that only comparing the text byte for byte refuses them.
 fn other_enrollment_url_requests(url: &str) -> anyhow::Result<Vec<(&'static str, RequestedExtensions)>> {
     let rest = url.strip_prefix("https://").context("enrollment URL is not https")?;
     let (authority, path) = rest.find('/').map_or((rest, ""), |slash| rest.split_at(slash));
-    // Another OID of the RFC 5612 documentation arc, which no party gives a meaning.
     let mut other_oid = enrollment_url_extension(url)?;
-    other_oid.extn_id = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.2");
+    other_oid.extn_id = UNASSIGNED_EXTENSION;
     let naming =
         |text: &str| -> anyhow::Result<RequestedExtensions> { Ok(Some(vec![enrollment_url_extension(text)?])) };
     Ok(vec![
@@ -7348,6 +7395,23 @@ pub(crate) async fn p_enroll_csr_must_name_token_url(ctx: Context) -> anyhow::Re
         "the accepted enrollment did not count the token's only use"
     );
     Ok(())
+}
+
+/// CONTRACT.agent-identity.md §4: the server "ignores the subject and every other attribute or requested extension", so a CSR requesting another extension beside the enrollment URL enrolls, and the leaf carries only the profile's extensions.
+pub(crate) async fn p_enroll_csr_ignores_other_requested_extensions(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    let token = token(&ctx, 1).await?;
+    let url = token_base_url(&token.text)?;
+    let key = KeyPair::generate()?;
+    let mut other = enrollment_url_extension(&url)?;
+    other.extn_id = UNASSIGNED_EXTENSION;
+    let csr = key.csr_requesting(Some(&[enrollment_url_extension(&url)?, other]))?;
+    let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
+    let reply = enroll_raw(&ctx.target, &token, &body).await?;
+    expect_status(&reply, 200).context("a CSR requesting another extension beside the enrollment URL was refused")?;
+    let identity = Identity::from_enrollment(&token.text, key, &reply)?;
+    let leaf = Certificate::from_der(&decoded_certificate(&identity.certificate_chain[0])?)?;
+    assert_leaf_extensions(&leaf, &url)
 }
 
 /// Sends an enrollment of `key` with `token` whose CSR names `elsewhere`, which must be refused with `invalid_request`, then one with the key's own CSR, and returns the reply to the latter.
