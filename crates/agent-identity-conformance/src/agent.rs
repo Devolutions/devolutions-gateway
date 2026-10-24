@@ -2591,13 +2591,13 @@ pub(crate) async fn a_enrollment_leaf_naming_another_url_refused(ctx: Context) -
     }
 }
 
-/// A server holding another authority's token relays a device's enrollment from its own address, so the token's `u` names the relay, and so does the agent's CSR, which the authority refuses with `invalid_request` ([CONTRACT.agent-identity.md] §4 "Certificates").
-/// `invalid_request` is transient (§5.4 "Errors"), so the agent keeps the pending state and retries, and the authority creates nothing.
+/// A server holding another authority's token relays a device's enrollment from its own address, so the token's `u` names the relay, and so does the agent's CSR, which the authority refuses with `token_url_mismatch` ([CONTRACT.agent-identity.md] §4 "Certificates").
+/// `token_url_mismatch` is permanent (§5.4 "Errors"), so the agent never retries the token, deletes its pending file, in-progress record and enrollment key, and records the code in a rejection marker, while the authority creates nothing.
 ///
 /// The mock's TLS certificate names both `127.0.0.1` and `localhost`, and the mock never reads a token's bag, so the token rewritten to the other name reaches the same mock as a relay reaches the authority.
 ///
 /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
-pub(crate) async fn a_relayed_enrollment_kept_pending(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn a_relayed_enrollment_refused(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
@@ -2614,36 +2614,27 @@ pub(crate) async fn a_relayed_enrollment_kept_pending(ctx: Context) -> anyhow::R
         let relayed = with_bag_url(&token.text, &relay)?;
         let initial = count(&target.requests(Some(&token)).await?, "enroll")?;
         case.write_pending(&relayed)?;
-        poll!(case, WAIT, POLL, "agent did not retry the relayed enrollment", async {
-            Ok((initial + 2 <= count(&target.requests(Some(&token)).await?, "enroll")?).then_some(()))
-        });
-        let progress = case
-            .in_progress()?
-            .context("agent dropped the in-progress record of the relayed enrollment")?;
+        case.until_pending_deleted(&target, &relayed, &token, 0, 0).await?;
+        let marker_path = case.rejection_path_for(&relayed);
+        let marker: Value = serde_json::from_slice(
+            &std::fs::read(&marker_path).with_context(|| format!("read rejection marker {}", marker_path.display()))?,
+        )?;
         ensure!(
-            key_exists(case, field(&progress, "key_name")?)?,
-            "agent deleted the enrollment key of the relayed enrollment"
+            marker["code"] == "token_url_mismatch",
+            "rejection marker records {} instead of token_url_mismatch",
+            marker["code"]
         );
         ensure!(
-            case.pending_path().exists(),
-            "agent deleted the pending file of the relayed enrollment"
+            count(&target.requests(Some(&token)).await?, "enroll")? == initial + 1,
+            "agent did not send the relayed enrollment exactly once"
         );
-        ensure!(
-            !case.rejection_path_for(&relayed).exists() && !case.has_stored_identity()?,
-            "agent rejected the relayed token or stored an identity"
-        );
-        let management = target.management();
-        ensure!(
-            management.identity_count(&token).await? == 0 && management.token(&token.id).await?.used_count == 0,
-            "the relayed enrollment created an identity or counted a token use"
-        );
-        // The agent's requests reached the mock, and this one shows the answer they got.
+        // The agent's request reached the mock, and this one shows the answer it got.
         expect_error(
             &target
                 .enroll(&relayed, &crate::signer::KeyPair::generate()?, &json!({}))
                 .await?,
-            400,
-            "invalid_request",
+            403,
+            "token_url_mismatch",
         )
         .context("the mock did not refuse a CSR naming the relay")?;
         case.check_running()

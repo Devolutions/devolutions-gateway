@@ -946,7 +946,7 @@ const TESTS: &[Test] = &[
     a!(a_enroll_revoked_before_response_is_permanent, mock_only),
     a!(a_pending_file_deleted_on_permanent_error),
     a!(a_pending_file_kept_on_transient_error),
-    a!(a_relayed_enrollment_kept_pending, mock_only),
+    a!(a_relayed_enrollment_refused, mock_only),
     a!(a_enrollment_leaf_naming_another_url_refused, mock_only),
     a!(a_unavailable_key_backend_stops_identity),
     a!(a_renew_transient_failures_retry_without_state_change, mock_only).channel(),

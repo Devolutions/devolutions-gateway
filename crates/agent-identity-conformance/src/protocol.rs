@@ -7370,25 +7370,37 @@ fn other_enrollment_url_requests(url: &str) -> anyhow::Result<Vec<(&'static str,
     ])
 }
 
-/// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u`, with `invalid_request`, and creates nothing".
+/// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates nothing".
 ///
 /// Each refused CSR is for the key of the accepted one and differs from it only in its attribute, so that only the enrollment URL rule refuses it.
 pub(crate) async fn p_enroll_csr_must_name_token_url(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let management = ctx.target.management();
     let token = token(&ctx, 1).await?;
     let url = token_base_url(&token.text)?;
     let key = KeyPair::generate()?;
     for (variant, extensions) in other_enrollment_url_requests(&url)? {
         let body = serde_json::to_vec(&json!({ "csr": key.csr_requesting(extensions.as_deref())?, "metadata": {} }))?;
-        expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
-            .with_context(|| format!("enrollment CSR {variant}"))?;
+        expect_error(
+            &enroll_raw(&ctx.target, &token, &body).await?,
+            403,
+            "token_url_mismatch",
+        )
+        .with_context(|| format!("enrollment CSR {variant}"))?;
         ensure!(
             management.token(&token.id).await?.used_count == 0 && management.identity_count(&token).await? == 0,
             "the enrollment CSR {variant} created an identity or counted a token use"
         );
     }
+    // §2.1 orders "`invalid_request` for an invalid body, CSR or metadata, then `token_url_mismatch`", so a CSR that is both is invalid.
+    let body = serde_json::to_vec(&json!({
+        "csr": bad_self_signature_csr(&key, &format!("{url}/relay"))?,
+        "metadata": {}
+    }))?;
+    expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
+        .context("enrollment CSR naming another URL with a bad self-signature")?;
     expect_status(&ctx.target.enroll(&token.text, &key, &json!({})).await?, 200)
         .context("the CSR of the same key naming the token's URL was not accepted")?;
     ensure!(
@@ -7421,7 +7433,7 @@ pub(crate) async fn p_enroll_csr_ignores_other_requested_extensions(ctx: Context
     Ok(())
 }
 
-/// Sends an enrollment of `key` with `token` whose CSR names `elsewhere`, which must be refused with `invalid_request`, then one with the key's own CSR, and returns the reply to the latter.
+/// Sends an enrollment of `key` with `token` whose CSR names `elsewhere`, which must be refused with `token_url_mismatch`, then one with the key's own CSR, and returns the reply to the latter.
 async fn enroll_elsewhere_then_here(
     target: &Target,
     token: &Token,
@@ -7431,17 +7443,18 @@ async fn enroll_elsewhere_then_here(
 ) -> anyhow::Result<Reply> {
     let csr = key.csr_requesting(Some(&[enrollment_url_extension(elsewhere)?]))?;
     let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
-    expect_error(&enroll_raw(target, token, &body).await?, 400, "invalid_request")
+    expect_error(&enroll_raw(target, token, &body).await?, 403, "token_url_mismatch")
         .with_context(|| format!("CSR naming another URL for {case}"))?;
     target.enroll(&token.text, key, &json!({})).await
 }
 
-/// CONTRACT.agent-identity.md §2.1: "(2) `invalid_request` for an invalid body, CSR or metadata" wins over "(3) the result of the CSR public key lookup", "(4) `token_invalid` for a revoked token" and "(5) `token_exhausted`".
+/// CONTRACT.agent-identity.md §2.1: "(2) [...] `token_url_mismatch` for a CSR whose enrollment URL extension is missing or not the token's `u`" wins over "(3) the result of the CSR public key lookup", "(4) `token_invalid` for a revoked token" and "(5) `token_exhausted`".
 ///
 /// Each case sends a CSR naming another URL, then the key's own CSR, whose outcome shows which later rule would decide the case.
 pub(crate) async fn p_enroll_csr_url_refusal_precedes_key_lookup_and_token_state(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let management = ctx.target.management();
     let token = token(&ctx, 2).await?;
     let url = token_base_url(&token.text)?;
@@ -7495,10 +7508,11 @@ pub(crate) async fn p_enroll_csr_url_refusal_precedes_key_lookup_and_token_state
     Ok(())
 }
 
-/// CONTRACT.agent-identity.md §2.1: "(2) `invalid_request` for an invalid body, CSR or metadata" wins over "`token_expired` for an expired one", and over the replay of an expired token's own key.
+/// CONTRACT.agent-identity.md §2.1: "(2) [...] `token_url_mismatch` for a CSR whose enrollment URL extension is missing or not the token's `u`" wins over "`token_expired` for an expired one", and over the replay of an expired token's own key.
 pub(crate) async fn p_enroll_csr_url_refusal_precedes_token_expiry(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     let token = token(&ctx, 2).await?;
     let url = token_base_url(&token.text)?;
     let elsewhere = format!("{url}/relay");
