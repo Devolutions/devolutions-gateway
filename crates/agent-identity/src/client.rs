@@ -11,6 +11,7 @@ use anyhow::Context as _;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use camino::Utf8Path;
+use der::asn1::Ia5StringRef;
 use der::{Decode as _, Encode as _};
 use device_key::DeviceKey;
 use http_client_proxy::{ProxyConfig, SystemProxySettings};
@@ -28,6 +29,7 @@ use url::Url;
 use uuid::Uuid;
 use x509_cert::Certificate;
 
+use crate::csr::ENROLLMENT_URL_EXTENSION;
 use crate::metadata::Metadata;
 use crate::token::Token;
 
@@ -40,6 +42,11 @@ pub enum PermanentCode {
     TokenInvalid,
     TokenExhausted,
     TokenExpired,
+    /// The enrollment certificate lacks the enrollment URL extension or names another URL than the token's, a local
+    /// code ([CONTRACT.agent-identity.md §5.2 "`POST enroll`"][contract]).
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enroll
+    AuthorityUrlMismatch,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,6 +61,7 @@ impl PermanentCode {
             Self::TokenInvalid => "token_invalid",
             Self::TokenExhausted => "token_exhausted",
             Self::TokenExpired => "token_expired",
+            Self::AuthorityUrlMismatch => "authority_url_mismatch",
         }
     }
 }
@@ -280,6 +288,10 @@ impl Client {
         let response: EnrollResponse = parse_response(&body)?;
         validate_certificate_chain(&response.certificate_chain, &key.public_key())?;
         validate_config(&response.config)?;
+        // UNTESTED: every enrollment response, first enrollments included, is refused when its leaf doesn't name the
+        // token's base URL.
+        // No client test runs an HTTPS authority; when changing this, keep the check on the enroll path.
+        check_enrollment_url(&response.certificate_chain, token.base_url())?;
         Ok(response)
     }
 
@@ -617,6 +629,33 @@ fn validate_chain_der(chain: &[String]) -> ClientResult<Vec<Certificate>> {
         .collect()
 }
 
+/// Requires the leaf of an enrollment chain to carry exactly one enrollment URL extension, whose `IA5String` is
+/// `base_url` byte for byte ([CONTRACT.agent-identity.md §5.2 "`POST enroll`"][enroll] and [§4
+/// "Certificates"][certificates]).
+///
+/// `base_url` is the token's `u` without its trailing slashes, the URL the agent names in its CSR.
+/// A leaf without the extension, with a value that is not an `IA5String`, or naming another URL is refused as the
+/// permanent [`PermanentCode::AuthorityUrlMismatch`], so that a server holding a token for another address can't
+/// relay the device's enrollment.
+/// Renewal responses are not checked.
+///
+/// [enroll]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enroll
+/// [certificates]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#certificates
+fn check_enrollment_url(chain: &[String], base_url: &str) -> ClientResult<()> {
+    let certificates = validate_chain_der(chain)?;
+    let mut urls = certificates[0]
+        .tbs_certificate()
+        .extensions()
+        .into_iter()
+        .flatten()
+        .filter(|extension| extension.extn_id == ENROLLMENT_URL_EXTENSION)
+        .map(|extension| Ia5StringRef::from_der(extension.extn_value.as_bytes()));
+    match (urls.next(), urls.next()) {
+        (Some(Ok(url)), None) if url.as_str() == base_url => Ok(()),
+        _ => Err(ClientError::Permanent(PermanentCode::AuthorityUrlMismatch)),
+    }
+}
+
 /// Returns a signer for a stored key and the leaf of its certificate chain.
 pub fn request_signer(key: Arc<dyn DeviceKey>, chain: &[String]) -> anyhow::Result<RequestSigner> {
     Ok(RequestSigner::new(key, &leaf_certificate_der(chain)?))
@@ -671,6 +710,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use der::asn1::{OctetString, Utf8StringRef};
     use http_client_proxy::{AutomaticConfiguration, ManualProxyConfig};
     use p256::ecdsa::{DerSignature, Signature, SigningKey};
     use rstest::rstest;
@@ -685,7 +725,7 @@ mod tests {
 
     use super::*;
 
-    struct TestProfile;
+    struct TestProfile(Vec<Extension>);
 
     impl BuilderProfile for TestProfile {
         fn get_issuer(&self, subject: &Name) -> Name {
@@ -702,17 +742,26 @@ mod tests {
             _issuer_spk: spki::SubjectPublicKeyInfoRef<'_>,
             _tbs: &x509_cert::certificate::TbsCertificate,
         ) -> x509_cert::builder::Result<Vec<Extension>> {
-            Ok(Vec::new())
+            Ok(self.0.clone())
         }
     }
 
     fn self_signed_leaf(key: &SigningKey, not_before: u64, not_after: u64) -> anyhow::Result<String> {
+        leaf_with_extensions(key, not_before, not_after, Vec::new())
+    }
+
+    fn leaf_with_extensions(
+        key: &SigningKey,
+        not_before: u64,
+        not_after: u64,
+        extensions: Vec<Extension>,
+    ) -> anyhow::Result<String> {
         let spki = key.verifying_key().to_public_key_der()?;
         let spki = SubjectPublicKeyInfoOwned::try_from(spki.as_bytes())?;
         let before = Time::try_from(UNIX_EPOCH + Duration::from_secs(not_before))?;
         let after = Time::try_from(UNIX_EPOCH + Duration::from_secs(not_after))?;
         let builder = CertificateBuilder::new(
-            TestProfile,
+            TestProfile(extensions),
             SerialNumber::from(1u64),
             Validity::new(before, after),
             spki,
@@ -754,6 +803,69 @@ mod tests {
         assert_eq!(
             validate_certificate_chain(&[leaf, "not base64".to_owned()], key.verifying_key()),
             Err(ClientError::invalid_response("invalid base64 certificate"))
+        );
+        Ok(())
+    }
+
+    /// An enrollment URL extension whose `extnValue` holds the DER `value`.
+    fn enrollment_url_extension(value: &[u8]) -> Extension {
+        Extension {
+            extn_id: ENROLLMENT_URL_EXTENSION,
+            critical: false,
+            extn_value: OctetString::new(value).expect("extension value fits an OCTET STRING"),
+        }
+    }
+
+    fn ia5(url: &str) -> Vec<u8> {
+        Ia5StringRef::new(url)
+            .and_then(|url| url.to_der())
+            .expect("test URL is an IA5String")
+    }
+
+    /// An enrollment chain whose leaf carries `extensions`.
+    fn enrollment_chain(extensions: Vec<Extension>) -> anyhow::Result<Vec<String>> {
+        let leaf = leaf_with_extensions(
+            &SigningKey::from_slice(&[7u8; 32])?,
+            1_800_000_000,
+            1_800_086_400,
+            extensions,
+        )?;
+        let root = self_signed_leaf(&SigningKey::from_slice(&[8u8; 32])?, 1_700_000_000, 1_900_000_000)?;
+        Ok(vec![leaf, root])
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[test]
+    fn an_enrollment_leaf_naming_the_token_base_url_is_accepted() -> anyhow::Result<()> {
+        let chain = enrollment_chain(vec![enrollment_url_extension(&ia5("https://example.test/dvls"))])?;
+        assert_eq!(check_enrollment_url(&chain, "https://example.test/dvls"), Ok(()));
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[rstest]
+    #[case::absent(Vec::new())]
+    #[case::another_host(vec![enrollment_url_extension(&ia5("https://other.test/dvls"))])]
+    #[case::another_path(vec![enrollment_url_extension(&ia5("https://example.test"))])]
+    #[case::trailing_slash(vec![enrollment_url_extension(&ia5("https://example.test/dvls/"))])]
+    #[case::host_case(vec![enrollment_url_extension(&ia5("https://EXAMPLE.test/dvls"))])]
+    #[case::not_an_ia5_string(vec![enrollment_url_extension(
+        &Utf8StringRef::new("https://example.test/dvls").and_then(|url| url.to_der()).expect("UTF8String")
+    )])]
+    // oracle: spec RFC 5280 §4.2
+    #[case::twice(vec![
+        enrollment_url_extension(&ia5("https://example.test/dvls")),
+        enrollment_url_extension(&ia5("https://example.test/dvls")),
+    ])]
+    fn an_enrollment_leaf_not_naming_the_token_base_url_is_refused_as_permanent(
+        #[case] extensions: Vec<Extension>,
+    ) -> anyhow::Result<()> {
+        let chain = enrollment_chain(extensions)?;
+        assert_eq!(
+            check_enrollment_url(&chain, "https://example.test/dvls"),
+            Err(ClientError::Permanent(PermanentCode::AuthorityUrlMismatch))
         );
         Ok(())
     }
