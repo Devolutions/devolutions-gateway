@@ -17,7 +17,7 @@ use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
 use crate::app::{App, rfc3339};
-use crate::state::{ApiError, DropTarget, FailNextResponse, Faults, StreamPush};
+use crate::state::{ApiError, DropTarget, FailNextResponse, Faults, MalformedEnrollmentUrl, StreamPush};
 
 pub(crate) fn router(app: Arc<App>) -> Router {
     Router::new()
@@ -238,6 +238,13 @@ fn faults_view(faults: &Faults) -> Value {
             Some(crate::state::MalformedChannelUrl::Query) => json!("query"),
             Some(crate::state::MalformedChannelUrl::Fragment) => json!("fragment"),
         },
+        "malformed_enrollment_url": match &faults.malformed_enrollment_url {
+            None => Value::Null,
+            Some(MalformedEnrollmentUrl::Missing) => json!("missing"),
+            Some(MalformedEnrollmentUrl::Repeated) => json!("repeated"),
+            Some(MalformedEnrollmentUrl::NotIa5) => json!("not_ia5"),
+            Some(MalformedEnrollmentUrl::OtherUrl(url)) => json!({ "other_url": url }),
+        },
         "rotation_rate_limit_per_sec": faults.rotation_rate_limit_per_sec,
         "config_version": faults.config_version,
         "root_key_unavailable": faults.root_key_unavailable,
@@ -361,6 +368,27 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                 }
                 _ => return invalid("malformed_channel_url must be true, false, query, fragment or null"),
             },
+            "malformed_enrollment_url" => {
+                const EXPECTED: &str =
+                    "malformed_enrollment_url must be missing, repeated, not_ia5, { other_url: <ASCII URL> } or null";
+                state.faults.malformed_enrollment_url = match value {
+                    Value::Null => None,
+                    Value::String(shape) => Some(match shape.as_str() {
+                        "missing" => MalformedEnrollmentUrl::Missing,
+                        "repeated" => MalformedEnrollmentUrl::Repeated,
+                        "not_ia5" => MalformedEnrollmentUrl::NotIa5,
+                        _ => return invalid(EXPECTED),
+                    }),
+                    // An `IA5String` holds only ASCII.
+                    Value::Object(fields) => match fields.get("other_url").and_then(Value::as_str) {
+                        Some(url) if fields.len() == 1 && url.is_ascii() => {
+                            Some(MalformedEnrollmentUrl::OtherUrl(url.to_owned()))
+                        }
+                        _ => return invalid(EXPECTED),
+                    },
+                    _ => return invalid(EXPECTED),
+                };
+            }
             "rotation_rate_limit_per_sec" => match value {
                 Value::Null => state.faults.rotation_rate_limit_per_sec = None,
                 Value::Number(n) => match n.as_u64().and_then(|v| u32::try_from(v).ok()) {

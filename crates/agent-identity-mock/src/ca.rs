@@ -7,7 +7,7 @@ use std::str::FromStr as _;
 use anyhow::Context as _;
 use base64::Engine as _;
 use der::Encode as _;
-use der::asn1::{Ia5String, ObjectIdentifier};
+use der::asn1::{Ia5String, ObjectIdentifier, Utf8StringRef};
 use p256::ecdsa::{DerSignature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::Generate as _;
 use sha2::Digest as _;
@@ -148,14 +148,26 @@ pub(crate) struct Leaf {
     pub(crate) not_after: i64,
 }
 
-/// Issues a leaf per §4, whose only extensions are KeyUsage, EKU, SAN and the non-critical enrollment URL extension
-/// naming `enrollment_url`, so that it carries no basicConstraints; the lifetime is capped at the issuing root's
+/// How a leaf carries the enrollment URL extension.
+pub(crate) enum EnrollmentUrlExtension<'a> {
+    /// One non-critical instance holding the URL as an `IA5String`, as §4 requires.
+    Conforming(&'a str),
+    /// No instance, which only a nonconforming authority issues.
+    Missing,
+    /// Two identical conforming instances, which only a nonconforming authority issues.
+    Repeated(&'a str),
+    /// One non-critical instance holding the URL as a `UTF8String`, which only a nonconforming authority issues.
+    NotIa5(&'a str),
+}
+
+/// Issues a leaf per §4, whose only extensions are KeyUsage, EKU, SAN and the enrollment URL extension as
+/// `enrollment_url` shapes it, so that it carries no basicConstraints; the lifetime is capped at the issuing root's
 /// `notAfter`.
 pub(crate) fn issue_leaf(
     root: &RootCa,
     identity_id: uuid::Uuid,
     public_key: &VerifyingKey,
-    enrollment_url: &str,
+    enrollment_url: EnrollmentUrlExtension<'_>,
     serial: u64,
     now: i64,
     lifetime_secs: i64,
@@ -168,7 +180,6 @@ pub(crate) fn issue_leaf(
     anyhow::ensure!(not_after > not_before, "issuing root has expired");
     let subject = Name::from_str(&format!("CN={identity_id}")).context("leaf name")?;
     let san_uri = Ia5String::new(&format!("urn:uuid:{identity_id}")).context("leaf SAN URI")?;
-    let enrollment_url = Ia5String::new(enrollment_url).context("enrollment URL is not an IA5String")?;
     let mut builder = new_builder(&root.name, &subject, public_key, serial, not_before, not_after)?;
     builder
         .add_extension(&KeyUsage(KeyUsages::DigitalSignature.into()))
@@ -179,9 +190,29 @@ pub(crate) fn issue_leaf(
     builder
         .add_extension(&SubjectAltName(vec![GeneralName::UniformResourceIdentifier(san_uri)]))
         .context("add subject alternative name")?;
-    builder
-        .add_extension((ENROLLMENT_URL_EXTENSION, false, &enrollment_url))
-        .context("add enrollment URL")?;
+    let ia5 = |url: &str| Ia5String::new(url).context("enrollment URL is not an IA5String");
+    match enrollment_url {
+        EnrollmentUrlExtension::Conforming(url) => {
+            builder
+                .add_extension((ENROLLMENT_URL_EXTENSION, false, &ia5(url)?))
+                .context("add enrollment URL")?;
+        }
+        EnrollmentUrlExtension::Missing => {}
+        EnrollmentUrlExtension::Repeated(url) => {
+            let url = ia5(url)?;
+            for _ in 0..2 {
+                builder
+                    .add_extension((ENROLLMENT_URL_EXTENSION, false, &url))
+                    .context("add enrollment URL")?;
+            }
+        }
+        EnrollmentUrlExtension::NotIa5(url) => {
+            let url = Utf8StringRef::new(url).context("enrollment URL is not a UTF8String")?;
+            builder
+                .add_extension((ENROLLMENT_URL_EXTENSION, false, &url))
+                .context("add enrollment URL")?;
+        }
+    }
     let cert = builder
         .build::<_, DerSignature>(root.key.as_ref().context("issuing root key was destroyed")?)
         .context("sign leaf certificate")?;
@@ -211,7 +242,7 @@ mod tests {
     use p256::ecdsa::SigningKey;
     use x509_cert::ext::pkix::KeyUsage;
 
-    use super::{RootCa, issue_leaf};
+    use super::{EnrollmentUrlExtension, RootCa, issue_leaf};
     use crate::oracle::ENROLLMENT_URL_EXTENSION;
 
     const URL: &str = "https://host.example/dvls";
@@ -232,7 +263,15 @@ mod tests {
         let root = RootCa::generate(1, now)?;
         let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
 
-        let leaf = issue_leaf(&root, uuid::Uuid::nil(), key.verifying_key(), URL, 2, now, 3600)?;
+        let leaf = issue_leaf(
+            &root,
+            uuid::Uuid::nil(),
+            key.verifying_key(),
+            EnrollmentUrlExtension::Conforming(URL),
+            2,
+            now,
+            3600,
+        )?;
 
         let certificate = x509_cert::Certificate::from_der(&leaf.der)?;
         let extensions: BTreeSet<ObjectIdentifier> = certificate
@@ -275,7 +314,15 @@ mod tests {
         let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
         let identity_id = uuid::Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
 
-        let leaf = issue_leaf(&root, identity_id, key.verifying_key(), URL, 2, now, 3600)?;
+        let leaf = issue_leaf(
+            &root,
+            identity_id,
+            key.verifying_key(),
+            EnrollmentUrlExtension::Conforming(URL),
+            2,
+            now,
+            3600,
+        )?;
 
         let leaf = x509_cert::Certificate::from_der(&leaf.der)?;
         let root = x509_cert::Certificate::from_der(&root.cert_der)?;
@@ -299,7 +346,15 @@ mod tests {
         let root = RootCa::generate(1, now)?;
         let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
 
-        let leaf = issue_leaf(&root, uuid::Uuid::nil(), key.verifying_key(), URL, 2, now, 3600)?;
+        let leaf = issue_leaf(
+            &root,
+            uuid::Uuid::nil(),
+            key.verifying_key(),
+            EnrollmentUrlExtension::Conforming(URL),
+            2,
+            now,
+            3600,
+        )?;
 
         let certificate = x509_cert::Certificate::from_der(&leaf.der)?;
         let instances = certificate

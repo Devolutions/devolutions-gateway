@@ -766,4 +766,80 @@ mod tests {
         }
         Ok(())
     }
+
+    /// Enrolls test key `seed` with a new token through the agent-facing API and returns the issued leaf.
+    async fn enrolled_leaf(app: &Arc<App>, seed: u8) -> anyhow::Result<Vec<u8>> {
+        let now = app.now();
+        let (_, secret) =
+            app.state
+                .lock()
+                .await
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
+        let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
+        let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
+        let body = json!({ "csr": STANDARD.encode(csr_naming(&key(seed), &app.base_url)), "metadata": {} });
+        let (status, enrolled) = post_json(app, "/api/agent-identity/v1/enroll", &headers, body.to_string()).await;
+        assert_eq!(status, 200, "{enrolled}");
+        Ok(STANDARD.decode(enrolled["certificate_chain"][0].as_str().expect("leaf"))?)
+    }
+
+    /// The `malformed_enrollment_url` fault shapes the leaf of every enrollment until it is cleared with `null`.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[tokio::test]
+    async fn malformed_enrollment_url_fault_lasts_until_cleared() -> anyhow::Result<()> {
+        const OTHER_URL: &str = "https://relay.example/mock";
+        let app = App::for_test()?;
+        let named = |leaf: &[u8]| enrollment_url_extension(leaf).map(|(_, url)| url);
+
+        let fault = json!({ "malformed_enrollment_url": { "other_url": OTHER_URL } });
+        let (status, faults) = post_json(&app, FAULTS, &[], fault.to_string()).await;
+        assert_eq!(
+            (status, &faults["malformed_enrollment_url"]),
+            (200, &fault["malformed_enrollment_url"])
+        );
+        assert_eq!(named(&enrolled_leaf(&app, 1).await?).as_deref(), Some(OTHER_URL));
+        assert_eq!(named(&enrolled_leaf(&app, 2).await?).as_deref(), Some(OTHER_URL));
+
+        let clear = json!({ "malformed_enrollment_url": null });
+        let (status, faults) = post_json(&app, FAULTS, &[], clear.to_string()).await;
+        assert_eq!((status, &faults["malformed_enrollment_url"]), (200, &Value::Null));
+        assert_eq!(
+            named(&enrolled_leaf(&app, 3).await?).as_deref(),
+            Some(app.base_url.as_str())
+        );
+        Ok(())
+    }
+
+    /// Each shape the README lists is accepted and reported back as set.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[rstest]
+    #[case::missing(json!("missing"))]
+    #[case::repeated(json!("repeated"))]
+    #[case::not_ia5(json!("not_ia5"))]
+    #[case::other_url(json!({ "other_url": "https://relay.example/mock" }))]
+    #[tokio::test]
+    async fn malformed_enrollment_url_fault_takes_each_shape(#[case] shape: Value) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let fault = json!({ "malformed_enrollment_url": shape });
+        let (status, faults) = post_json(&app, FAULTS, &[], fault.to_string()).await;
+        assert_eq!((status, &faults["malformed_enrollment_url"]), (200, &shape));
+        Ok(())
+    }
+
+    /// An `IA5String` holds only ASCII, so a URL it cannot hold is refused, as are unknown shapes.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[rstest]
+    #[case::unknown_shape(json!("elsewhere"))]
+    #[case::boolean(json!(true))]
+    #[case::non_ascii_url(json!({ "other_url": "https://h\u{f4}te.example/mock" }))]
+    #[case::url_not_a_string(json!({ "other_url": 1 }))]
+    #[case::object_without_url(json!({}))]
+    #[tokio::test]
+    async fn malformed_enrollment_url_fault_refuses_other_values(#[case] shape: Value) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let fault = json!({ "malformed_enrollment_url": shape });
+        let (status, refused) = post_json(&app, FAULTS, &[], fault.to_string()).await;
+        assert_eq!((status, &refused["error"]), (400, &json!("invalid_request")));
+        Ok(())
+    }
 }

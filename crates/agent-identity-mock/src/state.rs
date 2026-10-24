@@ -16,7 +16,7 @@ use tonic::Code;
 use uuid::Uuid;
 
 use crate::app::nanos;
-use crate::ca::{self, RootCa};
+use crate::ca::{self, EnrollmentUrlExtension, RootCa};
 use crate::channel::config_fits_envelope;
 use crate::name_eval;
 use crate::oracle::{
@@ -136,6 +136,20 @@ pub(crate) enum MalformedChannelUrl {
     Fragment,
 }
 
+/// How the leaves issued at enrollment carry the enrollment URL extension instead of the one conforming instance of §4,
+/// so that tests can drive the agent's refusal of such a leaf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum MalformedEnrollmentUrl {
+    /// No enrollment URL extension.
+    Missing,
+    /// Two identical instances.
+    Repeated,
+    /// One instance holding the URL as a `UTF8String`.
+    NotIa5,
+    /// One instance naming this URL instead of the token's.
+    OtherUrl(String),
+}
+
 /// Holds mock fault knobs merged field-by-field by `POST __mock__/faults`.
 #[derive(Debug, Clone)]
 pub(crate) struct Faults {
@@ -148,6 +162,7 @@ pub(crate) struct Faults {
     pub(crate) channel_available: bool,
     pub(crate) channel_broken: bool,
     pub(crate) malformed_channel_url: Option<MalformedChannelUrl>,
+    pub(crate) malformed_enrollment_url: Option<MalformedEnrollmentUrl>,
     /// Overrides the `rotationNotificationsPerSecond` setting without its bounds.
     pub(crate) rotation_rate_limit_per_sec: Option<u32>,
     /// Replaces `config.version` in every delivered config, so tests can deliver an unsupported version.
@@ -166,6 +181,7 @@ impl Default for Faults {
             channel_available: true,
             channel_broken: false,
             malformed_channel_url: None,
+            malformed_enrollment_url: None,
             rotation_rate_limit_per_sec: None,
             config_version: None,
             root_key_unavailable: false,
@@ -1081,7 +1097,15 @@ impl State {
         };
         let friendly_name = name_eval::render_friendly_name(&format, &metadata, &token_name, identity_id);
         let issued_seq = self.serial_seq;
-        let leaf = self.issue_leaf(identity_id, &csr_key, enrollment_url, now)?;
+        let malformed = self.faults.malformed_enrollment_url.clone();
+        let extension = match &malformed {
+            None => EnrollmentUrlExtension::Conforming(enrollment_url),
+            Some(MalformedEnrollmentUrl::Missing) => EnrollmentUrlExtension::Missing,
+            Some(MalformedEnrollmentUrl::Repeated) => EnrollmentUrlExtension::Repeated(enrollment_url),
+            Some(MalformedEnrollmentUrl::NotIa5) => EnrollmentUrlExtension::NotIa5(enrollment_url),
+            Some(MalformedEnrollmentUrl::OtherUrl(url)) => EnrollmentUrlExtension::Conforming(url),
+        };
+        let leaf = self.issue_leaf(identity_id, &csr_key, extension, now)?;
         self.tokens
             .get_mut(&token_id)
             .expect("hash index consistent")
@@ -1155,7 +1179,7 @@ impl State {
         &mut self,
         identity_id: Uuid,
         public_key: &VerifyingKey,
-        enrollment_url: &str,
+        enrollment_url: EnrollmentUrlExtension<'_>,
         now: i64,
     ) -> Result<ca::Leaf, ApiError> {
         if self.faults.root_key_unavailable {
@@ -1219,7 +1243,12 @@ impl State {
             .expect("identity exists")
             .enrollment_url
             .clone();
-        let leaf = self.issue_leaf(identity_id, &csr_key, &enrollment_url, now)?;
+        let leaf = self.issue_leaf(
+            identity_id,
+            &csr_key,
+            EnrollmentUrlExtension::Conforming(&enrollment_url),
+            now,
+        )?;
         let root_der = self.issuing_root().cert_der.clone();
         let issuer = self.issuing_root().thumbprint.clone();
         let retired = {
@@ -2384,6 +2413,60 @@ mod tests {
         assert_eq!((refused.status, refused.code), (400, "invalid_request"));
         assert_eq!(state.identities.len(), identities);
         assert_eq!(state.tokens[&token_id].used_count, used_count);
+        Ok(())
+    }
+
+    /// Encodes `contents` as a TLV with a short-form length.
+    fn short_tlv(tag: u8, contents: &[u8]) -> Vec<u8> {
+        let length = u8::try_from(contents.len())
+            .ok()
+            .filter(|length| *length < 0x80)
+            .expect("short contents");
+        [&[tag, length], contents].concat()
+    }
+
+    /// The `extnValue` contents of each enrollment URL extension of the certificate `der`, in order.
+    fn enrollment_url_values(der: &[u8]) -> Vec<Vec<u8>> {
+        use der::Decode as _;
+
+        x509_cert::Certificate::from_der(der)
+            .expect("DER certificate")
+            .tbs_certificate()
+            .extensions()
+            .into_iter()
+            .flatten()
+            .filter(|extension| extension.extn_id == crate::oracle::ENROLLMENT_URL_EXTENSION)
+            .map(|extension| extension.extn_value.as_bytes().to_vec())
+            .collect()
+    }
+
+    /// The `malformed_enrollment_url` fault shapes the leaf an enrollment issues, while the CSR is accepted as usual: the
+    /// identity is created and the use counted, as a nonconforming authority would.
+    /// X.680 §8.4 assigns the universal tags 22 (`0x16`) to `IA5String` and 12 (`0x0C`) to `UTF8String`.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    // oracle: spec X.680 §8.4
+    #[rstest]
+    #[case::missing(MalformedEnrollmentUrl::Missing, vec![])]
+    #[case::repeated(MalformedEnrollmentUrl::Repeated, vec![short_tlv(0x16, b"https://localhost/mock"), short_tlv(0x16, b"https://localhost/mock")])]
+    #[case::not_ia5(MalformedEnrollmentUrl::NotIa5, vec![short_tlv(0x0C, b"https://localhost/mock")])]
+    #[case::other_url(MalformedEnrollmentUrl::OtherUrl("https://relay.example/mock".to_owned()), vec![short_tlv(0x16, b"https://relay.example/mock")])]
+    fn malformed_enrollment_url_fault_shapes_the_enrolled_leaf(
+        #[case] fault: MalformedEnrollmentUrl,
+        #[case] expected: Vec<Vec<u8>>,
+    ) -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        state.faults.malformed_enrollment_url = Some(fault);
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
+        let csr = csr_naming(&key(1), "https://localhost/mock");
+
+        let enrolled = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .expect("enrollment succeeds");
+
+        assert_eq!(enrollment_url_values(&enrolled.certificate_chain[0]), expected);
+        assert!(state.identities.contains_key(&enrolled.identity_id));
+        assert_eq!(state.tokens[&token_id].used_count, 1);
         Ok(())
     }
 }
