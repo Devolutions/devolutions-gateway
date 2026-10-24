@@ -28,6 +28,28 @@ pub(crate) fn parse_file_url(url: &str) -> Option<&Utf8Path> {
     }
 }
 
+/// Creates an HTTP client builder that verifies server certificates with the OS verifier.
+///
+/// Unlike a static root snapshot, the OS verifier can fetch missing trusted roots and applies
+/// enterprise trust policy, such as TLS inspection CAs deployed by group policy.
+pub(crate) fn http_client_builder() -> reqwest::ClientBuilder {
+    use rustls_platform_verifier::BuilderVerifierExt as _;
+
+    let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+
+    let tls_config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .and_then(|builder| builder.with_platform_verifier());
+
+    match tls_config {
+        Ok(builder) => reqwest::Client::builder().use_preconfigured_tls(builder.with_no_client_auth()),
+        Err(error) => {
+            warn!(%error, "Failed to configure platform certificate verifier; falling back to native root certificates");
+            reqwest::Client::builder()
+        }
+    }
+}
+
 /// Download binary file to memory.
 pub(crate) async fn download_binary(url: &str, proxy_conf: &ProxyConf) -> Result<Vec<u8>, UpdaterError> {
     if let Some(path) = parse_file_url(url) {
@@ -41,12 +63,11 @@ pub(crate) async fn download_binary(url: &str, proxy_conf: &ProxyConf) -> Result
 
         let proxy_config = proxy_conf.to_proxy_config();
 
-        let client =
-            http_client_proxy::get_or_create_cached_client(reqwest::Client::builder(), &target_url, &proxy_config)
-                .map_err(|source| UpdaterError::FileDownload {
-                    source,
-                    url: url.to_owned(),
-                })?;
+        let client = http_client_proxy::get_or_create_cached_client(http_client_builder(), &target_url, &proxy_config)
+            .map_err(|source| UpdaterError::FileDownload {
+                source,
+                url: url.to_owned(),
+            })?;
 
         let body = client
             .get(url)

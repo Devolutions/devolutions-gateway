@@ -83,6 +83,7 @@ devolutions-pedm = { path = "../crates/devolutions-pedm" }
 notify-debouncer-mini = "0.6"
 now-package-broker = { path = "../crates/now-package-broker" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "http2", "socks"] }
+rustls-platform-verifier = "0.7"
 thiserror = "2"
 uuid = { version = "1.17", features = ["v4"] }
 win-api-wrappers = { path = "../crates/win-api-wrappers" }
