@@ -465,6 +465,7 @@ async fn enroll_pending(
                 PermanentCode::TokenInvalid => EnrollmentDiscardReason::TokenInvalid,
                 PermanentCode::TokenExhausted => EnrollmentDiscardReason::TokenExhausted,
                 PermanentCode::TokenExpired => EnrollmentDiscardReason::TokenExpired,
+                PermanentCode::TokenUrlMismatch => EnrollmentDiscardReason::TokenUrlMismatch,
                 PermanentCode::AuthorityUrlMismatch => EnrollmentDiscardReason::AuthorityUrlMismatch,
             };
             store.discard_enrollment(&hash, reason)?;

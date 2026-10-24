@@ -42,6 +42,7 @@ pub enum PermanentCode {
     TokenInvalid,
     TokenExhausted,
     TokenExpired,
+    TokenUrlMismatch,
     /// The enrollment certificate lacks the enrollment URL extension or names another URL than the token's, a local
     /// code ([CONTRACT.agent-identity.md §5.2 "`POST enroll`"][contract]).
     ///
@@ -61,6 +62,7 @@ impl PermanentCode {
             Self::TokenInvalid => "token_invalid",
             Self::TokenExhausted => "token_exhausted",
             Self::TokenExpired => "token_expired",
+            Self::TokenUrlMismatch => "token_url_mismatch",
             Self::AuthorityUrlMismatch => "authority_url_mismatch",
         }
     }
@@ -578,6 +580,7 @@ fn classify_error(status: StatusCode, body: &[u8], retry_after: Option<Duration>
         (StatusCode::UNAUTHORIZED, "token_invalid") => ClientError::Permanent(PermanentCode::TokenInvalid),
         (StatusCode::FORBIDDEN, "token_exhausted") => ClientError::Permanent(PermanentCode::TokenExhausted),
         (StatusCode::UNAUTHORIZED, "token_expired") => ClientError::Permanent(PermanentCode::TokenExpired),
+        (StatusCode::FORBIDDEN, "token_url_mismatch") => ClientError::Permanent(PermanentCode::TokenUrlMismatch),
         (StatusCode::FORBIDDEN, "identity_revoked") => ClientError::Terminal(TerminalCode::IdentityRevoked),
         (StatusCode::UNAUTHORIZED, "identity_unknown") => ClientError::Terminal(TerminalCode::IdentityUnknown),
         (StatusCode::UNAUTHORIZED, "certificate_expired") => ClientError::CertificateExpired,
@@ -1001,6 +1004,11 @@ mod tests {
                 StatusCode::UNAUTHORIZED,
                 "token_expired",
                 ClientError::Permanent(PermanentCode::TokenExpired),
+            ),
+            (
+                StatusCode::FORBIDDEN,
+                "token_url_mismatch",
+                ClientError::Permanent(PermanentCode::TokenUrlMismatch),
             ),
             (
                 StatusCode::FORBIDDEN,

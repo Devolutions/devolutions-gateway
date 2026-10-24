@@ -17,11 +17,12 @@ struct Rejection {
     at: String,
 }
 
-const PERMANENT_CODES: [&str; 7] = [
+const PERMANENT_CODES: [&str; 8] = [
     "identity_revoked",
     "token_invalid",
     "token_exhausted",
     "token_expired",
+    "token_url_mismatch",
     "token_malformed",
     "authority_conflict",
     "authority_url_mismatch",

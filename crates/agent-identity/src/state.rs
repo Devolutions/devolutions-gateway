@@ -75,6 +75,7 @@ pub enum EnrollmentDiscardReason {
     TokenInvalid,
     TokenExhausted,
     TokenExpired,
+    TokenUrlMismatch,
     TokenMalformed,
     AuthorityConflict,
     AuthorityUrlMismatch,
@@ -104,6 +105,7 @@ impl EnrollmentDiscardReason {
             Self::TokenInvalid => "token_invalid",
             Self::TokenExhausted => "token_exhausted",
             Self::TokenExpired => "token_expired",
+            Self::TokenUrlMismatch => "token_url_mismatch",
             Self::TokenMalformed => "token_malformed",
             Self::AuthorityConflict => "authority_conflict",
             Self::AuthorityUrlMismatch => "authority_url_mismatch",
@@ -1535,6 +1537,8 @@ mod tests {
             (1u8, EnrollmentDiscardReason::TokenInvalid, "token_invalid"),
             (2u8, EnrollmentDiscardReason::TokenExhausted, "token_exhausted"),
             (3u8, EnrollmentDiscardReason::TokenExpired, "token_expired"),
+            // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+            (4u8, EnrollmentDiscardReason::TokenUrlMismatch, "token_url_mismatch"),
         ] {
             let token = Token::parse(&format!(
                 "dvaet1.{}.{}",
