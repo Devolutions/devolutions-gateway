@@ -499,6 +499,84 @@ public class CertificateSigningRequestTests
         Assert.Equal(key.ExportSubjectPublicKeyInfo(), csr.SubjectPublicKeyInfo.ToArray());
     }
 
+    // The server reads the enrollment URL extension from the CSR's extensionRequest and ignores every other attribute
+    // or requested extension; a CSR that names no single enrollment URL is still valid, and enrollment refuses it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    [Theory]
+    [MemberData(nameof(EnrollmentUrlRequestNames))]
+    public void ReadsTheEnrollmentUrlOfTheExtensionRequest(string request)
+    {
+        (Func<ECDsa, byte[]> build, string? expected) = EnrollmentUrlRequests[request];
+        using ECDsa key = NewKey();
+
+        CertificateSigningRequest csr = AssertValid(CertificateSigningRequest.Validate(build(key)));
+
+        Assert.Equal(expected, csr.EnrollmentUrl);
+    }
+
+    public static TheoryData<string> EnrollmentUrlRequestNames => new(EnrollmentUrlRequests.Keys);
+
+    // Requests by what their attributes hold, with the enrollment URL each names, or null when they name none.
+    private static Dictionary<string, (Func<ECDsa, byte[]> Build, string? Expected)> EnrollmentUrlRequests => new()
+    {
+        // The agent's CSR: one extensionRequest holding the enrollment URL extension alone.
+        ["the extension alone"] = (key => TestEnrollmentUrl.Request(key, "https://host/dvls"), "https://host/dvls"),
+        // The value is read as it is; whether it matches the token is the enrollment rules' to decide.
+        ["a value with a trailing slash"] =
+            (key => TestEnrollmentUrl.Request(key, "https://host/dvls/"), "https://host/dvls/"),
+        ["the extension among other requested extensions"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.Attributes(
+                    TestEnrollmentUrl.Extension(
+                        new X509BasicConstraintsExtension(true, false, 0, true).RawData,
+                        "2.5.29.19"),
+                    TestEnrollmentUrl.Extension("https://host/dvls"))),
+            "https://host/dvls"),
+        ["the extension written by .NET"] = (
+            key =>
+            {
+                CertificateRequest request = new("CN=agent", key, HashAlgorithmName.SHA256);
+                request.CertificateExtensions.Add(
+                    new X509Extension(TestEnrollmentUrl.Oid, TestEnrollmentUrl.IA5String("https://host/dvls"), false));
+                return request.CreateSigningRequest();
+            },
+            "https://host/dvls"),
+        // The agent's CSR before it named an enrollment URL: an empty attribute set, A0 00.
+        ["no attributes"] = (TestCsr.For, null),
+        ["an extensionRequest without the extension"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.Attributes(
+                    TestEnrollmentUrl.Extension(TestEnrollmentUrl.IA5String("x"), "2.5.29.17"))),
+            null),
+        // A leaf carries the extension exactly once, so a request naming two values names no single one.
+        ["the extension twice"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.Attributes(
+                    TestEnrollmentUrl.Extension("https://host/dvls"),
+                    TestEnrollmentUrl.Extension("https://host/dvls"))),
+            null),
+        // The extension holds an IA5String.
+        ["a UTF8String value"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.Attributes(TestEnrollmentUrl.Extension([0x0C, 0x04, .. "host"u8]))),
+            null),
+        // An IA5String holds the characters 0 to 127 (X.680 §41).
+        ["an IA5String with a byte above 127"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.Attributes(TestEnrollmentUrl.Extension([0x16, 0x01, 0x80]))),
+            null),
+        ["an IA5String followed by other bytes"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.Attributes(
+                    TestEnrollmentUrl.Extension([.. TestEnrollmentUrl.IA5String("https://host/dvls"), 0x05, 0x00]))),
+            null),
+    };
     // Each request breaks a rule of the CSR profile, and a request that breaks one gets invalid_request;
     // each row's markers name the rule it breaks.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates

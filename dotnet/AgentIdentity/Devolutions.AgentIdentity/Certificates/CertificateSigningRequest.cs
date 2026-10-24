@@ -10,16 +10,20 @@ namespace Devolutions.AgentIdentity;
 /// <remarks>
 /// Only <see cref="Validate"/> and the request body parsers create instances,
 /// so an instance always holds an uncompressed P-256 key that signed its request.
-/// The request's subject, attributes and extensions are ignored and not kept,
-/// since an identity is never derived from claims in a CSR,
-/// so the subject and the attributes need only be BER elements of their type;
-/// the rest of the request is DER, as CONTRACT.agent-identity.md §1 requires of a CSR.
+/// The request's subject, attributes and requested extensions are ignored and not kept,
+/// since an identity is never derived from claims in a CSR, except the enrollment URL that its extensionRequest names,
+/// which enrollment compares with the presented token (CONTRACT.agent-identity.md §4);
+/// so the subject and the attributes need only be BER elements of their type,
+/// and the rest of the request is DER, as CONTRACT.agent-identity.md §1 requires of a CSR.
 /// </remarks>
 public sealed class CertificateSigningRequest
 {
     private const string IdEcPublicKey = "1.2.840.10045.2.1";
     private const string Secp256r1 = "1.2.840.10045.3.1.7";
     private const string EcdsaWithSha256 = "1.2.840.10045.4.3.2";
+
+    // RFC 2985 §5.4.2: the extensionRequest attribute.
+    private const string ExtensionRequest = "1.2.840.113549.1.9.14";
 
     private static readonly Asn1Tag AttributesTag = new(TagClass.ContextSpecific, 0, isConstructed: true);
 
@@ -30,10 +34,11 @@ public sealed class CertificateSigningRequest
     private static readonly BigInteger P256B = Unsigned(
         "5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B");
 
-    private CertificateSigningRequest(byte[] subjectPublicKeyInfo)
+    private CertificateSigningRequest(byte[] subjectPublicKeyInfo, string? enrollmentUrl)
     {
         SubjectPublicKeyInfo = subjectPublicKeyInfo;
         SubjectPublicKeyInfoSha256 = SHA256.HashData(subjectPublicKeyInfo);
+        EnrollmentUrl = enrollmentUrl;
     }
 
     /// <summary>
@@ -49,6 +54,19 @@ public sealed class CertificateSigningRequest
     /// The SHA-256 digest of <see cref="SubjectPublicKeyInfo"/>, which identifies the key among every issued key.
     /// </summary>
     public ReadOnlyMemory<byte> SubjectPublicKeyInfoSha256 { get; }
+
+    /// <summary>
+    /// The value of the enrollment URL extension that the request's extensionRequest attribute holds,
+    /// or null when the request names no single enrollment URL.
+    /// </summary>
+    /// <remarks>
+    /// The value is read as text, as the request holds it.
+    /// It is null when no extensionRequest holds the extension, when the extension appears more than once,
+    /// or when its value is not one IA5String; a request whose attributes cannot be read names none either.
+    /// <see cref="EnrollmentRules.Decide"/> compares it with the presented token's <c>u</c>,
+    /// and a renewal ignores it (CONTRACT.agent-identity.md §4).
+    /// </remarks>
+    public string? EnrollmentUrl { get; }
 
     /// <summary>
     /// Validates a PKCS #10 certificate signing request (RFC 2986).
@@ -107,7 +125,7 @@ public sealed class CertificateSigningRequest
         ReadOnlyMemory<byte> subjectPublicKeyInfo = fields[..length];
 
         AsnReader attributes = new(fields[length..], AsnEncodingRules.BER);
-        _ = attributes.ReadSetOf(AttributesTag);
+        AsnReader attributeSet = attributes.ReadSetOf(skipSortOrderValidation: true, expectedTag: AttributesTag);
         attributes.ThrowIfNotEmpty();
 
         AsnReader subjectPublicKeyInfoReader = new AsnReader(subjectPublicKeyInfo, AsnEncodingRules.DER).ReadSequence();
@@ -139,7 +157,56 @@ public sealed class CertificateSigningRequest
             return CsrValidationResult.Failure("The CSR self-signature does not verify.");
         }
 
-        return CsrValidationResult.Success(new CertificateSigningRequest(subjectPublicKeyInfo.ToArray()));
+        return CsrValidationResult.Success(
+            new CertificateSigningRequest(subjectPublicKeyInfo.ToArray(), ReadEnrollmentUrl(attributeSet)));
+    }
+
+    // RFC 2986 §4: Attribute ::= SEQUENCE { type OBJECT IDENTIFIER, values SET OF ANY };
+    // RFC 2985 §5.4.2: an extensionRequest value is Extensions ::= SEQUENCE OF Extension;
+    // RFC 5280 §4.1: Extension ::= SEQUENCE { extnID, critical BOOLEAN DEFAULT FALSE, extnValue OCTET STRING }.
+    // Returns the value of the one enrollment URL extension among the requested extensions,
+    // or null when there is none, there are several, or the attributes cannot be read,
+    // since the server otherwise ignores the attributes (CONTRACT.agent-identity.md §4).
+    private static string? ReadEnrollmentUrl(AsnReader attributeSet)
+    {
+        try
+        {
+            List<byte[]> values = [];
+
+            while (attributeSet.HasData)
+            {
+                AsnReader attribute = attributeSet.ReadSequence();
+                string type = attribute.ReadObjectIdentifier();
+                AsnReader attributeValues = attribute.ReadSetOf(skipSortOrderValidation: true);
+
+                while (type == ExtensionRequest && attributeValues.HasData)
+                {
+                    AsnReader extensions = attributeValues.ReadSequence();
+
+                    while (extensions.HasData)
+                    {
+                        AsnReader extension = extensions.ReadSequence();
+                        string id = extension.ReadObjectIdentifier();
+                        if (extension.PeekTag().HasSameClassAndValue(Asn1Tag.Boolean))
+                        {
+                            _ = extension.ReadBoolean();
+                        }
+
+                        byte[] value = extension.ReadOctetString();
+                        if (id == EnrollmentUrlExtension.Oid)
+                        {
+                            values.Add(value);
+                        }
+                    }
+                }
+            }
+
+            return values is [byte[] single] ? EnrollmentUrlExtension.ReadValue(single) : null;
+        }
+        catch (AsnContentException)
+        {
+            return null;
+        }
     }
 
     // RFC 5480 §2: SubjectPublicKeyInfo ::= SEQUENCE { algorithm AlgorithmIdentifier, subjectPublicKey BIT STRING },
