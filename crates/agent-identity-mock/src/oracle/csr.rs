@@ -447,7 +447,7 @@ mod tests {
     /// the next attribute starts.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[rstest]
-    #[case::truncated_tlv(&[0x30, 0x05, 0x06])]
+    #[case::length_reaching_into_the_next_attribute(&[0x30, 0x05, 0x06])]
     #[case::indefinite_length(&[0x30, 0x80])]
     #[case::five_byte_long_form_length(&[0x30, 0x85, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00])]
     #[case::length_past_the_end(&[0x30, 0x81, 0xFF])]
