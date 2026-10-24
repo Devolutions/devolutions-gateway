@@ -213,17 +213,20 @@ mod tests {
     use axum::body::Bytes;
     use axum::http;
     use base64::Engine as _;
-    use base64::engine::general_purpose::STANDARD;
+    use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
     use http_body_util::{BodyExt as _, Full};
-    use p256::ecdsa::VerifyingKey;
+    use p256::ecdsa::signature::Signer as _;
+    use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
     use rstest::rstest;
     use serde_json::{Map, Value, json};
+    use sha2::Digest as _;
 
     use super::Dispatcher;
     use crate::api_agent::enrollment_token;
     use crate::app::App;
     use crate::oracle::NonceStore;
     use crate::state::State;
+    use crate::test_x509::{csr_naming, enrollment_url_extension, key};
 
     /// CONTRACT.agent-identity.md §5.4: servers accept agent-facing request bodies up to 64 KiB.
     const BODY_LIMIT: usize = 64 * 1024;
@@ -634,8 +637,6 @@ mod tests {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     #[tokio::test]
     async fn trust_anchor_certificate_hashes_to_its_thumbprint() -> anyhow::Result<()> {
-        use sha2::Digest as _;
-
         let app = App::for_test()?;
         let request = http::Request::get("/mock/api/agent-identity/v1/trust-anchor").body(Full::new(Bytes::new()))?;
         let response = Dispatcher::new(Arc::clone(&app))
@@ -647,7 +648,7 @@ mod tests {
 
         let root = &body["roots"][0];
         let der = STANDARD.decode(root["certificate"].as_str().unwrap_or_default())?;
-        let thumbprint = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(&der));
+        let thumbprint = URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(&der));
         assert_eq!(root["thumbprint"], json!(thumbprint));
         Ok(())
     }
@@ -692,6 +693,82 @@ mod tests {
         let token = json!({ "name": "t" }).to_string();
         let (status, refused) = post_json(&app, "/api/v1/agent-identity/enrollment-token", &admin, token).await;
         assert_eq!((status, &refused["errors"][0]["field"]), (400, &json!("maxUses")));
+        Ok(())
+    }
+
+    /// Returns the DER of the CSR test vector `name`.
+    fn csr_vector(name: &str) -> Vec<u8> {
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))
+            .expect("vectors parse");
+        STANDARD
+            .decode(vectors["csr"][name]["csr"].as_str().expect("CSR vector"))
+            .expect("base64 CSR")
+    }
+
+    /// Sends `POST renew` for `csr`, signed with `key` under the certificate `keyid` (CONTRACT.agent-identity.md §5.3,
+    /// §6), and returns the status and body.
+    async fn renew(app: &Arc<App>, key: &SigningKey, keyid: &str, csr: &[u8]) -> anyhow::Result<(u16, Value)> {
+        let body = json!({ "csr": STANDARD.encode(csr), "metadata": {} }).to_string();
+        let digest = format!("sha-256=:{}:", STANDARD.encode(sha2::Sha256::digest(body.as_bytes())));
+        let now = app.now();
+        let nonce = URL_SAFE_NO_PAD.encode(uuid::Uuid::new_v4().as_bytes());
+        let params = format!(
+            "(\"@method\" \"content-digest\");created={now};expires={};nonce=\"{nonce}\";keyid=\"{keyid}\";alg=\"ecdsa-p256-sha256\";tag=\"renew\"",
+            now + 60,
+        );
+        let signature: Signature = key.try_sign(
+            format!(
+                "\"@method\": POST
+\"content-digest\": {digest}
+\"@signature-params\": {params}"
+            )
+            .as_bytes(),
+        )?;
+        let signature_input = format!("sig={params}");
+        let signature = format!("sig=:{}:", STANDARD.encode(signature.to_bytes()));
+        let headers = [
+            ("content-digest", digest.as_str()),
+            ("signature-input", signature_input.as_str()),
+            ("signature", signature.as_str()),
+        ];
+        Ok(post_json(app, "/api/agent-identity/v1/renew", &headers, body).await)
+    }
+
+    /// CONTRACT.agent-identity.md §4: every certificate issued for an identity carries the `u` of the token that
+    /// enrolled it, and at renewal the server "ignores the value" the CSR requests.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[rstest]
+    #[case::other_url(csr_naming(&key(2), "https://relay.example/mock"))]
+    #[case::no_url(csr_vector("valid"))]
+    #[tokio::test]
+    async fn every_leaf_of_an_identity_names_the_url_of_its_token(#[case] renewal_csr: Vec<u8>) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let now = app.now();
+        let (_, secret) =
+            app.state
+                .lock()
+                .await
+                .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
+        let enrolled_key = key(1);
+        let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
+        let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
+        let body = json!({ "csr": STANDARD.encode(csr_naming(&enrolled_key, &app.base_url)), "metadata": {} });
+        let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body.to_string()).await;
+        assert_eq!(status, 200);
+        let enrolled_leaf = STANDARD.decode(enrolled["certificate_chain"][0].as_str().expect("leaf"))?;
+        // CONTRACT.agent-identity.md §1: a thumbprint is `base64url(SHA-256(certificate DER))`.
+        let keyid = URL_SAFE_NO_PAD.encode(sha2::Sha256::digest(&enrolled_leaf));
+
+        let (status, renewed) = renew(&app, &enrolled_key, &keyid, &renewal_csr).await?;
+
+        assert_eq!(status, 200, "{renewed}");
+        let renewed_leaf = STANDARD.decode(renewed["certificate_chain"][0].as_str().expect("leaf"))?;
+        for leaf in [enrolled_leaf, renewed_leaf] {
+            assert_eq!(
+                enrollment_url_extension(&leaf).map(|(_, url)| url).as_deref(),
+                Some(app.base_url.as_str())
+            );
+        }
         Ok(())
     }
 }

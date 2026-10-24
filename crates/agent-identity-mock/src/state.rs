@@ -270,6 +270,8 @@ pub(crate) struct Identity {
     pub(crate) config: Value,
     pub(crate) token_id: Uuid,
     pub(crate) token_name: String,
+    /// The `u` of the token that enrolled the identity, which every certificate issued for it names (§4).
+    pub(crate) enrollment_url: String,
     pub(crate) certs: Vec<Cert>,
 }
 
@@ -1003,7 +1005,8 @@ impl State {
         let token_id = self.token_id(secret).ok_or_else(ApiError::token_invalid)?;
 
         let csr_key = check_csr(csr_der)
-            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
+            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?
+            .public_key;
         name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         let csr_key_hash = issued_key_hash(&csr_key);
@@ -1069,7 +1072,8 @@ impl State {
         };
         let friendly_name = name_eval::render_friendly_name(&format, &metadata, &token_name, identity_id);
         let issued_seq = self.serial_seq;
-        let leaf = self.issue_leaf(identity_id, &csr_key, now)?;
+        let enrollment_url = base_url.trim_end_matches('/').to_owned();
+        let leaf = self.issue_leaf(identity_id, &csr_key, &enrollment_url, now)?;
         self.tokens
             .get_mut(&token_id)
             .expect("hash index consistent")
@@ -1103,6 +1107,7 @@ impl State {
             config,
             token_id,
             token_name,
+            enrollment_url,
             certs: vec![cert],
         };
         assert!(
@@ -1138,7 +1143,13 @@ impl State {
         Ok(vec![current.der.clone(), root.cert_der.clone()])
     }
 
-    fn issue_leaf(&mut self, identity_id: Uuid, public_key: &VerifyingKey, now: i64) -> Result<ca::Leaf, ApiError> {
+    fn issue_leaf(
+        &mut self,
+        identity_id: Uuid,
+        public_key: &VerifyingKey,
+        enrollment_url: &str,
+        now: i64,
+    ) -> Result<ca::Leaf, ApiError> {
         if self.faults.root_key_unavailable {
             return Err(ApiError::internal("root key is unavailable"));
         }
@@ -1149,7 +1160,7 @@ impl State {
         let serial = self.serial_seq;
         self.serial_seq += 1;
         let root = self.issuing_root();
-        ca::issue_leaf(root, identity_id, public_key, serial, now, lifetime)
+        ca::issue_leaf(root, identity_id, public_key, enrollment_url, serial, now, lifetime)
             .map_err(|e| ApiError::internal(format!("failed to issue certificate: {e:#}")))
     }
 
@@ -1164,7 +1175,8 @@ impl State {
         let identity_id = auth.identity_id();
 
         let csr_key = check_csr(csr_der)
-            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
+            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?
+            .public_key;
         name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         let csr_key_hash = issued_key_hash(&csr_key);
@@ -1193,7 +1205,8 @@ impl State {
         }
 
         let issued_seq = self.serial_seq;
-        let leaf = self.issue_leaf(identity_id, &csr_key, now)?;
+        let enrollment_url = self.identities[&identity_id].enrollment_url.clone();
+        let leaf = self.issue_leaf(identity_id, &csr_key, &enrollment_url, now)?;
         let root_der = self.issuing_root().cert_der.clone();
         let issuer = self.issuing_root().thumbprint.clone();
         let retired = {
@@ -1662,6 +1675,7 @@ impl State {
                 config: json!({ "version": CONFIG_VERSION, "revision": 1 }),
                 token_id,
                 token_name: "test".to_owned(),
+                enrollment_url: "https://localhost/mock".to_owned(),
                 certs: vec![cert],
             },
         );
@@ -2098,7 +2112,7 @@ mod tests {
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let csr = base64::engine::general_purpose::STANDARD
             .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
-        let key_hash = issued_key_hash(&check_csr(&csr).expect("valid CSR"));
+        let key_hash = issued_key_hash(&check_csr(&csr).expect("valid CSR").public_key);
         let identity_id = state
             .enroll(&owner_secret, &csr, Map::new(), now, "https://localhost/mock")
             .expect("enrollment succeeds")
@@ -2262,6 +2276,30 @@ mod tests {
 
         assert_ne!(first, second);
         assert_eq!(state.tokens[&token_id].used_count, 2);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §2: "the agent removes trailing slashes from a `u` that has them", and §5.2: it refuses
+    /// a leaf that "names another URL than its token's `u`", so a leaf names the URL without them.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    #[test]
+    fn leaf_names_the_token_url_without_trailing_slashes() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
+        let csr = crate::test_x509::csr_naming(&crate::test_x509::key(1), "https://localhost/mock");
+
+        let enrolled = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock//")
+            .expect("enrollment succeeds");
+
+        assert_eq!(
+            crate::test_x509::enrollment_url_extension(&enrolled.certificate_chain[0])
+                .map(|(_, url)| url)
+                .as_deref(),
+            Some("https://localhost/mock")
+        );
         Ok(())
     }
 }

@@ -320,12 +320,12 @@ fn csr_cases() {
     for (name, case) in &vectors.csr.cases {
         let der = STANDARD.decode(&case.csr).expect("valid csr base64");
         match (check_csr(&der), case.expected.as_str()) {
-            (Some(key), "ok") => {
+            (Some(checked), "ok") => {
                 let expected_key = STANDARD
                     .decode(case.public_key_sec1.as_ref().expect("valid case has key"))
                     .expect("valid sec1");
                 assert_eq!(
-                    key.to_sec1_bytes().as_ref(),
+                    checked.public_key.to_sec1_bytes().as_ref(),
                     expected_key.as_slice(),
                     "csr case {name} public key"
                 );

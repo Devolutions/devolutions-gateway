@@ -21,4 +21,6 @@ pub use server::{Dispatcher, serve};
 pub use state::State;
 
 #[cfg(test)]
+mod test_x509;
+#[cfg(test)]
 mod vector_tests;

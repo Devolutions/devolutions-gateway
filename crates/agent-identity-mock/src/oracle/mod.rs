@@ -10,7 +10,7 @@ mod proof;
 mod sfv;
 mod verify;
 
-pub(crate) use csr::check_csr;
+pub(crate) use csr::{ENROLLMENT_URL_EXTENSION, check_csr};
 use p256::ecdsa::signature::Verifier as _;
 use p256::ecdsa::{Signature, VerifyingKey};
 pub(crate) use proof::verify_channel_proof;

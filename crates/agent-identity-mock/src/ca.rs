@@ -1,6 +1,6 @@
 //! In-memory CA per CONTRACT.agent-identity.md §4: a P-256 root per rotation generation and
 //! per-identity leaves (`CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU
-//! clientAuth, KU digitalSignature).
+//! clientAuth, KU digitalSignature, enrollment URL).
 
 use std::str::FromStr as _;
 
@@ -20,6 +20,8 @@ use x509_cert::ext::pkix::{BasicConstraints, ExtendedKeyUsage, KeyUsage, KeyUsag
 use x509_cert::name::Name;
 use x509_cert::serial_number::SerialNumber;
 use x509_cert::time::{Time, Validity};
+
+use crate::oracle::ENROLLMENT_URL_EXTENSION;
 
 /// id-kp-clientAuth (RFC 5280).
 const ID_KP_CLIENT_AUTH: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.5.5.7.3.2");
@@ -146,12 +148,14 @@ pub(crate) struct Leaf {
     pub(crate) not_after: i64,
 }
 
-/// Issues a leaf per §4, whose only extensions are KeyUsage, EKU and SAN, so that it carries no basicConstraints; the
-/// lifetime is capped at the issuing root's `notAfter`.
+/// Issues a leaf per §4, whose only extensions are KeyUsage, EKU, SAN and the non-critical enrollment URL extension
+/// naming `enrollment_url`, so that it carries no basicConstraints; the lifetime is capped at the issuing root's
+/// `notAfter`.
 pub(crate) fn issue_leaf(
     root: &RootCa,
     identity_id: uuid::Uuid,
     public_key: &VerifyingKey,
+    enrollment_url: &str,
     serial: u64,
     now: i64,
     lifetime_secs: i64,
@@ -164,6 +168,7 @@ pub(crate) fn issue_leaf(
     anyhow::ensure!(not_after > not_before, "issuing root has expired");
     let subject = Name::from_str(&format!("CN={identity_id}")).context("leaf name")?;
     let san_uri = Ia5String::new(&format!("urn:uuid:{identity_id}")).context("leaf SAN URI")?;
+    let enrollment_url = Ia5String::new(enrollment_url).context("enrollment URL is not an IA5String")?;
     let mut builder = new_builder(&root.name, &subject, public_key, serial, not_before, not_after)?;
     builder
         .add_extension(&KeyUsage(KeyUsages::DigitalSignature.into()))
@@ -174,6 +179,9 @@ pub(crate) fn issue_leaf(
     builder
         .add_extension(&SubjectAltName(vec![GeneralName::UniformResourceIdentifier(san_uri)]))
         .context("add subject alternative name")?;
+    builder
+        .add_extension((ENROLLMENT_URL_EXTENSION, false, &enrollment_url))
+        .context("add enrollment URL")?;
     let cert = builder
         .build::<_, DerSignature>(root.key.as_ref().context("issuing root key was destroyed")?)
         .context("sign leaf certificate")?;
@@ -204,10 +212,14 @@ mod tests {
     use x509_cert::ext::pkix::KeyUsage;
 
     use super::{RootCa, issue_leaf};
+    use crate::oracle::ENROLLMENT_URL_EXTENSION;
 
-    /// CONTRACT.agent-identity.md §4: the leaf has a SAN, an EKU and a KeyUsage, and "carries no other extension except
-    /// an authority key identifier and a subject key identifier; in particular it carries no basicConstraints".
-    /// The OIDs are those RFC 5280 §4.2.1 assigns under `id-ce` (2.5.29).
+    const URL: &str = "https://host.example/dvls";
+
+    /// CONTRACT.agent-identity.md §4: the leaf has a SAN, an EKU, a KeyUsage and the enrollment URL extension, and
+    /// "carries no other extension except an authority key identifier, a subject key identifier and the enrollment URL
+    /// extension; in particular it carries no basicConstraints".
+    /// The other OIDs are those RFC 5280 §4.2.1 assigns under `id-ce` (2.5.29).
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[test]
     fn leaf_carries_only_the_listed_extensions() -> anyhow::Result<()> {
@@ -220,7 +232,7 @@ mod tests {
         let root = RootCa::generate(1, now)?;
         let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
 
-        let leaf = issue_leaf(&root, uuid::Uuid::nil(), key.verifying_key(), 2, now, 3600)?;
+        let leaf = issue_leaf(&root, uuid::Uuid::nil(), key.verifying_key(), URL, 2, now, 3600)?;
 
         let certificate = x509_cert::Certificate::from_der(&leaf.der)?;
         let extensions: BTreeSet<ObjectIdentifier> = certificate
@@ -230,11 +242,17 @@ mod tests {
             .flatten()
             .map(|extension| extension.extn_id)
             .collect();
-        let required = BTreeSet::from([subject_alt_name, extended_key_usage, key_usage]);
+        let required = BTreeSet::from([
+            subject_alt_name,
+            extended_key_usage,
+            key_usage,
+            ENROLLMENT_URL_EXTENSION,
+        ]);
         let allowed = BTreeSet::from([
             subject_alt_name,
             extended_key_usage,
             key_usage,
+            ENROLLMENT_URL_EXTENSION,
             authority_key_identifier,
             subject_key_identifier,
         ]);
@@ -257,7 +275,7 @@ mod tests {
         let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
         let identity_id = uuid::Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
 
-        let leaf = issue_leaf(&root, identity_id, key.verifying_key(), 2, now, 3600)?;
+        let leaf = issue_leaf(&root, identity_id, key.verifying_key(), URL, 2, now, 3600)?;
 
         let leaf = x509_cert::Certificate::from_der(&leaf.der)?;
         let root = x509_cert::Certificate::from_der(&root.cert_der)?;
@@ -267,6 +285,24 @@ mod tests {
         );
         assert!(!root.tbs_certificate().subject().is_empty());
         assert_eq!(leaf.tbs_certificate().issuer(), root.tbs_certificate().subject());
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §4: the enrollment URL extension is "non-critical" and "holds as an `IA5String`" the
+    /// enrollment URL.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[test]
+    fn leaf_names_the_enrollment_url_in_a_non_critical_extension() -> anyhow::Result<()> {
+        let now = 1_800_000_000;
+        let root = RootCa::generate(1, now)?;
+        let key = SigningKey::from_slice(&[7; 32]).expect("valid P-256 scalar");
+
+        let leaf = issue_leaf(&root, uuid::Uuid::nil(), key.verifying_key(), URL, 2, now, 3600)?;
+
+        assert_eq!(
+            crate::test_x509::enrollment_url_extension(&leaf.der),
+            Some((false, URL.to_owned()))
+        );
         Ok(())
     }
 

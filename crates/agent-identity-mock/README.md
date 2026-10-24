@@ -63,6 +63,8 @@ A token authenticates by its secret alone, in its canonical `base64url` form onl
 The mock keeps SHA-256 of the 32 bytes the secret encodes, never the secret (§2).
 Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are limited to 64 KiB.
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).
+Every certificate issued for an identity carries the non-critical enrollment URL extension naming the `u` of the token that enrolled it, without trailing slashes, and renewal ignores the URL its CSR requests (§4).
+The extension's OID is `1.3.6.1.4.1.32473.1.1`, from the documentation arc of RFC 5612, in place of the contract's, whose arc is wider than the 32 bits `const-oid` parses.
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.
 Friendly names are stored server-side and appear only in the management API.
 Config revisions start at 1 and increase only on effective changes; `ConfigUpdate` follows `Welcome` for stale Hellos and is pushed to live streams after a change.
@@ -180,9 +182,9 @@ The old root's signing key is discarded when rotation starts.
 `src/oracle/` is a test-only verifier of CONTRACT.agent-identity.md §4, §6 and §7.3, written independently of the agent's RFC 9421 library and implementation and not intended for production use.
 For signed requests it checks, in order, (1) strict syntax, parameters, algorithm and covered components, (2) endpoint tag, (3) signature window, (4) certificate registration, status, revocation and validity, (5) renew/check-in content digest and P-256 signature, then (6) replay nonce insertion only after verification.
 For channels it verifies the P-256 proof over the §7.3 domain separator, zero byte, challenge and connect nonce; the channel service owns the handshake and state updates.
-For CSRs it checks the PKCS#10 structure, P-256 subject key, required signature algorithm and self-signature over the request info as received, while ignoring the subject and attributes, whose contents need not be canonical DER (§4).
+For CSRs it checks the PKCS#10 structure, P-256 subject key, required signature algorithm and self-signature over the request info as received, and reads the enrollment URL extension from an `extensionRequest`, while ignoring the subject and every other attribute or requested extension, whose contents need not be canonical DER (§4).
 The RFC 9421 Appendix B.2.4 vector exercises its raw P-256 verifier without widening the request profile.
-Its crate-local runtime API is `verify_request`, `verify_channel_proof`, `check_csr`, `content_digest_header`, `Endpoint`, `Rejection`, `RegisteredCert`, `CertStatus`, `NonceStore` and `AuthenticatedIdentity`.
+Its crate-local runtime API is `verify_request`, `verify_channel_proof`, `check_csr`, `content_digest_header`, `Endpoint`, `Rejection`, `RegisteredCert`, `CertStatus`, `NonceStore`, `AuthenticatedIdentity` and `ENROLLMENT_URL_EXTENSION`, the OID the CA also issues the extension under.
 Vector tests also use the test-only `verify_raw_signature` entry to check the RFC example and the positive fixtures' exact signed bases.
 Callers supply the certificate lookup, nonce store and current Unix time; the oracle performs no I/O or asynchronous work.
 The oracle depends only on `p256`, `sha2`, `base64`, `uuid`, `x509-cert` and `der` outside the standard library, and never on other mock modules or workspace crates.

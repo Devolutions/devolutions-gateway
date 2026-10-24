@@ -1,4 +1,4 @@
-//! PKCS#10 CSR checking per CONTRACT.agent-identity.md §4: uncompressed P-256 key required, self-signature verified, subject and attributes ignored.
+//! PKCS#10 CSR checking per CONTRACT.agent-identity.md §4: uncompressed P-256 key required, self-signature verified, enrollment URL extension read, subject and other attributes ignored.
 //! X.509 and DER provide CSR types; the signature is checked with P-256.
 
 use der::asn1::{AnyRef, BitStringRef, ObjectIdentifier};
@@ -12,12 +12,25 @@ use x509_cert::spki::{AlgorithmIdentifierRef, SubjectPublicKeyInfoRef};
 const ID_EC_PUBLIC_KEY: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
 /// secp256r1 / P-256 (RFC 5480).
 const SECP256R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.3.1.7");
+/// extensionRequest (RFC 2985 §5.4.2).
+const EXTENSION_REQUEST: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.14");
 /// ecdsa-with-SHA256 (RFC 5758).
 const ECDSA_WITH_SHA_256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+/// The enrollment URL extension (CONTRACT.agent-identity.md §4), here under the documentation arc of RFC 5612.
+/// The contract's OID replaces it; the contract's current UUID-based OID has an arc wider than the 32 bits `const-oid` parses.
+pub(crate) const ENROLLMENT_URL_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.1");
+
+/// A CSR that passed [`check_csr`].
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct CheckedCsr {
+    pub(crate) public_key: VerifyingKey,
+    /// The value of the enrollment URL extension the CSR requests, if any.
+    pub(crate) enrollment_url: Option<String>,
+}
 
 /// Parses a PKCS#10 CSR (DER), requires a P-256 subject key and verifies the self-signature.
-/// Returns the subject public key, or `None` for any §5.4 `invalid_request` case.
-pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<VerifyingKey> {
+/// Returns the subject public key and the requested enrollment URL, or `None` for any §5.4 `invalid_request` case.
+pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<CheckedCsr> {
     let (info, algorithm, signature) = AnyRef::from_der(der_bytes)
         .and_then(|req| {
             req.sequence(|reader| {
@@ -35,7 +48,7 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<VerifyingKey> {
         return None;
     }
 
-    let spki = AnyRef::from_der(info).and_then(|info| info.sequence(read_info)).ok()?;
+    let (spki, attributes) = AnyRef::from_der(info).and_then(|info| info.sequence(read_info)).ok()?;
     if spki.algorithm.oid != ID_EC_PUBLIC_KEY {
         return None;
     }
@@ -55,21 +68,92 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<VerifyingKey> {
     let signature = Signature::from_der(signature.as_bytes()?).ok()?;
     key.verify(info, &signature).ok()?;
 
-    return Some(key);
+    return Some(CheckedCsr {
+        public_key: key,
+        enrollment_url: requested_enrollment_url(attributes),
+    });
 
-    /// Reads a `CertificationRequestInfo` ([RFC 2986 §4, "Certification request syntax"][rfc]) and returns its `subjectPKInfo`.
-    /// Of the subject and attributes, only the tags are checked: the server ignores them and doesn't require their contents in canonical DER (CONTRACT.agent-identity.md §4).
+    /// Reads a `CertificationRequestInfo` ([RFC 2986 §4, "Certification request syntax"][rfc]) and returns its `subjectPKInfo` and the contents of its attributes.
+    /// Of the subject and attributes, only the tags are checked: the server ignores all but the enrollment URL extension and doesn't require their contents in canonical DER (CONTRACT.agent-identity.md §4).
     ///
     /// [rfc]: https://www.rfc-editor.org/rfc/rfc2986#section-4
-    fn read_info<'a>(reader: &mut SliceReader<'a>) -> der::Result<SubjectPublicKeyInfoRef<'a>> {
+    fn read_info<'a>(reader: &mut SliceReader<'a>) -> der::Result<(SubjectPublicKeyInfoRef<'a>, &'a [u8])> {
         Version::decode(reader)?;
         AnyRef::decode(reader)?.tag().assert_eq(Tag::Sequence)?;
         let spki = SubjectPublicKeyInfoRef::decode(reader)?;
-        AnyRef::decode(reader)?
-            .tag()
-            .assert_eq(TagNumber(0).context_specific(true))?;
-        Ok(spki)
+        let attributes = AnyRef::decode(reader)?;
+        attributes.tag().assert_eq(TagNumber(0).context_specific(true))?;
+        Ok((spki, attributes.value()))
     }
+}
+
+/// Returns the value of the enrollment URL extension (CONTRACT.agent-identity.md §4) that a CSR's attributes request in an `extensionRequest` ([RFC 2985 §5.4.2, "Extension request"][rfc]), if any.
+/// `attributes` is the contents of the `[0]` attribute set; the attributes and extensions around the one read are skipped without requiring canonical DER.
+///
+/// [rfc]: https://www.rfc-editor.org/rfc/rfc2985#section-5.4.2
+fn requested_enrollment_url(attributes: &[u8]) -> Option<String> {
+    const OCTET_STRING: u8 = 0x04;
+    const OBJECT_IDENTIFIER: u8 = 0x06;
+    const IA5_STRING: u8 = 0x16;
+    const SEQUENCE: u8 = 0x30;
+    const SET: u8 = 0x31;
+
+    tlvs(attributes)
+        .filter(|(tag, _)| *tag == SEQUENCE)
+        .filter_map(|(_, attribute)| {
+            let mut fields = tlvs(attribute);
+            if fields.next()? != (OBJECT_IDENTIFIER, EXTENSION_REQUEST.as_bytes()) {
+                return None;
+            }
+            fields.next()
+        })
+        .filter(|(tag, _)| *tag == SET)
+        .flat_map(|(_, values)| tlvs(values))
+        .filter(|(tag, _)| *tag == SEQUENCE)
+        .flat_map(|(_, extensions)| tlvs(extensions))
+        .filter(|(tag, _)| *tag == SEQUENCE)
+        .find_map(|(_, extension)| {
+            let mut fields = tlvs(extension);
+            if fields.next()? != (OBJECT_IDENTIFIER, ENROLLMENT_URL_EXTENSION.as_bytes()) {
+                return None;
+            }
+            // `critical` is optional (`DEFAULT FALSE`), so `extnValue` is the first OCTET STRING.
+            let (_, value) = fields.find(|(tag, _)| *tag == OCTET_STRING)?;
+            let (tag, url, rest) = split_tlv(value)?;
+            let url = std::str::from_utf8(url).ok()?;
+            (tag == IA5_STRING && rest.is_empty() && url.is_ascii()).then(|| url.to_owned())
+        })
+}
+
+/// Iterates over the TLVs of `contents`, stopping at the first one [`split_tlv`] cannot read.
+fn tlvs(mut contents: &[u8]) -> impl Iterator<Item = (u8, &[u8])> {
+    std::iter::from_fn(move || {
+        let (tag, value, rest) = split_tlv(contents)?;
+        contents = rest;
+        Some((tag, value))
+    })
+}
+
+/// Splits the first TLV off `input` and returns its tag, its contents and the rest of `input`.
+/// The tag is one byte and the length is definite, in the short form or in a long form of up to 4 bytes, minimal or not, as BER allows (X.690 §8.1.3).
+fn split_tlv(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
+    let (&tag, rest) = input.split_first()?;
+    let (&first, rest) = rest.split_first()?;
+    let (length, rest) = if first < 0x80 {
+        (usize::from(first), rest)
+    } else {
+        // `0x80` alone is the indefinite form, which only constructed encodings may use and a CSR never needs.
+        let (length_bytes, rest) = rest.split_at_checked(usize::from(first & 0x7F))?;
+        if !(1..=4).contains(&length_bytes.len()) {
+            return None;
+        }
+        let length = length_bytes
+            .iter()
+            .fold(0usize, |length, byte| (length << 8) | usize::from(*byte));
+        (length, rest)
+    };
+    let (value, rest) = rest.split_at_checked(length)?;
+    Some((tag, value, rest))
 }
 
 #[cfg(test)]
@@ -81,7 +165,14 @@ mod tests {
     use rstest::rstest;
     use spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned};
 
-    use super::{ECDSA_WITH_SHA_256, ID_EC_PUBLIC_KEY, SECP256R1, check_csr};
+    use super::{ECDSA_WITH_SHA_256, ENROLLMENT_URL_EXTENSION, ID_EC_PUBLIC_KEY, SECP256R1, check_csr};
+
+    /// extensionRequest (RFC 2985 §5.4.2).
+    const EXTENSION_REQUEST: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.14");
+    /// id-ce-subjectAltName (RFC 5280 §4.2.1.6).
+    const SUBJECT_ALT_NAME: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.17");
+
+    const URL: &str = "https://host.example/dvls";
 
     /// secp384r1 (RFC 5480).
     const SECP384R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
@@ -222,6 +313,29 @@ mod tests {
         [&[tag], length.as_slice(), &contents].concat()
     }
 
+    /// `[0] Attributes` holding the encoded `attributes` in the order given.
+    fn attributes(attributes: &[&[u8]]) -> Vec<u8> {
+        tlv(0xA0, attributes)
+    }
+
+    /// An `extensionRequest` attribute (RFC 2985 §5.4.2) holding one `Extensions` of the encoded `extensions`.
+    fn extension_request(extensions: &[&[u8]]) -> Vec<u8> {
+        let oid = EXTENSION_REQUEST.to_der().expect("encodable OID");
+        tlv(0x30, &[&oid, &tlv(0x31, &[&tlv(0x30, extensions)])])
+    }
+
+    /// An `Extension` (RFC 5280 §4.1) for `oid`, with the encoded `critical` flag (empty for the default) and `extnValue`
+    /// holding `value`.
+    fn extension(oid: ObjectIdentifier, critical: &[u8], value: &[u8]) -> Vec<u8> {
+        let oid = oid.to_der().expect("encodable OID");
+        tlv(0x30, &[&oid, critical, &tlv(0x04, &[value])])
+    }
+
+    /// The enrollment URL extension naming `url` as an `IA5String` (CONTRACT.agent-identity.md §4).
+    fn enrollment_url(url: &str) -> Vec<u8> {
+        extension(ENROLLMENT_URL_EXTENSION, &[], &tlv(0x16, &[url.as_bytes()]))
+    }
+
     /// Rewrites a TLV's short-form length in the long form `81 nn`, which DER forbids.
     fn with_long_form_length(tlv: &[u8]) -> Vec<u8> {
         assert!(tlv[1] < 0x80, "short-form length");
@@ -250,7 +364,10 @@ mod tests {
     #[case::unsorted_attributes(Csr { attributes: UNSORTED_ATTRIBUTES.to_vec(), ..Csr::valid() })]
     #[case::unsorted_attribute_values(Csr { attributes: UNSORTED_ATTRIBUTE_VALUES.to_vec(), ..Csr::valid() })]
     fn ignored_csr_parts_need_not_be_canonical_der(#[case] csr: Csr) {
-        assert_eq!(check_csr(&csr.encode()).as_ref(), Some(signer().verifying_key()));
+        assert_eq!(
+            check_csr(&csr.encode()).map(|checked| checked.public_key).as_ref(),
+            Some(signer().verifying_key())
+        );
     }
 
     /// CONTRACT.agent-identity.md §4: the server "verifies the CSR self-signature", which covers the request as
@@ -293,5 +410,35 @@ mod tests {
     #[case::trailing_data(Csr { trailing: vec![0x00], ..Csr::valid() })]
     fn csr_breaking_a_rule_is_invalid_request(#[case] csr: Csr) {
         assert_eq!(check_csr(&csr.encode()), None);
+    }
+
+    /// CONTRACT.agent-identity.md §4: the server "reads the enrollment URL extension from its `extensionRequest`" and
+    /// ignores "every other attribute or requested extension", whose contents need not be canonical DER.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[rstest]
+    #[case::built_by_rustcrypto(crate::test_x509::csr_naming(&signer(), URL))]
+    #[case::alone(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL)])]), ..Csr::valid() }.encode())]
+    #[case::explicitly_non_critical(Csr { attributes: attributes(&[&extension_request(&[&extension(ENROLLMENT_URL_EXTENSION, &[0x01, 0x01, 0x00], &tlv(0x16, &[URL.as_bytes()]))])]), ..Csr::valid() }.encode())]
+    #[case::after_another_requested_extension(Csr { attributes: attributes(&[&extension_request(&[&extension(SUBJECT_ALT_NAME, &[], &[0x30, 0x00]), &enrollment_url(URL)])]), ..Csr::valid() }.encode())]
+    #[case::after_unsorted_attributes(Csr { attributes: attributes(&[&UNSORTED_ATTRIBUTES[2..], &extension_request(&[&enrollment_url(URL)])]), ..Csr::valid() }.encode())]
+    #[case::after_an_attribute_with_a_long_form_length(Csr { attributes: attributes(&[&with_long_form_length(&UNSORTED_ATTRIBUTE_VALUES[2..]), &extension_request(&[&enrollment_url(URL)])]), ..Csr::valid() }.encode())]
+    fn requested_enrollment_url_is_read(#[case] csr: Vec<u8>) {
+        assert_eq!(
+            check_csr(&csr).and_then(|checked| checked.enrollment_url).as_deref(),
+            Some(URL)
+        );
+    }
+
+    /// CONTRACT.agent-identity.md §4: the enrollment URL extension holds the URL "as an `IA5String`" and is read from
+    /// the `extensionRequest`; a CSR without it is still a valid CSR, since renewal ignores the value.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[rstest]
+    #[case::no_attributes(Csr::valid())]
+    #[case::empty_extension_request(Csr { attributes: attributes(&[&extension_request(&[])]), ..Csr::valid() })]
+    #[case::other_extension_only(Csr { attributes: attributes(&[&extension_request(&[&extension(SUBJECT_ALT_NAME, &[], &tlv(0x16, &[URL.as_bytes()]))])]), ..Csr::valid() })]
+    #[case::utf8_string_value(Csr { attributes: attributes(&[&extension_request(&[&extension(ENROLLMENT_URL_EXTENSION, &[], &tlv(0x0C, &[URL.as_bytes()]))])]), ..Csr::valid() })]
+    fn csr_without_an_ia5_enrollment_url_has_none(#[case] csr: Csr) {
+        let checked = check_csr(&csr.encode()).expect("valid CSR");
+        assert_eq!(checked.enrollment_url, None);
     }
 }
