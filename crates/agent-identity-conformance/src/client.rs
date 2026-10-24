@@ -446,6 +446,18 @@ pub(crate) fn token_base_url(token: &str) -> anyhow::Result<String> {
     Ok(field(&token_bag(token)?, "u")?.trim_end_matches('/').to_owned())
 }
 
+/// Splits the `https` URL `url` into its authority and its path, which is empty or starts with `/`.
+pub(crate) fn https_authority_and_path(url: &str) -> anyhow::Result<(&str, &str)> {
+    let rest = url.strip_prefix("https://").context("URL is not https")?;
+    Ok(rest.find('/').map_or((rest, ""), |slash| rest.split_at(slash)))
+}
+
+/// Returns the `https` URL `url` with its scheme in upper case, which differs from `url` only as text.
+pub(crate) fn with_upper_case_scheme(url: &str) -> anyhow::Result<String> {
+    let (authority, path) = https_authority_and_path(url)?;
+    Ok(format!("HTTPS://{authority}{path}"))
+}
+
 pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> {
     base64::engine::general_purpose::STANDARD
         .decode(certificate)

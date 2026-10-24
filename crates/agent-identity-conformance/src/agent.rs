@@ -24,7 +24,7 @@ use x509_cert::Certificate;
 
 use crate::client::{
     Target, Token, count, decoded_certificate, expect_error, expect_status, field, token_bag, token_base_url,
-    with_bag_url,
+    with_bag_url, with_upper_case_scheme,
 };
 use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
 use crate::{Context, KeyBackend};
@@ -2526,10 +2526,9 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
     Ok(())
 }
 
-/// CONTRACT.agent-identity.md §5.2: "The agent refuses a response whose leaf lacks the enrollment URL extension or names another URL than its token's `u`, as a permanent outcome", which the agent records with the local marker code `authority_url_mismatch`.
+/// CONTRACT.agent-identity.md §5.2: "The agent refuses, as a permanent outcome, a response whose leaf lacks the enrollment URL extension, carries it more than once or not as an `IA5String`, or whose value, read as text, is not its token's `u` without trailing slashes", which the agent records with the local marker code `authority_url_mismatch`.
 ///
-/// A repeated extension and a value that is not an `IA5String` name no single URL of the token, so they are refused the same way.
-/// The trailing slash and the upper-case scheme and host name URLs that a URL parser reads as the token's own, so only comparing the text byte for byte refuses them.
+/// A trailing slash or an upper-case scheme makes a value whose text is not the token's `u`, so the agent refuses it like another host.
 /// The mock issues each leaf through its `malformed_enrollment_url` fault, which still creates the identity and counts the use, as a nonconforming authority would.
 pub(crate) async fn a_enrollment_leaf_naming_another_url_refused(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
@@ -2547,10 +2546,8 @@ pub(crate) async fn a_enrollment_leaf_naming_another_url_refused(ctx: Context) -
         ("naming the URL with a trailing slash", |url| {
             Ok(other_url(format!("{url}/")))
         }),
-        ("naming the URL with an upper-case scheme and host", |url| {
-            let rest = url.strip_prefix("https://").context("token URL is not https")?;
-            let (authority, path) = rest.find('/').map_or((rest, ""), |slash| rest.split_at(slash));
-            Ok(other_url(format!("HTTPS://{}{path}", authority.to_ascii_uppercase())))
+        ("naming the URL with an upper-case scheme", |url| {
+            Ok(other_url(with_upper_case_scheme(url)?))
         }),
     ];
     for (shape, fault) in cases {

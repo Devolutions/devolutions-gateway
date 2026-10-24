@@ -25,8 +25,8 @@ use x509_cert::ext::pkix::{
 };
 
 use crate::client::{
-    Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field, token_bag,
-    token_base_url,
+    Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field,
+    https_authority_and_path, token_bag, token_base_url, with_upper_case_scheme,
 };
 use crate::dvls::{
     self, CertificateStatus, Credential, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal,
@@ -7349,10 +7349,9 @@ const UNASSIGNED_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3
 
 /// Returns what a CSR to the authority whose tokens carry `url` may request instead of the enrollment URL extension naming `url`, each named for how it differs.
 ///
-/// The trailing slash and the upper-case scheme and host name URLs that a URL parser reads as `url` itself, so that only comparing the text byte for byte refuses them.
+/// §4 refuses a CSR "whose value is not the presented token's `u` without trailing slashes", so a trailing slash or an upper-case scheme, which leave the URL the same to a URL parser, still make another value.
 fn other_enrollment_url_requests(url: &str) -> anyhow::Result<Vec<(&'static str, RequestedExtensions)>> {
-    let rest = url.strip_prefix("https://").context("enrollment URL is not https")?;
-    let (authority, path) = rest.find('/').map_or((rest, ""), |slash| rest.split_at(slash));
+    let (_, path) = https_authority_and_path(url)?;
     let mut other_oid = enrollment_url_extension(url)?;
     other_oid.extn_id = UNASSIGNED_EXTENSION;
     let naming =
@@ -7364,8 +7363,8 @@ fn other_enrollment_url_requests(url: &str) -> anyhow::Result<Vec<(&'static str,
         ("naming another path", naming(&format!("{url}/relay"))?),
         ("naming the URL with a trailing slash", naming(&format!("{url}/"))?),
         (
-            "naming the URL with an upper-case scheme and host",
-            naming(&format!("HTTPS://{}{path}", authority.to_ascii_uppercase()))?,
+            "naming the URL with an upper-case scheme",
+            naming(&with_upper_case_scheme(url)?)?,
         ),
     ])
 }
@@ -7448,7 +7447,7 @@ async fn enroll_elsewhere_then_here(
     target.enroll(&token.text, key, &json!({})).await
 }
 
-/// CONTRACT.agent-identity.md §2.1: "(2) [...] `token_url_mismatch` for a CSR whose enrollment URL extension is missing or not the token's `u`" wins over "(3) the result of the CSR public key lookup", "(4) `token_invalid` for a revoked token" and "(5) `token_exhausted`".
+/// CONTRACT.agent-identity.md §2.1: "(2) `invalid_request` for an invalid body, CSR or metadata, then `token_url_mismatch` for a CSR whose enrollment URL extension is missing or not the token's `u` without trailing slashes" wins over "(3) the result of the CSR public key lookup", "(4) `token_invalid` for a revoked token" and "(5) `token_exhausted`".
 ///
 /// Each case sends a CSR naming another URL, then the key's own CSR, whose outcome shows which later rule would decide the case.
 pub(crate) async fn p_enroll_csr_url_refusal_precedes_key_lookup_and_token_state(ctx: Context) -> anyhow::Result<()> {
@@ -7508,7 +7507,7 @@ pub(crate) async fn p_enroll_csr_url_refusal_precedes_key_lookup_and_token_state
     Ok(())
 }
 
-/// CONTRACT.agent-identity.md §2.1: "(2) [...] `token_url_mismatch` for a CSR whose enrollment URL extension is missing or not the token's `u`" wins over "`token_expired` for an expired one", and over the replay of an expired token's own key.
+/// CONTRACT.agent-identity.md §2.1: "(2) `invalid_request` for an invalid body, CSR or metadata, then `token_url_mismatch` for a CSR whose enrollment URL extension is missing or not the token's `u` without trailing slashes" wins over "`token_expired` for an expired one", and over the replay of an expired token's own key.
 pub(crate) async fn p_enroll_csr_url_refusal_precedes_token_expiry(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
