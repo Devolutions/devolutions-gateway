@@ -360,16 +360,26 @@ mod tests {
         Ok(())
     }
 
-    /// The `fail_next_response` fault takes any §5.4 code, so tests can inject `unavailable` with a 5xx status.
+    /// The `fail_next_response` fault takes any §5.4 code, so tests can inject `unavailable` with a 5xx status, or the
+    /// `token_url_mismatch` code that CONTRACT.agent-identity.md §5.4 lists.
     // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    #[rstest]
+    #[case::unavailable("check-in", 503, "unavailable")]
+    // An injected enrollment failure needs a known token, so this one is injected on an unauthenticated renewal.
+    #[case::token_url_mismatch("renew", 403, "token_url_mismatch")]
     #[tokio::test]
-    async fn injected_failure_can_carry_unavailable() -> anyhow::Result<()> {
+    async fn injected_failure_can_carry_a_contract_code(
+        #[case] endpoint: &str,
+        #[case] status: u16,
+        #[case] code: &str,
+    ) -> anyhow::Result<()> {
         let app = App::for_test()?;
-        let fault = json!({ "fail_next_response": { "endpoint": "check-in", "status": 503, "error": "unavailable" } });
-        let (status, _) = post_json(&app, FAULTS, &[], fault.to_string()).await;
-        assert_eq!(status, 200);
-        let response = post(&app, "check-in", &[], Vec::new()).await;
-        assert_eq!(response, (503, "unavailable".to_owned()));
+        let fault = json!({ "fail_next_response": { "endpoint": endpoint, "status": status, "error": code } });
+        let (fault_status, _) = post_json(&app, FAULTS, &[], fault.to_string()).await;
+        assert_eq!(fault_status, 200);
+        let response = post(&app, endpoint, &[], Vec::new()).await;
+        assert_eq!(response, (status, code.to_owned()));
         Ok(())
     }
 

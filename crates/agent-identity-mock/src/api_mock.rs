@@ -298,6 +298,7 @@ async fn faults(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
                             "token_invalid" => "token_invalid",
                             "token_exhausted" => "token_exhausted",
                             "token_expired" => "token_expired",
+                            "token_url_mismatch" => "token_url_mismatch",
                             "identity_revoked" => "identity_revoked",
                             "identity_unknown" => "identity_unknown",
                             "certificate_expired" => "certificate_expired",

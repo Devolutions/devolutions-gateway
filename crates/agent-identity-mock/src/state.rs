@@ -71,6 +71,14 @@ impl ApiError {
         Self::new(401, "token_expired", "token is expired")
     }
 
+    pub(crate) fn token_url_mismatch() -> Self {
+        Self::new(
+            403,
+            "token_url_mismatch",
+            "CSR must request the enrollment URL extension naming the token's URL",
+        )
+    }
+
     pub(crate) fn identity_revoked() -> Self {
         Self::new(403, "identity_revoked", "identity is revoked")
     }
@@ -1024,15 +1032,13 @@ impl State {
 
         let csr = check_csr(csr_der)
             .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
+        name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
         // The agent removes trailing slashes from a token's `u` (§2) and names the result.
         let enrollment_url = base_url.trim_end_matches('/');
         if csr.enrollment_url.as_deref() != Some(enrollment_url) {
-            return Err(ApiError::invalid_request(
-                "CSR must request the enrollment URL extension naming the token's URL",
-            ));
+            return Err(ApiError::token_url_mismatch());
         }
         let csr_key = csr.public_key;
-        name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         let csr_key_hash = issued_key_hash(&csr_key);
         let token = self.tokens.get(&token_id).expect("hash index consistent");
@@ -2302,10 +2308,9 @@ mod tests {
         Ok(())
     }
 
-    /// CONTRACT.agent-identity.md §2: "the agent removes trailing slashes from a `u` that has them", and §5.2: it refuses
-    /// a leaf that "names another URL than its token's `u`", so a leaf names the URL without them.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    /// CONTRACT.agent-identity.md §4: the enrollment URL extension holds "the `u` of the token that enrolled the
+    /// identity, without trailing slashes", and a CSR naming that URL is accepted.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[test]
     fn leaf_names_the_token_url_without_trailing_slashes() -> anyhow::Result<()> {
         let now = 1_790_000_000;
@@ -2336,10 +2341,11 @@ mod tests {
     }
 
     /// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension,
-    /// or whose value is not the presented token's `u`, with `invalid_request`, and creates nothing", and §2.1 counts no
-    /// use for a failed enrollment.
+    /// or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates
+    /// nothing", §5.4 answers that code with 403, and §2.1 counts no use for a failed enrollment.
     /// The value is compared as text, so another case or a trailing slash names another URL.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     #[rstest]
     #[case::no_attributes(csr_vector("valid"))]
@@ -2347,13 +2353,37 @@ mod tests {
     #[case::other_url(csr_naming(&key(1), "https://relay.example/mock"))]
     #[case::other_case(csr_naming(&key(1), "https://LOCALHOST/mock"))]
     #[case::trailing_slash(csr_naming(&key(1), "https://localhost/mock/"))]
-    fn enrollment_csr_not_naming_the_token_url_is_invalid_request(#[case] csr: Vec<u8>) -> anyhow::Result<()> {
+    fn enrollment_csr_not_naming_the_token_url_is_token_url_mismatch(#[case] csr: Vec<u8>) -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
 
         let refused = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .err()
+            .expect("enrollment is refused");
+
+        assert_eq!((refused.status, refused.code), (403, "token_url_mismatch"));
+        assert!(state.identities.is_empty());
+        assert_eq!(state.tokens[&token_id].used_count, 0);
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §2.1: "`invalid_request` for an invalid body, CSR or metadata, then
+    /// `token_url_mismatch`", so invalid metadata wins over a CSR naming another URL.
+    /// §3 refuses a non-string metadata value with `invalid_request`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    #[test]
+    fn invalid_metadata_wins_over_a_csr_naming_another_url() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
+        let csr = csr_naming(&key(1), "https://relay.example/mock");
+        let metadata = json!({ "hostname": 1 }).as_object().cloned().expect("metadata object");
+
+        let refused = state
+            .enroll(&secret, &csr, metadata, now, "https://localhost/mock")
             .err()
             .expect("enrollment is refused");
 
@@ -2384,11 +2414,11 @@ mod tests {
             .expect("enrollment succeeds");
     }
 
-    /// CONTRACT.agent-identity.md §2.1: "`invalid_request` for an invalid body, CSR or metadata" comes before the CSR
-    /// public key lookup, a revoked or expired token, and an exhausted one, so a CSR naming another URL is refused even
-    /// where the key would replay an identity, and still counts no use.
+    /// CONTRACT.agent-identity.md §2.1: `token_url_mismatch` comes before the CSR public key lookup, a revoked or expired
+    /// token, and an exhausted one, so a CSR naming another URL is refused even where the key would replay an identity,
+    /// and still counts no use.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     #[rstest]
     #[case::revoked_token(revoke_token)]
     #[case::expired_token(expire_token)]
@@ -2410,7 +2440,7 @@ mod tests {
             .err()
             .expect("enrollment is refused");
 
-        assert_eq!((refused.status, refused.code), (400, "invalid_request"));
+        assert_eq!((refused.status, refused.code), (403, "token_url_mismatch"));
         assert_eq!(state.identities.len(), identities);
         assert_eq!(state.tokens[&token_id].used_count, used_count);
         Ok(())
