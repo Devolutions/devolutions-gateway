@@ -126,10 +126,17 @@ public class EnrollmentTokenTests
         Assert.Contains(creation, (Creation[])[Creation.Holding(normalized), Creation.Rejection]);
     }
 
-    // The unacceptable URLs, and a URL one byte longer than the longest that fits in a token
-    // (CONTRACT.agent-identity.md §2).
+    // The unacceptable URLs, a URL one byte longer than the longest that fits in a token,
+    // and URLs that are not ASCII, since `u` holds only ASCII characters (CONTRACT.agent-identity.md §2):
+    // an internationalized host not in its `xn--` form, and a fullwidth commercial at (U+FF20) in the host.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-    public static TheoryData<string> RejectedUrlRows => new([.. UnacceptableUrls.All, UrlOfLength(3026)]);
+    public static TheoryData<string> RejectedUrlRows => new(
+    [
+        .. UnacceptableUrls.All,
+        UrlOfLength(3026),
+        "https://bücher.example/dvls",
+        "https://admin＠host/dvls",
+    ]);
 
     // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Devolutions.AgentIdentity;
@@ -64,19 +65,27 @@ public sealed class EnrollmentToken
     /// The secret is 32 bytes from <paramref name="randomNumberGenerator"/>.
     /// </remarks>
     /// <param name="productBaseUrl">
-    /// The absolute <c>https</c> URL of the product, such as <c>https://host/dvls</c>,
+    /// The absolute <c>https</c> URL of the product, in ASCII, such as <c>https://host/dvls</c>,
     /// without user information or any other <c>@</c>, query or fragment.
     /// </param>
     /// <param name="randomNumberGenerator">A cryptographically secure generator, which supplies the secret.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="productBaseUrl"/> is not an absolute <c>https</c> URL,
+    /// <paramref name="productBaseUrl"/> is not ASCII, is not an absolute <c>https</c> URL,
     /// has user information or any other <c>@</c>, a query or a fragment, or makes the token longer than 4096 bytes.
     /// </exception>
     public static EnrollmentToken Create(string productBaseUrl, RandomNumberGenerator randomNumberGenerator)
     {
         ArgumentNullException.ThrowIfNull(productBaseUrl);
         ArgumentNullException.ThrowIfNull(randomNumberGenerator);
+
+        // CONTRACT.agent-identity.md §2: `u` holds only ASCII characters, since certificates carry it as an IA5String.
+        if (!Ascii.IsValid(productBaseUrl))
+        {
+            throw new ArgumentException(
+                "The product base URL is not ASCII; write an internationalized host in its xn-- form.",
+                nameof(productBaseUrl));
+        }
 
         ArrayBufferWriter<byte> json = new();
 
