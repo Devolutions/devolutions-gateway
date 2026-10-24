@@ -65,6 +65,7 @@ Unless stated otherwise, implementations must follow these conventions.
   Fields:
   - `u` (required): absolute `https` product base URL without a user name or password, a query, a fragment or a trailing slash, e.g. `https://host/dvls`; the agent removes trailing slashes from a `u` that has them, so that `https://host/` and `https://host` name the same authority.
     `u` is read as text: it begins with `https://` and contains no `@`, and any `@` counts as a user name, even with nothing before it as in `https://@host`, because URL parsers disagree on such forms.
+    `u` holds only ASCII characters, so an internationalized host is written in its `xn--` form, since certificates carry `u` as an `IA5String` (§4).
 - `secret`: `base64url` of 32 random bytes; opaque to the agent beyond this format.
   The authority authenticates a token by its `secret` alone, accepting only its canonical `base64url` form, and never checks the `bag`, which carries only routing data.
   The authority stores `SHA-256` of the 32 bytes the secret encodes, never the secret itself.
@@ -82,7 +83,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - Re-enrollment with the same token and CSR public key returns the existing identity without counting a use.
 - Revoking a token keeps its secret hash.
   A revoked token authenticates only for an idempotent replay of an identity that it created; every other use returns `token_invalid`, whatever the CSR public key matches.
-- When several outcomes apply to one enrollment, the earliest in this list wins: (1) `token_invalid` when the `Authorization` header is missing, repeated, not `Bearer`, or holds no token whose stored hash matches `SHA-256` of the 32 bytes its secret encodes; (2) `invalid_request` for an invalid body, CSR or metadata; (3) the result of the CSR public key lookup below, except that a revoked token gets `token_invalid` for anything but an idempotent replay; (4) `token_invalid` for a revoked token, then `token_expired` for an expired one; (5) `token_exhausted`; (6) a new identity.
+- When several outcomes apply to one enrollment, the earliest in this list wins: (1) `token_invalid` when the `Authorization` header is missing, repeated, not `Bearer`, or holds no token whose stored hash matches `SHA-256` of the 32 bytes its secret encodes; (2) `invalid_request` for an invalid body, CSR or metadata, then `token_url_mismatch` for a CSR whose enrollment URL extension is missing or not the token's `u` without trailing slashes; (3) the result of the CSR public key lookup below, except that a revoked token gets `token_invalid` for anything but an idempotent replay; (4) `token_invalid` for a revoked token, then `token_expired` for an expired one; (5) `token_exhausted`; (6) a new identity.
 - The server matches the CSR public key against every certificate it has issued using the first matching rule below:
   - The key of the current certificate of a non-revoked identity enrolled with the same token → `200` with that identity and its current chain, without counting a use or changing metadata.
   - The key of a non-deleted identity enrolled with a different token → `invalid_request`; a deleted identity's key falls to the last rule, since the server keeps no token for it.
@@ -135,13 +136,13 @@ Unless stated otherwise, implementations must follow these conventions.
 
 - Chains are leaf-first, any length; the agent never assumes a tier count.
 - The number of CA tiers and the rest of the root profile are each authority's choice, within the rule below.
-- Every certificate in a chain is signed with `ecdsa-with-SHA256` by a P-256 key or with `ecdsa-with-SHA384` by a P-384 key, never with RSA, and every CA certificate carries basicConstraints with `cA` set and key usage with `keyCertSign`.
+- Every certificate in a chain is signed with `ecdsa-with-SHA256` by a P-256 key or with `ecdsa-with-SHA384` by a P-384 key, never with RSA, and every CA certificate, the root included, carries basicConstraints with `cA` set and key usage with `keyCertSign`.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
   The leaf carries no other extension except an authority key identifier, a subject key identifier and the enrollment URL extension; in particular it carries no basicConstraints, so a leaf can never act as a CA.
-- The enrollment URL extension, OID `2.25.123288656976046528792596909476335030418`, non-critical, holds as an `IA5String` the `u` of the token that enrolled the identity, exactly as that token carries it; every certificate issued for that identity carries the same value.
-- The agent's CSR carries one attribute, an `extensionRequest` holding only the enrollment URL extension with the base URL it sends the request to: its token's `u` at enrollment, its identity's base URL at renewal.
+- The enrollment URL extension, OID `2.25.123288656976046528792596909476335030418`, non-critical, holds as an `IA5String` the `u` of the token that enrolled the identity, without trailing slashes (§2); a leaf carries it exactly once, and every certificate issued for that identity carries the same value.
+- The agent's CSR carries one attribute, an `extensionRequest` holding only the enrollment URL extension with the base URL it sends the request to, without trailing slashes: its token's `u` at enrollment, its identity's base URL at renewal.
 - The server takes the CSR's public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256), verifies the CSR self-signature (else `invalid_request`) and reads the enrollment URL extension from its `extensionRequest`; it ignores the subject and every other attribute or requested extension, and does not require their contents in canonical DER form, such as a sorted `SET OF`.
-- At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u`, with `invalid_request`, and creates nothing; at renewal it ignores the value.
+- At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates nothing; at renewal it ignores the value.
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
 
 <a id="http-api"></a>
@@ -209,7 +210,7 @@ Request:
 - Every field is required except `config.agent_channel_url` and product-specific config fields.
 - `authority_id` is the authority's UUID; it never changes for that authority, across restarts, upgrades, nodes, backup restores and disaster recovery, and a different `authority_id` denotes a different authority.
 - The server generates `identity_id` when it creates the identity, and the ID remains stable for that identity.
-- The agent refuses a response whose leaf lacks the enrollment URL extension or names another URL than its token's `u`, as a permanent outcome.
+- The agent refuses, as a permanent outcome, a response whose leaf lacks the enrollment URL extension, carries it more than once or not as an `IA5String`, or names another URL than its token's `u` without trailing slashes.
 - The friendly name is not returned to the agent.
 - `config.version` identifies the config schema and is `1`; the agent ignores unknown config fields.
   A config with any other `version` is a transient failure (§5.4), and the agent keeps its stored config.
@@ -256,6 +257,7 @@ This body is present on every non-2xx response under `{u}/api/agent-identity/v1/
 | `token_invalid`       | 401  | Unknown or revoked token, bad secret                                         | permanent                                         |
 | `token_exhausted`     | 403  | The token has created `max_uses` identities                                  | permanent                                         |
 | `token_expired`       | 401  | `now ≥ expires_at`                                                           | permanent                                         |
+| `token_url_mismatch`  | 403  | The CSR names no enrollment URL, or not the token's `u`                      | permanent                                         |
 | `identity_revoked`    | 403  | Identity revoked                                                             | terminal                                          |
 | `identity_unknown`    | 401  | Certificate not registered, or identity deleted                              | terminal except during pending-key recovery       |
 | `certificate_expired` | 401  | Expired (for `connect`, `confirm`, `check-in`) or beyond grace (for `renew`) | see below                                         |
