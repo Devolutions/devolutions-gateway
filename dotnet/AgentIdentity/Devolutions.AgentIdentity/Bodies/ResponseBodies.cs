@@ -211,6 +211,12 @@ public static class ResponseBodies
     }
 
     // X509Certificate2 gives its validity in local time.
+    // UNTESTED: the conversion is exact in the hour that a daylight-saving fall-back repeats,
+    // because the local DateTime that X509Certificate2 returns keeps the ambiguous-DST bit,
+    // which ToUniversalTime uses.
+    // A wrong instant there publishes a root's validity an hour off on hosts outside UTC.
+    // Keep the conversion straight from the property: arithmetic, formatting or a DateTimeOffset built from the
+    // local value before ToUniversalTime loses the bit.
     private static string Timestamp(DateTime localTime)
     {
         return AgentIdentityProtocol.FormatTimestamp(new DateTimeOffset(localTime.ToUniversalTime()));
