@@ -1,14 +1,14 @@
 namespace Devolutions.AgentIdentity.Tests;
 
 /// <summary>
-/// URLs that are not an absolute <c>https</c> URL without user information, a query or a fragment,
+/// URLs that are not an absolute <c>https</c> URL without an <c>@</c>, a query or a fragment,
 /// the form that a token's <c>u</c> and a config's <c>agent_channel_url</c> both take.
 /// </summary>
 public static class UnacceptableUrls
 {
-    // CONTRACT.agent-identity.md §2 makes `u` an absolute `https` URL without a user name or password,
-    // a query or a fragment, and §5.2 makes `agent_channel_url` one without a query or fragment.
-    // RFC 9110 §4.2.4 deprecates user information in an `https` URI and tells a recipient to treat it as an error.
+    // CONTRACT.agent-identity.md §2 makes `u`, and §5.2 makes `agent_channel_url`, an absolute `https` URL
+    // without a user name or password, a query or a fragment, read as text:
+    // it begins with `https://` and contains no '@', since any '@' counts as a user name.
     public static string[] All { get; } =
     [
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
@@ -43,16 +43,26 @@ public static class UnacceptableUrls
         // oracle: spec RFC 3986 §3.5
         "https://host/dvls#",
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-        // oracle: spec RFC 9110 §4.2.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         "https://admin@host/dvls",
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-        // oracle: spec RFC 9110 §4.2.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         "https://admin:secret@host/dvls",
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
-        // oracle: spec RFC 9110 §4.2.4
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         "https://:secret@host/dvls",
-        // oracle: spec RFC 9110 §4.2.4
+        // Any '@' counts as a user name, even with nothing before it.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         "https://@host/dvls",
+        // Read as text, a URL contains no '@' anywhere, even after the authority.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+        "https://host/dvls/a@b",
+        // Read as text, a URL begins with `https://`.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+        "https:@host/dvls",
     ];
 
     public static TheoryData<string> Rows => new(All);

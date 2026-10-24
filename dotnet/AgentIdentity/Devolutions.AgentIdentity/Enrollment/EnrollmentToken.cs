@@ -65,13 +65,13 @@ public sealed class EnrollmentToken
     /// </remarks>
     /// <param name="productBaseUrl">
     /// The absolute <c>https</c> URL of the product, such as <c>https://host/dvls</c>,
-    /// without user information, query or fragment.
+    /// without user information or any other <c>@</c>, query or fragment.
     /// </param>
     /// <param name="randomNumberGenerator">A cryptographically secure generator, which supplies the secret.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="productBaseUrl"/> is not an absolute <c>https</c> URL,
-    /// has user information, a query or a fragment, or makes the token longer than 4096 bytes.
+    /// has user information or any other <c>@</c>, a query or a fragment, or makes the token longer than 4096 bytes.
     /// </exception>
     public static EnrollmentToken Create(string productBaseUrl, RandomNumberGenerator randomNumberGenerator)
     {
