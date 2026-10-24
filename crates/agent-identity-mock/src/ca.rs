@@ -290,7 +290,9 @@ mod tests {
 
     /// CONTRACT.agent-identity.md §4: the enrollment URL extension is "non-critical" and "holds as an `IA5String`" the
     /// enrollment URL.
+    /// RFC 5280 §4.2: "A certificate MUST NOT include more than one instance of a particular extension."
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: spec RFC 5280 §4.2
     #[test]
     fn leaf_names_the_enrollment_url_in_a_non_critical_extension() -> anyhow::Result<()> {
         let now = 1_800_000_000;
@@ -299,6 +301,15 @@ mod tests {
 
         let leaf = issue_leaf(&root, uuid::Uuid::nil(), key.verifying_key(), URL, 2, now, 3600)?;
 
+        let certificate = x509_cert::Certificate::from_der(&leaf.der)?;
+        let instances = certificate
+            .tbs_certificate()
+            .extensions()
+            .into_iter()
+            .flatten()
+            .filter(|extension| extension.extn_id == ENROLLMENT_URL_EXTENSION)
+            .count();
+        assert_eq!(instances, 1);
         assert_eq!(
             crate::test_x509::enrollment_url_extension(&leaf.der),
             Some((false, URL.to_owned()))

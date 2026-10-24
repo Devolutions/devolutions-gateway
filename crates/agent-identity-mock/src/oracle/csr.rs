@@ -441,4 +441,24 @@ mod tests {
         let checked = check_csr(&csr.encode()).expect("valid CSR");
         assert_eq!(checked.enrollment_url, None);
     }
+
+    /// CONTRACT.agent-identity.md §4: the server reads the enrollment URL extension and ignores the other attributes,
+    /// so an attribute it cannot read leaves a valid CSR without a URL: the reader stops there rather than guess where
+    /// the next attribute starts.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[rstest]
+    #[case::truncated_tlv(&[0x30, 0x05, 0x06])]
+    #[case::indefinite_length(&[0x30, 0x80])]
+    #[case::five_byte_long_form_length(&[0x30, 0x85, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00])]
+    #[case::length_past_the_end(&[0x30, 0x81, 0xFF])]
+    fn unreadable_attribute_before_the_extension_request_leaves_no_url(#[case] unreadable: &[u8]) {
+        let csr = Csr {
+            attributes: attributes(&[unreadable, &extension_request(&[&enrollment_url(URL)])]),
+            ..Csr::valid()
+        };
+
+        let checked = check_csr(&csr.encode()).expect("valid CSR");
+
+        assert_eq!(checked.enrollment_url, None);
+    }
 }
