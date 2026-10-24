@@ -134,7 +134,8 @@ Unless stated otherwise, implementations must follow these conventions.
 ## 4. Certificates
 
 - Chains are leaf-first, any length; the agent never assumes a tier count.
-- The root profile and the number of CA tiers are each authority's choice.
+- The number of CA tiers and the rest of the root profile are each authority's choice, within the rule below.
+- Every certificate in a chain is signed with `ecdsa-with-SHA256` by a P-256 key, and every CA certificate carries basicConstraints with `cA` set and key usage with `keyCertSign`.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
   The leaf carries no other extension except an authority key identifier and a subject key identifier; in particular it carries no basicConstraints, so a leaf can never act as a CA.
 - The server ignores the CSR's subject and attributes, including an `extensionRequest` with an empty `Extensions` list, which common CSR builders emit, and it does not require their contents in canonical DER form, such as a sorted `SET OF`, since nothing it decides depends on them; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
