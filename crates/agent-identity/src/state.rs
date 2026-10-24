@@ -1867,7 +1867,8 @@ mod tests {
             Ok(SubjectPublicKeyInfoOwned::try_from(der.as_bytes())?)
         }
 
-        /// Signs the `D` digest of `message` with this ECDSA key, whichever digest the contract pairs with its curve.
+        /// Signs the `D` digest of `message` with this ECDSA key, whether or not `D` is the digest the contract pairs with
+        /// its curve.
         fn sign_ecdsa_digest<D: Digest>(&self, message: &[u8]) -> anyhow::Result<Vec<u8>> {
             let digest = D::digest(message);
             Ok(match self {
