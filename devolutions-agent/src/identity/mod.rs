@@ -410,7 +410,10 @@ async fn enroll_pending(
     let Some((record, key)) = store.begin_enrollment(token)? else {
         return Ok(PendingOutcome::Completed);
     };
-    let csr_der = csr::create(key.as_ref()).context("create enrollment CSR")?;
+    // UNTESTED: the enrollment CSR names the token's `u` without trailing slashes, which the authority compares with the
+    // `u` of the token it receives (`CONTRACT.agent-identity.md` §4).
+    // No agent test captures the request it sends; when changing this, keep passing `Token::base_url`.
+    let csr_der = csr::create(key.as_ref(), token.base_url()).context("create enrollment CSR")?;
     let metadata = metadata::collect(env!("CARGO_PKG_VERSION"), settings.metadata_override_path.as_deref());
     let hash = token.sha256_hex();
     match client.enroll(token, &csr_der, &metadata, key.as_ref()).await {
