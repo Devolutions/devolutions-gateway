@@ -7143,14 +7143,15 @@ pub(crate) async fn p_invalid_unicode_json_strings_rejected(ctx: Context) -> any
     Ok(())
 }
 
-/// A CSR of `key` naming `base_url` whose canonical `base64` encoding has padding and uses `+` or `/`, so that every non-canonical rewrite applies.
+/// Returns a new key and its CSR naming `base_url`, whose canonical `base64` encoding has padding and uses `+` or `/`, so that every non-canonical rewrite applies.
 ///
-/// ECDSA signatures are randomized, so each attempt encodes differently.
-fn rewritable_csr(key: &KeyPair, base_url: &str) -> anyhow::Result<String> {
+/// The CSR signature is deterministic (RFC 6979), so the same key always gives the same CSR, and each attempt takes a new key.
+fn key_with_rewritable_csr(base_url: &str) -> anyhow::Result<(KeyPair, String)> {
     for _ in 0..64 {
+        let key = KeyPair::generate()?;
         let csr = key.csr(base_url)?;
         if csr.ends_with('=') && csr.contains(['+', '/']) {
-            return Ok(csr);
+            return Ok((key, csr));
         }
     }
     anyhow::bail!("no generated CSR had a padded encoding with '+' or '/'")
@@ -7174,8 +7175,8 @@ pub(crate) async fn p_noncanonical_base64_csr_rejected(ctx: Context) -> anyhow::
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §conventions
     let (token, identity) = issued(&ctx, "noncanonical-csr").await?;
     let before = identity_record(&ctx.target, &identity.identity_id).await?;
-    let key = KeyPair::generate()?;
-    for (variant, csr) in noncanonical_base64(&rewritable_csr(&key, &identity.base_url)?)? {
+    let (key, canonical) = key_with_rewritable_csr(&identity.base_url)?;
+    for (variant, csr) in noncanonical_base64(&canonical)? {
         let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
         expect_error(&enroll_raw(&ctx.target, &token, &body).await?, 400, "invalid_request")
             .with_context(|| format!("enroll CSR with {variant}"))?;
