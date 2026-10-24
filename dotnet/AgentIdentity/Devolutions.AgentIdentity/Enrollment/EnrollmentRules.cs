@@ -15,8 +15,8 @@ public static class EnrollmentRules
     /// and the request body, CSR and metadata are valid.
     /// When several outcomes apply, the earliest of these wins:
     /// the result of the CSR key lookup,
-    /// except that a deleted token gets <c>token_invalid</c> for anything but a replay;
-    /// <c>token_invalid</c> for a deleted token,
+    /// except that a revoked token gets <c>token_invalid</c> for anything but a replay;
+    /// <c>token_invalid</c> for a revoked token,
     /// then <c>token_expired</c> once <paramref name="now"/> reaches its expiry;
     /// <c>token_exhausted</c> once it has created <see cref="EnrollmentTokenState.MaxUses"/> identities;
     /// a new identity, whose ID, <see cref="EnrollmentDecision.NewIdentityId"/>, is minted at random for this decision.
@@ -52,19 +52,19 @@ public static class EnrollmentRules
                 return EnrollmentDecision.ReturnExistingIdentity(keyMatch.IdentityId);
             }
 
-            if (token.Deleted)
+            if (token.Revoked)
             {
                 return EnrollmentDecision.Reject(
                     AgentIdentityErrorCode.TokenInvalid,
-                    "The token is deleted, and the CSR key is not the current key of an identity that it created.");
+                    "The token is revoked, and the CSR key is not the current key of an identity that it created.");
             }
 
             return RejectIssuedKey(keyMatch);
         }
 
-        if (token.Deleted)
+        if (token.Revoked)
         {
-            return EnrollmentDecision.Reject(AgentIdentityErrorCode.TokenInvalid, "The token is deleted.");
+            return EnrollmentDecision.Reject(AgentIdentityErrorCode.TokenInvalid, "The token is revoked.");
         }
 
         if (!(now < token.ExpiresAt))

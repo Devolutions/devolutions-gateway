@@ -15,7 +15,7 @@ public enum AgentIdentityErrorCode
     // values start at 1 so that an uninitialized code is not a valid one.
 
     /// <summary>
-    /// The enrollment token is unknown or deleted, or its secret does not match.
+    /// The enrollment token is unknown or revoked, or its secret does not match.
     /// </summary>
     TokenInvalid = 1,
 

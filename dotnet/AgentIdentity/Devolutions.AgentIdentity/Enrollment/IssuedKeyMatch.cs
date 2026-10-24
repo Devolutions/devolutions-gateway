@@ -78,7 +78,7 @@ public sealed class IssuedKeyMatch
     /// After an identity is deleted, the authority keeps only the SPKI SHA-256 and the issuance time of its keys,
     /// so <see cref="EnrollmentRules.Decide"/> refuses the key with <c>identity_revoked</c> whatever token enrolled
     /// the identity.
-    /// A deleted presented token gets <c>token_invalid</c> instead, since it authenticates nothing but a replay.
+    /// A revoked presented token gets <c>token_invalid</c> instead, since it authenticates nothing but a replay.
     /// <see cref="RenewalRules.Decide"/> refuses the key with <c>invalid_request</c>, as it does any key of another
     /// identity.
     /// </remarks>

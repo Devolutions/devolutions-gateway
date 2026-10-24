@@ -18,7 +18,7 @@ The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolut
 
 The host keeps everything else:
 
-- Storage: identities, certificates and their statuses, the SPKI SHA-256 of every issued key, token hashes and tombstones, accepted nonces, metadata, configs and request-renewal flags.
+- Storage: identities, certificates and their statuses, the SPKI SHA-256 of every issued key, token hashes, revoked tokens included, accepted nonces, metadata, configs and request-renewal flags.
 - Hosting: routes, TLS, the gRPC service and its timers, and when to send each push message.
 - Management: tokens, identities and root rotation, and the permissions that guard them.
 - The root CA and its private key at rest; the library reaches the key only through `IRootSigner`.
@@ -69,7 +69,7 @@ Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normall
 
 1. Answer a body longer than `AgentIdentityProtocol.MaxRequestBodyBytes` with `AgentIdentityError.BodyTooLarge`.
 2. Pass the `Authorization` field lines, as received, to `EnrollmentAuthorization.ReadBearerToken`.
-   Find the stored token by the result's `SecretHash`, deleted tokens included, and answer `AgentIdentityError.From(AgentIdentityErrorCode.TokenInvalid)` when there is none.
+   Find the stored token by the result's `SecretHash`, revoked tokens included, and answer `AgentIdentityError.From(AgentIdentityErrorCode.TokenInvalid)` when there is none.
 3. Parse the body with `EnrollRequestBody.Parse`.
 4. Look up `Csr.SubjectPublicKeyInfoSha256` among the keys of every certificate the authority has issued, deleted identities included.
    Describe the match with `IssuedKeyMatch.ForIdentity` or `IssuedKeyMatch.ForDeletedIdentity`, or use null when there is none.
