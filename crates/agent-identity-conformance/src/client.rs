@@ -160,9 +160,9 @@ impl Target {
     pub(crate) async fn channel_available(&self) -> anyhow::Result<bool> {
         let management = self.management();
         let token = management.create_token(1, Duration::from_secs(3600), None).await?;
-        let key = KeyPair::generate(&self.base_url)?;
+        let key = KeyPair::generate()?;
         let reply = self.enroll(&token.text, &key, &json!({})).await?;
-        let identity = Identity::from_enrollment(key, &reply)?;
+        let identity = Identity::from_enrollment(&token.text, key, &reply)?;
         management.revoke(&identity.identity_id).await?;
         management.delete_identity(&identity.identity_id).await?;
         management.revoke_token(&token.id).await?;
@@ -223,18 +223,21 @@ impl Target {
         expect_status(&self.control("time/advance", &json!({ "secs": secs })).await?, 200)
     }
 
+    /// Enrolls `key` with `token`, by a CSR naming the token's `u`.
     pub(crate) async fn enroll(&self, token: &str, key: &KeyPair, metadata: &Value) -> anyhow::Result<Reply> {
+        let csr = key.csr(&token_base_url(token)?)?;
         self.agent(
             Method::POST,
             "/enroll",
-            Some(&json!({ "csr": key.csr, "metadata": metadata })),
+            Some(&json!({ "csr": csr, "metadata": metadata })),
             Some(token),
         )
         .await
     }
 
+    /// Renews `current` with `new_key`, by a CSR naming the identity's base URL.
     pub(crate) async fn renew(&self, current: &Identity, new_key: &KeyPair, metadata: &Value) -> anyhow::Result<Reply> {
-        let body = serde_json::to_vec(&json!({ "csr": new_key.csr, "metadata": metadata }))?;
+        let body = serde_json::to_vec(&json!({ "csr": new_key.csr(&current.base_url)?, "metadata": metadata }))?;
         let headers = current.key.sign_now(&current.thumbprint, "renew", Some(&body));
         self.signed_renew(&body, &headers, None).await
     }
@@ -308,10 +311,13 @@ pub(crate) struct Identity {
     pub(crate) agent_channel_url: Option<String>,
     pub(crate) config: Value,
     pub(crate) key: KeyPair,
+    /// The `u` of the token that enrolled the identity, without its trailing slashes, which its renewal CSRs name.
+    pub(crate) base_url: String,
 }
 
 impl Identity {
-    pub(crate) fn from_enrollment(key: KeyPair, reply: &Reply) -> anyhow::Result<Self> {
+    /// The identity that `reply` enrolled with `token` for `key`.
+    pub(crate) fn from_enrollment(token: &str, key: KeyPair, reply: &Reply) -> anyhow::Result<Self> {
         expect_status(reply, 200)?;
         let chain = reply.body["certificate_chain"]
             .as_array()
@@ -342,6 +348,7 @@ impl Identity {
             agent_channel_url,
             config: reply.body["config"].clone(),
             key,
+            base_url: token_base_url(token)?,
         })
     }
 
@@ -402,18 +409,41 @@ pub(crate) fn count(value: &Value, key: &str) -> anyhow::Result<u64> {
         .with_context(|| format!("missing number field {key}"))
 }
 
-/// The `u` that the bag of `token` carries, without its trailing slashes, which is the URL the token's certificates name ([CONTRACT.agent-identity.md] §2 "Enrollment token" and §4 "Certificates").
+/// Returns the JSON object that the bag of `token` encodes ([CONTRACT.agent-identity.md] §2 "Enrollment token").
 ///
 /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
-pub(crate) fn token_base_url(token: &str) -> anyhow::Result<String> {
+pub(crate) fn token_bag(token: &str) -> anyhow::Result<Value> {
     let bag = token.split('.').nth(1).context("token has no bag")?;
-    let route: Value = serde_json::from_slice(
+    serde_json::from_slice(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD
             .decode(bag)
             .context("decode token bag")?,
     )
-    .context("parse token bag")?;
-    Ok(field(&route, "u")?.trim_end_matches('/').to_owned())
+    .context("parse token bag")
+}
+
+/// Returns `token` with its bag replaced by `bag`, keeping its prefix and secret.
+pub(crate) fn with_bag(token: &str, bag: &Value) -> anyhow::Result<String> {
+    let (head, secret) = token.rsplit_once('.').context("token has no secret")?;
+    let (prefix, _) = head.rsplit_once('.').context("token has no bag")?;
+    Ok(format!(
+        "{prefix}.{}.{secret}",
+        base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(bag)?)
+    ))
+}
+
+/// Returns `token` with the `u` of its bag replaced by `url`, keeping its other bag fields and its secret.
+pub(crate) fn with_bag_url(token: &str, url: &str) -> anyhow::Result<String> {
+    let mut bag = token_bag(token)?;
+    bag["u"] = json!(url);
+    with_bag(token, &bag)
+}
+
+/// Returns the `u` that the bag of `token` carries, without its trailing slashes, which is the URL the token's certificates name ([CONTRACT.agent-identity.md] §2 "Enrollment token" and §4 "Certificates").
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+pub(crate) fn token_base_url(token: &str) -> anyhow::Result<String> {
+    Ok(field(&token_bag(token)?, "u")?.trim_end_matches('/').to_owned())
 }
 
 pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> {
@@ -448,6 +478,11 @@ mod tests {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let certificate = field(&vectors["keys"][0], "certificate")?;
+        let token = format!(
+            "dvaet1.{}.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"u":"https://host/mock"}"#),
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([0x5a; 32])
+        );
         let mut reply = Reply {
             status: 200,
             body: json!({
@@ -460,19 +495,19 @@ mod tests {
         reply.body["channel_url"] = Value::Null;
         reply.body["extra_response_field"] = json!({ "nested": true });
         reply.body["config"]["product_field"] = json!("product-specific");
-        let identity = Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &reply)?;
+        let identity = Identity::from_enrollment(&token, KeyPair::generate()?, &reply)?;
         ensure!(
             identity.agent_channel_url.is_none() && identity.config["product_field"] == "product-specific",
             "unknown response fields or omitted config.agent_channel_url were not accepted"
         );
         reply.body["config"]["agent_channel_url"] = Value::Null;
         ensure!(
-            Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &reply).is_err(),
+            Identity::from_enrollment(&token, KeyPair::generate()?, &reply).is_err(),
             "explicit null config.agent_channel_url was accepted"
         );
         reply.body["config"]["agent_channel_url"] = json!("https://host/mock");
         ensure!(
-            Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &reply)?
+            Identity::from_enrollment(&token, KeyPair::generate()?, &reply)?
                 .agent_channel_url
                 .as_deref()
                 == Some("https://host/mock"),
@@ -482,7 +517,7 @@ mod tests {
             let mut invalid = reply.clone();
             invalid.body[name] = Value::Null;
             ensure!(
-                Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &invalid).is_err(),
+                Identity::from_enrollment(&token, KeyPair::generate()?, &invalid).is_err(),
                 "explicit null {name} was accepted"
             );
         }
@@ -490,7 +525,7 @@ mod tests {
             let mut invalid = reply.clone();
             invalid.body["config"][name] = Value::Null;
             ensure!(
-                Identity::from_enrollment(KeyPair::generate("https://host/mock")?, &invalid).is_err(),
+                Identity::from_enrollment(&token, KeyPair::generate()?, &invalid).is_err(),
                 "explicit null config.{name} was accepted"
             );
         }

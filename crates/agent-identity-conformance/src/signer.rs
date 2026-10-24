@@ -22,11 +22,10 @@ use x509_cert::spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned};
 pub(crate) const ENROLLMENT_URL_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.1");
 
 /// `ecdsa-with-SHA256`, RFC 5758 §3.2.
-const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
+pub(crate) const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
 
 pub(crate) struct KeyPair {
     pub(crate) key: SigningKey,
-    pub(crate) csr: String,
 }
 
 #[derive(Clone, Copy)]
@@ -49,16 +48,17 @@ const DEFAULT_PARAMETER_ORDER: [SignatureParameter; 6] = [
 ];
 
 impl KeyPair {
-    /// A new key with a CSR that requests the enrollment URL extension naming `base_url`, as an agent's CSR to the authority at `base_url` does ([CONTRACT.agent-identity.md] §4 "Certificates").
+    pub(crate) fn generate() -> anyhow::Result<Self> {
+        Ok(Self {
+            key: SigningKey::generate_from_rng(&mut rand::rng()),
+        })
+    }
+
+    /// A CSR for this key that requests the enrollment URL extension naming `base_url`, as the agent's CSR to the authority at `base_url` does ([CONTRACT.agent-identity.md] §4 "Certificates"): its token's `u` at enrollment, its identity's base URL at renewal.
     ///
     /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
-    pub(crate) fn generate(base_url: &str) -> anyhow::Result<Self> {
-        let mut pair = Self {
-            key: SigningKey::generate_from_rng(&mut rand::rng()),
-            csr: String::new(),
-        };
-        pair.csr = pair.csr_requesting(Some(&[enrollment_url_extension(base_url)?]))?;
-        Ok(pair)
+    pub(crate) fn csr(&self, base_url: &str) -> anyhow::Result<String> {
+        self.csr_requesting(Some(&[enrollment_url_extension(base_url)?]))
     }
 
     /// A CSR for this key whose one attribute is an `extensionRequest` holding `extensions`, or that has no attribute when `extensions` is `None`, encoded `base64`.
@@ -258,7 +258,6 @@ mod tests {
             let key_der = STANDARD.decode(vector_key["private_key_pkcs8"].as_str().context("vector private key")?)?;
             let pair = KeyPair {
                 key: SigningKey::from_pkcs8_der(&key_der)?,
-                csr: String::new(),
             };
             let input = case["headers"]["signature-input"].as_str().context("signature-input")?;
             let tag = case["endpoint"].as_str().context("endpoint")?;
@@ -293,7 +292,6 @@ mod tests {
         let key_der = STANDARD.decode(vectors["keys"][0]["private_key_pkcs8"].as_str().context("vector key")?)?;
         let pair = KeyPair {
             key: SigningKey::from_pkcs8_der(&key_der)?,
-            csr: String::new(),
         };
         let proof = &vectors["channel_proof"];
         let challenge = STANDARD.decode(proof["challenge"].as_str().context("challenge")?)?;
@@ -333,8 +331,8 @@ mod tests {
         use p256::pkcs8::EncodePublicKey as _;
 
         let url = "https://host:8443/dvls";
-        let pair = KeyPair::generate(url)?;
-        let request = CertReq::from_der(&STANDARD.decode(&pair.csr)?)?;
+        let pair = KeyPair::generate()?;
+        let request = CertReq::from_der(&STANDARD.decode(pair.csr(url)?)?)?;
         let [attribute] = request.info.attributes.as_slice() else {
             anyhow::bail!("the CSR does not carry exactly one attribute");
         };

@@ -22,7 +22,9 @@ use tokio::io::AsyncWriteExt as _;
 use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
-use crate::client::{Target, Token, count, decoded_certificate, expect_error, expect_status, field};
+use crate::client::{
+    Target, Token, count, decoded_certificate, expect_error, expect_status, field, token_bag, with_bag_url,
+};
 use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
 use crate::{Context, KeyBackend};
 
@@ -2322,22 +2324,12 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
             let target = case.ctx.target.clone();
             let token = new_token(case, 2).await?;
             // The rewritten token keeps the valid bag fields and secret, so only its new `u` can make it malformed.
-            let (head, secret) = token.text.rsplit_once('.').context("token structure")?;
-            let (_, bag) = head.rsplit_once('.').context("token bag")?;
-            let route: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(bag)?)?;
-            let secret = secret.to_owned();
-            let rest = field(&route, "u")?
+            let rest = field(&token_bag(&token.text)?, "u")?
                 .strip_prefix("https://")
                 .context("token base URL is not https")?
                 .to_owned();
-            let with_u = |u: String| -> anyhow::Result<String> {
-                let mut route = route.clone();
-                route["u"] = json!(u);
-                Ok(format!(
-                    "dvaet1.{}.{secret}",
-                    URL_SAFE_NO_PAD.encode(serde_json::to_vec(&route)?)
-                ))
-            };
+            let issued = token.text.clone();
+            let with_u = |u: String| with_bag_url(&issued, &u);
             let (pending, attempted, identities, used) = match reason {
                 "token_invalid" => {
                     let (prefix, _) = token.text.rsplit_once('.').context("token structure")?;
@@ -2348,7 +2340,7 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                         .management()
                         .create_token(1, Duration::from_secs(3600), None)
                         .await?;
-                    let key = crate::signer::KeyPair::generate(&target.base_url)?;
+                    let key = crate::signer::KeyPair::generate()?;
                     expect_status(&target.enroll(&once.text, &key, &json!({})).await?, 200)?;
                     (once.text.clone(), once, 1, 1)
                 }
@@ -2437,15 +2429,7 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
         let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         drop(listener);
-        let (prefix, secret) = token.text.rsplit_once('.').context("token structure")?;
-        let (_, bag) = prefix.rsplit_once('.').context("token bag")?;
-        let mut route: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(bag)?)?;
-        route["u"] = json!(format!("https://127.0.0.1:{port}/mock"));
-        let offline = format!(
-            "dvaet1.{}.{}",
-            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&route)?),
-            secret
-        );
+        let offline = with_bag_url(&token.text, &format!("https://127.0.0.1:{port}/mock"))?;
         case.write_pending(&offline)?;
         tokio::time::sleep(Duration::from_secs(2)).await;
         ensure!(
@@ -2541,18 +2525,6 @@ pub(crate) async fn a_pending_file_kept_on_transient_error(ctx: Context) -> anyh
     Ok(())
 }
 
-/// `token` with the `u` of its bag replaced by `url`, keeping its other bag fields and its secret.
-fn with_bag_url(token: &str, url: &str) -> anyhow::Result<String> {
-    let (head, secret) = token.rsplit_once('.').context("token structure")?;
-    let (prefix, bag) = head.rsplit_once('.').context("token bag")?;
-    let mut route: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(bag)?)?;
-    route["u"] = json!(url);
-    Ok(format!(
-        "{prefix}.{}.{secret}",
-        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&route)?)
-    ))
-}
-
 /// A server holding another authority's token relays a device's enrollment from its own address, so the token's `u` names the relay, and so does the agent's CSR, which the authority refuses with `invalid_request` ([CONTRACT.agent-identity.md] §4 "Certificates").
 /// `invalid_request` is transient (§5.4 "Errors"), so the agent keeps the pending state and retries, and the authority creates nothing.
 ///
@@ -2602,7 +2574,7 @@ pub(crate) async fn a_relayed_enrollment_kept_pending(ctx: Context) -> anyhow::R
         // The agent's requests reached the mock, and this one shows the answer they got.
         expect_error(
             &target
-                .enroll(&relayed, &crate::signer::KeyPair::generate(&relay)?, &json!({}))
+                .enroll(&relayed, &crate::signer::KeyPair::generate()?, &json!({}))
                 .await?,
             400,
             "invalid_request",
@@ -3016,7 +2988,7 @@ async fn same_token_after_permanent_outcome(ctx: Context, outcome: PermanentToke
         let token = new_token(case, 1).await?;
         let (pending, expected_identities, expected_uses) = match outcome {
             PermanentTokenOutcome::Exhausted => {
-                let key = crate::signer::KeyPair::generate(&target.base_url)?;
+                let key = crate::signer::KeyPair::generate()?;
                 expect_status(&target.enroll(&token.text, &key, &json!({})).await?, 200)?;
                 (token.text.clone(), 1, 1)
             }
