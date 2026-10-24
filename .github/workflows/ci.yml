@@ -1320,6 +1320,14 @@ jobs:
         run: ./crates/agent-channel-proto/dotnet/build.ps1
         shell: pwsh
 
+      - name: Agent identity tests
+        run: dotnet test dotnet/AgentIdentity/AgentIdentity.sln
+        shell: pwsh
+
+      - name: Build agent identity package
+        run: ./dotnet/AgentIdentity/build.ps1
+        shell: pwsh
+
   agent-identity-vectors:
     name: Agent Identity test vectors
     runs-on: ubuntu-latest
