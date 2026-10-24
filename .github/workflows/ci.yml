@@ -165,12 +165,14 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        os: [windows, linux]
+        os: [windows, linux, macos]
         include:
           - os: windows
             runner: windows-2022
           - os: linux
             runner: ubuntu-latest
+          - os: macos
+            runner: macos-15
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -182,6 +184,17 @@ jobs:
         uses: ./.github/actions/setup-rust-cache
         with:
           sccache-enabled: ${{ needs.preflight.outputs.sccache }}
+
+      # The macos-15 image's ~/.cargo/bin shims dispatch to Homebrew's rustup-init and
+      # fail for `cargo`; the official rustup installer replaces them with working ones.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs             | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
 
       - name: Check clippy
         shell: pwsh
@@ -264,15 +277,19 @@ jobs:
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
-        arch: [x64]
-        os: [windows, linux]
         include:
           - os: windows
+            arch: x64
             runner: windows-2022
             target: x86_64-pc-windows-msvc
           - os: linux
+            arch: x64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - os: macos
+            arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
 
     steps:
       - name: Checkout ${{ github.repository }}
@@ -290,6 +307,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get -o Acquire::Retries=3 install libsystemd-dev
+
+      # The macos-15 image's ~/.cargo/bin shims dispatch to Homebrew's rustup-init and
+      # fail for `cargo`; the official rustup installer replaces them with working ones.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs             | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
 
       - name: Tests
         run: ./ci/tlk.ps1 test -Platform ${{ matrix.os }} -Architecture ${{ matrix.arch }} -CargoProfile 'dev'
