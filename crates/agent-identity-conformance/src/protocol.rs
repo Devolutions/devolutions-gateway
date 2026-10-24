@@ -7811,6 +7811,13 @@ mod tests {
             error.downcast_ref::<crate::Incomplete>().is_none(),
             "an issuer algorithm the contract excludes was reported as a missing fixture"
         );
+        // The altered issuer also no longer verifies under the root, so only the leaf's own failure shows that the algorithm rule refused it.
+        let error = format!("{error:#}");
+        ensure!(
+            error.starts_with("chain certificate 0: ")
+                && error.contains("not with ecdsa-with-SHA256 by a P-256 key or ecdsa-with-SHA384 by a P-384 key"),
+            "the failure does not refuse the leaf for its issuer's algorithm: {error}"
+        );
         Ok(())
     }
 
