@@ -1213,7 +1213,12 @@ impl State {
         }
 
         let issued_seq = self.serial_seq;
-        let enrollment_url = self.identities[&identity_id].enrollment_url.clone();
+        let enrollment_url = self
+            .identities
+            .get(&identity_id)
+            .expect("identity exists")
+            .enrollment_url
+            .clone();
         let leaf = self.issue_leaf(identity_id, &csr_key, &enrollment_url, now)?;
         let root_der = self.issuing_root().cert_der.clone();
         let issuer = self.issuing_root().thumbprint.clone();
