@@ -113,6 +113,10 @@ pub fn agent_tokio_cmd() -> tokio::process::Command {
     cmd
 }
 
+pub fn agent_path() -> &'static std::path::Path {
+    &AGENT_BIN_PATH
+}
+
 pub fn assert_stderr_eq(output: &assert_cmd::assert::Assert, expected: expect_test::Expect) {
     let stderr = std::str::from_utf8(&output.get_output().stderr).unwrap();
     expected.assert_eq(stderr);

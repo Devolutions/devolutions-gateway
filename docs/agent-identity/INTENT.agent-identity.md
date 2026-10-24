@@ -1,0 +1,195 @@
+## Overview
+
+Devolutions Agent is installed on user devices.
+Agent Identity gives a device a durable identity with an authority: the device enrolls with the authority, which owns a root CA and issues the identity an X.509 certificate.
+Enrollment must work unattended for N machines from one reusable token, typically through an `msiexec` command deployed with Microsoft Intune.
+After enrollment, the agent authenticates to the authority with that identity, renews it automatically, and keeps a bidirectional channel open so that either side can send a message at any time.
+Features that need push, such as PEDM policies, require that channel.
+
+`docs/agent-identity/CONTRACT.agent-identity.md` defines what the agent and an authority must agree on, and `docs/agent-identity/test-vectors.json` holds their shared test data.
+
+Agent Tunnel currently has its own enrollment, against a root owned by Gateway.
+Later, it is expected to move onto Agent Identity, and its current enrollment to be deprecated:
+
+- DVLS registers with the Gateway the certificate thumbprint of each identity accepted for tunneling, and keeps it current on every renewal, revocation and deletion;
+- DVLS delivers the Gateway URL through the identity's config;
+- the agent authenticates to the Gateway over mTLS with the device key of its identity; Agent Tunnel's existing keys are not imported.
+
+A relying party such as the Gateway never accepts the request authentication or channel proofs the agent sends to its authority.
+It authenticates the device with a protocol bound to itself, so that neither side can relay the other's authentication.
+A service such as the Gateway never accepts a device, for example as a tunnel agent, only because the authority signed its identity.
+For example, DVLS gives the Gateway the identities accepted for tunneling beforehand, and the Gateway accepts only those; that works because an identity can't be impersonated.
+
+The design must not preclude this migration.
+
+## Terminology
+
+- **Authority**: a server implementing the contract and owning the root(s) that issue identity certificates (e.g.: DVLS, PSU).
+  Authorities use different base URLs and may provide product-specific configuration and management APIs, but never a product-specific variant of the agent-facing protocol.
+  An authority keeps one `authority_id` for its whole life, across restarts, upgrades, nodes, backup restores and disaster recovery; a different `authority_id` is a different authority, because the agent keys its identities by it.
+- **Enrollment token**: a reusable, use-capped, expiring credential that authorizes enrollment and nothing else.
+- **Device**: a machine where Devolutions Agent is installed (an endpoint).
+  A device can hold one identity per authority, for example one with DVLS and one with PSU at the same time.
+- **Identity**: the enrollment of one device with one authority: the authority's record, under the UUID the authority mints, and the agent's state for it.
+  An identity has one current device key at a time, and each renewal replaces it.
+  *Avoid:* "device" for the authority's record.
+- **Pending-enrollment file**: a file through which the `identity enroll` command hands a token to the agent service.
+- **Agent channel**: the bidirectional gRPC stream between the agent and an authority.
+
+## Scope
+
+Agent Identity covers enrollment, renewal, revocation, root rotation, config delivery, and the agent channel.
+
+Later:
+
+- a UI, including generating the install command;
+- CRL and OCSP;
+- an enrollment approval queue, if users ask for one;
+- proof from outside Agent Identity at enrollment, such as an Entra device certificate, which the design must not preclude but doesn't require;
+- PEDM payloads on the agent channel;
+- TPM-backed keys;
+- moving Agent Tunnel and other relying parties onto Agent Identity (see Overview).
+
+Not intended:
+
+- mTLS between the agent and the authority (see Request authentication);
+- un-revocation, because revocation is final by design;
+- a fallback transport for the agent channel: gRPC is the only channel for pushing things, which simplifies the implementation and avoids duplicating logic and transports, at the cost of dropping old setups.
+
+## Security invariants
+
+1. The private key is generated on the device, and the agent never sends or exports it.
+   Enrollment and renewal carry a PKCS#10 CSR, which is the proof of possession.
+2. The authority mints the identity's UUID and the certificate's subject.
+   An identity is never derived from the enrollment token, from reported metadata, or from claims in the CSR, which supplies only a verified public key.
+3. The enrollment token authorizes enrollment only.
+   A leaked token can enroll new identities; it must never allow impersonating or altering an existing identity.
+4. An authority authenticates a request only through a certificate it registered for that identity, looked up by thumbprint, and a signature by that certificate's key.
+   The agent never sends its certificate to the authority, and validating a chain is not authentication: any certificate the root issued chains successfully, and a chain says nothing about revocation.
+5. Revocation is final for the identity and its keys.
+   It blocks authentication and renewal, closes live streams, and never makes an issued public key reusable, so a revoked identity never authenticates again.
+   The agent never undoes a revocation on its own: it doesn't enroll again with the token that created the revoked identity.
+   That is a safeguard on the device, not a control, because enrollment authenticates the token, not the device: whoever controls the device can clear its state, then enroll it with any token that can still enroll, as a new identity that uses up a token use.
+   Keeping a revoked device out therefore also takes revoking every token it can still use.
+6. Reported metadata is informational (display, friendly-name evaluation).
+   It is never used for authorization.
+7. An agent channel stream is authenticated only once the device has signed a fresh challenge for that stream.
+   Signed opening headers are not tied to one stream and can be captured by a TLS-terminating proxy, TLS inspection or a header log, so they never authenticate a stream on their own.
+   No metadata update or server push happens before the challenge succeeds.
+8. A stream is bound to the certificate that opened it and is closed no later than that certificate's `notAfter`.
+9. Enrollment tokens never appear in logs, not even partially.
+10. An identity proves which device is speaking; whether it grants any privilege is a separate decision.
+    Least privilege is the default: devices enroll first, and an administrator then assigns them permissions and roles on the authority side.
+11. An authority treats a new identity as an unknown device: neither the authority nor a third-party system should send it a secret until the identity has been explicitly vetted, for example by an administrator marking it as trusted or by a user identifying themselves through it.
+    Once it is vetted, the authority may send it secrets.
+
+## Design choices
+
+### Protocol growth
+
+- The protocol grows through optional fields and payloads that older receivers ignore.
+  Authentication data stays strict because accepting extra or missing signed data could weaken verification.
+
+### Enrollment tokens
+
+- Enrollment tokens are opaque and versioned by their prefix.
+  The stable prefix makes tokens easy for secret scanners to recognize, and a new prefix lets older agents reject an incompatible format.
+- The unsigned bag only tells the agent where to enroll; it never carries anything an authority trusts.
+- The secret authenticates the token, and the authority stores only its hash.
+- Protecting the token against TLS interception, including a user's own inspection proxy and its logs, is not intended: the token stays an opaque bearer secret for simplicity, and a stronger scheme would later be a migration to a new prefix.
+  Proof of possession was considered and rejected for the complexity it adds.
+  The secret could have been a P-256 private key, used as is without changing the token's shape, with its public key replacing the hash the authority stores, so that the token would never travel on the wire and a stolen authority database would hold no working token.
+- Every authority enforces a maximum on a token's number of uses and on its lifetime.
+- Every authority lets administrators find the identities each token enrolled.
+  The address an enrollment came from is deliberately not recorded, because it has too little value: behind a reverse proxy it is the proxy's, and forwarded headers can be forged.
+- Anyone holding a token can use up its remaining uses; that risk is accepted, and a warning near the limit would mostly be noise, since a token is usually created with N uses for N machines.
+- The token's base URL never carries a user name or password, which could make an address read as one host while it reaches another; this can be revisited if it blocks a user.
+- A token works only at the base URL it names: the authority refuses a request naming another, and names that URL in every certificate it issues for the identity, so that a server relaying a token from another address is refused.
+- The token is deliberately not a JWT.
+  The authority already needs stored state for use limits, revocation and retry recovery, and an unenrolled agent has no authority key with which to verify a signed token.
+- A token that is no longer wanted is revoked, not deleted: it stays stored with its name.
+  This lets a device recover a lost enrollment response without allowing the revoked token to create another identity, and keeps the token's name on the identities it enrolled.
+
+### Enrollment
+
+- A lost enrollment response can be recovered by retrying the same token and CSR while the created identity remains non-revoked, even after the token expires, reaches its use limit or is revoked.
+  The retry consumes no extra use and changes no identity state because the CSR proves past possession of the key, not current possession.
+- The authority creates the friendly name once during enrollment, and later metadata updates never rename the identity.
+  The agent never receives the name, because an administrator can rename the identity and the agent's copy would go stale.
+  The authority evaluates it from the token's friendly-name format, whose placeholders are `{<known metadata key>}` and `{token_name}`, the enrollment token's name.
+  `{{` and `}}` escape braces, and a format with an unpaired brace or an unknown placeholder is rejected when the token is created.
+  A missing metadata value evaluates to empty.
+  The result is trimmed, truncated to 255 Unicode scalar values without splitting one, and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`); an empty result falls back to the identity ID.
+  The default format is `{hostname}`.
+
+### Certificate renewal
+
+- Renewal first creates a pending certificate.
+  Confirmation proves that the agent holds the new private key before the certificate becomes current.
+- If a confirmation response is lost, the agent cannot know whether the authority promoted the certificate.
+  The agent therefore retries confirmation before any other signed operation and can use the pending key to recover if that certificate expires.
+- Renewal grace lasts for the authenticating certificate's own lifetime.
+  This gives an offline device time to recover without requiring a new enrollment token immediately.
+
+### Configuration and metadata
+
+- `last_seen_at` moves only on actions that prove current possession of the device key; an enrollment replay and a stream closure prove none.
+  Creating the identity initializes it; every accepted renew, confirm (including an already-current retry) and check-in, every authenticated `Hello`, and every later agent message on an authenticated stream sets it to the authority's current time.
+- Check-in is only a fallback for configuration and renewal requests while no channel is working.
+  Features that need server push require the agent channel.
+- An enrollment token adds nothing to an identity's config.
+  An administrator assigns product settings to identities after they enroll, for example by selecting several identities and assigning them as tunnel agents of one Gateway; the authority then updates their config and gives that Gateway those identities, so that settings follow an administrator's decision about each device rather than the token it used.
+
+### Errors
+
+- The contract's error section is the only list of error codes, HTTP mappings and retry rules.
+  Changing these rules can break compatibility because agents use them to decide whether to retry, discard a pending enrollment or reject a stored identity.
+
+### Request authentication
+
+- Every request to the authority is authenticated with the identity's device key, and that authentication keeps working behind a reverse proxy in front of the authority, including one that terminates TLS or rewrites the host and path, since DVLS often runs behind IIS.
+- A captured request authentication can't be replayed: it is single-use per authority and expires quickly.
+  Single use across the nodes of a multi-node authority comes later.
+- A different key for each authority prevents reuse with another authority, and the operation tag prevents reuse at another endpoint.
+- mTLS and TLS channel binding are not used, because a TLS-terminating proxy or IIS in front of the authority breaks them; neither is a bearer token, because a captured one replays.
+- Requests are signed with RFC 9421 HTTP Message Signatures, a standard with maintained implementations on both sides, so that an authority need not adopt an in-house format.
+  The agent signs with the `httpsig` crate; an authority may use a library or, as the .NET authority library does because NSign keeps the last of repeated parameters, which §6 step 1 forbids, implement the profile itself from the RFC.
+  A hand-serialized JWS profile measured smaller and dependency-free, but it would be an in-house format that neither RFC 9421 nor RFC 9449 tooling understands.
+- Request authentication never covers the host or path: the operation tag, the per-authority key and the body digest bind a request to its endpoint, so an authority behind a rewriting proxy needs no setting.
+  Signing the URL, as DPoP's `htu` does, would make the authority configure its external URL and compare it exactly, and would cost about 95 bytes per request.
+- The agent supplies each request's freshness, a single-use nonce and its own timestamp within a window, and the authority issues none, so every operation takes one round trip and a lost response never stalls the agent.
+  Authority-issued nonces would tolerate a skewed agent clock, but they cost a round trip after an idle period, stall a retry after a lost response, and need issuance state shared across authority nodes.
+- The authority records a nonce only after the request signature and any body digest are valid.
+  Requests with an invalid signature or body digest therefore cannot consume nonce storage.
+- The authority keeps each accepted nonce until 60 s after its signature expires, the last moment the freshness window could accept the same signature again.
+- Published trust anchors help third parties validate certificate chains, but they carry no revocation information.
+
+### Agent channel
+
+- `Hello` and `Welcome` reconcile state after each connection.
+  Push messages are only an optimization.
+- `agent_channel_url` is a base URL rather than the exact endpoint, so that the agent selects the version of the channel service it calls.
+- Protecting against an active intermediary that can decrypt the TLS connection and relay or alter its traffic is not intended, because it would need TLS channel binding, which a TLS-terminating proxy or IIS in front of the authority breaks.
+
+### Root rotation
+
+- Rotation publishes the old and new roots together but destroys the old private key when rotation starts.
+  Every new certificate therefore uses the new root immediately.
+- Rotation ends when no non-revoked identity holds an unexpired current or pending certificate from the old root, or when its deadline passes.
+  Removing the old root from the published trust anchors does not invalidate old-root certificates already registered with the authority.
+
+### Conformance
+
+- `docs/agent-identity/test-vectors.json` holds shared positive and negative vectors for request signatures and channel proofs, so that implementations in different languages check the same bytes.
+  Its `evaluation` field says how a verifier runs them.
+- A signer passes a vector when it reproduces the vector's `Signature-Input`, `Content-Digest`, signature base and channel-proof input, and its signature verifies under the vector's public key.
+  It need not reproduce the vector's signature bytes, because an ECDSA signer may be randomized.
+- `docs/agent-identity/verify_vectors.py` recomputes every vector with a library independent of any implementation, so that an error in the vectors cannot pass unnoticed into every implementation that agrees with them.
+- The mock authority and the agent implement the protocol independently and share only the channel schema, so that a misreading of the contract shared by both sides cannot pass the conformance suite.
+
+## Implementation decisions
+
+- Agent Identity crates use RustCrypto for keys, CSRs and certificates for now, and never depend on `picky`, which is a heavy dependency.
+  Later, they implement against `picky-crypto`, a thin interface crate whose crypto backend (RustCrypto, ring, aws-lc-rs) can be swapped without changing their code.
+- Concerns are split into self-contained crates.
+- The channel crates are named `agent-channel-*`, not `agent-identity-*`, because the channel carries more than identity: renewal requests and config now, PEDM policies later.

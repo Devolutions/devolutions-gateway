@@ -1,0 +1,9 @@
+semicolon-outside-block-ignore-multiline = true
+accept-comment-above-statement = true
+accept-comment-above-attributes = true
+
+# Device-key signing can fail (for example in the Windows software provider); sign would panic, so callers use try_sign.
+disallowed-methods = [
+    { path = "signature::Signer::sign", reason = "use try_sign: device key signing is fallible" },
+    { path = "libc::renameat2", reason = "needs glibc 2.28; the Linux release baseline is glibc 2.27, so call the renameat2 syscall directly", allow-invalid = true },
+]

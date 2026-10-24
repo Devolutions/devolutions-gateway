@@ -58,6 +58,19 @@ pub fn boot_stacktrace_written(path: &Path) -> Entry {
         .field("path", path.display())
 }
 
+// 1100-1199 **Agent Identity**
+
+/// The configured device-key backend is unavailable, so Agent Identity stopped for the rest of the process lifetime.
+pub const IDENTITY_KEY_BACKEND_UNAVAILABLE: u32 = 1100;
+
+pub fn identity_key_backend_unavailable(backend: impl ToString, error: impl std::fmt::Display) -> Entry {
+    Entry::new("Agent Identity key backend unavailable")
+        .event_code(IDENTITY_KEY_BACKEND_UNAVAILABLE)
+        .severity(Severity::Error)
+        .field("backend", backend)
+        .field("error_chain", format!("{error:#}"))
+}
+
 // 6000-6099 **User Sessions**
 
 /// `DevolutionsSession.exe` started in session; include session id & kind (console/remote).
@@ -263,6 +276,7 @@ pub static DECLARED_CODES: &[(&str, u32)] = &[
     ("CONFIG_INVALID", CONFIG_INVALID),
     ("START_FAILED", START_FAILED),
     ("BOOT_STACKTRACE_WRITTEN", BOOT_STACKTRACE_WRITTEN),
+    ("IDENTITY_KEY_BACKEND_UNAVAILABLE", IDENTITY_KEY_BACKEND_UNAVAILABLE),
     ("USER_SESSION_PROCESS_STARTED", USER_SESSION_PROCESS_STARTED),
     ("USER_SESSION_PROCESS_TERMINATED", USER_SESSION_PROCESS_TERMINATED),
     ("UPDATER_TASK_ENABLED", UPDATER_TASK_ENABLED),
