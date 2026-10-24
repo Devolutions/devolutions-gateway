@@ -194,8 +194,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.False(extension.Critical);
     }
 
-    // The leaf carries SAN, EKU and KeyUsage, and no other extension except an authority key identifier and a subject
-    // key identifier, so no basicConstraints.
+    // The leaf carries SAN, EKU and KeyUsage, and no other extension except an authority key identifier, a subject
+    // key identifier and the enrollment URL extension, so no basicConstraints.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     [Fact]
     public void HasExactlyTheProfileExtensions()
@@ -205,6 +205,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         IEnumerable<string?> extensions = leaf.Extensions.Select(extension => extension.Oid?.Value);
         string[] expected =
         [
+            TestEnrollmentUrl.Oid,
             SubjectKeyIdentifierOid,
             KeyUsageOid,
             SubjectAlternativeNameOid,
@@ -215,6 +216,60 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(expected, extensions.Order(StringComparer.Ordinal));
         // oracle: spec RFC 5280 §4.1.2.1
         Assert.Equal(3, leaf.Version);
+    }
+
+    // The enrollment URL extension is non-critical and holds as an IA5String the `u` of the token that enrolled the
+    // identity, without trailing slashes, and a leaf carries it exactly once.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    [Fact]
+    public void NamesTheEnrollmentUrlOfTheDecision()
+    {
+        using X509Certificate2 leaf = Issue();
+
+        Assert.Equal((false, TokenUrl), Assert.Single(EnrollmentUrls(leaf)));
+    }
+
+    // Every certificate issued for an identity carries the same enrollment URL, which the authority keeps with it,
+    // so a renewal names the URL it is given.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    [Fact]
+    public async Task RenewalNamesTheEnrollmentUrlOfTheIdentity()
+    {
+        AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
+
+        using X509Certificate2 leaf = IssueForRenewal(renewing, "https://host/psu");
+
+        Assert.Equal((false, "https://host/psu"), Assert.Single(EnrollmentUrls(leaf)));
+    }
+
+    // The value is an IA5String, which holds only ASCII, of a URL without trailing slashes; an empty one names nothing.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Theory]
+    [InlineData("")]
+    [InlineData("https://host/dvls/")]
+    [InlineData("https://bücher.example/dvls")]
+    public async Task RenewalThrowsForAnEnrollmentUrlOutsideTheExtensionForm(string enrollmentUrl)
+    {
+        AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => IssueForRenewal(renewing, enrollmentUrl));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("enrollmentUrl", exception.ParamName);
+    }
+
+    // A null argument throws ArgumentNullException, whose ParamName names it.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Fact]
+    public async Task RenewalThrowsForANullEnrollmentUrl()
+    {
+        AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
+
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => IssueForRenewal(renewing, null!));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("enrollmentUrl", exception.ParamName);
     }
 
     // A positive INTEGER, so never zero, of at most 20 octets, whatever the injected generator draws.
@@ -580,10 +635,11 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         [nameof(RenewalRules)] = renewing => RenewalRules.Decide(renewing, null),
     };
 
-    private X509Certificate2 IssueForRenewal(AuthenticatedIdentity renewing)
+    private X509Certificate2 IssueForRenewal(AuthenticatedIdentity renewing, string enrollmentUrl = TokenUrl)
     {
         return IdentityCertificateIssuer.Issue(
             renewing,
+            enrollmentUrl,
             _csr,
             new TestRootSigner(_root, _rootKey),
             Lifetime,
@@ -623,6 +679,24 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         }
 
         return request.CreateSelfSigned(notBefore, notAfter);
+    }
+
+    // RFC 5280 §4.1: Extension ::= SEQUENCE { extnID, critical BOOLEAN DEFAULT FALSE, extnValue OCTET STRING };
+    // the enrollment URL extensions of a certificate, each with its criticality and its IA5String value.
+    private static (bool Critical, string Value)[] EnrollmentUrls(X509Certificate2 certificate)
+    {
+        return
+        [
+            .. certificate.Extensions
+                .Where(extension => extension.Oid?.Value == TestEnrollmentUrl.Oid)
+                .Select(extension =>
+                {
+                    AsnReader value = new(extension.RawData, AsnEncodingRules.DER);
+                    string url = value.ReadCharacterString(UniversalTagNumber.IA5String);
+                    value.ThrowIfNotEmpty();
+                    return (extension.Critical, url);
+                }),
+        ];
     }
 
     // RFC 5280 §4.1: TBSCertificate ::= SEQUENCE { [0] EXPLICIT version, serialNumber INTEGER, ... }.

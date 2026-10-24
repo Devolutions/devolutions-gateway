@@ -98,7 +98,7 @@ Each then acts for the result's `Identity` only.
 2. Pass `Identity` and the match to `RenewalRules.Decide`, and act on its `Outcome`:
    - `Reject`: answer with `Error`.
    - `ReturnPendingCertificate`: keep the identity's pending certificate, which holds the key.
-   - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the `AuthenticatedIdentity`, and store it as the identity's pending certificate, retiring the previous one.
+   - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the `AuthenticatedIdentity`, passing the `EnrollmentUrl` stored with the identity so that every certificate of the identity names the same URL, and store it as the identity's pending certificate, retiring the previous one; the renew CSR's own enrollment URL is ignored (CONTRACT.agent-identity.md [§4]).
      Store it atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent renewals.
 3. Replace the identity's metadata, set its `last_seen_at` to the current time, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.agent-identity.md [§5.3]).
 

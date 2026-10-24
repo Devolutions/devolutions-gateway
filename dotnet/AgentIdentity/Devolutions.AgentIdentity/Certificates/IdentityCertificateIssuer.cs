@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 
 namespace Devolutions.AgentIdentity;
 
@@ -53,7 +54,8 @@ public static class IdentityCertificateIssuer
     /// It is valid from the current time, truncated to the second, for <paramref name="lifetime"/>,
     /// or until the issuer's <c>notAfter</c> if that comes first; a fraction of a second in the lifetime is dropped.
     /// Its serial number is 16 octets from <paramref name="random"/>, positive and never zero,
-    /// and <paramref name="issuer"/> signs it with SHA-256.
+    /// and <paramref name="issuer"/> signs it with the ECDSA algorithm of its key's curve.
+    /// It names <see cref="EnrollmentDecision.EnrollmentUrl"/> in the enrollment URL extension.
     /// </para>
     /// <para>
     /// Taking the decision rather than an ID keeps the authority from certifying a key for an identity
@@ -98,13 +100,21 @@ public static class IdentityCertificateIssuer
             throw new ArgumentException("The enrollment decision does not create an identity.", nameof(creating));
         }
 
-        // A decision to create an identity always carries the ID minted for it.
-        return Issue(creating.NewIdentityId!.Value, csr, issuer, lifetime, timeProvider, random);
+        // A decision to create an identity always carries the ID minted for it and the token's URL.
+        return Issue(
+            creating.NewIdentityId!.Value,
+            creating.EnrollmentUrl!,
+            csr,
+            issuer,
+            lifetime,
+            timeProvider,
+            random);
     }
 
     // Private so that a certificate is issued only for an identity ID taken from a proof of that identity.
     private static X509Certificate2 Issue(
         Guid identityId,
+        string enrollmentUrl,
         CertificateSigningRequest csr,
         IRootSigner issuer,
         TimeSpan lifetime,
@@ -198,6 +208,7 @@ public static class IdentityCertificateIssuer
         extensions.Add(alternativeName.Build(critical: false));
         extensions.Add(new X509SubjectKeyIdentifierExtension(publicKey, keyIdMethod, critical: false));
         extensions.Add(X509AuthorityKeyIdentifierExtension.CreateFromSubjectKeyIdentifier(issuerKeyId));
+        extensions.Add(EnrollmentUrlExtension.Create(enrollmentUrl));
 
         return request.Create(
             issuerCertificate.SubjectName,
@@ -235,13 +246,17 @@ public static class IdentityCertificateIssuer
     /// </summary>
     /// <remarks>
     /// The certificate is the one that the other overload issues, with <see cref="AuthenticatedIdentity.IdentityId"/>
-    /// as the identity ID.
+    /// as the identity ID and <paramref name="enrollmentUrl"/> in the enrollment URL extension.
     /// Taking the identity that the signature check produced, rather than an ID,
     /// keeps a renewal from certifying a key for an identity that a request only named.
     /// </remarks>
     /// <param name="renewing">
     /// The identity that a <c>renew</c> request proved, as <see cref="RequestAuthenticator.AuthenticateAsync"/>
     /// returns it for <see cref="AgentOperation.Renew"/>.
+    /// </param>
+    /// <param name="enrollmentUrl">
+    /// The identity's enrollment URL, the <see cref="EnrollmentDecision.EnrollmentUrl"/> of the decision that created
+    /// it, which every certificate of the identity names.
     /// </param>
     /// <param name="csr">The validated CSR whose key the certificate is for.</param>
     /// <param name="issuer">The root that signs the certificate.</param>
@@ -251,6 +266,7 @@ public static class IdentityCertificateIssuer
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="renewing"/> was authenticated for another operation than <c>renew</c>;
+    /// or <paramref name="enrollmentUrl"/> is empty, ends in a slash or is not ASCII;
     /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second;
     /// or the issuer is outside the chain profile of CONTRACT.agent-identity.md §4:
     /// its certificate has neither a P-256 nor a P-384 key, no basicConstraints with cA set or no key usage with
@@ -262,6 +278,7 @@ public static class IdentityCertificateIssuer
     /// </exception>
     public static X509Certificate2 Issue(
         AuthenticatedIdentity renewing,
+        string enrollmentUrl,
         CertificateSigningRequest csr,
         IRootSigner issuer,
         TimeSpan lifetime,
@@ -275,7 +292,17 @@ public static class IdentityCertificateIssuer
             throw new ArgumentException("The identity was not authenticated by a renew request.", nameof(renewing));
         }
 
-        return Issue(renewing.IdentityId, csr, issuer, lifetime, timeProvider, random);
+        ArgumentNullException.ThrowIfNull(enrollmentUrl);
+
+        // CONTRACT.agent-identity.md §4: the extension holds the token's `u`, which is ASCII, without trailing slashes.
+        if (enrollmentUrl.Length == 0 || enrollmentUrl.EndsWith('/') || !Ascii.IsValid(enrollmentUrl))
+        {
+            throw new ArgumentException(
+                "The enrollment URL is empty, ends in a slash or is not ASCII.",
+                nameof(enrollmentUrl));
+        }
+
+        return Issue(renewing.IdentityId, enrollmentUrl, csr, issuer, lifetime, timeProvider, random);
     }
 
     private static DateTimeOffset TruncateToSecond(DateTimeOffset value)
