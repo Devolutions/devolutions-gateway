@@ -423,7 +423,7 @@ pub(crate) fn token_bag(token: &str) -> anyhow::Result<Value> {
 }
 
 /// Returns `token` with its bag replaced by `bag`, keeping its prefix and secret.
-pub(crate) fn with_bag(token: &str, bag: &Value) -> anyhow::Result<String> {
+fn with_bag(token: &str, bag: &Value) -> anyhow::Result<String> {
     let (head, secret) = token.rsplit_once('.').context("token has no secret")?;
     let (prefix, _) = head.rsplit_once('.').context("token has no bag")?;
     Ok(format!(

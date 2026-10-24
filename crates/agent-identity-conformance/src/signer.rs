@@ -48,6 +48,7 @@ const DEFAULT_PARAMETER_ORDER: [SignatureParameter; 6] = [
 ];
 
 impl KeyPair {
+    /// Generates a new P-256 key from the thread's random number generator.
     pub(crate) fn generate() -> anyhow::Result<Self> {
         Ok(Self {
             key: SigningKey::generate_from_rng(&mut rand::rng()),

@@ -50,7 +50,7 @@ The `p_*` tests check an authority and the `a_*` tests the agent; the tests name
   - an `agent_channel_url` holding an `@`, which the agent treats as absent (§5.2, §7.2), because no mock fault delivers such a URL;
   - the shape of the agent's own CSR (§4: one attribute, an `extensionRequest` holding only the enrollment URL extension) and the URL its renewal CSR names, because the mock reports no CSR it received; the mock accepting the agent's enrollments shows only that their CSRs name the token's `u` where the mock reads it;
   - the agent's check of an enrollment that returns a known authority ID from another base URL ("Pending-enrollment files" in `crates/agent-identity/INTENT.md`), such as a chain through a P-384 CA accepted and an RSA-signed chain refused with `authority_conflict`, because a mock serves one base URL and issues only from its own root;
-  - at enrollment, the `ecdsa_with_sha384` CSR vector that `p_failed_enrollment_consumes_nothing` sends also lacks the enrollment URL extension, so it does not isolate the CSR signature algorithm rule there until the vectors are regenerated; `p_renew_rejects_sha384_csr` checks that rule at renewal, which ignores the URL.
+  - at enrollment, the `bad_self_signature` and `ecdsa_with_sha384` CSR vectors that `p_failed_enrollment_consumes_nothing` sends also lack the enrollment URL extension, which refuses them first, until the vectors are regenerated; `p_csr_bad_self_signature_rejected` isolates the self-signature rule at enrollment and renewal, and `p_renew_rejects_sha384_csr` the signature algorithm rule at renewal, which ignores the URL.
 
 The suite's tests of each party's own intent:
 

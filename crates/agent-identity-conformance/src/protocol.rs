@@ -7398,21 +7398,27 @@ pub(crate) async fn p_enroll_csr_must_name_token_url(ctx: Context) -> anyhow::Re
     Ok(())
 }
 
-/// CONTRACT.agent-identity.md §4: the server "ignores the subject and every other attribute or requested extension", so a CSR requesting another extension beside the enrollment URL enrolls, and the leaf carries only the profile's extensions.
+/// CONTRACT.agent-identity.md §4: the server "ignores the subject and every other attribute or requested extension", so a CSR requesting another extension before or after the enrollment URL enrolls, and the leaf carries only the profile's extensions.
 pub(crate) async fn p_enroll_csr_ignores_other_requested_extensions(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
-    let token = token(&ctx, 1).await?;
+    let token = token(&ctx, 2).await?;
     let url = token_base_url(&token.text)?;
-    let key = KeyPair::generate()?;
     let mut other = enrollment_url_extension(&url)?;
     other.extn_id = UNASSIGNED_EXTENSION;
-    let csr = key.csr_requesting(Some(&[enrollment_url_extension(&url)?, other]))?;
-    let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
-    let reply = enroll_raw(&ctx.target, &token, &body).await?;
-    expect_status(&reply, 200).context("a CSR requesting another extension beside the enrollment URL was refused")?;
-    let identity = Identity::from_enrollment(&token.text, key, &reply)?;
-    let leaf = Certificate::from_der(&decoded_certificate(&identity.certificate_chain[0])?)?;
-    assert_leaf_extensions(&leaf, &url)
+    let named = enrollment_url_extension(&url)?;
+    for (order, extensions) in [("before", [other.clone(), named.clone()]), ("after", [named, other])] {
+        let key = KeyPair::generate()?;
+        let body = serde_json::to_vec(&json!({ "csr": key.csr_requesting(Some(&extensions))?, "metadata": {} }))?;
+        let reply = enroll_raw(&ctx.target, &token, &body).await?;
+        expect_status(&reply, 200)
+            .with_context(|| format!("a CSR requesting another extension {order} the enrollment URL was refused"))?;
+        let identity = Identity::from_enrollment(&token.text, key, &reply)?;
+        let leaf = Certificate::from_der(&decoded_certificate(&identity.certificate_chain[0])?)?;
+        assert_leaf_extensions(&leaf, &url).with_context(|| {
+            format!("leaf enrolled by a CSR requesting another extension {order} the enrollment URL")
+        })?;
+    }
+    Ok(())
 }
 
 /// Sends an enrollment of `key` with `token` whose CSR names `elsewhere`, which must be refused with `invalid_request`, then one with the key's own CSR, and returns the reply to the latter.
