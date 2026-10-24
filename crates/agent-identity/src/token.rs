@@ -46,7 +46,8 @@ impl Token {
             .as_object()
             .and_then(|fields| fields.get("u"))
             .and_then(serde_json::Value::as_str)
-            .filter(|url| is_base_url(url))
+            // Certificates carry `u` as an `IA5String`, so it holds only ASCII characters.
+            .filter(|url| url.is_ascii() && is_base_url(url))
             .context("invalid enrollment authority URL")?;
         let base_url = base_url.trim_end_matches('/').to_owned();
         Ok(Self {
@@ -216,5 +217,18 @@ mod tests {
     fn rejects_a_base_url_with_a_user_name_or_password(#[case] u: &str) {
         let raw = token_with_bag(&serde_json::json!({ "u": u }).to_string());
         assert!(Token::parse(&raw).is_err());
+    }
+
+    /// `u` holds only ASCII characters, since certificates carry it as an `IA5String`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    #[rstest]
+    #[case::internationalized_host("https://exämple.test/dvls")]
+    #[case::path("https://example.test/dvlś")]
+    #[case::fullwidth_commercial_at("https://user＠example.test/dvls")]
+    fn rejects_a_base_url_with_a_non_ascii_character(#[case] u: &str) {
+        let raw = token_with_bag(&serde_json::json!({ "u": u }).to_string());
+        let error = Token::parse(&raw).expect_err("a non-ASCII base URL was accepted");
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
+        assert!(!error.to_string().contains(&raw), "{error}");
     }
 }
