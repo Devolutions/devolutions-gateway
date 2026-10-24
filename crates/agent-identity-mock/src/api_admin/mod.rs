@@ -497,7 +497,7 @@ fn token_view(token: &Token, now: i64) -> Value {
         "maxUses": token.max_uses,
         "useCount": token.used_count,
         "expiresOn": rfc3339_nanos(token.expires_at_ns),
-        "state": token.state(now),
+        "status": token.status(now),
         "createdOn": rfc3339(token.created_at),
         "createdBy": token.created_by,
     });

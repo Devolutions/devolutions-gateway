@@ -233,8 +233,8 @@ pub(crate) struct Token {
 }
 
 impl Token {
-    /// Returns the DVLS token state, where `Revoked` wins over `Expired`, which wins over `Exhausted`.
-    pub(crate) fn state(&self, now: i64) -> &'static str {
+    /// Returns the DVLS token status, where `Revoked` wins over `Expired`, which wins over `Exhausted`.
+    pub(crate) fn status(&self, now: i64) -> &'static str {
         if self.revoked_at.is_some() {
             "Revoked"
         } else if nanos(now) >= self.expires_at_ns {

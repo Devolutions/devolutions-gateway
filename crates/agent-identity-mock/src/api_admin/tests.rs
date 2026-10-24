@@ -581,7 +581,7 @@ async fn create_token_returns_the_full_token_only_once() -> anyhow::Result<()> {
         "maxUses": 5,
         "useCount": 0,
         "expiresOn": rfc3339(now + 90 * DAY),
-        "state": "Active",
+        "status": "Active",
         "createdOn": rfc3339(now),
         "createdBy": "mock-admin",
     });
@@ -636,7 +636,7 @@ async fn token_expiry_keeps_its_fraction_of_a_second() -> anyhow::Result<()> {
     assert_eq!(
         (
             &created["enrollmentToken"]["expiresOn"],
-            &created["enrollmentToken"]["state"]
+            &created["enrollmentToken"]["status"]
         ),
         (&json!(expires_on), &json!("Active"))
     );
@@ -886,16 +886,16 @@ async fn revoked_token_stays_readable_and_listed() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// A revoked token's state is `Revoked`, in its record and in the token list, even once it has expired or used up its
+/// A revoked token's status is `Revoked`, in its record and in the token list, even once it has expired or used up its
 /// uses.
-/// The token enrolls `uses` identities, then the clock moves `later_secs` ahead, which leaves it in state `before`.
+/// The token enrolls `uses` identities, then the clock moves `later_secs` ahead, which leaves it with status `before`.
 // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
 #[rstest]
 #[case::active(0, 0, "Active")]
 #[case::expired(0, 2 * DAY, "Expired")]
 #[case::exhausted(1, 0, "Exhausted")]
 #[tokio::test]
-async fn revoked_token_state_is_revoked(
+async fn revoked_token_status_is_revoked(
     #[case] uses: usize,
     #[case] later_secs: i64,
     #[case] before: &str,
@@ -913,13 +913,13 @@ async fn revoked_token_state_is_revoked(
     app.clock.freeze_at(now + later_secs);
     let path = format!("/enrollment-token/{id}");
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
-    assert_eq!(call(&app, Method::GET, &path, None).await?.1["state"], before);
+    assert_eq!(call(&app, Method::GET, &path, None).await?.1["status"], before);
 
     assert_eq!(call(&app, Method::POST, &format!("{path}/revoke"), None).await?.0, 204);
     let (status, read) = call(&app, Method::GET, &path, None).await?;
-    assert_eq!((status, &read["state"]), (200, &json!("Revoked")));
+    assert_eq!((status, &read["status"]), (200, &json!("Revoked")));
     let (_, page) = call(&app, Method::GET, "/enrollment-token", None).await?;
-    assert_eq!(page["data"][0]["state"], "Revoked");
+    assert_eq!(page["data"][0]["status"], "Revoked");
     Ok(())
 }
 
