@@ -30,7 +30,7 @@ use crate::client::{
 };
 use crate::dvls::{
     self, CertificateStatus, Credential, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal,
-    RotationDeadline, RotationStatus, Settings, SettingsChange, TokenSpec, TokenState, refusal,
+    RotationDeadline, RotationStatus, Settings, SettingsChange, TokenSpec, TokenStatus, refusal,
 };
 use crate::signer::{
     ECDSA_WITH_SHA256, ENROLLMENT_URL_EXTENSION, KeyPair, SignatureParameter, SignedHeaders, enrollment_url_extension,
@@ -780,7 +780,7 @@ pub(crate) async fn p_token_expired(ctx: Context) -> anyhow::Result<()> {
         .await?;
     expect_error(&expired, 401, "token_expired")?;
     let record = ctx.target.management().token(&token.id).await?;
-    ensure!(record.state == TokenState::Expired, "token not marked expired");
+    ensure!(record.status == TokenStatus::Expired, "token not marked expired");
     ensure!(record.used_count == 0, "expired token consumed a use");
     Ok(())
 }
@@ -916,9 +916,9 @@ pub(crate) async fn p_revoked_token_replays_own_key_only(ctx: Context) -> anyhow
     // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
     // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
     ensure!(
-        revoked.state == TokenState::Revoked,
-        "revoked token's state is {:?} instead of Revoked",
-        revoked.state
+        revoked.status == TokenStatus::Revoked,
+        "revoked token's status is {:?} instead of Revoked",
+        revoked.status
     );
     Ok(())
 }
@@ -5951,7 +5951,7 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
     let token = token(&ctx, 1).await?;
     let record = management.token(&token.id).await?;
     ensure!(
-        record.state == TokenState::Active && record.used_count == 0,
+        record.status == TokenStatus::Active && record.used_count == 0,
         "new token not active"
     );
     ensure!(
@@ -5969,15 +5969,15 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
     let _ = identity(&ctx.target, &token, "exhaust").await?;
     let record = management.token(&token.id).await?;
     ensure!(
-        record.state == TokenState::Exhausted && record.used_count == 1,
-        "exhausted state incorrect"
+        record.status == TokenStatus::Exhausted && record.used_count == 1,
+        "exhausted status incorrect"
     );
     let expired = if ctx.mock() {
         let expiring = management.create_token(1, Duration::from_secs(2), None).await?;
         ctx.target.advance(4).await?;
         ensure!(
-            management.token(&expiring.id).await?.state == TokenState::Expired,
-            "expired token did not enter expired state"
+            management.token(&expiring.id).await?.status == TokenStatus::Expired,
+            "expired token did not enter expired status"
         );
         Some(expiring)
     } else {
@@ -6014,8 +6014,8 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         .await
         .context("revoked token is no longer readable")?;
     ensure!(
-        revoked.same_except_state(&unrevoked),
-        "revocation changed the token's record beyond its state"
+        revoked.same_except_status(&unrevoked),
+        "revocation changed the token's record beyond its status"
     );
     let listed = management
         .all_tokens()
@@ -6037,17 +6037,20 @@ pub(crate) async fn p_management_tokens_crud_and_states(ctx: Context) -> anyhow:
         refusal(management.revoke_token(&unknown).await)? == Refusal::NotFound,
         "revoking an unknown token was not refused as not found"
     );
-    // The state checks come last, so that a wrong state does not hide the outcomes above.
+    // The status checks come last, so that a wrong status does not hide the outcomes above.
     // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
     // oracle: intent Devolutions/RDM@fe54fbb839b5f42b3278eb1b0d6b8989051e4a19:DVLS/Server/server/Common/AgentIdentity/INTENT.md §Enrollment tokens
-    let mut states = vec![("exhausted, read", revoked.state), ("exhausted, listed", listed.state)];
+    let mut statuses = vec![
+        ("exhausted, read", revoked.status),
+        ("exhausted, listed", listed.status),
+    ];
     if let Some(expired) = expired {
         management.revoke_token(&expired.id).await?;
-        states.push(("expired, read", management.token(&expired.id).await?.state));
+        statuses.push(("expired, read", management.token(&expired.id).await?.status));
     }
     ensure!(
-        states.iter().all(|(_, state)| *state == TokenState::Revoked),
-        "revoked tokens report states other than Revoked: {states:?}"
+        statuses.iter().all(|(_, status)| *status == TokenStatus::Revoked),
+        "revoked tokens report statuses other than Revoked: {statuses:?}"
     );
     Ok(())
 }

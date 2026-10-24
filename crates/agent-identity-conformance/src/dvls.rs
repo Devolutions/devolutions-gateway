@@ -327,7 +327,7 @@ fn refusal_from(status: u16, body: &[u8]) -> anyhow::Result<Refusal> {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Deserialize)]
-pub(crate) enum TokenState {
+pub(crate) enum TokenStatus {
     Active,
     Exhausted,
     Expired,
@@ -342,7 +342,7 @@ pub(crate) struct TokenRecord {
     pub(crate) name: String,
     #[serde(rename = "useCount")]
     pub(crate) used_count: u64,
-    pub(crate) state: TokenState,
+    pub(crate) status: TokenStatus,
     #[serde(deserialize_with = "timestamp")]
     pub(crate) created_on: OffsetDateTime,
     #[serde(deserialize_with = "timestamp")]
@@ -357,10 +357,10 @@ pub(crate) struct TokenRecord {
 }
 
 impl TokenRecord {
-    /// Whether two reads of one token agree on every member but `state`, the only one revocation changes.
-    pub(crate) fn same_except_state(&self, other: &Self) -> bool {
+    /// Whether two reads of one token agree on every member but `status`, the only one revocation changes.
+    pub(crate) fn same_except_status(&self, other: &Self) -> bool {
         Self {
-            state: other.state,
+            status: other.status,
             ..self.clone()
         } == *other
     }
