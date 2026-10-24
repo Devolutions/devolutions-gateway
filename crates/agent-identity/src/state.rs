@@ -2106,6 +2106,18 @@ mod tests {
         Ok(vec![STANDARD.encode(leaf), held.der.clone()])
     }
 
+    fn chain_with_a_leaf_whose_signed_part_names_another_signature_algorithm(
+        held: &TestCertificate,
+    ) -> anyhow::Result<Vec<String>> {
+        // The signature verifies under the algorithm the leaf's signatureAlgorithm names, not under the one its signed
+        // part names.
+        let leaf = held.issue(64, "CN=Claimed identity", false)?;
+        let leaf = re_signed(&leaf.der, ECDSA_WITH_SHA384, ECDSA_WITH_SHA256, |tbs| {
+            held.key.sign_ecdsa_digest::<Sha256>(tbs)
+        })?;
+        Ok(vec![leaf, held.der.clone()])
+    }
+
     fn chain_with_a_leaf_the_held_p256_root_signs_with_sha384(held: &TestCertificate) -> anyhow::Result<Vec<String>> {
         let leaf = held.issue(60, "CN=Claimed identity", false)?;
         let leaf = re_signed(&leaf.der, ECDSA_WITH_SHA384, ECDSA_WITH_SHA384, |tbs| {
@@ -2149,6 +2161,10 @@ mod tests {
     // A signature verifies only under the algorithm its certificate names, which must be the one in the signed part.
     // oracle: spec RFC 5280 §4.1.1.2
     #[case::with_a_leaf_naming_another_signature_algorithm(chain_with_a_leaf_naming_another_signature_algorithm)]
+    // oracle: spec RFC 5280 §4.1.1.2
+    #[case::with_a_signed_part_naming_another_signature_algorithm(
+        chain_with_a_leaf_whose_signed_part_names_another_signature_algorithm
+    )]
     // A P-256 key signs only with `ecdsa-with-SHA256`, and a P-384 key only with `ecdsa-with-SHA384`.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[case::with_a_p256_key_signing_with_sha384(chain_with_a_leaf_the_held_p256_root_signs_with_sha384)]

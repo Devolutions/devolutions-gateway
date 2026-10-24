@@ -23,8 +23,8 @@ const ECDSA_WITH_SHA384: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.84
 /// public key of one of `roots`; both hold `base64` DER certificates, and `chain` is leaf first.
 ///
 /// Each step follows [RFC 5280 §6.1]: the certificate's issuer name equals its signer's subject, and its signature
-/// verifies under the signer's key with an algorithm the contract allows, `ecdsa-with-SHA256` by a P-256 key or
-/// `ecdsa-with-SHA384` by a P-384 key, never RSA.
+/// verifies under the signer's key with the algorithm its signed part names, one the contract allows:
+/// `ecdsa-with-SHA256` by a P-256 key or `ecdsa-with-SHA384` by a P-384 key, never RSA.
 /// A signer from `chain` must be a CA that may sign certificates, so that no leaf, such as the one the authority issued
 /// to another device, signs for the authority; a root is trusted as is, as RFC 5280 trusts an anchor.
 /// Validity periods are not checked, because the path only has to prove that the server holds the CA key of a root.
@@ -94,10 +94,14 @@ fn may_sign_certificates(certificate: &Certificate, intermediates: usize) -> boo
 ///
 /// The signature algorithm the certificate names picks the verifier, and the verifier accepts only a signer key on
 /// its curve, so any other pairing, an RSA key included, does not verify.
+/// That algorithm must also be the one the signed part names ([RFC 5280 §4.1.1.2]), which is the only one the signer
+/// vouched for.
 ///
 /// [CONTRACT.agent-identity.md §4 "Certificates"]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#certificates
+/// [RFC 5280 §4.1.1.2]: https://www.rfc-editor.org/rfc/rfc5280#section-4.1.1.2
 fn is_signed_by(certificate: &Certificate, signer: &Certificate) -> bool {
     return certificate.tbs_certificate().issuer() == signer.tbs_certificate().subject()
+        && certificate.signature_algorithm() == certificate.tbs_certificate().signature()
         && signature_verifies(certificate, signer).is_some();
 
     fn signature_verifies(certificate: &Certificate, signer: &Certificate) -> Option<()> {
