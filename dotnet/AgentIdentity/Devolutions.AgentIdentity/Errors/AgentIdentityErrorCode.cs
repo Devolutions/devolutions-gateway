@@ -63,4 +63,9 @@ public enum AgentIdentityErrorCode
     /// The server can't serve the request now, because it is overloaded or a part it needs fails.
     /// </summary>
     Unavailable = 10,
+
+    /// <summary>
+    /// The CSR of an enrollment names no enrollment URL, or not the presented token's `u`.
+    /// </summary>
+    TokenUrlMismatch = 11,
 }

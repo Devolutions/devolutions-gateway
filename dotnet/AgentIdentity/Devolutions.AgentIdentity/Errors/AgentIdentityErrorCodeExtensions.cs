@@ -27,6 +27,7 @@ public static class AgentIdentityErrorCodeExtensions
             AgentIdentityErrorCode.ClockSkew => "clock_skew",
             AgentIdentityErrorCode.InvalidRequest => "invalid_request",
             AgentIdentityErrorCode.Unavailable => "unavailable",
+            AgentIdentityErrorCode.TokenUrlMismatch => "token_url_mismatch",
             _ => throw UndefinedCode(code),
         };
     }
@@ -55,6 +56,7 @@ public static class AgentIdentityErrorCodeExtensions
             AgentIdentityErrorCode.ClockSkew => 401,
             AgentIdentityErrorCode.InvalidRequest => 400,
             AgentIdentityErrorCode.Unavailable => 500,
+            AgentIdentityErrorCode.TokenUrlMismatch => 403,
             _ => throw UndefinedCode(code),
         };
     }
@@ -74,6 +76,7 @@ public static class AgentIdentityErrorCodeExtensions
             AgentIdentityErrorCode.TokenInvalid
                 or AgentIdentityErrorCode.TokenExhausted
                 or AgentIdentityErrorCode.TokenExpired
+                or AgentIdentityErrorCode.TokenUrlMismatch
                 or AgentIdentityErrorCode.IdentityUnknown
                 or AgentIdentityErrorCode.CertificateExpired
                 or AgentIdentityErrorCode.SignatureInvalid

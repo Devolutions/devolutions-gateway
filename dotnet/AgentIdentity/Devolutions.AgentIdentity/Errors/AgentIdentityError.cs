@@ -160,6 +160,7 @@ public sealed class AgentIdentityError
             AgentIdentityErrorCode.ClockSkew => "The signature time is outside the accepted window.",
             AgentIdentityErrorCode.InvalidRequest => "The request body, CSR or metadata is not valid.",
             AgentIdentityErrorCode.Unavailable => "The server cannot serve the request now.",
+            AgentIdentityErrorCode.TokenUrlMismatch => "The CSR does not name the enrollment token's URL.",
             _ => throw AgentIdentityErrorCodeExtensions.UndefinedCode(code),
         };
     }

@@ -17,6 +17,7 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.ClockSkew, "clock_skew" },
         { AgentIdentityErrorCode.InvalidRequest, "invalid_request" },
         { AgentIdentityErrorCode.Unavailable, "unavailable" },
+        { AgentIdentityErrorCode.TokenUrlMismatch, "token_url_mismatch" },
     };
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
@@ -48,6 +49,8 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.ClockSkew, 401 },
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
         { AgentIdentityErrorCode.InvalidRequest, 400 },
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+        { AgentIdentityErrorCode.TokenUrlMismatch, 403 },
     };
 
     // CONTRACT.agent-identity.md §5.4, column "HTTP", for the codes to which it gives a class of statuses,
@@ -102,6 +105,8 @@ public class AgentIdentityErrorCodeTests
         { AgentIdentityErrorCode.InvalidRequest, StatusCode.InvalidArgument },
         // oracle: spec gRPC status codes §Status codes and their use in gRPC
         { AgentIdentityErrorCode.Unavailable, StatusCode.Unavailable },
+        // oracle: mutant the gRPC mapping throws for token_url_mismatch as for an undefined code
+        { AgentIdentityErrorCode.TokenUrlMismatch, StatusCode.Unauthenticated },
     };
 
     // Most rows follow the closures of the channel; each row's marker names the source that decides it.
