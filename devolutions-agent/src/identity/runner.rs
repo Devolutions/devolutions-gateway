@@ -317,7 +317,8 @@ impl Runner {
             };
             signer
         };
-        // UNTESTED: the renewal CSR names the identity's base URL (`CONTRACT.agent-identity.md` §4).
+        // UNTESTED: the renewal CSR names the identity's base URL, which the authority reads but ignores at renewal
+        // (`CONTRACT.agent-identity.md` §4).
         // No agent test captures the request it sends; when changing this, keep passing the stored base URL.
         let csr = csr::create(new_key.as_ref(), &identity.base_url).context("create renewal CSR")?;
         let metadata = self.metadata();

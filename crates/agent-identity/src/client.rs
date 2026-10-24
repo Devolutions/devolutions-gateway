@@ -289,7 +289,7 @@ impl Client {
         validate_certificate_chain(&response.certificate_chain, &key.public_key())?;
         validate_config(&response.config)?;
         // UNTESTED: every enrollment response, first enrollments included, is refused when its leaf doesn't name the
-        // token's base URL.
+        // token's base URL, so that a server holding a token for another address can't relay the enrollment.
         // No client test runs an HTTPS authority; when changing this, keep the check on the enroll path.
         check_enrollment_url(&response.certificate_chain, token.base_url())?;
         Ok(response)
