@@ -96,4 +96,15 @@ internal static class TestEnrollmentUrl
         Assert.True(result.Succeeded, result.FailureDetail);
         return result.Csr;
     }
+
+    /// <summary>
+    /// A validated CSR for a new key that names no enrollment URL, with an empty attribute set.
+    /// </summary>
+    public static CertificateSigningRequest CsrWithoutEnrollmentUrl()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CsrValidationResult result = CertificateSigningRequest.Validate(TestCsr.For(key));
+        Assert.True(result.Succeeded, result.FailureDetail);
+        return result.Csr;
+    }
 }

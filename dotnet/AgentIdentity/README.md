@@ -6,7 +6,7 @@ The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolut
 ## What the library covers
 
 - Enrollment tokens: `EnrollmentToken.Create` creates a token, `FriendlyNameFormat` parses and evaluates its friendly-name format, and `EnrollmentAuthorization.ReadBearerToken` reads it from an `enroll` request.
-  The host stores the token's `SecretHash`, never its `Value`, which it shows once and never logs.
+  The host stores the token's `SecretHash` and its `ProductBaseUrl`, never its `Value`, which it shows once and never logs.
 - Request authentication: `RequestAuthenticator` verifies the signed `renew`, `confirm` and `check-in` requests and the signed opening of an agent channel stream (CONTRACT.agent-identity.md [§6]).
 - Request bodies: `EnrollRequestBody`, `RenewRequestBody` and `CheckInRequestBody` parse a body and validate its CSR (`CertificateSigningRequest`) and metadata (`AgentMetadata`), and `ConfirmRequestBody` checks that a `confirm` body is empty.
 - Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the issued certificate that holds the CSR key.
@@ -74,10 +74,10 @@ Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normall
 3. Parse the body with `EnrollRequestBody.Parse`.
 4. Look up `Csr.SubjectPublicKeyInfoSha256` among the keys of every certificate the authority has issued, deleted identities included.
    Describe the match with `IssuedKeyMatch.ForIdentity` or `IssuedKeyMatch.ForDeletedIdentity`, or use null when there is none.
-5. Pass the token's `EnrollmentTokenState`, the match and the current time to `EnrollmentRules.Decide`, and act on its `Outcome`:
+5. Pass the token's `EnrollmentTokenState`, with the `ProductBaseUrl` stored for it, the body's `Csr`, the match and the current time to `EnrollmentRules.Decide`, and act on its `Outcome`; a CSR that names no enrollment URL, or not the token's, gets `token_url_mismatch` before any key rule applies (CONTRACT.agent-identity.md [§2.1]):
    - `Reject`: answer with `Error`.
    - `ReturnExistingIdentity`: take identity `ExistingIdentityId`, and change nothing, not even its `last_seen_at`, since a replay proves no current possession of the device key.
-   - `CreateIdentity`: take `NewIdentityId`, which the library minted, as the identity's ID, issue its certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata, the key's `SubjectPublicKeyInfoSha256`, and the current time as its `last_seen_at`.
+   - `CreateIdentity`: take `NewIdentityId`, which the library minted, as the identity's ID, issue its certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision, which names the decision's `EnrollmentUrl` in it, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata, its `EnrollmentUrl`, the key's `SubjectPublicKeyInfoSha256`, and the current time as its `last_seen_at`.
      Create the identity and count the token use atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent enrollments.
 6. Answer with `ResponseBodies.Enroll`, given the authority ID and the ID taken in step 5, with that identity's current certificate chain, leaf first, and config (CONTRACT.agent-identity.md [§5.2]).
 

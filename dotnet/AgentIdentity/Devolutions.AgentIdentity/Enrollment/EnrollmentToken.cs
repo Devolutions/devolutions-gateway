@@ -32,10 +32,11 @@ public sealed class EnrollmentToken
 
     private const int SecretByteCount = 32;
 
-    private EnrollmentToken(string value, byte[] secretHash)
+    private EnrollmentToken(string value, byte[] secretHash, string productBaseUrl)
     {
         Value = value;
         SecretHash = secretHash;
+        ProductBaseUrl = productBaseUrl;
     }
 
     /// <summary>
@@ -54,6 +55,15 @@ public sealed class EnrollmentToken
     /// so that the authority finds the token by it.
     /// </remarks>
     public ReadOnlyMemory<byte> SecretHash { get; }
+
+    /// <summary>
+    /// The token's <c>u</c>: the product base URL that its bag holds, in normalized form without trailing slashes.
+    /// </summary>
+    /// <remarks>
+    /// The authority stores it with the token and passes it to <see cref="EnrollmentTokenState"/>,
+    /// since an enrollment's CSR must name it (CONTRACT.agent-identity.md §2.1).
+    /// </remarks>
+    public string ProductBaseUrl { get; }
 
     /// <summary>
     /// Creates a token for the authority that serves the agent-facing API under a product base URL.
@@ -89,10 +99,12 @@ public sealed class EnrollmentToken
 
         ArrayBufferWriter<byte> json = new();
 
+        string u = BaseUrl.Normalize(productBaseUrl, "The product base URL", nameof(productBaseUrl));
+
         using (Utf8JsonWriter writer = new(json))
         {
             writer.WriteStartObject();
-            writer.WriteString("u", BaseUrl.Normalize(productBaseUrl, "The product base URL", nameof(productBaseUrl)));
+            writer.WriteString("u", u);
             writer.WriteEndObject();
         }
 
@@ -109,7 +121,7 @@ public sealed class EnrollmentToken
         randomNumberGenerator.GetBytes(secretBytes);
         string secret = StrictBase64.EncodeBase64Url(secretBytes);
 
-        return new EnrollmentToken(Prefix + "." + bag + "." + secret, HashSecret(secretBytes));
+        return new EnrollmentToken(Prefix + "." + bag + "." + secret, HashSecret(secretBytes), u);
     }
 
     /// <summary>

@@ -103,6 +103,20 @@ public class EnrollmentTokenTests
         Assert.Equal(("u", productBaseUrl), Assert.Single(BagMembers(token)));
     }
 
+    // The authority keeps the token's `u` to compare it with the enrollment URL of each CSR the token presents
+    // (CONTRACT.agent-identity.md §2.1), so ProductBaseUrl is the `u` that the bag holds, after any normalization.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    [Theory]
+    [InlineData("https://host/dvls")]
+    [InlineData("https://host/dvls/")]
+    [InlineData(" https://host/dvls\t")]
+    public void ProductBaseUrlIsTheUOfTheBag(string productBaseUrl)
+    {
+        EnrollmentToken token = EnrollmentToken.Create(productBaseUrl, new ScriptedRandomNumberGenerator(SecretBytes));
+
+        Assert.Equal(Assert.Single(BagMembers(token), member => member.Name == "u").Value, token.ProductBaseUrl);
+    }
+
     // Create may reject a URL that is not in the form of `u`,
     // but a token it creates holds in `u` the form that the source of the row decides.
     [Theory]

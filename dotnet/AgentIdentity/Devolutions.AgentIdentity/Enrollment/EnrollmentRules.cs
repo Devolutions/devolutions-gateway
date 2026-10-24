@@ -14,12 +14,15 @@ public static class EnrollmentRules
     /// The host calls this once <see cref="EnrollmentAuthorization.ReadBearerToken"/> and its token lookup succeed
     /// and the request body, CSR and metadata are valid.
     /// When several outcomes apply, the earliest of these wins:
+    /// <c>token_url_mismatch</c> when the CSR names no enrollment URL, or not the token's <c>u</c>
+    /// without trailing slashes, compared as text;
     /// the result of the CSR key lookup,
     /// except that a revoked token gets <c>token_invalid</c> for anything but a replay;
     /// <c>token_invalid</c> for a revoked token,
     /// then <c>token_expired</c> once <paramref name="now"/> reaches its expiry;
     /// <c>token_exhausted</c> once it has created <see cref="EnrollmentTokenState.MaxUses"/> identities;
-    /// a new identity, whose ID, <see cref="EnrollmentDecision.NewIdentityId"/>, is minted at random for this decision.
+    /// a new identity, whose ID, <see cref="EnrollmentDecision.NewIdentityId"/>, is minted at random for this decision,
+    /// and whose certificates name <see cref="EnrollmentDecision.EnrollmentUrl"/>.
     /// </para>
     /// <para>
     /// The CSR key lookup takes the first matching rule:
@@ -38,12 +41,27 @@ public static class EnrollmentRules
     /// </para>
     /// </remarks>
     /// <param name="token">The state of the token that the request presents.</param>
+    /// <param name="csr">The request's validated CSR.</param>
     /// <param name="keyMatch">The issued certificate whose public key is the CSR key, or null when none has it.</param>
     /// <param name="now">The authority's current time, read once for the request.</param>
-    /// <exception cref="ArgumentNullException"><paramref name="token"/> is null.</exception>
-    public static EnrollmentDecision Decide(EnrollmentTokenState token, IssuedKeyMatch? keyMatch, DateTimeOffset now)
+    /// <exception cref="ArgumentNullException"><paramref name="token"/> or <paramref name="csr"/> is null.</exception>
+    public static EnrollmentDecision Decide(
+        EnrollmentTokenState token,
+        CertificateSigningRequest csr,
+        IssuedKeyMatch? keyMatch,
+        DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(token);
+        ArgumentNullException.ThrowIfNull(csr);
+
+        // CONTRACT.agent-identity.md §2.1 (2) and §4: a token works only at the base URL it names.
+        string enrollmentUrl = token.ProductBaseUrl.TrimEnd('/');
+        if (!string.Equals(csr.EnrollmentUrl, enrollmentUrl, StringComparison.Ordinal))
+        {
+            return EnrollmentDecision.Reject(
+                AgentIdentityErrorCode.TokenUrlMismatch,
+                "The CSR names no enrollment URL, or not the token's.");
+        }
 
         if (keyMatch is not null)
         {
@@ -79,7 +97,7 @@ public static class EnrollmentRules
                 "The token has created its maximum number of identities.");
         }
 
-        return EnrollmentDecision.CreateIdentity(Guid.NewGuid());
+        return EnrollmentDecision.CreateIdentity(Guid.NewGuid(), enrollmentUrl);
     }
 
     // The key rules after the replay, in their order; a deleted identity matches only its own rule.

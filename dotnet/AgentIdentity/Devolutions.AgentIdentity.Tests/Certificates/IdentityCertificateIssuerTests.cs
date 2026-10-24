@@ -42,15 +42,26 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     public static TheoryData<string> SerialNumberDrawNames => new(SerialNumberDraws.Keys);
 
     // A token that can create an identity.
-    private static EnrollmentTokenState UsableToken => new(false, Now.AddDays(1), maxUses: 10, identitiesCreated: 0);
+    // The `u` of the token that enrolls the identity, and the CSR of the enrollment, which names it.
+    private const string TokenUrl = "https://host/dvls";
+
+    private static readonly CertificateSigningRequest EnrollingCsr = TestEnrollmentUrl.Csr(TokenUrl);
+
+    private static EnrollmentTokenState UsableToken =>
+        new(false, TokenUrl, Now.AddDays(1), maxUses: 10, identitiesCreated: 0);
 
     // A decision of each outcome but the creation of an identity: an expired token's refusal and a replay.
     private static Dictionary<EnrollmentOutcome, EnrollmentDecision> DecisionsButCreateIdentity => new()
     {
         [EnrollmentOutcome.Reject] =
-            EnrollmentRules.Decide(new(false, Now, maxUses: 10, identitiesCreated: 0), null, Now),
+            EnrollmentRules.Decide(
+                new(false, TokenUrl, Now, maxUses: 10, identitiesCreated: 0),
+                EnrollingCsr,
+                null,
+                Now),
         [EnrollmentOutcome.ReturnExistingIdentity] = EnrollmentRules.Decide(
             UsableToken,
+            EnrollingCsr,
             IssuedKeyMatch.ForIdentity(Guid.Parse(IdentityIdText), true, false, CertificateStatus.Current),
             Now),
     };
@@ -62,7 +73,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     private readonly CertificateSigningRequest _csr;
 
     // The decision that creates the identity whose certificate each test issues, unless the test passes another.
-    private readonly EnrollmentDecision _creating = EnrollmentRules.Decide(UsableToken, null, Now);
+    private readonly EnrollmentDecision _creating = EnrollmentRules.Decide(UsableToken, EnrollingCsr, null, Now);
 
     // The ID that the decision minted, as CONTRACT.agent-identity.md §1 writes IDs:
     // Guid.ToString("D") writes a UUID lowercase and hyphenated.

@@ -6,6 +6,11 @@ public class EnrollmentRulesTests
 
     private static readonly Guid IdentityId = Guid.Parse("0f8fad5b-d9cb-469f-a165-70867728950e");
 
+    // The `u` of the presented token, and the CSR an agent enrolling with it sends, which names that URL.
+    private const string TokenUrl = "https://host/dvls";
+
+    private static readonly CertificateSigningRequest Csr = TestEnrollmentUrl.Csr(TokenUrl);
+
     public static TheoryData<string> KeysButTheReplayNames => new(KeysButTheReplay.Keys);
 
     // The issued keys that each key rule of CONTRACT.agent-identity.md §2.1 matches, except the replay, by name.
@@ -24,9 +29,10 @@ public class EnrollmentRulesTests
     // A decision of each outcome but the creation of an identity: an expired token's refusal and a replay.
     private static Dictionary<EnrollmentOutcome, EnrollmentDecision> DecisionsButCreateIdentity => new()
     {
-        [EnrollmentOutcome.Reject] = EnrollmentRules.Decide(Token(expired: true), null, Now),
+        [EnrollmentOutcome.Reject] = EnrollmentRules.Decide(Token(expired: true), Csr, null, Now),
         [EnrollmentOutcome.ReturnExistingIdentity] = EnrollmentRules.Decide(
             Token(),
+            Csr,
             IssuedKeyMatch.ForIdentity(IdentityId, true, false, CertificateStatus.Current),
             Now),
     };
@@ -43,9 +49,9 @@ public class EnrollmentRulesTests
     [InlineData(TimeSpan.TicksPerDay, 9)]
     public void CreatesAnIdentityForANewKeyWithAUsableToken(long ticksToExpiry, int identitiesCreated)
     {
-        EnrollmentTokenState token = new(false, Now.AddTicks(ticksToExpiry), maxUses: 10, identitiesCreated);
+        EnrollmentTokenState token = new(false, TokenUrl, Now.AddTicks(ticksToExpiry), maxUses: 10, identitiesCreated);
 
-        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
+        EnrollmentDecision decision = EnrollmentRules.Decide(token, Csr, null, Now);
 
         Assert.Equal(EnrollmentOutcome.CreateIdentity, decision.Outcome);
         Assert.Null(decision.ExistingIdentityId);
@@ -58,7 +64,7 @@ public class EnrollmentRulesTests
     [Fact]
     public void CreateIdentityCarriesAnIdentityId()
     {
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), null, Now);
+        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), Csr, null, Now);
 
         Guid identityId = Assert.NotNull(decision.NewIdentityId);
         Assert.NotEqual(Guid.Empty, identityId);
@@ -70,8 +76,8 @@ public class EnrollmentRulesTests
     [Fact]
     public void EachCreateIdentityCarriesADifferentIdentityId()
     {
-        EnrollmentDecision first = EnrollmentRules.Decide(Token(), null, Now);
-        EnrollmentDecision second = EnrollmentRules.Decide(Token(), null, Now);
+        EnrollmentDecision first = EnrollmentRules.Decide(Token(), Csr, null, Now);
+        EnrollmentDecision second = EnrollmentRules.Decide(Token(), Csr, null, Now);
 
         Assert.NotEqual(first.NewIdentityId, second.NewIdentityId);
     }
@@ -118,9 +124,9 @@ public class EnrollmentRulesTests
         int identitiesCreated,
         AgentIdentityErrorCode expected)
     {
-        EnrollmentTokenState token = new(revoked, Now.AddTicks(ticksToExpiry), maxUses, identitiesCreated);
+        EnrollmentTokenState token = new(revoked, TokenUrl, Now.AddTicks(ticksToExpiry), maxUses, identitiesCreated);
 
-        EnrollmentDecision decision = EnrollmentRules.Decide(token, null, Now);
+        EnrollmentDecision decision = EnrollmentRules.Decide(token, Csr, null, Now);
 
         AssertRejected(expected, decision);
     }
@@ -140,7 +146,7 @@ public class EnrollmentRulesTests
     {
         IssuedKeyMatch keyMatch = IssuedKeyMatch.ForIdentity(IdentityId, true, false, CertificateStatus.Current);
 
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(revoked, expired, exhausted), keyMatch, Now);
+        EnrollmentDecision decision = EnrollmentRules.Decide(Token(revoked, expired, exhausted), Csr, keyMatch, Now);
 
         Assert.Equal(EnrollmentOutcome.ReturnExistingIdentity, decision.Outcome);
         Assert.Equal(IdentityId, decision.ExistingIdentityId);
@@ -183,7 +189,7 @@ public class EnrollmentRulesTests
             IssuedKeyMatch.ForIdentity(IdentityId, enrolledWithPresentedToken, identityRevoked, status);
 
         EnrollmentDecision decision =
-            EnrollmentRules.Decide(Token(expired: expired, exhausted: exhausted), keyMatch, Now);
+            EnrollmentRules.Decide(Token(expired: expired, exhausted: exhausted), Csr, keyMatch, Now);
 
         AssertRejected(expected, decision);
     }
@@ -200,6 +206,7 @@ public class EnrollmentRulesTests
     {
         EnrollmentDecision decision = EnrollmentRules.Decide(
             Token(expired: expired, exhausted: exhausted),
+            Csr,
             IssuedKeyMatch.ForDeletedIdentity(),
             Now);
 
@@ -213,9 +220,94 @@ public class EnrollmentRulesTests
     [MemberData(nameof(KeysButTheReplayNames))]
     public void RejectsARevokedTokenWithTokenInvalidForAnIssuedKeyButTheReplay(string key)
     {
-        EnrollmentDecision decision = EnrollmentRules.Decide(Token(revoked: true), KeysButTheReplay[key], Now);
+        EnrollmentDecision decision = EnrollmentRules.Decide(Token(revoked: true), Csr, KeysButTheReplay[key], Now);
 
         AssertRejected(AgentIdentityErrorCode.TokenInvalid, decision);
+    }
+
+    // At enrollment, a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u`
+    // without trailing slashes, gets token_url_mismatch, compared as text.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    [Theory]
+    [MemberData(nameof(CsrsNotNamingTheTokenUrlNames))]
+    public void RejectsACsrNotNamingTheTokenUrlWithTokenUrlMismatch(string csr)
+    {
+        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), CsrsNotNamingTheTokenUrl[csr](), null, Now);
+
+        AssertRejected(AgentIdentityErrorCode.TokenUrlMismatch, decision);
+    }
+
+    public static TheoryData<string> CsrsNotNamingTheTokenUrlNames => new(CsrsNotNamingTheTokenUrl.Keys);
+
+    // CSRs whose enrollment URL is not https://host/dvls, by what they name.
+    private static Dictionary<string, Func<CertificateSigningRequest>> CsrsNotNamingTheTokenUrl => new()
+    {
+        ["no enrollment URL"] = TestEnrollmentUrl.CsrWithoutEnrollmentUrl,
+        ["another path"] = () => TestEnrollmentUrl.Csr("https://host/psu"),
+        ["another host"] = () => TestEnrollmentUrl.Csr("https://other/dvls"),
+        // Compared as text, a trailing slash, an uppercase host and a port make another value.
+        ["a trailing slash"] = () => TestEnrollmentUrl.Csr("https://host/dvls/"),
+        ["an uppercase host"] = () => TestEnrollmentUrl.Csr("https://HOST/dvls"),
+        ["the default port"] = () => TestEnrollmentUrl.Csr("https://host:443/dvls"),
+    };
+
+    // (2) `token_url_mismatch` follows `invalid_request` and comes before (3) the key lookup,
+    // (4) `token_invalid` for a revoked token and `token_expired`, and (5) `token_exhausted`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    [Theory]
+    [MemberData(nameof(LaterOutcomeNames))]
+    public void TokenUrlMismatchWinsOverTheLaterOutcomes(string laterOutcome)
+    {
+        (EnrollmentTokenState token, IssuedKeyMatch? keyMatch) = LaterOutcomes[laterOutcome];
+
+        EnrollmentDecision decision =
+            EnrollmentRules.Decide(token, TestEnrollmentUrl.Csr("https://host/psu"), keyMatch, Now);
+
+        AssertRejected(AgentIdentityErrorCode.TokenUrlMismatch, decision);
+    }
+
+    public static TheoryData<string> LaterOutcomeNames => new(LaterOutcomes.Keys);
+
+    // Token states and key matches that a CSR naming the token's URL would get, by that outcome.
+    private static Dictionary<string, (EnrollmentTokenState Token, IssuedKeyMatch? KeyMatch)> LaterOutcomes => new()
+    {
+        ["a new identity"] = (Token(), null),
+        ["the replay of an identity"] = (
+            Token(revoked: true, expired: true, exhausted: true),
+            IssuedKeyMatch.ForIdentity(IdentityId, true, false, CertificateStatus.Current)),
+        ["the key of a revoked identity"] =
+            (Token(), IssuedKeyMatch.ForIdentity(IdentityId, true, true, CertificateStatus.Current)),
+        ["a revoked token"] = (Token(revoked: true), null),
+        ["an expired token"] = (Token(expired: true), null),
+        ["an exhausted token"] = (Token(exhausted: true), null),
+    };
+
+    // The CSR names the token's `u` without trailing slashes, whatever trailing slashes the stored `u` has,
+    // and the decision to create an identity carries that URL, which every certificate of the identity names.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    [Theory]
+    [InlineData("https://host/dvls")]
+    [InlineData("https://host/dvls/")]
+    [InlineData("https://host/dvls//")]
+    public void CreateIdentityCarriesTheTokenUrlWithoutTrailingSlashes(string storedUrl)
+    {
+        EnrollmentTokenState token = new(false, storedUrl, Now.AddDays(1), maxUses: 10, identitiesCreated: 3);
+
+        EnrollmentDecision decision = EnrollmentRules.Decide(token, Csr, null, Now);
+
+        Assert.Equal(EnrollmentOutcome.CreateIdentity, decision.Outcome);
+        Assert.Equal(TokenUrl, decision.EnrollmentUrl);
+    }
+
+    // Only the decision to create an identity issues a certificate.
+    // oracle: intent dotnet/AgentIdentity/INTENT.md §Authenticated identity
+    [Theory]
+    [InlineData(EnrollmentOutcome.Reject)]
+    [InlineData(EnrollmentOutcome.ReturnExistingIdentity)]
+    public void OtherDecisionsCarryNoEnrollmentUrl(EnrollmentOutcome outcome)
+    {
+        Assert.Null(DecisionsButCreateIdentity[outcome].EnrollmentUrl);
     }
 
     // A bad argument throws the most derived ArgumentException, whose ParamName names it,
@@ -228,7 +320,7 @@ public class EnrollmentRulesTests
     public void TokenStateRejectsANegativeCount(int maxUses, int identitiesCreated, string parameter)
     {
         ArgumentOutOfRangeException exception = Assert.Throws<ArgumentOutOfRangeException>(
-            () => new EnrollmentTokenState(false, Now, maxUses, identitiesCreated));
+            () => new EnrollmentTokenState(false, TokenUrl, Now, maxUses, identitiesCreated));
 
         Assert.Equal(parameter, exception.ParamName);
     }
@@ -256,10 +348,22 @@ public class EnrollmentRulesTests
     public void DecideRejectsANullToken()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => EnrollmentRules.Decide(null!, null, Now));
+            () => EnrollmentRules.Decide(null!, Csr, null, Now));
 
         // oracle: spec Framework Design Guidelines §Using Standard Exception Types
         Assert.Equal("token", exception.ParamName);
+    }
+
+    // A null argument throws ArgumentNullException, whose ParamName names it.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Fact]
+    public void DecideRejectsANullCsr()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
+            () => EnrollmentRules.Decide(Token(), null!, null, Now));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("csr", exception.ParamName);
     }
 
     private static void AssertRejected(AgentIdentityErrorCode expected, EnrollmentDecision decision)
@@ -277,6 +381,7 @@ public class EnrollmentRulesTests
     {
         return new EnrollmentTokenState(
             revoked,
+            TokenUrl,
             expiresAt: expired ? Now : Now.AddDays(1),
             maxUses: 10,
             identitiesCreated: exhausted ? 10 : 3);
