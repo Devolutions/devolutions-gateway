@@ -33,6 +33,7 @@ The host provides these dependencies, with the guarantees the library relies on:
 - `INonceStore.TryRecordAsync` records a `keyid` and `nonce` pair, or returns false when the pair is already recorded, in one atomic operation, and keeps the pair until `retainUntil`.
 - `IRootSigner` holds the root that issues new certificates and a `SignatureGenerator` over its private key.
   Its `Certificate` must have a Subject Key Identifier extension, which becomes the Authority Key Identifier of each issued certificate; without one, `IdentityCertificateIssuer.Issue` throws `ArgumentException`.
+  The root must also fit the chain profile (CONTRACT.agent-identity.md [§4]): a P-256 or P-384 key, basicConstraints with `cA` set, key usage with `keyCertSign`, and a `SignatureGenerator` that signs with `ecdsa-with-SHA256` for a P-256 key or `ecdsa-with-SHA384` for a P-384 key; otherwise `Issue` throws `ArgumentException`.
   Once a root rotation starts, it holds the new root (CONTRACT.agent-identity.md [§8.3]).
 - `TimeProvider` is the authority's clock, usually `TimeProvider.System`, which decides signature freshness, certificate validity and handshake deadlines.
   Take the `now` of `EnrollmentRules.Decide` and the `serverTime` of every error from the same clock, since the agent corrects its own clock from `server_time`.
@@ -189,6 +190,7 @@ Implement the `AgentChannel` service with that package; a feed that serves this 
 [contract]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md
 [repo]: https://github.com/Devolutions/devolutions-gateway
 [§2.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#token-rules
+[§4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#certificates
 [§5.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#trust-anchor
 [§5.2]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#enroll
 [§5.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#renew

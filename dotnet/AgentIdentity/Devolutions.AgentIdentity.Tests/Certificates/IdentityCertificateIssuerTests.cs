@@ -356,6 +356,97 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Throws<ArgumentException>(() => Issue(root: root));
     }
 
+    // Every certificate in a chain is signed with ecdsa-with-SHA256 by a P-256 key or with ecdsa-with-SHA384 by a P-384
+    // key, never with RSA, and every CA certificate, the root included, carries basicConstraints with cA set and key
+    // usage with keyCertSign, so the library issues nothing under a root that breaks one of these.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Theory]
+    [MemberData(nameof(IssuersOutsideTheChainProfileNames))]
+    public void ThrowsForAnIssuerOutsideTheChainProfile(string issuer)
+    {
+        using OwnedRootSigner root = IssuersOutsideTheChainProfile[issuer]();
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => IdentityCertificateIssuer.Issue(
+            _creating,
+            _csr,
+            root,
+            Lifetime,
+            new FixedTimeProvider(Now),
+            _random));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("issuer", exception.ParamName);
+    }
+
+    public static TheoryData<string> IssuersOutsideTheChainProfileNames => new(IssuersOutsideTheChainProfile.Keys);
+
+    // A root of each allowed curve signs the certificate with the signature algorithm of its curve,
+    // and the certificate chains to it: ecdsa-with-SHA256 for P-256 and ecdsa-with-SHA384 for P-384 (RFC 5758 §3.2).
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: spec RFC 5758 §3.2
+    [Theory]
+    [InlineData("P-256", "1.2.840.10045.4.3.2")]
+    [InlineData("P-384", "1.2.840.10045.4.3.3")]
+    public void SignsWithTheAlgorithmOfTheIssuerCurve(string curve, string signatureAlgorithm)
+    {
+        using OwnedRootSigner root = EcdsaProfileRoot(
+            curve == "P-256" ? ECCurve.NamedCurves.nistP256 : ECCurve.NamedCurves.nistP384);
+
+        using X509Certificate2 leaf = IdentityCertificateIssuer.Issue(
+            _creating,
+            _csr,
+            root,
+            Lifetime,
+            new FixedTimeProvider(Now),
+            _random);
+
+        Assert.Equal(signatureAlgorithm, leaf.SignatureAlgorithm.Value);
+        using X509Chain chain = new();
+        chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+        chain.ChainPolicy.CustomTrustStore.Add(root.Certificate);
+        chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+        chain.ChainPolicy.VerificationTime = Now.AddHours(1).UtcDateTime;
+        Assert.True(chain.Build(leaf), string.Join("; ", chain.ChainStatus.Select(status => status.StatusInformation)));
+    }
+
+    // Roots that break the chain profile, by what they break; every other part of each is a conforming CA root.
+    private static Dictionary<string, Func<OwnedRootSigner>> IssuersOutsideTheChainProfile => new()
+    {
+        ["an RSA key"] = () =>
+        {
+            RSA key = RSA.Create(2048);
+            return new OwnedRootSigner(
+                ProfileRoot(new CertificateRequest(RootName, key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1)),
+                X509SignatureGenerator.CreateForRSA(key, RSASignaturePadding.Pkcs1),
+                key);
+        },
+        ["a P-521 key"] = () => EcdsaProfileRoot(ECCurve.NamedCurves.nistP521),
+        ["a P-256 certificate whose signer is RSA"] = () =>
+        {
+            ECDsa certificateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            RSA key = RSA.Create(2048);
+            X509Certificate2 certificate =
+                ProfileRoot(new CertificateRequest(RootName, certificateKey, HashAlgorithmName.SHA256));
+            certificateKey.Dispose();
+            return new OwnedRootSigner(
+                certificate,
+                X509SignatureGenerator.CreateForRSA(key, RSASignaturePadding.Pkcs1),
+                key);
+        },
+        ["no basicConstraints"] = () => EcdsaProfileRoot(ECCurve.NamedCurves.nistP256, [CaKeyUsage()]),
+        ["basicConstraints without cA"] = () => EcdsaProfileRoot(
+            ECCurve.NamedCurves.nistP256,
+            [new X509BasicConstraintsExtension(false, false, 0, true), CaKeyUsage()]),
+        ["no key usage"] = () => EcdsaProfileRoot(ECCurve.NamedCurves.nistP256, [CaBasicConstraints()]),
+        ["key usage without keyCertSign"] = () => EcdsaProfileRoot(
+            ECCurve.NamedCurves.nistP256,
+            [
+                CaBasicConstraints(),
+                new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.CrlSign, true),
+            ]),
+    };
+
     // Code that acts for an identity takes it as a type only the library's checks can create;
     // for a new identity, that is the enrollment decision that creates it.
     // A refusal creates no identity, and a replay returns the identity's current chain rather than a new certificate.
@@ -531,6 +622,60 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         _ = tbsCertificate.ReadEncodedValue();
 
         return tbsCertificate.ReadIntegerBytes().ToArray();
+    }
+
+    private const string RootName = "CN=Test Agent Identity Root";
+
+    // A self-signed root with a subject key identifier and the given extensions,
+    // by default those of a CA root: basicConstraints with cA set, and key usage with keyCertSign.
+    private static X509Certificate2 ProfileRoot(CertificateRequest request, X509Extension[]? extensions = null)
+    {
+        foreach (X509Extension extension in extensions ?? [CaBasicConstraints(), CaKeyUsage()])
+        {
+            request.CertificateExtensions.Add(extension);
+        }
+
+        request.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
+
+        return request.CreateSelfSigned(Now.AddDays(-1), Now.AddYears(10));
+    }
+
+    private static OwnedRootSigner EcdsaProfileRoot(ECCurve curve, X509Extension[]? extensions = null)
+    {
+        ECDsa key = ECDsa.Create(curve);
+
+        return new OwnedRootSigner(
+            ProfileRoot(new CertificateRequest(RootName, key, HashAlgorithmName.SHA256), extensions),
+            X509SignatureGenerator.CreateForECDsa(key),
+            key);
+    }
+
+    private static X509BasicConstraintsExtension CaBasicConstraints()
+    {
+        return new X509BasicConstraintsExtension(true, false, 0, true);
+    }
+
+    private static X509KeyUsageExtension CaKeyUsage()
+    {
+        return new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true);
+    }
+
+    // A root signer that owns its certificate and the key behind its generator.
+    private sealed class OwnedRootSigner(
+        X509Certificate2 certificate,
+        X509SignatureGenerator generator,
+        IDisposable key)
+        : IRootSigner, IDisposable
+    {
+        public X509Certificate2 Certificate => certificate;
+
+        public X509SignatureGenerator SignatureGenerator => generator;
+
+        public void Dispose()
+        {
+            certificate.Dispose();
+            key.Dispose();
+        }
     }
 
     private sealed class TestRootSigner(X509Certificate2 certificate, ECDsa key) : IRootSigner

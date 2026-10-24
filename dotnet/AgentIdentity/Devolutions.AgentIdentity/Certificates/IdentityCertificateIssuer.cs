@@ -14,6 +14,24 @@ public static class IdentityCertificateIssuer
 
     private const string SubjectKeyIdentifierOid = "2.5.29.14";
 
+    private const string KeyUsageOid = "2.5.29.15";
+
+    private const string BasicConstraintsOid = "2.5.29.19";
+
+    // RFC 5480 §2.1.1: id-ecPublicKey.
+    private const string EcPublicKeyOid = "1.2.840.10045.2.1";
+
+    // RFC 5480 §2.1.1.1: the DER encodings of the namedCurve secp256r1 (P-256) and secp384r1 (P-384).
+    private static readonly byte[] P256CurveParameters = [0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
+    private static readonly byte[] P384CurveParameters = [0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22];
+
+    // RFC 5758 §3.2: the DER AlgorithmIdentifiers of ecdsa-with-SHA256 and ecdsa-with-SHA384,
+    // whose parameters are absent.
+    private static readonly byte[] EcdsaWithSha256Identifier =
+        [0x30, 0x0A, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x02];
+    private static readonly byte[] EcdsaWithSha384Identifier =
+        [0x30, 0x0A, 0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x04, 0x03, 0x03];
+
     /// <summary>
     /// The lifetime of an identity certificate when the host sets no other: 90 days.
     /// </summary>
@@ -56,7 +74,11 @@ public static class IdentityCertificateIssuer
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="creating"/> does not create an identity;
-    /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second.
+    /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second;
+    /// or the issuer is outside the chain profile of CONTRACT.agent-identity.md §4:
+    /// its certificate has neither a P-256 nor a P-384 key, no basicConstraints with cA set or no key usage with
+    /// keyCertSign, or its generator does not sign with ecdsa-with-SHA256 for a P-256 key or ecdsa-with-SHA384 for a
+    /// P-384 key.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="lifetime"/> is shorter than one second.
@@ -105,6 +127,36 @@ public static class IdentityCertificateIssuer
             throw new ArgumentException("The issuer certificate has no subject key identifier.", nameof(issuer));
         }
 
+        // CONTRACT.agent-identity.md §4: every certificate in a chain is signed with ecdsa-with-SHA256 by a P-256 key
+        // or with ecdsa-with-SHA384 by a P-384 key, and every CA certificate carries basicConstraints with cA set
+        // and key usage with keyCertSign.
+        (HashAlgorithmName hash, byte[] expectedAlgorithm) = SignatureProfile(issuerCertificate.PublicKey)
+            ?? throw new ArgumentException(
+                "The issuer certificate's key is neither a P-256 nor a P-384 key.",
+                nameof(issuer));
+
+        byte[] signatureAlgorithm = issuer.SignatureGenerator.GetSignatureAlgorithmIdentifier(hash);
+        if (!signatureAlgorithm.AsSpan().SequenceEqual(expectedAlgorithm))
+        {
+            throw new ArgumentException(
+                "The issuer does not sign with the ECDSA algorithm of its key's curve.",
+                nameof(issuer));
+        }
+
+        if (issuerCertificate.Extensions[BasicConstraintsOid] is not X509BasicConstraintsExtension
+            {
+                CertificateAuthority: true,
+            })
+        {
+            throw new ArgumentException("The issuer certificate is not a CA certificate.", nameof(issuer));
+        }
+
+        if (issuerCertificate.Extensions[KeyUsageOid] is not X509KeyUsageExtension keyUsage
+            || !keyUsage.KeyUsages.HasFlag(X509KeyUsageFlags.KeyCertSign))
+        {
+            throw new ArgumentException("The issuer certificate's key usage has no keyCertSign.", nameof(issuer));
+        }
+
         DateTimeOffset notBefore = TruncateToSecond(timeProvider.GetUtcNow());
         // UNTESTED: the conversion is exact in the hour that a daylight-saving fall-back repeats,
         // because the local DateTime that X509Certificate2 returns keeps the ambiguous-DST bit,
@@ -135,7 +187,7 @@ public static class IdentityCertificateIssuer
         SubjectAlternativeNameBuilder alternativeName = new();
         alternativeName.AddUri(new Uri($"urn:uuid:{id}"));
 
-        CertificateRequest request = new(subject.Build(), publicKey, HashAlgorithmName.SHA256);
+        CertificateRequest request = new(subject.Build(), publicKey, hash);
         OidCollection usages = [new Oid(ClientAuthentication)];
 
         // RFC 5280 §4.2.1.2, method (1): the SHA-1 hash of the subjectPublicKey bits.
@@ -155,6 +207,29 @@ public static class IdentityCertificateIssuer
             NewSerialNumber(random));
     }
 
+    // The hash and the signature AlgorithmIdentifier that CONTRACT.agent-identity.md §4 pairs with the key's curve,
+    // or null for a key of another type or curve.
+    private static (HashAlgorithmName Hash, byte[] SignatureAlgorithm)? SignatureProfile(PublicKey key)
+    {
+        byte[]? curve = key.EncodedParameters?.RawData;
+
+        if (key.Oid.Value != EcPublicKeyOid || curve is null)
+        {
+            return null;
+        }
+
+        if (curve.AsSpan().SequenceEqual(P256CurveParameters))
+        {
+            return (HashAlgorithmName.SHA256, EcdsaWithSha256Identifier);
+        }
+
+        if (curve.AsSpan().SequenceEqual(P384CurveParameters))
+        {
+            return (HashAlgorithmName.SHA384, EcdsaWithSha384Identifier);
+        }
+
+        return null;
+    }
     /// <summary>
     /// Issues the pending certificate of a renewal, for the identity that signed the renew request.
     /// </summary>
@@ -176,7 +251,11 @@ public static class IdentityCertificateIssuer
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="renewing"/> was authenticated for another operation than <c>renew</c>;
-    /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second.
+    /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second;
+    /// or the issuer is outside the chain profile of CONTRACT.agent-identity.md §4:
+    /// its certificate has neither a P-256 nor a P-384 key, no basicConstraints with cA set or no key usage with
+    /// keyCertSign, or its generator does not sign with ecdsa-with-SHA256 for a P-256 key or ecdsa-with-SHA384 for a
+    /// P-384 key.
     /// </exception>
     /// <exception cref="ArgumentOutOfRangeException">
     /// <paramref name="lifetime"/> is shorter than one second.
