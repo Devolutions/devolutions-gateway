@@ -135,12 +135,14 @@ Unless stated otherwise, implementations must follow these conventions.
 
 - Chains are leaf-first, any length; the agent never assumes a tier count.
 - The number of CA tiers and the rest of the root profile are each authority's choice, within the rule below.
-- Every certificate in a chain is signed with `ecdsa-with-SHA256` by a P-256 key, and every CA certificate carries basicConstraints with `cA` set and key usage with `keyCertSign`.
+- Every certificate in a chain is signed with `ecdsa-with-SHA256` by a P-256 key or with `ecdsa-with-SHA384` by a P-384 key, never with RSA, and every CA certificate carries basicConstraints with `cA` set and key usage with `keyCertSign`.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
-  The leaf carries no other extension except an authority key identifier and a subject key identifier; in particular it carries no basicConstraints, so a leaf can never act as a CA.
-- The server ignores the CSR's subject and attributes, including an `extensionRequest` with an empty `Extensions` list, which common CSR builders emit, and it does not require their contents in canonical DER form, such as a sorted `SET OF`, since nothing it decides depends on them; it only takes the public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256) and verifies the CSR self-signature (else `invalid_request`).
+  The leaf carries no other extension except an authority key identifier, a subject key identifier and the enrollment URL extension; in particular it carries no basicConstraints, so a leaf can never act as a CA.
+- The enrollment URL extension, OID `2.25.123288656976046528792596909476335030418`, non-critical, holds as an `IA5String` the `u` of the token that enrolled the identity, exactly as that token carries it; every certificate issued for that identity carries the same value.
+- The agent's CSR carries one attribute, an `extensionRequest` holding only the enrollment URL extension with the base URL it sends the request to: its token's `u` at enrollment, its identity's base URL at renewal.
+- The server takes the CSR's public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256), verifies the CSR self-signature (else `invalid_request`) and reads the enrollment URL extension from its `extensionRequest`; it ignores the subject and every other attribute or requested extension, and does not require their contents in canonical DER form, such as a sorted `SET OF`.
+- At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u`, with `invalid_request`, and creates nothing; at renewal it ignores the value.
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
-- The agent's CSR carries an empty attribute set: the `[0]` field RFC 2986 requires is present and empty (`A0 00`), so that a strict PKCS#10 parser accepts it; an empty `extensionRequest` breaks RFC 5280's `SIZE (1..MAX)`.
 
 <a id="http-api"></a>
 
@@ -207,6 +209,7 @@ Request:
 - Every field is required except `config.agent_channel_url` and product-specific config fields.
 - `authority_id` is the authority's UUID; it never changes for that authority, across restarts, upgrades, nodes, backup restores and disaster recovery, and a different `authority_id` denotes a different authority.
 - The server generates `identity_id` when it creates the identity, and the ID remains stable for that identity.
+- The agent refuses a response whose leaf lacks the enrollment URL extension or names another URL than its token's `u`, as a permanent outcome.
 - The friendly name is not returned to the agent.
 - `config.version` identifies the config schema and is `1`; the agent ignores unknown config fields.
   A config with any other `version` is a transient failure (§5.4), and the agent keeps its stored config.
