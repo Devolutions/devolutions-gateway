@@ -26,7 +26,7 @@ public static class EnrollmentAuthorization
     /// </para>
     /// <para>
     /// The authority finds a token by its secret alone, so the bag is not decoded.
-    /// The lookup includes deleted tokens, which keep their hash,
+    /// The lookup includes revoked tokens, which keep their hash,
     /// and <see cref="EnrollmentRules.Decide"/> refuses them except for a replay.
     /// When no stored token has <see cref="EnrollmentAuthorizationResult.SecretHash"/>,
     /// the request gets <c>token_invalid</c> too.
