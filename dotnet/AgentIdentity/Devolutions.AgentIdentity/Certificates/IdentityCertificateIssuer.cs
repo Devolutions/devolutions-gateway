@@ -106,6 +106,12 @@ public static class IdentityCertificateIssuer
         }
 
         DateTimeOffset notBefore = TruncateToSecond(timeProvider.GetUtcNow());
+        // UNTESTED: the conversion is exact in the hour that a daylight-saving fall-back repeats,
+        // because the local DateTime that X509Certificate2 returns keeps the ambiguous-DST bit,
+        // which ToUniversalTime uses.
+        // A wrong instant there shifts expiry and validity checks by an hour on hosts outside UTC.
+        // Keep the conversion straight from the property: arithmetic, formatting or a DateTimeOffset built from the
+        // local value before ToUniversalTime loses the bit.
         DateTimeOffset issuerNotAfter = new(issuerCertificate.NotAfter.ToUniversalTime(), TimeSpan.Zero);
 
         if (issuerNotAfter <= notBefore)
