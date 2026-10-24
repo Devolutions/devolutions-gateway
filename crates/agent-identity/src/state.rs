@@ -77,6 +77,7 @@ pub enum EnrollmentDiscardReason {
     TokenExpired,
     TokenMalformed,
     AuthorityConflict,
+    AuthorityUrlMismatch,
 }
 
 /// What [`Store::store_enrolled_identity`] did with the identity an enrollment returned.
@@ -105,6 +106,7 @@ impl EnrollmentDiscardReason {
             Self::TokenExpired => "token_expired",
             Self::TokenMalformed => "token_malformed",
             Self::AuthorityConflict => "authority_conflict",
+            Self::AuthorityUrlMismatch => "authority_url_mismatch",
         }
     }
 }
@@ -1150,6 +1152,41 @@ mod tests {
         ))?;
         let replacement_path = pending::write(&directory.0, &replacement, true)?;
         assert!(replacement_path.exists());
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn an_enrollment_refused_for_its_url_is_discarded_as_permanent() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let hash_hex = token.sha256_hex();
+        let path = pending::write(&directory.0, &token, true)?;
+        let (record, _key) = store
+            .begin_enrollment(&token)?
+            .context("new token was already processed")?;
+
+        store.discard_enrollment(&hash_hex, EnrollmentDiscardReason::AuthorityUrlMismatch)?;
+
+        assert!(!path.exists());
+        assert!(pending::read_in_progress(&directory.0, &hash_hex)?.is_none());
+        assert!(keys::open(store.key_backend(), &record.key_name)?.is_none());
+        assert!(store.list_identities()?.is_empty());
+        let marker_path = directory
+            .0
+            .join("identity")
+            .join("rejected")
+            .join(format!("{hash_hex}.json"));
+        let marker: Value = serde_json::from_slice(&fs::read(marker_path)?)?;
+        assert_eq!(marker["code"], "authority_url_mismatch");
+        assert_eq!(marker["token_sha256"], hash_hex);
+        pending::write(&directory.0, &token, true)?;
+        assert!(store.begin_enrollment(&token)?.is_none());
+        assert!(!path.exists());
         Ok(())
     }
 

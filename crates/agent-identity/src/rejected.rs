@@ -17,13 +17,14 @@ struct Rejection {
     at: String,
 }
 
-const PERMANENT_CODES: [&str; 6] = [
+const PERMANENT_CODES: [&str; 7] = [
     "identity_revoked",
     "token_invalid",
     "token_exhausted",
     "token_expired",
     "token_malformed",
     "authority_conflict",
+    "authority_url_mismatch",
 ];
 
 fn directory(data_dir: &Utf8Path) -> Utf8PathBuf {
