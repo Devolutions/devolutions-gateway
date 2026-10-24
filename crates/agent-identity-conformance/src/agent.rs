@@ -4952,55 +4952,36 @@ pub(crate) async fn a_no_channel_when_absent(ctx: Context) -> anyhow::Result<()>
             state["config"].get("agent_channel_url").is_none(),
             "agent stored config.agent_channel_url despite its absence from enrollment"
         );
-        let first_check_in = poll!(case, WAIT, POLL, "first channelless check-in did not complete", async {
+        poll!(case, WAIT, POLL, "first channelless check-in did not complete", async {
             let requests = target.requests(None).await?;
-            if count(&requests, "check_in")? > 0
-                && target
-                    .events(&id)
-                    .await?
-                    .iter()
-                    .any(|event| event["type"] == "check_in_received")
-            {
-                return Ok(Some(count(&requests, "check_in")?));
-            }
-            Ok(None)
+            Ok(
+                (count(&requests, "check_in")? > 0 && completed_check_ins(&target.events(&id).await?) > 0)
+                    .then_some(()),
+            )
         });
         ensure!(
             case.identity_record(&target, &id).await?.metadata_value("hostname") == Some(&*case.metadata_hostname),
             "first check-in did not send the current metadata override"
         );
-        let first_completed = target
-            .events(&id)
-            .await?
-            .iter()
-            .filter(|event| event["type"] == "check_in_received")
-            .count();
         case.set_metadata_hostname("second-check-in-host")?;
+        // The agent collects metadata when it sends a check-in (CONTRACT.agent-identity.md §3.1), and a scheduled check-in can have collected it just before the override changed, so the first check-in completed after the change may still carry the old value.
+        // Check-ins come `check_in_interval_secs` apart, so the second one completed after the change was collected after it.
+        let changed = completed_check_ins(&target.events(&id).await?);
         poll!(
             case,
             WAIT,
             POLL,
             "agent did not complete a check-in after the metadata override changed",
             async {
-                let attempts = count(&target.requests(None).await?, "check_in")?;
-                let completed = target
-                    .events(&id)
-                    .await?
-                    .iter()
-                    .filter(|event| event["type"] == "check_in_received")
-                    .count();
-                ensure!(
-                    attempts <= first_check_in + 1 && completed <= first_completed + 1,
-                    "multiple check-ins occurred before the first post-change send was observed"
-                );
-                if completed == first_completed + 1 {
-                    ensure!(
-                        attempts == first_check_in + 1
-                            && case.identity_record(&target, &id).await?.metadata["hostname"] == "second-check-in-host",
-                        "the first post-change check-in used stale metadata"
-                    );
+                let completed = completed_check_ins(&target.events(&id).await?);
+                if case.identity_record(&target, &id).await?.metadata["hostname"] == "second-check-in-host" {
                     return Ok(Some(()));
                 }
+                // A third check-in, counted before the record was read, shows that the second had been answered by then.
+                ensure!(
+                    completed < changed + 3,
+                    "the second check-in after the metadata override changed used stale metadata"
+                );
                 Ok(None)
             },
         );
