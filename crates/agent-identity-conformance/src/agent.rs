@@ -2313,6 +2313,7 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
         ("token_malformed, user name in u", "token_malformed"),
         ("token_malformed, empty user name in u", "token_malformed"),
         ("token_malformed, @ in the path of u", "token_malformed"),
+        ("token_malformed, non-ASCII host in u", "token_malformed"),
     ] {
         if reason == "token_expired" && !ctx.mock() {
             continue;
@@ -2386,6 +2387,11 @@ pub(crate) async fn a_pending_file_deleted_on_permanent_error(ctx: Context) -> a
                         0,
                         0,
                     )
+                }
+                "token_malformed, non-ASCII host in u" => {
+                    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+                    // `u` is ASCII, with an internationalized host in its `xn--` form, so that the certificates' `IA5String` can name it.
+                    (with_u("https://bücher.example/x".to_owned())?, token, 0, 0)
                 }
                 _ => anyhow::bail!("unknown permanent error"),
             };
