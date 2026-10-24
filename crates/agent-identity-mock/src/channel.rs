@@ -707,7 +707,6 @@ mod tests {
     use hyper::body::Frame;
     use p256::ecdsa::signature::Signer as _;
     use p256::ecdsa::{Signature, SigningKey};
-    use p256::pkcs8::DecodePrivateKey as _;
     use prost::Message as _;
     use rstest::rstest;
     use serde_json::{Map, Value};
@@ -771,12 +770,8 @@ mod tests {
     impl Enrolled {
         async fn new() -> anyhow::Result<Self> {
             let app = App::for_test()?;
-            let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-            let vector = &vectors["csr"]["valid"];
-            let key = SigningKey::from_pkcs8_der(
-                &STANDARD.decode(vector["private_key_pkcs8"].as_str().unwrap_or_default())?,
-            )?;
-            let csr = STANDARD.decode(vector["csr"].as_str().unwrap_or_default())?;
+            let key = crate::test_x509::key(1);
+            let csr = crate::test_x509::csr_naming(&key, &app.base_url);
             let mut state = app.state.lock().await;
             let now = app.now();
             let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);

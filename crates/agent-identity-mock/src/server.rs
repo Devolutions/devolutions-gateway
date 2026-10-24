@@ -323,10 +323,9 @@ mod tests {
                 .lock()
                 .await
                 .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
         let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
-        let csr = &vectors["csr"]["valid"]["csr"];
+        let csr = json!(STANDARD.encode(csr_naming(&key(1), &app.base_url)));
         let nested = format!("{}0{}", "[".repeat(64), "]".repeat(64));
         let body = format!(r#"{{"csr":{csr},"metadata":{{}},"x":{nested}}}"#);
         let (status, refused) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
@@ -354,9 +353,8 @@ mod tests {
             );
             secret
         };
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
-        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let body = json!({ "csr": STANDARD.encode(csr_naming(&key(1), &app.base_url)), "metadata": {} }).to_string();
         let response = post(&app, "enroll", &[authorization.as_str()], body.into_bytes()).await;
         assert_eq!(response, (500, "unavailable".to_owned()));
         Ok(())
@@ -412,13 +410,12 @@ mod tests {
                 .lock()
                 .await
                 .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
 
         let (status, faults) = post_json(&app, FAULTS, &[], json!({ "config_version": 7 }).to_string()).await;
         assert_eq!((status, &faults["config_version"]), (200, &json!(7)));
 
         let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
-        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let body = json!({ "csr": STANDARD.encode(csr_naming(&key(1), &app.base_url)), "metadata": {} }).to_string();
         let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
         let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
         assert_eq!((status, &enrolled["config"]["version"]), (200, &json!(7)));
@@ -449,7 +446,7 @@ mod tests {
             let mut state = app.state.lock().await;
             *state = State::with_root(now)?;
             let (_, secret) = state.create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
-            let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+            let csr = csr_naming(&key(1), &app.base_url);
             let identity_id = state
                 .enroll(&secret, &csr, Map::new(), now, &app.base_url)
                 .expect("enrollment succeeds")
@@ -519,10 +516,9 @@ mod tests {
         assert_eq!(status, 201);
         let token = alter(created["token"].as_str().expect("issued token"));
 
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let authorization = format!("Bearer {token}");
         let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
-        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let body = json!({ "csr": STANDARD.encode(csr_naming(&key(1), &app.base_url)), "metadata": {} }).to_string();
         let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
         assert_eq!((status, &enrolled["error"]), (expected_status, &expected_error));
         Ok(())
@@ -553,10 +549,9 @@ mod tests {
             state.token_hashes.insert(stored_hash, token_id);
         }
 
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
         let authorization = format!("Bearer dvaet1.e30.{SECRET}");
         let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
-        let body = json!({ "csr": vectors["csr"]["valid"]["csr"], "metadata": {} }).to_string();
+        let body = json!({ "csr": STANDARD.encode(csr_naming(&key(1), &app.base_url)), "metadata": {} }).to_string();
         let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
         assert_eq!((status, &enrolled["error"]), (200, &Value::Null));
         Ok(())

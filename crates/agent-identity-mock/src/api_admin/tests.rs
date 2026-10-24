@@ -8,7 +8,6 @@ use axum::body::{Body, Bytes};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{Method, Request};
 use base64::Engine as _;
-use base64::engine::general_purpose::STANDARD;
 use rstest::rstest;
 use serde_json::{Value, json};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -19,6 +18,7 @@ use super::{BASE_PATH, Permission, Permissions, TOKEN_ID_HEADER, key_permissions
 use crate::app::{App, nanos, rfc3339};
 use crate::oracle::Rejection;
 use crate::state::{State, StreamPush};
+use crate::test_x509::{csr_naming, key};
 
 const APP_KEY: &str = "admin";
 const APP_SECRET: &str = "secret";
@@ -174,7 +174,7 @@ fn assert_public_api_error(body: &Value) {
     assert!(members["message"].is_string(), "{body}");
 }
 
-/// Enrolls an identity with the CSR test vector and `metadata`, as the agent-facing enroll does.
+/// Enrolls an identity with a CSR for test key 1 and `metadata`, as the agent-facing enroll does.
 /// An app holds at most one, since a key is enrolled once.
 async fn enroll(app: &Arc<App>, metadata: Value) -> anyhow::Result<Uuid> {
     Ok(enroll_with_chain(app, metadata).await?.0)
@@ -182,8 +182,7 @@ async fn enroll(app: &Arc<App>, metadata: Value) -> anyhow::Result<Uuid> {
 
 /// Enrolls like [`enroll`] and also returns the issued certificate chain, leaf first, in DER.
 async fn enroll_with_chain(app: &Arc<App>, metadata: Value) -> anyhow::Result<(Uuid, Vec<Vec<u8>>)> {
-    let vectors: Value = serde_json::from_str(include_str!("../../../../docs/agent-identity/test-vectors.json"))?;
-    let csr = STANDARD.decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+    let csr = csr_naming(&key(1), &app.base_url);
     let now = app.now();
     let mut state = app.state.lock().await;
     let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + DAY), None, now);
@@ -864,13 +863,6 @@ async fn create_token_with_secret(app: &Arc<App>, body: Value) -> anyhow::Result
     Ok((id.to_owned(), secret))
 }
 
-/// Returns the DER of the CSR test vector `name`.
-fn csr_vector(name: &str) -> anyhow::Result<Vec<u8>> {
-    let vectors: Value = serde_json::from_str(include_str!("../../../../docs/agent-identity/test-vectors.json"))?;
-    let csr = vectors["csr"][name]["csr"].as_str().context("CSR vector")?;
-    Ok(STANDARD.decode(csr)?)
-}
-
 /// Revoking an enrollment token is `204`, and so is revoking it again; a revoked token stays stored with its name, so it
 /// is still read and listed.
 // oracle: intent crates/agent-identity-mock/INTENT.md §What it implements
@@ -911,7 +903,7 @@ async fn revoked_token_state_is_revoked(
     let (app, now) = frozen_app()?;
     let body = json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now + DAY) });
     let (id, secret) = create_token_with_secret(&app, body).await?;
-    let csr = csr_vector("valid")?;
+    let csr = csr_naming(&key(1), &app.base_url);
     for _ in 0..uses {
         let mut state = app.state.lock().await;
         state
@@ -943,7 +935,7 @@ async fn revoked_token_enrolls_no_new_identity(#[case] uses: usize, #[case] late
     let (app, now) = frozen_app()?;
     let body = json!({ "name": "t", "maxUses": 1, "expiresOn": rfc3339(now + DAY) });
     let (id, secret) = create_token_with_secret(&app, body).await?;
-    let enrolled_csr = csr_vector("valid")?;
+    let enrolled_csr = csr_naming(&key(1), &app.base_url);
     for _ in 0..uses {
         let mut state = app.state.lock().await;
         state
@@ -954,7 +946,7 @@ async fn revoked_token_enrolls_no_new_identity(#[case] uses: usize, #[case] late
     let revoke = format!("/enrollment-token/{id}/revoke");
     assert_eq!(call(&app, Method::POST, &revoke, None).await?.0, 204);
 
-    let csr = csr_vector("valid_with_empty_extension_request")?;
+    let csr = csr_naming(&key(2), &app.base_url);
     let mut state = app.state.lock().await;
     let refused = state
         .enroll(&secret, &csr, serde_json::Map::new(), app.now(), &app.base_url)

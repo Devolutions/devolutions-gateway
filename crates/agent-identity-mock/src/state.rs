@@ -994,6 +994,8 @@ impl State {
     }
 
     /// §5.2 enroll. `secret` is the 32 bytes the token's secret encodes; only their SHA-256 is matched.
+    /// `base_url` is the `u` of every token the mock issues (§2), which the CSR must name and every leaf of the identity
+    /// names (§4).
     pub(crate) fn enroll(
         &mut self,
         secret: &[u8; 32],
@@ -1004,9 +1006,16 @@ impl State {
     ) -> Result<EnrollOutcome, ApiError> {
         let token_id = self.token_id(secret).ok_or_else(ApiError::token_invalid)?;
 
-        let csr_key = check_csr(csr_der)
-            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?
-            .public_key;
+        let csr = check_csr(csr_der)
+            .ok_or_else(|| ApiError::invalid_request("invalid CSR: P-256 key and valid self-signature required"))?;
+        // The agent removes trailing slashes from a token's `u` (§2) and names the result.
+        let enrollment_url = base_url.trim_end_matches('/');
+        if csr.enrollment_url.as_deref() != Some(enrollment_url) {
+            return Err(ApiError::invalid_request(
+                "CSR must request the enrollment URL extension naming the token's URL",
+            ));
+        }
+        let csr_key = csr.public_key;
         name_eval::validate_metadata(&metadata).map_err(ApiError::invalid_request)?;
 
         let csr_key_hash = issued_key_hash(&csr_key);
@@ -1072,8 +1081,7 @@ impl State {
         };
         let friendly_name = name_eval::render_friendly_name(&format, &metadata, &token_name, identity_id);
         let issued_seq = self.serial_seq;
-        let enrollment_url = base_url.trim_end_matches('/').to_owned();
-        let leaf = self.issue_leaf(identity_id, &csr_key, &enrollment_url, now)?;
+        let leaf = self.issue_leaf(identity_id, &csr_key, enrollment_url, now)?;
         self.tokens
             .get_mut(&token_id)
             .expect("hash index consistent")
@@ -1107,7 +1115,7 @@ impl State {
             config,
             token_id,
             token_name,
-            enrollment_url,
+            enrollment_url: enrollment_url.to_owned(),
             certs: vec![cert],
         };
         assert!(
@@ -1742,6 +1750,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
+    use crate::test_x509::{csr_naming, enrollment_url_extension, key};
 
     // Certificates live 100 s, so CONTRACT.agent-identity.md §6 grants each one 100 s of renewal grace after
     // `notAfter`.
@@ -1853,9 +1862,7 @@ mod tests {
         let base_url = base_url(path_len);
         assert_eq!(config_len(&base_url), ENVELOPE_LIMIT + 1);
         let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), &base_url);
 
         let error = state
             .enroll(&secret, &csr, Map::new(), now, &base_url)
@@ -1946,9 +1953,7 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), "https://localhost/mock");
         let identity_id = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
             .expect("enrollment succeeds")
@@ -1975,9 +1980,7 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), "https://localhost/mock");
         let identity_id = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
             .expect("enrollment succeeds")
@@ -2001,9 +2004,7 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), "https://localhost/mock");
         let identity_id = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
             .expect("enrollment succeeds")
@@ -2064,9 +2065,7 @@ mod tests {
         let mut state = State::with_root(now)?;
         let expired_root = state.issuing_root().not_after;
         let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(expired_root + 60), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), "https://localhost/mock");
         assert!(
             state
                 .enroll(&secret, &csr, Map::new(), expired_root, "https://localhost/mock")
@@ -2090,9 +2089,7 @@ mod tests {
         let mut state = State::with_root(now)?;
         state.faults.root_key_unavailable = true;
         let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 60), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), "https://localhost/mock");
         let error = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
             .err()
@@ -2109,10 +2106,8 @@ mod tests {
         let mut state = State::with_root(now)?;
         let (owner_token_id, owner_secret) = state.create_token("owner".to_owned(), 1, nanos(now + 3600), None, now);
         let (other_token_id, other_secret) = state.create_token("other".to_owned(), 1, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
-        let key_hash = issued_key_hash(&check_csr(&csr).expect("valid CSR").public_key);
+        let csr = csr_naming(&key(1), "https://localhost/mock");
+        let key_hash = issued_key_hash(key(1).verifying_key());
         let identity_id = state
             .enroll(&owner_secret, &csr, Map::new(), now, "https://localhost/mock")
             .expect("enrollment succeeds")
@@ -2162,9 +2157,7 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), "https://localhost/mock");
         let identity_id = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
             .expect("enrollment succeeds")
@@ -2199,9 +2192,7 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let csr = base64::engine::general_purpose::STANDARD
-            .decode(vectors["csr"]["valid"]["csr"].as_str().expect("valid CSR vector"))?;
+        let csr = csr_naming(&key(1), "https://localhost/mock");
         let identity_id = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
             .expect("enrollment succeeds")
@@ -2261,18 +2252,16 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (token_id, secret) = state.create_token("test".to_owned(), 2, nanos(now + 3600), None, now);
-        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
-        let mut enroll = |vector: &str| -> anyhow::Result<Uuid> {
-            let csr = base64::engine::general_purpose::STANDARD
-                .decode(vectors["csr"][vector]["csr"].as_str().expect("valid CSR vector"))?;
-            Ok(state
+        let mut enroll = |seed: u8| {
+            let csr = csr_naming(&key(seed), "https://localhost/mock");
+            state
                 .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
                 .expect("enrollment succeeds")
-                .identity_id)
+                .identity_id
         };
 
-        let first = enroll("valid")?;
-        let second = enroll("valid_with_empty_extension_request")?;
+        let first = enroll(1);
+        let second = enroll(2);
 
         assert_ne!(first, second);
         assert_eq!(state.tokens[&token_id].used_count, 2);
@@ -2288,18 +2277,108 @@ mod tests {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;
         let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
-        let csr = crate::test_x509::csr_naming(&crate::test_x509::key(1), "https://localhost/mock");
+        let csr = csr_naming(&key(1), "https://localhost/mock");
 
         let enrolled = state
             .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock//")
             .expect("enrollment succeeds");
 
         assert_eq!(
-            crate::test_x509::enrollment_url_extension(&enrolled.certificate_chain[0])
+            enrollment_url_extension(&enrolled.certificate_chain[0])
                 .map(|(_, url)| url)
                 .as_deref(),
             Some("https://localhost/mock")
         );
+        Ok(())
+    }
+
+    /// The CSR test vector `name`.
+    fn csr_vector(name: &str) -> Vec<u8> {
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))
+            .expect("vectors parse");
+        base64::engine::general_purpose::STANDARD
+            .decode(vectors["csr"][name]["csr"].as_str().expect("CSR vector"))
+            .expect("base64 CSR")
+    }
+
+    /// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension,
+    /// or whose value is not the presented token's `u`, with `invalid_request`, and creates nothing", and §2.1 counts no
+    /// use for a failed enrollment.
+    /// The value is compared as text, so another case or a trailing slash names another URL.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    #[rstest]
+    #[case::no_attributes(csr_vector("valid"))]
+    #[case::empty_extension_request(csr_vector("valid_with_empty_extension_request"))]
+    #[case::other_url(csr_naming(&key(1), "https://relay.example/mock"))]
+    #[case::other_case(csr_naming(&key(1), "https://LOCALHOST/mock"))]
+    #[case::trailing_slash(csr_naming(&key(1), "https://localhost/mock/"))]
+    fn enrollment_csr_not_naming_the_token_url_is_invalid_request(#[case] csr: Vec<u8>) -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
+
+        let refused = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .err()
+            .expect("enrollment is refused");
+
+        assert_eq!((refused.status, refused.code), (400, "invalid_request"));
+        assert!(state.identities.is_empty());
+        assert_eq!(state.tokens[&token_id].used_count, 0);
+        Ok(())
+    }
+
+    fn revoke_token(state: &mut State, token_id: Uuid, _: &[u8; 32], now: i64) {
+        state.tokens.get_mut(&token_id).expect("token").revoked_at = Some(now);
+    }
+
+    fn expire_token(state: &mut State, token_id: Uuid, _: &[u8; 32], now: i64) {
+        state.tokens.get_mut(&token_id).expect("token").expires_at_ns = nanos(now);
+    }
+
+    fn exhaust_token(state: &mut State, token_id: Uuid, _: &[u8; 32], _: i64) {
+        let token = state.tokens.get_mut(&token_id).expect("token");
+        token.used_count = token.max_uses;
+    }
+
+    /// Enrolls the CSR key the test then presents again, so that the key lookup would return this identity.
+    fn enroll_the_key(state: &mut State, _: Uuid, secret: &[u8; 32], now: i64) {
+        let csr = csr_naming(&key(1), "https://localhost/mock");
+        state
+            .enroll(secret, &csr, Map::new(), now, "https://localhost/mock")
+            .expect("enrollment succeeds");
+    }
+
+    /// CONTRACT.agent-identity.md §2.1: "`invalid_request` for an invalid body, CSR or metadata" comes before the CSR
+    /// public key lookup, a revoked or expired token, and an exhausted one, so a CSR naming another URL is refused even
+    /// where the key would replay an identity, and still counts no use.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    #[rstest]
+    #[case::revoked_token(revoke_token)]
+    #[case::expired_token(expire_token)]
+    #[case::exhausted_token(exhaust_token)]
+    #[case::enrolled_key(enroll_the_key)]
+    fn csr_naming_another_url_wins_over_later_outcomes(
+        #[case] prepare: fn(&mut State, Uuid, &[u8; 32], i64),
+    ) -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let (token_id, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
+        prepare(&mut state, token_id, &secret, now);
+        let identities = state.identities.len();
+        let used_count = state.tokens[&token_id].used_count;
+        let csr = csr_naming(&key(1), "https://relay.example/mock");
+
+        let refused = state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .err()
+            .expect("enrollment is refused");
+
+        assert_eq!((refused.status, refused.code), (400, "invalid_request"));
+        assert_eq!(state.identities.len(), identities);
+        assert_eq!(state.tokens[&token_id].used_count, used_count);
         Ok(())
     }
 }
