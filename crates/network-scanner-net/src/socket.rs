@@ -371,17 +371,16 @@ impl Future for ConnectFuture<'_> {
         let events = self.runtime.check_event_with_id(self.id);
         for event in events {
             trace!(?event, "Event found");
-            if event
-                .is_err() // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection
-                .expect("your platform does not support connect failed")
-            {
+            // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection.
+            // kqueue cannot report it, so a failed connection is detected below from the pending socket error.
+            if event.is_err() == Some(true) {
                 return std::task::Poll::Ready(Err(std::io::Error::other("connection failed")));
             }
 
             // This is a special case, this happens when using epoll to wait for a unconnected TCP socket.
             // We clearly needs to call connect function, so we break the loop and call connect.
             #[cfg(target_os = "linux")]
-            if event.is_interrupt() && !event.is_err().expect("your platform does not support connect failed") {
+            if event.is_interrupt() && event.is_err() == Some(false) {
                 trace!("out and hup");
                 self.runtime.remove_events_with_id_from_history(self.id);
                 break;
@@ -389,7 +388,11 @@ impl Future for ConnectFuture<'_> {
 
             if event.writable || event.readable {
                 self.runtime.remove_events_with_id_from_history(self.id);
-                return std::task::Poll::Ready(Ok(()));
+                let result = match self.socket.take_error() {
+                    Ok(None) => Ok(()),
+                    Ok(Some(error)) | Err(error) => Err(error),
+                };
+                return std::task::Poll::Ready(result);
             }
         }
 
@@ -400,13 +403,12 @@ impl Future for ConnectFuture<'_> {
             Err(e) => e,
         };
 
-        // code 115, EINPROGRESS, only for linux
-        // reference: https://linux.die.net/man/2/connect
-        // it is the same as WouldBlock but for connect(2) only
-        #[cfg(target_os = "linux")]
-        let in_progress = err.kind() == std::io::ErrorKind::WouldBlock || err.raw_os_error() == Some(115);
+        // EINPROGRESS (115 on Linux, 36 on macOS) is the same as WouldBlock but for connect(2) only
+        // reference: https://man7.org/linux/man-pages/man2/connect.2.html
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let in_progress = err.kind() == std::io::ErrorKind::WouldBlock || err.raw_os_error() == Some(libc::EINPROGRESS);
 
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         let in_progress = err.kind() == std::io::ErrorKind::WouldBlock;
 
         let events_interested = [Event::readable(self.id), Event::writable(self.id), Event::all(self.id)];

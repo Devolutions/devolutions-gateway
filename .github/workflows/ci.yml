@@ -276,6 +276,7 @@ jobs:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
