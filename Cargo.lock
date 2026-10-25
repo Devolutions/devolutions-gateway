@@ -8126,6 +8126,7 @@ dependencies = [
  "fastrand",
  "futures-util",
  "gateway-db",
+ "hex",
  "ipnetwork",
  "jmux-proto",
  "libsql",

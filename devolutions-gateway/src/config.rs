@@ -564,6 +564,11 @@ impl WebAppConf {
             root_path.push(APPLICATION_DIR);
             root_path.push("webapp");
             Ok(root_path)
+        } else if cfg!(target_os = "macos") {
+            let mut root_path = std::path::PathBuf::from("/Library/Application Support");
+            root_path.push(APPLICATION_DIR);
+            root_path.push("webapp");
+            Ok(root_path)
         } else {
             anyhow::bail!("standalone web application path must be specified manually on this platform");
         }

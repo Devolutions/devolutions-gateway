@@ -164,19 +164,34 @@ jobs:
     needs: [preflight]
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows, linux]
+        os: [windows, linux, macos]
         include:
           - os: windows
             runner: windows-2022
           - os: linux
             runner: ubuntu-latest
+          - os: macos
+            runner: macos-15
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # The macos-15 image's ~/.cargo/bin shims dispatch to Homebrew's rustup-init and
+      # fail for `cargo`; the official rustup installer replaces them with working ones.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
 
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
@@ -262,23 +277,41 @@ jobs:
     name: tests [${{ matrix.os }} ${{ matrix.arch }}]
     needs: [preflight]
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
-        arch: [x64]
-        os: [windows, linux]
         include:
           - os: windows
+            arch: x64
             runner: windows-2022
             target: x86_64-pc-windows-msvc
           - os: linux
+            arch: x64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - os: macos
+            arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # The macos-15 image's ~/.cargo/bin shims dispatch to Homebrew's rustup-init and
+      # fail for `cargo`; the official rustup installer replaces them with working ones.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
 
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
@@ -383,6 +416,22 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      # The macos-15 runner image ships `cargo`, `rustc`, etc. in ~/.cargo/bin as
+      # symlinks to Homebrew's `rustup-init`, which is a shell-script wrapper that
+      # only dispatches on the `rustup`/`rustup-init` names (not on `cargo`/`rustc`/
+      # `clippy`). Invoking `cargo` therefore runs `rustup-init` and fails with
+      # "unexpected argument 'build'". The official rustup installer lays down proper
+      # multi-call hard-link shims, so we run it to repair ~/.cargo/bin.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
+
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
         with:
@@ -441,22 +490,6 @@ jobs:
         run: |
           rustup target add aarch64-pc-windows-msvc
         shell: pwsh
-
-      # The macos-15 runner image ships `cargo`, `rustc`, etc. in ~/.cargo/bin as
-      # symlinks to Homebrew's `rustup-init`, which is a shell-script wrapper that
-      # only dispatches on the `rustup`/`rustup-init` names (not on `cargo`/`rustc`/
-      # `clippy`). Invoking `cargo` therefore runs `rustup-init` and fails with
-      # "unexpected argument 'build'". The official rustup installer lays down proper
-      # multi-call hard-link shims, so we run it to repair ~/.cargo/bin.
-      - name: Repair Rust shims (macOS)
-        if: ${{ matrix.os == 'macos' }}
-        run: |
-          set -eux
-          rm -rf "$HOME/.cargo/bin"
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-        shell: bash
 
       - name: Configure macOS (intel) runner
         if: ${{ matrix.os == 'macos' && matrix.arch == 'x64' }}

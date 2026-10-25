@@ -30,10 +30,13 @@ impl ShutdownSignal {
     }
 }
 
-/// Aborts the running task when dropped.
+/// Aborts the running task when dropped, unless it was detached.
 /// Also see https://github.com/tokio-rs/tokio/issues/1830 for some background.
 #[must_use]
-pub struct ChildTask<T>(JoinHandle<T>);
+pub struct ChildTask<T> {
+    handle: JoinHandle<T>,
+    detached: bool,
+}
 
 impl<T> ChildTask<T> {
     pub fn spawn<F>(future: F) -> Self
@@ -41,33 +44,39 @@ impl<T> ChildTask<T> {
         F: Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
-        ChildTask(tokio::task::spawn(future))
+        ChildTask::from(tokio::task::spawn(future))
     }
 
     pub async fn join(mut self) -> Result<T, tokio::task::JoinError> {
-        (&mut self.0).await
+        (&mut self.handle).await
     }
 
     /// Immediately abort the task
     pub fn abort(&self) {
-        self.0.abort()
+        self.handle.abort()
     }
 
     /// Drop without aborting the task
-    pub fn detach(self) {
-        core::mem::forget(self);
+    pub fn detach(mut self) {
+        // The handle is still dropped, because a forgotten `JoinHandle` keeps the finished task allocated.
+        self.detached = true;
     }
 }
 
 impl<T> From<JoinHandle<T>> for ChildTask<T> {
     fn from(value: JoinHandle<T>) -> Self {
-        Self(value)
+        Self {
+            handle: value,
+            detached: false,
+        }
     }
 }
 
 impl<T> Drop for ChildTask<T> {
     fn drop(&mut self) {
-        self.abort();
+        if !self.detached {
+            self.abort();
+        }
     }
 }
 
@@ -86,7 +95,7 @@ where
 {
     let task_fut = task.run(shutdown_signal);
     let handle = spawn_task_impl(task_fut, T::NAME);
-    ChildTask(handle)
+    ChildTask::from(handle)
 }
 
 #[cfg(not(all(feature = "named_tasks", tokio_unstable)))]
@@ -112,4 +121,30 @@ where
     // NOTE: unwrap because as of now (tokio 1.28), this never returns an error,
     // and production build never enable tokio-console instrumentation anyway (unstable).
     tokio::task::Builder::new().name(name).spawn(future).unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    // oracle: regression #1973
+    #[tokio::test]
+    async fn detached_task_releases_its_output_once_finished() {
+        let output = Arc::new(());
+        let task_output = Arc::clone(&output);
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+
+        ChildTask::spawn(async move {
+            let _ = finished_tx.send(());
+            task_output
+        })
+        .detach();
+
+        finished_rx.await.expect("detached task was aborted");
+
+        // The current-thread runtime completes the task before this test resumes.
+        assert_eq!(Arc::strong_count(&output), 1, "detached task kept its output alive");
+    }
 }
