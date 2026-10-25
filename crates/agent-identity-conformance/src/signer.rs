@@ -60,14 +60,16 @@ impl KeyPair {
     ///
     /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
     pub(crate) fn csr(&self, base_url: &str) -> anyhow::Result<String> {
-        self.csr_requesting(Some(&[enrollment_url_extension(base_url)?]))
+        self.csr_requesting(&[vec![enrollment_url_extension(base_url)?]])
     }
 
-    /// A CSR for this key whose one attribute is an `extensionRequest` holding `extensions`, or that has no attribute when `extensions` is `None`, encoded `base64`.
-    pub(crate) fn csr_requesting(&self, extensions: Option<&[Extension]>) -> anyhow::Result<String> {
+    /// A CSR for this key whose attributes are one `extensionRequest` per entry of `requests`, each holding that entry's extensions, encoded `base64`.
+    ///
+    /// A `SET OF` may repeat a value, so two equal requests make two attributes.
+    pub(crate) fn csr_requesting(&self, requests: &[Vec<Extension>]) -> anyhow::Result<String> {
         let mut attributes = SetOfVec::new();
-        if let Some(extensions) = extensions {
-            attributes.insert(Attribute::try_from(ExtensionReq(extensions.to_vec()))?)?;
+        for extensions in requests {
+            attributes.insert(Attribute::try_from(ExtensionReq(extensions.clone()))?)?;
         }
         let subject: Name = "CN=conformance request subject ignored"
             .parse()
@@ -362,7 +364,7 @@ mod tests {
                 &DerSignature::from_bytes(request.signature.raw_bytes())?,
             )
             .context("the CSR self-signature does not verify")?;
-        let bare = CertReq::from_der(&STANDARD.decode(pair.csr_requesting(None)?)?)?;
+        let bare = CertReq::from_der(&STANDARD.decode(pair.csr_requesting(&[])?)?)?;
         assert!(
             bare.info.attributes.is_empty(),
             "a CSR without extensions carries an attribute"

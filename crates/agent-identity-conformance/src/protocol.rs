@@ -7344,24 +7344,35 @@ pub(crate) async fn p_compressed_point_csr_rejected(ctx: Context) -> anyhow::Res
         .context("the uncompressed CSR of the same key was not accepted")
 }
 
-/// A CSR's `extensionRequest` holds these extensions, or a CSR without one has `None`.
-type RequestedExtensions = Option<Vec<x509_cert::ext::Extension>>;
+/// A CSR's `extensionRequest` attributes, each holding these extensions.
+type RequestedExtensions = Vec<Vec<x509_cert::ext::Extension>>;
 
 /// Another OID of the RFC 5612 documentation arc, which no party gives a meaning.
 const UNASSIGNED_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.2");
 
-/// Returns what a CSR to the authority whose tokens carry `url` may request instead of the enrollment URL extension naming `url`, each named for how it differs.
+/// The enrollment URL extension holding `url` as a `UTF8String` instead of an `IA5String`.
+fn utf8_enrollment_url_extension(url: &str) -> anyhow::Result<x509_cert::ext::Extension> {
+    let mut extension = enrollment_url_extension(url)?;
+    extension.extn_value = der::asn1::OctetString::new(der::asn1::Utf8StringRef::new(url)?.to_der()?)?;
+    Ok(extension)
+}
+
+/// Returns what a CSR to the authority whose tokens carry `url` may request instead of the enrollment URL extension naming `url` once, each named for how it differs.
 ///
 /// §4 refuses a CSR "whose value is not the presented token's `u` without trailing slashes", so a trailing slash or an upper-case scheme, which leave the URL the same to a URL parser, still make another value.
+/// It also refuses one that "names no enrollment URL", which a CSR does when it "requests the enrollment URL extension more than once, in one `extensionRequest` or several, or not as an `IA5String`", even when every instance holds `url`.
+/// The two orders of an `IA5String` and a `UTF8String` instance catch a server that reads only the first instance and one that reads only the last.
 fn other_enrollment_url_requests(url: &str) -> anyhow::Result<Vec<(&'static str, RequestedExtensions)>> {
     let (_, path) = https_authority_and_path(url)?;
     let mut other_oid = enrollment_url_extension(url)?;
     other_oid.extn_id = UNASSIGNED_EXTENSION;
+    let named = enrollment_url_extension(url)?;
+    let utf8 = utf8_enrollment_url_extension(url)?;
     let naming =
-        |text: &str| -> anyhow::Result<RequestedExtensions> { Ok(Some(vec![enrollment_url_extension(text)?])) };
+        |text: &str| -> anyhow::Result<RequestedExtensions> { Ok(vec![vec![enrollment_url_extension(text)?]]) };
     Ok(vec![
-        ("without an extensionRequest", None),
-        ("requesting the URL under another extension OID", Some(vec![other_oid])),
+        ("without an extensionRequest", vec![]),
+        ("requesting the URL under another extension OID", vec![vec![other_oid]]),
         ("naming another host", naming(&format!("https://relay.invalid{path}"))?),
         ("naming another path", naming(&format!("{url}/relay"))?),
         ("naming the URL with a trailing slash", naming(&format!("{url}/"))?),
@@ -7369,12 +7380,29 @@ fn other_enrollment_url_requests(url: &str) -> anyhow::Result<Vec<(&'static str,
             "naming the URL with an upper-case scheme",
             naming(&with_upper_case_scheme(url)?)?,
         ),
+        (
+            "requesting the URL twice in one extensionRequest",
+            vec![vec![named.clone(), named.clone()]],
+        ),
+        (
+            "requesting the URL once in each of two extensionRequests",
+            vec![vec![named.clone()], vec![named.clone()]],
+        ),
+        (
+            "requesting the URL as an IA5String, then as a UTF8String",
+            vec![vec![named.clone(), utf8.clone()]],
+        ),
+        (
+            "requesting the URL as a UTF8String, then as an IA5String",
+            vec![vec![utf8.clone(), named]],
+        ),
+        ("requesting the URL only as a UTF8String", vec![vec![utf8]]),
     ])
 }
 
-/// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates nothing".
+/// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that names no enrollment URL, or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates nothing", and "A CSR that requests the enrollment URL extension more than once, in one `extensionRequest` or several, or not as an `IA5String`, names no enrollment URL".
 ///
-/// Each refused CSR is for the key of the accepted one and differs from it only in its attribute, so that only the enrollment URL rule refuses it.
+/// Each refused CSR is for the key of the accepted one and differs from it only in its attributes, so that only the enrollment URL rule refuses it.
 pub(crate) async fn p_enroll_csr_must_name_token_url(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
@@ -7384,7 +7412,7 @@ pub(crate) async fn p_enroll_csr_must_name_token_url(ctx: Context) -> anyhow::Re
     let url = token_base_url(&token.text)?;
     let key = KeyPair::generate()?;
     for (variant, extensions) in other_enrollment_url_requests(&url)? {
-        let body = serde_json::to_vec(&json!({ "csr": key.csr_requesting(extensions.as_deref())?, "metadata": {} }))?;
+        let body = serde_json::to_vec(&json!({ "csr": key.csr_requesting(&extensions)?, "metadata": {} }))?;
         expect_error(
             &enroll_raw(&ctx.target, &token, &body).await?,
             403,
@@ -7422,7 +7450,7 @@ pub(crate) async fn p_enroll_csr_ignores_other_requested_extensions(ctx: Context
     let named = enrollment_url_extension(&url)?;
     for (order, extensions) in [("before", [other.clone(), named.clone()]), ("after", [named, other])] {
         let key = KeyPair::generate()?;
-        let body = serde_json::to_vec(&json!({ "csr": key.csr_requesting(Some(&extensions))?, "metadata": {} }))?;
+        let body = serde_json::to_vec(&json!({ "csr": key.csr_requesting(&[extensions.to_vec()])?, "metadata": {} }))?;
         let reply = enroll_raw(&ctx.target, &token, &body).await?;
         expect_status(&reply, 200)
             .with_context(|| format!("a CSR requesting another extension {order} the enrollment URL was refused"))?;
@@ -7443,7 +7471,7 @@ async fn enroll_elsewhere_then_here(
     elsewhere: &str,
     case: &str,
 ) -> anyhow::Result<Reply> {
-    let csr = key.csr_requesting(Some(&[enrollment_url_extension(elsewhere)?]))?;
+    let csr = key.csr_requesting(&[vec![enrollment_url_extension(elsewhere)?]])?;
     let body = serde_json::to_vec(&json!({ "csr": csr, "metadata": {} }))?;
     expect_error(&enroll_raw(target, token, &body).await?, 403, "token_url_mismatch")
         .with_context(|| format!("CSR naming another URL for {case}"))?;
@@ -7550,20 +7578,27 @@ pub(crate) async fn p_enroll_csr_url_refusal_precedes_token_expiry(ctx: Context)
 }
 
 /// CONTRACT.agent-identity.md §4: at renewal the server "ignores the value" the CSR requests, and "every certificate issued for that identity carries the same value", the `u` of the token that enrolled it.
+///
+/// The refusal of a CSR that "names no enrollment URL" is an enrollment rule, so a renewal CSR requesting the URL twice is renewed too.
 pub(crate) async fn p_renew_ignores_csr_enrollment_url(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     let (token, mut identity) = issued(&ctx, "renewal-url").await?;
     let url = token_base_url(&token.text)?;
+    let named = enrollment_url_extension(&url)?;
     for (variant, extensions) in [
         (
             "naming another URL",
-            Some(vec![enrollment_url_extension(&format!("{url}/relay"))?]),
+            vec![vec![enrollment_url_extension(&format!("{url}/relay"))?]],
         ),
-        ("without an extensionRequest", None),
+        ("without an extensionRequest", vec![]),
+        (
+            "requesting the URL twice in one extensionRequest",
+            vec![vec![named.clone(), named]],
+        ),
     ] {
         let next = KeyPair::generate()?;
-        let body = serde_json::to_vec(&json!({ "csr": next.csr_requesting(extensions.as_deref())?, "metadata": {} }))?;
+        let body = serde_json::to_vec(&json!({ "csr": next.csr_requesting(&extensions)?, "metadata": {} }))?;
         let signed = identity.key.sign_now(&identity.thumbprint, "renew", Some(&body));
         let reply = ctx.target.signed_renew(&body, &signed, None).await?;
         expect_status(&reply, 200).with_context(|| format!("renewal CSR {variant}"))?;
