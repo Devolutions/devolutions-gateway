@@ -43,40 +43,63 @@ $projects = switch ($Product) {
     default { @('AgentWindowsManaged', 'WindowsManaged') }
 }
 
-foreach ($project in $projects) {
-    $resources = Join-Path $PSScriptRoot "$project\Resources"
-    $template = Join-Path $resources 'Strings.g.tt'
-    $newtonsoft = Join-Path $resources 'Newtonsoft.Json.dll'
-
-    # TextTransform.exe does not expand the `$(SolutionDir)` macro that Visual Studio resolves.
-    # Use a temporary copy of the template (it must live next to the original: outputs are written beside the template).
-    $temporaryTemplate = Join-Path $resources "_Strings.$([guid]::NewGuid().ToString('N')).tt"
-    $text = [IO.File]::ReadAllText($template).Replace('$(SolutionDir)Resources\Newtonsoft.Json.dll', $newtonsoft)
-    [IO.File]::WriteAllText($temporaryTemplate, $text)
-
-    # T4 drops the byte order mark that some existing files carry; keep each file as it was.
-    $hadBom = @{}
-    Get-ChildItem $resources -Include '*.wxl', 'Strings.g.cs' -File -Recurse | ForEach-Object {
-        $bytes = [IO.File]::ReadAllBytes($_.FullName)
-        $hadBom[$_.FullName] = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+function Get-GeneratedFiles {
+    $projects | ForEach-Object {
+        Get-ChildItem (Join-Path $PSScriptRoot "$_\Resources") -Include '*.wxl', 'Strings.g.cs' -File -Recurse
     }
+}
 
-    try {
-        & $TextTransformPath $temporaryTemplate -out (Join-Path $resources 'Strings.g.cs')
+# T4 drops the byte order mark that some existing files carry; keep each file as it was.
+# On failure T4 still overwrites its output with `ErrorGeneratingOutput`, so keep the original bytes of every selected project to restore them.
+$original = @{}
+$hadBom = @{}
+Get-GeneratedFiles | ForEach-Object {
+    $bytes = [IO.File]::ReadAllBytes($_.FullName)
+    $original[$_.FullName] = $bytes
+    $hadBom[$_.FullName] = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+}
 
-        if ($LASTEXITCODE -ne 0) {
-            throw "TextTransform failed for $project"
+try {
+    foreach ($project in $projects) {
+        $resources = Join-Path $PSScriptRoot "$project\Resources"
+        $template = Join-Path $resources 'Strings.g.tt'
+        $newtonsoft = Join-Path $resources 'Newtonsoft.Json.dll'
+
+        # TextTransform.exe does not expand the `$(SolutionDir)` macro that Visual Studio resolves.
+        # Use a temporary copy of the template (it must live next to the original: outputs are written beside the template).
+        $temporaryTemplate = Join-Path $resources "_Strings.$([guid]::NewGuid().ToString('N')).tt"
+        $text = [IO.File]::ReadAllText($template).Replace('$(SolutionDir)Resources\Newtonsoft.Json.dll', $newtonsoft)
+        # TextTransform.exe fails to compile a template with LF line endings (CS1519), so use CRLF whatever the checkout has.
+        $text = $text -replace '\r?\n', "`r`n"
+        [IO.File]::WriteAllText($temporaryTemplate, $text)
+
+        try {
+            & $TextTransformPath $temporaryTemplate -out (Join-Path $resources 'Strings.g.cs')
+
+            if ($LASTEXITCODE -ne 0) {
+                throw "TextTransform failed for $project"
+            }
         }
+        finally {
+            Remove-Item $temporaryTemplate -ErrorAction SilentlyContinue
+        }
+
+        # The repository stores these files with LF line endings, while T4 emits mixed endings.
+        Get-ChildItem $resources -Include '*.wxl', 'Strings.g.cs' -File -Recurse | ForEach-Object {
+            $content = [IO.File]::ReadAllText($_.FullName).Replace("`r`n", "`n")
+            [IO.File]::WriteAllText($_.FullName, $content, (New-Object Text.UTF8Encoding($hadBom[$_.FullName] -eq $true)))
+        }
+
+        Write-Output "Regenerated localization files for $project"
     }
-    finally {
-        Remove-Item $temporaryTemplate -ErrorAction SilentlyContinue
+}
+catch {
+    # Leave every selected project as it was: drop outputs this run created, then restore the rest.
+    Get-GeneratedFiles | Where-Object { -not $original.ContainsKey($_.FullName) } | Remove-Item
+
+    foreach ($path in $original.Keys) {
+        [IO.File]::WriteAllBytes($path, $original[$path])
     }
 
-    # The repository stores these files with LF line endings, while T4 emits mixed endings.
-    Get-ChildItem $resources -Include '*.wxl', 'Strings.g.cs' -File -Recurse | ForEach-Object {
-        $content = [IO.File]::ReadAllText($_.FullName).Replace("`r`n", "`n")
-        [IO.File]::WriteAllText($_.FullName, $content, (New-Object Text.UTF8Encoding($hadBom[$_.FullName] -eq $true)))
-    }
-
-    Write-Output "Regenerated localization files for $project"
+    throw "$_; generated files were left unchanged"
 }
