@@ -88,8 +88,16 @@ struct CsrSection {
 #[derive(Deserialize)]
 struct CsrCase {
     csr: String,
-    expected: String,
-    public_key_sec1: Option<String>,
+    expected: CsrOutcomes,
+    public_key_sec1: String,
+    enrollment_url: Option<String>,
+}
+
+/// The outcomes a CSR vector expects per endpoint; the oracle decides the renewal one, since renewal ignores the
+/// enrollment URL (CONTRACT.agent-identity.md §4), and the enrollment one is checked against the mock's state.
+#[derive(Deserialize)]
+struct CsrOutcomes {
+    renew: String,
 }
 
 #[derive(Deserialize)]
@@ -319,19 +327,20 @@ fn csr_cases() {
     assert!(!vectors.csr.cases.is_empty(), "CSR cases are missing");
     for (name, case) in &vectors.csr.cases {
         let der = STANDARD.decode(&case.csr).expect("valid csr base64");
-        match (check_csr(&der), case.expected.as_str()) {
-            (Some(checked), "ok") => {
-                let expected_key = STANDARD
-                    .decode(case.public_key_sec1.as_ref().expect("valid case has key"))
-                    .expect("valid sec1");
-                assert_eq!(
-                    checked.public_key.to_sec1_bytes().as_ref(),
-                    expected_key.as_slice(),
-                    "csr case {name} public key"
-                );
-            }
-            (None, "invalid_request") => {}
-            (result, expected) => panic!("csr case {name}: got {result:?}, want {expected}"),
+        let checked = check_csr(&der);
+        let renewal = if checked.is_some() { "ok" } else { "invalid_request" };
+        assert_eq!(renewal, case.expected.renew, "csr case {name}");
+        if let Some(checked) = checked {
+            let expected_key = STANDARD.decode(&case.public_key_sec1).expect("valid sec1");
+            assert_eq!(
+                checked.public_key.to_sec1_bytes().as_ref(),
+                expected_key.as_slice(),
+                "csr case {name} public key"
+            );
+            assert_eq!(
+                checked.enrollment_url, case.enrollment_url,
+                "csr case {name} enrollment URL"
+            );
         }
     }
 }

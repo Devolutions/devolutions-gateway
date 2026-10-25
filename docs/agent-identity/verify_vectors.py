@@ -1,6 +1,6 @@
 """Recompute docs/agent-identity/test-vectors.json independently of any Agent Identity implementation.
 
-Usage: python verify_vectors.py [--table] [--self-test] [path/to/test-vectors.json]
+Usage: python verify_vectors.py [--table] [--self-test] [--print-csr] [path/to/test-vectors.json]
 
 Every http_signature case and sequence runs through a CONTRACT.agent-identity.md §6 evaluator written from the
 contract text alone. It has its own parser for the RFC 8941 subset the profile uses, because a
@@ -9,6 +9,8 @@ which are exactly what §6 step 1 must reject. Each negative case is also checke
 with its failing step bypassed, the request must not fail later for another reason.
 --table prints one row per case. --self-test builds, from the file's positive cases and test keys,
 the step-1 violations that no vector covers yet.
+The csr entries, except the pinned valid_with_empty_extension_request, are what cryptography's CSR builder
+generates from seeded keys; --print-csr prints them, and the checks read each CSR with a DER parser of their own.
 Requires the `cryptography` package.
 """
 import argparse, base64, hashlib, json, os, re, sys
@@ -868,10 +870,20 @@ OID_P256 = bytes.fromhex("06082a8648ce3d030107")  # 1.2.840.10045.3.1.7
 OID_ECDSA_SHA256 = bytes.fromhex("06082a8648ce3d040302")  # 1.2.840.10045.4.3.2
 OID_ECDSA_SHA384 = bytes.fromhex("06082a8648ce3d040303")  # 1.2.840.10045.4.3.3
 OID_EXTENSION_REQUEST = bytes.fromhex("06092a864886f70d01090e")  # 1.2.840.113549.1.9.14
+OID_ENROLLMENT_URL = bytes.fromhex("060a2b0601040181fd590101")  # 1.3.6.1.4.1.32473.1.1 (section 4)
+DIGESTS = {OID_ECDSA_SHA256: hashes.SHA256, OID_ECDSA_SHA384: hashes.SHA384}
 P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
-CSR_VALID_SEED = b"agent-identity test vector csr.valid"
-# SHA-256 of the CSR DER that csr.valid held until it was regenerated; csr.valid_with_empty_extension_request keeps it.
-LEGACY_VALID_CSR_SHA256 = "356f2273ae4892c99bd9182db419a90f880958f30d56cc060f73f6e8625ee200"
+CSR_ENROLLMENT_URL = "https://example.test/dvls"
+# The csr entries cryptography's CSR builder regenerates: signature algorithm, whether the signature's last byte is
+# altered, and the outcome sections 2.1 and 4 give at each endpoint.
+CSR_GENERATED = {
+    "valid": (OID_ECDSA_SHA256, False, {"enroll": "ok", "renew": "ok"}),
+    "bad_self_signature": (OID_ECDSA_SHA256, True, {"enroll": "invalid_request", "renew": "invalid_request"}),
+    "ecdsa_with_sha384": (OID_ECDSA_SHA384, False, {"enroll": "invalid_request", "renew": "invalid_request"}),
+}
+PINNED_CSR = "valid_with_empty_extension_request"
+# SHA-256 of the csr.valid_with_empty_extension_request DER, pinned because no generator here reproduces its key.
+PINNED_CSR_SHA256 = "356f2273ae4892c99bd9182db419a90f880958f30d56cc060f73f6e8625ee200"
 
 
 def der_read(buf, i=0):
@@ -926,6 +938,55 @@ def parse_csr(data):
             "alg": [raw for _, _, raw in der_items(alg)], "signature": sig[1:], "attributes": fields[3:]}
 
 
+def requested_url(attributes):
+    """The IA5String value of the enrollment URL extension that the CSR's extensionRequest holds (section 4), or None."""
+    try:
+        for tag, content, _ in attributes:
+            for _, attribute, _ in der_items(content) if tag == 0xA0 else []:
+                (_, _, oid), (_, values, _) = der_items(attribute)
+                for _, extensions, _ in der_items(values) if oid == OID_EXTENSION_REQUEST else []:
+                    for _, extension, _ in der_items(extensions):
+                        parts = der_items(extension)
+                        value = der_items(parts[-1][1]) if parts[0][2] == OID_ENROLLMENT_URL else []
+                        if len(value) == 1 and value[0][0] == 0x16:
+                            return value[0][1].decode("ascii")
+    except (ValueError, IndexError, UnicodeDecodeError):
+        pass
+    return None
+
+
+def url_extension_request(url):
+    """The [0] attributes holding one extensionRequest with only the non-critical enrollment URL extension (section 4)."""
+    extension = der(0x30, OID_ENROLLMENT_URL + der(0x04, der(0x16, url.encode("ascii"))))
+    return der(0xA0, der(0x30, OID_EXTENSION_REQUEST + der(0x31, der(0x30, extension))))
+
+
+def csr_key(name):
+    """The test key of csr entry `name`, d = SHA-256(seed) mod n, and its seed."""
+    seed = f"agent-identity test vector csr.{name}".encode()
+    return ec.derive_private_key(int.from_bytes(hashlib.sha256(seed).digest(), "big") % P256_ORDER, ec.SECP256R1()), seed
+
+
+def generated_csr(name):
+    """csr entry `name` without its description, as cryptography's CSR builder encodes it with RFC 6979 nonces."""
+    alg, corrupt, expected = CSR_GENERATED[name]
+    key, _ = csr_key(name)
+    csr = (x509.CertificateSigningRequestBuilder()
+           .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "ignored")]))
+           .add_extension(x509.UnrecognizedExtension(x509.ObjectIdentifier("1.3.6.1.4.1.32473.1.1"),
+                                                     der(0x16, CSR_ENROLLMENT_URL.encode("ascii"))), critical=False)
+           .sign(key, DIGESTS[alg](), ecdsa_deterministic=True)
+           .public_bytes(serialization.Encoding.DER))
+    if corrupt:
+        csr = csr[:-1] + bytes([csr[-1] ^ 1])
+    entry = {"enrollment_url": CSR_ENROLLMENT_URL}
+    if name == "valid":
+        entry["private_key_pkcs8"] = b64(key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+                                                           serialization.NoEncryption()))
+    entry.update(csr=b64(csr), public_key_sec1=b64(sec1(key.public_key())), expected=expected)
+    return entry
+
+
 def stated_csr_reason(name):
     for words, rule in [(("self_signature", "self-signature"), "self-signature"),
                         (("sha1", "sha384", "sha512", "alg"), "signature algorithm"),
@@ -935,8 +996,8 @@ def stated_csr_reason(name):
     return None
 
 
-def check_csr_entry(name, e, layout):
-    """§4 server rules for one csr entry, plus its shape; returns the problems found."""
+def check_csr_entry(name, e):
+    """Sections 2.1 and 4 server rules for one csr entry, plus its shape; returns the problems found."""
     found = []
     deterministic = None
     def need(cond, msg):
@@ -947,46 +1008,36 @@ def check_csr_entry(name, e, layout):
     try:
         f = parse_csr(data)
     except ValueError as err:
-        need(e["expected"] != "ok", f"unparseable ({err}), but expected {e['expected']}")
+        need(e["expected"].get("renew") != "ok", f"unparseable ({err}), but expected {e['expected']}")
         return found, deterministic
     point = f["point"]
     try:
         pub = ec.EllipticCurvePublicKey.from_encoded_point(ec.SECP256R1(), point)
     except ValueError:
         pub = None
-    digest = {OID_ECDSA_SHA256: hashes.SHA256(), OID_ECDSA_SHA384: hashes.SHA384()}.get(f["alg"][0] if len(f["alg"]) == 1 else None)
+    digest = DIGESTS.get(f["alg"][0] if len(f["alg"]) == 1 else None)
     try:
-        self_signed = pub is not None and digest is not None and pub.verify(f["signature"], f["info_der"], ec.ECDSA(digest)) is None
+        self_signed = pub is not None and digest is not None and pub.verify(f["signature"], f["info_der"], ec.ECDSA(digest())) is None
     except (InvalidSignature, ValueError):
         self_signed = False
     rules = {"key": f["key_alg"] == [OID_EC_PUBLIC_KEY, OID_P256] and pub is not None and len(point) == 65 and point[0] == 4,
              "self-signature": self_signed,
              "signature algorithm": f["alg"] == [OID_ECDSA_SHA256]}  # RFC 5758 §3.2: parameters absent
     failing = [r for r, ok in rules.items() if not ok]
-    need(("invalid_request" if failing else "ok") == e["expected"], f"section 4 gives {'invalid_request' if failing else 'ok'} "
-         f"({', '.join(failing) or 'all rules pass'}), expected {e['expected']}")
-    if e["expected"] != "ok":
-        stated = stated_csr_reason(name)
-        need(failing == [stated], f"fails {failing}, want only its stated reason ({stated})")
-    if "public_key_sec1" in e:
-        need(base64.b64decode(e["public_key_sec1"]) == point, "public_key_sec1 is not the CSR key")
+    url = requested_url(f["attributes"])
+    named = url is not None and url == e.get("enrollment_url")
+    # Section 2.1 orders invalid_request before token_url_mismatch at enrollment; renewal ignores the URL (section 4).
+    outcome = {"enroll": "invalid_request" if failing else "ok" if named else "token_url_mismatch",
+               "renew": "invalid_request" if failing else "ok"}
+    need(outcome == e["expected"], f"sections 2.1 and 4 give {outcome}, expected {e['expected']}: "
+         f"rules failing {failing}, enrollment_url {'named' if named else 'not named'} (CSR requests {url!r})")
+    stated = stated_csr_reason(name)
+    if e["expected"].get("renew") != "ok":
+        need(failing == [stated] and named, f"rules failing {failing}, enrollment_url {'named' if named else 'not named'}, "
+             f"want only its stated reason ({stated})")
+    need(base64.b64decode(e.get("public_key_sec1", "")) == point, "public_key_sec1 is not the CSR key")
     attrs = f["attributes"]
-    if name == "valid":
-        need(len(attrs) == 1 and attrs[0][2] == b"\xa0\x00" and f["info_der"].endswith(b"\xa0\x00"),
-             "attribute set is not present and empty: CertificationRequestInfo ends "
-             + (f"with attributes {attrs[0][2].hex()}" if attrs else "without the [0] attributes field") + ", want a000 (section 4)")
-        pkcs8 = next((k for k in e if "pkcs8" in k), None)
-        if pkcs8:
-            key = serialization.load_der_private_key(base64.b64decode(e[pkcs8]), None)
-            d = int.from_bytes(hashlib.sha256(CSR_VALID_SEED).digest(), "big") % P256_ORDER
-            need(isinstance(key, ec.EllipticCurvePrivateKey) and key.curve.name == "secp256r1"
-                 and key.private_numbers().private_value == d, f"{pkcs8} is not d = SHA-256({CSR_VALID_SEED.decode()!r}) mod n")
-            if need(sec1(key.public_key()) == point, f"the CSR key is not the {pkcs8} key"):
-                deterministic = sign_raw(key, f["info_der"]) == raw_signature(f["signature"])
-                need(deterministic, "signature is not the RFC 6979 deterministic signature")
-        else:
-            need("valid_with_empty_extension_request" not in layout, "no PKCS#8 key stored for the regenerated CSR")
-    if name == "valid_with_empty_extension_request":
+    if name == PINNED_CSR:
         try:
             attr = der_items(attrs[0][1]) if len(attrs) == 1 and attrs[0][0] == 0xA0 else []
             fields = der_items(attr[0][1]) if len(attr) == 1 and attr[0][0] == 0x30 else []
@@ -995,24 +1046,41 @@ def check_csr_entry(name, e, layout):
             fields = values = []
         need(len(fields) == 2 and fields[0][2] == OID_EXTENSION_REQUEST and len(values) == 1 and values[0][2] == b"\x30\x00",
              "the only attribute is not extensionRequest with an empty Extensions SEQUENCE")
-        need(hashlib.sha256(data).hexdigest() == LEGACY_VALID_CSR_SHA256, "not byte-identical to the former csr.valid")
+        need(hashlib.sha256(data).hexdigest() == PINNED_CSR_SHA256, "not byte-identical to its pinned DER")
+        return found, deterministic
+    want = url_extension_request(e["enrollment_url"]) if need("enrollment_url" in e, "no enrollment_url") else None
+    need(len(attrs) == 1 and attrs[0][2] == want and f["info_der"].endswith(want),
+         "attributes are not one extensionRequest holding only the non-critical enrollment URL extension naming "
+         f"enrollment_url: CertificationRequestInfo ends with {attrs[-1][2].hex() if attrs else 'no [0] attributes field'} (section 4)")
+    key, seed = csr_key(name)
+    need("private_key_pkcs8" in e or name != "valid", "no PKCS#8 key stored for csr.valid")
+    if "private_key_pkcs8" in e:
+        stored = serialization.load_der_private_key(base64.b64decode(e["private_key_pkcs8"]), None)
+        need(isinstance(stored, ec.EllipticCurvePrivateKey) and stored.curve.name == "secp256r1"
+             and stored.private_numbers().private_value == key.private_numbers().private_value,
+             f"private_key_pkcs8 is not d = SHA-256({seed.decode()!r}) mod n")
+    if need(sec1(key.public_key()) == point, f"the CSR key is not d = SHA-256({seed.decode()!r}) mod n") and digest is not None:
+        signature = key.sign(f["info_der"], ec.ECDSA(digest(), deterministic_signing=True))
+        if stated == "self-signature":
+            signature = signature[:-1] + bytes([signature[-1] ^ 1])
+        deterministic = f["signature"] == signature
+        need(deterministic, "signature is not the RFC 6979 deterministic signature"
+             + (" with its last byte altered" if stated == "self-signature" else ""))
     return found, deterministic
-
-
-def raw_signature(sig_der):
-    try:
-        return der_to_raw(sig_der)
-    except (ValueError, OverflowError):
-        return b""
 
 
 def check_csr(V):
     for name, e in V["csr"].items():
-        found, deterministic = check_csr_entry(name, e, V["csr"])
+        found, deterministic = check_csr_entry(name, e)
         problems.extend(found)
         if deterministic is not None:
             det["total"] += 1
             det["ok"] += deterministic
+    check(PINNED_CSR in V["csr"], f"csr {PINNED_CSR} is missing")
+    for name in CSR_GENERATED:
+        e = V["csr"].get(name, {})
+        for field, value in generated_csr(name).items():
+            check(e.get(field) == value, f"csr {name}: {field} is not what cryptography's CSR builder generates")
     print("csr cases:", len(V["csr"]))
 
 
@@ -1184,58 +1252,78 @@ def boundary_tests(V, registry, by_thumb):
     return n
 
 
-def build_csr(key, attributes=b"\xa0\x00", alg=OID_ECDSA_SHA256, compressed=False, corrupt=False):
-    """A PKCS#10 CSR assembled from DER by hand and signed deterministically by `key`."""
+def build_csr(key, attributes=None, alg=OID_ECDSA_SHA256, compressed=False, corrupt=False):
+    """A PKCS#10 CSR assembled from DER by hand and signed deterministically by `key`; by default it requests
+    CSR_ENROLLMENT_URL as section 4 has the agent do."""
+    if attributes is None:
+        attributes = url_extension_request(CSR_ENROLLMENT_URL)
     fmt_ = serialization.PublicFormat.CompressedPoint if compressed else serialization.PublicFormat.UncompressedPoint
     point = key.public_key().public_bytes(serialization.Encoding.X962, fmt_)
     spki = der(0x30, der(0x30, OID_EC_PUBLIC_KEY + OID_P256) + der(0x03, b"\x00" + point))
     subject = der(0x30, der(0x31, der(0x30, bytes.fromhex("0603550403") + der(0x0C, b"ignored"))))
     info = der(0x30, b"\x02\x01\x00" + subject + spki + attributes)
-    sig = key.sign(info, ec.ECDSA(hashes.SHA384() if alg == OID_ECDSA_SHA384 else hashes.SHA256(), deterministic_signing=True))
+    sig = key.sign(info, ec.ECDSA(DIGESTS[alg](), deterministic_signing=True))
     if corrupt:
         sig = sig[:-1] + bytes([sig[-1] ^ 1])
     return der(0x30, info + der(0x30, alg) + der(0x03, b"\x00" + sig))
 
 
 def csr_self_test(V):
-    """Run the csr checks on the announced layout, which must pass, and on mutations, which each must fail."""
-    d = int.from_bytes(hashlib.sha256(CSR_VALID_SEED).digest(), "big") % P256_ORDER
-    key, other = ec.derive_private_key(d, ec.SECP256R1()), ec.derive_private_key(d + 1, ec.SECP256R1())
+    """Run the csr checks on the generated entries, which must pass, and on mutations, which each must fail."""
+    layout = {name: generated_csr(name) for name in CSR_GENERATED}
+    layout[PINNED_CSR] = V["csr"][PINNED_CSR]
+    accepted = [p for n, e in layout.items() for p in check_csr_entry(n, e)[0]]
+    check(not accepted, f"self-test csr: the generated entries are rejected: {accepted}")
+    # Two encoders agree: the DER assembled here by hand is what cryptography's CSR builder emits.
+    for name, (alg, corrupt, _) in CSR_GENERATED.items():
+        check(b64(build_csr(csr_key(name)[0], alg=alg, corrupt=corrupt)) == layout[name]["csr"],
+              f"self-test csr {name}: the hand-built DER is not what cryptography's CSR builder emits")
 
-    def entry(csr, k=key, expected="ok"):
-        pkcs8 = k.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-        return {"csr": b64(csr), "public_key_sec1": b64(sec1(k.public_key())), "private_key_pkcs8": b64(pkcs8), "expected": expected}
-
-    csrs = V["csr"]
-    legacy = csrs.get("valid_with_empty_extension_request", csrs["valid"])
-    layout = {"valid": entry(build_csr(key)), "valid_with_empty_extension_request": legacy,
-              "bad_self_signature": csrs["bad_self_signature"], "ecdsa_with_sha384": csrs["ecdsa_with_sha384"]}
-    accepted = [p for n, e in layout.items() for p in check_csr_entry(n, e, layout)[0]]
-    check(not accepted, f"self-test csr: the announced layout is rejected: {accepted}")
+    def entry(name, csr, key=None, **changes):
+        """layout[name] holding `csr` for `key`, with `changes`; a change to None removes the field."""
+        e = dict(layout[name], csr=b64(csr), public_key_sec1=b64(sec1((key or csr_key(name)[0]).public_key())), **changes)
+        return {k: v for k, v in e.items() if v is not None}
 
     def ext_request(extensions):
         return der(0xA0, der(0x30, OID_EXTENSION_REQUEST + der(0x31, der(0x30, extensions))))
+    def url_extension(critical=b"", value=der(0x16, CSR_ENROLLMENT_URL.encode("ascii"))):
+        return der(0x30, OID_ENROLLMENT_URL + critical + der(0x04, value))
     key_usage = der(0x30, bytes.fromhex("0603551d0f") + der(0x04, bytes.fromhex("03020780")))
     other_attribute = der(0x30, bytes.fromhex("06092a864886f70d010907") + der(0x31, der(0x30, b"")))  # challengePassword OID
     two_attributes = der(0xA0, ext_request(b"")[2:] + other_attribute)
-    unkeyed = {k: v for k, v in entry(build_csr(key)).items() if k != "private_key_pkcs8"}
+    valid, sha384, bad = csr_key("valid")[0], csr_key("ecdsa_with_sha384")[0], csr_key("bad_self_signature")[0]
+    other_url = url_extension_request("https://example.test/other")
+    unkeyed = {k: v for k, v in layout["valid"].items() if k != "private_key_pkcs8"}
+    layout_problem = "attributes are not one extensionRequest holding only"
     mutations_ = [
-        ("valid", "[0] attributes omitted", entry(build_csr(key, attributes=b"")), "attribute set is not present and empty"),
-        ("valid", "empty extensionRequest", entry(build_csr(key, attributes=ext_request(b""))), "attribute set is not present and empty"),
-        ("valid", "ecdsa-with-SHA384", entry(build_csr(key, alg=OID_ECDSA_SHA384)), "(signature algorithm)"),
-        ("valid", "bad self-signature", entry(build_csr(key, corrupt=True)), "(self-signature)"),
-        ("valid", "compressed point", entry(build_csr(key, compressed=True)), "(key)"),
-        ("valid", "another key", entry(build_csr(other), other), "is not d = SHA-256"),
+        ("valid", "[0] attributes omitted", entry("valid", build_csr(valid, attributes=b"")), layout_problem),
+        ("valid", "empty attribute set", entry("valid", build_csr(valid, attributes=b"\xa0\x00")), layout_problem),
+        ("valid", "empty extensionRequest", entry("valid", build_csr(valid, attributes=ext_request(b""))), layout_problem),
+        ("valid", "URL extension marked critical", entry("valid", build_csr(valid, attributes=ext_request(url_extension(b"\x01\x01\xff")))), layout_problem),
+        ("valid", "URL as a UTF8String", entry("valid", build_csr(valid, attributes=ext_request(url_extension(value=der(0x0C, CSR_ENROLLMENT_URL.encode()))))), layout_problem),
+        ("valid", "a second requested extension", entry("valid", build_csr(valid, attributes=ext_request(url_extension() + key_usage))), layout_problem),
+        ("valid", "another URL", entry("valid", build_csr(valid, attributes=other_url)), "enrollment_url not named"),
+        ("valid", "enrollment_url with a trailing slash", entry("valid", build_csr(valid), enrollment_url=CSR_ENROLLMENT_URL + "/"), "enrollment_url not named"),
+        ("valid", "no enrollment_url", entry("valid", build_csr(valid), enrollment_url=None), "no enrollment_url"),
+        ("valid", "ecdsa-with-SHA384", entry("valid", build_csr(valid, alg=OID_ECDSA_SHA384)), "rules failing ['signature algorithm']"),
+        ("valid", "bad self-signature", entry("valid", build_csr(valid, corrupt=True)), "rules failing ['self-signature']"),
+        ("valid", "compressed point", entry("valid", build_csr(valid, compressed=True)), "rules failing ['key']"),
+        ("valid", "another key", entry("valid", build_csr(sha384), sha384), "is not d = SHA-256"),
         ("valid", "no PKCS#8 key", unkeyed, "no PKCS#8 key stored"),
-        ("valid_with_empty_extension_request", "one extension", entry(build_csr(key, attributes=ext_request(key_usage))), "the only attribute"),
-        ("valid_with_empty_extension_request", "another attribute type", entry(build_csr(key, attributes=der(0xA0, other_attribute))), "the only attribute"),
-        ("valid_with_empty_extension_request", "a second attribute", entry(build_csr(key, attributes=two_attributes)), "the only attribute"),
-        ("valid_with_empty_extension_request", "regenerated", entry(build_csr(key, attributes=ext_request(b""))), "byte-identical"),
-        ("bad_self_signature", "also SHA-384", entry(build_csr(key, alg=OID_ECDSA_SHA384, corrupt=True), expected="invalid_request"), "only its stated reason"),
-        ("ecdsa_with_sha384", "bad self-signature instead", entry(build_csr(key, corrupt=True), expected="invalid_request"), "only its stated reason"),
+        (PINNED_CSR, "accepted at enrollment", dict(layout[PINNED_CSR], expected={"enroll": "ok", "renew": "ok"}), "sections 2.1 and 4 give"),
+        (PINNED_CSR, "one extension", entry(PINNED_CSR, build_csr(valid, attributes=ext_request(key_usage)), valid), "the only attribute"),
+        (PINNED_CSR, "another attribute type", entry(PINNED_CSR, build_csr(valid, attributes=der(0xA0, other_attribute)), valid), "the only attribute"),
+        (PINNED_CSR, "a second attribute", entry(PINNED_CSR, build_csr(valid, attributes=two_attributes), valid), "the only attribute"),
+        (PINNED_CSR, "regenerated", entry(PINNED_CSR, build_csr(valid, attributes=ext_request(b"")), valid), "byte-identical"),
+        ("bad_self_signature", "also SHA-384", entry("bad_self_signature", build_csr(bad, alg=OID_ECDSA_SHA384, corrupt=True)), "only its stated reason"),
+        ("bad_self_signature", "without the URL extension", entry("bad_self_signature", build_csr(bad, attributes=b"\xa0\x00", corrupt=True)), "only its stated reason"),
+        ("bad_self_signature", "naming another URL", entry("bad_self_signature", build_csr(bad, attributes=other_url, corrupt=True)), "only its stated reason"),
+        ("bad_self_signature", "intact signature", entry("bad_self_signature", build_csr(bad)), "sections 2.1 and 4 give"),
+        ("ecdsa_with_sha384", "bad self-signature instead", entry("ecdsa_with_sha384", build_csr(sha384, corrupt=True)), "only its stated reason"),
+        ("ecdsa_with_sha384", "without the URL extension", entry("ecdsa_with_sha384", build_csr(sha384, attributes=b"\xa0\x00", alg=OID_ECDSA_SHA384)), "only its stated reason"),
     ]
     for name, label, e, want in mutations_:
-        found = check_csr_entry(name, e, layout)[0]
+        found = check_csr_entry(name, e)[0]
         check(any(want in p for p in found), f"self-test csr {name} / {label}: want a problem with {want!r}, got {found}")
     return len(layout), len(mutations_)
 
@@ -1267,7 +1355,7 @@ def self_test(V, registry, keys):
           f"{len(positives)} whitespace controls")
     print("self-test mutations per rule:", ", ".join(f"{r} {k}" for r, k in sorted(per_rule.items())))
     print(f"self-test validity boundaries: {boundary_tests(V, registry, by_thumb)}")
-    print("self-test csr: announced layout of {} entries accepted, {} mutations rejected".format(*csr_self_test(V)))
+    print("self-test csr: {} generated or pinned entries accepted, {} mutations rejected".format(*csr_self_test(V)))
 
 
 # ---------------------------------------------------------------------------- main
@@ -1277,9 +1365,13 @@ def main():
     ap.add_argument("path", nargs="?", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "test-vectors.json"))
     ap.add_argument("--self-test", action="store_true", help="check the evaluator against step-1 mutations of the positive cases")
     ap.add_argument("--table", action="store_true", help="print one row per http_signature case")
+    ap.add_argument("--print-csr", action="store_true", help="print the csr entries cryptography's CSR builder generates")
     args = ap.parse_args()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(errors="backslashreplace")
+    if args.print_csr:
+        print(json.dumps({name: generated_csr(name) for name in CSR_GENERATED}, indent=2))
+        return
     with open(args.path, encoding="utf-8") as f:
         V = json.load(f)
     registry, keys = check_material(V)

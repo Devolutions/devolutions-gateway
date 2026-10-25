@@ -2340,6 +2340,31 @@ mod tests {
             .expect("base64 CSR")
     }
 
+    /// Each CSR vector states its enrollment outcome for a token whose `u` is the vector's `enrollment_url`, or for any
+    /// token when it names none.
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Conformance
+    #[test]
+    fn enrollment_answers_each_csr_vector_as_it_expects() -> anyhow::Result<()> {
+        let vectors: Value = serde_json::from_str(include_str!("../../../docs/agent-identity/test-vectors.json"))?;
+        let cases = vectors["csr"].as_object().expect("CSR vectors");
+        assert!(!cases.is_empty(), "CSR vectors are missing");
+        for (name, case) in cases {
+            let now = 1_790_000_000;
+            let mut state = State::with_root(now)?;
+            let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
+            let csr = base64::engine::general_purpose::STANDARD.decode(case["csr"].as_str().expect("CSR vector"))?;
+            let token_url = case["enrollment_url"].as_str().unwrap_or("https://localhost/mock");
+
+            let outcome = match state.enroll(&secret, &csr, Map::new(), now, token_url) {
+                Ok(_) => "ok",
+                Err(refused) => refused.code,
+            };
+
+            assert_eq!(case["expected"]["enroll"], outcome, "csr vector {name}");
+        }
+        Ok(())
+    }
+
     /// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension,
     /// or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates
     /// nothing", §5.4 answers that code with 403, and §2.1 counts no use for a failed enrollment.
@@ -2348,7 +2373,6 @@ mod tests {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     #[rstest]
-    #[case::no_attributes(csr_vector("valid"))]
     #[case::empty_extension_request(csr_vector("valid_with_empty_extension_request"))]
     #[case::other_url(csr_naming(&key(1), "https://relay.example/mock"))]
     #[case::other_case(csr_naming(&key(1), "https://LOCALHOST/mock"))]

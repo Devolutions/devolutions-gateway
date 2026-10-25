@@ -744,7 +744,7 @@ mod tests {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[rstest]
     #[case::other_url(csr_naming(&key(2), "https://relay.example/mock"))]
-    #[case::no_url(csr_vector("valid"))]
+    #[case::no_url(csr_vector("valid_with_empty_extension_request"))]
     #[tokio::test]
     async fn every_leaf_of_an_identity_names_the_url_of_its_token(#[case] renewal_csr: Vec<u8>) -> anyhow::Result<()> {
         let app = App::for_test()?;
