@@ -875,11 +875,11 @@ DIGESTS = {OID_ECDSA_SHA256: hashes.SHA256, OID_ECDSA_SHA384: hashes.SHA384}
 P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
 CSR_ENROLLMENT_URL = "https://example.test/dvls"
 # The csr entries cryptography's CSR builder regenerates: signature algorithm, whether the signature's last byte is
-# altered, and the outcome sections 2.1 and 4 give at each endpoint.
+# altered, and the outcome of section 4's CSR checks.
 CSR_GENERATED = {
-    "valid": (OID_ECDSA_SHA256, False, {"enroll": "ok", "renew": "ok"}),
-    "bad_self_signature": (OID_ECDSA_SHA256, True, {"enroll": "invalid_request", "renew": "invalid_request"}),
-    "ecdsa_with_sha384": (OID_ECDSA_SHA384, False, {"enroll": "invalid_request", "renew": "invalid_request"}),
+    "valid": (OID_ECDSA_SHA256, False, "ok"),
+    "bad_self_signature": (OID_ECDSA_SHA256, True, "invalid_request"),
+    "ecdsa_with_sha384": (OID_ECDSA_SHA384, False, "invalid_request"),
 }
 PINNED_CSR = "valid_with_empty_extension_request"
 # SHA-256 of the csr.valid_with_empty_extension_request DER, pinned because no generator here reproduces its key.
@@ -983,7 +983,9 @@ def generated_csr(name):
     if name == "valid":
         entry["private_key_pkcs8"] = b64(key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
                                                            serialization.NoEncryption()))
-    entry.update(csr=b64(csr), public_key_sec1=b64(sec1(key.public_key())), expected=expected)
+    # A generated entry names its enrollment URL, so section 2.1 gives the CSR checks' outcome at both endpoints.
+    entry.update(csr=b64(csr), public_key_sec1=b64(sec1(key.public_key())), expected=expected,
+                 expected_at={"enroll": expected, "renew": expected})
     return entry
 
 
@@ -1008,7 +1010,7 @@ def check_csr_entry(name, e):
     try:
         f = parse_csr(data)
     except ValueError as err:
-        need(e["expected"].get("renew") != "ok", f"unparseable ({err}), but expected {e['expected']}")
+        need(e["expected"] != "ok", f"unparseable ({err}), but expected {e['expected']}")
         return found, deterministic
     point = f["point"]
     try:
@@ -1029,10 +1031,11 @@ def check_csr_entry(name, e):
     # Section 2.1 orders invalid_request before token_url_mismatch at enrollment; renewal ignores the URL (section 4).
     outcome = {"enroll": "invalid_request" if failing else "ok" if named else "token_url_mismatch",
                "renew": "invalid_request" if failing else "ok"}
-    need(outcome == e["expected"], f"sections 2.1 and 4 give {outcome}, expected {e['expected']}: "
+    need(outcome["renew"] == e["expected"], f"section 4 gives {outcome['renew']}, expected {e['expected']}: rules failing {failing}")
+    need(outcome == e.get("expected_at"), f"sections 2.1 and 4 give {outcome}, expected_at {e.get('expected_at')}: "
          f"rules failing {failing}, enrollment_url {'named' if named else 'not named'} (CSR requests {url!r})")
     stated = stated_csr_reason(name)
-    if e["expected"].get("renew") != "ok":
+    if e["expected"] != "ok":
         need(failing == [stated] and named, f"rules failing {failing}, enrollment_url {'named' if named else 'not named'}, "
              f"want only its stated reason ({stated})")
     need(base64.b64decode(e.get("public_key_sec1", "")) == point, "public_key_sec1 is not the CSR key")
@@ -1310,7 +1313,10 @@ def csr_self_test(V):
         ("valid", "compressed point", entry("valid", build_csr(valid, compressed=True)), "rules failing ['key']"),
         ("valid", "another key", entry("valid", build_csr(sha384), sha384), "is not d = SHA-256"),
         ("valid", "no PKCS#8 key", unkeyed, "no PKCS#8 key stored"),
-        (PINNED_CSR, "accepted at enrollment", dict(layout[PINNED_CSR], expected={"enroll": "ok", "renew": "ok"}), "sections 2.1 and 4 give"),
+        ("valid", "expected refused", dict(layout["valid"], expected="invalid_request"), "section 4 gives"),
+        ("valid", "no expected_at", {k: v for k, v in layout["valid"].items() if k != "expected_at"}, "sections 2.1 and 4 give"),
+        (PINNED_CSR, "expected refused", dict(layout[PINNED_CSR], expected="invalid_request"), "section 4 gives"),
+        (PINNED_CSR, "accepted at enrollment", dict(layout[PINNED_CSR], expected_at={"enroll": "ok", "renew": "ok"}), "sections 2.1 and 4 give"),
         (PINNED_CSR, "one extension", entry(PINNED_CSR, build_csr(valid, attributes=ext_request(key_usage)), valid), "the only attribute"),
         (PINNED_CSR, "another attribute type", entry(PINNED_CSR, build_csr(valid, attributes=der(0xA0, other_attribute)), valid), "the only attribute"),
         (PINNED_CSR, "a second attribute", entry(PINNED_CSR, build_csr(valid, attributes=two_attributes), valid), "the only attribute"),

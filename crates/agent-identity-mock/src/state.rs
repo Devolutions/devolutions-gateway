@@ -2360,7 +2360,7 @@ mod tests {
                 Err(refused) => refused.code,
             };
 
-            assert_eq!(case["expected"]["enroll"], outcome, "csr vector {name}");
+            assert_eq!(case["expected_at"]["enroll"], outcome, "csr vector {name}");
         }
         Ok(())
     }

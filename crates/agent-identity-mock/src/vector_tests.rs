@@ -88,16 +88,11 @@ struct CsrSection {
 #[derive(Deserialize)]
 struct CsrCase {
     csr: String,
-    expected: CsrOutcomes,
+    /// The outcome of the CSR checks the oracle makes; the per-endpoint outcomes in `expected_at` are checked against
+    /// the mock's state.
+    expected: String,
     public_key_sec1: String,
     enrollment_url: Option<String>,
-}
-
-/// The outcomes a CSR vector expects per endpoint; the oracle decides the renewal one, since renewal ignores the
-/// enrollment URL (CONTRACT.agent-identity.md §4), and the enrollment one is checked against the mock's state.
-#[derive(Deserialize)]
-struct CsrOutcomes {
-    renew: String,
 }
 
 #[derive(Deserialize)]
@@ -328,8 +323,8 @@ fn csr_cases() {
     for (name, case) in &vectors.csr.cases {
         let der = STANDARD.decode(&case.csr).expect("valid csr base64");
         let checked = check_csr(&der);
-        let renewal = if checked.is_some() { "ok" } else { "invalid_request" };
-        assert_eq!(renewal, case.expected.renew, "csr case {name}");
+        let outcome = if checked.is_some() { "ok" } else { "invalid_request" };
+        assert_eq!(outcome, case.expected, "csr case {name}");
         if let Some(checked) = checked {
             let expected_key = STANDARD.decode(&case.public_key_sec1).expect("valid sec1");
             assert_eq!(
