@@ -448,10 +448,10 @@ mod tests {
         assert_eq!(checked.enrollment_url, None);
     }
 
-    /// CONTRACT.agent-identity.md §4: the server reads the enrollment URL extension and ignores the other attributes,
-    /// so an attribute it cannot read leaves a valid CSR without a URL: the reader stops there rather than guess where
-    /// the next attribute starts.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    /// The contract doesn't decide how an attribute that isn't DER affects reading the enrollment URL.
+    /// The mock's reader stops at an attribute it cannot read rather than guess where the next one starts, so a URL
+    /// after it is not read and the CSR, still valid, names no URL.
+    // oracle: mutant the reader guesses where the next attribute starts
     #[rstest]
     #[case::length_reaching_into_the_next_attribute(&[0x30, 0x05, 0x06])]
     #[case::indefinite_length(&[0x30, 0x80])]
