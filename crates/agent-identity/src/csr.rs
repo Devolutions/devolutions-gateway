@@ -15,10 +15,7 @@ const ECDSA_WITH_SHA256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.84
 /// [rfc2985]: https://www.rfc-editor.org/rfc/rfc2985#section-5.4.2
 const EXTENSION_REQUEST: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.14");
 
-/// The OID of the enrollment URL extension ([CONTRACT.agent-identity.md §4 "Certificates"][contract]).
-///
-/// This is a provisional OID under the documentation enterprise number of RFC 5612; the OID the contract names
-/// replaces it.
+/// The OID of the enrollment URL extension, as [CONTRACT.agent-identity.md §4 "Certificates"][contract] names it.
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#certificates
 pub(crate) const ENROLLMENT_URL_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.1");
@@ -154,11 +151,9 @@ mod tests {
         // The extension is non-critical, and DER omits a component equal to its default.
         let fields = Vec::<Any>::from_der(&extensions[0].to_der()?)?;
         assert_eq!(fields.len(), 2);
-        // The extension is the one the agent looks for in the leaves it receives.
-        assert_eq!(
-            ObjectIdentifier::from_der(&fields[0].to_der()?)?,
-            ENROLLMENT_URL_EXTENSION
-        );
+        let oid: ObjectIdentifier = ObjectIdentifier::from_der(&fields[0].to_der()?)?;
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+        assert_eq!(oid.to_string(), "1.3.6.1.4.1.32473.1.1");
         assert_eq!(fields[1].tag(), Tag::OctetString);
         assert_eq!(Ia5StringRef::from_der(fields[1].value())?.as_str(), base_url);
         Ok(())

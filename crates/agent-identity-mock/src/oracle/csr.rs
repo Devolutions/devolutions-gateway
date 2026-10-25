@@ -16,8 +16,7 @@ const SECP256R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.
 const EXTENSION_REQUEST: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.9.14");
 /// ecdsa-with-SHA256 (RFC 5758).
 const ECDSA_WITH_SHA_256: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.4.3.2");
-/// The enrollment URL extension (CONTRACT.agent-identity.md §4), here under the documentation arc of RFC 5612.
-/// The contract's OID replaces it; the contract's current UUID-based OID has an arc wider than the 32 bits `const-oid` parses.
+/// The enrollment URL extension, as CONTRACT.agent-identity.md §4 names it.
 pub(crate) const ENROLLMENT_URL_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.1");
 
 /// A CSR that passed [`check_csr`].

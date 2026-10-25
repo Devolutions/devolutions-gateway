@@ -65,7 +65,6 @@ Metadata is limited to 16 KiB in aggregate, and agent-facing request bodies are 
 A larger body gets `413 invalid_request` before authentication; otherwise an authentication error wins over an invalid body, CSR or metadata (§5.4).
 Every certificate issued for an identity carries the non-critical enrollment URL extension naming the `u` of the token that enrolled it, without trailing slashes, and renewal ignores the URL its CSR requests (§4).
 An enrollment CSR that lacks the extension or names another URL, compared as text, is `403 token_url_mismatch` and creates nothing; it is refused after an invalid body, CSR or metadata, which stays `invalid_request`, and ahead of the CSR key lookup and the token's revocation, expiry and use limit, so it counts no use (§2.1, §4, §5.4).
-The extension's OID is `1.3.6.1.4.1.32473.1.1`, from the documentation arc of RFC 5612, in place of the contract's, whose arc is wider than the 32 bits `const-oid` parses.
 Enrollment returns `config.version`, `config.revision` and optional `config.agent_channel_url`, never a top-level channel URL.
 Friendly names are stored server-side and appear only in the management API.
 Config revisions start at 1 and increase only on effective changes; `ConfigUpdate` follows `Welcome` for stale Hellos and is pushed to live streams after a change.
