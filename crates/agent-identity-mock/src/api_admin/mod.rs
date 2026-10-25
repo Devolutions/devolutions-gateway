@@ -554,7 +554,7 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
     if !is_token_url(&app.base_url) {
         return Err(ManagementError::status(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "the mock's base URL does not begin with https:// or contains an @, which an enrollment token's URL never does",
+            "the mock's base URL does not begin with https://, contains an @ or holds a non-ASCII character, which an enrollment token's URL never does",
         ));
     }
 
@@ -578,12 +578,12 @@ async fn create_token(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Manag
         .into_response())
 }
 
-/// Returns whether `url`, read as text, begins with `https://` and contains no `@`, as an enrollment token's `u` must
-/// ([CONTRACT.agent-identity.md][contract], "2. Enrollment token").
+/// Returns whether `url`, read as text, begins with `https://`, contains no `@` and holds only ASCII characters, as an
+/// enrollment token's `u` must ([CONTRACT.agent-identity.md][contract], "2. Enrollment token").
 ///
 /// [contract]: ../../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
 fn is_token_url(url: &str) -> bool {
-    url.starts_with("https://") && !url.contains('@')
+    url.starts_with("https://") && !url.contains('@') && url.is_ascii()
 }
 
 /// `AgentIdentityPublicApi_GetAgentIdentityEnrollmentTokens`.

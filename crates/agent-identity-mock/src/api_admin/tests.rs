@@ -751,8 +751,8 @@ async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result
 
 /// `AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken`'s `422`: "DVLS has no https external URL for the token to
 /// carry".
-/// A token's `u` is read as text: it begins with `https://` and contains no `@`, wherever it is
-/// (CONTRACT.agent-identity.md §2), so a mock whose base URL is not such a text creates no token.
+/// A token's `u` is read as text: it begins with `https://`, contains no `@`, wherever it is, and holds only ASCII
+/// characters (CONTRACT.agent-identity.md §2), so a mock whose base URL is not such a text creates no token.
 // oracle: spec DVLS public OpenAPI document §AgentIdentityPublicApi_CreateAgentIdentityEnrollmentToken
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
 #[rstest]
@@ -763,6 +763,7 @@ async fn first_root_without_the_encryption_key_is_a_conflict() -> anyhow::Result
 #[case::at_without_slashes("https:@127.0.0.1:1/mock")]
 #[case::no_slashes("https:127.0.0.1:1/mock")]
 #[case::at_in_the_path("https://127.0.0.1:1/mock@path")]
+#[case::non_ascii_path("https://127.0.0.1:1/m\u{f4}ck")]
 #[tokio::test]
 async fn create_token_for_a_base_url_that_is_no_token_url_is_unprocessable(
     #[case] base_url: &str,
