@@ -27,7 +27,7 @@ The default mutant source is domain mutants written by a fresh-context sub-agent
 Add cargo-mutants (`references/cargo-mutants.md`) or Stryker.NET (`references/stryker.md`) only on targeted modules or a change's diff, preferring the critical ones, and never on a whole crate or project unless the user asks; load only the language in scope.
 Build the kill matrix of mutant by test: for a domain mutant, from the failing tests of its scoped run; for a tool mutant, from the tool's outputs, with per-test reruns only where the reference names them.
 A unique kill is a mutant caught by exactly one test in scope.
-Make no deletion decision about a test until some mutant of the code it exercises is caught, by it or another test, since zero unique kills over nothing caught measures nothing and the invariant then passes trivially; challenge such a test instead.
+Zero unique kills over nothing caught measures nothing and lets the invariant pass trivially, so a test whose code no mutant of the pass reaches is challenged rather than deleted on that evidence, until the budget runs out.
 For tests with several assertions, record which assertion fails for each kill.
 Run the scoped suite a few times on the clean tree to find flaky tests before trusting any kill.
 
@@ -44,7 +44,9 @@ No `scaffold` marker outlives the pass: resolve each as `test-oracle-reviewer` r
 
 Deletion is a set decision, not a per-test verdict.
 Two tests that both catch mutant M each have zero unique kills, and deleting both loses M.
-A deletion is proven when the remaining tests still catch every mutant the deleted tests caught; when the only evidence would need a run over budget, keep the test.
+A deletion is proven when the remaining tests still catch every mutant the deleted tests caught.
+The burden of proof is on keeping, as `test-writer` requires a named bug: a self-derived or unknown-oracle test stays only when someone names a defect it alone catches, a unique kill counting as named, so one still unnamed when the budget runs out is deleted.
+Independent and protected tests are never deleted on budget grounds.
 The same rule applies to assertions: a self-derived one that never fails across its test's kills is a deletion candidate.
 
 Protected tests are never proposed for deletion: a regression test tied to an issue or fuzz crash, a test of untrusted-input parsing or bounds checks, and a doctest.
