@@ -96,29 +96,23 @@ mod process_tree {
             // SAFETY: The runner leads the original group; stopping it prevents new agent launches.
             let _ = unsafe { kill(-self.0, 9) };
             // Agents use separate process groups in this dedicated session.
+            // `ps` only lists PIDs and getsid finds the session members, because the `ps` session column is not portable:
+            // on macOS, `sess` prints a kernel session pointer rather than a session ID.
             for _ in 0..3 {
-                let output = std::process::Command::new("ps")
-                    .args(["-e", "-o", "pid=", "-o", "sess="])
-                    .output();
+                let output = std::process::Command::new("ps").args(["-e", "-o", "pid="]).output();
                 let Ok(output) = output else {
                     break;
                 };
                 let mut found = false;
-                for line in String::from_utf8_lossy(&output.stdout).lines() {
-                    let mut fields = line.split_whitespace();
-                    let (Some(pid), Some(sid)) = (fields.next(), fields.next()) else {
+                for pid in String::from_utf8_lossy(&output.stdout).split_whitespace() {
+                    let Ok(pid) = pid.parse::<i32>() else {
                         continue;
                     };
-                    let (Ok(pid), Ok(sid)) = (pid.parse::<i32>(), sid.parse::<i32>()) else {
-                        continue;
-                    };
-                    if sid == self.0 {
-                        // SAFETY: getsid rechecks that this PID still belongs to the isolated session.
-                        if unsafe { getsid(pid) } == self.0 {
-                            // SAFETY: This PID was verified as a member of this test's session.
-                            let _ = unsafe { kill(pid, 9) };
-                            found = true;
-                        }
+                    // SAFETY: getsid only reads the session of this PID, and returns -1 once the process is gone.
+                    if unsafe { getsid(pid) } == self.0 {
+                        // SAFETY: This PID was verified as a member of this test's session.
+                        let _ = unsafe { kill(pid, 9) };
+                        found = true;
                     }
                 }
                 if !found {
