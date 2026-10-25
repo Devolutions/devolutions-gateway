@@ -31,8 +31,8 @@ A test-only diff still yields mutants under `--since`: every mutant covered by a
 Pass `--project <Name>.csproj` only when the test project references more than one project, and `--solution <path>.sln` when it targets .NET Framework, where Stryker requires it.
 Coverage analysis, `perTest` by default, runs only the tests covering each mutant, so the matrix spans the whole test project without scoping tests and a unique kill is unique across the project; restricting to a test class needs `test-case-filter` in `stryker-config.json`, since the 5.0.0 command line rejects it as a flag.
 Stryker builds the test project itself and writes a `.gitignore` of `*` into `--output`, so the output stays untracked wherever it is.
-Build and the initial run take a few minutes before the first mutant, and a whole library of a few thousand lines can run for most of an hour, so `--mutate` a module, a file, or a span, never the whole project unless the user asks.
-Stryker logs the initial test run's duration and how many mutants it will test before the first one runs; estimate the run from those and `--concurrency` there, and stop it if the estimate exceeds the budget.
+Build and the initial run take a few minutes before the first mutant, and a whole library of a few thousand lines can run for most of an hour, so `--mutate` a module, a file, or a span.
+Stryker logs how many mutants it will test before the first one runs; estimate the run from that count, the clean TRX run's duration, and `--concurrency`, and stop it if the estimate exceeds the budget.
 Timeouts are computed per mutant from the initial run, and `additional-timeout` and `timeout-ratio` are config-file options.
 
 ## Kill matrix

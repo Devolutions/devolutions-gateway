@@ -1,11 +1,5 @@
 # Domain mutants
 
-## Commission
-
-Ask a fresh-context sub-agent for the mutants, giving it the applicable intent and contract files, the code under test, and the catalog below, but not the tests, so the faults come from what the code must do rather than from what the tests already check.
-Ask for one patch per fault, each a single plausible mistake, weighted toward critical paths such as validation, cryptography, parsing, and authorization decisions, and sized to the budget: a dozen or two usually fit a 30-minute pass.
-Include one positive control, a mutant an existing test plainly catches, and apply it first: if no test fails, the patched code is not what the tests run, as with a stale build or a filter that matches nothing, and every result of the pass would be void.
-
 ## Apply
 
 Neither mutation tool takes user-defined operators, so write each domain mutant as a patch.

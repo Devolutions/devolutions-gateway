@@ -1,6 +1,6 @@
 ---
 name: test-pruner
-description: Prune, strengthen, and consolidate tests within a one-hour pass using oracle classification and domain mutants, with cargo-mutants for Rust or Stryker.NET for C# on targeted modules only, for one crate, project, or module or for one change's diff. Use when asked to remove redundant tests, consolidate tests into cases or properties, audit test value, clean up AI-written tests, finalize a change's tests before its pull request opens, or get a mutation-backed review of a pull request's tests. For a quick oracle-only check, use `test-oracle-reviewer` instead.
+description: Prune, strengthen, and consolidate tests in a pass of at most one hour, using oracle classification and domain mutants, with cargo-mutants or Stryker.NET only on targeted modules or a change's diff. Use when asked to remove redundant tests, consolidate tests into cases or properties, audit test value, clean up AI-written tests, finalize a change's tests before its pull request opens, or get a mutation-backed review of a pull request's tests. For a quick oracle-only check, use `test-oracle-reviewer` instead.
 ---
 
 # Test pruner
@@ -23,7 +23,11 @@ A reviewer's request for more mutation evidence falls under the same budget.
 ## Measure
 
 Invoke `test-oracle-reviewer` on every test in scope and record independent, self-derived, or unknown with evidence.
-The default mutant source is domain mutants written by a fresh-context sub-agent as `references/domain-mutants.md` describes, because a few calibrated domain faults cost minutes where a generic run over the same code costs hours.
+The default mutant source is domain mutants written by a fresh-context sub-agent, because a few calibrated domain faults cost minutes where a generic run over the same code costs hours.
+Give it the applicable intent and contract files, the code under test, and `references/domain-mutants.md`, but not the tests, so the faults come from what the code must do rather than from what the tests already check.
+Ask for one patch per fault, each a single plausible mistake, weighted toward critical paths such as validation, cryptography, parsing, and authorization decisions, and as many as the estimate fits in the remaining budget.
+Write one positive control yourself, a mutant that a test you have read plainly catches, and apply it before the sub-agent's patches: if no test fails, the patched code is not what the tests run, as with a stale build or a filter that matches nothing, and every result of the pass is void.
+Apply each patch as `references/domain-mutants.md` describes.
 Add cargo-mutants (`references/cargo-mutants.md`) or Stryker.NET (`references/stryker.md`) only on targeted modules or a change's diff, preferring the critical ones, and never on a whole crate or project unless the user asks; load only the language in scope.
 Build the kill matrix of mutant by test: for a domain mutant, from the failing tests of its scoped run; for a tool mutant, from the tool's outputs, with per-test reruns only where the reference names them.
 A unique kill is a mutant caught by exactly one test in scope.
@@ -45,7 +49,7 @@ No `scaffold` marker outlives the pass: resolve each as `test-oracle-reviewer` r
 Deletion is a set decision, not a per-test verdict.
 Two tests that both catch mutant M each have zero unique kills, and deleting both loses M.
 A deletion is proven when the remaining tests still catch every mutant the deleted tests caught.
-The burden of proof is on keeping, as `test-writer` requires a named bug: a self-derived or unknown-oracle test stays only when someone names a defect it alone catches, a unique kill counting as named, so one still unnamed when the budget runs out is deleted.
+A test of unknown oracle still without a named defect when the budget runs out is deleted, since `test-writer` requires a named bug; a unique kill counts as named.
 Independent and protected tests are never deleted on budget grounds.
 The same rule applies to assertions: a self-derived one that never fails across its test's kills is a deletion candidate.
 

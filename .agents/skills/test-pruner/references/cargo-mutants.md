@@ -5,7 +5,7 @@ These notes target cargo-mutants 27.1.
 
 ## Run
 
-Scope with `--file '<package-dir>/src/<module>/**'` for a module, `--re '<fn>|<fn>'` for a pull request's changed or critical functions, or `--in-diff <diff>` for its whole diff, never a whole crate unless the user asks, since each mutant costs an incremental build.
+Scope with `--file '<package-dir>/src/<module>/**'` for a module, `--re '<fn>|<fn>'` for a pull request's changed or critical functions, or `--in-diff <diff>` for its whole diff; each mutant costs an incremental build, so scope narrowly.
 Count the mutants first by adding `--list` to the same scope, and estimate the run as mutants × (incremental build + clean scoped test time), divided by `--jobs` only without `--in-place`, which rejects it; narrow `--re` when it exceeds the budget.
 A test-only diff yields no mutants under `--in-diff`, so scope with `--re` to the production functions the changed tests call, including unchanged ones.
 Package directories vary; take the path from `cargo metadata` rather than assuming `crates/<name>`.
