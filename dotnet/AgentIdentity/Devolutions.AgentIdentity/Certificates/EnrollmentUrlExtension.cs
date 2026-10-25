@@ -13,7 +13,8 @@ namespace Devolutions.AgentIdentity;
 /// </remarks>
 internal static class EnrollmentUrlExtension
 {
-    // CONTRACT.agent-identity.md §4: the OID of the enrollment URL extension.
+    // CONTRACT.agent-identity.md §4: the OID of the enrollment URL extension, under the enterprise number that RFC 5612
+    // reserves for documentation; the contract moves it under Devolutions' own enterprise number before release.
     public const string Oid = "1.3.6.1.4.1.32473.1.1";
 
     /// <summary>
