@@ -2365,9 +2365,11 @@ mod tests {
         Ok(())
     }
 
-    /// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that lacks the enrollment URL extension,
-    /// or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates
-    /// nothing", §5.4 answers that code with 403, and §2.1 counts no use for a failed enrollment.
+    /// CONTRACT.agent-identity.md §4: "At enrollment, the server refuses a CSR that names no enrollment URL, or whose
+    /// value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates nothing",
+    /// where "A CSR that requests the enrollment URL extension more than once, in one `extensionRequest` or several, or
+    /// not as an `IA5String`, names no enrollment URL"; §5.4 answers that code with 403, and §2.1 counts no use for a
+    /// failed enrollment.
     /// The value is compared as text, so another case or a trailing slash names another URL.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
