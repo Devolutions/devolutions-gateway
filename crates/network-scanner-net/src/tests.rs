@@ -101,6 +101,7 @@ async fn connect_that_fails_immediately_returns_the_error() -> anyhow::Result<()
     let result = tokio::time::timeout(Duration::from_secs(5), socket.connect(&addr)).await?;
 
     // oracle: spec POSIX connect(2) §ERRORS
+    // oracle: spec Winsock connect §Return value
     assert!(
         result.is_err(),
         "connecting an IPv4 socket to an IPv6 address succeeded"
