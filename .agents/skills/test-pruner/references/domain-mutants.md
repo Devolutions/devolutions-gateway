@@ -1,9 +1,19 @@
 # Domain mutants
 
+## Commission
+
+Ask a fresh-context sub-agent for the mutants, giving it the applicable intent and contract files, the code under test, and the catalog below, but not the tests, so the faults come from what the code must do rather than from what the tests already check.
+Ask for one patch per fault, each a single plausible mistake, weighted toward critical paths such as validation, cryptography, parsing, and authorization decisions, and sized to the budget: a dozen or two usually fit a 30-minute pass.
+Include one positive control, a mutant an existing test plainly catches, and apply it first: if no test fails, the patched code is not what the tests run, as with a stale build or a filter that matches nothing, and every result of the pass would be void.
+
+## Apply
+
 Neither mutation tool takes user-defined operators, so write each domain mutant as a patch.
 Take it, or rebuild a challenger's patch, with `git diff --output=<file>` from an edit you then revert, since a hand-written hunk header is easily wrong and a Windows PowerShell redirect re-encodes the patch as UTF-16 with CRLF, which `git apply` rejects.
 `git apply` it, run the scoped tests, and `git apply -R` it; caught means a test failed, and a patch that does not build proves nothing until it does.
 Patches are pull request evidence, not repository files.
+
+## Catalog
 
 Codec catalog:
 
