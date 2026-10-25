@@ -74,6 +74,21 @@ async fn test_connectivity() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn connect_to_a_closed_port_fails() -> anyhow::Result<()> {
+    // Binding then dropping a listener leaves a loopback port nothing listens on.
+    let addr = std::net::TcpListener::bind("127.0.0.1:0")?.local_addr()?;
+
+    let runtime = crate::runtime::Socket2Runtime::new(None)?;
+    let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
+    let result = tokio::time::timeout(Duration::from_secs(10), socket.connect(&SockAddr::from(addr))).await?;
+
+    // oracle: spec POSIX connect(2) §ERRORS
+    assert!(result.is_err(), "connecting to a closed port succeeded");
+
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
 async fn multiple_tcp() -> anyhow::Result<()> {
     let kill_server = Arc::new(AtomicBool::new(false));
