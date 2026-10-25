@@ -373,8 +373,7 @@ impl Future for ConnectFuture<'_> {
             trace!(?event, "Event found");
             // For linux, failed connection is ERR and HUP, a single HUP does not indicate a failed connection.
             // kqueue cannot report it, so a failed connection is detected below from the pending socket error.
-            // Either way, the pending socket error says why, so callers can tell a closed port from an
-            // unreachable host.
+            // Either way, the pending socket error says why, so callers can tell a closed port from an unreachable host.
             if event.is_err() == Some(true) {
                 self.runtime.remove_events_with_id_from_history(self.id);
                 let error = match self.socket.take_error() {
@@ -410,8 +409,8 @@ impl Future for ConnectFuture<'_> {
             Err(e) => e,
         };
 
-        // A connection still in progress is reported by EINPROGRESS (WSAEWOULDBLOCK on Windows) on the first call,
-        // and by EALREADY on later ones; any other error, such as an unreachable network, fails the connection.
+        // A connection still in progress is reported by EINPROGRESS (WSAEWOULDBLOCK on Windows) on the first call, and by EALREADY on later ones.
+        // Any other error, such as an unreachable network, fails the connection; on Unix, that includes EAGAIN.
         // reference: https://man7.org/linux/man-pages/man2/connect.2.html
         // reference: https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-connect
         #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -425,19 +424,19 @@ impl Future for ConnectFuture<'_> {
             const WSAEALREADY: i32 = 10037;
             const WSAEISCONN: i32 = 10056;
             (
-                err.raw_os_error() == Some(WSAEALREADY),
+                err.kind() == std::io::ErrorKind::WouldBlock || err.raw_os_error() == Some(WSAEALREADY),
                 err.raw_os_error() == Some(WSAEISCONN),
             )
         };
 
         #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-        let (in_progress, already_connected) = (false, false);
+        let (in_progress, already_connected) = (err.kind() == std::io::ErrorKind::WouldBlock, false);
 
         if already_connected {
             return std::task::Poll::Ready(Ok(()));
         }
 
-        if !in_progress && err.kind() != std::io::ErrorKind::WouldBlock {
+        if !in_progress {
             return std::task::Poll::Ready(Err(err));
         }
 

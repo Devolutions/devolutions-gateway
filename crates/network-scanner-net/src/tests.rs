@@ -83,9 +83,28 @@ async fn connect_to_a_closed_port_fails() -> anyhow::Result<()> {
     let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
     let result = tokio::time::timeout(Duration::from_secs(10), socket.connect(&SockAddr::from(addr))).await?;
 
-    // oracle: spec POSIX connect(2) §ERRORS
+    // oracle: spec POSIX connect(2) §DESCRIPTION
+    // oracle: spec Winsock connect §Return value
     let error = result.expect_err("connecting to a closed port succeeded");
     assert_eq!(error.kind(), ErrorKind::ConnectionRefused, "{error}");
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn connect_that_fails_immediately_returns_the_error() -> anyhow::Result<()> {
+    let runtime = crate::runtime::Socket2Runtime::new(None)?;
+    let socket = runtime.new_socket(socket2::Domain::IPV4, socket2::Type::STREAM, None)?;
+    // An IPv4 socket cannot connect to an IPv6 address, so connect fails before any packet is sent.
+    let addr = SockAddr::from(SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, 9)));
+
+    let result = tokio::time::timeout(Duration::from_secs(5), socket.connect(&addr)).await?;
+
+    // oracle: spec POSIX connect(2) §ERRORS
+    assert!(
+        result.is_err(),
+        "connecting an IPv4 socket to an IPv6 address succeeded"
+    );
 
     Ok(())
 }

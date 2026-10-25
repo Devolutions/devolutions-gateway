@@ -1910,12 +1910,10 @@ mod tests {
         const LINES_PER_FRAME: usize = 64;
 
         let temp_dir = tempfile::tempdir().expect("create temp dir");
-        // Reads one 1 KiB line every 50 ms, so writing a 64 KiB frame into a full Unix pipe takes twice the stall
-        // timeout. On Unix, the reader drains the rest at full speed once the first frame is read, so the lines
-        // left in the pipe when the last write completes do not outlast the exit grace period on a slow runner.
-        // On Windows, the pipe absorbs both frames, so the test only checks that slow reading is not mistaken for
-        // a stall. The reader handles a first line before reporting that it started, so loading the cmdlets it
-        // uses is not mistaken for a stall.
+        // Reads one 1 KiB line every 50 ms, so writing a 64 KiB frame into a full Unix pipe takes twice the stall timeout.
+        // On Unix, the reader drains the rest at full speed once the first frame is read, so the lines left in the pipe when the last write completes do not outlast the exit grace period on a slow runner.
+        // On Windows, the pipe absorbs both frames, so the test only checks that slow reading is not mistaken for a stall.
+        // The reader handles a first line before reporting that it started, so loading the cmdlets it uses is not mistaken for a stall.
         let script = write_script(
             temp_dir.path(),
             "slow-reader",
