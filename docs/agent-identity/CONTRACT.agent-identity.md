@@ -144,7 +144,8 @@ Unless stated otherwise, implementations must follow these conventions.
 - Every arc of every OID in a certificate or CSR fits in 32 bits, because common X.509 libraries refuse larger arcs.
 - The agent's CSR carries one attribute, an `extensionRequest` holding only the enrollment URL extension with the base URL it sends the request to, without trailing slashes: its token's `u` at enrollment, its identity's base URL at renewal.
 - The server takes the CSR's public key (an uncompressed P-256 point required, else `invalid_request`, so that each key has exactly one SPKI SHA-256), verifies the CSR self-signature (else `invalid_request`) and reads the enrollment URL extension from its `extensionRequest`; it ignores the subject and every other attribute or requested extension, and does not require their contents in canonical DER form, such as a sorted `SET OF`.
-- At enrollment, the server refuses a CSR that lacks the enrollment URL extension, or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates nothing; at renewal it ignores the value.
+  A CSR that requests the enrollment URL extension more than once, in one `extensionRequest` or several, or not as an `IA5String`, names no enrollment URL.
+- At enrollment, the server refuses a CSR that names no enrollment URL, or whose value is not the presented token's `u` without trailing slashes, with `token_url_mismatch`, and creates nothing; at renewal it ignores the value.
 - The CSR signature algorithm is `ecdsa-with-SHA256`; anything else → `invalid_request`.
 
 <a id="http-api"></a>
