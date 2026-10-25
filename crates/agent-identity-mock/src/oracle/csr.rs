@@ -88,6 +88,7 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<CheckedCsr> {
 
 /// Returns the value of the enrollment URL extension (CONTRACT.agent-identity.md §4) that a CSR's attributes request in an `extensionRequest` ([RFC 2985 §5.4.2, "Extension request"][rfc]), if they request it exactly once, as an `IA5String`.
 /// `attributes` is the contents of the `[0]` attribute set; the attributes and extensions around the one read are skipped without requiring canonical DER.
+/// Every container walked to count the instances must be framed to its end, or the count is unknown and the CSR names no URL.
 ///
 /// [rfc]: https://www.rfc-editor.org/rfc/rfc2985#section-5.4.2
 fn requested_enrollment_url(attributes: &[u8]) -> Option<String> {
@@ -97,43 +98,58 @@ fn requested_enrollment_url(attributes: &[u8]) -> Option<String> {
     const SEQUENCE: u8 = 0x30;
     const SET: u8 = 0x31;
 
-    let mut requested = tlvs(attributes)
-        .filter(|(tag, _)| *tag == SEQUENCE)
-        .filter_map(|(_, attribute)| {
-            let mut fields = tlvs(attribute);
-            if fields.next()? != (OBJECT_IDENTIFIER, EXTENSION_REQUEST.as_bytes()) {
-                return None;
+    let mut instances = Vec::new();
+    // An item that is not a SEQUENCE is neither an `Attribute`, an `Extensions` nor an `Extension`, so it requests
+    // nothing; one whose type cannot be read might request the extension.
+    for (tag, attribute) in framed(attributes)? {
+        if tag != SEQUENCE {
+            continue;
+        }
+        let (tag, attribute_type, _) = split_tlv(attribute)?;
+        if (tag, attribute_type) != (OBJECT_IDENTIFIER, EXTENSION_REQUEST.as_bytes()) {
+            continue;
+        }
+        for (tag, values) in framed(attribute)?.into_iter().skip(1) {
+            if tag != SET {
+                continue;
             }
-            fields.next()
-        })
-        .filter(|(tag, _)| *tag == SET)
-        .flat_map(|(_, values)| tlvs(values))
-        .filter(|(tag, _)| *tag == SEQUENCE)
-        .flat_map(|(_, extensions)| tlvs(extensions))
-        .filter(|(tag, _)| *tag == SEQUENCE)
-        .filter_map(|(_, extension)| {
-            let mut fields = tlvs(extension);
-            (fields.next()? == (OBJECT_IDENTIFIER, ENROLLMENT_URL_EXTENSION.as_bytes())).then_some(fields)
-        });
-    // A CSR requesting the extension more than once, in one `extensionRequest` or several, names no URL (§4).
-    let mut fields = requested.next()?;
-    if requested.next().is_some() {
-        return None;
+            for (tag, extensions) in framed(values)? {
+                if tag != SEQUENCE {
+                    continue;
+                }
+                for (tag, extension) in framed(extensions)? {
+                    if tag != SEQUENCE {
+                        continue;
+                    }
+                    let (tag, extension_id, _) = split_tlv(extension)?;
+                    if (tag, extension_id) == (OBJECT_IDENTIFIER, ENROLLMENT_URL_EXTENSION.as_bytes()) {
+                        instances.push(extension);
+                    }
+                }
+            }
+        }
     }
+
+    // A CSR requesting the extension more than once, in one `extensionRequest` or several, names no URL (§4).
+    let [extension] = instances[..] else {
+        return None;
+    };
     // `critical` is optional (`DEFAULT FALSE`), so `extnValue` is the first OCTET STRING.
-    let (_, value) = fields.find(|(tag, _)| *tag == OCTET_STRING)?;
+    let (_, value) = framed(extension)?.into_iter().find(|(tag, _)| *tag == OCTET_STRING)?;
     let (tag, url, rest) = split_tlv(value)?;
     let url = std::str::from_utf8(url).ok()?;
     (tag == IA5_STRING && rest.is_empty() && url.is_ascii()).then(|| url.to_owned())
 }
 
-/// Iterates over the TLVs of `contents`, stopping at the first one [`split_tlv`] cannot read.
-fn tlvs(mut contents: &[u8]) -> impl Iterator<Item = (u8, &[u8])> {
-    std::iter::from_fn(move || {
+/// Returns the TLVs of `contents`, or `None` unless [`split_tlv`] frames them to its end.
+fn framed(mut contents: &[u8]) -> Option<Vec<(u8, &[u8])>> {
+    let mut items = Vec::new();
+    while !contents.is_empty() {
         let (tag, value, rest) = split_tlv(contents)?;
+        items.push((tag, value));
         contents = rest;
-        Some((tag, value))
-    })
+    }
+    Some(items)
 }
 
 /// Splits the first TLV off `input` and returns its tag, its contents and the rest of `input`.
@@ -175,6 +191,9 @@ mod tests {
     const SUBJECT_ALT_NAME: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.17");
 
     const URL: &str = "https://host.example/dvls";
+
+    /// An attribute whose length takes 5 bytes in the long form, which BER allows and the reader doesn't frame.
+    const FIVE_BYTE_LONG_FORM_LENGTH: &[u8] = &[0x30, 0x85, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00];
 
     /// secp384r1 (RFC 5480).
     const SECP384R1: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.34");
@@ -443,23 +462,40 @@ mod tests {
     #[case::repeated_in_one_extension_request(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL), &enrollment_url(URL)])]), ..Csr::valid() })]
     #[case::repeated_in_two_extension_requests(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL)]), &extension_request(&[&enrollment_url(URL)])]), ..Csr::valid() })]
     #[case::ia5_then_utf8_string(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL), &extension(ENROLLMENT_URL_EXTENSION, &[], &tlv(0x0C, &[URL.as_bytes()]))])]), ..Csr::valid() })]
+    // The reader cannot frame the middle attribute, so it cannot tell how many instances the CSR requests.
+    #[case::attribute_it_cannot_frame_between_two_extension_requests(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL)]), FIVE_BYTE_LONG_FORM_LENGTH, &extension_request(&[&enrollment_url("https://relay.example/dvls")])]), ..Csr::valid() })]
     fn csr_without_exactly_one_ia5_enrollment_url_names_none(#[case] csr: Csr) {
         let checked = check_csr(&csr.encode()).expect("valid CSR");
         assert_eq!(checked.enrollment_url, None);
     }
 
-    /// The contract doesn't decide how an attribute that isn't DER affects reading the enrollment URL.
-    /// The mock's reader stops at an attribute it cannot read rather than guess where the next one starts, so a URL
-    /// after it is not read and the CSR, still valid, names no URL.
+    /// Where an attribute the reader cannot frame sits next to an `extensionRequest`.
+    #[derive(Debug, Clone, Copy)]
+    enum Position {
+        Before,
+        After,
+    }
+
+    /// The contract doesn't decide how an attribute the reader cannot frame affects reading the enrollment URL.
+    /// The mock's reader then cannot tell how many instances the CSR requests, so wherever that attribute sits, the CSR,
+    /// still valid, names no URL.
     // oracle: mutant the reader guesses where the next attribute starts
     #[rstest]
     #[case::length_reaching_into_the_next_attribute(&[0x30, 0x05, 0x06])]
     #[case::indefinite_length(&[0x30, 0x80])]
-    #[case::five_byte_long_form_length(&[0x30, 0x85, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00])]
+    #[case::five_byte_long_form_length(FIVE_BYTE_LONG_FORM_LENGTH)]
     #[case::length_past_the_end(&[0x30, 0x81, 0xFF])]
-    fn unreadable_attribute_before_the_extension_request_leaves_no_url(#[case] unreadable: &[u8]) {
+    fn attribute_the_reader_cannot_frame_leaves_no_url(
+        #[case] unframed: &[u8],
+        #[values(Position::Before, Position::After)] position: Position,
+    ) {
+        let request = extension_request(&[&enrollment_url(URL)]);
+        let ordered: [&[u8]; 2] = match position {
+            Position::Before => [unframed, &request],
+            Position::After => [&request, unframed],
+        };
         let csr = Csr {
-            attributes: attributes(&[unreadable, &extension_request(&[&enrollment_url(URL)])]),
+            attributes: attributes(&ordered),
             ..Csr::valid()
         };
 
