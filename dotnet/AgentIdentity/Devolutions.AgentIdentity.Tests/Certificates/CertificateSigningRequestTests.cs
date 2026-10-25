@@ -583,6 +583,22 @@ public class CertificateSigningRequestTests
                     TestEnrollmentUrl.Extension("https://host/dvls"),
                     TestEnrollmentUrl.Extension("https://host/dvls"))),
             null),
+        // Several extensionRequest attributes requesting the extension name no enrollment URL either.
+        ["the extension in two extensionRequest attributes"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.AttributesWithAnExtensionRequestEach(
+                    TestEnrollmentUrl.Extension("https://host/dvls"),
+                    TestEnrollmentUrl.Extension("https://host/dvls"))),
+            null),
+        // A request for the extension once, among several extensionRequest attributes, names its value.
+        ["the extension in one of two extensionRequest attributes"] = (
+            key => TestEnrollmentUrl.Request(
+                key,
+                TestEnrollmentUrl.AttributesWithAnExtensionRequestEach(
+                    TestEnrollmentUrl.Extension("https://host/dvls"),
+                    TestEnrollmentUrl.Extension(TestEnrollmentUrl.IA5String("x"), "2.5.29.17"))),
+            "https://host/dvls"),
         // The extension holds an IA5String.
         ["a UTF8String value"] = (
             key => TestEnrollmentUrl.Request(

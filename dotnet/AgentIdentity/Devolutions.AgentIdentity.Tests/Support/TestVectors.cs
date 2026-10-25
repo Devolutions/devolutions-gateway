@@ -74,9 +74,11 @@ public sealed record RootVector(byte[] Certificate, string Thumbprint, byte[] Pu
 public sealed record CsrVector(
     byte[] Csr,
     string Expected,
+    IReadOnlyDictionary<string, string> ExpectedAt,
     string? Description = null,
     byte[]? PublicKeySec1 = null,
-    byte[]? PrivateKeyPkcs8 = null);
+    byte[]? PrivateKeyPkcs8 = null,
+    string? EnrollmentUrl = null);
 
 public sealed record HttpSignatureVectors(
     IReadOnlyList<RegisteredCertificateVector> Registered,

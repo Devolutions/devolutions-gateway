@@ -8,7 +8,8 @@ namespace Devolutions.AgentIdentity.Tests;
 /// </summary>
 internal static class TestEnrollmentUrl
 {
-    // CONTRACT.agent-identity.md §4: the OID of the enrollment URL extension.
+    // CONTRACT.agent-identity.md §4: the OID of the enrollment URL extension, under RFC 5612's documentation enterprise
+    // number until the contract moves it.
     public const string Oid = "1.3.6.1.4.1.32473.1.1";
 
     // RFC 2985 §5.4.2: the extensionRequest attribute.
@@ -60,12 +61,7 @@ internal static class TestEnrollmentUrl
     /// </summary>
     public static byte[] AttributesAfter(byte[] otherAttribute, params byte[][] extensions)
     {
-        byte[] attributes = Attributes(extensions);
-        AsnReader reader = new AsnReader(attributes, AsnEncodingRules.DER)
-            .ReadSetOf(new Asn1Tag(TagClass.ContextSpecific, 0));
-        byte[] extensionRequest = reader.ReadEncodedValue().ToArray();
-
-        return TestCsr.Tlv(0xA0, otherAttribute, extensionRequest);
+        return TestCsr.Tlv(0xA0, otherAttribute, ExtensionRequestAttribute(extensions));
     }
 
     /// <summary>
@@ -107,6 +103,23 @@ internal static class TestEnrollmentUrl
         }
 
         return writer.Encode();
+    }
+
+    /// <summary>
+    /// The <c>[0]</c> attributes of a CSR holding one extensionRequest per given extension.
+    /// </summary>
+    public static byte[] AttributesWithAnExtensionRequestEach(params byte[][] extensions)
+    {
+        return TestCsr.Tlv(0xA0, [.. extensions.Select(extension => ExtensionRequestAttribute(extension))]);
+    }
+
+    // The one extensionRequest Attribute (RFC 2986 §4) that Attributes writes for the given extensions.
+    private static byte[] ExtensionRequestAttribute(params byte[][] extensions)
+    {
+        return new AsnReader(Attributes(extensions), AsnEncodingRules.DER)
+            .ReadSetOf(new Asn1Tag(TagClass.ContextSpecific, 0))
+            .ReadEncodedValue()
+            .ToArray();
     }
 
     /// <summary>
