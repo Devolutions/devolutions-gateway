@@ -99,8 +99,8 @@ fn requested_enrollment_url(attributes: &[u8]) -> Option<String> {
     const SET: u8 = 0x31;
 
     let mut instances = Vec::new();
-    // An item that is not a SEQUENCE is neither an `Attribute`, an `Extensions` nor an `Extension`, so it requests
-    // nothing; one whose type cannot be read might request the extension.
+    // An item that is not a SEQUENCE is neither an `Attribute`, an `Extensions` nor an `Extension`, so it requests nothing.
+    // One whose type cannot be read might request the extension, so the CSR then names no URL.
     for (tag, attribute) in framed(attributes)? {
         if tag != SEQUENCE {
             continue;
@@ -153,9 +153,13 @@ fn framed(mut contents: &[u8]) -> Option<Vec<(u8, &[u8])>> {
 }
 
 /// Splits the first TLV off `input` and returns its tag, its contents and the rest of `input`.
-/// The tag is one byte and the length is definite, in the short form or in a long form of up to 4 bytes, minimal or not, as BER allows (X.690 §8.1.3).
+/// The tag is one byte, so the high-tag-number form, whose first byte has the low 5 bits set (X.690 §8.1.2.4), is refused rather than read as a one-byte tag followed by a length.
+/// The length is definite, in the short form or in a long form of up to 4 bytes, minimal or not, as BER allows (X.690 §8.1.3).
 fn split_tlv(input: &[u8]) -> Option<(u8, &[u8], &[u8])> {
     let (&tag, rest) = input.split_first()?;
+    if tag & 0x1F == 0x1F {
+        return None;
+    }
     let (&first, rest) = rest.split_first()?;
     let (length, rest) = if first < 0x80 {
         (usize::from(first), rest)
@@ -191,6 +195,7 @@ mod tests {
     const SUBJECT_ALT_NAME: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.5.29.17");
 
     const URL: &str = "https://host.example/dvls";
+    const OTHER_URL: &str = "https://relay.example/dvls";
 
     /// An attribute whose length takes 5 bytes in the long form, which BER allows and the reader doesn't frame.
     const FIVE_BYTE_LONG_FORM_LENGTH: &[u8] = &[0x30, 0x85, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00];
@@ -357,6 +362,32 @@ mod tests {
         extension(ENROLLMENT_URL_EXTENSION, &[], &tlv(0x16, &[url.as_bytes()]))
     }
 
+    /// An empty item with the high-tag-number tag `BF 81 nn` (X.690 §8.1.2.4), followed by `next`.
+    /// Read with a one-byte tag, `81 nn` is a long-form length whose contents hide `next`.
+    fn high_tag_number_item_hiding(next: &[u8]) -> Vec<u8> {
+        let hidden = u8::try_from(1 + next.len())
+            .ok()
+            .filter(|hidden| *hidden < 0x80)
+            .expect("a last tag number byte");
+        [&[0xBF, 0x81, hidden, 0x00], next].concat()
+    }
+
+    /// The attribute set holding `unframed`, then an `extensionRequest` naming the URL.
+    fn before_the_request(unframed: &[u8]) -> Vec<u8> {
+        attributes(&[unframed, &extension_request(&[&enrollment_url(URL)])])
+    }
+
+    /// The attribute set holding an `extensionRequest` naming the URL, then `unframed`.
+    fn after_the_request(unframed: &[u8]) -> Vec<u8> {
+        attributes(&[&extension_request(&[&enrollment_url(URL)]), unframed])
+    }
+
+    /// An `extensionRequest` attribute with the encoded `values` in its SET, and `trailing` after the SET.
+    fn extension_request_holding(values: &[&[u8]], trailing: &[u8]) -> Vec<u8> {
+        let oid = EXTENSION_REQUEST.to_der().expect("encodable OID");
+        tlv(0x30, &[&oid, &tlv(0x31, values), trailing])
+    }
+
     /// Rewrites a TLV's short-form length in the long form `81 nn`, which DER forbids.
     fn with_long_form_length(tlv: &[u8]) -> Vec<u8> {
         assert!(tlv[1] < 0x80, "short-form length");
@@ -463,39 +494,36 @@ mod tests {
     #[case::repeated_in_two_extension_requests(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL)]), &extension_request(&[&enrollment_url(URL)])]), ..Csr::valid() })]
     #[case::ia5_then_utf8_string(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL), &extension(ENROLLMENT_URL_EXTENSION, &[], &tlv(0x0C, &[URL.as_bytes()]))])]), ..Csr::valid() })]
     // The reader cannot frame the middle attribute, so it cannot tell how many instances the CSR requests.
-    #[case::attribute_it_cannot_frame_between_two_extension_requests(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL)]), FIVE_BYTE_LONG_FORM_LENGTH, &extension_request(&[&enrollment_url("https://relay.example/dvls")])]), ..Csr::valid() })]
+    #[case::attribute_it_cannot_frame_between_two_extension_requests(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL)]), FIVE_BYTE_LONG_FORM_LENGTH, &extension_request(&[&enrollment_url(OTHER_URL)])]), ..Csr::valid() })]
+    // An item with a high-tag-number tag, read as one tag byte, would hide the first instance.
+    #[case::high_tag_number_item_before_two_extension_requests(Csr { attributes: attributes(&[&high_tag_number_item_hiding(&extension_request(&[&enrollment_url(URL)])), &extension_request(&[&enrollment_url(OTHER_URL)])]), ..Csr::valid() })]
+    #[case::high_tag_number_item_before_two_extensions(Csr { attributes: attributes(&[&extension_request(&[&high_tag_number_item_hiding(&enrollment_url(URL)), &enrollment_url(OTHER_URL)])]), ..Csr::valid() })]
     fn csr_without_exactly_one_ia5_enrollment_url_names_none(#[case] csr: Csr) {
         let checked = check_csr(&csr.encode()).expect("valid CSR");
         assert_eq!(checked.enrollment_url, None);
     }
 
-    /// Where an attribute the reader cannot frame sits next to an `extensionRequest`.
-    #[derive(Debug, Clone, Copy)]
-    enum Position {
-        Before,
-        After,
-    }
-
-    /// The contract doesn't decide how an attribute the reader cannot frame affects reading the enrollment URL.
-    /// The mock's reader then cannot tell how many instances the CSR requests, so wherever that attribute sits, the CSR,
-    /// still valid, names no URL.
-    // oracle: mutant the reader guesses where the next attribute starts
+    /// The contract doesn't decide how an item the reader cannot frame affects reading the enrollment URL.
+    /// The mock's reader then cannot tell how many instances the CSR requests, so the CSR, still valid, names no URL.
+    /// This holds for an attribute wherever it sits, and for an item at each level the reader walks.
+    // oracle: mutant the reader guesses where the next attribute starts, or counts only the instances before one it cannot frame
     #[rstest]
-    #[case::length_reaching_into_the_next_attribute(&[0x30, 0x05, 0x06])]
-    #[case::indefinite_length(&[0x30, 0x80])]
-    #[case::five_byte_long_form_length(FIVE_BYTE_LONG_FORM_LENGTH)]
-    #[case::length_past_the_end(&[0x30, 0x81, 0xFF])]
-    fn attribute_the_reader_cannot_frame_leaves_no_url(
-        #[case] unframed: &[u8],
-        #[values(Position::Before, Position::After)] position: Position,
-    ) {
-        let request = extension_request(&[&enrollment_url(URL)]);
-        let ordered: [&[u8]; 2] = match position {
-            Position::Before => [unframed, &request],
-            Position::After => [&request, unframed],
-        };
+    #[case::length_reaching_into_the_next_attribute_before(before_the_request(&[0x30, 0x05, 0x06]))]
+    #[case::length_reaching_into_the_next_attribute_after(after_the_request(&[0x30, 0x05, 0x06]))]
+    #[case::indefinite_length_before(before_the_request(&[0x30, 0x80]))]
+    #[case::indefinite_length_after(after_the_request(&[0x30, 0x80]))]
+    #[case::five_byte_long_form_length_before(before_the_request(FIVE_BYTE_LONG_FORM_LENGTH))]
+    #[case::five_byte_long_form_length_after(after_the_request(FIVE_BYTE_LONG_FORM_LENGTH))]
+    #[case::length_past_the_end_before(before_the_request(&[0x30, 0x81, 0xFF]))]
+    #[case::length_past_the_end_after(after_the_request(&[0x30, 0x81, 0xFF]))]
+    #[case::attribute_type_it_cannot_frame(before_the_request(&[0x30, 0x01, 0x06]))]
+    #[case::item_after_the_extension_request_set(attributes(&[&extension_request_holding(&[&tlv(0x30, &[&enrollment_url(URL)])], &[0x30, 0x80])]))]
+    #[case::item_after_the_extensions(attributes(&[&extension_request_holding(&[&tlv(0x30, &[&enrollment_url(URL)]), &[0x30, 0x80]], &[])]))]
+    #[case::item_after_the_extension(attributes(&[&extension_request(&[&enrollment_url(URL), &[0x30, 0x80]])]))]
+    #[case::extension_id_it_cannot_frame(attributes(&[&extension_request(&[&[0x30, 0x01, 0x06], &enrollment_url(URL)])]))]
+    fn item_the_reader_cannot_frame_leaves_no_url(#[case] attributes: Vec<u8>) {
         let csr = Csr {
-            attributes: attributes(&ordered),
+            attributes,
             ..Csr::valid()
         };
 
