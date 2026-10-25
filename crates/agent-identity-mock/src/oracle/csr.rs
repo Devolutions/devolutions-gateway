@@ -86,7 +86,7 @@ pub(crate) fn check_csr(der_bytes: &[u8]) -> Option<CheckedCsr> {
     }
 }
 
-/// Returns the value of the enrollment URL extension (CONTRACT.agent-identity.md §4) that a CSR's attributes request in an `extensionRequest` ([RFC 2985 §5.4.2, "Extension request"][rfc]), if any.
+/// Returns the value of the enrollment URL extension (CONTRACT.agent-identity.md §4) that a CSR's attributes request in an `extensionRequest` ([RFC 2985 §5.4.2, "Extension request"][rfc]), if they request it exactly once, as an `IA5String`.
 /// `attributes` is the contents of the `[0]` attribute set; the attributes and extensions around the one read are skipped without requiring canonical DER.
 ///
 /// [rfc]: https://www.rfc-editor.org/rfc/rfc2985#section-5.4.2
@@ -97,7 +97,7 @@ fn requested_enrollment_url(attributes: &[u8]) -> Option<String> {
     const SEQUENCE: u8 = 0x30;
     const SET: u8 = 0x31;
 
-    tlvs(attributes)
+    let mut requested = tlvs(attributes)
         .filter(|(tag, _)| *tag == SEQUENCE)
         .filter_map(|(_, attribute)| {
             let mut fields = tlvs(attribute);
@@ -111,17 +111,20 @@ fn requested_enrollment_url(attributes: &[u8]) -> Option<String> {
         .filter(|(tag, _)| *tag == SEQUENCE)
         .flat_map(|(_, extensions)| tlvs(extensions))
         .filter(|(tag, _)| *tag == SEQUENCE)
-        .find_map(|(_, extension)| {
+        .filter_map(|(_, extension)| {
             let mut fields = tlvs(extension);
-            if fields.next()? != (OBJECT_IDENTIFIER, ENROLLMENT_URL_EXTENSION.as_bytes()) {
-                return None;
-            }
-            // `critical` is optional (`DEFAULT FALSE`), so `extnValue` is the first OCTET STRING.
-            let (_, value) = fields.find(|(tag, _)| *tag == OCTET_STRING)?;
-            let (tag, url, rest) = split_tlv(value)?;
-            let url = std::str::from_utf8(url).ok()?;
-            (tag == IA5_STRING && rest.is_empty() && url.is_ascii()).then(|| url.to_owned())
-        })
+            (fields.next()? == (OBJECT_IDENTIFIER, ENROLLMENT_URL_EXTENSION.as_bytes())).then_some(fields)
+        });
+    // A CSR requesting the extension more than once, in one `extensionRequest` or several, names no URL (§4).
+    let mut fields = requested.next()?;
+    if requested.next().is_some() {
+        return None;
+    }
+    // `critical` is optional (`DEFAULT FALSE`), so `extnValue` is the first OCTET STRING.
+    let (_, value) = fields.find(|(tag, _)| *tag == OCTET_STRING)?;
+    let (tag, url, rest) = split_tlv(value)?;
+    let url = std::str::from_utf8(url).ok()?;
+    (tag == IA5_STRING && rest.is_empty() && url.is_ascii()).then(|| url.to_owned())
 }
 
 /// Iterates over the TLVs of `contents`, stopping at the first one [`split_tlv`] cannot read.
@@ -428,15 +431,19 @@ mod tests {
         );
     }
 
-    /// CONTRACT.agent-identity.md §4: the enrollment URL extension holds the URL "as an `IA5String`" and is read from
-    /// the `extensionRequest`; a CSR without it is still a valid CSR, since renewal ignores the value.
+    /// CONTRACT.agent-identity.md §4: "A CSR that requests the enrollment URL extension more than once, in one
+    /// `extensionRequest` or several, or not as an `IA5String`, names no enrollment URL"; such a CSR, or one without the
+    /// extension, is still a valid CSR, since renewal ignores the value.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[rstest]
     #[case::no_attributes(Csr::valid())]
     #[case::empty_extension_request(Csr { attributes: attributes(&[&extension_request(&[])]), ..Csr::valid() })]
     #[case::other_extension_only(Csr { attributes: attributes(&[&extension_request(&[&extension(SUBJECT_ALT_NAME, &[], &tlv(0x16, &[URL.as_bytes()]))])]), ..Csr::valid() })]
     #[case::utf8_string_value(Csr { attributes: attributes(&[&extension_request(&[&extension(ENROLLMENT_URL_EXTENSION, &[], &tlv(0x0C, &[URL.as_bytes()]))])]), ..Csr::valid() })]
-    fn csr_without_an_ia5_enrollment_url_has_none(#[case] csr: Csr) {
+    #[case::repeated_in_one_extension_request(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL), &enrollment_url(URL)])]), ..Csr::valid() })]
+    #[case::repeated_in_two_extension_requests(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL)]), &extension_request(&[&enrollment_url(URL)])]), ..Csr::valid() })]
+    #[case::ia5_then_utf8_string(Csr { attributes: attributes(&[&extension_request(&[&enrollment_url(URL), &extension(ENROLLMENT_URL_EXTENSION, &[], &tlv(0x0C, &[URL.as_bytes()]))])]), ..Csr::valid() })]
+    fn csr_without_exactly_one_ia5_enrollment_url_names_none(#[case] csr: Csr) {
         let checked = check_csr(&csr.encode()).expect("valid CSR");
         assert_eq!(checked.enrollment_url, None);
     }

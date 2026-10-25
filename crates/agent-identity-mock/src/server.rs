@@ -226,7 +226,7 @@ mod tests {
     use crate::app::App;
     use crate::oracle::NonceStore;
     use crate::state::State;
-    use crate::test_x509::{csr_naming, enrollment_url_extension, key};
+    use crate::test_x509::{csr_naming, csr_requesting, enrollment_url_extension, key};
 
     /// CONTRACT.agent-identity.md §5.4: servers accept agent-facing request bodies up to 64 KiB.
     const BODY_LIMIT: usize = 64 * 1024;
@@ -744,6 +744,7 @@ mod tests {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
     #[rstest]
     #[case::other_url(csr_naming(&key(2), "https://relay.example/mock"))]
+    #[case::repeated_url(csr_requesting(&key(2), &["https://relay.example/mock", "https://relay.example/mock"]))]
     #[case::no_url(csr_vector("valid_with_empty_extension_request"))]
     #[tokio::test]
     async fn every_leaf_of_an_identity_names_the_url_of_its_token(#[case] renewal_csr: Vec<u8>) -> anyhow::Result<()> {

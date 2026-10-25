@@ -1790,7 +1790,7 @@ mod tests {
     use rstest::rstest;
 
     use super::*;
-    use crate::test_x509::{csr_naming, enrollment_url_extension, key};
+    use crate::test_x509::{csr_naming, csr_requesting, enrollment_url_extension, key};
 
     // Certificates live 100 s, so CONTRACT.agent-identity.md §6 grants each one 100 s of renewal grace after
     // `notAfter`.
@@ -2377,6 +2377,7 @@ mod tests {
     #[case::other_url(csr_naming(&key(1), "https://relay.example/mock"))]
     #[case::other_case(csr_naming(&key(1), "https://LOCALHOST/mock"))]
     #[case::trailing_slash(csr_naming(&key(1), "https://localhost/mock/"))]
+    #[case::repeated(csr_requesting(&key(1), &["https://localhost/mock", "https://localhost/mock"]))]
     fn enrollment_csr_not_naming_the_token_url_is_token_url_mismatch(#[case] csr: Vec<u8>) -> anyhow::Result<()> {
         let now = 1_790_000_000;
         let mut state = State::with_root(now)?;

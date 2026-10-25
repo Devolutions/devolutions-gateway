@@ -17,11 +17,19 @@ pub(crate) fn key(seed: u8) -> SigningKey {
 /// Returns a CSR for `key` with an empty subject and an `extensionRequest` holding only the enrollment URL extension
 /// naming `url`.
 pub(crate) fn csr_naming(key: &SigningKey, url: &str) -> Vec<u8> {
+    csr_requesting(key, &[url])
+}
+
+/// Returns a CSR for `key` with an empty subject and one `extensionRequest` holding an enrollment URL extension for each
+/// of `urls`, in order.
+pub(crate) fn csr_requesting(key: &SigningKey, urls: &[&str]) -> Vec<u8> {
     let mut builder = RequestBuilder::new(Name::default()).expect("empty subject");
-    let url = Ia5String::new(url).expect("ASCII URL");
-    builder
-        .add_extension((ENROLLMENT_URL_EXTENSION, false, &url))
-        .expect("encodable extension");
+    for url in urls {
+        let url = Ia5String::new(url).expect("ASCII URL");
+        builder
+            .add_extension((ENROLLMENT_URL_EXTENSION, false, &url))
+            .expect("encodable extension");
+    }
     builder
         .build::<_, DerSignature>(key)
         .expect("signed CSR")
