@@ -137,8 +137,10 @@ Not intended:
   Creating the identity initializes it; every accepted renew, confirm (including an already-current retry) and check-in, every authenticated `Hello`, and every later agent message on an authenticated stream sets it to the authority's current time.
 - Check-in is only a fallback for configuration and renewal requests while no channel is working.
   Features that need server push require the agent channel.
-- An enrollment token adds nothing to an identity's config.
-  An administrator assigns product settings to identities after they enroll, for example by selecting several identities and assigning them as tunnel agents of one Gateway; the authority then updates their config and gives that Gateway those identities, so that settings follow an administrator's decision about each device rather than the token it used.
+- An enrollment token gives an identity no config by default.
+  An administrator assigns product settings to identities after they enroll, for example by selecting several identities and assigning them as tunnel agents of one Gateway; the authority then updates their config and gives that Gateway those identities, so that settings follow an administrator's decision about each device.
+  An authority may let a token carry such assignments, chosen from the ones it recognizes rather than written as free-form config, and apply them to each identity the token enrolls as if an administrator had made them right after enrollment, so that the Gateway also receives the identity.
+  This suits only a short-lived token whose uses match machines known to be online, because anyone holding the token receives those assignments.
 
 ### Errors
 
