@@ -180,7 +180,7 @@ Not intended:
 
 ### Conformance
 
-- `docs/agent-identity/test-vectors.json` holds shared positive and negative vectors for request signatures and channel proofs, so that implementations in different languages check the same bytes.
+- `docs/agent-identity/test-vectors.json` holds shared positive and negative vectors for request signatures, channel proofs and CSRs, so that implementations in different languages check the same bytes.
   Its `evaluation` field says how a verifier runs them.
 - A signer passes a vector when it reproduces the vector's `Signature-Input`, `Content-Digest`, signature base and channel-proof input, and its signature verifies under the vector's public key.
   It need not reproduce the vector's signature bytes, because an ECDSA signer may be randomized.
