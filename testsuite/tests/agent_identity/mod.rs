@@ -96,8 +96,8 @@ mod process_tree {
             // SAFETY: The runner leads the original group; stopping it prevents new agent launches.
             let _ = unsafe { kill(-self.0, 9) };
             // Agents use separate process groups in this dedicated session.
-            // `ps` only lists PIDs and getsid finds the session members, because the `ps` session column is not portable:
-            // on macOS, `sess` prints a kernel session pointer rather than a session ID.
+            // `ps` lists only PIDs and getsid finds the session members, because the `ps` session column is not portable.
+            // On macOS, `sess` prints a kernel session pointer rather than a session ID.
             for _ in 0..3 {
                 let output = std::process::Command::new("ps").args(["-e", "-o", "pid="]).output();
                 let Ok(output) = output else {
@@ -105,9 +105,13 @@ mod process_tree {
                 };
                 let mut found = false;
                 for pid in String::from_utf8_lossy(&output.stdout).split_whitespace() {
+                    // PID 0 would make getsid read the caller's session and kill signal the caller's group.
                     let Ok(pid) = pid.parse::<i32>() else {
                         continue;
                     };
+                    if pid <= 0 {
+                        continue;
+                    }
                     // SAFETY: getsid only reads the session of this PID, and returns -1 once the process is gone.
                     if unsafe { getsid(pid) } == self.0 {
                         // SAFETY: This PID was verified as a member of this test's session.
