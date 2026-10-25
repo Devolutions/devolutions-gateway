@@ -16,7 +16,8 @@ use x509_cert::spki::{AlgorithmIdentifierOwned, SubjectPublicKeyInfoOwned};
 
 /// The OID of the enrollment URL extension that [CONTRACT.agent-identity.md] §4 "Certificates" defines.
 ///
-/// The contract's OID, `2.25.123288656976046528792596909476335030418`, has an arc wider than the 32 bits `x509-cert` parses, so the parties use `1.3.6.1.4.1.32473.1.1`, from the documentation arc of RFC 5612, until the extension moves under Devolutions' private enterprise number.
+/// §4 gives this value, which sits under the enterprise number RFC 5612 reserves for documentation.
+/// The contract moves it under Devolutions' own enterprise number before release, and this constant then follows.
 ///
 /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 pub(crate) const ENROLLMENT_URL_EXTENSION: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.6.1.4.1.32473.1.1");
