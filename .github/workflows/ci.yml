@@ -188,7 +188,8 @@ jobs:
         run: |
           set -eux
           rm -rf "$HOME/.cargo/bin"
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs             | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
         shell: bash
 
@@ -307,7 +308,8 @@ jobs:
         run: |
           set -eux
           rm -rf "$HOME/.cargo/bin"
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs             | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
         shell: bash
 

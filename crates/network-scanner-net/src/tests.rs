@@ -84,7 +84,8 @@ async fn connect_to_a_closed_port_fails() -> anyhow::Result<()> {
     let result = tokio::time::timeout(Duration::from_secs(10), socket.connect(&SockAddr::from(addr))).await?;
 
     // oracle: spec POSIX connect(2) §ERRORS
-    assert!(result.is_err(), "connecting to a closed port succeeded");
+    let error = result.expect_err("connecting to a closed port succeeded");
+    assert_eq!(error.kind(), ErrorKind::ConnectionRefused, "{error}");
 
     Ok(())
 }
