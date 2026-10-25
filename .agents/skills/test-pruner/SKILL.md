@@ -1,6 +1,6 @@
 ---
 name: test-pruner
-description: Prune, strengthen, and consolidate tests in a pass of at most one hour, using oracle classification and domain mutants, with cargo-mutants or Stryker.NET only on targeted modules or a change's diff. Use when asked to remove redundant tests, consolidate tests into cases or properties, audit test value, clean up AI-written tests, finalize a change's tests before its pull request opens, or get a mutation-backed review of a pull request's tests. For a quick oracle-only check, use `test-oracle-reviewer` instead.
+description: Prune, strengthen, and consolidate tests in a pass of at most one hour, using oracle classification and domain mutants, with cargo-mutants or Stryker.NET where their estimated run fits that hour. Use when asked to remove redundant tests, consolidate tests into cases or properties, audit test value, clean up AI-written tests, finalize a change's tests before its pull request opens, or get a mutation-backed review of a pull request's tests. For a quick oracle-only check, use `test-oracle-reviewer` instead.
 ---
 
 # Test pruner
@@ -28,7 +28,7 @@ Give it the applicable intent and contract files, the code under test, and `refe
 Ask for one patch per fault, each a single plausible mistake, weighted toward critical paths such as validation, cryptography, parsing, and authorization decisions, and as many as the estimate fits in the remaining budget.
 Write one positive control yourself, a mutant that a test you have read plainly catches, and apply it before the sub-agent's patches: if no test fails, the patched code is not what the tests run, as with a stale build or a filter that matches nothing, and every result of the pass is void.
 Apply each patch as `references/domain-mutants.md` describes.
-Add cargo-mutants (`references/cargo-mutants.md`) or Stryker.NET (`references/stryker.md`) only on targeted modules or a change's diff, preferring the critical ones, and never on a whole crate or project unless the user asks; load only the language in scope.
+Add cargo-mutants (`references/cargo-mutants.md`) or Stryker.NET (`references/stryker.md`) where the estimate fits the budget, critical modules first; load only the language in scope.
 Build the kill matrix of mutant by test: for a domain mutant, from the failing tests of its scoped run; for a tool mutant, from the tool's outputs, with per-test reruns only where the reference names them.
 A unique kill is a mutant caught by exactly one test in scope.
 Zero unique kills over nothing caught measures nothing and lets the invariant pass trivially, so a test whose code no mutant of the pass reaches is challenged rather than deleted on that evidence, until the budget runs out.
