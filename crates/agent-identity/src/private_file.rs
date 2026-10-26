@@ -813,10 +813,12 @@ mod unix_tests {
         fs::set_permissions(&identity, fs::Permissions::from_mode(0o500))?;
 
         let provisioned = prepare_directories(&directory.0, true);
+        let mode = fs::metadata(&identity).map(|metadata| metadata.permissions().mode() & 0o777);
         // A failed reset would leave a directory the test can't remove.
         let _ = fs::set_permissions(&identity, fs::Permissions::from_mode(0o700));
 
         provisioned?;
+        assert_eq!(mode?, 0o700);
         Ok(())
     }
 
