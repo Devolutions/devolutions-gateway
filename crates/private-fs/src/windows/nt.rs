@@ -16,8 +16,9 @@ use windows::Wdk::Storage::FileSystem::{
     NtSetInformationFile,
 };
 use windows::Win32::Foundation::{
-    ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_DEVICE_REQUEST,
-    STATUS_INVALID_INFO_CLASS, STATUS_INVALID_PARAMETER, STATUS_NOT_IMPLEMENTED, STATUS_NOT_SUPPORTED, UNICODE_STRING,
+    ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_DELETE_PENDING,
+    STATUS_INVALID_DEVICE_REQUEST, STATUS_INVALID_INFO_CLASS, STATUS_INVALID_PARAMETER, STATUS_NOT_IMPLEMENTED,
+    STATUS_NOT_SUPPORTED, UNICODE_STRING,
 };
 use windows::Win32::Security::SECURITY_DESCRIPTOR;
 use windows::Win32::Storage::FileSystem::{
@@ -78,13 +79,29 @@ pub(super) fn create_absolute(path: &str, request: &Request<'_>) -> io::Result<O
     create_in(HANDLE::default(), path.encode_utf16().collect(), request)
 }
 
-/// Opens or creates the entry of the directory `root` named by the UTF-16 `name`, which need not be valid UTF-16, as
-/// NTFS names need not be.
-pub(super) fn create_wide(root: BorrowedHandle<'_>, name: &[u16], request: &Request<'_>) -> io::Result<OwnedHandle> {
-    create_in(raw(root), name.to_vec(), request)
+/// Opens the listed entry of the directory `root` named by the UTF-16 `name`, which need not be valid UTF-16, as NTFS
+/// names need not be, or returns `None` when the entry is pending deletion.
+///
+/// An entry another program marked for deletion with the legacy semantics stays listed until its last handle closes,
+/// but can't be opened: NtCreateFile fails with STATUS_DELETE_PENDING, which the Win32 mapping makes access denied.
+pub(super) fn open_listed(
+    root: BorrowedHandle<'_>,
+    name: &[u16],
+    request: &Request<'_>,
+) -> io::Result<Option<OwnedHandle>> {
+    match create_status(raw(root), name.to_vec(), request)? {
+        Ok(handle) => Ok(Some(handle)),
+        Err(status) if status == STATUS_DELETE_PENDING => Ok(None),
+        Err(status) => Err(status_error(status)),
+    }
 }
 
-fn create_in(root: HANDLE, mut wide: Vec<u16>, request: &Request<'_>) -> io::Result<OwnedHandle> {
+fn create_in(root: HANDLE, wide: Vec<u16>, request: &Request<'_>) -> io::Result<OwnedHandle> {
+    create_status(root, wide, request)?.map_err(status_error)
+}
+
+/// Calls NtCreateFile, and returns its failure as the NTSTATUS itself.
+fn create_status(root: HANDLE, mut wide: Vec<u16>, request: &Request<'_>) -> io::Result<Result<OwnedHandle, NTSTATUS>> {
     let length = wide
         .len()
         .checked_mul(size_of::<u16>())
@@ -125,10 +142,10 @@ fn create_in(root: HANDLE, mut wide: Vec<u16>, request: &Request<'_>) -> io::Res
     };
     // NT_SUCCESS: success and informational codes are not negative; warnings and errors are.
     if status.0 < 0 {
-        return Err(status_error(status));
+        return Ok(Err(status));
     }
     // SAFETY: NtCreateFile succeeded, so the handle is open and nothing else owns it.
-    Ok(unsafe { OwnedHandle::from_raw_handle(handle.0) })
+    Ok(Ok(unsafe { OwnedHandle::from_raw_handle(handle.0) }))
 }
 
 /// Reads one fixed-size information class of `handle`.

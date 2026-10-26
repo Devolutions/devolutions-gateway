@@ -390,7 +390,8 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
     Ok(entries)
 }
 
-/// Returns the number of hard links of the entry `name` of `dir`, or `None` when it doesn't exist any more.
+/// Returns the number of hard links of the entry `name` of `dir`, or `None` when it doesn't exist any more or is pending
+/// deletion.
 ///
 /// The entry is opened with FILE_READ_ATTRIBUTES only, which the directory's FILE_LIST_DIRECTORY grants whatever the
 /// entry's own DACL says, without following a reparse point.
@@ -408,8 +409,10 @@ fn entry_links(dir: BorrowedHandle<'_>, path: &Utf8Path, name: &OsStr) -> Result
         attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
         descriptor: None,
     };
-    let handle = match nt::create_wide(dir, &name, &request) {
-        Ok(handle) => handle,
+    let handle = match nt::open_listed(dir, &name, &request) {
+        Ok(Some(handle)) => handle,
+        // Pending deletion, the entry goes once its last handle closes, as one removed since it was listed has.
+        Ok(None) => return Ok(None),
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(open_error(error)),
     };

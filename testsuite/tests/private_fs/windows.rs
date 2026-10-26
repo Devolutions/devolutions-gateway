@@ -28,7 +28,10 @@ use win_api_wrappers::raw::Win32::Security::{
     self, ACE_FLAGS, DACL_SECURITY_INFORMATION, SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE,
     TOKEN_IMPERSONATE, TOKEN_QUERY, TokenImpersonation,
 };
-use win_api_wrappers::raw::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT};
+use win_api_wrappers::raw::Win32::Storage::FileSystem::{
+    FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FileDispositionInfo,
+    SetFileInformationByHandle,
+};
 use win_api_wrappers::security::acl::{
     Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee, set_named_security_info,
 };
@@ -882,6 +885,38 @@ fn entries_list_a_name_that_is_not_valid_utf16() -> anyhow::Result<()> {
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, name);
     assert_eq!(entries[0].links, 1);
+    Ok(())
+}
+
+// oracle: mutant a listing that fails on an entry pending deletion instead of leaving it out
+#[test]
+fn entries_leave_out_an_entry_pending_deletion() -> anyhow::Result<()> {
+    // Catches a listing that fails as a whole on an entry another program marked for deletion with the legacy semantics
+    // and still holds open, which stays listed by name but can't be opened.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    drop(base.create_file("kept", &user_rule(), FileOptions::new())?);
+    drop(base.create_file("pending", &user_rule(), FileOptions::new())?);
+    let pending = test.path().join("pending");
+    let holder = std::fs::File::open(&pending)?;
+    let deleting = std::fs::OpenOptions::new()
+        .access_mode(0x0001_0000) // DELETE
+        .share_mode(0x7)
+        .open(&pending)?;
+    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+    // SAFETY: The handle is open with DELETE and the disposition structure stays live for the call.
+    unsafe {
+        SetFileInformationByHandle(
+            HANDLE(deleting.as_raw_handle()),
+            FileDispositionInfo,
+            (&raw const disposition).cast(),
+            u32::try_from(size_of::<FILE_DISPOSITION_INFO>())?,
+        )
+    }?;
+    drop(deleting);
+    let names: Vec<_> = base.entries()?.into_iter().map(|entry| entry.name).collect();
+    drop(holder);
+    assert_eq!(names, ["kept"]);
     Ok(())
 }
 
