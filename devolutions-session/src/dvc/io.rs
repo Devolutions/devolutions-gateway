@@ -636,17 +636,13 @@ impl IoRedirectionPipes {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::{Duration, Instant};
 
     use futures::poll;
-    use now_proto_pdu::NowMessage;
-    use tokio::sync::mpsc;
-
-    use std::sync::atomic::{AtomicU32, Ordering};
-    use std::time::Instant;
-
     use now_proto_pdu::ironrdp_core::encode_vec;
-    use now_proto_pdu::{NowChannelHeartbeatMsg, NowExecDataMsg, NowExecDataStreamKind};
+    use now_proto_pdu::{NowChannelHeartbeatMsg, NowExecDataMsg, NowExecDataStreamKind, NowMessage};
+    use tokio::sync::mpsc;
     use win_api_wrappers::event::Event;
     use windows::Win32::Foundation::{ERROR_MORE_DATA, GENERIC_READ, GENERIC_WRITE, HANDLE};
     use windows::Win32::Storage::FileSystem::{
