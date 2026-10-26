@@ -70,16 +70,21 @@ pub(super) fn win32_error(error: windows::core::Error) -> io::Error {
 
 /// Opens or creates the entry `name` of the directory `root`, without resolving any path but `name`.
 pub(super) fn create(root: BorrowedHandle<'_>, name: &str, request: &Request<'_>) -> io::Result<OwnedHandle> {
-    create_in(raw(root), name, request)
+    create_in(raw(root), name.encode_utf16().collect(), request)
 }
 
 /// Opens or creates the object at the NT path `path`, such as `\??\C:\Users`.
 pub(super) fn create_absolute(path: &str, request: &Request<'_>) -> io::Result<OwnedHandle> {
-    create_in(HANDLE::default(), path, request)
+    create_in(HANDLE::default(), path.encode_utf16().collect(), request)
 }
 
-fn create_in(root: HANDLE, name: &str, request: &Request<'_>) -> io::Result<OwnedHandle> {
-    let mut wide: Vec<u16> = name.encode_utf16().collect();
+/// Opens or creates the entry of the directory `root` named by the UTF-16 `name`, which need not be valid UTF-16, as
+/// NTFS names need not be.
+pub(super) fn create_wide(root: BorrowedHandle<'_>, name: &[u16], request: &Request<'_>) -> io::Result<OwnedHandle> {
+    create_in(raw(root), name.to_vec(), request)
+}
+
+fn create_in(root: HANDLE, mut wide: Vec<u16>, request: &Request<'_>) -> io::Result<OwnedHandle> {
     let length = wide
         .len()
         .checked_mul(size_of::<u16>())

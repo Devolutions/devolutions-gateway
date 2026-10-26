@@ -12,6 +12,7 @@ use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::marker::PhantomData;
+use std::os::windows::ffi::OsStrExt as _;
 use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
 use std::os::windows::io::{AsHandle as _, BorrowedHandle, FromRawHandle as _, OwnedHandle};
 use std::sync::{Mutex, PoisonError};
@@ -395,9 +396,8 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
 /// entry's own DACL says, without following a reparse point.
 fn entry_links(dir: BorrowedHandle<'_>, path: &Utf8Path, name: &OsStr) -> Result<Option<u64>> {
     let open_error = |error| Error::io(path, "open entry", error);
-    let name = name
-        .to_str()
-        .ok_or_else(|| open_error(io::Error::from(io::ErrorKind::InvalidData)))?;
+    // A listed name need not be valid UTF-16, so it is opened as listed.
+    let name: Vec<u16> = name.encode_wide().collect();
     let request = Request {
         // Not SYNCHRONIZE, which the entry's DACL may not grant, so the handle is asynchronous, which reading
         // information doesn't mind.
@@ -408,7 +408,7 @@ fn entry_links(dir: BorrowedHandle<'_>, path: &Utf8Path, name: &OsStr) -> Result
         attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
         descriptor: None,
     };
-    let handle = match nt::create(dir, name, &request) {
+    let handle = match nt::create_wide(dir, &name, &request) {
         Ok(handle) => handle,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(open_error(error)),

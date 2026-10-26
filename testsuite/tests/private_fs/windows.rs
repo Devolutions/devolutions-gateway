@@ -867,6 +867,24 @@ fn entries_report_each_file_s_hard_links() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: spec MS-FSCC §2.1.5.2 Filename
+#[test]
+fn entries_list_a_name_that_is_not_valid_utf16() -> anyhow::Result<()> {
+    // Catches a listing that fails on a name with an unpaired surrogate, which NTFS allows, so that one stray name
+    // stops every listing of the directory.
+    use std::os::windows::ffi::OsStringExt as _;
+
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let name = std::ffi::OsString::from_wide(&[u16::from(b'x'), 0xD800]);
+    std::fs::File::create(test.path().as_std_path().join(&name))?;
+    let entries = base.entries()?;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].name, name);
+    assert_eq!(entries[0].links, 1);
+    Ok(())
+}
+
 // oracle: mutant remove_file reporting the inverse of whether the file existed
 #[test]
 fn remove_file_reports_whether_the_file_existed() -> anyhow::Result<()> {
