@@ -87,7 +87,8 @@ fn granted(rule: Rule, grant_current_user: bool) -> Rule {
 }
 
 /// The rule of `identity`, `authorities`, `keys`, `rejected`, every authority directory and every `identity.json`, and
-/// of `<data-dir>` when the agent creates it; an existing `<data-dir>` gets only the check of the directories above.
+/// of `<data-dir>` when the agent creates it; an existing `<data-dir>` gets only the check of the directories above, and
+/// the directories above it that the agent creates keep the access they inherit.
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): they are owned by the agent's account, which in production is
 /// SYSTEM or root.
@@ -172,6 +173,9 @@ fn open_parent(path: &Utf8Path) -> anyhow::Result<(Dir, &str)> {
 
 /// Provisions the identity directories, and returns `<data-dir>`.
 ///
+/// A missing `<data-dir>` is created with the identity rule, and its missing parents as the platform creates any
+/// directory, so that they keep the access they inherit: they are not the agent's identity directories.
+///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): an identity directory with a wrong owner or wrong permissions is
 /// reset, without changing anything below it.
 ///
@@ -182,6 +186,9 @@ pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: boo
         grant_current_user || crate::windows::is_system()?,
         "identity directory must be created by SYSTEM"
     );
+    if let Some(parent) = data_dir.parent().filter(|parent| !parent.as_str().is_empty()) {
+        std::fs::create_dir_all(parent).context("create the parent of the identity data directory")?;
+    }
     let rule = tree_rule(grant_current_user);
     let data = Dir::create_base(data_dir, &rule).context("open identity data directory")?;
     let identity = provision(&data, "identity", &rule)?;
@@ -776,6 +783,26 @@ mod unix_tests {
         Ok(true)
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn provisioning_under_a_missing_parent_leaves_the_parent_its_default_mode() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let parent = directory.0.join("parent");
+        let data_dir = parent.join("data");
+        // A directory the platform creates by default gets the mode the process umask leaves.
+        let default = directory.0.join("default");
+        fs::create_dir(&default)?;
+
+        prepare_directories(&data_dir, true)?;
+
+        assert_eq!(
+            fs::metadata(&parent)?.permissions().mode(),
+            fs::metadata(&default)?.permissions().mode()
+        );
+        assert_eq!(fs::metadata(&data_dir)?.permissions().mode() & 0o777, 0o700);
+        Ok(())
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn a_pending_file_owned_by_another_account_is_ignored() -> anyhow::Result<()> {
@@ -944,6 +971,26 @@ mod windows_tests {
 
     // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
+    fn provisioning_under_a_missing_parent_leaves_the_parent_its_inherited_access() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let parent = directory.0.join("parent");
+        let data_dir = parent.join("data");
+
+        prepare_directories(&data_dir, true)?;
+
+        assert_eq!(acl::protected_dacl_of(&parent)?, None);
+        assert_eq!(
+            acl::protected_dacl_of(&data_dir)?,
+            Some(acl::sorted(&[
+                full(&acl::system_sid()?, INHERITED),
+                full(&acl::user_sid()?, INHERITED)
+            ]))
+        );
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
     fn replacing_a_file_waits_for_a_reader_to_close_it() -> anyhow::Result<()> {
         // A reader holding the destination open, even one sharing deletion as the standard library does, makes the
         // replacement fail with `ERROR_ACCESS_DENIED` until it closes the file.
@@ -1042,55 +1089,65 @@ mod windows_tests {
         Ok(())
     }
 
-    /// The DACL a test gives a pending file the current user owns.
-    #[derive(Clone, Copy, Debug)]
-    enum PendingDacl {
-        /// SYSTEM and the agent's account, as the agent writes it under `__debug__.identity.acl_grant_current_user`.
-        Provisioned,
-        /// The same with a zero-access OWNER RIGHTS entry, which only an administrator owner's file carries.
-        WithZeroOwnerRights,
-        /// The same with full control for Users.
-        WithUsers,
-    }
-
-    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
-    #[rstest::rstest]
-    #[case::provisioned(PendingDacl::Provisioned, true)]
-    #[case::with_zero_owner_rights(PendingDacl::WithZeroOwnerRights, false)]
-    #[case::with_users(PendingDacl::WithUsers, false)]
-    fn a_pending_file_owned_by_the_agent_is_read_only_in_the_provisioned_form(
-        #[case] dacl: PendingDacl,
-        #[case] readable: bool,
-    ) -> anyhow::Result<()> {
-        let directory = TestDir::provisioned()?;
+    /// Writes a pending file the current user owns, with the DACL the agent gives it under
+    /// `__debug__.identity.acl_grant_current_user` plus `extra`.
+    fn pending_file_owned_by_the_agent(directory: &TestDir, extra: Option<Ace>) -> anyhow::Result<Utf8PathBuf> {
         let path = directory.pending_file('a');
         write_atomic(&directory.0, &path, b"blob", true)?;
         let user = acl::user_sid()?;
-        let system = acl::system_sid()?;
-        let mut entries = vec![full(&system, NO_INHERITANCE.0), full(&user, NO_INHERITANCE.0)];
-        match dacl {
-            PendingDacl::Provisioned => {}
-            PendingDacl::WithZeroOwnerRights => entries.push((acl::owner_rights_sid()?, 0, NO_INHERITANCE.0)),
-            PendingDacl::WithUsers => entries.push(full(&Sid::from_well_known(WinBuiltinUsersSid, None)?, 0)),
-        }
+        let mut entries = vec![
+            full(&acl::system_sid()?, NO_INHERITANCE.0),
+            full(&user, NO_INHERITANCE.0),
+        ];
+        entries.extend(extra);
         acl::set_owner(&path, &user)?;
         acl::set_dacl(&path, &entries)?;
+        Ok(path)
+    }
 
-        let read = open_pending_read(&path, true);
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn a_pending_file_owned_by_the_agent_in_the_provisioned_form_is_read() -> anyhow::Result<()> {
+        let directory = TestDir::provisioned()?;
+        let path = pending_file_owned_by_the_agent(&directory, None)?;
 
-        assert_eq!(read.is_ok(), readable, "{dacl:?}: {read:?}");
+        open_pending_read(&path, true)?;
         Ok(())
+    }
+
+    /// An entry a test adds to the DACL of a pending file the agent owns.
+    #[derive(Clone, Copy, Debug)]
+    enum ExtraEntry {
+        /// A zero-access OWNER RIGHTS entry, which only an administrator owner's file carries.
+        ZeroOwnerRights,
+        /// Full control for Users.
+        Users,
     }
 
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[rstest::rstest]
-    #[case::with_zero_owner_rights(true, true)]
-    #[case::without_owner_rights(false, false)]
-    fn a_pending_file_owned_by_administrators_needs_a_zero_owner_rights_entry(
-        #[case] owner_rights: bool,
-        #[case] readable: bool,
-    ) -> anyhow::Result<()> {
+    #[case::zero_owner_rights(ExtraEntry::ZeroOwnerRights)]
+    #[case::users(ExtraEntry::Users)]
+    fn a_pending_file_owned_by_the_agent_in_another_form_is_ignored(#[case] extra: ExtraEntry) -> anyhow::Result<()> {
         let directory = TestDir::provisioned()?;
+        let entry = match extra {
+            ExtraEntry::ZeroOwnerRights => (acl::owner_rights_sid()?, 0, NO_INHERITANCE.0),
+            ExtraEntry::Users => full(&Sid::from_well_known(WinBuiltinUsersSid, None)?, NO_INHERITANCE.0),
+        };
+        let path = pending_file_owned_by_the_agent(&directory, Some(entry))?;
+
+        let error = open_pending_read(&path, true).expect_err("a pending file in another form was read");
+
+        assert!(is_untrusted(&error), "{extra:?}: {error:#}");
+        Ok(())
+    }
+
+    /// Writes a pending file that BUILTIN\Administrators owns and that grants SYSTEM full control, with a zero-access
+    /// OWNER RIGHTS entry when `owner_rights` is set, or returns `None` when the token can't give a file that owner.
+    fn pending_file_owned_by_administrators(
+        directory: &TestDir,
+        owner_rights: bool,
+    ) -> anyhow::Result<Option<Utf8PathBuf>> {
         let path = directory.pending_file('b');
         write_atomic(&directory.0, &path, b"blob", true)?;
         let administrators = Sid::from_well_known(WinBuiltinAdministratorsSid, None)?;
@@ -1099,22 +1156,47 @@ mod windows_tests {
                 io::stderr(),
                 "SKIP: giving a file another owner needs an elevated token"
             )?;
-            return Ok(());
+            return Ok(None);
         }
         let mut entries = vec![full(&acl::system_sid()?, NO_INHERITANCE.0)];
         if owner_rights {
             entries.push((acl::owner_rights_sid()?, 0, NO_INHERITANCE.0));
         }
         acl::set_dacl(&path, &entries)?;
+        Ok(Some(path))
+    }
 
-        // The zero OWNER RIGHTS entry takes away even the owner's right to read the DACL, so the test reads the file as
-        // SYSTEM can, through the backup privilege, which private-fs opens with.
-        let read = {
-            let _backup = private_fs::BackupPrivilege::enable()?;
-            open_pending_read(&path, false)
+    /// Opens a pending file as SYSTEM can, through the backup privilege, which private-fs opens with.
+    ///
+    /// The zero OWNER RIGHTS entry takes away even the owner's right to read the DACL, and the test is not SYSTEM.
+    fn open_pending_as_system(path: &Utf8Path) -> anyhow::Result<File> {
+        let _backup = private_fs::BackupPrivilege::enable()?;
+        open_pending_read(path, false)
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn a_pending_file_owned_by_administrators_with_a_zero_owner_rights_entry_is_read() -> anyhow::Result<()> {
+        let directory = TestDir::provisioned()?;
+        let Some(path) = pending_file_owned_by_administrators(&directory, true)? else {
+            return Ok(());
         };
 
-        assert_eq!(read.is_ok(), readable, "{read:?}");
+        open_pending_as_system(&path)?;
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    #[test]
+    fn a_pending_file_owned_by_administrators_without_a_zero_owner_rights_entry_is_ignored() -> anyhow::Result<()> {
+        let directory = TestDir::provisioned()?;
+        let Some(path) = pending_file_owned_by_administrators(&directory, false)? else {
+            return Ok(());
+        };
+
+        let error = open_pending_as_system(&path).expect_err("a pending file without OWNER RIGHTS was read");
+
+        assert!(is_untrusted(&error), "{error:#}");
         Ok(())
     }
 

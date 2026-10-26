@@ -955,6 +955,60 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/private-fs/INTENT.md §paths
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_key_directory_under_an_execute_only_parent_is_refused() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // `crates/device-key/INTENT.md` ("File backend") asks only two rights on the ancestors for keeping and using keys
+        // once the key directory exists; creating it needs its parent open, to sync the new entry so that it survives a
+        // power cut.
+        struct RestorePermissions(Utf8PathBuf);
+
+        impl Drop for RestorePermissions {
+            fn drop(&mut self) {
+                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+            }
+        }
+
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            writeln!(
+                std::io::stderr(),
+                "SKIP: a_missing_key_directory_under_an_execute_only_parent_is_refused needs an account other than root"
+            )?;
+            return Ok(());
+        }
+        let root = KeyDirectory::new()?;
+        let parent = root.0.join("execute-only");
+        fs::create_dir(&parent)?;
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o100))?;
+        let restore = RestorePermissions(parent.clone());
+        let backend = KeyBackend::File {
+            dir: parent.join("keys"),
+        };
+
+        let error = generate(&backend, &new_key_name(TEST_PREFIX))
+            .err()
+            .context("a key directory was created under an execute-only parent")?;
+        drop(restore);
+
+        let refusal = error
+            .chain()
+            .find_map(|cause| cause.downcast_ref::<private_fs::Error>())
+            .context("the failure is not from private-fs")?;
+        assert!(
+            matches!(
+                refusal.kind(),
+                private_fs::ErrorKind::Refused(private_fs::Refusal::Unreadable(_))
+            ),
+            "{error:#}"
+        );
+        assert!(!parent.join("keys").exists());
+        Ok(())
+    }
+
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[cfg(windows)]
     #[test]
