@@ -45,6 +45,10 @@ const FULL: u32 = 0x001F_01FF;
 const READ_WRITE_DIRECTORY: u32 = 0x0013_01FF;
 /// `READ_CONTROL | SYNCHRONIZE | FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES`, `FILE_GENERIC_READ`.
 const READ: u32 = 0x0012_0089;
+/// `READ_CONTROL`.
+const READ_CONTROL: u32 = 0x0002_0000;
+/// `FILE_TRAVERSE`.
+const TRAVERSE: u32 = 0x20;
 /// `FILE_DELETE_CHILD`.
 const DELETE_CHILD: u32 = 0x40;
 /// `FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY | SYNCHRONIZE`.
@@ -635,6 +639,36 @@ fn a_directory_above_others_can_only_add_to_is_accepted() -> anyhow::Result<()> 
         InheritableAclKind::Protected,
     )?;
     Dir::create_base(&test.path().join("base"), &user_rule())?;
+    Ok(())
+}
+
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn a_directory_above_that_lets_the_user_only_read_its_access_is_accepted() -> anyhow::Result<()> {
+    // Catches an ancestor check that asks a directory above for more than reading its owner and DACL, such as
+    // SYNCHRONIZE or FILE_READ_ATTRIBUTES, which a directory the user may only traverse doesn't grant.
+    let test = TestDir::new();
+    let above = test.path().join("above");
+    let existing = above.join("existing");
+    std::fs::create_dir_all(&existing)?;
+    set_dacl(
+        &existing,
+        &[(user(), FULL, INHERITED_BY_CHILDREN)],
+        InheritableAclKind::Protected,
+    )?;
+    set_dacl(
+        &above,
+        &[(user(), READ_CONTROL | TRAVERSE, 0)],
+        InheritableAclKind::Protected,
+    )?;
+    let created = Dir::create_base(&existing.join("base"), &user_rule());
+    // The owner keeps WRITE_DAC, so the test can give itself access again to clean up.
+    set_dacl(
+        &above,
+        &[(user(), FULL, INHERITED_BY_CHILDREN)],
+        InheritableAclKind::Protected,
+    )?;
+    created?;
     Ok(())
 }
 

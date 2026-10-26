@@ -20,6 +20,7 @@ use windows::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_FOR_BACKUP_INTENT,
     FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_OPTIONS,
 };
+use windows::Win32::Foundation::ERROR_DIRECTORY;
 use windows::Win32::Foundation::{ERROR_NO_TOKEN, ERROR_NOT_ALL_ASSIGNED, HANDLE, LUID};
 use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::{
@@ -196,7 +197,7 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
                 let repairing = nt::create(parent.handle(), name, &request)
                     .map_err(|error| Error::io(path, "open directory for repair", error))?;
                 let policy = Policy::new(rule, Kind::Directory, path)?;
-                repair(repairing.as_handle(), path, &policy)?;
+                repair(repairing.as_handle(), path, Kind::Directory, &policy)?;
                 let handle = reopen(repairing.as_handle(), DIRECTORY_ACCESS)
                     .map_err(|error| Error::io(path, "open directory", error))?;
                 check_item(handle.as_handle(), path, Kind::Directory, &policy.exact())?;
@@ -425,14 +426,25 @@ pub(crate) fn check_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
 
 pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
     let policy = Policy::new(rule, Kind::Directory, path)?;
-    repair(dir.handle(), path, &policy)?;
+    repair(dir.handle(), path, Kind::Directory, &policy)?;
     check_item(dir.handle(), path, Kind::Directory, &policy.exact())
 }
 
-/// Brings the owner and DACL of the directory `handle` refers to into line with `policy`, through a handle opened again
+/// Brings an open file's owner and DACL into line with `rule`, then checks it exactly.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "lib.rs exposes it as private_fs::repair_file")
+)]
+pub(crate) fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
+    let policy = Policy::new(rule, Kind::File, path)?;
+    repair(file.as_handle(), path, Kind::File, &policy)?;
+    check_item(file.as_handle(), path, Kind::File, &policy.exact())
+}
+
+/// Brings the owner and DACL of the item `handle` refers to into line with `policy`, through a handle opened again
 /// with the repair's access only, without checking the result.
-fn repair(handle: BorrowedHandle<'_>, path: &Utf8Path, policy: &Policy) -> Result<()> {
-    classify(handle, path, Kind::Directory)?;
+fn repair(handle: BorrowedHandle<'_>, path: &Utf8Path, kind: Kind, policy: &Policy) -> Result<()> {
+    classify(handle, path, kind)?;
     let security =
         OwnerAndDacl::of_handle(handle).map_err(|error| Error::io(path, "read access control list", error))?;
     let current_owner = security.owner();
@@ -463,19 +475,18 @@ fn repair(handle: BorrowedHandle<'_>, path: &Utf8Path, policy: &Policy) -> Resul
         descriptor: None,
     };
     // An empty name relative to a handle names its object.
-    let reopened =
-        nt::create(handle, "", &request).map_err(|error| Error::io(path, "open directory for repair", error))?;
+    let reopened = nt::create(handle, "", &request).map_err(|error| Error::io(path, "open for repair", error))?;
     let original = nt::file_id(handle).map_err(|error| Error::io(path, "read file ID", error))?;
     let current = nt::file_id(reopened.as_handle()).map_err(|error| Error::io(path, "read file ID", error))?;
     if original != current {
         return Err(Error::io(
             path,
-            "open directory for repair",
-            io::Error::other("the directory was replaced while reopening it"),
+            "open for repair",
+            io::Error::other("the item was replaced while reopening it"),
         ));
     }
     // Unlike SetSecurityInfo, SetKernelObjectSecurity doesn't propagate inheritable entries to existing children, so a
-    // repair never changes what lies below the directory.
+    // repair never changes what lies below a directory.
     // SAFETY: The handle is open and the descriptor stays live for the call.
     unsafe { SetKernelObjectSecurity(raw(reopened.as_handle()), information, descriptor.as_raw()) }
         .map_err(|error| Error::io(path, "set access control list", nt::win32_error(error)))
@@ -772,7 +783,7 @@ fn open_entry(
     }
 }
 
-/// Refuses an item that is a reparse point, isn't of `kind`, or is on a volume that doesn't enforce ACLs.
+/// Refuses an item that is a reparse point, isn't of `kind`, or is on a volume that doesn't enforce ACLs or is remote.
 fn classify(handle: BorrowedHandle<'_>, path: &Utf8Path, kind: Kind) -> Result<()> {
     let (attributes, tag) =
         nt::attributes_and_tag(handle).map_err(|error| Error::io(path, "read attributes", error))?;
@@ -793,7 +804,8 @@ fn classify(handle: BorrowedHandle<'_>, path: &Utf8Path, kind: Kind) -> Result<(
         }
         Kind::Directory => {}
     }
-    if !nt::persistent_acls(handle).map_err(|error| Error::io(path, "read volume information", error))? {
+    let volume_error = |error| Error::io(path, "read volume information", error);
+    if !nt::persistent_acls(handle).map_err(volume_error)? || nt::is_remote(handle).map_err(volume_error)? {
         return Err(Error::refused(path, Refusal::Volume));
     }
     Ok(())
@@ -875,16 +887,44 @@ fn open_first_existing(path: &Utf8Path, policy: &Policy) -> Result<Dir> {
     Ok(Dir::new(handle, false))
 }
 
-/// Checks a directory above the first existing one, at its resolved path.
+/// Checks a directory above the first existing one, at its resolved path, such as `\\?\C:\Users`.
+///
+/// The directory is opened with READ_CONTROL only, so that reading its owner and DACL is all the check needs, besides
+/// traversing the directories above it.
 fn check_above(path: &Utf8Path, policy: &Policy) -> Result<()> {
     let unreadable = |error| Error::refused(path, Refusal::Unreadable(error));
-    let handle = open_path(path, CHECK_ACCESS).map_err(unreadable)?;
-    let (attributes, tag) = nt::attributes_and_tag(handle.as_handle()).map_err(unreadable)?;
-    // The path was resolved through every link, so a link on it now was put there since.
-    // A volume mounted on a folder is a name surrogate on the resolved path too, and is refused although nobody put it
-    // there since.
-    let link = attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 && nt::is_name_surrogate(tag);
-    if link || attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+    let nt_path = path
+        .as_str()
+        .strip_prefix(r"\\?\")
+        .map(|rest| format!(r"\??\{rest}"))
+        .ok_or_else(|| {
+            unreadable(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "the path is not a resolved path",
+            ))
+        })?;
+    let request = Request {
+        // Not FILE_READ_ATTRIBUTES or SYNCHRONIZE, which the directory may not grant, and which CreateFileW would add.
+        access: READ_CONTROL,
+        share: SHARE_ALL,
+        disposition: FILE_OPEN,
+        // A reparse point is followed, since its attributes can't be read without FILE_READ_ATTRIBUTES.
+        options: NTCREATEFILE_CREATE_OPTIONS(FILE_DIRECTORY_FILE.0 | FILE_OPEN_FOR_BACKUP_INTENT.0),
+        attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
+        descriptor: None,
+    };
+    let handle = match nt::create_absolute(&nt_path, &request) {
+        Ok(handle) => handle,
+        // STATUS_NOT_A_DIRECTORY: a file has replaced the directory since its path was resolved.
+        Err(error) if error.raw_os_error() == Some(ERROR_DIRECTORY.0.cast_signed()) => {
+            return Err(Error::refused(path, Refusal::Replaceable));
+        }
+        Err(error) => return Err(unreadable(error)),
+    };
+    // The path was resolved through every link, so a directory that now resolves elsewhere, through a link put there
+    // since or a folder on which a volume with a drive letter is mounted, is refused.
+    let resolved = nt::final_path(handle.as_handle()).map_err(unreadable)?;
+    if !same_name(&resolved, path.as_str()) {
         return Err(Error::refused(path, Refusal::Replaceable));
     }
     let security = OwnerAndDacl::of_handle(handle.as_handle()).map_err(unreadable)?;
@@ -905,6 +945,45 @@ fn open_path(path: &Utf8Path, access: FILE_ACCESS_RIGHTS) -> io::Result<OwnedHan
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Access, Account};
+
+    /// A directory under the system temporary directory, whose ancestors pass the ancestor check, removed on drop.
+    struct TestDir(Utf8PathBuf);
+
+    impl TestDir {
+        fn new() -> Self {
+            let temp = Utf8PathBuf::from_path_buf(std::env::temp_dir()).expect("the temporary directory path is UTF-8");
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("the clock is after 1970")
+                .as_nanos();
+            Self(temp.join(format!("pfs-unit-{}-{unique}", std::process::id())))
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    // oracle: intent crates/private-fs/INTENT.md §paths
+    #[test]
+    fn repair_file_brings_a_file_into_line_with_its_rule() -> Result<()> {
+        // Catches a file repair that leaves an entry the rule doesn't name.
+        let test = TestDir::new();
+        let user_full = Rule::new()
+            .owner(Account::CurrentUser)
+            .grant(Account::CurrentUser, Access::Full);
+        let base = crate::Dir::create_base(&test.0, &user_full)?;
+        let wider = user_full.clone().grant(Account::System, Access::Full);
+        let file = base.create_file("file", &wider, FileOptions::new())?;
+        let exact = user_full.exact();
+        let path = test.0.join("file");
+        assert!(check_file(&file, &path, &exact).is_err());
+        repair_file(&file, &path, &exact)?;
+        check_file(&file, &path, &exact)
+    }
 
     /// Reparse tags, from [MS-FSCC] "Reparse Tags".
     ///

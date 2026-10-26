@@ -11,8 +11,9 @@ use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::{
     FILE_DISPOSITION_DELETE, FILE_DISPOSITION_POSIX_SEMANTICS, FILE_INFORMATION_CLASS, FILE_RENAME_INFORMATION,
     FILE_RENAME_POSIX_SEMANTICS, FILE_RENAME_REPLACE_IF_EXISTS, FileDispositionInformation,
-    FileDispositionInformationEx, FileRenameInformation, FileRenameInformationEx, NTCREATEFILE_CREATE_DISPOSITION,
-    NTCREATEFILE_CREATE_OPTIONS, NtCreateFile, NtSetInformationFile,
+    FileDispositionInformationEx, FileFsDeviceInformation, FileRenameInformation, FileRenameInformationEx,
+    NTCREATEFILE_CREATE_DISPOSITION, NTCREATEFILE_CREATE_OPTIONS, NtCreateFile, NtQueryVolumeInformationFile,
+    NtSetInformationFile,
 };
 use windows::Win32::Foundation::{
     ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_DEVICE_REQUEST,
@@ -69,6 +70,15 @@ pub(super) fn win32_error(error: windows::core::Error) -> io::Error {
 
 /// Opens or creates the entry `name` of the directory `root`, without resolving any path but `name`.
 pub(super) fn create(root: BorrowedHandle<'_>, name: &str, request: &Request<'_>) -> io::Result<OwnedHandle> {
+    create_in(raw(root), name, request)
+}
+
+/// Opens or creates the object at the NT path `path`, such as `\??\C:\Users`.
+pub(super) fn create_absolute(path: &str, request: &Request<'_>) -> io::Result<OwnedHandle> {
+    create_in(HANDLE::default(), path, request)
+}
+
+fn create_in(root: HANDLE, name: &str, request: &Request<'_>) -> io::Result<OwnedHandle> {
     let mut wide: Vec<u16> = name.encode_utf16().collect();
     let length = wide
         .len()
@@ -82,7 +92,7 @@ pub(super) fn create(root: BorrowedHandle<'_>, name: &str, request: &Request<'_>
     };
     let attributes = OBJECT_ATTRIBUTES {
         Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).expect("OBJECT_ATTRIBUTES is a few dozen bytes"),
-        RootDirectory: raw(root),
+        RootDirectory: root,
         ObjectName: &raw const object_name,
         // Win32 file names are case-insensitive, and so are the names private-fs opens.
         Attributes: OBJ_CASE_INSENSITIVE,
@@ -92,7 +102,7 @@ pub(super) fn create(root: BorrowedHandle<'_>, name: &str, request: &Request<'_>
     let mut handle = HANDLE::default();
     let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: The name, its buffer, the object attributes and the security descriptor stay live for the call, the root
-    // handle is open, and the handle and status block outputs are writable.
+    // handle is open or null, and the handle and status block outputs are writable.
     let status = unsafe {
         NtCreateFile(
             &raw mut handle,
@@ -169,6 +179,33 @@ pub(super) fn persistent_acls(handle: BorrowedHandle<'_>) -> io::Result<bool> {
     unsafe { GetVolumeInformationByHandleW(raw(handle), None, None, None, Some(&raw mut flags), None) }
         .map_err(win32_error)?;
     Ok(flags & FILE_PERSISTENT_ACLS != 0)
+}
+
+/// Reports whether the volume holding `handle` is remote, such as an SMB share, whose server decides access with its own
+/// accounts rather than by the DACLs this computer reads.
+///
+/// UNTESTED: a file on a mapped or UNC SMB share reports `true`, and one on a local disk `false`.
+/// Tests have no share to mount; when changing this, check both, because a share keeps ACLs and would otherwise pass the
+/// volume check.
+pub(super) fn is_remote(handle: BorrowedHandle<'_>) -> io::Result<bool> {
+    // FILE_FS_DEVICE_INFORMATION: DeviceType, then Characteristics.
+    let mut information = [0u32; 2];
+    let mut status_block = IO_STATUS_BLOCK::default();
+    // SAFETY: The handle is open, and the information and status block outputs are writable for their sizes.
+    let status = unsafe {
+        NtQueryVolumeInformationFile(
+            raw(handle),
+            &raw mut status_block,
+            information.as_mut_ptr().cast(),
+            4 /* DeviceType */ + 4, /* Characteristics */
+            FileFsDeviceInformation,
+        )
+    };
+    if status.0 < 0 {
+        return Err(status_error(status));
+    }
+    // FILE_REMOTE_DEVICE.
+    Ok(information[1] & 0x10 != 0)
 }
 
 /// Returns the normalized path of `handle` with its DOS volume name, such as `\\?\C:\Users`.
