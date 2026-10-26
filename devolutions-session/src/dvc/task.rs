@@ -184,6 +184,7 @@ async fn serve_channel(mut shutdown_signal: ShutdownSignal) -> anyhow::Result<Ch
     // Each channel gets its own progress, and therefore its own negotiation deadline.
     let init_progress = Arc::new(DvcInitializationProgress::default());
     let io_thread_progress = Arc::clone(&init_progress);
+    let (io_loop_ended_tx, io_loop_ended_rx) = tokio::sync::oneshot::channel();
 
     info!(
         "Starting NowProto DVC v{}.{}",
@@ -193,7 +194,13 @@ async fn serve_channel(mut shutdown_signal: ShutdownSignal) -> anyhow::Result<Ch
 
     // Spawning thread is relatively short operation, so it could be executed synchronously.
     let io_thread = std::thread::spawn(move || {
-        let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event, &io_thread_progress);
+        let io_thread_result = run_dvc_io(
+            write_rx,
+            read_tx,
+            cloned_shutdown_event,
+            &io_thread_progress,
+            io_loop_ended_tx,
+        );
 
         if let Err(error) = io_thread_result {
             error!(%error, "DVC IO thread failed");
@@ -217,7 +224,11 @@ async fn serve_channel(mut shutdown_signal: ShutdownSignal) -> anyhow::Result<Ch
 
     info!("Processing DVC messages...");
 
-    let process_result = process_messages(read_rx, write_tx, shutdown_signal.clone(), &init_progress).await;
+    let process_result = process_until_io_ends(
+        process_messages(read_rx, write_tx, shutdown_signal.clone(), &init_progress),
+        io_loop_ended_rx,
+    )
+    .await;
 
     // Send shutdown signal to IO thread to release WTS channel resources.
     info!("Shutting down DVC IO thread");
@@ -244,6 +255,17 @@ async fn serve_channel(mut shutdown_signal: ShutdownSignal) -> anyhow::Result<Ch
     }
 
     Ok(outcome)
+}
+
+async fn process_until_io_ends(
+    processing: impl Future<Output = anyhow::Result<()>>,
+    io_loop_ended: tokio::sync::oneshot::Receiver<()>,
+) -> anyhow::Result<()> {
+    select! {
+        biased;
+        result = processing => result,
+        _ = io_loop_ended => bail!("DVC IO loop ended"),
+    }
 }
 
 async fn process_messages(
@@ -1510,10 +1532,43 @@ mod tests {
 
     use super::{
         ChannelOutcome, DEFAULT_HEARTBEAT_INTERVAL, MAX_CONSECUTIVE_FAILED_REOPENS, REOPEN_DELAY_CAP,
-        REOPEN_DELAY_FLOOR, heartbeat_timer, process_messages, serve_dvc, spawn_heartbeat,
+        REOPEN_DELAY_FLOOR, heartbeat_timer, process_messages, process_until_io_ends, serve_dvc, spawn_heartbeat,
     };
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
+
+    // oracle: mutant a full stdin queue prevents a closed DVC from interrupting the processing loop.
+    #[tokio::test]
+    async fn io_loss_interrupts_processing_while_stdin_is_backpressured() {
+        let (stdin_tx, _stdin_rx) = tokio::sync::mpsc::channel(1);
+        stdin_tx.send(()).await.expect("fill stdin queue");
+        let processing = async move {
+            stdin_tx.send(()).await.expect("stdin queue remains open");
+            Ok(())
+        };
+        let (io_loop_ended_tx, io_loop_ended_rx) = tokio::sync::oneshot::channel();
+        io_loop_ended_tx.send(()).expect("publish IO loop exit");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            process_until_io_ends(processing, io_loop_ended_rx),
+        )
+        .await
+        .expect("IO loss interrupts the blocked stdin send");
+
+        assert!(result.is_err(), "transport loss must enter channel recovery");
+    }
+
+    // oracle: mutant IO teardown changes an already-completed normal protocol close into a transport failure.
+    #[tokio::test]
+    async fn completed_protocol_close_stays_normal_when_io_also_ends() {
+        let (io_loop_ended_tx, io_loop_ended_rx) = tokio::sync::oneshot::channel();
+        io_loop_ended_tx.send(()).expect("publish IO loop exit");
+
+        process_until_io_ends(async { Ok(()) }, io_loop_ended_rx)
+            .await
+            .expect("normal protocol close remains normal");
+    }
 
     /// A negotiated channel whose IO ends, as when the client tears the DVC down while the RDP connection stays up,
     /// must be told apart from one that never negotiated, because only the former is reopened.

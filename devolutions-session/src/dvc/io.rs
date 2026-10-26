@@ -158,13 +158,18 @@ pub fn run_dvc_io(
     read_tx: Sender<NowMessage<'static>>,
     stop_event: Event,
     progress: &DvcInitializationProgress,
+    io_loop_ended_tx: tokio::sync::oneshot::Sender<()>,
 ) -> Result<(), anyhow::Error> {
     let Some(mut context) = initialize_dvc_with_retry(&stop_event, progress)? else {
         info!("DVC IO thread stopped during initialization");
         return Ok(());
     };
 
-    context.io.serve(write_rx, &read_tx, &stop_event)
+    let result = context.io.serve(write_rx, &read_tx, &stop_event);
+
+    // Notify processing before cancellation cleanup, which can block until pending IO completes.
+    let _ = io_loop_ended_tx.send(());
+    result
 }
 
 /// Interval at which decoded messages are offered again to a full processing queue.
