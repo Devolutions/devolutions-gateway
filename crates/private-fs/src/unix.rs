@@ -354,7 +354,6 @@ pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> 
     repair_item(&dir.file, path, rule, Kind::Directory)
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "private_fs::repair_file is not wired yet"))]
 pub(crate) fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
     repair_item(file, path, rule, Kind::File)
 }

@@ -294,6 +294,13 @@ pub fn check_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
     sys::check_file(file, path, rule)
 }
 
+/// Brings an open file, at `path`, into line with `rule`, then checks it exactly.
+///
+/// A file with more than one hard link is refused rather than changed, since a change through one name applies to all.
+pub fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
+    sys::repair_file(file, path, rule)
+}
+
 impl Error {
     fn already_exists(&self) -> bool {
         matches!(self.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::AlreadyExists)

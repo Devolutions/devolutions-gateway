@@ -20,8 +20,7 @@ use windows::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_FOR_BACKUP_INTENT,
     FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_OPTIONS,
 };
-use windows::Win32::Foundation::ERROR_DIRECTORY;
-use windows::Win32::Foundation::{ERROR_NO_TOKEN, ERROR_NOT_ALL_ASSIGNED, HANDLE, LUID};
+use windows::Win32::Foundation::{ERROR_DIRECTORY, ERROR_NO_TOKEN, ERROR_NOT_ALL_ASSIGNED, HANDLE, LUID};
 use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::{
     AdjustTokenPrivileges, DACL_SECURITY_INFORMATION, DuplicateTokenEx, GetTokenInformation, LUID_AND_ATTRIBUTES,
@@ -431,10 +430,6 @@ pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> 
 }
 
 /// Brings an open file's owner and DACL into line with `rule`, then checks it exactly.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "lib.rs exposes it as private_fs::repair_file")
-)]
 pub(crate) fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
     let policy = Policy::new(rule, Kind::File, path)?;
     repair(file.as_handle(), path, Kind::File, &policy)?;
