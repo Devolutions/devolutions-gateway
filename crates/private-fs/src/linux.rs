@@ -322,7 +322,7 @@ mod tests {
     }
 
     // A parser that misread the header or an entry would hide a named entry from the checks.
-    // oracle: spec Linux include/uapi/linux/posix_acl_xattr.h
+    // oracle: spec Linux UAPI posix_acl_xattr.h §posix_acl_xattr_entry
     #[test]
     fn parses_the_kernel_attribute_format() {
         // Version 2, then user nobody with read and write: tag 0x0002, perm 0x0006, ID 65534 (0x0000FFFE).
@@ -374,13 +374,13 @@ mod tests {
         );
     }
 
-    // oracle: spec Linux include/uapi/linux/fs.h RENAME_NOREPLACE
+    // oracle: spec Linux UAPI fs.h §RENAME_NOREPLACE
     #[test]
     fn passes_the_kernel_flag_for_an_exclusive_rename() {
         assert_eq!(u32::try_from(RENAME_NOREPLACE).ok(), Some(libc::RENAME_NOREPLACE));
     }
 
-    // oracle: spec Linux include/uapi/linux/posix_acl_xattr.h
+    // oracle: spec Linux UAPI posix_acl_xattr.h §posix_acl_xattr_entry
     #[test]
     fn rejects_an_attribute_it_cannot_read() {
         // Version 1.
@@ -435,7 +435,7 @@ mod tests {
         assert_eq!(owning_group_writes(&AncestorAcl(None)), None);
     }
 
-    // oracle: spec Linux include/uapi/linux/magic.h
+    // oracle: spec Linux UAPI magic.h §CIFS_SUPER_MAGIC
     #[test]
     fn recognizes_volumes_that_fake_ownership() {
         // CIFS_SUPER_MAGIC as a 64-bit platform reports it, and as a 32-bit one does, sign-extended.
