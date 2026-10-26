@@ -105,6 +105,9 @@ impl ChannelOutcome {
 /// keep a process alive that nobody can reach.
 /// Once a client has negotiated, a failed channel is reopened after a delay that grows with each consecutive reopen
 /// that fails to negotiate, until [`MAX_CONSECUTIVE_FAILED_REOPENS`] of them.
+///
+/// Errors only when a negotiated client can no longer be served, which makes the process exit with a failure code
+/// that the agent answers by relaunching it.
 async fn serve_dvc<F, Fut>(mut serve_channel: F, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()>
 where
     F: FnMut() -> Fut,
@@ -132,7 +135,13 @@ where
             }
             ChannelOutcome::NotNegotiated(error) => {
                 let Some(previous_failures) = failed_reopens else {
-                    return Err(error);
+                    // Not a failure: the client likely has no NOW listener, and the agent relaunches a process that
+                    // exits with an error.
+                    warn!(
+                        error = format!("{error:#}"),
+                        "The client did not negotiate the DVC channel"
+                    );
+                    return Ok(());
                 };
 
                 let failures = previous_failures + 1;
@@ -1531,8 +1540,9 @@ mod tests {
         assert!(matches!(outcome, ChannelOutcome::Ended), "{outcome:?}");
     }
 
-    /// A first channel that never negotiates must end the loop with its error, so a client without a NOW listener
-    /// does not keep the process alive reopening a channel nobody serves.
+    /// A first channel that never negotiates must end the loop, so a client without a NOW listener does not keep the
+    /// process alive reopening a channel nobody serves.
+    /// It ends without an error, because the agent relaunches a process that exits with one.
     // oracle: scaffold
     #[tokio::test(start_paused = true)]
     async fn unnegotiated_first_channel_is_not_reopened() {
@@ -1540,7 +1550,7 @@ mod tests {
 
         let (result, _) = serve_script([not_negotiated()], shutdown_signal).await;
 
-        assert!(result.is_err());
+        result.expect("a client without a NOW listener is not a failure");
     }
 
     // oracle: scaffold
