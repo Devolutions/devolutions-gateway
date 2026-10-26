@@ -22,6 +22,10 @@ const DEFAULT_ACL: &CStr = c"system.posix_acl_default";
 const ACL_VERSION: u32 = 2;
 /// `XATTR_SIZE_MAX`, the largest extended attribute value the kernel stores.
 const XATTR_SIZE_MAX: usize = 65536;
+/// The size of the first read of an ACL attribute, which holds an ACL of up to 32 entries; a larger one is read again.
+const ACL_READ_SIZE: usize = 4 /* a_version */ + 32 * 8 /* a_entries */;
+/// [`libc::RENAME_NOREPLACE`] as the `long` that `syscall` reads its arguments as.
+const RENAME_NOREPLACE: libc::c_long = 1;
 
 const ACL_USER_OBJ: u16 = 0x01;
 const ACL_USER: u16 = 0x02;
@@ -169,15 +173,17 @@ pub(crate) fn owning_group_writes(acl: &AncestorAcl) -> Option<bool> {
 
 pub(crate) fn rename_exclusive(fd: libc::c_int, from: &CStr, to: &CStr) -> io::Result<()> {
     // The raw system call avoids glibc's renameat2 wrapper, which needs glibc 2.28; the release baseline is 2.27.
+    // `syscall` reads each argument as a `long`, so each is passed as one.
+    let fd = libc::c_long::from(fd);
     // SAFETY: The descriptor is open and both names are NUL-terminated.
     let status = unsafe {
         libc::syscall(
             libc::SYS_renameat2,
             fd,
-            from.as_ptr(),
+            from.as_ptr() as libc::c_long,
             fd,
-            to.as_ptr(),
-            libc::RENAME_NOREPLACE,
+            to.as_ptr() as libc::c_long,
+            RENAME_NOREPLACE,
         )
     };
     if status != 0 {
@@ -219,15 +225,31 @@ fn read_acl(file: &File, name: &CStr) -> io::Result<Option<Vec<AclEntry>>> {
 }
 
 /// Reads an ACL attribute with `get`, which takes a buffer and its size as `getxattr` does.
-fn read_xattr(get: impl FnOnce(*mut libc::c_void, usize) -> isize) -> io::Result<Option<Vec<AclEntry>>> {
-    let mut buffer = vec![0u8; XATTR_SIZE_MAX];
-    let size = get(buffer.as_mut_ptr().cast(), buffer.len());
-    let Ok(size) = usize::try_from(size) else {
+fn read_xattr(get: impl Fn(*mut libc::c_void, usize) -> isize) -> io::Result<Option<Vec<AclEntry>>> {
+    let mut buffer = vec![0u8; ACL_READ_SIZE];
+    // INVARIANT: the buffer grows on each retry and never past XATTR_SIZE_MAX, so the loop ends.
+    loop {
+        let size = get(buffer.as_mut_ptr().cast(), buffer.len());
+        if let Ok(size) = usize::try_from(size) {
+            buffer.truncate(size);
+            return parse_acl(&buffer).map(Some);
+        }
         let error = io::Error::last_os_error();
-        return if no_acl(&error) { Ok(None) } else { Err(error) };
-    };
-    buffer.truncate(size);
-    parse_acl(&buffer).map(Some)
+        if no_acl(&error) {
+            return Ok(None);
+        }
+        if error.raw_os_error() != Some(libc::ERANGE) || buffer.len() == XATTR_SIZE_MAX {
+            return Err(error);
+        }
+        // The attribute is larger than the buffer: ask for its size, which may grow again before the next read.
+        let needed = get(std::ptr::null_mut(), 0);
+        let Ok(needed) = usize::try_from(needed) else {
+            let error = io::Error::last_os_error();
+            return if no_acl(&error) { Ok(None) } else { Err(error) };
+        };
+        let grown = needed.max(buffer.len() * 2).min(XATTR_SIZE_MAX);
+        buffer.resize(grown, 0);
+    }
 }
 
 fn no_acl(error: &io::Error) -> bool {
@@ -313,6 +335,49 @@ mod tests {
                 id: NOBODY
             }]
         );
+    }
+
+    // A reader that kept the first, small buffer would fail on a large ACL, or read part of it.
+    // oracle: spec getxattr(2) §ERRORS
+    #[test]
+    fn reads_an_attribute_larger_than_the_first_buffer() {
+        let entries: Vec<[u8; 8]> = (0..40).map(|id| entry(ACL_USER, 4, id)).collect();
+        let value = attribute(&entries);
+        assert!(ACL_READ_SIZE < value.len());
+        // Behaves as getxattr does: a zero size asks for the value's size, and a smaller buffer fails with ERANGE.
+        let get = |buffer: *mut libc::c_void, size: usize| -> isize {
+            if size == 0 {
+                return isize::try_from(value.len()).expect("small value");
+            }
+            if size < value.len() {
+                clear_errno();
+                // SAFETY: __errno_location has no preconditions and returns the calling thread's errno.
+                let errno = unsafe { libc::__errno_location() };
+                // SAFETY: The pointer is valid for the calling thread.
+                unsafe { *errno = libc::ERANGE };
+                return -1;
+            }
+            // SAFETY: read_xattr passes a buffer writable for `size` bytes, which holds the value.
+            unsafe { std::ptr::copy_nonoverlapping(value.as_ptr(), buffer.cast::<u8>(), value.len()) };
+            isize::try_from(value.len()).expect("small value")
+        };
+
+        let read = read_xattr(get).expect("read").expect("an ACL");
+        assert_eq!(read.len(), 40);
+        assert_eq!(
+            read[39],
+            AclEntry {
+                tag: ACL_USER,
+                perm: 4,
+                id: 39
+            }
+        );
+    }
+
+    // oracle: spec Linux include/uapi/linux/fs.h RENAME_NOREPLACE
+    #[test]
+    fn passes_the_kernel_flag_for_an_exclusive_rename() {
+        assert_eq!(u32::try_from(RENAME_NOREPLACE).ok(), Some(libc::RENAME_NOREPLACE));
     }
 
     // oracle: spec Linux include/uapi/linux/posix_acl_xattr.h
