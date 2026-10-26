@@ -623,6 +623,10 @@ struct MessageProcessor {
     io_notification_tx: Sender<ServerChannelEvent>,
     #[allow(dead_code)] // Not yet used.
     capabilities: NowChannelCapsetMsg,
+    /// Attached execution sessions of this channel.
+    ///
+    /// Ending the channel or renegotiating capabilities stops only their IO; the processes keep running.
+    /// No later channel or negotiation can reach them, because each starts with no sessions.
     sessions: HashMap<u32, WinApiProcess>,
     rdm_handler: RdmMessageProcessor,
     /// Resolved pwsh executable path; `None` when pwsh is not installed.
