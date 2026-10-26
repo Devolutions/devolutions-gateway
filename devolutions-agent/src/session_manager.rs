@@ -1143,13 +1143,13 @@ mod tests {
         let argv = CommandLine::from_command_line(&command_line).0;
         // oracle: spec CreateProcessAsUserW §Parameters
         assert_eq!(argv[0], session_app_path.as_str());
-        // oracle: scaffold
+        // oracle: mutant session arguments are dropped, reordered, or merged into the module name
         assert_eq!(argv[1..], ["--session", "3"]);
     }
 
     /// A failure to look up the session process must neither end the session manager nor mark the session ready, so
     /// that the next readiness event retries.
-    // oracle: scaffold
+    // oracle: mutant a process lookup failure ends the session manager or marks the session ready
     #[test]
     fn process_lookup_failure_leaves_the_session_waiting() {
         let session = Session::new(1);
@@ -1244,7 +1244,7 @@ mod tests {
     const QUICK_RUN: Duration = Duration::from_secs(1);
 
     /// A process that crashes while its session still wants it must come back, or the channel it hosts stays unserved.
-    // oracle: scaffold
+    // oracle: mutant a failed exit of a ready remote session schedules no relaunch, or one before the floor delay
     #[test]
     fn failed_exit_of_ready_remote_session_schedules_relaunch_after_the_floor_delay() {
         let session = Session::new(1);
@@ -1258,7 +1258,7 @@ mod tests {
     }
 
     /// Back-off keeps a process that fails on start from being relaunched in a tight loop.
-    // oracle: scaffold
+    // oracle: mutant the relaunch delay does not double per consecutive failure, or exceeds its cap
     #[test]
     fn relaunch_delay_doubles_per_consecutive_failure_and_is_capped() {
         assert_eq!(relaunch_delay(1), Duration::from_secs(2));
@@ -1269,7 +1269,7 @@ mod tests {
     }
 
     /// Consecutive quick failures of relaunched processes grow the delay.
-    // oracle: scaffold
+    // oracle: mutant a second quick failure keeps the first delay
     #[test]
     fn second_quick_failure_doubles_the_delay() {
         let session = Session::new(1);
@@ -1284,7 +1284,7 @@ mod tests {
     }
 
     /// A process that ran for a while before failing is not failing on start, so it is relaunched promptly.
-    // oracle: scaffold
+    // oracle: mutant a failure after a long run keeps the grown delay
     #[test]
     fn long_run_before_failure_resets_the_delay() {
         let session = Session::new(1);
@@ -1301,7 +1301,7 @@ mod tests {
     }
 
     /// A process that keeps failing on start is given up on, and the next logon or unlock tries again.
-    // oracle: scaffold
+    // oracle: mutant repeated quick failures relaunch forever, or block the next logon or unlock
     #[test]
     fn repeated_quick_failures_give_up_until_the_next_logon_or_unlock() {
         let session = Session::new(1);
@@ -1323,7 +1323,7 @@ mod tests {
     }
 
     /// Exit code 0 means the process ended on purpose, such as when the client has no listener for the channel.
-    // oracle: scaffold
+    // oracle: mutant a clean exit is relaunched
     #[test]
     fn clean_exit_is_not_relaunched() {
         let session = Session::new(1);
@@ -1339,7 +1339,7 @@ mod tests {
     }
 
     /// The exit of a process replaced by a later launch says nothing about the current one.
-    // oracle: scaffold
+    // oracle: mutant the exit of a replaced launch relaunches the process
     #[test]
     fn exit_of_a_replaced_launch_is_ignored() {
         let session = Session::new(1);
@@ -1354,7 +1354,7 @@ mod tests {
     }
 
     /// A reconnected session terminates the old process, whose exit must not start a second one.
-    // oracle: scaffold
+    // oracle: mutant an exit after a remote reconnect starts a second process
     #[test]
     fn exit_after_remote_reconnect_is_ignored() {
         let session = Session::new(1);
@@ -1369,7 +1369,7 @@ mod tests {
     }
 
     /// A disconnected session terminates its process and wants none.
-    // oracle: scaffold
+    // oracle: mutant an exit after a disconnect relaunches the process
     #[test]
     fn exit_after_disconnect_is_ignored() {
         let session = Session::new(1);
@@ -1384,7 +1384,7 @@ mod tests {
     }
 
     /// The system stops the process at logoff, and the next logon starts it.
-    // oracle: scaffold
+    // oracle: mutant an exit after logoff relaunches the process
     #[test]
     fn exit_after_logoff_is_ignored() {
         let session = Session::new(1);
@@ -1401,7 +1401,7 @@ mod tests {
     }
 
     /// A console session never hosts the process, so a stray report for one must not start it.
-    // oracle: scaffold
+    // oracle: mutant an exit reported for the console session starts the process
     #[test]
     fn exit_in_console_session_is_ignored() {
         let session = Session::new(1);
@@ -1419,7 +1419,7 @@ mod tests {
     }
 
     /// A session that logged off during the delay must not have the process started when the delay ends.
-    // oracle: scaffold
+    // oracle: mutant a relaunch falling due after logoff starts the process
     #[test]
     fn relaunch_due_after_logoff_is_ignored() {
         let session = Session::new(1);
@@ -1434,7 +1434,7 @@ mod tests {
     }
 
     /// A relaunch scheduled for a launch that was since replaced must not start another process.
-    // oracle: scaffold
+    // oracle: mutant a relaunch falling due for a replaced launch starts another process
     #[test]
     fn relaunch_due_for_a_replaced_launch_is_ignored() {
         let session = Session::new(1);

@@ -1813,7 +1813,7 @@ mod tests {
 
     /// A negotiated channel whose IO ends, as when the client tears the DVC down while the RDP connection stays up,
     /// must be told apart from one that never negotiated, because only the former is reopened.
-    // oracle: scaffold
+    // oracle: mutant a channel lost after negotiation is classified as not negotiated or ended
     #[tokio::test]
     async fn read_channel_closing_after_negotiation_loses_the_channel() {
         let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
@@ -1835,7 +1835,7 @@ mod tests {
 
     /// A channel whose IO ends before the client negotiates, as with a client that has no NOW listener, must not be
     /// classified as lost, so it is never reopened.
-    // oracle: scaffold
+    // oracle: mutant a channel ending before negotiation is classified as lost
     #[tokio::test]
     async fn read_channel_closing_before_negotiation_is_not_negotiated() {
         let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
@@ -1878,7 +1878,7 @@ mod tests {
     /// A first channel that never negotiates must end the loop, so a client without a NOW listener does not keep the
     /// process alive reopening a channel nobody serves.
     /// It ends without an error, because the agent relaunches a process that exits with one.
-    // oracle: scaffold
+    // oracle: mutant an unnegotiated first channel is reopened or ends with an error
     #[tokio::test(start_paused = true)]
     async fn unnegotiated_first_channel_is_not_reopened() {
         let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
@@ -1888,7 +1888,7 @@ mod tests {
         result.expect("a client without a NOW listener is not a failure");
     }
 
-    // oracle: scaffold
+    // oracle: mutant an ended channel is reopened or ends with an error
     #[tokio::test(start_paused = true)]
     async fn ended_channel_is_not_reopened() {
         let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
@@ -1898,7 +1898,7 @@ mod tests {
         result.expect("an ended channel ends the loop cleanly");
     }
 
-    // oracle: scaffold
+    // oracle: mutant a lost channel is not reopened, or is reopened before the floor delay
     #[tokio::test(start_paused = true)]
     async fn lost_channel_is_reopened_after_a_delay() {
         let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
@@ -1918,13 +1918,13 @@ mod tests {
 
         let (result, served_at) = serve_script(script, shutdown_signal).await;
 
-        // oracle: scaffold
+        // oracle: mutant reopening never gives up, or gives up without an error
         assert!(result.is_err());
 
         let delays = served_at.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>();
         // oracle: property monotonic
         assert!(delays.windows(2).all(|w| w[0] <= w[1]), "{delays:?}");
-        // oracle: scaffold
+        // oracle: mutant a reopen delay falls below the floor or above the cap
         assert!(
             delays
                 .iter()
@@ -1935,7 +1935,7 @@ mod tests {
 
     /// A reopened channel that negotiates shows the client serves NOW again, so earlier failures must not count
     /// toward giving up.
-    // oracle: scaffold
+    // oracle: mutant a negotiated reopen keeps earlier failures in the give-up budget
     #[tokio::test(start_paused = true)]
     async fn negotiated_reopen_resets_the_failure_budget() {
         let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
@@ -1952,7 +1952,7 @@ mod tests {
     }
 
     /// A shutdown requested while waiting to reopen must end the loop at once, without opening another channel.
-    // oracle: scaffold
+    // oracle: mutant a shutdown during the reopen delay waits it out or opens another channel
     #[tokio::test(start_paused = true)]
     async fn shutdown_during_reopen_delay_stops_without_reopening() {
         let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
@@ -2173,7 +2173,7 @@ mod tests {
 
     /// The IO thread probes a held-back channel with heartbeats only while this flag is set, so it must follow every
     /// negotiation: on by default, off for a zero interval, and on again when renegotiated to a nonzero one.
-    // oracle: mutant
+    // oracle: mutant the heartbeat flag ignores renegotiation or a zero interval
     #[tokio::test(start_paused = true)]
     async fn processing_loop_publishes_whether_heartbeats_are_enabled() {
         let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");

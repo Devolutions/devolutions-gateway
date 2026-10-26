@@ -840,7 +840,7 @@ mod tests {
             .into()
     }
 
-    // oracle: scaffold
+    // oracle: mutant a read shorter than the channel header ends the loop as a close, or loses its length
     #[test]
     fn read_shorter_than_the_channel_header_is_an_error_with_its_length() {
         let (server, client) = dvc_pipe();
@@ -854,7 +854,7 @@ mod tests {
     }
 
     /// An empty channel PDU carries no message and must not end the loop, so a later message still arrives.
-    // oracle: scaffold
+    // oracle: mutant an empty channel PDU ends the loop or drops the next message
     #[test]
     fn empty_channel_pdu_is_skipped() {
         let (server, client) = dvc_pipe();
@@ -870,7 +870,7 @@ mod tests {
 
     /// A client that does not read our output must not stop us from reading its input; with a synchronous write the
     /// loop would block until the client reads.
-    // oracle: mutant
+    // oracle: mutant a pending write blocks reads from the client
     #[test]
     fn reads_continue_while_a_large_write_is_pending() {
         let (server, client) = dvc_pipe();
@@ -895,7 +895,7 @@ mod tests {
 
     /// A full processing queue must hold messages back rather than drop them or end the channel: the client matches
     /// responses by send order, so a gap would desynchronize it.
-    // oracle: mutant
+    // oracle: mutant a full processing queue drops, reorders, or ends on held-back messages
     #[test]
     fn full_processing_queue_holds_messages_back_in_order() {
         let (server, client) = dvc_pipe();
@@ -920,7 +920,7 @@ mod tests {
     /// A client that goes away while the processing queue is full must still end the loop, so the channel is reopened.
     ///
     /// No read is pending while messages are held back, so only a write can observe the closed channel.
-    // oracle: mutant
+    // oracle: mutant a closed channel goes unnoticed while messages are held back
     #[test]
     fn closed_channel_ends_the_loop_while_messages_are_held_back() {
         let (server, client) = dvc_pipe();
@@ -937,7 +937,7 @@ mod tests {
     }
 
     /// Probing a held-back channel must not disturb it: the client gets heartbeats, and every message still arrives.
-    // oracle: mutant
+    // oracle: mutant probing a held-back channel sends no heartbeat, or disturbs held-back messages
     #[test]
     fn held_back_channel_is_probed_with_heartbeats() {
         let (server, client) = dvc_pipe();
@@ -960,7 +960,7 @@ mod tests {
     }
 
     /// A client that disabled heartbeats must never be sent one, even to probe a held-back channel.
-    // oracle: mutant
+    // oracle: mutant a client that disabled heartbeats is sent probe heartbeats
     #[test]
     fn held_back_channel_is_not_probed_when_heartbeats_are_disabled() {
         let (server, client) = dvc_pipe();
@@ -987,7 +987,7 @@ mod tests {
     }
 
     /// Stopping with a read and a write in flight must cancel both and return.
-    // oracle: scaffold
+    // oracle: mutant stopping with IO in flight hangs or leaves the IO pending
     #[test]
     fn stop_cancels_pending_io() {
         let (server, _client) = dvc_pipe();
@@ -1002,7 +1002,7 @@ mod tests {
         running.stop().expect("the loop stops cleanly");
     }
 
-    // oracle: scaffold
+    // oracle: mutant a closed processing queue ends the loop without an error
     #[test]
     fn closed_processing_queue_is_an_error() {
         let (server, client) = dvc_pipe();

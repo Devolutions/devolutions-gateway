@@ -1021,7 +1021,7 @@ mod tests {
     /// A process that fills its output before reading stdin must still get all of a large input.
     ///
     /// The input exceeds the stdin pipe buffer, so a stdin write that blocks the output drain deadlocks.
-    // oracle: spec Windows anonymous pipes block a writer until the reader frees buffer space
+    // oracle: spec CreatePipe §Remarks
     #[tokio::test(flavor = "multi_thread")]
     async fn large_stdin_after_output_completes() {
         const SESSION_ID: u32 = 1;
