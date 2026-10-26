@@ -335,13 +335,28 @@ async fn process_messages(
     init_progress.mark_negotiated();
     info!("DVC negotiation completed");
 
+    // Process output keeps being served while stdin waits, because the process may not read stdin until its output
+    // is drained.
+    let mut pending_stdin: Option<(u32, StdinSend)> = None;
+
     loop {
         select! {
-            read_result = read_rx.recv() => {
+            () = async {
+                match pending_stdin.as_mut() {
+                    Some((_, send)) => send.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                pending_stdin = None;
+            }
+            read_result = read_rx.recv(), if pending_stdin.is_none() => {
                 match read_result {
                     Some(message) => {
                         match processor.process_message(message).await {
                             Ok(ProcessMessageAction::Continue) => {}
+                            Ok(ProcessMessageAction::SendStdin { session_id, send }) => {
+                                pending_stdin = Some((session_id, send));
+                            }
                             Ok(ProcessMessageAction::Shutdown) => {
                                 info!("Received channel shutdown message...");
                                 return Ok(());
@@ -403,6 +418,7 @@ async fn process_messages(
                             ServerChannelEvent::SessionExited { session_id, exit_code } => {
                                 info!(session_id, %exit_code, "Session exited");
                                 processor.remove_session(session_id);
+                                discard_pending_stdin(&mut pending_stdin, session_id);
 
                                 let message = NowExecResultMsg::new_success(session_id, exit_code);
                                 dvc_tx.send(message.into()).await?;
@@ -410,6 +426,7 @@ async fn process_messages(
                             ServerChannelEvent::SessionFailed { session_id, error } => {
                                 error!(session_id, %error, "Session error");
                                 processor.remove_session(session_id);
+                                discard_pending_stdin(&mut pending_stdin, session_id);
 
                                 handle_exec_error(&dvc_tx, session_id, error).await;
                             }
@@ -548,10 +565,27 @@ fn find_pwsh_executable() -> Option<String> {
     String::from_utf16(&buffer[..len]).ok()
 }
 
+type StdinSend = std::pin::Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Drops a stdin send for a session that has ended, so its input no longer holds back other messages.
+fn discard_pending_stdin(pending_stdin: &mut Option<(u32, StdinSend)>, ended_session_id: u32) {
+    if pending_stdin
+        .as_ref()
+        .is_some_and(|(session_id, _)| *session_id == ended_session_id)
+    {
+        *pending_stdin = None;
+    }
+}
+
 enum ProcessMessageAction {
     Continue,
     Shutdown,
     Restart(NowChannelCapsetMsg),
+    /// Stdin for a session; later messages wait for it so input stays ordered and a full stdin queue pushes back.
+    SendStdin {
+        session_id: u32,
+        send: StdinSend,
+    },
 }
 
 struct MessageProcessor {
@@ -722,7 +756,12 @@ impl MessageProcessor {
                     }
                 };
 
-                process.send_stdin(data_msg.data().to_vec(), data_msg.is_last()).await?;
+                let send = process.send_stdin(data_msg.data().to_vec(), data_msg.is_last());
+
+                return Ok(ProcessMessageAction::SendStdin {
+                    session_id,
+                    send: Box::pin(send),
+                });
             }
             NowMessage::Session(NowSessionMessage::MsgBoxReq(request)) => {
                 let tx = self.dvc_tx.clone();

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
-use tokio::sync::mpsc::Sender;
-use tracing::{error, info, trace};
+use tokio::sync::mpsc::{Receiver, Sender};
+use tracing::{debug, error, info, trace, warn};
 use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::{Process, post_message_for_pid};
@@ -21,7 +21,9 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, WM_QUIT};
 use windows::core::PCWSTR;
 
-use crate::dvc::channel::{WinapiSignaledReceiver, WinapiSignaledSender, winapi_signaled_mpsc_channel};
+use crate::dvc::channel::{
+    WinapiSignaledReceiver, WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel,
+};
 use crate::dvc::encoding::{DataEncoding, InputEncoder, OutputDecoder};
 use crate::dvc::env::make_environment_block;
 use crate::dvc::fs::TmpFileGuard;
@@ -62,13 +64,15 @@ impl<T: Send + Sync + 'static> From<tokio::sync::mpsc::error::SendError<T>> for 
 pub enum ProcessIoInputEvent {
     AbortExecution(u32),
     CancelExecution,
-    DataIn {
-        data: Vec<u8>,
-        /// If last is set, then stdin pipe should be closed. Any consecutive DataIn messages
-        /// will be ignored.
-        last: bool,
-    },
     TerminateIo,
+}
+
+/// Input for the process stdin.
+#[derive(Debug)]
+pub struct StdinChunk {
+    data: Vec<u8>,
+    /// Closes stdin after this chunk; later chunks are ignored.
+    last: bool,
 }
 
 /// Message, sent from Process IO thread to task to finalize process execution.
@@ -195,9 +199,6 @@ impl WinApiProcessCtx {
                             // wait for process to exit
                             continue;
                         }
-                        ProcessIoInputEvent::DataIn { .. } => {
-                            // DataIn messages ignored.
-                        }
                         ProcessIoInputEvent::TerminateIo => {
                             info!(session_id, "Terminating IO loop");
 
@@ -226,10 +227,9 @@ impl WinApiProcessCtx {
 
         info!(session_id, ?self.encoding, "Process IO redirection loop has started");
 
-        // Encoding transcoders for stdin/stdout/stderr.
+        // Encoding transcoders for stdout/stderr.
         let mut stdout_decoder = OutputDecoder::new(self.encoding);
         let mut stderr_decoder = OutputDecoder::new(self.encoding);
-        let mut stdin_encoder = InputEncoder::new(self.encoding);
 
         // Events for overlapped IO
         let stdout_read_event = Event::new_unnamed()?;
@@ -324,61 +324,6 @@ impl WinApiProcessCtx {
 
                             // wait for process to exit
                             continue;
-                        }
-                        ProcessIoInputEvent::DataIn { data, last } => {
-                            trace!(session_id, "Received data to write to stdin pipe");
-
-                            let pipe_handle = match self.stdin_write_pipe.as_ref() {
-                                Some(pipe) => pipe.handle.raw(),
-                                None => {
-                                    // Ignore data, as stdin pipe was already closed.
-                                    continue;
-                                }
-                            };
-
-                            // Transcode UTF-8 input to the process encoding.
-                            let encoded_data = stdin_encoder.encode(&data);
-
-                            if !encoded_data.is_empty() {
-                                let mut bytes_written: u32 = 0;
-
-                                // Send data to stdin pipe in a blocking manner.
-                                // SAFETY: pipe and input buffer are ensured to be valid via
-                                // borrowing rules.
-                                unsafe {
-                                    WriteFile(
-                                        pipe_handle,
-                                        Some(&*encoded_data),
-                                        Some(&mut bytes_written as *mut _),
-                                        None,
-                                    )
-                                }?;
-                            }
-
-                            if last {
-                                // Flush any remaining encoder state before closing.
-                                let flushed = stdin_encoder.flush();
-                                if !flushed.is_empty() {
-                                    let mut bytes_written: u32 = 0;
-                                    // SAFETY: pipe and input buffer are ensured to be valid via
-                                    // borrowing rules.
-                                    unsafe {
-                                        WriteFile(
-                                            self.stdin_write_pipe
-                                                .as_ref()
-                                                .expect("BUG: stdin pipe closed unexpectedly")
-                                                .handle
-                                                .raw(),
-                                            Some(&flushed),
-                                            Some(&mut bytes_written as *mut _),
-                                            None,
-                                        )
-                                    }?;
-                                }
-
-                                // Close stdin pipe.
-                                self.stdin_write_pipe = None;
-                            }
                         }
                         ProcessIoInputEvent::TerminateIo => {
                             info!(session_id, "Terminating IO loop");
@@ -554,6 +499,52 @@ impl WinApiProcessCtx {
     }
 }
 
+/// Writes stdin chunks to the process until the last one, then closes its stdin.
+///
+/// Runs on a thread of its own because the write blocks until the process reads: in the IO loop, it would stop
+/// stdout and stderr from being drained, and a process blocked on full output pipes never reads its input.
+/// After a failed write, later input is discarded: the process no longer reads stdin, and its exit is reported by the
+/// IO loop.
+fn write_stdin(session_id: u32, pipe: Pipe, mut encoder: InputEncoder, mut stdin_rx: Receiver<StdinChunk>) {
+    while let Some(StdinChunk { data, last }) = stdin_rx.blocking_recv() {
+        let mut bytes = encoder.encode(&data).into_owned();
+
+        if last {
+            bytes.extend(encoder.flush());
+        }
+
+        if let Err(error) = write_all(&pipe, &bytes) {
+            warn!(session_id, %error, "Failed to write to the process stdin; discarding further input");
+            return;
+        }
+
+        if last {
+            break;
+        }
+    }
+
+    trace!(session_id, "Closing the process stdin");
+}
+
+fn write_all(pipe: &Pipe, mut bytes: &[u8]) -> anyhow::Result<()> {
+    while !bytes.is_empty() {
+        let mut bytes_written: u32 = 0;
+
+        // SAFETY: The pipe is a synchronous handle, and the buffer outlives the call.
+        unsafe { WriteFile(pipe.handle.raw(), Some(bytes), Some(&mut bytes_written), None) }?;
+
+        let bytes_written = usize::try_from(bytes_written).expect("u32 fits into usize on Windows");
+
+        if bytes_written == 0 {
+            anyhow::bail!("stdin write made no progress");
+        }
+
+        bytes = bytes.get(bytes_written..).unwrap_or_default();
+    }
+
+    Ok(())
+}
+
 /// Builder for process execution session.
 pub struct WinApiProcessBuilder {
     executable: String,
@@ -673,6 +664,21 @@ impl WinApiProcessBuilder {
         // Create channel for `task` -> `Process IO thread` communication
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
 
+        let mut process_ctx = process_ctx;
+        let stdin_tx = match process_ctx.stdin_write_pipe.take() {
+            Some(pipe) => {
+                let (stdin_tx, stdin_rx) = bounded_mpsc_channel()?;
+                let encoder = InputEncoder::new(encoding);
+
+                std::thread::Builder::new()
+                    .name(format!("process-{session_id}-stdin"))
+                    .spawn(move || write_stdin(session_id, pipe, encoder, stdin_rx))?;
+
+                Some(stdin_tx)
+            }
+            None => None,
+        };
+
         let io_notification_tx =
             io_notification_tx.expect("BUG: io_notification_tx must be Some for non-detached mode");
 
@@ -695,6 +701,7 @@ impl WinApiProcessBuilder {
 
         Ok(Some(WinApiProcess {
             input_event_tx,
+            stdin_tx,
             join_handle,
             _temp_files: temp_files,
         }))
@@ -875,6 +882,8 @@ fn prepare_process_with_io_redirection(
 /// Represents spawned process with IO redirection.
 pub struct WinApiProcess {
     input_event_tx: WinapiSignaledSender<ProcessIoInputEvent>,
+    /// `None` without IO redirection.
+    stdin_tx: Option<Sender<StdinChunk>>,
     join_handle: std::thread::JoinHandle<()>,
     _temp_files: Vec<TmpFileGuard>,
 }
@@ -898,10 +907,23 @@ impl WinApiProcess {
         self.input_event_tx.send(ProcessIoInputEvent::CancelExecution).await
     }
 
-    pub async fn send_stdin(&self, data: Vec<u8>, last: bool) -> anyhow::Result<()> {
-        self.input_event_tx
-            .send(ProcessIoInputEvent::DataIn { data, last })
-            .await
+    /// Returns a send of `data` to the process stdin that waits while the stdin queue is full.
+    ///
+    /// The send owns what it needs, so the caller can keep serving process output while it waits: the process may not
+    /// read its stdin until its output is drained.
+    /// Input for a process that no longer reads stdin is discarded.
+    pub fn send_stdin(&self, data: Vec<u8>, last: bool) -> impl Future<Output = ()> + Send + 'static {
+        let stdin_tx = self.stdin_tx.clone();
+
+        async move {
+            let Some(stdin_tx) = stdin_tx else {
+                return;
+            };
+
+            if stdin_tx.send(StdinChunk { data, last }).await.is_err() {
+                debug!("Discarding input for a closed process stdin");
+            }
+        }
     }
 
     pub async fn shutdown(&self) -> anyhow::Result<()> {
@@ -911,5 +933,65 @@ impl WinApiProcess {
 
     pub fn is_session_terminated(&self) -> bool {
         self.join_handle.is_finished()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+
+    /// A process that fills its output before reading stdin must still get all of a large input.
+    ///
+    /// The input exceeds the stdin pipe buffer, so a stdin write that blocks the output drain deadlocks.
+    // oracle: spec Windows anonymous pipes block a writer until the reader frees buffer space
+    #[tokio::test(flavor = "multi_thread")]
+    async fn large_stdin_after_output_completes() {
+        const SESSION_ID: u32 = 1;
+        const OUTPUT_LINES: u32 = 3000;
+        const INPUT_LINES: u32 = 5000;
+
+        let (io_notification_tx, mut io_notification_rx) = tokio::sync::mpsc::channel(100);
+        let process = WinApiProcessBuilder::new("cmd.exe")
+            .with_command_line(&format!(
+                "/d /c (for /L %i in (1,1,{OUTPUT_LINES}) do @echo output-line-%i) & sort"
+            ))
+            .with_io_redirection(true)
+            .with_encoding(DataEncoding::Raw)
+            .run(SESSION_ID, io_notification_tx)
+            .expect("start cmd.exe");
+
+        let input: String = (0..INPUT_LINES).map(|i| format!("input-line-{i:05}\r\n")).collect();
+        let feed = tokio::spawn(process.send_stdin(input.into_bytes(), true));
+
+        let mut stdout = Vec::new();
+        let exit_code = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                match io_notification_rx.recv().await.expect("notification channel open") {
+                    ServerChannelEvent::SessionDataOut {
+                        stream: NowExecDataStreamKind::Stdout,
+                        data,
+                        ..
+                    } => stdout.extend(data),
+                    ServerChannelEvent::SessionExited { exit_code, .. } => break exit_code,
+                    ServerChannelEvent::SessionFailed { error, .. } => panic!("process failed: {error}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .expect("process exits instead of deadlocking on stdin");
+
+        feed.await.expect("stdin feed completes");
+
+        let stdout = String::from_utf8(stdout).expect("ASCII output");
+        assert_eq!(exit_code, 0);
+        assert!(stdout.contains(&format!("output-line-{OUTPUT_LINES}")));
+        assert!(stdout.contains(&format!("input-line-{:05}", INPUT_LINES - 1)));
+        assert_eq!(
+            stdout.matches("input-line-").count(),
+            usize::try_from(INPUT_LINES).expect("u32 fits into usize")
+        );
     }
 }
