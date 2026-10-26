@@ -353,18 +353,18 @@ mod tests {
             "A".repeat(43)
         ))?;
         let test_dir = private_file::TestDir::new()?;
-        let dir = test_dir.0.clone();
+        let dir = test_dir.path();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
 
-            if fs::metadata(&dir)?.permissions().mode() & 0o022 != 0 {
-                fs::remove_dir_all(&dir)?;
+            if fs::metadata(dir)?.permissions().mode() & 0o022 != 0 {
+                fs::remove_dir_all(dir)?;
                 return Ok(());
             }
         }
-        private_file::prepare_directories(&dir, true)?;
-        let path = file_path(&dir, &token.sha256_hex())?;
+        private_file::prepare_directories(dir, true)?;
+        let path = file_path(dir, &token.sha256_hex())?;
         let body = format!(r#"{{"version":1,"token":"{}"}}"#, token.as_str());
         // JSON allows trailing white space, which pads the payload to an exact size.
         for (size, readable) in [(16 * 1024, true), (16 * 1024 + 1, false)] {
@@ -373,14 +373,14 @@ mod tests {
             let contents = crate::windows::protect(padded.as_bytes())?;
             #[cfg(not(windows))]
             let contents = padded.into_bytes();
-            private_file::write_atomic(&dir, &path, &contents, true)?;
+            private_file::write_atomic(dir, &path, &contents, true)?;
             assert_eq!(
                 matches!(read(&path, true)?, PendingRead::Ready(found) if found.as_str() == token.as_str()),
                 readable,
                 "{size}"
             );
         }
-        fs::remove_dir_all(&dir)?;
+        fs::remove_dir_all(dir)?;
         Ok(())
     }
 
@@ -394,19 +394,19 @@ mod tests {
             "A".repeat(43)
         );
         let test_dir = private_file::TestDir::new()?;
-        let dir = test_dir.0.clone();
+        let dir = test_dir.path();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
 
-            if fs::metadata(&dir)?.permissions().mode() & 0o022 != 0 {
-                fs::remove_dir_all(&dir)?;
+            if fs::metadata(dir)?.permissions().mode() & 0o022 != 0 {
+                fs::remove_dir_all(dir)?;
                 return Ok(());
             }
         }
         let hash = token::sha256_hex(&token);
-        let path = file_path(&dir, &hash)?;
-        private_file::prepare_directories(&dir, true)?;
+        let path = file_path(dir, &hash)?;
+        private_file::prepare_directories(dir, true)?;
         for oversized in [
             format!(
                 r#"{{"version":1,"token":"{token}","padding":"{}"}}"#,
@@ -423,7 +423,7 @@ mod tests {
             let contents = crate::windows::protect(oversized.as_bytes())?;
             #[cfg(not(windows))]
             let contents = oversized.into_bytes();
-            private_file::write_atomic(&dir, &path, &contents, true)?;
+            private_file::write_atomic(dir, &path, &contents, true)?;
             assert!(matches!(read(&path, true)?, PendingRead::Unusable));
         }
         #[cfg(windows)]
@@ -435,10 +435,10 @@ mod tests {
             .into_bytes();
             let ciphertext = crate::windows::protect(&oversized)?;
             assert!(ciphertext.len() > MAX_PENDING_BYTES + 4096);
-            private_file::write_atomic(&dir, &path, &ciphertext, true)?;
+            private_file::write_atomic(dir, &path, &ciphertext, true)?;
             assert!(matches!(read(&path, true)?, PendingRead::Unusable));
         }
-        fs::remove_dir_all(&dir)?;
+        fs::remove_dir_all(dir)?;
         Ok(())
     }
 
@@ -455,43 +455,43 @@ mod tests {
         );
         let token = Token::parse(&raw)?;
         let test_dir = private_file::TestDir::new()?;
-        let dir = test_dir.0.clone();
+        let dir = test_dir.path();
         let hash = hex::encode(Sha256::digest(raw.as_bytes()));
         assert_eq!(
-            file_path(&dir, &hash)?,
-            directory(&dir).join(format!("{hash}.{EXTENSION}"))
+            file_path(dir, &hash)?,
+            directory(dir).join(format!("{hash}.{EXTENSION}"))
         );
-        let result = write(&dir, &token, true);
+        let result = write(dir, &token, true);
         #[cfg(unix)]
-        if fs::metadata(&dir)?.permissions().mode() & 0o022 != 0 {
+        if fs::metadata(dir)?.permissions().mode() & 0o022 != 0 {
             assert!(
                 result.is_err(),
                 "pending file written to volume without owner-only permissions"
             );
-            assert!(list(&dir)?.is_empty());
-            fs::remove_dir_all(&dir)?;
+            assert!(list(dir)?.is_empty());
+            fs::remove_dir_all(dir)?;
             return Ok(());
         }
         let path = result?;
-        assert_eq!(path, file_path(&dir, &hash)?);
+        assert_eq!(path, file_path(dir, &hash)?);
         assert!(matches!(read(&path, true)?, PendingRead::Ready(found) if found.as_str() == raw));
-        let overwritten = write(&dir, &token, true)?;
+        let overwritten = write(dir, &token, true)?;
         assert_eq!(overwritten, path);
-        assert_eq!(list(&dir)?, vec![path.clone()]);
-        let token_named = directory(&dir).join(format!("{raw}.{EXTENSION}"));
+        assert_eq!(list(dir)?, vec![path.clone()]);
+        let token_named = directory(dir).join(format!("{raw}.{EXTENSION}"));
         fs::write(&token_named, b"not encrypted")?;
         #[cfg(unix)]
         fs::set_permissions(&token_named, fs::Permissions::from_mode(0o644))?;
-        assert_eq!(list(&dir)?, vec![path.clone()]);
+        assert_eq!(list(dir)?, vec![path.clone()]);
         let error = read(&token_named, true).expect_err("untrusted token-named file was read");
         assert!(!format!("{error:#}").contains(&raw));
         fs::remove_file(token_named)?;
-        private_file::write_atomic(&dir, &path, b"not a token", true)?;
+        private_file::write_atomic(dir, &path, b"not a token", true)?;
         #[cfg(windows)]
         {
             assert!(matches!(read(&path, true)?, PendingRead::Undecryptable));
             let encrypted = crate::windows::protect(b"not valid JSON")?;
-            private_file::write_atomic(&dir, &path, &encrypted, true)?;
+            private_file::write_atomic(dir, &path, &encrypted, true)?;
             assert!(matches!(read(&path, true)?, PendingRead::Unusable));
         }
         #[cfg(not(windows))]
@@ -513,7 +513,7 @@ mod tests {
                 URL_SAFE_NO_PAD.encode(r#"{"u":"https://other.test"}"#),
                 "A".repeat(43)
             ))?;
-            let independent = file_path(&dir, &other.sha256_hex())?;
+            let independent = file_path(dir, &other.sha256_hex())?;
             fs::write(&independent, b"independently supplied blob")?;
             assert!(
                 read(&independent, true).is_err(),
@@ -523,16 +523,16 @@ mod tests {
             crate::windows::test::assert_pending_protection(&path, true)?;
             let protected_path = independent;
             if crate::windows::is_system()? {
-                assert_eq!(write(&dir, &other, false)?, protected_path);
-                assert_eq!(write(&dir, &other, false)?, protected_path);
+                assert_eq!(write(dir, &other, false)?, protected_path);
+                assert_eq!(write(dir, &other, false)?, protected_path);
                 crate::windows::test::assert_pending_protection(&protected_path, false)?;
                 fs::remove_file(protected_path)?;
             } else {
-                assert!(write(&dir, &other, false).is_err());
+                assert!(write(dir, &other, false).is_err());
                 assert!(!protected_path.exists());
             }
         }
-        fs::remove_dir_all(&dir)?;
+        fs::remove_dir_all(dir)?;
         Ok(())
     }
 }

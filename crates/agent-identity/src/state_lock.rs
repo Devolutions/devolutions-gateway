@@ -71,15 +71,20 @@ fn lock_file(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Fi
 fn lock_directory(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Dir> {
     use std::time::{Duration, Instant};
 
-    private_file::retry_sharing_violation(Instant::now(), Duration::from_secs(30), || {
-        private_file::provision_directories(data_dir, grant_current_user)?
-            .open_dir(
-                "identity",
-                &private_file::tree_rule(grant_current_user),
-                private_fs::Share::Exclusive,
-            )
-            .context("open identity state lock")
-    })
+    private_file::retry_sharing_violation(
+        Instant::now(),
+        Duration::from_secs(30),
+        Duration::from_millis(25),
+        || {
+            private_file::provision_directories(data_dir, grant_current_user)?
+                .open_dir(
+                    "identity",
+                    &private_file::tree_rule(grant_current_user),
+                    private_fs::Share::Exclusive,
+                )
+                .context("open identity state lock")
+        },
+    )
     .map_err(|error| {
         if private_file::is_sharing_violation(&error) {
             error.context("identity state lock remained busy")
@@ -108,25 +113,25 @@ mod tests {
     #[test]
     fn trusted_lock_serializes_concurrent_writers() -> anyhow::Result<()> {
         let directory = private_file::TestDir::new()?;
-        let worker_dir = directory.0.clone();
-        let lock = acquire(&directory.0, true)?;
+        let lock = acquire(directory.path(), true)?;
         let (sender, receiver) = std::sync::mpsc::channel();
-        let worker = std::thread::spawn(move || {
-            let result = acquire(&worker_dir, true).map(|_lock| ());
-            let _ = sender.send(result);
-        });
-        std::thread::sleep(Duration::from_millis(50));
-        match receiver.try_recv() {
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => anyhow::bail!("identity lock worker disconnected"),
-            Ok(Ok(())) => anyhow::bail!("concurrent writer acquired the identity lock before release"),
-            Ok(Err(error)) => return Err(error).context("concurrent writer failed before release"),
-        }
-        drop(lock);
-        receiver.recv_timeout(Duration::from_secs(5))??;
-        worker
-            .join()
-            .map_err(|_| anyhow::anyhow!("identity lock worker panicked"))?;
-        Ok(())
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(|| {
+                let result = acquire(directory.path(), true).map(|_lock| ());
+                let _ = sender.send(result);
+            });
+            std::thread::sleep(Duration::from_millis(50));
+            match receiver.try_recv() {
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => anyhow::bail!("identity lock worker disconnected"),
+                Ok(Ok(())) => anyhow::bail!("concurrent writer acquired the identity lock before release"),
+                Ok(Err(error)) => return Err(error).context("concurrent writer failed before release"),
+            }
+            drop(lock);
+            receiver.recv_timeout(Duration::from_secs(5))??;
+            worker
+                .join()
+                .map_err(|_| anyhow::anyhow!("identity lock worker panicked"))
+        })
     }
 }

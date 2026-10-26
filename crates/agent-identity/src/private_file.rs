@@ -550,7 +550,7 @@ fn submit_into_drop_box(
             .then(private_fs::BackupPrivilege::enable)
             .transpose()
             .context("enable administrator backup privilege")?;
-        let data = retry_sharing_violation(started, SUBMISSION_TIMEOUT, || {
+        let data = retry_sharing_violation(started, SUBMISSION_TIMEOUT, SUBMISSION_RETRY_INTERVAL, || {
             Ok(Dir::open_base(data_dir, &rules.base)?)
         })
         .and_then(|data| data.ok_or_else(not_found))
@@ -591,6 +591,8 @@ fn submit_into_drop_box(
         // The rule gives the administrator no access to the file, so only the handle that created it can remove it.
         let _ = pending.discard(&file, &staging);
     }
+    // The handle shares nothing, so the service can read the published file only once it is closed.
+    drop(file);
     published.map(drop)
 }
 
@@ -598,20 +600,25 @@ fn submit_into_drop_box(
 #[cfg(windows)]
 const SUBMISSION_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// How often an administrator's submission tries again while the service holds the identity directory.
+#[cfg(windows)]
+const SUBMISSION_RETRY_INTERVAL: Duration = Duration::from_millis(100);
+
 #[cfg(windows)]
 fn open_drop_box_directory(parent: &Dir, name: &str, rule: &Rule, started: Instant) -> anyhow::Result<Dir> {
-    retry_sharing_violation(started, SUBMISSION_TIMEOUT, || {
+    retry_sharing_violation(started, SUBMISSION_TIMEOUT, SUBMISSION_RETRY_INTERVAL, || {
         Ok(parent.open_dir(name, rule, Share::Shared)?)
     })?
     .ok_or_else(not_found)
 }
 
-/// Retries `operation` while it fails with a sharing violation, as while another process holds the identity directory,
-/// until `timeout` after `started`.
+/// Retries `operation` every `interval` while it fails with a sharing violation, as while another process holds the
+/// identity directory, until `timeout` after `started`.
 #[cfg(windows)]
 pub(crate) fn retry_sharing_violation<T>(
     started: Instant,
     timeout: Duration,
+    interval: Duration,
     mut operation: impl FnMut() -> anyhow::Result<T>,
 ) -> anyhow::Result<T> {
     loop {
@@ -621,7 +628,7 @@ pub(crate) fn retry_sharing_violation<T>(
                 if remaining.is_zero() {
                     return Err(error);
                 }
-                std::thread::sleep(remaining.min(Duration::from_millis(25)));
+                std::thread::sleep(remaining.min(interval));
             }
             result => return result,
         }
@@ -677,6 +684,10 @@ pub(crate) struct TestDir(pub(crate) Utf8PathBuf);
 
 #[cfg(test)]
 impl TestDir {
+    pub(crate) fn path(&self) -> &Utf8Path {
+        &self.0
+    }
+
     pub(crate) fn new() -> anyhow::Result<Self> {
         let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
             .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
@@ -1091,8 +1102,9 @@ mod windows_tests {
         Ok(())
     }
 
-    /// Runs `operation` impersonating a copy of the process token with the restore and take-ownership privileges enabled,
-    /// which let an elevated test give a directory SYSTEM as its owner and take it back.
+    /// Runs `operation` impersonating a copy of the process token with the backup, restore and take-ownership privileges
+    /// enabled, which let an elevated test give a directory SYSTEM as its owner, read the directories below it while
+    /// their inheritance is applied again, and take it back.
     fn with_restore_privilege<T>(operation: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
         use ::windows::Win32::Security::{
             SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_QUERY,
@@ -1109,10 +1121,83 @@ mod windows_tests {
                 SecurityImpersonation,
                 TokenImpersonation,
             )?;
+        token.enable_privilege(privilege::SE_BACKUP_NAME)?;
         token.enable_privilege(privilege::SE_RESTORE_NAME)?;
         token.enable_privilege(privilege::SE_TAKE_OWNERSHIP_NAME)?;
         let _impersonation = token.impersonate()?;
         operation()
+    }
+
+    /// Gives a test's `identity` and drop box the owner and DACLs the service running as SYSTEM provisions them with,
+    /// until restored or dropped, so that a failing test leaves no directory in the temporary directory that only SYSTEM
+    /// can remove.
+    struct SystemProvisioned<'a> {
+        directory: &'a TestDir,
+        restored: bool,
+    }
+
+    impl<'a> SystemProvisioned<'a> {
+        fn new(directory: &'a TestDir) -> anyhow::Result<Self> {
+            let mut provisioned = Self {
+                directory,
+                restored: false,
+            };
+            let system = acl::system_sid()?;
+            // SYSTEM owns them, only SYSTEM can list or read them, and administrators can only add a file to the drop
+            // box.
+            // `identity` comes first: changing its DACL applies its inheritance again below it, which reads the drop box
+            // while the current user still has access to it.
+            let provisioning = with_restore_privilege(|| {
+                for path in [directory.identity(), directory.pending()] {
+                    acl::set_owner(&path, &system)?;
+                }
+                acl::set_dacl(&directory.identity(), &[full(&system, INHERITED)])?;
+                acl::set_dacl(&directory.pending(), &[full(&system, INHERITED), add_only()?])
+            });
+            if let Err(error) = provisioning {
+                let _ = provisioned.restore();
+                return Err(error);
+            }
+            Ok(provisioned)
+        }
+
+        /// Gives the directories back to the current user, as `TestDir::provisioned` made them.
+        fn restore(&mut self) -> anyhow::Result<()> {
+            self.restored = true;
+            let system = acl::system_sid()?;
+            let user = acl::user_sid()?;
+            let directory = self.directory;
+            // Taking ownership back gives the current user the owner's implicit right to change the DACLs.
+            with_restore_privilege(|| {
+                for path in [directory.identity(), directory.pending()] {
+                    acl::set_owner(&path, &user)?;
+                }
+                acl::set_dacl(
+                    &directory.identity(),
+                    &[full(&system, INHERITED), full(&user, INHERITED)],
+                )?;
+                acl::set_dacl(
+                    &directory.pending(),
+                    &[full(&system, INHERITED), full(&user, INHERITED), add_only()?],
+                )
+            })
+        }
+    }
+
+    impl Drop for SystemProvisioned<'_> {
+        fn drop(&mut self) {
+            if !self.restored {
+                let _ = self.restore();
+            }
+        }
+    }
+
+    fn add_only() -> anyhow::Result<Ace> {
+        Ok((
+            Sid::from_well_known(WinBuiltinAdministratorsSid, None)?,
+            FILE_ADD_FILE.0 | SYNCHRONIZE.0,
+            NO_INHERITANCE.0,
+        ))
     }
 
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
@@ -1131,42 +1216,19 @@ mod windows_tests {
             return Ok(());
         }
         let directory = TestDir::provisioned()?;
-        let system = acl::system_sid()?;
-        let user = acl::user_sid()?;
-        let add_only = (
-            Sid::from_well_known(WinBuiltinAdministratorsSid, None)?,
-            FILE_ADD_FILE.0 | SYNCHRONIZE.0,
-            NO_INHERITANCE.0,
-        );
         let path = directory.pending_file('a');
-        // The directories as the service running as SYSTEM provisions them: SYSTEM owns them, only SYSTEM can list or
-        // read them, and administrators can only add a file to the drop box.
-        with_restore_privilege(|| {
-            for directory in [directory.identity(), directory.pending()] {
-                acl::set_owner(&directory, &system)?;
-            }
-            acl::set_dacl(&directory.pending(), &[full(&system, INHERITED), add_only.clone()])?;
-            acl::set_dacl(&directory.identity(), &[full(&system, INHERITED)])
-        })?;
+        let mut provisioned = SystemProvisioned::new(&directory)?;
+        // The test's data directory is the current user's, unlike the directories the service provisions.
+        let rules = DropBox {
+            base: tree_rule(true),
+            ..DropBox::provisioned_by(Account::System, false)
+        };
 
-        let submitted = submit_pending_as_administrator(&directory.0, &path, b"test payload");
+        let submitted = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, true);
         // The same token again finds its pending file there, so the second submission discards its staging file through
         // the handle that created it, which is all the access an administrator has to it.
-        let replayed = submit_pending_as_administrator(&directory.0, &path, b"test payload");
-        // Taking ownership back gives the current user the owner's implicit right to change the DACLs.
-        with_restore_privilege(|| {
-            for directory in [directory.identity(), directory.pending()] {
-                acl::set_owner(&directory, &user)?;
-            }
-            acl::set_dacl(
-                &directory.identity(),
-                &[full(&system, INHERITED), full(&user, INHERITED)],
-            )?;
-            acl::set_dacl(
-                &directory.pending(),
-                &[full(&system, INHERITED), full(&user, INHERITED), add_only.clone()],
-            )
-        })?;
+        let replayed = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, true);
+        provisioned.restore()?;
 
         submitted?;
         replayed?;
@@ -1326,7 +1388,7 @@ mod windows_tests {
         };
         // oracle: mutant a sharing violation, as while the service holds the identity directory, fails at once
         let mut attempts = 0;
-        retry_sharing_violation(Instant::now(), SUBMISSION_TIMEOUT, || {
+        retry_sharing_violation(Instant::now(), SUBMISSION_TIMEOUT, SUBMISSION_RETRY_INTERVAL, || {
             attempts += 1;
             if attempts == 1 { Err(sharing()) } else { Ok(()) }
         })?;
@@ -1334,12 +1396,13 @@ mod windows_tests {
 
         // oracle: mutant any failure is retried until the timeout
         let mut attempts = 0;
-        let result: anyhow::Result<()> = retry_sharing_violation(Instant::now(), SUBMISSION_TIMEOUT, || {
-            attempts += 1;
-            Err(anyhow::Error::new(io::Error::from_raw_os_error(i32::try_from(
-                ERROR_ACCESS_DENIED.0,
-            )?)))
-        });
+        let result: anyhow::Result<()> =
+            retry_sharing_violation(Instant::now(), SUBMISSION_TIMEOUT, SUBMISSION_RETRY_INTERVAL, || {
+                attempts += 1;
+                Err(anyhow::Error::new(io::Error::from_raw_os_error(i32::try_from(
+                    ERROR_ACCESS_DENIED.0,
+                )?)))
+            });
         assert!(result.is_err());
         assert_eq!(attempts, 1);
 
