@@ -917,14 +917,16 @@ impl MessageProcessor {
 
         info!(session_id, "Executing ShellExecuteW");
 
-        // SAFETY: All buffers are valid, therefore `ShellExecuteW` is safe to call.
+        // UNTESTED: Keep the directory buffer alive through ShellExecuteW; consuming it creates a dangling pointer.
+        // Check the borrow when changing argument conversion; a successful launch cannot prove pointer validity.
+        // SAFETY: All buffers are borrowed from locals that remain alive through the call.
         let hinstance = unsafe {
             ShellExecuteW(
                 None,
                 operation.as_pcwstr(),
                 command.as_pcwstr(),
                 parameters.as_pcwstr(),
-                directory.map(|d| d.as_pcwstr()).unwrap_or(PCWSTR::null()),
+                directory.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
                 // Activate and show window
                 SW_RESTORE,
             )
