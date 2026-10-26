@@ -191,9 +191,10 @@ const INBOUND_RETRY_INTERVAL_MS: u32 = 10;
 /// Longest time without a write while decoded messages are held back, on a channel with heartbeats enabled.
 ///
 /// No read is pending while messages are held back, so only a write can observe a closed channel.
-/// Without this probe, a client lost during stdin backpressure goes unnoticed until the next periodic heartbeat.
-/// A client that disabled heartbeats gets no probe, so its loss stays unnoticed while messages are held back.
+/// Without inbound progress, a probe or timeout is needed to observe a lost client.
 const BACKLOG_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+/// Maximum time a disabled-heartbeat channel may remain without progress while messages are held back.
+const BACKLOG_STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Overlapped IO state of one open DVC channel.
 ///
@@ -212,6 +213,8 @@ struct DvcIo {
     ///
     /// No read is issued while this is not empty, which bounds it to the messages of one read.
     inbound: VecDeque<NowMessage<'static>>,
+    backlog_stall_timeout: Duration,
+    inbound_blocked_since: Option<Instant>,
 
     write_buffer: Vec<u8>,
     write_overlapped: OVERLAPPED,
@@ -246,6 +249,8 @@ impl DvcIo {
             read_pending: false,
             message_dissector: NowMessageDissector::default(),
             inbound: VecDeque::new(),
+            backlog_stall_timeout: BACKLOG_STALL_TIMEOUT,
+            inbound_blocked_since: None,
             write_buffer: Vec::new(),
             write_overlapped: OVERLAPPED {
                 hEvent: write_event.raw(),
@@ -271,18 +276,31 @@ impl DvcIo {
                 if !self.read_pending {
                     self.start_read()?;
                 }
-            } else if progress.heartbeats_enabled()
-                && !self.write_pending
-                && self.last_write_started.elapsed() >= BACKLOG_PROBE_INTERVAL
-            {
-                // A heartbeat is the only message the server may send unprompted, and only when the client enabled
-                // heartbeats; NOW clients take one at any time, since they only watch for missing ones.
-                // UNTESTED: the probe must wait for any pending write, because `start_write` replaces the buffer the
-                // OS is still sending, and must stay spaced by `BACKLOG_PROBE_INTERVAL` so a held-back channel is not
-                // flooded; when changing this condition, check both still hold.
-                trace!("Probing the DVC channel while inbound messages are held back");
-                self.start_write(&NowChannelHeartbeatMsg::default().into())
-                    .context("probing the DVC channel while inbound messages are held back")?;
+            } else {
+                if !progress.heartbeats_enabled()
+                    && self
+                        .inbound_blocked_since
+                        .is_some_and(|since| since.elapsed() >= self.backlog_stall_timeout)
+                {
+                    anyhow::bail!(
+                        "inbound DVC messages remained backpressured for {:?}",
+                        self.backlog_stall_timeout
+                    );
+                }
+
+                if progress.heartbeats_enabled()
+                    && !self.write_pending
+                    && self.last_write_started.elapsed() >= BACKLOG_PROBE_INTERVAL
+                {
+                    // A heartbeat is the only message the server may send unprompted, and only when the client
+                    // enabled heartbeats; NOW clients take one at any time, since they only watch for missing ones.
+                    // UNTESTED: the probe must wait for any pending write, because `start_write` replaces the buffer
+                    // the OS is still sending, and must stay spaced by `BACKLOG_PROBE_INTERVAL` so a held-back
+                    // channel is not flooded; when changing this condition, check both still hold.
+                    trace!("Probing the DVC channel while inbound messages are held back");
+                    self.start_write(&NowChannelHeartbeatMsg::default().into())
+                        .context("probing the DVC channel while inbound messages are held back")?;
+                }
             }
 
             // The stop event comes first so that it wins over a busy channel.
@@ -398,8 +416,9 @@ impl DvcIo {
     fn forward_inbound(&mut self, read_tx: &Sender<NowMessage<'static>>) -> anyhow::Result<()> {
         while let Some(message) = self.inbound.pop_front() {
             match read_tx.try_send(message) {
-                Ok(()) => {}
+                Ok(()) => self.inbound_blocked_since = None,
                 Err(TrySendError::Full(message)) => {
+                    self.inbound_blocked_since.get_or_insert_with(Instant::now);
                     trace!(pending = self.inbound.len() + 1, "DVC processing queue is full");
                     self.inbound.push_front(message);
                     break;
@@ -718,6 +737,20 @@ mod tests {
     }
 
     fn run_dvc_io_with_heartbeats(server: usize, read_queue_capacity: usize, heartbeats_enabled: bool) -> RunningDvcIo {
+        run_dvc_io_with_timeout(
+            server,
+            read_queue_capacity,
+            heartbeats_enabled,
+            super::BACKLOG_STALL_TIMEOUT,
+        )
+    }
+
+    fn run_dvc_io_with_timeout(
+        server: usize,
+        read_queue_capacity: usize,
+        heartbeats_enabled: bool,
+        backlog_stall_timeout: Duration,
+    ) -> RunningDvcIo {
         let (write_tx, write_rx) = winapi_signaled_mpsc_channel().expect("create the write queue");
         let (read_tx, read_rx) = mpsc::channel(read_queue_capacity);
         let stop_event = Event::new_unnamed().expect("create the stop event");
@@ -729,6 +762,7 @@ mod tests {
             // SAFETY: The handle was opened by `dvc_pipe`, which gave up ownership of it.
             let file = unsafe { Owned::new(HANDLE(server as *mut _)) };
             let mut io = DvcIo::new(file)?;
+            io.backlog_stall_timeout = backlog_stall_timeout;
             io.serve(write_rx, &read_tx, &thread_stop_event, &progress)
         });
 
@@ -984,6 +1018,61 @@ mod tests {
         }
 
         running.stop().expect("the loop stops cleanly");
+    }
+
+    /// The disabled-heartbeat backlog timeout remains at the chosen 30-second recovery limit.
+    // oracle: mutant the backlog timeout changes away from 30 seconds.
+    #[test]
+    fn disabled_heartbeat_backlog_timeout_is_thirty_seconds() {
+        assert_eq!(super::BACKLOG_STALL_TIMEOUT, Duration::from_secs(30));
+    }
+
+    /// A blocked stdin sender and full processing queue cannot hide a closed DVC when heartbeats are disabled.
+    // oracle: mutant disabled-heartbeat backpressure can stall indefinitely after peer closure.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn closed_channel_with_disabled_heartbeats_ends_saturated_backlog() {
+        let (server, client) = dvc_pipe();
+        let running = run_dvc_io_with_timeout(server, 1, false, Duration::from_secs(1));
+        let RunningDvcIo {
+            write_tx,
+            mut read_rx,
+            stop_event: _,
+            thread,
+        } = running;
+        let (stdin_tx, _stdin_rx) = mpsc::channel(1);
+        stdin_tx.try_send(()).expect("fill the stdin queue");
+        let (blocked_tx, blocked_rx) = tokio::sync::oneshot::channel();
+        let processing = tokio::spawn(async move {
+            let message = read_rx.recv().await.expect("first DVC message reaches processing");
+            blocked_tx.send(message).expect("test is waiting for the first message");
+            stdin_tx.send(()).await.expect("stdin queue remains open");
+        });
+
+        write_pdu(&client, &encoded(&exec_data(1, vec![0; 16])));
+        blocked_rx.await.expect("processing consumes the first message");
+        write_pdu(&client, &encoded(&exec_data(2, vec![0; 16])));
+        write_pdu(&client, &encoded(&exec_data(3, vec![0; 16])));
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(client);
+
+        let deadline = Instant::now() + TEST_TIMEOUT;
+        while !thread.is_finished() {
+            assert!(Instant::now() < deadline, "the stalled saturated DVC did not end");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+
+        let error = thread
+            .join()
+            .expect("the DVC IO loop does not panic")
+            .expect_err("a stalled saturated channel ends with an error");
+        assert!(
+            format!("{error:#}").contains("remained backpressured"),
+            "unexpected error: {error:#}"
+        );
+        processing.abort();
+        let _ = processing.await;
+        drop(write_tx);
     }
 
     /// Stopping with a read and a write in flight must cancel both and return.

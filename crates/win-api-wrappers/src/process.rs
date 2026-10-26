@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 use tracing::{error, warn};
 use windows::Win32::Foundation::{
     E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FILETIME, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM,
-    MAX_PATH, WAIT_EVENT, WAIT_FAILED, WAIT_OBJECT_0, WPARAM,
+    MAX_PATH, WAIT_EVENT, WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT, WPARAM,
 };
 use windows::Win32::Security::{TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
@@ -1010,14 +1010,17 @@ fn terminate_process_by_name_impl(
                     // SAFETY: OpenProcess returned a valid handle owned by the caller.
                     let process = unsafe { Handle::new_owned(process) }?;
                     // SAFETY: `OpenProcess` ensures that the handle is valid.
-                    unsafe {
-                        if let Err(error) = TerminateProcess(process.raw(), 1) {
-                            if timeout_ms.is_some() {
-                                return Err(error.into());
+                    if let Err(error) = unsafe { TerminateProcess(process.raw(), 1) } {
+                        if timeout_ms.is_some() {
+                            // SAFETY: The handle has SYNCHRONIZE access when termination is awaited.
+                            let wait = unsafe { WaitForSingleObject(process.raw(), 0) };
+                            if termination_failure_is_complete(wait)? {
+                                return Ok(true);
                             }
-                            warn!(process_name, session_id, %error, "TerminateProcess failed");
-                            return Ok(false);
+                            return Err(error.into());
                         }
+                        warn!(process_name, session_id, %error, "TerminateProcess failed");
+                        return Ok(false);
                     }
 
                     if let Some(timeout_ms) = timeout_ms {
@@ -1045,6 +1048,15 @@ fn terminate_process_by_name_impl(
     }
 
     Ok(false)
+}
+
+fn termination_failure_is_complete(wait: WAIT_EVENT) -> Result<bool> {
+    match wait {
+        WAIT_OBJECT_0 => Ok(true),
+        WAIT_TIMEOUT => Ok(false),
+        WAIT_FAILED => Err(Error::last_error().into()),
+        status => bail!("unexpected process wait status {:#X}", status.0),
+    }
 }
 
 /// Get the Windows session ID for a given process ID.
@@ -1121,4 +1133,24 @@ pub fn post_message_for_pid(pid: u32, msg: u32, wparam: WPARAM, lparam: LPARAM) 
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+
+    use super::termination_failure_is_complete;
+
+    /// TerminateProcess may lose a race with normal process exit; a signaled process handle means termination is done.
+    // oracle: spec TerminateProcess §Remarks
+    #[test]
+    fn already_signaled_process_is_treated_as_terminated() {
+        assert!(termination_failure_is_complete(WAIT_OBJECT_0).expect("read process state"));
+    }
+
+    // oracle: spec WaitForSingleObject §Return value
+    #[test]
+    fn running_process_is_not_treated_as_terminated() {
+        assert!(!termination_failure_is_complete(WAIT_TIMEOUT).expect("read process state"));
+    }
 }

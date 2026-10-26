@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::os::windows::io::AsRawHandle as _;
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 use now_proto_pdu::{NowExecDataStreamKind, NowStatusError};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -10,10 +13,11 @@ use win_api_wrappers::security::attributes::SecurityAttributesInit;
 use win_api_wrappers::thread::Thread;
 use win_api_wrappers::utils::{Pipe, WideString};
 use windows::Win32::Foundation::{
-    ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, GetLastError, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
+    ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, ERROR_NOT_FOUND, GetLastError, HANDLE, LPARAM, WAIT_EVENT, WAIT_OBJECT_0,
+    WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
-use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
+use windows::Win32::System::IO::{CancelSynchronousIo, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_LIMIT_INFORMATION,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
@@ -550,6 +554,60 @@ fn write_all(pipe: &Pipe, mut bytes: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
+const STDIN_WRITER_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
+struct StdinWriter {
+    sender: Option<Sender<StdinChunk>>,
+    thread: Option<JoinHandle<()>>,
+}
+
+impl StdinWriter {
+    fn stop(&mut self) -> anyhow::Result<()> {
+        drop(self.sender.take());
+
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+
+        let deadline = Instant::now() + STDIN_WRITER_STOP_TIMEOUT;
+        while !thread.is_finished() && Instant::now() < deadline {
+            // SAFETY: The join handle owns this valid thread handle until it is dropped.
+            if let Err(error) = unsafe { CancelSynchronousIo(HANDLE(thread.as_raw_handle() as *mut _)) }
+                && error.code() != ERROR_NOT_FOUND.to_hresult()
+            {
+                warn!(%error, "Failed to cancel synchronous process stdin write");
+            }
+
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        if thread.is_finished() {
+            if thread.join().is_err() {
+                anyhow::bail!("process stdin writer thread panicked");
+            }
+            return Ok(());
+        }
+
+        // UNTESTED: A writer that does not stop remains detached with its pipe and write buffer alive, because
+        // freeing either while WriteFile is pending would be unsafe. When changing this timeout, check that cleanup
+        // remains bounded and the pending write's memory stays owned.
+        error!(
+            timeout = ?STDIN_WRITER_STOP_TIMEOUT,
+            "Process stdin writer did not stop after cancellation"
+        );
+        drop(thread);
+        anyhow::bail!("process stdin writer did not stop within {STDIN_WRITER_STOP_TIMEOUT:?}")
+    }
+}
+
+impl Drop for StdinWriter {
+    fn drop(&mut self) {
+        if let Err(error) = self.stop() {
+            error!(%error, "Failed to stop process stdin writer");
+        }
+    }
+}
+
 /// Builder for process execution session.
 pub struct WinApiProcessBuilder {
     executable: String,
@@ -672,16 +730,19 @@ impl WinApiProcessBuilder {
         let (input_event_tx, input_event_rx) = winapi_signaled_mpsc_channel()?;
 
         let mut process_ctx = process_ctx;
-        let stdin_tx = match process_ctx.stdin_write_pipe.take() {
+        let stdin_writer = match process_ctx.stdin_write_pipe.take() {
             Some(pipe) => {
                 let (stdin_tx, stdin_rx) = bounded_mpsc_channel()?;
                 let encoder = InputEncoder::new(encoding);
 
-                std::thread::Builder::new()
+                let thread = std::thread::Builder::new()
                     .name(format!("process-{session_id}-stdin"))
                     .spawn(move || write_stdin(session_id, pipe, encoder, stdin_rx))?;
 
-                Some(stdin_tx)
+                Some(StdinWriter {
+                    sender: Some(stdin_tx),
+                    thread: Some(thread),
+                })
             }
             None => None,
         };
@@ -708,7 +769,7 @@ impl WinApiProcessBuilder {
 
         Ok(Some(WinApiProcess {
             input_event_tx,
-            stdin_tx,
+            stdin_writer,
             join_handle,
             _temp_files: temp_files,
         }))
@@ -950,8 +1011,8 @@ fn prepare_process_with_io_redirection(
 pub struct WinApiProcess {
     input_event_tx: WinapiSignaledSender<ProcessIoInputEvent>,
     /// `None` without IO redirection.
-    stdin_tx: Option<Sender<StdinChunk>>,
-    join_handle: std::thread::JoinHandle<()>,
+    stdin_writer: Option<StdinWriter>,
+    join_handle: JoinHandle<()>,
     _temp_files: Vec<TmpFileGuard>,
 }
 
@@ -980,7 +1041,11 @@ impl WinApiProcess {
     /// read its stdin until its output is drained.
     /// Input for a process that no longer reads stdin is discarded.
     pub fn send_stdin(&self, data: Vec<u8>, last: bool) -> impl Future<Output = ()> + Send + 'static {
-        let stdin_tx = self.stdin_tx.clone();
+        let stdin_tx = self
+            .stdin_writer
+            .as_ref()
+            .and_then(|writer| writer.sender.as_ref())
+            .cloned();
 
         async move {
             let Some(stdin_tx) = stdin_tx else {
@@ -1070,5 +1135,32 @@ mod tests {
             stdout.matches("input-line-").count(),
             usize::try_from(INPUT_LINES).expect("u32 fits into usize")
         );
+    }
+
+    /// Dropping an attached execution must cancel a synchronous stdin write blocked by a child that does not read.
+    // oracle: mutant dropping an execution leaves its synchronous stdin writer blocked.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn dropping_process_stops_a_blocked_stdin_writer() {
+        const SESSION_ID: u32 = 1;
+
+        let (io_notification_tx, _io_notification_rx) = tokio::sync::mpsc::channel(100);
+        let job = ProcessJob::new().expect("create job");
+        let process = WinApiProcessBuilder::new("cmd.exe")
+            .with_command_line("/d /c ping -n 600 127.0.0.1 > nul")
+            .with_io_redirection(true)
+            .run(SESSION_ID, io_notification_tx, &job)
+            .expect("start cmd.exe");
+
+        process.send_stdin(vec![b'x'; 1024 * 1024], false).await;
+        std::thread::sleep(Duration::from_millis(100));
+
+        let started_at = Instant::now();
+        drop(process);
+        assert!(
+            started_at.elapsed() < STDIN_WRITER_STOP_TIMEOUT / 2,
+            "dropping the process did not stop the blocked stdin writer promptly"
+        );
+
+        drop(job);
     }
 }

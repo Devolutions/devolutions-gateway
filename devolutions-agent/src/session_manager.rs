@@ -79,6 +79,8 @@ struct GatewaySession {
     launch_id: Option<u64>,
     /// Number of consecutive quick failures of the session process.
     consecutive_failures: u32,
+    /// Generation of a start request that has not started or adopted a process yet.
+    start_retry_id: Option<u64>,
     /// A reconnect must finish terminating its old host before lookup can adopt another one.
     termination_pending: bool,
 }
@@ -92,6 +94,7 @@ impl Debug for GatewaySession {
             .field("readiness", &self.readiness)
             .field("launch_id", &self.launch_id)
             .field("consecutive_failures", &self.consecutive_failures)
+            .field("start_retry_id", &self.start_retry_id)
             .finish()
     }
 }
@@ -104,6 +107,7 @@ impl GatewaySession {
             readiness,
             launch_id: None,
             consecutive_failures: 0,
+            start_retry_id: None,
             termination_pending: false,
         }
     }
@@ -133,6 +137,7 @@ impl GatewaySession {
     fn set_waiting_for_logon(&mut self) {
         self.readiness = SessionReadiness::WaitingForLogon;
         self.consecutive_failures = 0;
+        self.start_retry_id = None;
     }
 
     /// Whether the process started with `launch_id` is the one this session still wants running.
@@ -155,6 +160,7 @@ struct ProcessExit {
 enum InternalEvent {
     ProcessExited(ProcessExit),
     RelaunchDue { session_id: u32, launch_id: u64 },
+    StartRetryDue { session_id: u32, retry_id: u64 },
 }
 
 /// Delay before relaunching a process that failed for the first time.
@@ -181,6 +187,7 @@ fn relaunch_delay(consecutive_failures: u32) -> Duration {
 struct SessionManagerCtx {
     sessions: BTreeMap<String, GatewaySession>,
     last_launch_id: u64,
+    last_start_retry_id: u64,
 }
 
 impl SessionManagerCtx {
@@ -329,6 +336,64 @@ impl SessionManagerCtx {
         Some(delay)
     }
 
+    fn begin_start_retry(&mut self, session: &Session) -> Option<u64> {
+        let key = session.to_string();
+        if !self.sessions.contains_key(&key) {
+            return None;
+        }
+
+        self.last_start_retry_id += 1;
+        let retry_id = self.last_start_retry_id;
+        let gw_session = self.sessions.get_mut(&key)?;
+        gw_session.start_retry_id = Some(retry_id);
+        gw_session.consecutive_failures = 0;
+        Some(retry_id)
+    }
+
+    fn complete_start_retry(&mut self, session_id: u32, retry_id: u64) {
+        if let Some(gw_session) = self
+            .get_session_mut(&Session::new(session_id))
+            .filter(|gw_session| gw_session.start_retry_id == Some(retry_id))
+        {
+            gw_session.start_retry_id = None;
+        }
+    }
+
+    fn retry_failed_start(&mut self, session_id: u32, retry_id: u64) -> Option<Duration> {
+        let gw_session = self
+            .get_session_mut(&Session::new(session_id))
+            .filter(|gw_session| gw_session.start_retry_id == Some(retry_id))?;
+        gw_session.consecutive_failures += 1;
+
+        if MAX_CONSECUTIVE_FAILURES <= gw_session.consecutive_failures {
+            error!(
+                session = session_id,
+                retry_id,
+                consecutive_failures = gw_session.consecutive_failures,
+                "Session process recovery keeps failing; waiting for the next logon or unlock"
+            );
+            gw_session.readiness = SessionReadiness::WaitingForLogonOrUnlock;
+            gw_session.consecutive_failures = 0;
+            gw_session.start_retry_id = None;
+            return None;
+        }
+
+        let delay = relaunch_delay(gw_session.consecutive_failures);
+        warn!(
+            session = session_id,
+            retry_id,
+            ?delay,
+            "Scheduling session process start retry"
+        );
+        Some(delay)
+    }
+
+    fn should_retry_start(&self, session_id: u32, retry_id: u64) -> bool {
+        self.sessions
+            .get(&Session::new(session_id).to_string())
+            .is_some_and(|gw_session| gw_session.start_retry_id == Some(retry_id))
+    }
+
     /// Whether a relaunch scheduled after the exit of the process started with `launch_id` is still wanted.
     fn should_relaunch(&self, session_id: u32, launch_id: u64) -> bool {
         self.sessions
@@ -455,7 +520,7 @@ impl SessionManager {
                 let mut ctx = ctx.write().await;
                 for session in sessions {
                     ctx.register_session(&session, SessionKind::Remote, SessionReadiness::WaitingForLogonOrUnlock);
-                    start_session_process_if_not_running(&mut ctx, system, &session, &internal_tx);
+                    request_session_process_start(&mut ctx, system, &session, false, &internal_tx);
                 }
             }
             Err(error) => {
@@ -480,6 +545,26 @@ impl SessionManager {
                                     && let Some(delay) = ctx.retry_failed_launch(session_id, launch_id)
                                 {
                                     schedule_relaunch(&internal_tx, session_id, launch_id, delay);
+                                }
+                            }
+                        }
+                        InternalEvent::StartRetryDue { session_id, retry_id } => {
+                            if ctx.should_retry_start(session_id, retry_id) {
+                                match system.active_remote_sessions() {
+                                    Ok(sessions) if sessions.iter().any(|session| session.id == session_id) => {
+                                        if start_session_process_if_not_running(&mut ctx, system, &Session::new(session_id), &internal_tx) {
+                                            ctx.complete_start_retry(session_id, retry_id);
+                                        } else if let Some(delay) = ctx.retry_failed_start(session_id, retry_id) {
+                                            schedule_start_retry(&internal_tx, session_id, retry_id, delay);
+                                        }
+                                    }
+                                    Ok(_) => ctx.complete_start_retry(session_id, retry_id),
+                                    Err(error) => {
+                                        error!(%error, session = session_id, "Failed to check whether the remote session is active for start retry");
+                                        if let Some(delay) = ctx.retry_failed_start(session_id, retry_id) {
+                                            schedule_start_retry(&internal_tx, session_id, retry_id, delay);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -533,21 +618,7 @@ impl SessionManager {
                                 let mut ctx = ctx.write().await;
                                 ctx.register_session(&id, SessionKind::Remote, readiness);
                                 ctx.get_session_mut(&id).expect("session was just registered").termination_pending = true;
-
-                                if !finish_session_termination(&mut ctx, system, &id) {
-                                    continue;
-                                }
-
-                                // A queued connect may predate the startup snapshot and its user's logon.
-                                match system.active_remote_sessions() {
-                                    Ok(sessions) if sessions.iter().any(|session| session.id == id.id) => {
-                                        start_session_process_if_not_running(&mut ctx, system, &id, &internal_tx);
-                                    }
-                                    Ok(_) => {}
-                                    Err(error) => {
-                                        error!(%id, %error, "Failed to check whether the remote session is active");
-                                    }
-                                }
+                                request_session_process_start(&mut ctx, system, &id, true, &internal_tx);
                             }
                         }
                         AgentServiceEvent::SessionRemoteDisconnect(id) => {
@@ -568,7 +639,7 @@ impl SessionManager {
                             // session app on logon, if not yet started.
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Logon) {
-                                start_session_process_if_not_running(&mut ctx, system, &id, &internal_tx);
+                                request_session_process_start(&mut ctx, system, &id, false, &internal_tx);
                             }
                         }
                         AgentServiceEvent::SessionUnlock(id) => {
@@ -576,7 +647,7 @@ impl SessionManager {
 
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Unlock) {
-                                start_session_process_if_not_running(&mut ctx, system, &id, &internal_tx);
+                                request_session_process_start(&mut ctx, system, &id, false, &internal_tx);
                             }
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
@@ -619,11 +690,55 @@ fn start_session_process_if_not_running(
     if !finish_session_termination(ctx, system, session) {
         return false;
     }
+    start_registered_session_process(ctx, system, session, internal_tx)
+}
+
+fn start_registered_session_process(
+    ctx: &mut SessionManagerCtx,
+    system: &dyn SessionSystem,
+    session: &Session,
+    internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+) -> bool {
     ctx.start_process_if_not_running(
         session,
         |session| system.is_running(session),
         |session, launch_id| system.start_watched(session, launch_id, internal_tx),
     )
+}
+
+fn request_session_process_start(
+    ctx: &mut SessionManagerCtx,
+    system: &dyn SessionSystem,
+    session: &Session,
+    verify_active_remote_session: bool,
+    internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+) {
+    let Some(retry_id) = ctx.begin_start_retry(session) else {
+        return;
+    };
+
+    let mut should_start = finish_session_termination(ctx, system, session);
+    if should_start && verify_active_remote_session {
+        match system.active_remote_sessions() {
+            Ok(sessions) => {
+                should_start = sessions.iter().any(|active| active.id == session.id);
+                if !should_start {
+                    ctx.complete_start_retry(session.id, retry_id);
+                    return;
+                }
+            }
+            Err(error) => {
+                error!(%error, %session, "Failed to check whether the remote session is active");
+                should_start = false;
+            }
+        }
+    }
+
+    if should_start && start_registered_session_process(ctx, system, session, internal_tx) {
+        ctx.complete_start_retry(session.id, retry_id);
+    } else if let Some(delay) = ctx.retry_failed_start(session.id, retry_id) {
+        schedule_start_retry(internal_tx, session.id, retry_id, delay);
+    }
 }
 
 fn finish_session_termination(ctx: &mut SessionManagerCtx, system: &dyn SessionSystem, session: &Session) -> bool {
@@ -638,6 +753,19 @@ fn finish_session_termination(ctx: &mut SessionManagerCtx, system: &dyn SessionS
         gw_session.termination_pending = false;
     }
     true
+}
+
+fn schedule_start_retry(
+    internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+    session_id: u32,
+    retry_id: u64,
+    delay: Duration,
+) {
+    let internal_tx = internal_tx.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        let _ = internal_tx.send(InternalEvent::StartRetryDue { session_id, retry_id });
+    });
 }
 
 /// Reports the exit of `process` to the session manager from a dedicated thread.
@@ -815,6 +943,7 @@ mod tests {
         events: mpsc::Sender<AgentServiceEvent>,
         events_during_snapshot: Mutex<Vec<AgentServiceEvent>>,
         lookup_failures: Mutex<VecDeque<bool>>,
+        launch_failures: Mutex<VecDeque<bool>>,
         termination_failures: Mutex<VecDeque<bool>>,
         running: Mutex<BTreeSet<u32>>,
         exit_on_start: Mutex<Option<u32>>,
@@ -862,6 +991,15 @@ mod tests {
             launch_id: u64,
             internal_tx: &mpsc::UnboundedSender<InternalEvent>,
         ) -> anyhow::Result<()> {
+            if self
+                .launch_failures
+                .lock()
+                .expect("launch failure lock")
+                .pop_front()
+                .unwrap_or(false)
+            {
+                anyhow::bail!("session process launch failed");
+            }
             assert!(
                 self.running.lock().expect("running processes lock").insert(session.id),
                 "duplicate host launch"
@@ -914,6 +1052,30 @@ mod tests {
         ChildTask<anyhow::Result<()>>,
         mpsc::UnboundedReceiver<HostAction>,
     ) {
+        start_test_manager_with_launch_failures(
+            active_sessions,
+            running,
+            events_during_snapshot,
+            lookup_failures,
+            Vec::new(),
+            exit_on_start,
+            termination_failures,
+        )
+    }
+
+    fn start_test_manager_with_launch_failures(
+        active_sessions: Vec<u32>,
+        running: BTreeSet<u32>,
+        events_during_snapshot: Vec<AgentServiceEvent>,
+        lookup_failures: Vec<bool>,
+        launch_failures: Vec<bool>,
+        exit_on_start: Option<u32>,
+        termination_failures: Vec<bool>,
+    ) -> (
+        ShutdownHandle,
+        ChildTask<anyhow::Result<()>>,
+        mpsc::UnboundedReceiver<HostAction>,
+    ) {
         let manager = SessionManager::default();
         let (shutdown, signal) = ShutdownHandle::new();
         let (actions, observations) = mpsc::unbounded_channel();
@@ -922,6 +1084,7 @@ mod tests {
             events: manager.service_event_tx(),
             events_during_snapshot: Mutex::new(events_during_snapshot),
             lookup_failures: Mutex::new(lookup_failures.into()),
+            launch_failures: Mutex::new(launch_failures.into()),
             termination_failures: Mutex::new(termination_failures.into()),
             running: Mutex::new(running),
             exit_on_start: Mutex::new(exit_on_start),
@@ -943,6 +1106,29 @@ mod tests {
     #[tokio::test]
     async fn already_active_remote_session_launches_without_new_events() {
         let (shutdown, task, mut actions) = start_test_manager(vec![42], BTreeSet::new(), vec![], vec![], None, vec![]);
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    /// A transient startup process launch failure is retried without waiting for another readiness event.
+    // oracle: mutant an active startup session remains without a host after one launch failure.
+    #[tokio::test]
+    async fn startup_launch_failure_is_retried_without_a_new_event() {
+        let (shutdown, task, mut actions) = start_test_manager_with_launch_failures(
+            vec![42],
+            BTreeSet::new(),
+            vec![],
+            vec![false, false],
+            vec![true, false],
+            None,
+            vec![],
+        );
 
         assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
 
@@ -1086,6 +1272,46 @@ mod tests {
             .expect("session manager result");
     }
 
+    /// A transient startup process lookup failure is retried without waiting for another readiness event.
+    // oracle: mutant an active startup session remains without a host after one process lookup failure.
+    #[tokio::test]
+    async fn startup_lookup_failure_is_retried_without_a_new_event() {
+        let (shutdown, task, mut actions) =
+            start_test_manager(vec![42], BTreeSet::new(), vec![], vec![true, false], None, vec![]);
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    /// A reconnect termination failure is retried without another logon or unlock event.
+    // oracle: mutant a transient reconnect termination failure prevents host recovery until another service event.
+    #[tokio::test]
+    async fn reconnect_termination_failure_is_retried_without_a_new_event() {
+        let (shutdown, task, mut actions) = start_test_manager(
+            vec![42],
+            BTreeSet::new(),
+            vec![AgentServiceEvent::SessionRemoteConnect(Session::new(42))],
+            vec![],
+            None,
+            vec![true, false],
+        );
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Stopped(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
     // oracle: mutant a transient lookup failure during relaunch leaves the session Ready without another retry.
     #[tokio::test]
     async fn relaunch_lookup_failure_is_retried_without_another_service_event() {
@@ -1162,6 +1388,24 @@ mod tests {
             |_, _| panic!("the process was started although the lookup failed"),
         );
 
+        assert!(ctx.should_start_session(&session, SessionReadinessEvent::Logon));
+    }
+
+    /// Start retries use the existing exponential backoff and stop after the configured failure bound.
+    // oracle: mutant prelaunch recovery retries forever or skips its exponential backoff.
+    #[test]
+    fn prelaunch_retries_are_bounded_until_a_new_readiness_event() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        ctx.register_session(&session, SessionKind::Remote, SessionReadiness::WaitingForLogon);
+        let retry_id = ctx.begin_start_retry(&session).expect("session is registered");
+
+        assert_eq!(ctx.retry_failed_start(1, retry_id), Some(Duration::from_secs(2)));
+        assert_eq!(ctx.retry_failed_start(1, retry_id), Some(Duration::from_secs(4)));
+        assert_eq!(ctx.retry_failed_start(1, retry_id), Some(Duration::from_secs(8)));
+        assert_eq!(ctx.retry_failed_start(1, retry_id), Some(Duration::from_secs(16)));
+        assert_eq!(ctx.retry_failed_start(1, retry_id), None);
+        assert!(!ctx.should_retry_start(1, retry_id));
         assert!(ctx.should_start_session(&session, SessionReadinessEvent::Logon));
     }
 
