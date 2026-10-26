@@ -260,7 +260,6 @@ pub(crate) fn remove_file(parent: &Dir, path: &Utf8Path, name: &str) -> Result<b
 }
 
 /// Removes the file `name`, which `file` was created as, unless the name now holds another file.
-#[expect(dead_code, reason = "Dir::discard is not wired yet")]
 pub(crate) fn discard(parent: &Dir, path: &Utf8Path, file: &File, name: &str) -> Result<()> {
     let c_name = c_name(path, name)?;
     let created = fstat(file).map_err(|error| Error::io(path, "inspect file", error))?;

@@ -215,6 +215,15 @@ impl Dir {
         sys::persist(&self.inner, &path, file, from, to, replace)
     }
 
+    /// Removes the file `name` that this handle created as `file`, through `file` itself where the platform allows.
+    ///
+    /// A file can be created with a rule that gives its creator no access once created, so removing it by name again
+    /// could be refused.
+    pub fn discard(&self, file: &File, name: &str) -> Result<()> {
+        let path = self.child(name)?;
+        sys::discard(&self.inner, &path, file, name)
+    }
+
     /// Removes the file `name`, and returns `false` when it doesn't exist.
     pub fn remove_file(&self, name: &str) -> Result<bool> {
         let path = self.child(name)?;

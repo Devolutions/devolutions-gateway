@@ -283,7 +283,6 @@ pub(crate) fn remove_file(parent: &Dir, path: &Utf8Path, name: &str) -> Result<b
 }
 
 /// Removes `file`, which this directory's handle created as `name`, through the file's own handle.
-#[expect(dead_code, reason = "lib.rs exposes it as Dir::discard")]
 pub(crate) fn discard(_parent: &Dir, path: &Utf8Path, file: &File, _name: &str) -> Result<()> {
     nt::delete_on_close(file.as_handle()).map_err(|error| Error::io(path, "remove file", error))
 }
