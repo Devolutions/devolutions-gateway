@@ -90,6 +90,7 @@ pub struct DvcInitializationProgress {
     channel_opened: AtomicBool,
     channel_opened_notify: Notify,
     negotiated: AtomicBool,
+    heartbeats_enabled: AtomicBool,
 }
 
 impl DvcInitializationProgress {
@@ -144,6 +145,18 @@ impl DvcInitializationProgress {
     pub fn negotiated(&self) -> bool {
         self.negotiated.load(Ordering::Relaxed)
     }
+
+    /// Records whether the negotiated capabilities let the server send heartbeats.
+    pub fn set_heartbeats_enabled(&self, enabled: bool) {
+        self.heartbeats_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    /// Whether the client accepted heartbeats on this channel.
+    ///
+    /// A client that negotiated a zero interval disabled them, so it is never sent one.
+    pub fn heartbeats_enabled(&self) -> bool {
+        self.heartbeats_enabled.load(Ordering::Relaxed)
+    }
 }
 
 struct DvcIoContext {
@@ -165,7 +178,7 @@ pub fn run_dvc_io(
         return Ok(());
     };
 
-    let result = context.io.serve(write_rx, &read_tx, &stop_event);
+    let result = context.io.serve(write_rx, &read_tx, &stop_event, progress);
 
     // Notify processing before cancellation cleanup, which can block until pending IO completes.
     let _ = io_loop_ended_tx.send(());
@@ -175,11 +188,11 @@ pub fn run_dvc_io(
 /// Interval at which decoded messages are offered again to a full processing queue.
 const INBOUND_RETRY_INTERVAL_MS: u32 = 10;
 
-/// Longest time without a write while decoded messages are held back.
+/// Longest time without a write while decoded messages are held back, on a channel with heartbeats enabled.
 ///
 /// No read is pending while messages are held back, so only a write can observe a closed channel.
-/// Without this probe, a client lost during stdin backpressure goes unnoticed until the next heartbeat, or forever
-/// when heartbeats are disabled, and the channel is never reopened.
+/// Without this probe, a client lost during stdin backpressure goes unnoticed until the next periodic heartbeat.
+/// A client that disabled heartbeats gets no probe, so its loss stays unnoticed while messages are held back.
 const BACKLOG_PROBE_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Overlapped IO state of one open DVC channel.
@@ -249,6 +262,7 @@ impl DvcIo {
         mut write_rx: WinapiSignaledReceiver<NowMessage<'static>>,
         read_tx: &Sender<NowMessage<'static>>,
         stop_event: &Event,
+        progress: &DvcInitializationProgress,
     ) -> anyhow::Result<()> {
         loop {
             self.forward_inbound(read_tx)?;
@@ -257,9 +271,15 @@ impl DvcIo {
                 if !self.read_pending {
                     self.start_read()?;
                 }
-            } else if !self.write_pending && self.last_write_started.elapsed() >= BACKLOG_PROBE_INTERVAL {
-                // NOW clients already accept unsolicited heartbeats, which are sent even when none was negotiated.
-                // Messages are only held back after negotiation, once stdin backpressure stops the processing task.
+            } else if progress.heartbeats_enabled()
+                && !self.write_pending
+                && self.last_write_started.elapsed() >= BACKLOG_PROBE_INTERVAL
+            {
+                // A heartbeat is the only message the server may send unprompted, and only when the client enabled
+                // heartbeats; NOW clients take one at any time, since they only watch for missing ones.
+                // UNTESTED: the probe must wait for any pending write, because `start_write` replaces the buffer the
+                // OS is still sending, and must stay spaced by `BACKLOG_PROBE_INTERVAL` so a held-back channel is not
+                // flooded; when changing this condition, check both still hold.
                 trace!("Probing the DVC channel while inbound messages are held back");
                 self.start_write(&NowChannelHeartbeatMsg::default().into())
                     .context("probing the DVC channel while inbound messages are held back")?;
@@ -698,16 +718,22 @@ mod tests {
     }
 
     fn run_dvc_io_on(server: usize, read_queue_capacity: usize) -> RunningDvcIo {
+        run_dvc_io_with_heartbeats(server, read_queue_capacity, true)
+    }
+
+    fn run_dvc_io_with_heartbeats(server: usize, read_queue_capacity: usize, heartbeats_enabled: bool) -> RunningDvcIo {
         let (write_tx, write_rx) = winapi_signaled_mpsc_channel().expect("create the write queue");
         let (read_tx, read_rx) = mpsc::channel(read_queue_capacity);
         let stop_event = Event::new_unnamed().expect("create the stop event");
         let thread_stop_event = stop_event.clone();
 
         let thread = std::thread::spawn(move || {
+            let progress = DvcInitializationProgress::default();
+            progress.set_heartbeats_enabled(heartbeats_enabled);
             // SAFETY: The handle was opened by `dvc_pipe`, which gave up ownership of it.
             let file = unsafe { Owned::new(HANDLE(server as *mut _)) };
             let mut io = DvcIo::new(file)?;
-            io.serve(write_rx, &read_tx, &thread_stop_event)
+            io.serve(write_rx, &read_tx, &thread_stop_event, &progress)
         });
 
         RunningDvcIo {
@@ -929,6 +955,33 @@ mod tests {
         let heartbeat = encoded(&NowChannelHeartbeatMsg::default().into());
         wait_for_outbound(&client, "the held-back channel was never probed");
         assert_eq!(read_exact(&client, heartbeat.len()), heartbeat);
+
+        for message in &messages {
+            assert_eq!(encoded(&running.recv()), encoded(message));
+        }
+
+        running.stop().expect("the loop stops cleanly");
+    }
+
+    /// A client that disabled heartbeats must never be sent one, even to probe a held-back channel.
+    // oracle: mutant
+    #[test]
+    fn held_back_channel_is_not_probed_when_heartbeats_are_disabled() {
+        let (server, client) = dvc_pipe();
+        let mut running = run_dvc_io_with_heartbeats(server, 1, false);
+        let messages: Vec<_> = (1..=3).map(|session_id| exec_data(session_id, vec![0; 16])).collect();
+
+        for message in &messages {
+            write_pdu(&client, &encoded(message));
+        }
+
+        // Twice the probe interval, so a probe would have been written by now.
+        std::thread::sleep(super::BACKLOG_PROBE_INTERVAL * 2);
+
+        let mut available = 0;
+        // SAFETY: The handle is valid, and only the byte count is requested.
+        unsafe { PeekNamedPipe(*client, None, 0, None, Some(&mut available), None) }.expect("peek the test pipe");
+        assert_eq!(available, 0, "a client that disabled heartbeats was sent one");
 
         for message in &messages {
             assert_eq!(encoded(&running.recv()), encoded(message));

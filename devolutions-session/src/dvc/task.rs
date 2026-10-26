@@ -342,6 +342,7 @@ async fn process_messages(
         reason = "the task handle is a drop guard; it is assigned, never inspected"
     )]
     let mut _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
+    init_progress.set_heartbeats_enabled(heartbeats_enabled(downgraded_caps.heartbeat_interval()));
 
     // Reply with the negotiated capset so the client sees the capabilities and heartbeat interval
     // the agent applies, not the server default that omits the interval.
@@ -391,6 +392,7 @@ async fn process_messages(
                                 let server_caps = default_server_caps(pwsh_executable.is_some());
                                 let downgraded_caps = client_caps.downgrade(&server_caps);
                                 _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
+                                init_progress.set_heartbeats_enabled(heartbeats_enabled(downgraded_caps.heartbeat_interval()));
 
                                 // Old exec sessions will be abandoned (IO loops will terminate
                                 // on old processor `Drop`).
@@ -514,16 +516,22 @@ fn spawn_heartbeat(
 /// `NOW_CHANNEL_SET_HEARTBEAT`.
 /// Without a negotiated interval, [`DEFAULT_HEARTBEAT_INTERVAL`] applies.
 fn heartbeat_timer(negotiated_interval: Option<core::time::Duration>) -> Option<Interval> {
-    let period = negotiated_interval.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
-
-    if period.is_zero() {
+    if !heartbeats_enabled(negotiated_interval) {
         return None;
     }
 
+    let period = negotiated_interval.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
     let mut timer = tokio::time::interval_at(Instant::now() + period, period);
     timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     Some(timer)
+}
+
+/// Whether the server may send heartbeats for a negotiated interval.
+///
+/// Only a zero interval disables them; without a negotiated interval, [`DEFAULT_HEARTBEAT_INTERVAL`] applies.
+fn heartbeats_enabled(negotiated_interval: Option<core::time::Duration>) -> bool {
+    !negotiated_interval.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL).is_zero()
 }
 
 fn default_server_caps(pwsh_available: bool) -> NowChannelCapsetMsg {
@@ -1928,6 +1936,59 @@ mod tests {
             matches!(message, NowMessage::Channel(NowChannelMessage::Heartbeat(_))),
             "expected a heartbeat, got {message:?}"
         );
+    }
+
+    /// The IO thread probes a held-back channel with heartbeats only while this flag is set, so it must follow every
+    /// negotiation: on by default, off for a zero interval, and on again when renegotiated to a nonzero one.
+    // oracle: mutant
+    #[tokio::test(start_paused = true)]
+    async fn processing_loop_publishes_whether_heartbeats_are_enabled() {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        let mut loop_future = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+
+        let capsets = [
+            (NowChannelCapsetMsg::default(), true),
+            (capset_with_zero_heartbeat_interval(), false),
+            (
+                NowChannelCapsetMsg::default()
+                    .with_heartbeat_interval(Duration::from_secs(30))
+                    .expect("30 s is a valid heartbeat interval"),
+                true,
+            ),
+        ];
+
+        for (capset, expected) in capsets {
+            read_tx.send(capset.into()).await.expect("queue client capset");
+            assert!(poll!(loop_future.as_mut()).is_pending());
+            write_rx.try_recv().expect("negotiation reply was sent");
+
+            assert_eq!(init_progress.heartbeats_enabled(), expected);
+        }
+    }
+
+    /// A client capset that disables heartbeats.
+    ///
+    /// `with_heartbeat_interval` refuses zero, but the wire format still carries it, so it is decoded from bytes.
+    fn capset_with_zero_heartbeat_interval() -> NowChannelCapsetMsg {
+        const NOW_CHANNEL_SET_HEARTBEAT: u8 = 0x01;
+        const MSG_FLAGS_OFFSET: usize = 6;
+
+        // The default capset already encodes a zero interval; only the flag announcing it is missing.
+        let mut bytes = now_proto_pdu::ironrdp_core::encode_vec(&OwnedNowMessage::from(NowChannelCapsetMsg::default()))
+            .expect("encode a capset");
+        *bytes.get_mut(MSG_FLAGS_OFFSET).expect("the capset has a header") |= NOW_CHANNEL_SET_HEARTBEAT;
+
+        let message: NowMessage<'_> = now_proto_pdu::ironrdp_core::decode(&bytes).expect("decode the capset");
+        let NowMessage::Channel(NowChannelMessage::Capset(capset)) = message else {
+            panic!("expected a capset, got {message:?}");
+        };
+        assert_eq!(capset.heartbeat_interval(), Some(Duration::ZERO));
+
+        capset
     }
 
     /// Serves `outcomes` in order and returns the loop result with the instant each channel was served.
