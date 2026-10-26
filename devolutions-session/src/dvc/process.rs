@@ -641,21 +641,22 @@ impl WinApiProcessBuilder {
             prepare_process(session_id, command_line, current_directory, self.env, encoding)?
         };
 
-        // For detached mode, spawn a thread that waits for process exit and keeps temp files alive
-        if detached && !temp_files.is_empty() {
-            std::thread::spawn(move || {
-                let _temp_files = temp_files;
+        if detached {
+            if !temp_files.is_empty() {
+                std::thread::spawn(move || {
+                    let _temp_files = temp_files;
 
-                // Wait for process to exit (indefinitely)
-                if let Err(error) = process_ctx.process.wait(None) {
-                    error!(%error, session_id, "Failed to wait for detached process");
-                    return;
-                }
+                    // Wait for process exit to keep its temporary files alive.
+                    if let Err(error) = process_ctx.process.wait(None) {
+                        error!(%error, session_id, "Failed to wait for detached process");
+                        return;
+                    }
 
-                info!(session_id, "Detached process exited");
+                    info!(session_id, "Detached process exited");
 
-                // Temp files will be cleaned up when this thread exits
-            });
+                    // Temporary files are cleaned up when this thread exits.
+                });
+            }
 
             info!(session_id, "Detached process started successfully");
             return Ok(None);
@@ -941,6 +942,15 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    // oracle: regression #2156 detached Process without temporary files must not panic after launch.
+    #[test]
+    fn detached_process_without_temp_files_returns_success() {
+        WinApiProcessBuilder::new("cmd.exe")
+            .with_command_line("/d /c exit 0")
+            .run_detached(1)
+            .expect("detached launch returns successfully without an IO notification channel");
+    }
 
     /// A process that fills its output before reading stdin must still get all of a large input.
     ///

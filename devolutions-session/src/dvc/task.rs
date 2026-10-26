@@ -1533,8 +1533,8 @@ mod tests {
     use devolutions_gateway_task::{ShutdownHandle, ShutdownSignal};
     use futures::poll;
     use now_proto_pdu::{
-        NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowMessage,
-        NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
+        NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowExecMessage,
+        NowExecProcessMsg, NowExecResultMsg, NowMessage, NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
     };
     use tokio::time::Instant;
 
@@ -1544,6 +1544,70 @@ mod tests {
     };
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
+
+    // oracle: regression #2156 detached Process must leave the channel alive for subsequent execution.
+    #[tokio::test]
+    async fn detached_process_keeps_channel_available_for_execution() {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(
+                NowExecProcessMsg::new(1, "cmd.exe")
+                    .expect("valid executable")
+                    .with_parameters("/d /c exit 0")
+                    .expect("valid parameters")
+                    .with_detached()
+                    .into(),
+            )
+            .await
+            .expect("queue detached process");
+
+        let mut processing = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                tokio::select! {
+                    result = &mut processing => panic!("processing ended before fresh execution completed: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+
+                while let Ok(message) = write_rx.try_recv() {
+                    if let NowMessage::Exec(NowExecMessage::Result(result)) = message {
+                        if result.session_id() == 1 {
+                            assert_eq!(result, NowExecResultMsg::new_success(1, 0));
+                            read_tx
+                                .send(
+                                    NowExecProcessMsg::new(2, "cmd.exe")
+                                        .expect("valid executable")
+                                        .with_parameters("/d /c exit 7")
+                                        .expect("valid parameters")
+                                        .into(),
+                                )
+                                .await
+                                .expect("queue fresh execution after detached acknowledgment");
+                        } else {
+                            assert_eq!(result, NowExecResultMsg::new_success(2, 7));
+                            return;
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .expect("fresh execution completes without the detached launch killing the host");
+
+        read_tx
+            .send(NowChannelCloseMsg::default().into())
+            .await
+            .expect("queue channel close");
+        processing.await.expect("channel still accepts a normal close");
+    }
 
     // oracle: mutant a full stdin queue prevents a closed DVC from interrupting the processing loop.
     #[tokio::test]
