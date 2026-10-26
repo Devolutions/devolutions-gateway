@@ -689,19 +689,45 @@ fn a_directory_above_that_lets_the_user_only_read_its_access_is_accepted() -> an
         &[(user(), FULL, INHERITED_BY_CHILDREN)],
         InheritableAclKind::Protected,
     )?;
-    set_dacl(
-        &above,
-        &[(user(), READ_CONTROL | TRAVERSE, 0)],
-        InheritableAclKind::Protected,
-    )?;
+    // The directory above `above` grants no FILE_LIST_DIRECTORY either, through which Windows would grant
+    // FILE_READ_ATTRIBUTES on `above` whatever its own DACL says.
+    for directory in [&above, test.path()] {
+        set_dacl(
+            directory,
+            &[(user(), READ_CONTROL | TRAVERSE, 0)],
+            InheritableAclKind::Protected,
+        )?;
+    }
     let created = Dir::create_base(&existing.join("base"), &user_rule());
     // The owner keeps WRITE_DAC, so the test can give itself access again to clean up.
-    set_dacl(
-        &above,
-        &[(user(), FULL, INHERITED_BY_CHILDREN)],
-        InheritableAclKind::Protected,
-    )?;
+    for directory in [test.path(), &above] {
+        set_dacl(
+            directory,
+            &[(user(), FULL, INHERITED_BY_CHILDREN)],
+            InheritableAclKind::Protected,
+        )?;
+    }
     created?;
+    Ok(())
+}
+
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn repair_file_brings_a_file_into_line_with_its_rule() -> anyhow::Result<()> {
+    // Catches a file repair that leaves an entry the rule doesn't name.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let wider = user_rule().grant(Account::System, Access::Full);
+    let file = base.create_file("file", &wider, FileOptions::new())?;
+    let path = test.path().join("file");
+    let exact = user_rule().exact();
+    let error = refusal(private_fs::check_file(&file, &path, &exact));
+    assert!(
+        is_refused(&error, |refusal| matches!(refusal, Refusal::Access)),
+        "{error:?}"
+    );
+    private_fs::repair_file(&file, &path, &exact)?;
+    assert_eq!(security_of(&file)?, (user(), vec![(user(), FULL, 0)]));
     Ok(())
 }
 

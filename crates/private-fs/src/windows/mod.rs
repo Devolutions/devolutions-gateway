@@ -915,8 +915,20 @@ fn check_above(path: &Utf8Path, policy: &Policy) -> Result<()> {
     if !same_name(&resolved, path.as_str()) {
         return Err(Error::refused(path, Refusal::Replaceable));
     }
+    // A folder on which a volume without a drive letter is mounted resolves to its own path, but opens the mounted
+    // volume's root, so the folder's own DACL can't be read through it: it is refused too.
+    let in_volume = nt::path_in_volume(handle.as_handle()).map_err(unreadable)?;
+    if is_mount_folder(&in_volume, path) {
+        return Err(Error::refused(path, Refusal::Replaceable));
+    }
     let security = OwnerAndDacl::of_handle(handle.as_handle()).map_err(unreadable)?;
     policy.check_ancestor(&security, path, path.parent().is_none(), &administrators_member)
+}
+
+/// Reports whether a directory whose path within its volume is `path_in_volume` is a volume's root reached through a
+/// folder at `path`, rather than the root of a path.
+fn is_mount_folder(path_in_volume: &str, path: &Utf8Path) -> bool {
+    path_in_volume == "\\" && path.parent().is_some()
 }
 
 /// Opens a directory by path without following a reparse point.
@@ -933,44 +945,13 @@ fn open_path(path: &Utf8Path, access: FILE_ACCESS_RIGHTS) -> io::Result<OwnedHan
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Access, Account};
-
-    /// A directory under the system temporary directory, whose ancestors pass the ancestor check, removed on drop.
-    struct TestDir(Utf8PathBuf);
-
-    impl TestDir {
-        fn new() -> Self {
-            let temp = Utf8PathBuf::from_path_buf(std::env::temp_dir()).expect("the temporary directory path is UTF-8");
-            let unique = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("the clock is after 1970")
-                .as_nanos();
-            Self(temp.join(format!("pfs-unit-{}-{unique}", std::process::id())))
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
 
     // oracle: intent crates/private-fs/INTENT.md §paths
     #[test]
-    fn repair_file_brings_a_file_into_line_with_its_rule() -> Result<()> {
-        // Catches a file repair that leaves an entry the rule doesn't name.
-        let test = TestDir::new();
-        let user_full = Rule::new()
-            .owner(Account::CurrentUser)
-            .grant(Account::CurrentUser, Access::Full);
-        let base = crate::Dir::create_base(&test.0, &user_full)?;
-        let wider = user_full.clone().grant(Account::System, Access::Full);
-        let file = base.create_file("file", &wider, FileOptions::new())?;
-        let exact = user_full.exact();
-        let path = test.0.join("file");
-        assert!(check_file(&file, &path, &exact).is_err());
-        repair_file(&file, &path, &exact)?;
-        check_file(&file, &path, &exact)
+    fn only_a_volume_root_below_a_path_root_is_a_mount_folder() {
+        assert!(is_mount_folder("\\", Utf8Path::new(r"\\?\C:\mnt\volume")));
+        assert!(!is_mount_folder("\\", Utf8Path::new(r"\\?\C:\")));
+        assert!(!is_mount_folder(r"\mnt\volume", Utf8Path::new(r"\\?\C:\mnt\volume")));
     }
 
     /// Reparse tags, from [MS-FSCC] "Reparse Tags".

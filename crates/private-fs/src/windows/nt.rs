@@ -25,7 +25,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_NAME_NORMALIZED, FILE_SHARE_MODE,
     FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo,
     FileStandardInfo, FlushFileBuffers, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
-    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, VOLUME_NAME_DOS,
+    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, VOLUME_NAME_DOS, VOLUME_NAME_NONE,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
@@ -189,6 +189,8 @@ pub(super) fn persistent_acls(handle: BorrowedHandle<'_>) -> io::Result<bool> {
 /// volume check.
 pub(super) fn is_remote(handle: BorrowedHandle<'_>) -> io::Result<bool> {
     // FILE_FS_DEVICE_INFORMATION: DeviceType, then Characteristics.
+    // The windows crate's FILE_FS_DEVICE_INFORMATION and FILE_REMOTE_DEVICE need its Wdk_System_SystemServices feature,
+    // which nothing else here needs, so the two fields are read as they are laid out.
     let mut information = [0u32; 2];
     let mut status_block = IO_STATUS_BLOCK::default();
     // SAFETY: The handle is open, and the information and status block outputs are writable for their sizes.
@@ -210,6 +212,15 @@ pub(super) fn is_remote(handle: BorrowedHandle<'_>) -> io::Result<bool> {
 
 /// Returns the normalized path of `handle` with its DOS volume name, such as `\\?\C:\Users`.
 pub(super) fn final_path(handle: BorrowedHandle<'_>) -> io::Result<String> {
+    final_path_with(handle, VOLUME_NAME_DOS)
+}
+
+/// Returns the normalized path of `handle` within its volume, such as `\Users`, or `\` for the volume's root.
+pub(super) fn path_in_volume(handle: BorrowedHandle<'_>) -> io::Result<String> {
+    final_path_with(handle, VOLUME_NAME_NONE)
+}
+
+fn final_path_with(handle: BorrowedHandle<'_>, volume: GETFINALPATHNAMEBYHANDLE_FLAGS) -> io::Result<String> {
     let mut buffer = vec![0u16; 512];
     loop {
         // SAFETY: The handle is open and the buffer is writable for its length.
@@ -217,7 +228,7 @@ pub(super) fn final_path(handle: BorrowedHandle<'_>) -> io::Result<String> {
             GetFinalPathNameByHandleW(
                 raw(handle),
                 &mut buffer,
-                GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | VOLUME_NAME_DOS.0),
+                GETFINALPATHNAMEBYHANDLE_FLAGS(FILE_NAME_NORMALIZED.0 | volume.0),
             )
         };
         if length == 0 {
