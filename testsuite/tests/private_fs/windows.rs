@@ -832,6 +832,22 @@ fn discard_keeps_a_file_persisted_under_another_name() -> anyhow::Result<()> {
 
 // oracle: reference crates/private-fs/src/lib.rs Dir::discard
 #[test]
+fn discard_keeps_a_file_renamed_to_a_name_only_full_case_mapping_matches() -> anyhow::Result<()> {
+    // Catches names compared with Unicode's full case mapping, under which `xß` and `xSS` match although NTFS keeps
+    // them apart, so that a discard deletes the file installed under the other name.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let mut file = base.create_file("x\u{df}", &user_rule(), FileOptions::new())?;
+    file.write_all(b"new")?;
+    base.persist(&file, "x\u{df}", "xSS", Replace::Allow)?;
+    base.discard(&file, "x\u{df}")?;
+    drop(file);
+    assert_eq!(std::fs::read(test.path().join("xSS"))?, b"new");
+    Ok(())
+}
+
+// oracle: reference crates/private-fs/src/lib.rs Dir::discard
+#[test]
 fn discard_removes_a_file_still_under_its_name() -> anyhow::Result<()> {
     // Catches a discard that never removes anything, given a name of another case than the one created.
     let test = TestDir::new();

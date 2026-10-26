@@ -21,6 +21,7 @@ use windows::Wdk::Storage::FileSystem::{
     FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT, NTCREATEFILE_CREATE_OPTIONS,
 };
 use windows::Win32::Foundation::{ERROR_NO_TOKEN, ERROR_NOT_ALL_ASSIGNED, HANDLE, LUID};
+use windows::Win32::Globalization::{CSTR_EQUAL, CompareStringOrdinal};
 use windows::Win32::Security::{
     AdjustTokenPrivileges, DACL_SECURITY_INFORMATION, DuplicateTokenEx, LUID_AND_ATTRIBUTES, LookupPrivilegeValueW,
     OWNER_SECURITY_INFORMATION, RevertToSelf, SE_BACKUP_NAME, SE_PRIVILEGE_ENABLED, SecurityImpersonation,
@@ -343,16 +344,24 @@ pub(crate) fn remove_file(parent: &Dir, path: &Utf8Path, name: &str) -> Result<b
 /// The file's own handle deletes it because an account that may only add to the directory has no access by name.
 pub(crate) fn discard(parent: &Dir, path: &Utf8Path, file: &File, name: &str) -> Result<()> {
     validate_name(path, name)?;
-    let read_path = |handle| nt::final_path(handle).map_err(|error| Error::io(path, "read file path", error));
-    let directory = read_path(parent.handle())?;
-    let current = read_path(file.as_handle())?;
+    let directory = nt::final_path(parent.handle()).map_err(|error| Error::io(path, "read directory path", error))?;
+    let current = nt::final_path(file.as_handle()).map_err(|error| Error::io(path, "read file path", error))?;
     let separator = if directory.ends_with('\\') { "" } else { "\\" };
     let expected = format!("{directory}{separator}{name}");
-    // Windows file names are case-insensitive.
-    if current.to_uppercase() != expected.to_uppercase() {
+    if !same_name(&current, &expected) {
         return Ok(());
     }
     nt::delete(file.as_handle()).map_err(|error| Error::io(path, "remove file", error))
+}
+
+/// Reports whether two names are the same file name, ignoring case as NTFS does: with the simple, one-to-one upcase
+/// table, under which `ß` and `SS` differ, unlike Unicode's full case mapping.
+fn same_name(left: &str, right: &str) -> bool {
+    let left: Vec<u16> = left.encode_utf16().collect();
+    let right: Vec<u16> = right.encode_utf16().collect();
+    // SAFETY: CompareStringOrdinal only reads both slices for their lengths.
+    let compared = unsafe { CompareStringOrdinal(&left, &right, true) };
+    compared == CSTR_EQUAL
 }
 
 pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
@@ -908,6 +917,16 @@ mod tests {
     const LX_FIFO: u32 = 0x8000_0024;
 
     const REPARSE_POINT: u32 = FILE_ATTRIBUTE_REPARSE_POINT.0;
+
+    // oracle: reference crates/private-fs/src/lib.rs Dir::discard
+    #[test]
+    fn names_compare_ignoring_case_one_character_at_a_time() {
+        assert!(same_name("C:\\Dir\\Staged", "c:\\dir\\STAGED"));
+        assert!(same_name("\u{e9}t\u{e9}", "\u{c9}T\u{c9}"));
+        // Full case mapping uppercases ß to SS; the simple mapping NTFS uses leaves it.
+        assert!(!same_name("x\u{df}", "xSS"));
+        assert!(!same_name("staged", "staged2"));
+    }
 
     // oracle: spec MS-FSCC §2.1.2.1 Reparse Tags
     // oracle: reference crates/private-fs/src/error.rs Refusal
