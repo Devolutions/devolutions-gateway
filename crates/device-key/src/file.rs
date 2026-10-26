@@ -168,26 +168,16 @@ pub(super) fn list(dir: &Utf8Path, prefix: &str) -> anyhow::Result<Vec<String>> 
         .entries()
         .context("list key directory")?
         .into_iter()
-        .filter(|entry| entry.kind == EntryKind::File)
+        // `crates/device-key/INTENT.md` ("Operations"): listing never returns a link, and a file with another hard link is
+        // one; any other key that breaks the access rule is still listed, so the listing reads only the link count.
+        .filter(|entry| entry.kind == EntryKind::File && entry.links <= 1)
         .filter_map(|entry| {
-            let file_name = entry.name.to_str()?;
-            let name = file_name.strip_suffix(KEY_FILE_SUFFIX)?;
-            (name_matches_prefix(name, prefix) && !is_hard_linked(&dir, file_name)).then(|| name.to_owned())
+            let name = entry.name.to_str()?.strip_suffix(KEY_FILE_SUFFIX)?;
+            name_matches_prefix(name, prefix).then(|| name.to_owned())
         })
         .collect::<Vec<_>>();
     names.sort_unstable();
     Ok(names)
-}
-
-/// Reports whether the key file `file_name` has another hard link, which makes it a link rather than a key.
-///
-/// `crates/device-key/INTENT.md` ("Operations"): listing never returns a link, but returns a key that breaks the access
-/// rule, so only a refusal for a link excludes a key file, and any other failure to check it leaves it listed.
-fn is_hard_linked(dir: &Dir, file_name: &str) -> bool {
-    matches!(
-        dir.open_file(file_name, &key_file_rule(), FileOptions::new()),
-        Err(error) if matches!(error.kind(), private_fs::ErrorKind::Refused(private_fs::Refusal::Link))
-    )
 }
 
 /// Opens the key directory, or returns `None` when it doesn't exist.
@@ -811,6 +801,7 @@ mod tests {
                 .find_map(|cause| cause.downcast_ref::<private_fs::Error>())
                 .with_context(|| format!("{operation}: the failure is not a refusal: {error:#}"))?;
             assert!(refusal.is_refused(), "{operation}: {error:#}");
+            // oracle: mutant an error that doesn't name the lock file, which leaves an operator unable to find it
             assert!(format!("{error:#}").contains(LOCK_NAME), "{operation}: {error:#}");
         }
         Ok(())
@@ -854,6 +845,33 @@ mod tests {
         generate(&backend, &linked)?;
         generate(&backend, &kept)?;
         fs::hard_link(directory.key_path(&linked), directory.0.join("elsewhere"))?;
+
+        assert_eq!(list(&backend, TEST_PREFIX)?, [kept]);
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_linked_key_file_the_caller_cannot_open_is_not_listed() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            writeln!(
+                std::io::stderr(),
+                "SKIP: a_hard_linked_key_file_the_caller_cannot_open_is_not_listed needs an account other than root"
+            )?;
+            return Ok(());
+        }
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let linked = new_key_name(TEST_PREFIX);
+        let kept = new_key_name(TEST_PREFIX);
+        generate(&backend, &linked)?;
+        generate(&backend, &kept)?;
+        fs::hard_link(directory.key_path(&linked), directory.0.join("elsewhere"))?;
+        fs::set_permissions(directory.key_path(&linked), fs::Permissions::from_mode(0o000))?;
 
         assert_eq!(list(&backend, TEST_PREFIX)?, [kept]);
         Ok(())

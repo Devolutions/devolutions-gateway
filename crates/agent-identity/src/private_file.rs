@@ -201,14 +201,11 @@ pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: boo
     return Ok(data);
 
     fn provision(parent: &Dir, name: &str, rule: &Rule) -> anyhow::Result<Dir> {
-        // Repairing only a directory that fails its rule leaves a correct one unwritten.
-        // A directory whose access denies the agent fails to open rather than failing the rule, and is repaired too,
-        // since repair needs only the access its owner always keeps.
-        match parent.create_dir(name, rule, Existing::Check) {
-            Err(error) if fails_trust_check(&error) => parent.create_dir(name, rule, Existing::Repair),
-            created => created,
-        }
-        .context("provision identity directory")
+        // A repair changes nothing on a directory that already follows its rule, and also covers one whose access
+        // denies the agent or whose mode is narrower than the rule's.
+        parent
+            .create_dir(name, rule, Existing::Repair)
+            .context("provision identity directory")
     }
 }
 
@@ -799,6 +796,30 @@ mod unix_tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn provisioning_resets_an_identity_directory_narrowed_to_read_and_search() -> anyhow::Result<()> {
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            writeln!(
+                io::stderr(),
+                "SKIP: provisioning_resets_an_identity_directory_narrowed_to_read_and_search needs an account other \
+                 than root"
+            )?;
+            return Ok(());
+        }
+        let directory = TestDir::provisioned()?;
+        let identity = directory.0.join("identity");
+        fs::set_permissions(&identity, fs::Permissions::from_mode(0o500))?;
+
+        let provisioned = prepare_directories(&directory.0, true);
+        // A failed reset would leave a directory the test can't remove.
+        let _ = fs::set_permissions(&identity, fs::Permissions::from_mode(0o700));
+
+        provisioned?;
+        Ok(())
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn a_pending_file_owned_by_another_account_is_ignored() -> anyhow::Result<()> {
@@ -982,7 +1003,13 @@ mod windows_tests {
         );
         // oracle: mutant missing parents of the data directory created with inherited access, which loses the refusal of
         // a link among them
-        assert!(acl::protected_dacl_of(&directory.0.join("parent"))?.is_some());
+        assert_eq!(
+            acl::protected_dacl_of(&directory.0.join("parent"))?,
+            Some(acl::sorted(&[
+                full(&acl::system_sid()?, INHERITED),
+                full(&acl::user_sid()?, INHERITED)
+            ]))
+        );
         Ok(())
     }
 
