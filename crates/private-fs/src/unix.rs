@@ -193,7 +193,13 @@ pub(crate) fn create_file(
     // An existing entry fails the creation as it would without the ACL, which callers such as
     // `Dir::open_or_create_file` rely on, so only a file that must be created can be refused for the parent's ACL.
     match stat_at(&parent.file, &c_name) {
-        Ok(_) => return Err(Error::io(path, "create file", io::ErrorKind::AlreadyExists.into())),
+        Ok(_) => {
+            return Err(Error::io(
+                path,
+                "create file",
+                io::Error::from_raw_os_error(libc::EEXIST),
+            ));
+        }
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(Error::io(path, "create file", error)),
     }
@@ -394,18 +400,17 @@ impl<'a> Base<'a> {
             } else {
                 prefix
             };
-            let found = std::fs::symlink_metadata(candidate);
-            if found.is_ok()
-                && let Some(error) = denied.take()
-            {
-                return Err(Error::refused(candidate, Refusal::Unreadable(error)));
-            }
-            let error = match found {
+            let error = match std::fs::symlink_metadata(candidate) {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
                     return Err(Error::refused(candidate, Refusal::Link));
                 }
                 Ok(metadata) if !metadata.is_dir() => return Err(Error::refused(candidate, Refusal::NotADirectory)),
-                Ok(_) => break (prefix.to_owned(), candidate),
+                Ok(_) => {
+                    if let Some(error) = denied {
+                        return Err(Error::refused(candidate, Refusal::Unreadable(error)));
+                    }
+                    break (prefix.to_owned(), candidate);
+                }
                 Err(error) if permission_denied(&error) => {
                     denied.get_or_insert(error);
                     None

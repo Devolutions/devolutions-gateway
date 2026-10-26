@@ -38,7 +38,7 @@ const ACL_WRITE: u16 = 0x02;
 const ACL_ALL: u16 = 0x07;
 
 /// The `statfs` types of volumes that ignore or fake ownership: FUSE, CIFS, SMB2, SMB, NFS, 9P, vboxsf, MSDOS/vfat,
-/// exFAT, ntfs3, NTFS (ntfs and ntfs-3g's kernel type) and UDF.
+/// exFAT, ntfs3, NTFS (the legacy in-kernel ntfs driver; ntfs-3g is FUSE) and UDF.
 const IGNORING_VOLUMES: [u32; 12] = [
     0x6573_5546,
     0xFF53_4D42,

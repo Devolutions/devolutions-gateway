@@ -460,6 +460,32 @@ fn a_directory_that_cannot_be_searched_is_unreadable() {
     assert!(!locked.join("inner").join("base").exists());
 }
 
+// A link reached while looking for the first existing directory is refused as a link, even when what it points to
+// can't be searched.
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn a_link_to_a_directory_that_cannot_be_searched_is_a_link() {
+    let scratch = Scratch::new();
+    if scratch.as_root() {
+        skip(
+            "a_link_to_a_directory_that_cannot_be_searched_is_a_link",
+            "needs an account other than root",
+        );
+        return;
+    }
+    let locked = scratch.path.join("locked");
+    fs::create_dir_all(locked.join("inner")).unwrap();
+    let link = scratch.path.join("link");
+    symlink(&locked, &link).unwrap();
+    set_mode(&locked, 0o000);
+
+    let result = Dir::create_base(&link.join("inner").join("base"), &rule());
+    set_mode(&locked, 0o700);
+    let error = result.unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Link)), "{error:?}");
+    assert_eq!(error.path(), link);
+}
+
 // oracle: intent crates/private-fs/INTENT.md §mechanisms
 #[test]
 fn a_file_with_an_extended_acl_is_refused() {
@@ -484,6 +510,12 @@ fn nothing_is_created_under_an_inheritable_acl() {
     let scratch = Scratch::new();
     let base = scratch.base();
     let parent = base.create_dir("parent", &rule(), Existing::Check).unwrap();
+    drop(parent.create_dir("existing", &rule(), Existing::Check).unwrap());
+    drop(
+        parent
+            .create_file("existing-file", &rule(), FileOptions::new())
+            .unwrap(),
+    );
     if !acl::make_inheritable(&scratch.path.join("parent")) {
         skip("nothing_is_created_under_an_inheritable_acl", "needs ACL support");
         return;
@@ -493,7 +525,20 @@ fn nothing_is_created_under_an_inheritable_acl() {
     assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
     let error = parent.create_file("file", &rule(), FileOptions::new()).unwrap_err();
     assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
-    assert_eq!(parent.entries().unwrap().len(), 0);
+    assert!(!scratch.path.join("parent").join("dir").exists());
+    assert!(!scratch.path.join("parent").join("file").exists());
+
+    // What already exists inherited nothing, so it is checked as it is, and an existing file still fails a creation as
+    // existing.
+    parent.create_dir("existing", &rule(), Existing::Check).unwrap();
+    let error = parent
+        .create_file("existing-file", &rule(), FileOptions::new())
+        .unwrap_err();
+    assert!(
+        matches!(error.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::AlreadyExists),
+        "{error:?}"
+    );
+
     let error = parent.check(&rule()).unwrap_err();
     assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
 
@@ -703,4 +748,19 @@ fn entries_report_kinds_without_following_links() {
             ("socket".to_owned(), EntryKind::Other),
         ]
     );
+}
+
+// The agent's default macOS data directory lives under `/Library/Application Support`, as
+// `crates/devolutions-agent-shared/src/lib.rs` sets it, so that directory and `/Library` must pass the check of the
+// directories above a base on a stock Mac.
+// The test fails rather than skips, so a stock macOS that fails the check shows on CI.
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[cfg(target_os = "macos")]
+#[test]
+fn the_stock_macos_application_support_directory_is_a_valid_base() {
+    let rule = Rule::new()
+        .owner(Account::CurrentUser)
+        .grant(Account::System, Access::Full);
+    let base = Dir::open_base(Utf8Path::new("/Library/Application Support"), &rule).unwrap();
+    assert!(base.is_some());
 }
