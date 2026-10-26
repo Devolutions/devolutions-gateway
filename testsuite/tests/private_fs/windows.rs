@@ -310,7 +310,10 @@ fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
     let backup = match BackupPrivilege::enable() {
         Ok(backup) => backup,
         Err(error) => {
-            println!("SKIP: the process token doesn't hold the backup privilege: {error}");
+            let _ = writeln!(
+                std::io::stderr(),
+                "SKIP: the process token doesn't hold the backup privilege: {error}"
+            );
             return Ok(());
         }
     };
@@ -322,6 +325,30 @@ fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
         matches!(denied.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied),
         "{denied:?}"
     );
+    Ok(())
+}
+
+// oracle: reference crates/private-fs/src/rule.rs Rule::owner
+#[test]
+fn a_rule_that_does_not_let_the_current_user_own_cannot_create() -> anyhow::Result<()> {
+    // Catches a creation that makes the current user the owner although the rule doesn't allow it, or that reports it
+    // otherwise than the Unix backend does.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let rule = Rule::new()
+        .owner(Account::System)
+        .grant(Account::CurrentUser, Access::Full);
+    let error = refusal(base.create_dir("dir", &rule, Existing::Check));
+    assert!(
+        is_refused(&error, |refusal| matches!(refusal, Refusal::Owner)),
+        "{error:?}"
+    );
+    let error = refusal(base.create_file("file", &rule, FileOptions::new()));
+    assert!(
+        is_refused(&error, |refusal| matches!(refusal, Refusal::Owner)),
+        "{error:?}"
+    );
+    assert!(base.entries()?.is_empty());
     Ok(())
 }
 
@@ -484,7 +511,10 @@ fn a_repair_takes_ownership_from_an_owner_the_rule_does_not_allow() -> anyhow::R
     drop(base.create_dir("child", &user_rule(), Existing::Check)?);
     let child = test.path().join("child");
     if !set_owner(&child, &well_known(Security::WinLocalServiceSid))? {
-        println!("SKIP: the process token doesn't hold the restore privilege");
+        let _ = writeln!(
+            std::io::stderr(),
+            "SKIP: the process token doesn't hold the restore privilege"
+        );
         return Ok(());
     }
     let error = refusal(base.create_dir("child", &user_rule(), Existing::Check));
@@ -503,7 +533,10 @@ fn administrators_as_an_owner_allow_a_member_of_the_group() -> anyhow::Result<()
     // Catches an owner check that compares with the BUILTIN\Administrators SID only.
     let token = Process::current_process().token(TOKEN_QUERY | TOKEN_DUPLICATE)?;
     if !token.is_member(&administrators())? {
-        println!("SKIP: the current user is not a member of Administrators");
+        let _ = writeln!(
+            std::io::stderr(),
+            "SKIP: the current user is not a member of Administrators"
+        );
         return Ok(());
     }
     let test = TestDir::new();
@@ -940,7 +973,10 @@ fn a_thread_holds_one_backup_privilege_at_a_time() -> anyhow::Result<()> {
     let first = match BackupPrivilege::enable() {
         Ok(first) => first,
         Err(error) => {
-            println!("SKIP: the process token doesn't hold the backup privilege: {error}");
+            let _ = writeln!(
+                std::io::stderr(),
+                "SKIP: the process token doesn't hold the backup privilege: {error}"
+            );
             return Ok(());
         }
     };

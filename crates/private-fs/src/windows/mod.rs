@@ -673,14 +673,7 @@ impl Drop for BackupPrivilege {
 fn creation_policy(rule: &Rule, kind: Kind, path: &Utf8Path) -> Result<Policy> {
     let policy = Policy::new(rule, kind, path)?;
     if !policy.allows_user_owner() {
-        return Err(Error::io(
-            path,
-            "use rule",
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "the rule doesn't allow the current user to own what it creates",
-            ),
-        ));
+        return Err(Error::refused(path, Refusal::Owner));
     }
     Ok(policy)
 }
@@ -991,7 +984,7 @@ mod tests {
 
     const REPARSE_POINT: u32 = FILE_ATTRIBUTE_REPARSE_POINT.0;
 
-    // oracle: reference crates/private-fs/src/lib.rs Dir::discard
+    // oracle: spec Microsoft Learn "Handling Sorting in Your Applications" §Sort Strings Ordinally
     #[test]
     fn names_compare_ignoring_case_one_character_at_a_time() {
         assert!(same_name("C:\\Dir\\Staged", "c:\\dir\\STAGED"));
