@@ -384,7 +384,8 @@ fn parse_listing(bytes: &[u8], entries: &mut Vec<(OsString, u32, u32)>) -> io::R
         };
         let next = field(offset_of!(FILE_ID_BOTH_DIR_INFO, NextEntryOffset))?;
         let attributes = field(offset_of!(FILE_ID_BOTH_DIR_INFO, FileAttributes))?;
-        // A reparse point's entry holds its reparse tag in EaSize, per [MS-FSCC] §2.4.17.
+        // A reparse point's entry holds its reparse tag in EaSize, per [MS-FSCC] "FileIdBothDirectoryInformation",
+        // EaSize.
         let tag = if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
             field(offset_of!(FILE_ID_BOTH_DIR_INFO, EaSize))?
         } else {

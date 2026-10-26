@@ -524,7 +524,9 @@ unsafe fn read_acl(acl: *mut ACL) -> io::Result<Vec<Ace>> {
     Ok(entries)
 }
 
-/// Returns the size of a SID with `sub_authority_count` subauthorities, per [MS-DTYP] §2.4.2.2 SID.
+/// Returns the size of a SID with `sub_authority_count` subauthorities, per [MS-DTYP] "SID--Packet Representation".
+///
+/// [MS-DTYP]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-dtyp/
 fn sid_size(sub_authority_count: usize) -> usize {
     let header = 1 /* Revision */ + 1 /* SubAuthorityCount */ + 6 /* IdentifierAuthority */;
     header + 4 /* SubAuthority */ * sub_authority_count

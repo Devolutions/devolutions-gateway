@@ -345,6 +345,9 @@ pub(crate) fn discard(_parent: &Dir, path: &Utf8Path, file: &File, _name: &str) 
 pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
     let listed = {
         // A listing restarts and moves the handle's one enumeration cursor, so listings take turns.
+        // UNTESTED: concurrent listings of one directory each return every entry.
+        // A test racing two threads would pass whether or not they overlap, so it couldn't catch a missing lock; when
+        // changing this, keep every listing through this handle under the lock, from the restart to the last entry.
         let _listing = dir.listing.lock().unwrap_or_else(PoisonError::into_inner);
         nt::list(dir.handle()).map_err(|error| Error::io(path, "list directory", error))?
     };
@@ -615,10 +618,10 @@ impl Drop for BackupPrivilege {
         // it would take away an impersonation this guard didn't set.
         // When the thread token can't be read, the earlier token is restored, since leaving the privilege enabled is
         // the worse failure.
-        // UNTESTED: a thread that impersonates another token since this guard was created keeps it.
-        // Tests can't nest another impersonation inside this guard without the backup privilege, which CI's elevated
-        // runs hold but these checks can't rely on; when changing this, keep comparing token IDs, not handles, since
-        // OpenThreadToken returns a new handle each time.
+        // UNTESTED: a thread that impersonates another token since this guard was created keeps it, unless its token
+        // can't be read.
+        // The guard can't be created without the backup privilege, which tests can't rely on; when changing this, keep
+        // comparing token IDs, not handles, since OpenThreadToken returns a new handle each time.
         match thread_token_id() {
             Ok(Some(current)) if current != self.token_id => return,
             Ok(None) => return,
@@ -882,7 +885,9 @@ fn open_path(path: &Utf8Path, access: FILE_ACCESS_RIGHTS) -> io::Result<OwnedHan
 mod tests {
     use super::*;
 
-    /// Reparse tags, from [MS-FSCC] §2.1.2.1 Reparse Tags.
+    /// Reparse tags, from [MS-FSCC] "Reparse Tags".
+    ///
+    /// [MS-FSCC]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/
     const SYMLINK: u32 = 0xA000_000C;
     const MOUNT_POINT: u32 = 0xA000_0003;
     const CLOUD: u32 = 0x9000_001A;
@@ -891,27 +896,33 @@ mod tests {
 
     const REPARSE_POINT: u32 = FILE_ATTRIBUTE_REPARSE_POINT.0;
 
-    fn refusal(tag: u32) -> String {
-        format!("{:?}", reparse_refusal(REPARSE_POINT, tag))
-    }
-
     // oracle: spec MS-FSCC §2.1.2.1 Reparse Tags
+    // oracle: reference crates/private-fs/src/error.rs Refusal
     #[test]
     fn a_name_surrogate_item_is_a_link() {
-        assert_eq!(refusal(SYMLINK), "Some(Link)");
-        assert_eq!(refusal(MOUNT_POINT), "Some(Link)");
+        for tag in [SYMLINK, MOUNT_POINT] {
+            assert!(
+                matches!(reparse_refusal(REPARSE_POINT, tag), Some(Refusal::Link)),
+                "{tag:#x}"
+            );
+        }
     }
 
     // oracle: spec MS-FSCC §2.1.2.1 Reparse Tags
+    // oracle: reference crates/private-fs/src/error.rs Refusal
     #[test]
     fn any_other_reparse_point_item_is_not_a_file() {
         // Opened without following the reparse point, a stub's content is not the file's, and a FIFO is not a file.
-        assert_eq!(refusal(CLOUD), "Some(NotAFile)");
-        assert_eq!(refusal(DEDUP), "Some(NotAFile)");
-        assert_eq!(refusal(LX_FIFO), "Some(NotAFile)");
+        for tag in [CLOUD, DEDUP, LX_FIFO] {
+            assert!(
+                matches!(reparse_refusal(REPARSE_POINT, tag), Some(Refusal::NotAFile)),
+                "{tag:#x}"
+            );
+        }
     }
 
     // oracle: spec MS-FSCC §2.1.2.1 Reparse Tags
+    // oracle: reference crates/private-fs/src/lib.rs EntryKind
     #[test]
     fn a_listed_reparse_point_is_a_link_only_when_it_stands_for_another_name() {
         assert_eq!(entry_kind(REPARSE_POINT, SYMLINK), EntryKind::Link);

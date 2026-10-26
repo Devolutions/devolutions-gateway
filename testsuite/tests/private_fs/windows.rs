@@ -1,7 +1,10 @@
 //! Tests of the Windows backend of private-fs, which read and set owners and DACLs through the Windows API rather than
 //! through private-fs.
 //!
-//! The access masks are the file and directory access rights of [MS-SMB2] §2.2.13.1, which NTFS shares.
+//! The access masks are the file and directory access rights of [MS-SMB2] "File_Pipe_Printer_Access_Mask" and
+//! "Directory_Access_Mask", which NTFS shares.
+//!
+//! [MS-SMB2]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-smb2/
 
 use std::io::{Read as _, Write as _};
 use std::os::windows::fs::OpenOptionsExt as _;
@@ -791,6 +794,40 @@ fn removing_a_file_another_process_holds_open_frees_its_name() -> anyhow::Result
     assert!(base.remove_file("file")?);
     drop(base.create_file("file", &user_rule(), FileOptions::new())?);
     drop(reader);
+    Ok(())
+}
+
+// oracle: mutant DELETE held by a created directory's handle, which fails every other open that doesn't share deletion
+#[test]
+fn a_created_directory_opens_elsewhere_without_sharing_deletion() -> anyhow::Result<()> {
+    // Catches a directory handle that holds DELETE, so that `cd` or `_wopen` fail while the `Dir` lives.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let child = base.create_dir("child", &user_rule(), Existing::Check)?;
+    let other = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0x3) // FILE_SHARE_READ | FILE_SHARE_WRITE
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+        .open(test.path().join("child"));
+    assert!(other.is_ok(), "{other:?}");
+    drop(child);
+    Ok(())
+}
+
+// oracle: reference crates/private-fs/src/lib.rs Dir::entries
+#[test]
+fn a_directory_opened_exclusively_lists_its_entries() -> anyhow::Result<()> {
+    // Catches a listing through a second handle, which the exclusive open refuses.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let child = base.create_dir("child", &user_rule(), Existing::Check)?;
+    drop(child.create_file("file", &user_rule(), FileOptions::new())?);
+    drop(child);
+    let child = base
+        .open_dir("child", &user_rule(), Share::Exclusive)?
+        .context("the directory exists")?;
+    let names: Vec<_> = child.entries()?.into_iter().map(|entry| entry.name).collect();
+    assert_eq!(names, ["file"]);
     Ok(())
 }
 
