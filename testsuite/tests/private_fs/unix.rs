@@ -234,7 +234,7 @@ fn an_existing_directory_open_to_others_is_refused_until_repaired() {
     assert!(base.open_dir("shared", &rule(), Share::Shared).unwrap().is_some());
 }
 
-// A repair that needed to open the directory first could never fix one whose mode shuts out its own owner.
+// Catches a repair that opens the directory first, which could never fix one whose mode shuts out its own owner.
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
 fn a_directory_its_owner_cannot_open_is_repaired() {
@@ -690,6 +690,13 @@ fn add_only_access_to_a_file_fails_without_a_fallback() {
 #[test]
 fn a_rule_that_does_not_let_the_current_user_own_cannot_create() {
     let scratch = Scratch::new();
+    if scratch.as_root() {
+        skip(
+            "a_rule_that_does_not_let_the_current_user_own_cannot_create",
+            "needs an account other than root, which System names",
+        );
+        return;
+    }
     let system_only = Rule::new().owner(Account::System).grant(Account::System, Access::Full);
     let error = scratch
         .base()

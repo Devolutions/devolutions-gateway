@@ -106,18 +106,20 @@ pub(crate) fn open_base(path: &Utf8Path, rule: &Rule) -> Result<Option<Dir>> {
 pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule, existing: Existing) -> Result<Dir> {
     check_creatable(path, rule, Kind::Directory)?;
     let c_name = c_name(path, name)?;
-    let open = || {
+    // A directory the current user owns but can't open is given back its owner's access when it is to be repaired, or
+    // when it was just created under a umask that removed the owner's read access.
+    let open = |restore: bool| {
         let open = || open_at(parent, path, name, libc::O_RDONLY | libc::O_DIRECTORY, Kind::Directory);
         match open() {
-            Err(error) if existing == Existing::Repair && is_permission_denied(&error) => {
-                restore_owner_access(parent, &c_name, error)?;
+            Err(error) if restore && is_permission_denied(&error) => {
+                restore_owner_access(parent, &c_name, rule, error)?;
                 open()
             }
             opened => opened,
         }
     };
     // A directory that exists is checked or repaired, so only one that must be created can inherit the parent's ACL.
-    let (file, created) = match open()? {
+    let (file, created) = match open(existing == Existing::Repair)? {
         Some(file) => (file, false),
         None => {
             os::refuse_inheritable_acl(&parent.file, parent_path(path))?;
@@ -129,7 +131,8 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
                     return Err(Error::io(path, "create directory", error));
                 }
             }
-            let file = open()?.ok_or_else(|| Error::io(path, "open directory", io::ErrorKind::NotFound.into()))?;
+            let file = open(created || existing == Existing::Repair)?
+                .ok_or_else(|| Error::io(path, "open directory", io::ErrorKind::NotFound.into()))?;
             (file, created)
         }
     };
@@ -160,14 +163,27 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
 }
 
 /// Gives the current user back access to the directory `name` of `parent`, which it owns but couldn't open, so that it
-/// can be repaired; fails with `denied` when `name` is not such a directory.
+/// can be repaired or checked; fails with `denied` when `name` is not such a directory.
 ///
-/// The parent is a checked directory, in which no other account can replace an entry between the look and the change.
-fn restore_owner_access(parent: &Dir, name: &CStr, denied: Error) -> Result<()> {
+/// The change happens before the volume check that the repair or check makes once the directory is open.
+/// It is harmless there: mode 0700 gives no account but the owner any access, and the owner could change the mode
+/// itself.
+fn restore_owner_access(parent: &Dir, name: &CStr, rule: &Rule, denied: Error) -> Result<()> {
+    let euid = effective_uid();
     match stat_at(&parent.file, name) {
-        Ok(stat) if entry_kind(stat.st_mode) == EntryKind::Directory && stat.st_uid == effective_uid() => {}
+        Ok(stat)
+            if entry_kind(stat.st_mode) == EntryKind::Directory
+                && stat.st_uid == euid
+                && owner_allowed(rule, euid, euid) => {}
         _ => return Err(denied),
     }
+    check_rule(denied.path(), rule, euid, euid, Kind::Directory)?;
+    // UNTESTED: no other account can replace the entry between the `fstatat` above and the `fchmodat` below.
+    // The parent is a directory checked against its rule, or a base directory that no other account can replace entries
+    // in, and the entry is a directory the effective user owns, which the sticky bit protects from other accounts; a
+    // test can't run the race.
+    // When changing this, keep the type and owner check before the mode change, that invariant of the parent, and the
+    // open with `O_NOFOLLOW` that follows, then the repair or check.
     // SAFETY: The parent descriptor is open and the name is NUL-terminated.
     if unsafe { libc::fchmodat(parent.file.as_raw_fd(), name.as_ptr(), MKDIR_MODE, 0) } != 0 {
         return Err(Error::io(denied.path(), "change mode", io::Error::last_os_error()));
@@ -636,10 +652,11 @@ fn check_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<(
 
 /// Fails when `rule` can't create an item: private-fs creates items owned by the current user.
 fn check_creatable(path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
-    if !rule.owners.contains(&Account::CurrentUser) {
+    let euid = effective_uid();
+    // Any account of the rule that is the effective user counts, as System does when running as root.
+    if !owner_allowed(rule, euid, euid) {
         return Err(Error::refused(path, Refusal::Owner));
     }
-    let euid = effective_uid();
     check_rule(path, rule, euid, euid, kind)
 }
 
