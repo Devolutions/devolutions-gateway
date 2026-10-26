@@ -351,26 +351,43 @@ pub(crate) fn check_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
 }
 
 pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
+    repair_item(&dir.file, path, rule, Kind::Directory)
+}
+
+#[cfg_attr(not(test), expect(dead_code, reason = "private_fs::repair_file is not wired yet"))]
+pub(crate) fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
+    repair_item(file, path, rule, Kind::File)
+}
+
+/// Brings the owner, mode and ACLs of the open directory or file `file` into line with `rule`, then checks it.
+fn repair_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
+    let (mode, step) = match kind {
+        Kind::Directory => (DIR_MODE, "inspect directory"),
+        Kind::File => (FILE_MODE, "inspect file"),
+    };
     let euid = effective_uid();
-    let metadata = dir
-        .file
-        .metadata()
-        .map_err(|error| Error::io(path, "inspect directory", error))?;
+    let metadata = file.metadata().map_err(|error| Error::io(path, step, error))?;
+    // A repair changes nothing that the check would refuse whatever the repair did, such as another hard link, whose
+    // mode the change would also give to the other name.
+    match kind {
+        Kind::Directory if !metadata.is_dir() => return Err(Error::refused(path, Refusal::NotADirectory)),
+        Kind::File if !metadata.is_file() => return Err(Error::refused(path, Refusal::NotAFile)),
+        Kind::File if 1 < metadata.nlink() => return Err(Error::refused(path, Refusal::Link)),
+        Kind::Directory | Kind::File => {}
+    }
     let owner = if owner_allowed(rule, metadata.uid(), euid) {
         metadata.uid()
     } else {
         euid
     };
-    check_rule(path, rule, owner, euid, Kind::Directory)?;
+    check_rule(path, rule, owner, euid, kind)?;
     if owner != metadata.uid() {
-        std::os::unix::fs::fchown(&dir.file, Some(owner), None)
-            .map_err(|error| Error::io(path, "change owner", error))?;
+        std::os::unix::fs::fchown(file, Some(owner), None).map_err(|error| Error::io(path, "change owner", error))?;
     }
-    os::remove_extended_acl(&dir.file, path)?;
-    dir.file
-        .set_permissions(Permissions::from_mode(DIR_MODE))
+    os::remove_extended_acl(file, path)?;
+    file.set_permissions(Permissions::from_mode(mode))
         .map_err(|error| Error::io(path, "change mode", error))?;
-    check_item(&dir.file, path, rule, Kind::Directory)
+    check_item(file, path, rule, kind)
 }
 
 pub(crate) fn check_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
@@ -987,5 +1004,112 @@ mod tests {
         assert!(!replaceable(0o1777, &acl, &allowed));
         assert!(!replaceable(0o1775, &acl, &allowed));
         assert!(!replaceable(0o755, &acl, &allowed));
+    }
+
+    /// A file under the system temporary directory, removed with its directory when dropped.
+    struct ScratchFile {
+        dir: Utf8PathBuf,
+        path: Utf8PathBuf,
+    }
+
+    impl ScratchFile {
+        fn new(test: &str, mode: u32) -> Self {
+            let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .expect("UTF-8 temporary directory")
+                .join(format!("private-fs-{test}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir(&dir).expect("create a scratch directory");
+            let path = dir.join("file");
+            std::fs::write(&path, b"content").expect("create a scratch file");
+            std::fs::set_permissions(&path, Permissions::from_mode(mode)).expect("set a scratch mode");
+            Self { dir, path }
+        }
+
+        fn open(&self) -> File {
+            File::open(&self.path).expect("open the scratch file")
+        }
+
+        fn mode(&self) -> u32 {
+            std::fs::metadata(&self.path).expect("inspect the scratch file").mode() & 0o7777
+        }
+    }
+
+    impl Drop for ScratchFile {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn file_rule() -> Rule {
+        Rule::new()
+            .owner(Account::CurrentUser)
+            .grant(Account::CurrentUser, Access::Full)
+    }
+
+    // oracle: intent crates/private-fs/INTENT.md §paths
+    #[test]
+    fn repair_brings_a_file_open_to_others_into_line() {
+        let scratch = ScratchFile::new("repair-file", 0o644);
+        let file = scratch.open();
+        assert!(check_file(&file, &scratch.path, &file_rule()).is_err());
+
+        repair_file(&file, &scratch.path, &file_rule()).expect("repair");
+        assert_eq!(scratch.mode(), 0o600);
+        check_file(&file, &scratch.path, &file_rule()).expect("passes after the repair");
+    }
+
+    // Removing a directory's default ACL is meaningless on a file, so a repair that failed on it would never fix a file.
+    // oracle: intent crates/private-fs/INTENT.md §mechanisms
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn repair_removes_a_file_acl() {
+        let scratch = ScratchFile::new("repair-file-acl", 0o600);
+        // Version 2, then the owner rw-, nobody (65534) r--, the owning group ---, a mask ---, and other ---, as the
+        // kernel's include/uapi/linux/posix_acl_xattr.h lays them out.
+        let mut acl = 2u32.to_le_bytes().to_vec();
+        for (tag, perm, id) in [
+            (0x01u16, 6u16, u32::MAX),
+            (0x02, 4, 65534),
+            (0x04, 0, u32::MAX),
+            (0x10, 0, u32::MAX),
+            (0x20, 0, u32::MAX),
+        ] {
+            acl.extend_from_slice(&tag.to_le_bytes());
+            acl.extend_from_slice(&perm.to_le_bytes());
+            acl.extend_from_slice(&id.to_le_bytes());
+        }
+        let c_path = CString::new(scratch.path.as_str()).expect("NUL-free path");
+        // SAFETY: The path and name are NUL-terminated, and the value is readable for its length.
+        let status = unsafe {
+            libc::setxattr(
+                c_path.as_ptr(),
+                c"system.posix_acl_access".as_ptr(),
+                acl.as_ptr().cast(),
+                acl.len(),
+                0,
+            )
+        };
+        assert_eq!(status, 0, "set a test ACL: {}", io::Error::last_os_error());
+        let file = scratch.open();
+        assert!(check_file(&file, &scratch.path, &file_rule()).is_err());
+
+        repair_file(&file, &scratch.path, &file_rule()).expect("repair");
+        check_file(&file, &scratch.path, &file_rule()).expect("passes after the repair");
+    }
+
+    // Changing the mode through one name changes it for every other hard link to the file.
+    // oracle: reference crates/private-fs/src/lib.rs Dir::open_file
+    #[test]
+    fn repair_leaves_a_file_with_another_hard_link_unchanged() {
+        let scratch = ScratchFile::new("repair-linked-file", 0o644);
+        std::fs::hard_link(&scratch.path, scratch.dir.join("other")).expect("link the scratch file");
+        let file = scratch.open();
+
+        let error = repair_file(&file, &scratch.path, &file_rule()).expect_err("refused");
+        assert!(
+            matches!(error.kind(), crate::ErrorKind::Refused(Refusal::Link)),
+            "{error:?}"
+        );
+        assert_eq!(scratch.mode(), 0o644);
     }
 }
