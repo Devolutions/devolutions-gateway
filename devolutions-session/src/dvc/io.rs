@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::Context;
-use now_proto_pdu::NowMessage;
+use now_proto_pdu::{NowChannelHeartbeatMsg, NowMessage};
 use tokio::sync::Notify;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::mpsc::error::TrySendError;
@@ -175,6 +175,13 @@ pub fn run_dvc_io(
 /// Interval at which decoded messages are offered again to a full processing queue.
 const INBOUND_RETRY_INTERVAL_MS: u32 = 10;
 
+/// Longest time without a write while decoded messages are held back.
+///
+/// No read is pending while messages are held back, so only a write can observe a closed channel.
+/// Without this probe, a client lost during stdin backpressure goes unnoticed until the next heartbeat, or forever
+/// when heartbeats are disabled, and the channel is never reopened.
+const BACKLOG_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+
 /// Overlapped IO state of one open DVC channel.
 ///
 /// Reads and writes are both overlapped, so that a client slow to read never stops the loop from reading, and the
@@ -197,6 +204,7 @@ struct DvcIo {
     write_overlapped: OVERLAPPED,
     write_event: Event,
     write_pending: bool,
+    last_write_started: Instant,
 }
 
 #[derive(Clone, Copy)]
@@ -232,6 +240,7 @@ impl DvcIo {
             },
             write_event,
             write_pending: false,
+            last_write_started: Instant::now(),
         }))
     }
 
@@ -244,8 +253,16 @@ impl DvcIo {
         loop {
             self.forward_inbound(read_tx)?;
 
-            if self.inbound.is_empty() && !self.read_pending {
-                self.start_read()?;
+            if self.inbound.is_empty() {
+                if !self.read_pending {
+                    self.start_read()?;
+                }
+            } else if !self.write_pending && self.last_write_started.elapsed() >= BACKLOG_PROBE_INTERVAL {
+                // NOW clients already accept unsolicited heartbeats, which are sent even when none was negotiated.
+                // Messages are only held back after negotiation, once stdin backpressure stops the processing task.
+                trace!("Probing the DVC channel while inbound messages are held back");
+                self.start_write(&NowChannelHeartbeatMsg::default().into())
+                    .context("probing the DVC channel while inbound messages are held back")?;
             }
 
             // The stop event comes first so that it wins over a busy channel.
@@ -388,6 +405,7 @@ impl DvcIo {
                 Some(&mut self.write_overlapped),
             )
         };
+        self.last_write_started = Instant::now();
         ensure_overlapped_io_result(result)?;
         self.write_pending = true;
 
@@ -608,7 +626,7 @@ mod tests {
     use std::time::Instant;
 
     use now_proto_pdu::ironrdp_core::encode_vec;
-    use now_proto_pdu::{NowExecDataMsg, NowExecDataStreamKind};
+    use now_proto_pdu::{NowChannelHeartbeatMsg, NowExecDataMsg, NowExecDataStreamKind};
     use win_api_wrappers::event::Event;
     use windows::Win32::Foundation::{ERROR_MORE_DATA, GENERIC_READ, GENERIC_WRITE, HANDLE};
     use windows::Win32::Storage::FileSystem::{
@@ -863,6 +881,47 @@ mod tests {
         // Give the loop time to read past the queue's capacity before anything is received.
         std::thread::sleep(Duration::from_millis(200));
         assert!(!running.thread.is_finished(), "the loop ended on a full queue");
+
+        for message in &messages {
+            assert_eq!(encoded(&running.recv()), encoded(message));
+        }
+
+        running.stop().expect("the loop stops cleanly");
+    }
+
+    /// A client that goes away while the processing queue is full must still end the loop, so the channel is reopened.
+    ///
+    /// No read is pending while messages are held back, so only a write can observe the closed channel.
+    // oracle: mutant
+    #[test]
+    fn closed_channel_ends_the_loop_while_messages_are_held_back() {
+        let (server, client) = dvc_pipe();
+        let running = run_dvc_io_on(server, 1);
+
+        for session_id in 1..=3 {
+            write_pdu(&client, &encoded(&exec_data(session_id, vec![0; 16])));
+        }
+
+        std::thread::sleep(Duration::from_millis(200));
+        drop(client);
+
+        running.join().expect_err("a closed channel ends the loop");
+    }
+
+    /// Probing a held-back channel must not disturb it: the client gets heartbeats, and every message still arrives.
+    // oracle: mutant
+    #[test]
+    fn held_back_channel_is_probed_with_heartbeats() {
+        let (server, client) = dvc_pipe();
+        let mut running = run_dvc_io_on(server, 1);
+        let messages: Vec<_> = (1..=3).map(|session_id| exec_data(session_id, vec![0; 16])).collect();
+
+        for message in &messages {
+            write_pdu(&client, &encoded(message));
+        }
+
+        let heartbeat = encoded(&NowChannelHeartbeatMsg::default().into());
+        assert_eq!(read_exact(&client, heartbeat.len()), heartbeat);
 
         for message in &messages {
             assert_eq!(encoded(&running.recv()), encoded(message));
