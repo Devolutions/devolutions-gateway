@@ -148,6 +148,51 @@ impl SessionManagerCtx {
             .get(&session.to_string())
             .is_some_and(|session| session.is_ready_to_start(event))
     }
+
+    /// Starts the session process in a registered session unless it is already running.
+    ///
+    /// The session is marked ready only once its process is known to run, so that a failure leaves it waiting for the
+    /// next readiness event.
+    fn start_process_if_not_running(
+        &mut self,
+        session: &Session,
+        is_running: impl FnOnce(&Session) -> anyhow::Result<bool>,
+        start: impl FnOnce(&Session) -> anyhow::Result<()>,
+    ) {
+        let Some(gw_session) = self.get_session_mut(session) else {
+            warn!(%session, "Session is not yet registered");
+            return;
+        };
+
+        match is_running(session) {
+            Ok(true) => {
+                gw_session.set_session_ready();
+                return;
+            }
+            Ok(false) => {}
+            Err(error) => {
+                // Starting a process without knowing whether one already runs could start a second one.
+                error!(
+                    error = format!("{error:#}"),
+                    %session,
+                    "Failed to check whether the session process is running"
+                );
+                return;
+            }
+        }
+
+        info!(%session, "Starting session process");
+
+        match start(session) {
+            Ok(()) => {
+                info!(%session, "Session process started");
+                gw_session.set_session_ready();
+            }
+            Err(error) => {
+                error!(%error, %session, "Failed to start session process");
+            }
+        }
+    }
 }
 
 pub struct SessionManager {
@@ -257,7 +302,7 @@ impl Task for SessionManager {
                             // session app on logon, if not yet started.
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Logon) {
-                                start_session_process_if_not_running(&mut ctx, &id)?;
+                                start_session_process_if_not_running(&mut ctx, &id);
                             }
                         }
                         AgentServiceEvent::SessionUnlock(id) => {
@@ -265,7 +310,7 @@ impl Task for SessionManager {
 
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Unlock) {
-                                start_session_process_if_not_running(&mut ctx, &id)?;
+                                start_session_process_if_not_running(&mut ctx, &id);
                             }
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
@@ -295,32 +340,8 @@ impl Task for SessionManager {
 }
 
 /// Starts Devolutions Session process in the target session.
-fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &Session) -> anyhow::Result<()> {
-    match ctx.get_session_mut(session) {
-        Some(gw_session) => {
-            if is_session_running_in_session(session)? {
-                gw_session.set_session_ready();
-                return Ok(());
-            }
-
-            info!(%session, "Starting session process");
-
-            match start_session_process(session) {
-                Ok(()) => {
-                    info!(%session, "Session process started");
-                    gw_session.set_session_ready();
-                }
-                Err(error) => {
-                    error!(%error, %session, "Failed to start session process");
-                }
-            }
-        }
-        None => {
-            warn!(%session, "Session is not yet registered");
-        }
-    };
-
-    Ok(())
+fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &Session) {
+    ctx.start_process_if_not_running(session, is_session_running_in_session, start_session_process);
 }
 
 /// Terminates Devolutions Session process in the target session.
@@ -416,7 +437,10 @@ mod tests {
     use camino::Utf8Path;
     use win_api_wrappers::utils::CommandLine;
 
-    use super::{GatewaySession, Session, SessionKind, SessionReadiness, SessionReadinessEvent, session_command_line};
+    use super::{
+        GatewaySession, Session, SessionKind, SessionManagerCtx, SessionReadiness, SessionReadinessEvent,
+        session_command_line,
+    };
 
     fn make_session(kind: SessionKind, readiness: SessionReadiness) -> GatewaySession {
         GatewaySession::new(Session::new(1), kind, readiness)
@@ -435,6 +459,24 @@ mod tests {
         assert_eq!(argv[0], session_app_path.as_str());
         // oracle: scaffold
         assert_eq!(argv[1..], ["--session", "3"]);
+    }
+
+    /// A failure to look up the session process must neither end the session manager nor mark the session ready, so
+    /// that the next readiness event retries.
+    // oracle: scaffold
+    #[test]
+    fn process_lookup_failure_leaves_the_session_waiting() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        ctx.register_session(&session, SessionKind::Remote, SessionReadiness::WaitingForLogon);
+
+        ctx.start_process_if_not_running(
+            &session,
+            |_| Err(anyhow::anyhow!("process lookup failed")),
+            |_| panic!("the process was started although the lookup failed"),
+        );
+
+        assert!(ctx.should_start_session(&session, SessionReadinessEvent::Logon));
     }
 
     #[test]
