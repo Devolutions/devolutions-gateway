@@ -169,8 +169,9 @@ pub(super) fn list(dir: &Utf8Path, prefix: &str) -> anyhow::Result<Vec<String>> 
         .context("list key directory")?
         .into_iter()
         // `crates/device-key/INTENT.md` ("Operations"): listing never returns a link, and a file with another hard link is
-        // one; any other key that breaks the access rule is still listed, so the listing reads only the link count.
-        .filter(|entry| entry.kind == EntryKind::File && entry.links <= 1)
+        // one, so an entry whose link count can't be read is skipped too; any other key that breaks the access rule is
+        // still listed, so the listing reads only the link count.
+        .filter(|entry| entry.kind == EntryKind::File && entry.links == Some(1))
         .filter_map(|entry| {
             let name = entry.name.to_str()?.strip_suffix(KEY_FILE_SUFFIX)?;
             name_matches_prefix(name, prefix).then(|| name.to_owned())

@@ -277,6 +277,8 @@ impl Dir {
     }
 
     /// Brings this directory into line with `rule`, without changing anything below it.
+    ///
+    /// On Linux and macOS the directory gets mode `0700`; a directory already in line is not written to.
     pub fn repair(&self, rule: &Rule) -> Result<()> {
         sys::repair_dir(&self.inner, &self.path, rule)
     }
@@ -302,6 +304,7 @@ pub fn check_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
 /// Brings an open file, at `path`, into line with `rule`, then checks it exactly.
 ///
 /// A file with more than one hard link is refused rather than changed, since a change through one name applies to all.
+/// On Linux and macOS the file gets mode `0600`; a file already in line is not written to.
 pub fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
     sys::repair_file(file, path, rule)
 }
