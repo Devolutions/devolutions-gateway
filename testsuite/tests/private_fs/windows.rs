@@ -81,6 +81,12 @@ impl Drop for TestDir {
     }
 }
 
+/// Reports a skipped test on standard error, where a CI log shows it.
+fn skip(test: &str, reason: &str) {
+    // The test harness captures `eprintln!` output from a passing test, but not direct writes to stderr.
+    let _ = writeln!(std::io::stderr(), "SKIP: {test} {reason}");
+}
+
 fn user() -> Sid {
     Token::current_process_token()
         .sid_and_attributes()
@@ -310,9 +316,9 @@ fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
     let backup = match BackupPrivilege::enable() {
         Ok(backup) => backup,
         Err(error) => {
-            let _ = writeln!(
-                std::io::stderr(),
-                "SKIP: the process token doesn't hold the backup privilege: {error}"
+            skip(
+                "the_backup_privilege_opens_a_file_the_token_cannot",
+                &format!("the process token doesn't hold the backup privilege: {error}"),
             );
             return Ok(());
         }
@@ -332,7 +338,14 @@ fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
 #[test]
 fn a_rule_that_does_not_let_the_current_user_own_cannot_create() -> anyhow::Result<()> {
     // Catches a creation that makes the current user the owner although the rule doesn't allow it, or that reports it
-    // otherwise than the Unix backend does.
+    // as anything but an owner refusal.
+    if user() == system() {
+        skip(
+            "a_rule_that_does_not_let_the_current_user_own_cannot_create",
+            "the process runs as SYSTEM, which the rule lets own",
+        );
+        return Ok(());
+    }
     let test = TestDir::new();
     let base = Dir::create_base(test.path(), &user_rule())?;
     let rule = Rule::new()
@@ -511,9 +524,9 @@ fn a_repair_takes_ownership_from_an_owner_the_rule_does_not_allow() -> anyhow::R
     drop(base.create_dir("child", &user_rule(), Existing::Check)?);
     let child = test.path().join("child");
     if !set_owner(&child, &well_known(Security::WinLocalServiceSid))? {
-        let _ = writeln!(
-            std::io::stderr(),
-            "SKIP: the process token doesn't hold the restore privilege"
+        skip(
+            "a_repair_takes_ownership_from_an_owner_the_rule_does_not_allow",
+            "the process token doesn't hold the restore privilege",
         );
         return Ok(());
     }
@@ -533,9 +546,9 @@ fn administrators_as_an_owner_allow_a_member_of_the_group() -> anyhow::Result<()
     // Catches an owner check that compares with the BUILTIN\Administrators SID only.
     let token = Process::current_process().token(TOKEN_QUERY | TOKEN_DUPLICATE)?;
     if !token.is_member(&administrators())? {
-        let _ = writeln!(
-            std::io::stderr(),
-            "SKIP: the current user is not a member of Administrators"
+        skip(
+            "administrators_as_an_owner_allow_a_member_of_the_group",
+            "the current user is not a member of Administrators",
         );
         return Ok(());
     }
@@ -999,9 +1012,9 @@ fn a_thread_holds_one_backup_privilege_at_a_time() -> anyhow::Result<()> {
     let first = match BackupPrivilege::enable() {
         Ok(first) => first,
         Err(error) => {
-            let _ = writeln!(
-                std::io::stderr(),
-                "SKIP: the process token doesn't hold the backup privilege: {error}"
+            skip(
+                "a_thread_holds_one_backup_privilege_at_a_time",
+                &format!("the process token doesn't hold the backup privilege: {error}"),
             );
             return Ok(());
         }
