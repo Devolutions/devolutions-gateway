@@ -312,11 +312,19 @@ async fn conformance() -> anyhow::Result<()> {
     let agent_version = std::fs::read_to_string(project_dir.join("VERSION")).context("read workspace VERSION")?;
     let agent_version = agent_version.trim();
     ensure!(!agent_version.is_empty(), "workspace VERSION is empty");
-    // The agent refuses a data directory with a directory above it that another account can rename, as a workspace
-    // `target` directory's can be, and the system temporary directory's are not.
+    // The agent refuses a data directory with a directory above it that an account other than the system account,
+    // administrators and its own can rename or replace, as a workspace `target` directory's can be. On Windows, the
+    // SYSTEM fixture's agent runs as SYSTEM, so even the user's temporary directory fails; `%ProgramData%` passes, and a
+    // directory an elevated administrator creates there is owned by Administrators.
+    #[cfg(windows)]
+    let work_parent = std::env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .context("ProgramData is not set")?;
+    #[cfg(not(windows))]
+    let work_parent = std::env::temp_dir();
     let mut work_dir = tempfile::Builder::new()
         .prefix("agent-identity-integration-")
-        .tempdir()?;
+        .tempdir_in(work_parent)?;
     let mut first_dir = tempfile::Builder::new().prefix("mock-1-").tempdir_in(work_dir.path())?;
     let second_dir = tempfile::Builder::new().prefix("mock-2-").tempdir_in(work_dir.path())?;
     let first = start_mock(first_dir.path()).await?;
