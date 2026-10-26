@@ -163,37 +163,31 @@ pub(super) fn list(dir: &Utf8Path, prefix: &str) -> anyhow::Result<Vec<String>> 
     let Some(dir) = open_key_directory(dir)? else {
         return Ok(Vec::new());
     };
-    // `crates/device-key/INTENT.md` ("Operations"): listing skips an unexpected entry, a lock file that fails its rule
-    // included.
-    // Listing needs the lock only to remove leftovers first, and their names never end in `.p8`, so without the lock it
-    // lists the same keys and leaves the leftovers to a later operation.
-    let _lock = match lock_directory(&dir) {
-        Ok(lock) => {
-            cleanup_abandoned(&dir)?;
-            Some(lock)
-        }
-        Err(error)
-            if error
-                .chain()
-                .filter_map(|cause| cause.downcast_ref::<private_fs::Error>())
-                .any(private_fs::Error::is_refused) =>
-        {
-            None
-        }
-        Err(error) => return Err(error),
-    };
+    let _lock = lock_and_reconcile(&dir)?;
     let mut names = dir
         .entries()
         .context("list key directory")?
         .into_iter()
         .filter(|entry| entry.kind == EntryKind::File)
         .filter_map(|entry| {
-            let name = entry.name.to_str()?.strip_suffix(KEY_FILE_SUFFIX)?;
-            name_matches_prefix(name, prefix).then(|| name.to_owned())
+            let file_name = entry.name.to_str()?;
+            let name = file_name.strip_suffix(KEY_FILE_SUFFIX)?;
+            (name_matches_prefix(name, prefix) && !is_hard_linked(&dir, file_name)).then(|| name.to_owned())
         })
         .collect::<Vec<_>>();
     names.sort_unstable();
     Ok(names)
+}
+
+/// Reports whether the key file `file_name` has another hard link, which makes it a link rather than a key.
+///
+/// `crates/device-key/INTENT.md` ("Operations"): listing never returns a link, but returns a key that breaks the access
+/// rule, so only a refusal for a link excludes a key file, and any other failure to check it leaves it listed.
+fn is_hard_linked(dir: &Dir, file_name: &str) -> bool {
+    matches!(
+        dir.open_file(file_name, &key_file_rule(), FileOptions::new()),
+        Err(error) if matches!(error.kind(), private_fs::ErrorKind::Refused(private_fs::Refusal::Link))
+    )
 }
 
 /// Opens the key directory, or returns `None` when it doesn't exist.
@@ -777,8 +771,10 @@ mod tests {
     }
 
     // oracle: intent crates/device-key/INTENT.md §Operations
+    // The lock file is the crate's own entry, so it is not an unexpected entry that listing skips; failing promptly on one
+    // that breaks its rule keeps both "no leftover survives a later operation" and "fails promptly" true.
     #[test]
-    fn a_lock_file_that_fails_its_rule_stops_every_operation_but_listing() -> anyhow::Result<()> {
+    fn a_lock_file_that_fails_its_rule_stops_every_operation_promptly() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
@@ -795,10 +791,28 @@ mod tests {
             fs::set_permissions(&lock, fs::Permissions::from_mode(0o644))?;
         }
 
-        assert_eq!(list(&backend, TEST_PREFIX)?, std::slice::from_ref(&name));
-        assert!(open(&backend, &name).is_err());
-        assert!(generate(&backend, &new_key_name(TEST_PREFIX)).is_err());
-        assert!(delete(&backend, &name).is_err());
+        let operations: [(&str, &dyn Fn() -> anyhow::Result<()>); 4] = [
+            ("list", &|| list(&backend, TEST_PREFIX).map(drop)),
+            ("open", &|| open(&backend, &name).map(drop)),
+            ("generate", &|| generate(&backend, &new_key_name(TEST_PREFIX)).map(drop)),
+            ("delete", &|| delete(&backend, &name)),
+        ];
+        for (operation, run) in operations {
+            let started = Instant::now();
+            let error = run()
+                .err()
+                .with_context(|| format!("{operation} ignored a lock file that fails its rule"))?;
+            let elapsed = started.elapsed();
+
+            assert!(elapsed < LOCK_TIMEOUT, "{operation}: {elapsed:?}");
+            // The error names the lock file and why it fails, so that an operator can fix it.
+            let refusal = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<private_fs::Error>())
+                .with_context(|| format!("{operation}: the failure is not a refusal: {error:#}"))?;
+            assert!(refusal.is_refused(), "{operation}: {error:#}");
+            assert!(format!("{error:#}").contains(LOCK_NAME), "{operation}: {error:#}");
+        }
         Ok(())
     }
 
@@ -827,6 +841,41 @@ mod tests {
         assert!(leftover.exists());
         assert_eq!(list(&backend, TEST_PREFIX)?, [name]);
         assert!(!leftover.exists());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_hard_linked_key_file_is_not_listed() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let linked = new_key_name(TEST_PREFIX);
+        let kept = new_key_name(TEST_PREFIX);
+        generate(&backend, &linked)?;
+        generate(&backend, &kept)?;
+        fs::hard_link(directory.key_path(&linked), directory.0.join("elsewhere"))?;
+
+        assert_eq!(list(&backend, TEST_PREFIX)?, [kept]);
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_key_file_readable_by_other_accounts_is_still_listed() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        // Written outside the crate, the file is readable by other accounts: on Unix through its mode, and on Windows
+        // through the entries it inherits from the key directory.
+        fs::write(directory.key_path(&name), b"key material")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(directory.key_path(&name), fs::Permissions::from_mode(0o644))?;
+        }
+
+        assert_eq!(list(&backend, TEST_PREFIX)?, [name]);
         Ok(())
     }
 
