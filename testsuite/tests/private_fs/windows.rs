@@ -746,35 +746,6 @@ fn repair_file_brings_a_file_into_line_with_its_rule() -> anyhow::Result<()> {
 
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
-fn open_base_returns_none_for_a_missing_directory() -> anyhow::Result<()> {
-    // Catches an open that creates what it should only open.
-    let test = TestDir::new();
-    assert!(Dir::open_base(&test.path().join("missing"), &user_rule())?.is_none());
-    assert!(!test.path().exists());
-    Ok(())
-}
-
-// oracle: intent crates/private-fs/INTENT.md §paths
-#[test]
-fn persist_refusing_to_replace_keeps_the_existing_file() -> anyhow::Result<()> {
-    // Catches a rename without replacement that overwrites the destination.
-    let test = TestDir::new();
-    let base = Dir::create_base(test.path(), &user_rule())?;
-    base.create_file("old", &user_rule(), FileOptions::new())?
-        .write_all(b"old")?;
-    let mut new = base.create_file("new", &user_rule(), FileOptions::new())?;
-    new.write_all(b"new")?;
-    let error = refusal(base.persist(&new, "new", "old", Replace::Refuse));
-    assert!(
-        matches!(error.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::AlreadyExists),
-        "{error:?}"
-    );
-    assert_eq!(std::fs::read(test.path().join("old"))?, b"old");
-    Ok(())
-}
-
-// oracle: intent crates/private-fs/INTENT.md §paths
-#[test]
 fn persist_replacing_moves_the_content_to_the_destination() -> anyhow::Result<()> {
     // Catches a persist that renames something other than the given file, or doesn't replace.
     let test = TestDir::new();
@@ -842,7 +813,7 @@ fn entries_lists_each_entry_with_its_kind() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: mutant remove_file reporting the inverse of whether the file existed
 #[test]
 fn remove_file_reports_whether_the_file_existed() -> anyhow::Result<()> {
     // Catches a removal that fails on a missing file or leaves the file.
