@@ -241,10 +241,12 @@ impl Policy {
             let mut expected = self.entries();
             expected.sort();
             others.sort();
-            let owner_rights_exact = match owner_rights.as_slice() {
-                [] => true,
-                [(mask, flags)] => *mask == owner_rights_mask && *flags == 0,
-                _ => false,
+            // An owner with full access needs no OWNER RIGHTS entry, so an exact DACL has none; any other owner has
+            // exactly one, with exactly the owner's access.
+            let owner_rights_exact = match (owner_access, owner_rights.as_slice()) {
+                (Some(Access::Full), entries) => entries.is_empty(),
+                (_, [(mask, flags)]) => *mask == owner_rights_mask && *flags == 0,
+                (_, _) => false,
             };
             if others != expected || !owner_rights_exact {
                 return Err(refused(Refusal::Access));
@@ -803,6 +805,30 @@ mod tests {
         // The rule gives the owner no access, so OWNER RIGHTS must grant nothing; a narrower check also refuses more.
         let security = security("O:{user}D:P(A;;FA;;;SY)(A;;FR;;;OW)");
         let checked = policy(&system_rule(), Kind::File).check(&security, Utf8Path::new("item"), &no_member);
+        assert_eq!(refusal(checked), "Access");
+    }
+
+    // oracle: intent crates/private-fs/INTENT.md §vocabulary
+    #[test]
+    fn an_exact_check_refuses_owner_rights_for_an_owner_with_full_access() {
+        // The rule gives the owner, SYSTEM, full access, so the DACL private-fs writes has no OWNER RIGHTS entry, and an
+        // exact check refuses one of any mask.
+        let rule = Rule::new()
+            .owner(Account::System)
+            .grant(Account::System, Access::Full)
+            .exact();
+        for owner_rights in ["", "FA"] {
+            let security = security(&format!("O:SYD:P(A;;FA;;;SY)(A;;{owner_rights};;;OW)"));
+            let checked = policy(&rule, Kind::File).check(&security, Utf8Path::new("item"), &no_member);
+            assert_eq!(refusal(checked), "Access", "OWNER RIGHTS mask {owner_rights:?}");
+        }
+    }
+
+    // oracle: intent crates/private-fs/INTENT.md §vocabulary
+    #[test]
+    fn an_exact_check_refuses_a_second_owner_rights_entry() {
+        let security = security("O:{user}D:P(A;;FA;;;SY)(A;;;;;OW)(A;;;;;OW)");
+        let checked = policy(&system_rule().exact(), Kind::File).check(&security, Utf8Path::new("item"), &no_member);
         assert_eq!(refusal(checked), "Access");
     }
 

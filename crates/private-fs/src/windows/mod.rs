@@ -56,6 +56,15 @@ const OPEN_OPTIONS: NTCREATEFILE_CREATE_OPTIONS = NTCREATEFILE_CREATE_OPTIONS(
     FILE_OPEN_REPARSE_POINT.0 | FILE_OPEN_FOR_BACKUP_INTENT.0 | FILE_SYNCHRONOUS_IO_NONALERT.0,
 );
 
+/// The options of an open for a repair: as [`OPEN_OPTIONS`], but asynchronous, so the open doesn't need SYNCHRONIZE,
+/// which an owner's implicit access doesn't include.
+const REPAIR_OPTIONS: NTCREATEFILE_CREATE_OPTIONS =
+    NTCREATEFILE_CREATE_OPTIONS(FILE_OPEN_REPARSE_POINT.0 | FILE_OPEN_FOR_BACKUP_INTENT.0);
+
+/// The access a repair opens with: what it reads and writes, all within an owner's implicit READ_CONTROL and WRITE_DAC,
+/// and FILE_READ_ATTRIBUTES, which a directory's parent grants with FILE_LIST_DIRECTORY.
+const REPAIR_ACCESS: FILE_ACCESS_RIGHTS = FILE_ACCESS_RIGHTS(READ_CONTROL.0 | WRITE_DAC.0 | FILE_READ_ATTRIBUTES.0);
+
 const SHARE_ALL: FILE_SHARE_MODE = FILE_SHARE_MODE(FILE_SHARE_READ.0 | FILE_SHARE_WRITE.0 | FILE_SHARE_DELETE.0);
 
 #[derive(Debug)]
@@ -158,23 +167,42 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
             nt::flush(handle.as_handle()).map_err(|error| Error::io(path, "flush directory", error))?;
             Ok(Dir::new(handle, true))
         }
-        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-            let handle = open_entry(
-                parent.handle(),
-                path,
-                name,
-                DIRECTORY_ACCESS,
-                SHARE_ALL,
-                "open directory",
-            )?
-            .ok_or_else(|| Error::io(path, "open directory", io::Error::from(io::ErrorKind::NotFound)))?;
-            let dir = Dir::new(handle, false);
-            match existing {
-                Existing::Check => check_dir(&dir, path, rule)?,
-                Existing::Repair => repair_dir(&dir, path, rule)?,
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => match existing {
+            Existing::Check => {
+                let handle = open_entry(
+                    parent.handle(),
+                    path,
+                    name,
+                    DIRECTORY_ACCESS,
+                    SHARE_ALL,
+                    "open directory",
+                )?
+                .ok_or_else(|| Error::io(path, "open directory", io::Error::from(io::ErrorKind::NotFound)))?;
+                let dir = Dir::new(handle, false);
+                check_dir(&dir, path, rule)?;
+                Ok(dir)
             }
-            Ok(dir)
-        }
+            Existing::Repair => {
+                // A directory whose DACL no longer grants the current user anything is still repairable by its owner,
+                // so it is opened with the repair's access only, and opened normally once repaired.
+                let request = Request {
+                    access: REPAIR_ACCESS,
+                    share: SHARE_ALL,
+                    disposition: FILE_OPEN,
+                    options: REPAIR_OPTIONS,
+                    attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
+                    descriptor: None,
+                };
+                let repairing = nt::create(parent.handle(), name, &request)
+                    .map_err(|error| Error::io(path, "open directory for repair", error))?;
+                let policy = Policy::new(rule, Kind::Directory, path)?;
+                repair(repairing.as_handle(), path, &policy)?;
+                let handle = reopen(repairing.as_handle(), DIRECTORY_ACCESS)
+                    .map_err(|error| Error::io(path, "open directory", error))?;
+                check_item(handle.as_handle(), path, Kind::Directory, &policy.exact())?;
+                Ok(Dir::new(handle, false))
+            }
+        },
         Err(error) => Err(Error::io(path, "create directory", error)),
     }
 }
@@ -373,9 +401,16 @@ pub(crate) fn check_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
 
 pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
     let policy = Policy::new(rule, Kind::Directory, path)?;
-    classify(dir.handle(), path, Kind::Directory)?;
+    repair(dir.handle(), path, &policy)?;
+    check_item(dir.handle(), path, Kind::Directory, &policy.exact())
+}
+
+/// Brings the owner and DACL of the directory `handle` refers to into line with `policy`, through a handle opened again
+/// with the repair's access only, without checking the result.
+fn repair(handle: BorrowedHandle<'_>, path: &Utf8Path, policy: &Policy) -> Result<()> {
+    classify(handle, path, Kind::Directory)?;
     let security =
-        OwnerAndDacl::of_handle(dir.handle()).map_err(|error| Error::io(path, "read access control list", error))?;
+        OwnerAndDacl::of_handle(handle).map_err(|error| Error::io(path, "read access control list", error))?;
     let current_owner = security.owner();
     let owner_allowed = match current_owner {
         Some(owner) => policy.owner_allowed(owner, path, &administrators_member)?,
@@ -389,15 +424,24 @@ pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> 
     };
     let descriptor = Descriptor::new(&owner, &policy.dacl(&owner))
         .map_err(|error| Error::io(path, "build security descriptor", error))?;
-    let mut access = READ_CONTROL.0 | WRITE_DAC.0 | FILE_READ_ATTRIBUTES.0 | SYNCHRONIZE.0;
+    let mut access = REPAIR_ACCESS.0;
     let mut information = DACL_SECURITY_INFORMATION;
     if !owner_allowed {
         access |= WRITE_OWNER.0;
         information |= OWNER_SECURITY_INFORMATION;
     }
-    let reopened = reopen(dir.handle(), FILE_ACCESS_RIGHTS(access))
-        .map_err(|error| Error::io(path, "open directory for repair", error))?;
-    let original = nt::file_id(dir.handle()).map_err(|error| Error::io(path, "read file ID", error))?;
+    let request = Request {
+        access: FILE_ACCESS_RIGHTS(access),
+        share: SHARE_ALL,
+        disposition: FILE_OPEN,
+        options: REPAIR_OPTIONS,
+        attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
+        descriptor: None,
+    };
+    // An empty name relative to a handle names its object.
+    let reopened =
+        nt::create(handle, "", &request).map_err(|error| Error::io(path, "open directory for repair", error))?;
+    let original = nt::file_id(handle).map_err(|error| Error::io(path, "read file ID", error))?;
     let current = nt::file_id(reopened.as_handle()).map_err(|error| Error::io(path, "read file ID", error))?;
     if original != current {
         return Err(Error::io(
@@ -410,8 +454,7 @@ pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> 
     // repair never changes what lies below the directory.
     // SAFETY: The handle is open and the descriptor stays live for the call.
     unsafe { SetKernelObjectSecurity(raw(reopened.as_handle()), information, descriptor.as_raw()) }
-        .map_err(|error| Error::io(path, "set access control list", nt::win32_error(error)))?;
-    check_item(dir.handle(), path, Kind::Directory, &policy.exact())
+        .map_err(|error| Error::io(path, "set access control list", nt::win32_error(error)))
 }
 
 pub(crate) fn check_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {

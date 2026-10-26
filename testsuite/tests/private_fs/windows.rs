@@ -452,6 +452,22 @@ fn a_repair_restores_the_rule_without_changing_what_lies_below() -> anyhow::Resu
     Ok(())
 }
 
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn a_repair_restores_a_directory_whose_dacl_grants_its_owner_nothing() -> anyhow::Result<()> {
+    // Catches a repair that opens the directory with more access than its owner's implicit READ_CONTROL and WRITE_DAC,
+    // which such a directory doesn't grant.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    drop(base.create_dir("child", &user_rule(), Existing::Check)?);
+    let child = test.path().join("child");
+    set_dacl(&child, &[(users(), READ, 0)], InheritableAclKind::Protected)?;
+    let rule = user_rule().exact();
+    drop(base.create_dir("child", &rule, Existing::Repair)?);
+    assert_eq!(security(&child)?, (user(), vec![(user(), FULL, INHERITED_BY_CHILDREN)]));
+    Ok(())
+}
+
 // oracle: intent crates/private-fs/INTENT.md §mechanisms
 #[test]
 fn a_repair_takes_ownership_from_an_owner_the_rule_does_not_allow() -> anyhow::Result<()> {
