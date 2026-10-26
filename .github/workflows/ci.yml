@@ -1353,12 +1353,12 @@ jobs:
         run: ./crates/agent-channel-proto/dotnet/build.ps1
         shell: pwsh
 
-      - name: Agent identity tests
-        run: dotnet test dotnet/AgentIdentity/AgentIdentity.sln
+      - name: Agent identity authority tests
+        run: dotnet test dotnet/Devolutions.Agent.Identity.Authority/Devolutions.Agent.Identity.Authority.sln
         shell: pwsh
 
-      - name: Build agent identity package
-        run: ./dotnet/AgentIdentity/build.ps1
+      - name: Build agent identity authority package
+        run: ./dotnet/Devolutions.Agent.Identity.Authority/build.ps1
         shell: pwsh
 
   agent-identity-vectors:
