@@ -803,6 +803,24 @@ mod tests {
 
     // oracle: intent crates/private-fs/INTENT.md §vocabulary
     #[test]
+    fn an_exact_check_refuses_a_narrower_mask_in_place_of_the_rule_s() {
+        // Catches an exact check that compares how many entries there are rather than what they grant.
+        let security = security("O:{user}D:P(A;;FR;;;SY)(A;;;;;OW)");
+        let checked = policy(&system_rule().exact(), Kind::File).check(&security, Utf8Path::new("item"), &no_member);
+        assert_eq!(refusal(checked), "Access");
+    }
+
+    // oracle: intent crates/private-fs/INTENT.md §mechanisms
+    #[test]
+    fn a_check_refuses_the_rule_s_entries_in_an_unprotected_dacl() {
+        // An unprotected DACL takes the parent's inheritable entries, so its entries alone don't decide who has access.
+        let security = security("O:{user}D:(A;;FA;;;SY)(A;;;;;OW)");
+        let checked = policy(&system_rule(), Kind::File).check(&security, Utf8Path::new("item"), &no_member);
+        assert_eq!(refusal(checked), "Access");
+    }
+
+    // oracle: intent crates/private-fs/INTENT.md §vocabulary
+    #[test]
     fn a_check_refuses_owner_rights_wider_than_the_owner_s_access() {
         // The rule gives the owner no access, so OWNER RIGHTS must grant nothing; a narrower check also refuses more.
         let security = security("O:{user}D:P(A;;FA;;;SY)(A;;FR;;;OW)");

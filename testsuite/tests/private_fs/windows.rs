@@ -580,6 +580,29 @@ fn a_directory_above_whose_entries_others_can_delete_is_refused() -> anyhow::Res
     Ok(())
 }
 
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn the_parent_of_the_first_existing_directory_is_checked() -> anyhow::Result<()> {
+    // Catches an ancestor walk that starts above the parent of the directory it opened.
+    let test = TestDir::new();
+    std::fs::create_dir(test.path())?;
+    set_dacl(
+        test.path(),
+        &[(user(), FULL, INHERITED_BY_CHILDREN), (users(), DELETE_CHILD, 0)],
+        InheritableAclKind::Protected,
+    )?;
+    let existing = test.path().join("existing");
+    std::fs::create_dir(&existing)?;
+    let error = refusal(Dir::create_base(&existing.join("base"), &user_rule()));
+    assert!(
+        is_refused(&error, |refusal| matches!(refusal, Refusal::Replaceable)),
+        "{error:?}"
+    );
+    // A directory above the first existing one is checked, and so reported, on its resolved path.
+    assert_eq!(error.path().file_name(), test.path().file_name());
+    Ok(())
+}
+
 // oracle: intent crates/device-key/INTENT.md §Operations
 #[test]
 fn a_missing_directory_under_a_replaceable_one_is_reported_missing() -> anyhow::Result<()> {

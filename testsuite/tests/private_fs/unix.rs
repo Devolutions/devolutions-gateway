@@ -375,6 +375,22 @@ fn a_directory_above_that_its_group_can_write_is_refused() {
     assert_eq!(error.path(), canonical(&shared));
 }
 
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn the_parent_of_the_first_existing_directory_is_checked() {
+    // Catches an ancestor walk that starts above the parent of the directory it opened.
+    let scratch = Scratch::new();
+    let shared = scratch.path.join("shared");
+    fs::create_dir(&shared).unwrap();
+    fs::create_dir(shared.join("base")).unwrap();
+    set_mode(&shared.join("base"), 0o700);
+    set_mode(&shared, 0o770);
+
+    let error = Dir::open_base(&shared.join("base"), &rule()).unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Replaceable)), "{error:?}");
+    assert_eq!(error.path(), canonical(&shared));
+}
+
 // A member of root's group need not be root, as members of `wheel` and `admin` on macOS are not.
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
