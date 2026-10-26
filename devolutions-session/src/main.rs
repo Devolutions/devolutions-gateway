@@ -14,6 +14,8 @@ use ::{
 
 #[macro_use]
 extern crate tracing;
+use std::process::ExitCode;
+
 use anyhow::Context;
 use devolutions_gateway_task::{ChildTask, ShutdownHandle, ShutdownSignal};
 #[cfg(all(windows, feature = "dvc"))]
@@ -22,7 +24,7 @@ use devolutions_session::{ConfHandle, get_data_dir, init_log};
 use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
-fn main() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<ExitCode> {
     // Ensure per-user data dir exists.
 
     std::fs::create_dir_all(get_data_dir()).context("failed to create data directory")?;
@@ -49,11 +51,15 @@ fn main() -> anyhow::Result<()> {
 
     info!("Waiting for shutdown signal");
 
-    runtime.block_on(join_handle)?;
+    let tasks_succeeded = runtime.block_on(join_handle)?;
 
     info!("Exiting Devolutions Session");
 
-    Ok(())
+    if tasks_succeeded {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::FAILURE)
+    }
 }
 
 /// Returns the session ID the Devolutions Agent passed via `--session`, if any.
@@ -74,7 +80,12 @@ fn session_id_from_args() -> Option<String> {
     None
 }
 
-pub fn start() -> anyhow::Result<(Runtime, ShutdownHandle, JoinHandle<()>)> {
+/// Spawns the tasks and returns a handle that resolves to whether every task ended without an error.
+// UNTESTED: the process exits with a failure code exactly when a task failed or panicked.
+// The agent relaunches the process on a failure code and leaves it stopped on success, so a task that fails while this
+// still reports success leaves the session without a NOW channel.
+// When changing how tasks are joined, check that every failure still clears the flag.
+pub fn start() -> anyhow::Result<(Runtime, ShutdownHandle, JoinHandle<bool>)> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -90,13 +101,21 @@ pub fn start() -> anyhow::Result<(Runtime, ShutdownHandle, JoinHandle<()>)> {
     let mut join_all = futures::future::select_all(tasks.inner.into_iter().map(|child| Box::pin(child.join())));
 
     let join_handle = runtime.spawn(async {
+        let mut succeeded = true;
+
         loop {
             let (result, _, rest) = join_all.await;
 
             match result {
                 Ok(Ok(())) => trace!("A task terminated gracefully"),
-                Ok(Err(error)) => error!(error = format!("{error:#}"), "A task failed"),
-                Err(error) => error!(%error, "Something went very wrong with a task"),
+                Ok(Err(error)) => {
+                    error!(error = format!("{error:#}"), "A task failed");
+                    succeeded = false;
+                }
+                Err(error) => {
+                    error!(%error, "Something went very wrong with a task");
+                    succeeded = false;
+                }
             }
 
             if rest.is_empty() {
@@ -105,6 +124,8 @@ pub fn start() -> anyhow::Result<(Runtime, ShutdownHandle, JoinHandle<()>)> {
                 join_all = futures::future::select_all(rest);
             }
         }
+
+        succeeded
     });
 
     Ok((runtime, shutdown_handle, join_handle))
