@@ -109,8 +109,6 @@ impl Rule {
     /// Makes a check also fail when a file or directory gives an account less than the rule does.
     ///
     /// By default a check fails only when a file or directory gives an account more than the rule does.
-    /// On Linux and macOS an exact check also requires the mode the rule maps to, `0700` for a directory and `0600` for a
-    /// file, ignoring the setuid, setgid and sticky bits, so a repair resets an owner's narrowed mode.
     #[must_use]
     pub fn exact(mut self) -> Self {
         self.exact = true;

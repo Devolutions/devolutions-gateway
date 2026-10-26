@@ -96,7 +96,7 @@ impl fmt::Display for Error {
                     Refusal::NotADirectory => "is not a directory",
                     Refusal::NotAFile => "is not a regular file",
                     Refusal::Owner => "is owned by an account the rule doesn't allow",
-                    Refusal::Access => "gives access the rule doesn't",
+                    Refusal::Access => "gives access other than the rule's",
                     Refusal::Volume => "is on a volume that doesn't enforce ownership and access",
                     Refusal::Replaceable => "can be renamed or replaced by an account the rule doesn't allow",
                     Refusal::Unreadable(_) => "has an owner or access that can't be read",
