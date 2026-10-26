@@ -89,8 +89,9 @@ pub struct Entry {
 pub enum EntryKind {
     File,
     Directory,
-    /// A symbolic link or another reparse point.
+    /// A symbolic link, or on Windows a reparse point whose tag is a name surrogate, such as a junction.
     Link,
+    /// Anything else, including a Windows reparse point whose tag is not a name surrogate, such as a cloud placeholder.
     Other,
 }
 
@@ -258,6 +259,8 @@ impl Dir {
     /// On Windows, flushing a directory needs `FILE_ADD_FILE` on it: a directory that [`Dir::create_dir`] created holds it
     /// already, and any other is opened again with it, which fails when the directory is open exclusively or its rule
     /// doesn't give the current user that access.
+    /// Holding that access, a directory created this way stays open for writing, so another open of it that doesn't
+    /// share writing fails while this handle lives.
     pub fn sync(&self) -> Result<()> {
         sys::sync(&self.inner, &self.path)
     }

@@ -24,11 +24,13 @@ pub enum ErrorKind {
 /// Why a file or directory breaks its rule.
 #[derive(Debug)]
 pub enum Refusal {
-    /// It is a symbolic link, a reparse point or a hard link.
+    /// It is a symbolic link, a Windows reparse point whose tag is a name surrogate, such as a junction, or a file with
+    /// more than one hard link.
     Link,
     /// It is not a directory.
     NotADirectory,
-    /// It is not a regular file.
+    /// It is not a regular file, or, on Windows, it is a reparse point whose tag is not a name surrogate, such as a cloud
+    /// placeholder, whose content private-fs can't vouch for.
     NotAFile,
     /// An account that the rule doesn't allow owns it.
     Owner,
