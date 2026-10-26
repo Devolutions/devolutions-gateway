@@ -7,16 +7,21 @@ use win_api_wrappers::event::Event;
 use win_api_wrappers::handle::Handle;
 use win_api_wrappers::process::{Process, post_message_for_pid};
 use win_api_wrappers::security::attributes::SecurityAttributesInit;
+use win_api_wrappers::thread::Thread;
 use win_api_wrappers::utils::{Pipe, WideString};
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, GetLastError, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
+    ERROR_BROKEN_PIPE, ERROR_HANDLE_EOF, GetLastError, LPARAM, WAIT_EVENT, WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::IO::{GetOverlappedResult, OVERLAPPED};
+use windows::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_LIMIT_INFORMATION,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
+};
 use windows::Win32::System::Threading::{
-    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CREATE_UNICODE_ENVIRONMENT, CreateProcessW, INFINITE,
-    NORMAL_PRIORITY_CLASS, PROCESS_INFORMATION, STARTF_USESHOWWINDOW, STARTF_USESTDHANDLES, STARTUPINFOW,
-    WaitForMultipleObjects,
+    CREATE_NEW_CONSOLE, CREATE_NEW_PROCESS_GROUP, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, CreateProcessW,
+    INFINITE, NORMAL_PRIORITY_CLASS, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESHOWWINDOW,
+    STARTF_USESTDHANDLES, STARTUPINFOW, WaitForMultipleObjects,
 };
 use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, WM_QUIT};
 use windows::core::PCWSTR;
@@ -609,6 +614,7 @@ impl WinApiProcessBuilder {
         mut self,
         session_id: u32,
         io_notification_tx: Option<Sender<ServerChannelEvent>>,
+        job: Option<&ProcessJob>,
         detached: bool,
     ) -> Result<Option<WinApiProcess>, ExecError> {
         let command_line = format!("\"{}\" {}", self.executable, self.command_line)
@@ -636,9 +642,9 @@ impl WinApiProcessBuilder {
         let encoding = self.encoding;
 
         let process_ctx = if io_redirection {
-            prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env, encoding)?
+            prepare_process_with_io_redirection(session_id, command_line, current_directory, self.env, encoding, job)?
         } else {
-            prepare_process(session_id, command_line, current_directory, self.env, encoding)?
+            prepare_process(session_id, command_line, current_directory, self.env, encoding, job)?
         };
 
         if detached {
@@ -709,13 +715,16 @@ impl WinApiProcessBuilder {
     }
 
     /// Starts process execution and spawns IO thread to redirect stdio to/from dvc.
+    ///
+    /// The process joins `job` before it runs, so it and every process it starts are killed when the job is dropped.
     pub fn run(
         self,
         session_id: u32,
         io_notification_tx: Sender<ServerChannelEvent>,
+        job: &ProcessJob,
     ) -> Result<WinApiProcess, ExecError> {
         Ok(self
-            .run_impl(session_id, Some(io_notification_tx), false)?
+            .run_impl(session_id, Some(io_notification_tx), Some(job), false)?
             .expect("result should be non-optional when running in non-detached mode"))
     }
 
@@ -724,9 +733,92 @@ impl WinApiProcessBuilder {
     /// Returns immediately after spawning.
     pub fn run_detached(self, session_id: u32) -> Result<(), ExecError> {
         // Result always empty and therefore ignored in detached mode.
-        self.run_impl(session_id, None, true)?;
+        self.run_impl(session_id, None, None, true)?;
         Ok(())
     }
+}
+
+/// Job object whose processes are killed when it is dropped, or when the host exits or crashes.
+pub struct ProcessJob(Handle);
+
+impl ProcessJob {
+    pub fn new() -> anyhow::Result<Self> {
+        // SAFETY: Creating an unnamed job object with default security attributes has no preconditions.
+        // The handle is not inheritable, so no child process can keep the job open.
+        let job = unsafe { CreateJobObjectW(None, PCWSTR::null()) }?;
+        // SAFETY: `job` was just created and nothing else owns it.
+        let job = unsafe { Handle::new_owned(job) }?;
+
+        let limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+            BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
+                LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        // SAFETY: `limits` is a JOBOBJECT_EXTENDED_LIMIT_INFORMATION of the size passed, and outlives the call.
+        unsafe {
+            SetInformationJobObject(
+                job.raw(),
+                JobObjectExtendedLimitInformation,
+                (&raw const limits).cast(),
+                u32::try_from(size_of_val(&limits)).expect("JOBOBJECT_EXTENDED_LIMIT_INFORMATION size fits into u32"),
+            )
+        }?;
+
+        Ok(Self(job))
+    }
+}
+
+fn creation_flags(job: Option<&ProcessJob>, has_environment_block: bool) -> PROCESS_CREATION_FLAGS {
+    let mut flags = NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE;
+
+    if has_environment_block {
+        flags |= CREATE_UNICODE_ENVIRONMENT;
+    }
+
+    // A process that ran before joining its job could start processes outside it.
+    if job.is_some() {
+        flags |= CREATE_SUSPENDED;
+    }
+
+    flags
+}
+
+/// Takes ownership of the handles returned by `CreateProcessW` for a process created with [`creation_flags`], and
+/// lets the process run.
+///
+/// With a job, the process joins it first, and is killed if it cannot.
+fn start_created_process(
+    process_information: &PROCESS_INFORMATION,
+    job: Option<&ProcessJob>,
+) -> Result<Process, ExecError> {
+    // SAFETY: `CreateProcessW` returned these handles, and nothing else owns them.
+    let thread = Thread::from(unsafe { Handle::new_owned(process_information.hThread) }.map_err(anyhow::Error::from)?);
+    // SAFETY: Same as above.
+    let process =
+        Process::from(unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?);
+
+    if let Some(job) = job {
+        // SAFETY: Both handles are valid for the duration of the call.
+        let started = unsafe { AssignProcessToJobObject(job.0.raw(), process.handle.raw()) }
+            .map_err(anyhow::Error::from)
+            .and_then(|()| thread.resume());
+
+        if let Err(error) = started {
+            // UNTESTED: a process that cannot join its job must be killed, not left running where no channel can
+            // end it. No test makes AssignProcessToJobObject or ResumeThread fail; when changing this path, check
+            // that every failure after CreateProcessW still terminates the suspended process.
+            if let Err(error) = process.terminate(1) {
+                error!(%error, "Failed to kill a process that could not join its job");
+            }
+
+            return Err(error.context("failed to start the process in its job").into());
+        }
+    }
+
+    Ok(process)
 }
 
 fn prepare_process(
@@ -735,6 +827,7 @@ fn prepare_process(
     current_directory: WideString,
     env: HashMap<String, String>,
     encoding: DataEncoding,
+    job: Option<&ProcessJob>,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
 
@@ -746,12 +839,6 @@ fn prepare_process(
 
     let environment_block = (!env.is_empty()).then(|| make_environment_block(env)).transpose()?;
 
-    let mut creation_flags = NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE;
-
-    if environment_block.is_some() {
-        creation_flags |= CREATE_UNICODE_ENVIRONMENT;
-    }
-
     // SAFETY: All parameters constructed above are valid and safe to use.
     unsafe {
         CreateProcessW(
@@ -760,7 +847,7 @@ fn prepare_process(
             None,
             None,
             true,
-            creation_flags,
+            creation_flags(job, environment_block.is_some()),
             environment_block.as_ref().map(|block| block.as_ptr() as *const _),
             current_directory.as_pcwstr(),
             &startup_info as *const _,
@@ -768,18 +855,7 @@ fn prepare_process(
         )?;
     }
 
-    // The thread handle returned by CreateProcessW is only needed if you want to manage or
-    // wait on the primary thread of the new process. Since we only need to manage the process
-    // itself and not its main thread, we close the thread handle immediately to avoid
-    // resource leaks.
-
-    // SAFETY: FFI call with no outstanding precondition.
-    unsafe { CloseHandle(process_information.hThread) }?;
-
-    let process_handle = Process::from(
-        // SAFETY: process_information is valid and contains valid process handle.
-        unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?,
-    );
+    let process_handle = start_created_process(&process_information, job)?;
 
     let pid = process_information.dwProcessId;
 
@@ -800,6 +876,7 @@ fn prepare_process_with_io_redirection(
     current_directory: WideString,
     env: HashMap<String, String>,
     encoding: DataEncoding,
+    job: Option<&ProcessJob>,
 ) -> Result<WinApiProcessCtx, ExecError> {
     let mut process_information = PROCESS_INFORMATION::default();
 
@@ -830,11 +907,6 @@ fn prepare_process_with_io_redirection(
 
     let environment_block = (!env.is_empty()).then(|| make_environment_block(env)).transpose()?;
 
-    let mut creation_flags = NORMAL_PRIORITY_CLASS | CREATE_NEW_PROCESS_GROUP | CREATE_NEW_CONSOLE;
-    if environment_block.is_some() {
-        creation_flags |= CREATE_UNICODE_ENVIRONMENT;
-    }
-
     // SAFETY: All parameters constructed above are valid and safe to use.
     unsafe {
         CreateProcessW(
@@ -843,7 +915,7 @@ fn prepare_process_with_io_redirection(
             Some(security_attributes.as_ptr()),
             None,
             true,
-            creation_flags,
+            creation_flags(job, environment_block.is_some()),
             environment_block.as_ref().map(|block| block.as_ptr() as *const _),
             current_directory.as_pcwstr(),
             &startup_info as *const _,
@@ -851,19 +923,13 @@ fn prepare_process_with_io_redirection(
         )?;
     }
 
-    // SAFETY: FFI call with no outstanding precondition.
-    unsafe { CloseHandle(process_information.hThread) }?;
-
     // Handles were duplicated by CreateProcessW, so we can close them immediately.
     // Explicitly drop handles just for clarity.
     drop(stdout_write_pipe);
     drop(stderr_write_pipe);
     drop(stdin_read_pipe);
 
-    let process_handle = Process::from(
-        // SAFETY: process_information is valid and contains valid process handle.
-        unsafe { Handle::new_owned(process_information.hProcess) }.map_err(anyhow::Error::from)?,
-    );
+    let process_handle = start_created_process(&process_information, job)?;
 
     let pid = process_information.dwProcessId;
 
@@ -963,13 +1029,14 @@ mod tests {
         const INPUT_LINES: u32 = 5000;
 
         let (io_notification_tx, mut io_notification_rx) = tokio::sync::mpsc::channel(100);
+        let job = ProcessJob::new().expect("create job");
         let process = WinApiProcessBuilder::new("cmd.exe")
             .with_command_line(&format!(
                 "/d /c (for /L %i in (1,1,{OUTPUT_LINES}) do @echo output-line-%i) & sort"
             ))
             .with_io_redirection(true)
             .with_encoding(DataEncoding::Raw)
-            .run(SESSION_ID, io_notification_tx)
+            .run(SESSION_ID, io_notification_tx, &job)
             .expect("start cmd.exe");
 
         let input: String = (0..INPUT_LINES).map(|i| format!("input-line-{i:05}\r\n")).collect();

@@ -42,7 +42,7 @@ use windows::core::PCWSTR;
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::encoding::DataEncoding;
 use crate::dvc::io::{DvcInitializationProgress, run_dvc_io};
-use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
+use crate::dvc::process::{ExecError, ProcessJob, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 use crate::dvc::rdm::RdmMessageProcessor;
 use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
 
@@ -394,8 +394,7 @@ async fn process_messages(
                                 _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
                                 init_progress.set_heartbeats_enabled(heartbeats_enabled(downgraded_caps.heartbeat_interval()));
 
-                                // Old exec sessions will be abandoned (IO loops will terminate
-                                // on old processor `Drop`).
+                                // Dropping the old processor ends its exec sessions and the processes they started.
                                 processor = MessageProcessor::new(
                                     downgraded_caps.clone(),
                                     dvc_tx.clone(),
@@ -625,9 +624,13 @@ struct MessageProcessor {
     capabilities: NowChannelCapsetMsg,
     /// Attached execution sessions of this channel.
     ///
-    /// Ending the channel or renegotiating capabilities stops only their IO; the processes keep running.
-    /// No later channel or negotiation can reach them, because each starts with no sessions.
+    /// Ending the channel or renegotiating capabilities drops this processor, which stops their IO and kills them with
+    /// `process_job`; no later channel or negotiation could reach them, because each starts with no sessions.
     sessions: HashMap<u32, WinApiProcess>,
+    /// Job of the attached executions and the processes they start; created by the first attached execution.
+    ///
+    /// Processes left running by an attached execution that already exited are killed with it too.
+    process_job: Option<ProcessJob>,
     rdm_handler: RdmMessageProcessor,
     /// Resolved pwsh executable path; `None` when pwsh is not installed.
     pwsh_executable: Option<String>,
@@ -650,11 +653,19 @@ impl MessageProcessor {
             io_notification_tx,
             capabilities,
             sessions: HashMap::new(),
+            process_job: None,
             rdm_handler,
             pwsh_executable,
             window_monitor_shutdown_tx: None,
             window_monitor_handle: None,
         }
+    }
+
+    fn process_job(&mut self) -> Result<&ProcessJob, ExecError> {
+        Ok(match &mut self.process_job {
+            Some(job) => job,
+            slot @ None => slot.insert(ProcessJob::new()?),
+        })
     }
 
     async fn ensure_session_id_free(&self, session_id: u32) -> Result<(), ExecError> {
@@ -981,9 +992,11 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        let process = run_process
-            .with_io_redirection(exec_msg.is_with_io_redirection())
-            .run(exec_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_process.with_io_redirection(exec_msg.is_with_io_redirection()).run(
+            exec_msg.session_id(),
+            self.io_notification_tx.clone(),
+            self.process_job()?,
+        )?;
 
         self.sessions.insert(exec_msg.session_id(), process);
 
@@ -1028,9 +1041,11 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        let process = run_batch
-            .with_io_redirection(batch_msg.is_with_io_redirection())
-            .run(batch_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_batch.with_io_redirection(batch_msg.is_with_io_redirection()).run(
+            batch_msg.session_id(),
+            self.io_notification_tx.clone(),
+            self.process_job()?,
+        )?;
 
         self.sessions.insert(batch_msg.session_id(), process);
 
@@ -1090,7 +1105,11 @@ impl MessageProcessor {
 
         let process = run_process
             .with_io_redirection(winps_msg.is_with_io_redirection())
-            .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
+            .run(
+                winps_msg.session_id(),
+                self.io_notification_tx.clone(),
+                self.process_job()?,
+            )?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
@@ -1155,9 +1174,11 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        let process = run_process
-            .with_io_redirection(pwsh_msg.is_with_io_redirection())
-            .run(pwsh_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_process.with_io_redirection(pwsh_msg.is_with_io_redirection()).run(
+            pwsh_msg.session_id(),
+            self.io_notification_tx.clone(),
+            self.process_job()?,
+        )?;
 
         self.sessions.insert(pwsh_msg.session_id(), process);
 
@@ -1543,6 +1564,9 @@ mod tests {
         NowExecProcessMsg, NowExecResultMsg, NowMessage, NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
     };
     use tokio::time::Instant;
+    use win_api_wrappers::process::Process;
+    use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows::Win32::System::Threading::{PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
 
     use super::{
         ChannelOutcome, DEFAULT_HEARTBEAT_INTERVAL, MAX_CONSECUTIVE_FAILED_REOPENS, REOPEN_DELAY_CAP,
@@ -1613,6 +1637,145 @@ mod tests {
             .await
             .expect("queue channel close");
         processing.await.expect("channel still accepts a normal close");
+    }
+
+    /// An attached execution and the processes it started must not outlive their channel, because no other channel
+    /// can reach them.
+    // oracle: regression #2156 attached exec children survived the loss of their channel.
+    #[tokio::test]
+    async fn attached_exec_tree_ends_with_its_channel() {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(
+                NowExecProcessMsg::new(1, "powershell.exe")
+                    .expect("valid executable")
+                    .with_parameters(
+                        "-NoProfile -NonInteractive -Command \
+                         $g = Start-Process ping.exe -ArgumentList '-n 600 127.0.0.1' -WindowStyle Hidden -PassThru; \
+                         [Console]::Out.WriteLine([string]$PID + ' ' + $g.Id); Start-Sleep 600",
+                    )
+                    .expect("valid parameters")
+                    .with_io_redirection()
+                    .into(),
+            )
+            .await
+            .expect("queue attached process");
+
+        let mut processing = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+        let mut stdout = Vec::new();
+        let tree = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                tokio::select! {
+                    result = &mut processing => panic!("processing ended before the process tree started: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+
+                while let Ok(message) = write_rx.try_recv() {
+                    if let NowMessage::Exec(NowExecMessage::Data(data)) = message {
+                        stdout.extend_from_slice(data.data());
+                    }
+                }
+
+                if let Some(line) = String::from_utf8_lossy(&stdout)
+                    .lines()
+                    .next()
+                    .filter(|_| stdout.contains(&b'\n'))
+                {
+                    // Opened right away so that the process IDs cannot be reused before the assertions.
+                    return line
+                        .split_whitespace()
+                        .map(|pid| {
+                            Process::get_by_pid(pid.parse().expect("process ID"), PROCESS_SYNCHRONIZE)
+                                .expect("open process in the tree")
+                        })
+                        .collect::<Vec<_>>();
+                }
+            }
+        })
+        .await
+        .expect("attached process reports its tree");
+        assert_eq!(tree.len(), 2, "child and grandchild");
+
+        drop(read_tx);
+        let result = processing.await;
+        assert!(result.is_err(), "channel loss ends processing with an error");
+
+        for process in &tree {
+            assert_eq!(
+                process.wait(Some(10_000)).expect("wait for process"),
+                WAIT_OBJECT_0,
+                "process in the attached tree outlived its channel"
+            );
+        }
+    }
+
+    /// A detached execution is fire-and-forget, so it must outlive the channel that started it.
+    // oracle: mutant attached-tree cleanup also kills detached launches.
+    #[tokio::test]
+    async fn detached_exec_outlives_its_channel() {
+        let pid_file = std::env::temp_dir().join(format!("now-detached-exec-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(
+                NowExecProcessMsg::new(1, "powershell.exe")
+                    .expect("valid executable")
+                    .with_parameters(format!(
+                        "-NoProfile -NonInteractive -Command \
+                         Set-Content -LiteralPath '{}' -Value $PID; Start-Sleep 600",
+                        pid_file.display()
+                    ))
+                    .expect("valid parameters")
+                    .with_detached()
+                    .into(),
+            )
+            .await
+            .expect("queue detached process");
+
+        let mut processing = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+        let process = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                tokio::select! {
+                    result = &mut processing => panic!("processing ended before the detached process started: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+
+                while write_rx.try_recv().is_ok() {}
+
+                let pid = std::fs::read_to_string(&pid_file).unwrap_or_default();
+                if let Ok(pid) = pid.trim().parse() {
+                    return Process::get_by_pid(pid, PROCESS_SYNCHRONIZE | PROCESS_TERMINATE)
+                        .expect("open detached process");
+                }
+            }
+        })
+        .await
+        .expect("detached process reports its ID");
+
+        drop(read_tx);
+        let result = processing.await;
+        assert!(result.is_err(), "channel loss ends processing with an error");
+
+        let outlived = process.wait(Some(1_000)).expect("wait for process") == WAIT_TIMEOUT;
+        process.terminate(1).expect("clean up detached process");
+        let _ = std::fs::remove_file(&pid_file);
+        assert!(outlived, "detached process ended with its channel");
     }
 
     // oracle: mutant a full stdin queue prevents a closed DVC from interrupting the processing loop.
