@@ -881,7 +881,6 @@ mod tests {
     use x509_cert::time::{Time, Validity};
 
     use super::*;
-
     use crate::private_file::TestDir;
 
     impl TestDir {
