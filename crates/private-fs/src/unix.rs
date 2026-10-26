@@ -133,6 +133,10 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
                     return Err(Error::io(path, "create directory", error));
                 }
             }
+            // UNTESTED: a directory this call just created opens even under a umask that removes the owner's read or
+            // search bit, because the open restores the owner's access first.
+            // The umask is process-wide, so a test can't set one without racing every other test.
+            // When changing this, keep restoring the access of a directory created here before giving up on its open.
             let file = open(created || existing == Existing::Repair)?
                 .ok_or_else(|| Error::io(path, "open directory", io::ErrorKind::NotFound.into()))?;
             (file, created)

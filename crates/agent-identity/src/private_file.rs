@@ -790,6 +790,12 @@ mod unix_tests {
         prepare_directories(&data_dir, true)?;
 
         assert_eq!(fs::metadata(&data_dir)?.permissions().mode() & 0o777, 0o700);
+        // oracle: mutant missing parents of the data directory created with the default mode, which loses the refusal of
+        // a link among them
+        assert_eq!(
+            fs::metadata(directory.0.join("parent"))?.permissions().mode() & 0o777,
+            0o700
+        );
         Ok(())
     }
 
@@ -974,6 +980,9 @@ mod windows_tests {
                 full(&acl::user_sid()?, INHERITED)
             ]))
         );
+        // oracle: mutant missing parents of the data directory created with inherited access, which loses the refusal of
+        // a link among them
+        assert!(acl::protected_dacl_of(&directory.0.join("parent"))?.is_some());
         Ok(())
     }
 

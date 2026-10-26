@@ -816,7 +816,7 @@ fn entries_lists_each_entry_with_its_kind() -> anyhow::Result<()> {
 // oracle: mutant remove_file reporting the inverse of whether the file existed
 #[test]
 fn remove_file_reports_whether_the_file_existed() -> anyhow::Result<()> {
-    // Catches a removal that fails on a missing file or leaves the file.
+    // Catches a removal that reports the inverse of whether the file existed.
     let test = TestDir::new();
     let base = Dir::create_base(test.path(), &user_rule())?;
     drop(base.create_file("file", &user_rule(), FileOptions::new())?);

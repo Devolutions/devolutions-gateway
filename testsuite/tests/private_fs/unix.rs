@@ -334,7 +334,7 @@ enum Special {
 }
 
 // Opening a FIFO for reading blocks until a writer comes, unless the open doesn't wait.
-// oracle: mutant a check that takes a FIFO for a regular file
+// oracle: mutant a check that takes a FIFO or a socket for a regular file
 #[rstest]
 #[case::fifo(Special::Fifo)]
 #[case::socket(Special::Socket)]
@@ -730,6 +730,7 @@ fn repair_brings_a_file_open_to_others_into_line() {
     assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
 
     private_fs::repair_file(&file, &path, &rule()).unwrap();
+    // oracle: mutant a repair that leaves a file mode other than 0600 that a narrower check still accepts
     assert_eq!(mode(&path), 0o600);
     private_fs::check_file(&file, &path, &rule()).unwrap();
 }

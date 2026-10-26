@@ -1039,9 +1039,14 @@ mod tests {
         let generated = generate(&backend, &new_key_name(TEST_PREFIX));
         drop(restore);
 
+        let error = generated
+            .err()
+            .context("a key directory was created under an execute-only parent")?;
         assert!(
-            generated.is_err(),
-            "a key directory was created under an execute-only parent"
+            error.chain().any(|cause| cause
+                .downcast_ref::<private_fs::Error>()
+                .is_some_and(private_fs::Error::is_refused)),
+            "{error:#}"
         );
         assert!(!parent.join("keys").exists());
         Ok(())

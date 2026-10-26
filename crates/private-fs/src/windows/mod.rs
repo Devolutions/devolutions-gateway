@@ -916,10 +916,13 @@ fn check_above(path: &Utf8Path, policy: &Policy) -> Result<()> {
         return Err(Error::refused(path, Refusal::Replaceable));
     }
     // A folder on which a volume without a drive letter is mounted resolves to its own path, but opens the mounted
-    // volume's root, so the folder's own DACL can't be read through it: it is refused too.
+    // volume's root, so the folder's own owner and DACL can't be read through it, which fails the check.
     let in_volume = nt::path_in_volume(handle.as_handle()).map_err(unreadable)?;
     if is_mount_folder(&in_volume, path) {
-        return Err(Error::refused(path, Refusal::Replaceable));
+        return Err(unreadable(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "a volume is mounted on this folder",
+        )));
     }
     let security = OwnerAndDacl::of_handle(handle.as_handle()).map_err(unreadable)?;
     policy.check_ancestor(&security, path, path.parent().is_none(), &administrators_member)
