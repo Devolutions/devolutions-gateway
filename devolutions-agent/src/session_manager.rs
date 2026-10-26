@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use ceviche::controller::Session;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::sync::{RwLock, mpsc};
@@ -349,7 +349,7 @@ fn start_session_process(session: &Session) -> anyhow::Result<()> {
     }
 
     let session_app_path = session_app_path();
-    let command_line = CommandLine::new(vec!["--session".to_owned(), session.to_string()]);
+    let command_line = session_command_line(&session_app_path, session);
 
     info!(%session, "Starting `{session_app_path}`");
 
@@ -389,6 +389,18 @@ fn start_session_process(session: &Session) -> anyhow::Result<()> {
     }
 }
 
+/// Builds the session process command line.
+///
+/// The process receives the command line unchanged as its whole command line, so it must start with the module name
+/// that the process reads as `argv[0]`.
+fn session_command_line(session_app_path: &Utf8Path, session: &Session) -> CommandLine {
+    CommandLine::new(vec![
+        session_app_path.as_str().to_owned(),
+        "--session".to_owned(),
+        session.to_string(),
+    ])
+}
+
 fn session_app_path() -> Utf8PathBuf {
     let mut current_dir = Utf8PathBuf::from_path_buf(std::env::current_exe().expect("BUG: can't get current exe path"))
         .expect("BUG: OS should always return valid UTF-8 executable path");
@@ -401,10 +413,28 @@ fn session_app_path() -> Utf8PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{GatewaySession, Session, SessionKind, SessionReadiness, SessionReadinessEvent};
+    use camino::Utf8Path;
+    use win_api_wrappers::utils::CommandLine;
+
+    use super::{GatewaySession, Session, SessionKind, SessionReadiness, SessionReadinessEvent, session_command_line};
 
     fn make_session(kind: SessionKind, readiness: SessionReadiness) -> GatewaySession {
         GatewaySession::new(Session::new(1), kind, readiness)
+    }
+
+    /// The session process reads its arguments after `argv[0]`, so a command line without the module name loses the
+    /// first one.
+    #[test]
+    fn session_command_line_starts_with_the_module_name() {
+        let session_app_path = Utf8Path::new(r"C:\Program Files\Devolutions\Agent\DevolutionsSession.exe");
+
+        let command_line = session_command_line(session_app_path, &Session::new(3)).to_command_line();
+
+        let argv = CommandLine::from_command_line(&command_line).0;
+        // oracle: spec CreateProcessAsUserW §Parameters
+        assert_eq!(argv[0], session_app_path.as_str());
+        // oracle: scaffold
+        assert_eq!(argv[1..], ["--session", "3"]);
     }
 
     #[test]
