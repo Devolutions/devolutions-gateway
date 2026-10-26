@@ -373,20 +373,17 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
         if name == c"." || name == c".." {
             continue;
         }
-        let kind = match entry.d_type {
-            libc::DT_REG => EntryKind::File,
-            libc::DT_DIR => EntryKind::Directory,
-            libc::DT_LNK => EntryKind::Link,
-            libc::DT_UNKNOWN => match stat_at(&dir.file, name) {
-                Ok(stat) => entry_kind(stat.st_mode),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-                Err(error) => return Err(list_error(error)),
-            },
-            _ => EntryKind::Other,
+        // fstatat without following a link needs only search access on the directory, not access to the entry.
+        let stat = match stat_at(&dir.file, name) {
+            Ok(stat) => stat,
+            // The entry was removed since it was read.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(list_error(error)),
         };
         entries.push(Entry {
             name: OsString::from_vec(name.to_bytes().to_vec()),
-            kind,
+            kind: entry_kind(stat.st_mode),
+            links: link_count(stat.st_nlink),
         });
     }
 }
@@ -873,6 +870,12 @@ fn fstat(file: &File) -> io::Result<libc::stat> {
 
 fn same_file(left: &libc::stat, right: &libc::stat) -> bool {
     left.st_dev == right.st_dev && left.st_ino == right.st_ino
+}
+
+/// Widens a link count, whose type `nlink_t` is 16 bits on macOS, 32 bits on 64-bit ARM Linux and 64 bits on x86-64
+/// Linux.
+fn link_count(links: impl Into<u64>) -> u64 {
+    links.into()
 }
 
 fn entry_kind(mode: libc::mode_t) -> EntryKind {

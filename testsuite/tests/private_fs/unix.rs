@@ -793,6 +793,36 @@ fn discard_removes_only_the_file_it_was_given() {
     assert!(scratch.path.join("key.tmp").exists());
 }
 
+// A listing that couldn't tell a file with another hard link would let a caller list it as its own, when the caller can't
+// open the file to check it.
+// oracle: intent crates/private-fs/INTENT.md §mechanisms
+#[test]
+fn entries_report_each_file_s_hard_links() {
+    let scratch = Scratch::new();
+    let base = scratch.base();
+    drop(base.create_file("linked", &rule(), FileOptions::new()).unwrap());
+    drop(base.create_file("single", &rule(), FileOptions::new()).unwrap());
+    fs::hard_link(scratch.path.join("linked"), scratch.path.join("other")).unwrap();
+    // The count is read without opening the file, so a file nobody may open is counted too.
+    set_mode(&scratch.path.join("linked"), 0o000);
+
+    let mut entries: Vec<_> = base
+        .entries()
+        .unwrap()
+        .into_iter()
+        .map(|entry| (entry.name.into_string().unwrap(), entry.links))
+        .collect();
+    entries.sort();
+    assert_eq!(
+        entries,
+        [
+            ("linked".to_owned(), 2),
+            ("other".to_owned(), 2),
+            ("single".to_owned(), 1),
+        ]
+    );
+}
+
 // A listing that followed links would report a link to a directory as a directory.
 // oracle: mutant a listing that reports a symbolic link as something other than a link
 #[test]

@@ -813,6 +813,40 @@ fn entries_lists_each_entry_with_its_kind() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent crates/private-fs/INTENT.md §mechanisms
+#[test]
+fn entries_report_each_file_s_hard_links() -> anyhow::Result<()> {
+    // Catches a listing that can't tell a file with another hard link, so that a caller lists it as its own when it
+    // can't open the file to check it.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    drop(base.create_file("linked", &user_rule(), FileOptions::new())?);
+    drop(base.create_file("single", &user_rule(), FileOptions::new())?);
+    std::fs::hard_link(test.path().join("linked"), test.path().join("other"))?;
+    // The count is read without opening the file for its content or its DACL, so a file whose DACL grants the user
+    // nothing is counted too.
+    set_dacl(
+        &test.path().join("linked"),
+        &[(users(), 0x40, 0)],
+        InheritableAclKind::Protected,
+    )?;
+    let mut entries: Vec<_> = base
+        .entries()?
+        .into_iter()
+        .map(|entry| (entry.name.into_string().expect("UTF-16 name"), entry.links))
+        .collect();
+    entries.sort();
+    assert_eq!(
+        entries,
+        [
+            ("linked".to_owned(), 2),
+            ("other".to_owned(), 2),
+            ("single".to_owned(), 1)
+        ]
+    );
+    Ok(())
+}
+
 // oracle: mutant remove_file reporting the inverse of whether the file existed
 #[test]
 fn remove_file_reports_whether_the_file_existed() -> anyhow::Result<()> {

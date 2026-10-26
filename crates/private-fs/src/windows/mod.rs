@@ -8,6 +8,7 @@ mod nt;
 mod security;
 
 use std::cell::Cell;
+use std::ffi::OsStr;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::marker::PhantomData;
@@ -372,13 +373,47 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
         let _listing = dir.listing.lock().unwrap_or_else(PoisonError::into_inner);
         nt::list(dir.handle()).map_err(|error| Error::io(path, "list directory", error))?
     };
-    Ok(listed
-        .into_iter()
-        .map(|(name, attributes, tag)| Entry {
+    let mut entries = Vec::with_capacity(listed.len());
+    for (name, attributes, tag) in listed {
+        let Some(links) = entry_links(dir.handle(), path, &name)? else {
+            // The entry was removed since it was listed.
+            continue;
+        };
+        entries.push(Entry {
             name,
             kind: entry_kind(attributes, tag),
-        })
-        .collect())
+            links,
+        });
+    }
+    Ok(entries)
+}
+
+/// Returns the number of hard links of the entry `name` of `dir`, or `None` when it doesn't exist any more.
+///
+/// The entry is opened with FILE_READ_ATTRIBUTES only, which the directory's FILE_LIST_DIRECTORY grants whatever the
+/// entry's own DACL says, without following a reparse point.
+fn entry_links(dir: BorrowedHandle<'_>, path: &Utf8Path, name: &OsStr) -> Result<Option<u64>> {
+    let open_error = |error| Error::io(path, "open entry", error);
+    let name = name
+        .to_str()
+        .ok_or_else(|| open_error(io::Error::from(io::ErrorKind::InvalidData)))?;
+    let request = Request {
+        // Not SYNCHRONIZE, which the entry's DACL may not grant, so the handle is asynchronous, which reading
+        // information doesn't mind.
+        access: FILE_READ_ATTRIBUTES,
+        share: SHARE_ALL,
+        disposition: FILE_OPEN,
+        options: NTCREATEFILE_CREATE_OPTIONS(FILE_OPEN_REPARSE_POINT.0 | FILE_OPEN_FOR_BACKUP_INTENT.0),
+        attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
+        descriptor: None,
+    };
+    let handle = match nt::create(dir, name, &request) {
+        Ok(handle) => handle,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(open_error(error)),
+    };
+    let links = nt::link_count(handle.as_handle()).map_err(|error| Error::io(path, "read link count", error))?;
+    Ok(Some(u64::from(links)))
 }
 
 /// Returns the kind of a listed entry: a reparse point that stands for another name is a link, and any other reparse
