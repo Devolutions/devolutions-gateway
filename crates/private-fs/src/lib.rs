@@ -231,10 +231,9 @@ impl Dir {
         sys::persist(&self.inner, &path, file, from, to, replace)
     }
 
-    /// Removes `file`, which this handle created as `name`, and never another file.
+    /// Removes `file`, which this handle created as `name`, while it is still at `name`, and never another file.
     ///
-    /// On Linux and macOS, it removes `file` only while it is still at `name`; on Windows, it removes `file` through its
-    /// own handle, wherever it is.
+    /// After a failed [`Dir::persist`], it removes the file only if the rename didn't happen.
     ///
     /// A file can be created with a rule that gives its creator no access once created, so removing it by name again
     /// could be refused.
