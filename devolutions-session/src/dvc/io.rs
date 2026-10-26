@@ -790,6 +790,24 @@ mod tests {
         bytes
     }
 
+    /// Waits until the client has bytes to read, so that a following [`read_exact`] cannot block forever.
+    fn wait_for_outbound(client: &Owned<HANDLE>, failure: &str) {
+        let deadline = Instant::now() + TEST_TIMEOUT;
+
+        loop {
+            let mut available = 0;
+            // SAFETY: The handle is valid, and only the byte count is requested.
+            unsafe { PeekNamedPipe(**client, None, 0, None, Some(&mut available), None) }.expect("peek the test pipe");
+
+            if available > 0 {
+                return;
+            }
+
+            assert!(Instant::now() < deadline, "{failure}");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+
     fn encoded(message: &NowMessage<'_>) -> Vec<u8> {
         encode_vec(message).expect("encode a NOW message")
     }
@@ -841,19 +859,7 @@ mod tests {
         running.write_tx.try_send(outbound).expect("queue the outbound message");
 
         // The write is in flight once its first bytes are visible to the client.
-        let deadline = Instant::now() + TEST_TIMEOUT;
-        loop {
-            let mut available = 0;
-            // SAFETY: The handle is valid, and only the byte count is requested.
-            unsafe { PeekNamedPipe(*client, None, 0, None, Some(&mut available), None) }.expect("peek the test pipe");
-
-            if available > 0 {
-                break;
-            }
-
-            assert!(Instant::now() < deadline, "the outbound write never started");
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        wait_for_outbound(&client, "the outbound write never started");
 
         let inbound = exec_data(2, b"stdin".to_vec());
         write_pdu(&client, &encoded(&inbound));
@@ -921,6 +927,7 @@ mod tests {
         }
 
         let heartbeat = encoded(&NowChannelHeartbeatMsg::default().into());
+        wait_for_outbound(&client, "the held-back channel was never probed");
         assert_eq!(read_exact(&client, heartbeat.len()), heartbeat);
 
         for message in &messages {
