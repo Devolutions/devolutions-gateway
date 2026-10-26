@@ -3,6 +3,8 @@
 //! The owner of a file or directory can always change its mode, so it always has full access, and root can access
 //! everything whatever the mode says.
 //! A rule therefore reduces to an owner, mode `0700` for a directory or `0600` for a file, and no extended ACL.
+//! A check refuses group and other bits, and under an exact rule also owner bits other than the rule's, which leave the
+//! owner less than its full access until it changes the mode back.
 
 use std::ffi::{CStr, CString, OsString};
 use std::fs::{File, Metadata, OpenOptions, Permissions};
@@ -645,6 +647,14 @@ fn check_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<(
     }
     check_rule(path, rule, metadata.uid(), euid, kind)?;
     if metadata.mode() & GROUP_OTHER_BITS != 0 {
+        return Err(Error::refused(path, Refusal::Access));
+    }
+    // The setuid, setgid and sticky bits give no account access, so even an exact rule ignores them.
+    let expected = match kind {
+        Kind::Directory => DIR_MODE,
+        Kind::File => FILE_MODE,
+    };
+    if rule.exact && metadata.mode() & 0o777 != expected {
         return Err(Error::refused(path, Refusal::Access));
     }
     os::check_no_extended_acl(file, path, kind == Kind::Directory)
