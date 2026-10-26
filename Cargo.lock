@@ -8131,6 +8131,7 @@ dependencies = [
  "hex",
  "ipnetwork",
  "jmux-proto",
+ "libc",
  "libsql",
  "mcp-proxy",
  "network-scanner",

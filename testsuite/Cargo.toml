@@ -68,6 +68,8 @@ tokio-rustls = { version = "0.26", features = ["ring"] }
 uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dev-dependencies]
+# Sets POSIX ACLs in the private-fs tests, which `setfacl` would need a package for.
+libc = "0.2"
 sysevent-syslog.path = "../crates/sysevent-syslog"
 
 [target.'cfg(windows)'.dev-dependencies]

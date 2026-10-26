@@ -16,8 +16,10 @@ use camino::Utf8Path;
 use crate::unix::Allowed;
 use crate::{Error, Refusal, Result};
 
-/// Groups whose write access to a directory above doesn't count: root's (`wheel`) and `admin`.
-pub(crate) const ADMIN_GIDS: &[libc::gid_t] = &[0, 80];
+/// The `statfs` type names of file systems that ignore or fake ownership, besides those starting with `fuse`.
+const IGNORING_FILE_SYSTEMS: [&[u8]; 9] = [
+    b"smbfs", b"nfs", b"webdav", b"afpfs", b"msdos", b"exfat", b"ntfs", b"macfuse", b"osxfuse",
+];
 
 const ACL_TYPE_EXTENDED: libc::c_int = 0x100;
 const ACL_FIRST_ENTRY: libc::c_int = 0;
@@ -76,13 +78,23 @@ pub(crate) fn check_volume(file: &File, path: &Utf8Path) -> Result<()> {
     }
     // SAFETY: fstatfs initialized the output buffer on success.
     let info = unsafe { info.assume_init() };
-    // UNTESTED: a volume with "Ignore ownership on this volume" set is refused, and the boot volume is not.
-    // CI has no such volume; on one, every owner check passes whatever the file's owner.
-    // When changing this, check both on a Mac, for example on a disk image after `diskutil disableOwnership`.
-    if info.f_flags & libc::MNT_IGNORE_OWNERSHIP.cast_unsigned() != 0 {
+    // UNTESTED: a volume with "Ignore ownership on this volume" set, or of one of the listed file system types, is
+    // refused, and the boot volume is not.
+    // CI has no such volume; on one, every owner check passes whatever the file's owner, or the owner and mode are
+    // made up by the driver.
+    // When changing this, check a disk image after `diskutil disableOwnership`, an SMB or MS-DOS volume, and the boot
+    // volume on a Mac.
+    let type_name = info.f_fstypename.map(libc::c_char::cast_unsigned);
+    let type_name = CStr::from_bytes_until_nul(&type_name).map_or(&type_name[..], CStr::to_bytes);
+    if info.f_flags & libc::MNT_IGNORE_OWNERSHIP.cast_unsigned() != 0 || type_ignores_ownership(type_name) {
         return Err(Error::refused(path, Refusal::Volume));
     }
     Ok(())
+}
+
+/// Reports whether volumes of the file system type `name`, as `statfs` reports it, ignore or fake ownership.
+fn type_ignores_ownership(name: &[u8]) -> bool {
+    name.starts_with(b"fuse") || IGNORING_FILE_SYSTEMS.contains(&name)
 }
 
 pub(crate) fn check_no_extended_acl(file: &File, path: &Utf8Path, _is_dir: bool) -> Result<()> {
@@ -153,6 +165,14 @@ pub(crate) fn rename_exclusive(fd: libc::c_int, from: &CStr, to: &CStr) -> io::R
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Reports whether `renameatx_np` failed with `code` because the file system has no exclusive rename.
+///
+/// `EINVAL` is left out: `RENAME_EXCL` is a valid flag on every supported macOS, and the names are single components
+/// of one directory, so it can't mean the flag is unsupported.
+pub(crate) fn exclusive_rename_unsupported(code: libc::c_int) -> bool {
+    code == libc::ENOTSUP || code == libc::EOPNOTSUPP || code == libc::ENOSYS
 }
 
 pub(crate) fn clear_errno() {
@@ -241,5 +261,22 @@ fn flag(flagset: *mut c_void, flag: libc::c_int) -> io::Result<bool> {
 impl AncestorAcl {
     pub(crate) fn empty() -> Self {
         Self { replace_allowed: false }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // A network or foreign file system shows owners and modes its driver makes up.
+    // oracle: intent crates/private-fs/INTENT.md §mechanisms
+    #[test]
+    fn recognizes_file_systems_that_fake_ownership() {
+        for name in ["smbfs", "nfs", "msdos", "exfat", "macfuse", "fuse-t"] {
+            assert!(type_ignores_ownership(name.as_bytes()), "{name}");
+        }
+        for name in ["apfs", "hfs", "devfs"] {
+            assert!(!type_ignores_ownership(name.as_bytes()), "{name}");
+        }
     }
 }

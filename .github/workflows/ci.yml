@@ -344,6 +344,9 @@ jobs:
         # A root-only test run without root skips and passes, so after changing this step, check that its log has no SKIP line.
         run: |
           cargo test --locked --target ${{ matrix.target }} --config "target.${{ matrix.target }}.runner='sudo'" -p device-key --lib root_only_
+          cargo test --locked --target ${{ matrix.target }} --config "target.${{ matrix.target }}.runner='sudo'" -p testsuite --test integration_tests private_fs::unix::root_only_
+        env:
+          AWS_LC_SYS_NO_ASM: true
 
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}

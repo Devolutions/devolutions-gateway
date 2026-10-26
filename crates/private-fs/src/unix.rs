@@ -28,7 +28,7 @@ use crate::{
 const DIR_MODE: u32 = 0o700;
 /// [`DIR_MODE`] as `mkdirat` takes it.
 const MKDIR_MODE: libc::mode_t = 0o700;
-/// The mode of a file, owner-only, as `openat` takes it.
+/// The mode of a file, owner-only, of the `c_uint` type `openat` takes.
 const FILE_MODE: libc::c_uint = 0o600;
 /// The permission bits of the group and other classes.
 const GROUP_OTHER_BITS: u32 = 0o077;
@@ -69,11 +69,6 @@ impl Allowed {
     }
 }
 
-/// Reports whether `gid` is a group of administrators, whose write access to a directory above doesn't count.
-pub(crate) fn admin_gid(gid: libc::gid_t) -> bool {
-    os::ADMIN_GIDS.contains(&gid)
-}
-
 pub(crate) fn create_base(path: &Utf8Path, rule: &Rule) -> Result<Dir> {
     let base = Base::open(path, rule)?;
     let mut dir = base.dir;
@@ -110,23 +105,29 @@ pub(crate) fn open_base(path: &Utf8Path, rule: &Rule) -> Result<Option<Dir>> {
 
 pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule, existing: Existing) -> Result<Dir> {
     check_creatable(path, rule, Kind::Directory)?;
-    os::refuse_inheritable_acl(&parent.file, parent_path(path))?;
     let c_name = c_name(path, name)?;
-    // SAFETY: The parent descriptor is open and the name is NUL-terminated.
-    let created = unsafe { libc::mkdirat(parent.file.as_raw_fd(), c_name.as_ptr(), MKDIR_MODE) } == 0;
-    if !created {
-        let error = io::Error::last_os_error();
-        if error.raw_os_error() != Some(libc::EEXIST) {
-            return Err(Error::io(path, "create directory", error));
+    let open = || open_at(parent, path, name, libc::O_RDONLY | libc::O_DIRECTORY, Kind::Directory);
+    // A directory that exists is checked or repaired, so only one that must be created can inherit the parent's ACL.
+    let (file, created) = match open()? {
+        Some(file) => (file, false),
+        None => {
+            os::refuse_inheritable_acl(&parent.file, parent_path(path))?;
+            // SAFETY: The parent descriptor is open and the name is NUL-terminated.
+            let created = unsafe { libc::mkdirat(parent.file.as_raw_fd(), c_name.as_ptr(), MKDIR_MODE) } == 0;
+            if !created {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::EEXIST) {
+                    return Err(Error::io(path, "create directory", error));
+                }
+            }
+            let file = open()?.ok_or_else(|| Error::io(path, "open directory", io::ErrorKind::NotFound.into()))?;
+            (file, created)
         }
-    }
-    let Some(file) = open_at(parent, path, name, libc::O_RDONLY | libc::O_DIRECTORY, Kind::Directory)? else {
-        return Err(Error::io(path, "open directory", io::ErrorKind::NotFound.into()));
     };
     let dir = Dir { file };
     if created {
-        if let Err(error) = protect_created_dir(&dir, path, rule) {
-            discard_entry(parent, &c_name, &dir.file, libc::AT_REMOVEDIR);
+        if let Err(error) = protect_created(&dir.file, path, rule, Kind::Directory) {
+            let _ = discard_entry(parent, path, &c_name, &dir.file, libc::AT_REMOVEDIR);
             return Err(error);
         }
     } else {
@@ -188,8 +189,15 @@ pub(crate) fn create_file(
     options: FileOptions,
 ) -> Result<File> {
     check_creatable(path, rule, Kind::File)?;
-    os::refuse_inheritable_acl(&parent.file, parent_path(path))?;
     let c_name = c_name(path, name)?;
+    // An existing entry fails the creation as it would without the ACL, which callers such as
+    // `Dir::open_or_create_file` rely on, so only a file that must be created can be refused for the parent's ACL.
+    match stat_at(&parent.file, &c_name) {
+        Ok(_) => return Err(Error::io(path, "create file", io::ErrorKind::AlreadyExists.into())),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(Error::io(path, "create file", error)),
+    }
+    os::refuse_inheritable_acl(&parent.file, parent_path(path))?;
     let flags =
         access_flags(options) | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NOCTTY;
     // SAFETY: The parent descriptor is open, the name is NUL-terminated, and O_CREAT takes the mode argument.
@@ -199,8 +207,8 @@ pub(crate) fn create_file(
     }
     // SAFETY: openat returned a new descriptor that nothing else owns.
     let file = File::from(unsafe { OwnedFd::from_raw_fd(fd) });
-    if let Err(error) = check_item(&file, path, rule, Kind::File) {
-        discard_entry(parent, &c_name, &file, 0);
+    if let Err(error) = protect_created(&file, path, rule, Kind::File) {
+        let _ = discard_entry(parent, path, &c_name, &file, 0);
         return Err(error);
     }
     Ok(file)
@@ -217,12 +225,13 @@ pub(crate) fn rename(parent: &Dir, path: &Utf8Path, from: &str, to: &str, replac
             _ => Err(io::Error::last_os_error()),
         },
         Replace::Refuse => match os::rename_exclusive(fd, &from, &to) {
-            Err(error) if error.raw_os_error().is_some_and(rename_exclusive_unsupported) => {
+            Err(error) if error.raw_os_error().is_some_and(os::exclusive_rename_unsupported) => {
                 // UNTESTED: without an exclusive rename, the entry is linked under its new name, which fails when
                 // the name exists, and then unlinked under its old one.
                 // The kernels and file systems CI runs on support the exclusive rename.
-                // When changing this, keep the link step failing on an existing name rather than replacing it.
-                link_then_unlink(fd, &from, &to)
+                // When changing this, keep the link step failing on an existing name rather than replacing it, and a
+                // failed unlink leaving only the old name.
+                link_then_unlink(&parent.file, &from, &to)
             }
             renamed => renamed,
         },
@@ -261,24 +270,7 @@ pub(crate) fn remove_file(parent: &Dir, path: &Utf8Path, name: &str) -> Result<b
 
 /// Removes the file `name`, which `file` was created as, unless the name now holds another file.
 pub(crate) fn discard(parent: &Dir, path: &Utf8Path, file: &File, name: &str) -> Result<()> {
-    let c_name = c_name(path, name)?;
-    let created = fstat(file).map_err(|error| Error::io(path, "inspect file", error))?;
-    let current = match stat_at(&parent.file, &c_name) {
-        Ok(current) => current,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(Error::io(path, "inspect file", error)),
-    };
-    if !same_file(&created, &current) {
-        return Ok(());
-    }
-    // SAFETY: The descriptor is open and the name is NUL-terminated.
-    if unsafe { libc::unlinkat(parent.file.as_raw_fd(), c_name.as_ptr(), 0) } != 0 {
-        let error = io::Error::last_os_error();
-        if error.kind() != io::ErrorKind::NotFound {
-            return Err(Error::io(path, "remove file", error));
-        }
-    }
-    Ok(())
+    discard_entry(parent, path, &c_name(path, name)?, file, 0)
 }
 
 pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
@@ -391,6 +383,9 @@ struct Base<'a> {
 impl<'a> Base<'a> {
     fn open(path: &'a Utf8Path, rule: &Rule) -> Result<Self> {
         let mut missing = Vec::new();
+        // A lookup refused for lack of search permission, which the walk up then attributes to the deepest directory
+        // it can look up.
+        let mut denied = None;
         let mut components = path.components();
         let (prefix, candidate) = loop {
             let prefix = components.as_path();
@@ -399,28 +394,50 @@ impl<'a> Base<'a> {
             } else {
                 prefix
             };
-            match std::fs::symlink_metadata(candidate) {
+            let found = std::fs::symlink_metadata(candidate);
+            if found.is_ok()
+                && let Some(error) = denied.take()
+            {
+                return Err(Error::refused(candidate, Refusal::Unreadable(error)));
+            }
+            let error = match found {
                 Ok(metadata) if metadata.file_type().is_symlink() => {
                     return Err(Error::refused(candidate, Refusal::Link));
                 }
                 Ok(metadata) if !metadata.is_dir() => return Err(Error::refused(candidate, Refusal::NotADirectory)),
                 Ok(_) => break (prefix.to_owned(), candidate),
+                Err(error) if permission_denied(&error) => {
+                    denied.get_or_insert(error);
+                    None
+                }
                 Err(error)
                     if error.kind() == io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ENOTDIR) =>
                 {
-                    match components.next_back() {
-                        Some(Utf8Component::Normal(name)) => missing.push(name),
-                        Some(_) => {
-                            return Err(Error::io(
-                                candidate,
-                                "use directory path",
-                                io::ErrorKind::InvalidInput.into(),
-                            ));
-                        }
-                        None => return Err(Error::io(candidate, "inspect directory", error)),
-                    }
+                    Some(error)
                 }
                 Err(error) => return Err(Error::io(candidate, "inspect directory", error)),
+            };
+            match components.next_back() {
+                Some(Utf8Component::Normal(name)) => missing.push(name),
+                // A walk that only looks for the directory to blame skips any component.
+                Some(_) if denied.is_some() => {}
+                Some(_) => {
+                    return Err(Error::io(
+                        candidate,
+                        "use directory path",
+                        io::ErrorKind::InvalidInput.into(),
+                    ));
+                }
+                None => {
+                    return Err(match (denied, error) {
+                        (Some(denied), _) => Error::refused(candidate, Refusal::Unreadable(denied)),
+                        (None, error) => Error::io(
+                            candidate,
+                            "inspect directory",
+                            error.unwrap_or_else(|| io::ErrorKind::NotFound.into()),
+                        ),
+                    });
+                }
             }
         };
         missing.reverse();
@@ -431,6 +448,7 @@ impl<'a> Base<'a> {
             .map_err(|error| match std::fs::symlink_metadata(candidate) {
                 Ok(metadata) if metadata.file_type().is_symlink() => Error::refused(candidate, Refusal::Link),
                 Ok(metadata) if !metadata.is_dir() => Error::refused(candidate, Refusal::NotADirectory),
+                _ if permission_denied(&error) => Error::refused(candidate, Refusal::Unreadable(error)),
                 _ => Error::io(candidate, "open directory", error),
             })?;
         check_ancestors(&file, candidate, rule)?;
@@ -445,7 +463,13 @@ impl<'a> Base<'a> {
 /// Refuses when an account outside the system account, administrators and the accounts of `rule` owns the open
 /// directory `dir`, at `path`, or a directory above it on its resolved path, or can rename or replace one of them.
 fn check_ancestors(dir: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
-    let resolved = std::fs::canonicalize(path).map_err(|error| Error::io(path, "resolve directory", error))?;
+    let resolved = std::fs::canonicalize(path).map_err(|error| {
+        if permission_denied(&error) {
+            Error::refused(path, Refusal::Unreadable(error))
+        } else {
+            Error::io(path, "resolve directory", error)
+        }
+    })?;
     let resolved = Utf8PathBuf::from_path_buf(resolved)
         .map_err(|_| Error::io(path, "resolve directory", io::ErrorKind::InvalidData.into()))?;
     let opened = dir
@@ -494,17 +518,19 @@ fn check_not_replaceable_path(path: &Utf8Path, allowed: &Allowed) -> Result<()> 
 }
 
 fn check_not_replaceable(path: &Utf8Path, metadata: &Metadata, acl: &os::AncestorAcl, allowed: &Allowed) -> Result<()> {
-    if !allowed.uid(metadata.uid()) || replaceable(metadata.mode(), metadata.gid(), acl, allowed) {
+    if !allowed.uid(metadata.uid()) || replaceable(metadata.mode(), acl, allowed) {
         return Err(Error::refused(path, Refusal::Replaceable));
     }
     Ok(())
 }
 
 /// Reports whether an account that `allowed` doesn't name can rename or replace the entries of a directory with
-/// `mode`, group `gid` and `acl`.
+/// `mode` and `acl`.
 ///
 /// Write access to a directory with the sticky bit only lets an account add entries and remove its own.
-fn replaceable(mode: u32, gid: libc::gid_t, acl: &os::AncestorAcl, allowed: &Allowed) -> bool {
+/// Group write counts whatever the group, root's included: administrators are root alone, and a group's members need
+/// not be root.
+fn replaceable(mode: u32, acl: &os::AncestorAcl, allowed: &Allowed) -> bool {
     let sticky = mode & STICKY != 0;
     if os::acl_lets_replace(acl, sticky, allowed) {
         return true;
@@ -513,24 +539,24 @@ fn replaceable(mode: u32, gid: libc::gid_t, acl: &os::AncestorAcl, allowed: &All
         return false;
     }
     let group_write = os::owning_group_writes(acl).unwrap_or(mode & GROUP_WRITE != 0);
-    mode & OTHER_WRITE != 0 || (group_write && !admin_gid(gid))
+    mode & OTHER_WRITE != 0 || group_write
 }
 
-fn protect_created_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
-    let mode = dir
-        .file
-        .metadata()
-        .map_err(|error| Error::io(path, "inspect directory", error))?
-        .mode();
-    // UNTESTED: a umask that removes owner bits doesn't leave the new directory unusable.
+/// Gives the directory or file that was just created as `file` its rule's mode, then checks it.
+fn protect_created(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
+    let (expected, step) = match kind {
+        Kind::Directory => (DIR_MODE, "inspect directory"),
+        Kind::File => (FILE_MODE, "inspect file"),
+    };
+    let mode = file.metadata().map_err(|error| Error::io(path, step, error))?.mode();
+    // UNTESTED: a umask that removes owner bits doesn't leave the new directory or file without the owner's access.
     // The umask is process-wide, so a test can't set one without racing every other test.
     // When changing this, keep the mode change before the check.
-    if mode & 0o777 != DIR_MODE {
-        dir.file
-            .set_permissions(Permissions::from_mode(DIR_MODE))
+    if mode & 0o777 != expected {
+        file.set_permissions(Permissions::from_mode(expected))
             .map_err(|error| Error::io(path, "change mode", error))?;
     }
-    check_item(&dir.file, path, rule, Kind::Directory)
+    check_item(file, path, rule, kind)
 }
 
 fn check_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
@@ -685,31 +711,54 @@ fn open_at(parent: &Dir, path: &Utf8Path, name: &str, flags: libc::c_int, kind: 
     })
 }
 
-/// Removes the entry `name` of `parent` if it is still `file`, after a creation whose check failed.
-fn discard_entry(parent: &Dir, name: &CStr, file: &File, flags: libc::c_int) {
-    let (Ok(created), Ok(current)) = (fstat(file), stat_at(&parent.file, name)) else {
-        return;
-    };
-    if same_file(&created, &current) {
-        // SAFETY: The descriptor is open and the name is NUL-terminated.
-        let _ = unsafe { libc::unlinkat(parent.file.as_raw_fd(), name.as_ptr(), flags) };
+/// Removes the entry `name` of `parent`, at `path`, if it is still the file or directory `file`.
+///
+/// `flags` is `AT_REMOVEDIR` for a directory, as `unlinkat` takes it.
+fn discard_entry(parent: &Dir, path: &Utf8Path, name: &CStr, file: &File, flags: libc::c_int) -> Result<()> {
+    let created = fstat(file).map_err(|error| Error::io(path, "inspect created entry", error))?;
+    match stat_at(&parent.file, name) {
+        Ok(current) if same_file(&created, &current) => {}
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(Error::io(path, "inspect created entry", error)),
     }
+    // SAFETY: The descriptor is open and the name is NUL-terminated.
+    if unsafe { libc::unlinkat(parent.file.as_raw_fd(), name.as_ptr(), flags) } != 0 {
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::NotFound {
+            return Err(Error::io(path, "remove created entry", error));
+        }
+    }
+    Ok(())
 }
 
-fn link_then_unlink(fd: libc::c_int, from: &CStr, to: &CStr) -> io::Result<()> {
+/// Renames `from` to `to` in `dir` without replacing `to`, for a file system without an exclusive rename.
+///
+/// When the old name can't be removed, the new one is removed again, so the entry keeps only its old name.
+fn link_then_unlink(dir: &File, from: &CStr, to: &CStr) -> io::Result<()> {
+    let fd = dir.as_raw_fd();
     // SAFETY: The descriptor is open and both names are NUL-terminated.
     if unsafe { libc::linkat(fd, from.as_ptr(), fd, to.as_ptr(), 0) } != 0 {
         return Err(io::Error::last_os_error());
     }
     // SAFETY: The descriptor is open and the name is NUL-terminated.
-    if unsafe { libc::unlinkat(fd, from.as_ptr(), 0) } != 0 {
-        return Err(io::Error::last_os_error());
+    if unsafe { libc::unlinkat(fd, from.as_ptr(), 0) } == 0 {
+        return Ok(());
     }
-    Ok(())
+    let error = io::Error::last_os_error();
+    if let (Ok(source), Ok(linked)) = (stat_at(dir, from), stat_at(dir, to))
+        && same_file(&source, &linked)
+    {
+        // SAFETY: The descriptor is open and the name is NUL-terminated.
+        let _ = unsafe { libc::unlinkat(fd, to.as_ptr(), 0) };
+    }
+    Err(error)
 }
 
-fn rename_exclusive_unsupported(code: libc::c_int) -> bool {
-    code == libc::ENOSYS || code == libc::EINVAL || code == libc::EOPNOTSUPP || code == libc::ENOTSUP
+/// Reports whether `error` is a refusal for lack of permission, such as looking up an entry of a directory without
+/// search permission on it.
+fn permission_denied(error: &io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(libc::EACCES | libc::EPERM))
 }
 
 fn stat_at(dir: &File, name: &CStr) -> io::Result<libc::stat> {
@@ -796,7 +845,7 @@ mod tests {
 
     // A backend that let the owner keep less than full access, or chose a broader access than the rule, would leave
     // the owner, who can always change the mode, with access the rule withholds.
-    // oracle: intent crates/private-fs/INTENT.md §rules
+    // oracle: reference crates/private-fs/src/rule.rs Access
     #[test]
     fn a_grant_this_platform_cannot_enforce_needs_a_fallback() {
         let rule = Rule::new()
@@ -826,7 +875,7 @@ mod tests {
         );
     }
 
-    // oracle: intent crates/private-fs/INTENT.md §rules
+    // oracle: reference crates/private-fs/src/rule.rs Rule::owner_fallback
     #[test]
     fn an_owner_without_full_access_needs_an_owner_fallback() {
         let rule = Rule::new().owner(Account::CurrentUser).grant_or(
@@ -855,7 +904,7 @@ mod tests {
     }
 
     // Root has every access whatever the mode says, so a rule may give root, or a root owner, any access.
-    // oracle: intent crates/private-fs/INTENT.md §mechanisms
+    // oracle: reference crates/private-fs/src/rule.rs Account
     #[test]
     fn grants_to_root_need_nothing_on_disk() {
         let rule = Rule::new()
@@ -872,7 +921,7 @@ mod tests {
     }
 
     // An account other than root that doesn't own the item gets no access from mode 0700 or 0600.
-    // oracle: intent crates/private-fs/INTENT.md §rules
+    // oracle: mutant a grant to an account other than root that does not own the item counted as enforced
     #[test]
     fn a_grant_to_a_user_who_does_not_own_the_item_is_unsupported() {
         let rule = Rule::new()
@@ -892,7 +941,7 @@ mod tests {
         assert!(check(&rule, 0, USER, Kind::Directory).is_ok());
     }
 
-    // oracle: intent crates/private-fs/INTENT.md §rules
+    // oracle: reference crates/private-fs/src/rule.rs Access::AddOnly
     #[test]
     fn add_only_access_to_a_file_is_unsupported_even_for_root() {
         let rule = Rule::new()
@@ -906,9 +955,9 @@ mod tests {
         assert!(check(&rule, USER, USER, Kind::Directory).is_ok());
     }
 
-    // oracle: intent crates/private-fs/INTENT.md §mechanisms
+    // oracle: reference crates/private-fs/src/rule.rs Rule::owner
     #[test]
-    fn only_root_and_the_accounts_a_rule_names_may_own_an_item() {
+    fn only_an_account_the_rule_names_may_own_an_item() {
         let current_user_only = Rule::new().owner(Account::CurrentUser);
         assert!(owner_allowed(&current_user_only, USER, USER));
         assert!(!owner_allowed(&current_user_only, 0, USER));
@@ -920,18 +969,18 @@ mod tests {
     }
 
     // StrictModes: write access to a directory above lets an account rename or replace its entries, unless the sticky
-    // bit limits it to adding entries and removing its own, or the account is root or in an administrators group.
+    // bit limits it to adding entries and removing its own.
+    // Group write counts for any group, since administrators are root alone.
     // oracle: intent crates/private-fs/INTENT.md §paths
     #[test]
     fn write_access_for_others_makes_a_directory_above_replaceable() {
         let acl = os::AncestorAcl::empty();
         let allowed = Allowed::new_for_tests(Some(USER));
-        let staff = 20;
-        assert!(replaceable(0o777, staff, &acl, &allowed));
-        assert!(replaceable(0o775, staff, &acl, &allowed));
-        assert!(replaceable(0o757, 0, &acl, &allowed));
-        assert!(!replaceable(0o1777, staff, &acl, &allowed));
-        assert!(!replaceable(0o775, 0, &acl, &allowed));
-        assert!(!replaceable(0o755, staff, &acl, &allowed));
+        assert!(replaceable(0o777, &acl, &allowed));
+        assert!(replaceable(0o775, &acl, &allowed));
+        assert!(replaceable(0o757, &acl, &allowed));
+        assert!(!replaceable(0o1777, &acl, &allowed));
+        assert!(!replaceable(0o1775, &acl, &allowed));
+        assert!(!replaceable(0o755, &acl, &allowed));
     }
 }

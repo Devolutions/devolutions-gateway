@@ -14,11 +14,8 @@ use std::os::fd::AsRawFd as _;
 
 use camino::Utf8Path;
 
-use crate::unix::{Allowed, admin_gid};
+use crate::unix::Allowed;
 use crate::{Error, Refusal, Result};
-
-/// Groups whose write access to a directory above doesn't count: root's.
-pub(crate) const ADMIN_GIDS: &[libc::gid_t] = &[0];
 
 const ACCESS_ACL: &CStr = c"system.posix_acl_access";
 const DEFAULT_ACL: &CStr = c"system.posix_acl_default";
@@ -36,9 +33,9 @@ const ACL_WRITE: u16 = 0x02;
 /// Read, write and execute, the permissions a missing mask leaves.
 const ACL_ALL: u16 = 0x07;
 
-/// The `statfs` types of volumes that ignore or fake ownership: FUSE, CIFS, SMB2, SMB, NFS, 9P, vboxsf, MSDOS/vfat and
-/// exFAT.
-const IGNORING_VOLUMES: [u32; 9] = [
+/// The `statfs` types of volumes that ignore or fake ownership: FUSE, CIFS, SMB2, SMB, NFS, 9P, vboxsf, MSDOS/vfat,
+/// exFAT, ntfs3, NTFS (ntfs and ntfs-3g's kernel type) and UDF.
+const IGNORING_VOLUMES: [u32; 12] = [
     0x6573_5546,
     0xFF53_4D42,
     0xFE53_4D42,
@@ -48,6 +45,9 @@ const IGNORING_VOLUMES: [u32; 9] = [
     0x786F_4256,
     0x0000_4D44,
     0x2011_BAB0,
+    0x7366_746E,
+    0x5346_544E,
+    0x1501_3346,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -70,7 +70,7 @@ pub(crate) fn check_volume(file: &File, path: &Utf8Path) -> Result<()> {
     let info = unsafe { info.assume_init() };
     // UNTESTED: a file on one of the listed volume types is refused.
     // CI has no such volume; on one, the owner and mode that the other checks read are made up by the driver.
-    // When changing this, check a file on a FUSE or SMB mount and on a vfat image, and one on ext4.
+    // When changing this, check a file on a FUSE or SMB mount and on a vfat, NTFS or UDF image, and one on ext4.
     if ignores_ownership(i128::from(info.f_type)) {
         return Err(Error::refused(path, Refusal::Volume));
     }
@@ -135,8 +135,11 @@ pub(crate) fn ancestor_acl_of_path(path: &Utf8Path) -> io::Result<AncestorAcl> {
     .map(AncestorAcl)
 }
 
-/// Reports whether a named user or group entry of `acl` lets an account that `allowed` doesn't name write, so rename or
-/// replace entries, unless the sticky bit limits writers to adding entries and removing their own.
+/// Reports whether a named user entry for an account that `allowed` doesn't name, or any named group entry, of `acl`
+/// can write, so rename or replace entries, unless the sticky bit limits writers to adding entries and removing their
+/// own.
+///
+/// A group is never allowed: administrators are root alone, and any account can be a member of a group.
 pub(crate) fn acl_lets_replace(acl: &AncestorAcl, sticky: bool, allowed: &Allowed) -> bool {
     let Some(entries) = &acl.0 else {
         return false;
@@ -149,7 +152,7 @@ pub(crate) fn acl_lets_replace(acl: &AncestorAcl, sticky: bool, allowed: &Allowe
         entry.perm & mask & ACL_WRITE != 0
             && match entry.tag {
                 ACL_USER => !allowed.uid(entry.id),
-                ACL_GROUP => !admin_gid(entry.id),
+                ACL_GROUP => true,
                 _ => false,
             }
     })
@@ -181,6 +184,16 @@ pub(crate) fn rename_exclusive(fd: libc::c_int, from: &CStr, to: &CStr) -> io::R
         return Err(io::Error::last_os_error());
     }
     Ok(())
+}
+
+/// Reports whether `renameat2` failed with `code` because the kernel or file system has no `RENAME_NOREPLACE`.
+///
+/// A kernel before 3.15 fails with `ENOSYS`, and a file system without the flag with `EINVAL` on older kernels or
+/// `EOPNOTSUPP` on newer ones.
+/// `EINVAL` has no other cause here: the names are single components of one directory, never `.` or `..`, so neither
+/// is an ancestor of the other.
+pub(crate) fn exclusive_rename_unsupported(code: libc::c_int) -> bool {
+    matches!(code, libc::ENOSYS | libc::EINVAL | libc::EOPNOTSUPP)
 }
 
 pub(crate) fn clear_errno() {
@@ -253,8 +266,6 @@ impl AncestorAcl {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write as _;
-
     use super::*;
 
     const NOBODY: u32 = 65534;
@@ -336,13 +347,14 @@ mod tests {
 
     // oracle: intent crates/private-fs/INTENT.md §paths
     #[test]
-    fn a_named_group_other_than_root_that_can_write_makes_a_directory_replaceable() {
+    fn a_named_group_that_can_write_makes_a_directory_replaceable() {
         let allowed = Allowed::new_for_tests(None);
         let mut group = nobody_can_write();
         group[1] = entry(ACL_GROUP, 7, 100);
         assert!(acl_lets_replace(&ancestor(&group), false, &allowed));
+        // Root's group too: its members need not be root.
         group[1] = entry(ACL_GROUP, 7, 0);
-        assert!(!acl_lets_replace(&ancestor(&group), false, &allowed));
+        assert!(acl_lets_replace(&ancestor(&group), false, &allowed));
     }
 
     // With an ACL, the mode's group bits are the mask, so the owning group's write comes from its entry.
@@ -367,149 +379,5 @@ mod tests {
         // EXT4_SUPER_MAGIC and TMPFS_MAGIC.
         assert!(!ignores_ownership(0xEF53));
         assert!(!ignores_ownership(0x0102_1994));
-    }
-
-    /// A directory under the system temporary directory, removed when dropped.
-    struct Scratch(camino::Utf8PathBuf);
-
-    impl Scratch {
-        fn new(test: &str) -> Self {
-            let path = camino::Utf8PathBuf::from_path_buf(std::env::temp_dir())
-                .expect("UTF-8 temporary directory")
-                .join(format!("private-fs-{test}-{}", std::process::id()));
-            let _ = std::fs::remove_dir_all(&path);
-            std::fs::create_dir(&path).expect("create a scratch directory");
-            set_mode(&path, 0o700);
-            Self(path)
-        }
-    }
-
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
-        }
-    }
-
-    fn set_mode(path: &Utf8Path, mode: u32) {
-        std::fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(mode)).expect("set a test mode");
-    }
-
-    fn rule() -> crate::Rule {
-        crate::Rule::new()
-            .owner(crate::Account::CurrentUser)
-            .grant(crate::Account::CurrentUser, crate::Access::Full)
-    }
-
-    /// Sets the ACL attribute `name` of `path` as `setfacl` would, and returns `false` when the volume has no ACLs.
-    fn set_acl(path: &Utf8Path, name: &CStr, entries: &[[u8; 8]]) -> bool {
-        let path = CString::new(path.as_str()).expect("NUL-free path");
-        let value = attribute(entries);
-        // SAFETY: The path and name are NUL-terminated, and the value is readable for its length.
-        let status = unsafe { libc::setxattr(path.as_ptr(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0) };
-        if status == 0 {
-            return true;
-        }
-        let error = io::Error::last_os_error();
-        assert!(no_acl(&error), "set a test ACL: {error}");
-        // The test harness captures `eprintln!` output from a passing test, but not direct writes to stderr.
-        let _ = writeln!(io::stderr(), "SKIP: the temporary directory's volume has no POSIX ACLs");
-        false
-    }
-
-    fn refusal(error: &Error) -> Option<&Refusal> {
-        match error.kind() {
-            crate::ErrorKind::Refused(refusal) => Some(refusal),
-            crate::ErrorKind::Io { .. } | crate::ErrorKind::Unsupported { .. } => None,
-        }
-    }
-
-    /// `setfacl -m u:nobody:r,m::-` on a file with mode 0600: nobody is named, and the mask leaves it nothing, so the
-    /// mode still reads 0600.
-    fn nobody_named() -> [[u8; 8]; 5] {
-        [
-            entry(ACL_USER_OBJ, 6, u32::MAX),
-            entry(ACL_USER, 4, NOBODY),
-            entry(ACL_GROUP_OBJ, 0, u32::MAX),
-            entry(ACL_MASK, 0, u32::MAX),
-            entry(ACL_OTHER, 0, u32::MAX),
-        ]
-    }
-
-    // A named entry is an access the mode doesn't show, and a mask change can open it up.
-    // oracle: intent crates/private-fs/INTENT.md §mechanisms
-    #[test]
-    fn a_file_with_a_named_acl_entry_is_refused() {
-        let scratch = Scratch::new("named-entry");
-        let base = crate::Dir::create_base(&scratch.0, &rule()).expect("open the scratch directory");
-        drop(
-            base.create_file("key", &rule(), crate::FileOptions::new())
-                .expect("create a file"),
-        );
-        if !set_acl(&scratch.0.join("key"), ACCESS_ACL, &nobody_named()) {
-            return;
-        }
-        assert_eq!(
-            std::os::unix::fs::MetadataExt::mode(&std::fs::metadata(scratch.0.join("key")).expect("inspect")) & 0o777,
-            0o600
-        );
-
-        let error = base
-            .open_file("key", &rule(), crate::FileOptions::new())
-            .expect_err("refused");
-        assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
-    }
-
-    // A new entry would inherit the default ACL, and so not have exactly its rule from the moment it exists.
-    // oracle: intent crates/private-fs/INTENT.md §paths
-    #[test]
-    fn a_default_acl_refuses_creation_until_repaired() {
-        let scratch = Scratch::new("default-acl");
-        let base = crate::Dir::create_base(&scratch.0, &rule()).expect("open the scratch directory");
-        let parent = base
-            .create_dir("parent", &rule(), crate::Existing::Check)
-            .expect("create a directory");
-        let default = [
-            entry(ACL_USER_OBJ, 7, u32::MAX),
-            entry(ACL_GROUP_OBJ, 0, u32::MAX),
-            entry(ACL_OTHER, 0, u32::MAX),
-        ];
-        if !set_acl(&scratch.0.join("parent"), DEFAULT_ACL, &default) {
-            return;
-        }
-
-        let error = parent
-            .create_file("file", &rule(), crate::FileOptions::new())
-            .expect_err("refused");
-        assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
-        assert!(!scratch.0.join("parent").join("file").exists());
-        let error = parent.check(&rule()).expect_err("refused");
-        assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
-
-        parent.repair(&rule()).expect("repair");
-        drop(
-            parent
-                .create_file("file", &rule(), crate::FileOptions::new())
-                .expect("create a file"),
-        );
-    }
-
-    // StrictModes: a named user who can write to a directory above can rename or replace its entries.
-    // oracle: intent crates/private-fs/INTENT.md §paths
-    #[test]
-    fn a_directory_above_that_a_named_user_can_write_is_refused() {
-        let scratch = Scratch::new("ancestor-acl");
-        let shared = scratch.0.join("shared");
-        std::fs::create_dir(&shared).expect("create a directory");
-        set_mode(&shared, 0o755);
-        // The mask makes the mode read 0775, but the owning group can't write: only the named entry can.
-        if !set_acl(&shared, ACCESS_ACL, &nobody_can_write()) {
-            return;
-        }
-
-        let error = crate::Dir::create_base(&shared.join("base"), &rule()).expect_err("refused");
-        assert!(matches!(refusal(&error), Some(Refusal::Replaceable)), "{error:?}");
-
-        set_mode(&shared, 0o1775);
-        crate::Dir::create_base(&shared.join("base"), &rule()).expect("accepted with the sticky bit");
     }
 }

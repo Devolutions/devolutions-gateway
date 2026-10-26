@@ -77,45 +77,116 @@ fn skip(test: &str, reason: &str) {
     let _ = writeln!(std::io::stderr(), "SKIP: {test} {reason}");
 }
 
-/// Runs a platform command that changes a test path's ACL, and returns `false` when the platform can't run it.
-fn run_acl_command(program: &str, args: &[&str]) -> bool {
-    Command::new(program)
-        .args(args)
-        .status()
-        .is_ok_and(|status| status.success())
-}
+#[cfg(target_os = "linux")]
+mod acl {
+    //! POSIX ACLs, set without `setfacl`, which a CI runner may lack.
+    //!
+    //! They are written as the kernel reads them from the `system.posix_acl_access` and `system.posix_acl_default`
+    //! extended attributes: a 4-byte little-endian version, 2, then 8-byte entries of a 2-byte tag, a 2-byte
+    //! permission set and a 4-byte ID, as `include/uapi/linux/posix_acl_xattr.h` defines them.
 
-/// Gives another account read access to `path` through an extended ACL.
-fn grant_others_read(path: &Utf8Path) -> bool {
-    if cfg!(target_os = "macos") {
-        run_acl_command("chmod", &["+a", "everyone allow read", path.as_str()])
-    } else {
-        run_acl_command("setfacl", &["-m", "u:65534:r", path.as_str()])
+    use std::ffi::{CStr, CString};
+    use std::os::unix::fs::MetadataExt as _;
+
+    use camino::Utf8Path;
+
+    const ACCESS: &CStr = c"system.posix_acl_access";
+    const DEFAULT: &CStr = c"system.posix_acl_default";
+    const USER_OBJ: u16 = 0x01;
+    const USER: u16 = 0x02;
+    const GROUP_OBJ: u16 = 0x04;
+    const MASK: u16 = 0x10;
+    const OTHER: u16 = 0x20;
+    /// The ID of an entry that names no account.
+    const NO_ID: u32 = u32::MAX;
+    const NOBODY: u32 = 65534;
+
+    /// Sets the ACL attribute `name` of `path`, and returns `false` when its volume has no POSIX ACLs.
+    fn set(path: &Utf8Path, name: &CStr, entries: &[(u16, u16, u32)]) -> bool {
+        let mut value = 2u32.to_le_bytes().to_vec();
+        for &(tag, perm, id) in entries {
+            value.extend_from_slice(&tag.to_le_bytes());
+            value.extend_from_slice(&perm.to_le_bytes());
+            value.extend_from_slice(&id.to_le_bytes());
+        }
+        let path = CString::new(path.as_str()).expect("NUL-free test path");
+        // SAFETY: The path and name are NUL-terminated, and the value is readable for its length.
+        let status = unsafe { libc::setxattr(path.as_ptr(), name.as_ptr(), value.as_ptr().cast(), value.len(), 0) };
+        if status == 0 {
+            return true;
+        }
+        let error = std::io::Error::last_os_error();
+        assert_eq!(error.raw_os_error(), Some(libc::EOPNOTSUPP), "set a test ACL: {error}");
+        false
     }
-}
 
-/// Gives the directory `path` an ACL that new entries inherit.
-fn make_inheritable(path: &Utf8Path) -> bool {
-    if cfg!(target_os = "macos") {
-        run_acl_command(
-            "chmod",
-            &[
-                "+a",
-                "everyone allow read,file_inherit,directory_inherit",
-                path.as_str(),
-            ],
+    /// The owner's permissions, which an access ACL's owner entry must repeat.
+    fn owner_perm(path: &Utf8Path) -> u16 {
+        let mode = std::fs::metadata(path).expect("inspect a test path").mode();
+        u16::try_from((mode >> 6) & 0o7).expect("three permission bits")
+    }
+
+    /// Names nobody with read access, behind a mask that leaves it none, so the mode doesn't change.
+    pub(super) fn name_another_account(path: &Utf8Path) -> bool {
+        let entries = [
+            (USER_OBJ, owner_perm(path), NO_ID),
+            (USER, 4, NOBODY),
+            (GROUP_OBJ, 0, NO_ID),
+            (MASK, 0, NO_ID),
+            (OTHER, 0, NO_ID),
+        ];
+        set(path, ACCESS, &entries)
+    }
+
+    /// Gives the directory `path` a default ACL, which new entries inherit.
+    pub(super) fn make_inheritable(path: &Utf8Path) -> bool {
+        set(
+            path,
+            DEFAULT,
+            &[(USER_OBJ, 7, NO_ID), (GROUP_OBJ, 0, NO_ID), (OTHER, 0, NO_ID)],
         )
-    } else {
-        run_acl_command("setfacl", &["-d", "-m", "u::rwx", path.as_str()])
+    }
+
+    /// Lets nobody write to the directory `path`, while its owning group can only read and search.
+    ///
+    /// The mode's group bits then show the mask, rwx.
+    pub(super) fn let_others_replace(path: &Utf8Path) -> bool {
+        let entries = [
+            (USER_OBJ, 7, NO_ID),
+            (USER, 7, NOBODY),
+            (GROUP_OBJ, 5, NO_ID),
+            (MASK, 7, NO_ID),
+            (OTHER, 5, NO_ID),
+        ];
+        set(path, ACCESS, &entries)
     }
 }
 
-/// Lets another account remove or rename the entries of the directory `path` through an extended ACL.
-fn let_others_replace(path: &Utf8Path) -> bool {
-    if cfg!(target_os = "macos") {
-        run_acl_command("chmod", &["+a", "everyone allow delete_child", path.as_str()])
-    } else {
-        run_acl_command("setfacl", &["-m", "u:65534:rwx", path.as_str()])
+/// Extended ACLs, set with `chmod +a`.
+#[cfg(target_os = "macos")]
+mod acl {
+    use std::process::Command;
+
+    use camino::Utf8Path;
+
+    fn add(path: &Utf8Path, entry: &str) -> bool {
+        Command::new("chmod")
+            .args(["+a", entry, path.as_str()])
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    /// Gives everyone read access, which leaves the mode as it is.
+    pub(super) fn name_another_account(path: &Utf8Path) -> bool {
+        add(path, "everyone allow read")
+    }
+
+    pub(super) fn make_inheritable(path: &Utf8Path) -> bool {
+        add(path, "everyone allow read,file_inherit,directory_inherit")
+    }
+
+    pub(super) fn let_others_replace(path: &Utf8Path) -> bool {
+        add(path, "everyone allow delete_child")
     }
 }
 
@@ -132,7 +203,7 @@ fn create_base_creates_each_missing_directory_owner_only() {
     assert!(Dir::open_base(&path, &rule()).unwrap().is_some());
 }
 
-// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: reference crates/private-fs/src/lib.rs Dir::open_base
 #[test]
 fn open_base_returns_none_for_a_missing_directory() {
     let scratch = Scratch::new();
@@ -200,7 +271,7 @@ fn an_entry_that_is_a_symbolic_link_is_refused() {
 }
 
 // Another hard link lets whoever can reach it in another directory open the file.
-// oracle: intent crates/private-fs/INTENT.md §mechanisms
+// oracle: reference crates/private-fs/src/lib.rs Dir::open_file
 #[test]
 fn a_file_with_another_hard_link_is_refused() {
     let scratch = Scratch::new();
@@ -233,7 +304,7 @@ enum Special {
 }
 
 // Opening a FIFO for reading blocks until a writer comes, unless the open doesn't wait.
-// oracle: intent crates/private-fs/INTENT.md §mechanisms
+// oracle: reference crates/private-fs/src/error.rs Refusal::NotAFile
 #[rstest]
 #[case::fifo(Special::Fifo)]
 #[case::socket(Special::Socket)]
@@ -276,6 +347,7 @@ fn a_directory_above_that_others_can_write_is_refused() {
     assert!(!shared.join("base").exists());
 }
 
+// Any member of the group can rename or replace the directory's entries, and administrators are root alone.
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
 fn a_directory_above_that_its_group_can_write_is_refused() {
@@ -283,16 +355,30 @@ fn a_directory_above_that_its_group_can_write_is_refused() {
     let shared = scratch.path.join("shared");
     fs::create_dir(&shared).unwrap();
     set_mode(&shared, 0o770);
-    // Root's group, and `admin` on macOS, are administrators, whose write access doesn't count.
-    if [0, 80].contains(&fs::metadata(&shared).unwrap().gid()) {
+
+    let error = Dir::open_base(&shared, &rule()).unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Replaceable)), "{error:?}");
+    assert_eq!(error.path(), canonical(&shared));
+}
+
+// A member of root's group need not be root, as members of `wheel` and `admin` on macOS are not.
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn root_only_a_directory_above_that_roots_group_can_write_is_refused() {
+    let scratch = Scratch::new();
+    if !scratch.as_root() {
         skip(
-            "a_directory_above_that_its_group_can_write_is_refused",
-            "needs a directory group other than administrators",
+            "root_only_a_directory_above_that_roots_group_can_write_is_refused",
+            "needs root",
         );
         return;
     }
+    let shared = scratch.path.join("shared");
+    fs::create_dir(&shared).unwrap();
+    std::os::unix::fs::chown(&shared, None, Some(0)).unwrap();
+    set_mode(&shared, 0o770);
 
-    let error = Dir::open_base(&shared, &rule()).unwrap_err();
+    let error = Dir::create_base(&shared.join("base"), &rule()).unwrap_err();
     assert!(matches!(refusal(&error), Some(Refusal::Replaceable)), "{error:?}");
     assert_eq!(error.path(), canonical(&shared));
 }
@@ -317,10 +403,10 @@ fn a_directory_above_that_an_acl_lets_others_replace_is_refused() {
     let shared = scratch.path.join("shared");
     fs::create_dir(&shared).unwrap();
     set_mode(&shared, 0o755);
-    if !let_others_replace(&shared) {
+    if !acl::let_others_replace(&shared) {
         skip(
             "a_directory_above_that_an_acl_lets_others_replace_is_refused",
-            "needs ACL support and its tools",
+            "needs ACL support",
         );
         return;
     }
@@ -330,14 +416,34 @@ fn a_directory_above_that_an_acl_lets_others_replace_is_refused() {
     assert_eq!(error.path(), canonical(&shared));
 }
 
+// A POSIX ACL entry is group-class access, which the sticky bit limits as it does the mode's group bits.
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[cfg(target_os = "linux")]
+#[test]
+fn a_directory_above_that_an_acl_lets_others_write_is_accepted_with_the_sticky_bit() {
+    let scratch = Scratch::new();
+    let shared = scratch.path.join("shared");
+    fs::create_dir(&shared).unwrap();
+    set_mode(&shared, 0o1755);
+    if !acl::let_others_replace(&shared) {
+        skip(
+            "a_directory_above_that_an_acl_lets_others_write_is_accepted_with_the_sticky_bit",
+            "needs ACL support",
+        );
+        return;
+    }
+
+    Dir::create_base(&shared.join("base"), &rule()).unwrap();
+}
+
 // A directory above whose entries can't be read could hide a replaceable directory from the check.
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
-fn a_path_through_a_directory_that_cannot_be_searched_fails() {
+fn a_directory_that_cannot_be_searched_is_unreadable() {
     let scratch = Scratch::new();
     if scratch.as_root() {
         skip(
-            "a_path_through_a_directory_that_cannot_be_searched_fails",
+            "a_directory_that_cannot_be_searched_is_unreadable",
             "needs an account other than root",
         );
         return;
@@ -348,7 +454,9 @@ fn a_path_through_a_directory_that_cannot_be_searched_fails() {
 
     let result = Dir::create_base(&locked.join("inner").join("base"), &rule());
     set_mode(&locked, 0o700);
-    assert!(result.is_err());
+    let error = result.unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Unreadable(_))), "{error:?}");
+    assert_eq!(error.path(), locked);
     assert!(!locked.join("inner").join("base").exists());
 }
 
@@ -358,13 +466,12 @@ fn a_file_with_an_extended_acl_is_refused() {
     let scratch = Scratch::new();
     let base = scratch.base();
     drop(base.create_file("key", &rule(), FileOptions::new()).unwrap());
-    if !grant_others_read(&scratch.path.join("key")) {
-        skip(
-            "a_file_with_an_extended_acl_is_refused",
-            "needs ACL support and its tools",
-        );
+    if !acl::name_another_account(&scratch.path.join("key")) {
+        skip("a_file_with_an_extended_acl_is_refused", "needs ACL support");
         return;
     }
+    // Only the ACL can fail the check.
+    assert_eq!(mode(&scratch.path.join("key")), 0o600);
 
     let error = base.open_file("key", &rule(), FileOptions::new()).unwrap_err();
     assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
@@ -377,11 +484,8 @@ fn nothing_is_created_under_an_inheritable_acl() {
     let scratch = Scratch::new();
     let base = scratch.base();
     let parent = base.create_dir("parent", &rule(), Existing::Check).unwrap();
-    if !make_inheritable(&scratch.path.join("parent")) {
-        skip(
-            "nothing_is_created_under_an_inheritable_acl",
-            "needs ACL support and its tools",
-        );
+    if !acl::make_inheritable(&scratch.path.join("parent")) {
+        skip("nothing_is_created_under_an_inheritable_acl", "needs ACL support");
         return;
     }
 
@@ -390,6 +494,11 @@ fn nothing_is_created_under_an_inheritable_acl() {
     let error = parent.create_file("file", &rule(), FileOptions::new()).unwrap_err();
     assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
     assert_eq!(parent.entries().unwrap().len(), 0);
+    let error = parent.check(&rule()).unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
+
+    parent.repair(&rule()).unwrap();
+    drop(parent.create_file("file", &rule(), FileOptions::new()).unwrap());
 }
 
 // oracle: intent crates/private-fs/INTENT.md §paths
@@ -398,8 +507,8 @@ fn repair_removes_an_extended_acl() {
     let scratch = Scratch::new();
     let base = scratch.base();
     drop(base.create_dir("dir", &rule(), Existing::Check).unwrap());
-    if !grant_others_read(&scratch.path.join("dir")) || !make_inheritable(&scratch.path.join("dir")) {
-        skip("repair_removes_an_extended_acl", "needs ACL support and its tools");
+    if !acl::name_another_account(&scratch.path.join("dir")) || !acl::make_inheritable(&scratch.path.join("dir")) {
+        skip("repair_removes_an_extended_acl", "needs ACL support");
         return;
     }
     let error = base.create_dir("dir", &rule(), Existing::Check).unwrap_err();
@@ -438,7 +547,7 @@ fn root_only_an_item_owned_by_another_account_is_refused_until_repaired() {
 }
 
 // private-fs never chooses a broader access than the rule: an owner other than root can always change the mode.
-// oracle: intent crates/private-fs/INTENT.md §rules
+// oracle: reference crates/private-fs/src/rule.rs Access
 #[test]
 fn a_grant_the_platform_cannot_enforce_fails_without_a_fallback() {
     let scratch = Scratch::new();
@@ -464,7 +573,7 @@ fn a_grant_the_platform_cannot_enforce_fails_without_a_fallback() {
     Dir::create_base(&scratch.path.join("dir"), &with_fallback).unwrap();
 }
 
-// oracle: intent crates/private-fs/INTENT.md §rules
+// oracle: reference crates/private-fs/src/rule.rs Access::AddOnly
 #[test]
 fn add_only_access_to_a_file_fails_without_a_fallback() {
     let scratch = Scratch::new();
@@ -478,7 +587,7 @@ fn add_only_access_to_a_file_fails_without_a_fallback() {
 }
 
 // private-fs creates what it creates owned by the current user, which the rule must allow.
-// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: reference crates/private-fs/src/rule.rs Rule::owner
 #[test]
 fn a_rule_that_does_not_let_the_current_user_own_cannot_create() {
     let scratch = Scratch::new();
@@ -491,7 +600,7 @@ fn a_rule_that_does_not_let_the_current_user_own_cannot_create() {
     assert!(!scratch.path.join("dir").exists());
 }
 
-// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: reference crates/private-fs/src/lib.rs Dir::persist
 #[test]
 fn persist_installs_the_written_file_under_its_name() {
     let scratch = Scratch::new();
@@ -514,7 +623,7 @@ fn persist_installs_the_written_file_under_its_name() {
     );
 }
 
-// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: reference crates/private-fs/src/lib.rs Replace
 #[test]
 fn a_rename_that_refuses_replacement_keeps_the_existing_entry() {
     let scratch = Scratch::new();
@@ -540,7 +649,7 @@ fn a_rename_that_refuses_replacement_keeps_the_existing_entry() {
     assert!(!scratch.path.join("new").exists());
 }
 
-// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: reference crates/private-fs/src/lib.rs Dir::remove_file
 #[test]
 fn remove_file_reports_whether_the_file_existed() {
     let scratch = Scratch::new();
@@ -550,8 +659,25 @@ fn remove_file_reports_whether_the_file_existed() {
     assert!(!base.remove_file("key").unwrap());
 }
 
+// A discard that removed by name alone would remove whatever was installed under the name since.
+// oracle: reference crates/private-fs/src/lib.rs Dir::discard
+#[test]
+fn discard_removes_only_the_file_it_was_given() {
+    let scratch = Scratch::new();
+    let base = scratch.base();
+    let created = base.create_file("key.tmp", &rule(), FileOptions::new()).unwrap();
+    base.discard(&created, "key.tmp").unwrap();
+    assert!(!scratch.path.join("key.tmp").exists());
+
+    let renamed = base.create_file("key.tmp", &rule(), FileOptions::new()).unwrap();
+    base.rename("key.tmp", "key", Replace::Refuse).unwrap();
+    drop(base.create_file("key.tmp", &rule(), FileOptions::new()).unwrap());
+    base.discard(&renamed, "key.tmp").unwrap();
+    assert!(scratch.path.join("key.tmp").exists());
+}
+
 // A listing that followed links would report a link to a directory as a directory.
-// oracle: intent crates/private-fs/INTENT.md §mechanisms
+// oracle: reference crates/private-fs/src/lib.rs EntryKind
 #[test]
 fn entries_report_kinds_without_following_links() {
     let scratch = Scratch::new();
