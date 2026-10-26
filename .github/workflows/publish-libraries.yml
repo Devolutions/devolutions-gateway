@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        library: [ dotnet-client, dotnet-subscriber, utils, pedm-dotnet-client, agent-channel ]
+        library: [ dotnet-client, dotnet-subscriber, utils, pedm-dotnet-client, agent-channel, agent-identity ]
         include:
           - library: dotnet-client
             libpath: ./devolutions-gateway/openapi/dotnet-client
@@ -52,6 +52,8 @@ jobs:
             libpath: ./crates/devolutions-pedm/openapi/dotnet-client
           - library: agent-channel
             libpath: ./crates/agent-channel-proto/dotnet
+          - library: agent-identity
+            libpath: ./dotnet/AgentIdentity
 
     steps:
       - name: Check out ${{ github.repository }}
