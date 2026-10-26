@@ -834,9 +834,9 @@ fn entries_report_each_file_s_hard_links() {
     assert_eq!(
         entries,
         [
-            ("linked".to_owned(), 2),
-            ("other".to_owned(), 2),
-            ("single".to_owned(), 1),
+            ("linked".to_owned(), Some(2)),
+            ("other".to_owned(), Some(2)),
+            ("single".to_owned(), Some(1)),
         ]
     );
 }

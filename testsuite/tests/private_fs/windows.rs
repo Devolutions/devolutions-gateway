@@ -862,15 +862,15 @@ fn entries_report_each_file_s_hard_links() -> anyhow::Result<()> {
     assert_eq!(
         entries,
         [
-            ("linked".to_owned(), 2),
-            ("other".to_owned(), 2),
-            ("single".to_owned(), 1)
+            ("linked".to_owned(), Some(2)),
+            ("other".to_owned(), Some(2)),
+            ("single".to_owned(), Some(1))
         ]
     );
     Ok(())
 }
 
-// oracle: spec MS-FSCC §2.1.5.2 Filename
+// oracle: reference NTFS, which the test observes by creating the name
 #[test]
 fn entries_list_a_name_that_is_not_valid_utf16() -> anyhow::Result<()> {
     // Catches a listing that fails on a name with an unpaired surrogate, which NTFS allows, so that one stray name
@@ -884,7 +884,7 @@ fn entries_list_a_name_that_is_not_valid_utf16() -> anyhow::Result<()> {
     let entries = base.entries()?;
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].name, name);
-    assert_eq!(entries[0].links, 1);
+    assert_eq!(entries[0].links, Some(1));
     Ok(())
 }
 

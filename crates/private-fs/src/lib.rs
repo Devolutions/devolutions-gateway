@@ -85,7 +85,9 @@ pub struct Entry {
     pub kind: EntryKind,
     /// The number of hard links of the entry, read without opening it for its content or its owner and access, so a
     /// caller can leave out a file with another hard link even when it can't open the file to check it.
-    pub links: u64,
+    ///
+    /// `None` when the count can't be read.
+    pub links: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

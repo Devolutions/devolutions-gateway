@@ -377,9 +377,12 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
     };
     let mut entries = Vec::with_capacity(listed.len());
     for (name, attributes, tag) in listed {
-        let Some(links) = entry_links(dir.handle(), path, &name)? else {
-            // The entry was removed since it was listed.
-            continue;
+        let links = match entry_links(dir.handle(), &name) {
+            Links::Count(links) => Some(links),
+            // An entry that can't be inspected is still listed, with no link count.
+            Links::Unreadable => None,
+            // The entry was removed since it was listed, or goes once its last handle closes.
+            Links::Gone => continue,
         };
         entries.push(Entry {
             name,
@@ -390,13 +393,20 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
     Ok(entries)
 }
 
-/// Returns the number of hard links of the entry `name` of `dir`, or `None` when it doesn't exist any more or is pending
-/// deletion.
+/// What reading the link count of a listed entry found.
+enum Links {
+    Count(u64),
+    /// The entry exists, but its count can't be read.
+    Unreadable,
+    /// The entry doesn't exist any more, or is pending deletion.
+    Gone,
+}
+
+/// Reads the number of hard links of the entry `name` of `dir`.
 ///
 /// The entry is opened with FILE_READ_ATTRIBUTES only, which the directory's FILE_LIST_DIRECTORY grants whatever the
 /// entry's own DACL says, without following a reparse point.
-fn entry_links(dir: BorrowedHandle<'_>, path: &Utf8Path, name: &OsStr) -> Result<Option<u64>> {
-    let open_error = |error| Error::io(path, "open entry", error);
+fn entry_links(dir: BorrowedHandle<'_>, name: &OsStr) -> Links {
     // A listed name need not be valid UTF-16, so it is opened as listed.
     let name: Vec<u16> = name.encode_wide().collect();
     let request = Request {
@@ -412,12 +422,14 @@ fn entry_links(dir: BorrowedHandle<'_>, path: &Utf8Path, name: &OsStr) -> Result
     let handle = match nt::open_listed(dir, &name, &request) {
         Ok(Some(handle)) => handle,
         // Pending deletion, the entry goes once its last handle closes, as one removed since it was listed has.
-        Ok(None) => return Ok(None),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(open_error(error)),
+        Ok(None) => return Links::Gone,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Links::Gone,
+        Err(_) => return Links::Unreadable,
     };
-    let links = nt::link_count(handle.as_handle()).map_err(|error| Error::io(path, "read link count", error))?;
-    Ok(Some(u64::from(links)))
+    match nt::link_count(handle.as_handle()) {
+        Ok(links) => Links::Count(u64::from(links)),
+        Err(_) => Links::Unreadable,
+    }
 }
 
 /// Returns the kind of a listed entry: a reparse point that stands for another name is a link, and any other reparse

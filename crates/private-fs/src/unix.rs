@@ -389,16 +389,18 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
             continue;
         }
         // fstatat without following a link needs only search access on the directory, not access to the entry.
-        let stat = match stat_at(&dir.file, name) {
-            Ok(stat) => stat,
+        let (kind, links) = match stat_at(&dir.file, name) {
+            Ok(stat) => (entry_kind(stat.st_mode), Some(link_count(stat.st_nlink))),
             // The entry was removed since it was read.
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(list_error(error)),
+            // An entry that can't be inspected, as under a directory without search access, is still listed, with the
+            // kind the directory reports and no link count.
+            Err(_) => (dirent_kind(entry.d_type), None),
         };
         entries.push(Entry {
             name: OsString::from_vec(name.to_bytes().to_vec()),
-            kind: entry_kind(stat.st_mode),
-            links: link_count(stat.st_nlink),
+            kind,
+            links,
         });
     }
 }
@@ -889,6 +891,16 @@ fn same_file(left: &libc::stat, right: &libc::stat) -> bool {
 /// Linux.
 fn link_count(links: impl Into<u64>) -> u64 {
     links.into()
+}
+
+/// Returns the kind a directory entry reports, `Other` when the file system doesn't report one.
+fn dirent_kind(kind: u8) -> EntryKind {
+    match kind {
+        libc::DT_REG => EntryKind::File,
+        libc::DT_DIR => EntryKind::Directory,
+        libc::DT_LNK => EntryKind::Link,
+        _ => EntryKind::Other,
+    }
 }
 
 fn entry_kind(mode: libc::mode_t) -> EntryKind {
