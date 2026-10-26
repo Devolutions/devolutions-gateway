@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -9,7 +10,8 @@ use ceviche::controller::Session;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::sync::{RwLock, mpsc};
 use win_api_wrappers::process::{
-    StartupInfo, create_process_in_session, is_process_running_in_session, terminate_process_by_name_in_session,
+    Process, StartupInfo, create_process_in_session, is_process_running_in_session,
+    terminate_process_by_name_in_session,
 };
 use win_api_wrappers::utils::{CommandLine, WideString};
 use win_api_wrappers::wts::session_has_logged_in_user;
@@ -73,6 +75,10 @@ struct GatewaySession {
     session: Session,
     kind: SessionKind,
     readiness: SessionReadiness,
+    /// Launch id of the last process this agent started in the session, if any.
+    launch_id: Option<u64>,
+    /// Number of consecutive quick failures of the session process.
+    consecutive_failures: u32,
 }
 
 // NOTE: `ceviche::controller::Session` do not implement `Debug` for session.
@@ -82,6 +88,8 @@ impl Debug for GatewaySession {
             .field("session", &self.session.id)
             .field("kind", &self.kind)
             .field("readiness", &self.readiness)
+            .field("launch_id", &self.launch_id)
+            .field("consecutive_failures", &self.consecutive_failures)
             .finish()
     }
 }
@@ -92,6 +100,8 @@ impl GatewaySession {
             session,
             kind,
             readiness,
+            launch_id: None,
+            consecutive_failures: 0,
         }
     }
 
@@ -119,12 +129,55 @@ impl GatewaySession {
 
     fn set_waiting_for_logon(&mut self) {
         self.readiness = SessionReadiness::WaitingForLogon;
+        self.consecutive_failures = 0;
     }
+
+    /// Whether the process started with `launch_id` is the one this session still wants running.
+    fn wants_launch(&self, launch_id: u64) -> bool {
+        self.kind().is_remote() && self.readiness == SessionReadiness::Ready && self.launch_id == Some(launch_id)
+    }
+}
+
+/// Exit of a session process started by this agent.
+#[derive(Debug, Clone, Copy)]
+struct ProcessExit {
+    session_id: u32,
+    launch_id: u64,
+    exit_code: u32,
+    run_time: Duration,
+}
+
+/// Events the session manager sends to itself.
+#[derive(Debug)]
+enum InternalEvent {
+    ProcessExited(ProcessExit),
+    RelaunchDue { session_id: u32, launch_id: u64 },
+}
+
+/// Delay before relaunching a process that failed for the first time.
+const RELAUNCH_DELAY_FLOOR: Duration = Duration::from_secs(2);
+
+/// Upper bound of the relaunch delay.
+const RELAUNCH_DELAY_CAP: Duration = Duration::from_secs(60);
+
+/// Run time after which a failure no longer counts as failing on start.
+const STABLE_RUN_TIME: Duration = Duration::from_secs(60);
+
+/// Number of consecutive quick failures after which relaunching stops until the next logon or unlock.
+const MAX_CONSECUTIVE_FAILURES: u32 = 5;
+
+/// Delay before relaunching after the `consecutive_failures`-th consecutive quick failure, counting from 1.
+fn relaunch_delay(consecutive_failures: u32) -> Duration {
+    let doublings = consecutive_failures.saturating_sub(1);
+    2u32.checked_pow(doublings)
+        .and_then(|factor| RELAUNCH_DELAY_FLOOR.checked_mul(factor))
+        .map_or(RELAUNCH_DELAY_CAP, |delay| delay.min(RELAUNCH_DELAY_CAP))
 }
 
 #[derive(Default, Debug)]
 struct SessionManagerCtx {
     sessions: BTreeMap<String, GatewaySession>,
+    last_launch_id: u64,
 }
 
 impl SessionManagerCtx {
@@ -153,12 +206,17 @@ impl SessionManagerCtx {
     ///
     /// The session is marked ready only once its process is known to run, so that a failure leaves it waiting for the
     /// next readiness event.
+    /// A process started here gets a fresh launch id, passed to `start` and recorded on the session, so that reports
+    /// about an earlier process can be told apart.
+    /// A process found already running keeps the recorded launch id, because nothing tells whether this agent started it.
     fn start_process_if_not_running(
         &mut self,
         session: &Session,
         is_running: impl FnOnce(&Session) -> anyhow::Result<bool>,
-        start: impl FnOnce(&Session) -> anyhow::Result<()>,
+        start: impl FnOnce(&Session, u64) -> anyhow::Result<()>,
     ) {
+        let launch_id = self.last_launch_id + 1;
+
         let Some(gw_session) = self.get_session_mut(session) else {
             warn!(%session, "Session is not yet registered");
             return;
@@ -183,15 +241,82 @@ impl SessionManagerCtx {
 
         info!(%session, "Starting session process");
 
-        match start(session) {
+        match start(session, launch_id) {
             Ok(()) => {
-                info!(%session, "Session process started");
+                info!(%session, launch_id, "Session process started");
                 gw_session.set_session_ready();
+                gw_session.launch_id = Some(launch_id);
+                self.last_launch_id = launch_id;
             }
             Err(error) => {
                 error!(%error, %session, "Failed to start session process");
             }
         }
+    }
+
+    /// Decides what to do about the exit of a session process this agent started.
+    ///
+    /// Returns the delay after which to relaunch the process, or `None` when it must not be relaunched.
+    fn handle_process_exit(&mut self, exit: &ProcessExit) -> Option<Duration> {
+        let ProcessExit {
+            session_id,
+            launch_id,
+            exit_code,
+            run_time,
+        } = *exit;
+
+        let Some(gw_session) = self
+            .get_session_mut(&Session::new(session_id))
+            .filter(|gw_session| gw_session.wants_launch(launch_id))
+        else {
+            debug!(
+                session = session_id,
+                launch_id, exit_code, "Ignored exit of an unwanted session process"
+            );
+            return None;
+        };
+
+        if exit_code == 0 {
+            info!(session = session_id, launch_id, "Session process ended");
+            return None;
+        }
+
+        if STABLE_RUN_TIME <= run_time {
+            gw_session.consecutive_failures = 0;
+        }
+        gw_session.consecutive_failures += 1;
+
+        if MAX_CONSECUTIVE_FAILURES <= gw_session.consecutive_failures {
+            error!(
+                session = session_id,
+                launch_id,
+                exit_code = format!("{exit_code:#010X}"),
+                consecutive_failures = gw_session.consecutive_failures,
+                "Session process keeps failing; waiting for the next logon or unlock"
+            );
+            gw_session.readiness = SessionReadiness::WaitingForLogonOrUnlock;
+            gw_session.consecutive_failures = 0;
+            return None;
+        }
+
+        let delay = relaunch_delay(gw_session.consecutive_failures);
+        warn!(
+            session = session_id,
+            launch_id,
+            exit_code = format!("{exit_code:#010X}"),
+            ?run_time,
+            ?delay,
+            "Session process failed; relaunching"
+        );
+
+        Some(delay)
+    }
+
+    /// Whether a relaunch scheduled after the exit of the process started with `launch_id` is still wanted.
+    fn should_relaunch(&self, session_id: u32, launch_id: u64) -> bool {
+        self.sessions
+            .get(&Session::new(session_id).to_string())
+            .is_some_and(|gw_session| gw_session.wants_launch(launch_id))
     }
 }
 
@@ -234,8 +359,27 @@ impl Task for SessionManager {
 
         info!("Starting session manager...");
 
+        // The loop keeps a sender, so the receiver never reports a closed channel.
+        let (internal_tx, mut internal_rx) = mpsc::unbounded_channel();
+
         loop {
             tokio::select! {
+                Some(event) = internal_rx.recv() => {
+                    let mut ctx = ctx.write().await;
+                    match event {
+                        InternalEvent::ProcessExited(exit) => {
+                            if let Some(delay) = ctx.handle_process_exit(&exit) {
+                                schedule_relaunch(&internal_tx, exit.session_id, exit.launch_id, delay);
+                            }
+                        }
+                        InternalEvent::RelaunchDue { session_id, launch_id } => {
+                            if ctx.should_relaunch(session_id, launch_id) {
+                                info!(session = session_id, "Relaunching session process");
+                                start_session_process_if_not_running(&mut ctx, &Session::new(session_id), &internal_tx);
+                            }
+                        }
+                    }
+                }
                 event = service_event_rx.recv() => {
                     info!("Received service event");
 
@@ -302,7 +446,7 @@ impl Task for SessionManager {
                             // session app on logon, if not yet started.
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Logon) {
-                                start_session_process_if_not_running(&mut ctx, &id);
+                                start_session_process_if_not_running(&mut ctx, &id, &internal_tx);
                             }
                         }
                         AgentServiceEvent::SessionUnlock(id) => {
@@ -310,7 +454,7 @@ impl Task for SessionManager {
 
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Unlock) {
-                                start_session_process_if_not_running(&mut ctx, &id);
+                                start_session_process_if_not_running(&mut ctx, &id, &internal_tx);
                             }
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
@@ -340,8 +484,80 @@ impl Task for SessionManager {
 }
 
 /// Starts Devolutions Session process in the target session.
-fn start_session_process_if_not_running(ctx: &mut SessionManagerCtx, session: &Session) {
-    ctx.start_process_if_not_running(session, is_session_running_in_session, start_session_process);
+///
+/// A process started here is watched, and its exit is reported through `internal_tx`.
+/// A process found already running, such as one started by an earlier agent instance, is not watched, so its exit is
+/// not relaunched until the next logon or unlock.
+fn start_session_process_if_not_running(
+    ctx: &mut SessionManagerCtx,
+    session: &Session,
+    internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+) {
+    ctx.start_process_if_not_running(session, is_session_running_in_session, |session, launch_id| {
+        let process = start_session_process(session)?;
+        watch_session_process(process, session.id, launch_id, internal_tx.clone());
+        Ok(())
+    });
+}
+
+/// Reports the exit of `process` to the session manager from a dedicated thread.
+///
+/// The thread blocks until the process exits, which may outlive the session manager.
+fn watch_session_process(
+    process: Process,
+    session_id: u32,
+    launch_id: u64,
+    internal_tx: mpsc::UnboundedSender<InternalEvent>,
+) {
+    let started_at = Instant::now();
+
+    // UNTESTED: the watcher is a detached `std::thread`, never a `tokio::task::spawn_blocking` task, and is never
+    // joined, because the runtime waits for blocking tasks at shutdown and a long-lived process would then hang the
+    // service stop.
+    // When changing this, check that stopping the service with a running session process returns promptly.
+    let spawn_result = std::thread::Builder::new()
+        .name(format!("session-{session_id}-process-watcher"))
+        .spawn(move || {
+            let exit_code = match process.wait(None).and_then(|_| process.exit_code()) {
+                Ok(exit_code) => exit_code,
+                Err(error) => {
+                    error!(%error, session = session_id, "Failed to wait for session process exit");
+                    return;
+                }
+            };
+
+            let exit = ProcessExit {
+                session_id,
+                launch_id,
+                exit_code,
+                run_time: started_at.elapsed(),
+            };
+
+            // The session manager is gone once it shuts down, and then nothing is left to relaunch the process.
+            let _ = internal_tx.send(InternalEvent::ProcessExited(exit));
+        });
+
+    if let Err(error) = spawn_result {
+        error!(%error, session = session_id, "Failed to watch session process");
+    }
+}
+
+/// Sends a relaunch-due event for the process started with `launch_id` after `delay`.
+fn schedule_relaunch(
+    internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+    session_id: u32,
+    launch_id: u64,
+    delay: Duration,
+) {
+    let internal_tx = internal_tx.clone();
+
+    // UNTESTED: the timer is a detached task that nothing awaits, so that shutting down the session manager does not
+    // wait for a pending relaunch.
+    // When changing this, check that stopping the service during a relaunch delay returns promptly.
+    tokio::spawn(async move {
+        tokio::time::sleep(delay).await;
+        let _ = internal_tx.send(InternalEvent::RelaunchDue { session_id, launch_id });
+    });
 }
 
 /// Terminates Devolutions Session process in the target session.
@@ -364,7 +580,7 @@ fn is_session_running_in_session(session: &Session) -> anyhow::Result<bool> {
     Ok(is_running)
 }
 
-fn start_session_process(session: &Session) -> anyhow::Result<()> {
+fn start_session_process(session: &Session) -> anyhow::Result<Process> {
     if !session_has_logged_in_user(session.id)? {
         anyhow::bail!("Session {} does not have a logged in user", session);
     }
@@ -399,9 +615,9 @@ fn start_session_process(session: &Session) -> anyhow::Result<()> {
     );
 
     match start_result {
-        Ok(_) => {
-            info!(%session, "{SESSION_BINARY} started");
-            Ok(())
+        Ok(process_information) => {
+            info!(%session, process_id = process_information.process_id, "{SESSION_BINARY} started");
+            Ok(process_information.process)
         }
         Err(error) => {
             error!(%error, %session, "Failed to start {SESSION_BINARY}");
@@ -434,12 +650,14 @@ fn session_app_path() -> Utf8PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use camino::Utf8Path;
     use win_api_wrappers::utils::CommandLine;
 
     use super::{
-        GatewaySession, Session, SessionKind, SessionManagerCtx, SessionReadiness, SessionReadinessEvent,
-        session_command_line,
+        GatewaySession, ProcessExit, Session, SessionKind, SessionManagerCtx, SessionReadiness, SessionReadinessEvent,
+        relaunch_delay, session_command_line,
     };
 
     fn make_session(kind: SessionKind, readiness: SessionReadiness) -> GatewaySession {
@@ -473,7 +691,7 @@ mod tests {
         ctx.start_process_if_not_running(
             &session,
             |_| Err(anyhow::anyhow!("process lookup failed")),
-            |_| panic!("the process was started although the lookup failed"),
+            |_, _| panic!("the process was started although the lookup failed"),
         );
 
         assert!(ctx.should_start_session(&session, SessionReadinessEvent::Logon));
@@ -524,6 +742,240 @@ mod tests {
 
         let session = make_session(SessionKind::Remote, SessionReadiness::WaitingForUnlock);
         assert!(session.is_ready_to_start(SessionReadinessEvent::Unlock));
+    }
+
+    /// Registers a remote session and starts its process through the production path, returning its launch id.
+    fn start_ready_remote_session(ctx: &mut SessionManagerCtx, session: &Session) -> u64 {
+        ctx.register_session(session, SessionKind::Remote, SessionReadiness::WaitingForLogon);
+        start_again(ctx, session)
+    }
+
+    /// Starts the process of an already registered session as a relaunch would, returning its launch id.
+    fn start_again(ctx: &mut SessionManagerCtx, session: &Session) -> u64 {
+        let mut launched = None;
+        ctx.start_process_if_not_running(
+            session,
+            |_| Ok(false),
+            |_, launch_id| {
+                launched = Some(launch_id);
+                Ok(())
+            },
+        );
+        launched.expect("the process was not started")
+    }
+
+    fn failed_exit(session: &Session, launch_id: u64, run_time: Duration) -> ProcessExit {
+        ProcessExit {
+            session_id: session.id,
+            launch_id,
+            exit_code: 0xC000_0005,
+            run_time,
+        }
+    }
+
+    const QUICK_RUN: Duration = Duration::from_secs(1);
+
+    /// A process that crashes while its session still wants it must come back, or the channel it hosts stays unserved.
+    // oracle: scaffold
+    #[test]
+    fn failed_exit_of_ready_remote_session_schedules_relaunch_after_the_floor_delay() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+
+        let delay = ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+
+        assert_eq!(delay, Some(Duration::from_secs(2)));
+        assert!(ctx.should_relaunch(session.id, launch_id));
+    }
+
+    /// Back-off keeps a process that fails on start from being relaunched in a tight loop.
+    // oracle: scaffold
+    #[test]
+    fn relaunch_delay_doubles_per_consecutive_failure_and_is_capped() {
+        assert_eq!(relaunch_delay(1), Duration::from_secs(2));
+        assert_eq!(relaunch_delay(2), Duration::from_secs(4));
+        assert_eq!(relaunch_delay(3), Duration::from_secs(8));
+        assert_eq!(relaunch_delay(6), Duration::from_secs(60));
+        assert_eq!(relaunch_delay(u32::MAX), Duration::from_secs(60));
+    }
+
+    /// Consecutive quick failures of relaunched processes grow the delay.
+    // oracle: scaffold
+    #[test]
+    fn second_quick_failure_doubles_the_delay() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+        let launch_id = start_again(&mut ctx, &session);
+
+        let delay = ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+
+        assert_eq!(delay, Some(Duration::from_secs(4)));
+    }
+
+    /// A process that ran for a while before failing is not failing on start, so it is relaunched promptly.
+    // oracle: scaffold
+    #[test]
+    fn long_run_before_failure_resets_the_delay() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+        let launch_id = start_again(&mut ctx, &session);
+        ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+        let launch_id = start_again(&mut ctx, &session);
+
+        let delay = ctx.handle_process_exit(&failed_exit(&session, launch_id, Duration::from_secs(60)));
+
+        assert_eq!(delay, Some(Duration::from_secs(2)));
+    }
+
+    /// A process that keeps failing on start is given up on, and the next logon or unlock tries again.
+    // oracle: scaffold
+    #[test]
+    fn repeated_quick_failures_give_up_until_the_next_logon_or_unlock() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let mut launch_id = start_ready_remote_session(&mut ctx, &session);
+        for _ in 0..4 {
+            assert!(
+                ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN))
+                    .is_some()
+            );
+            launch_id = start_again(&mut ctx, &session);
+        }
+
+        let delay = ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+
+        assert_eq!(delay, None);
+        assert!(ctx.should_start_session(&session, SessionReadinessEvent::Logon));
+        assert!(ctx.should_start_session(&session, SessionReadinessEvent::Unlock));
+    }
+
+    /// Exit code 0 means the process ended on purpose, such as when the client has no listener for the channel.
+    // oracle: scaffold
+    #[test]
+    fn clean_exit_is_not_relaunched() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        let exit = ProcessExit {
+            exit_code: 0,
+            ..failed_exit(&session, launch_id, QUICK_RUN)
+        };
+
+        assert_eq!(ctx.handle_process_exit(&exit), None);
+        assert!(!ctx.should_start_session(&session, SessionReadinessEvent::Logon));
+    }
+
+    /// The exit of a process replaced by a later launch says nothing about the current one.
+    // oracle: scaffold
+    #[test]
+    fn exit_of_a_replaced_launch_is_ignored() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let old_launch_id = start_ready_remote_session(&mut ctx, &session);
+        start_again(&mut ctx, &session);
+
+        assert_eq!(
+            ctx.handle_process_exit(&failed_exit(&session, old_launch_id, QUICK_RUN)),
+            None
+        );
+    }
+
+    /// A reconnected session terminates the old process, whose exit must not start a second one.
+    // oracle: scaffold
+    #[test]
+    fn exit_after_remote_reconnect_is_ignored() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.register_session(&session, SessionKind::Remote, SessionReadiness::WaitingForUnlock);
+
+        assert_eq!(
+            ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN)),
+            None
+        );
+    }
+
+    /// A disconnected session terminates its process and wants none.
+    // oracle: scaffold
+    #[test]
+    fn exit_after_disconnect_is_ignored() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.unregister_session(&session);
+
+        assert_eq!(
+            ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN)),
+            None
+        );
+    }
+
+    /// The system stops the process at logoff, and the next logon starts it.
+    // oracle: scaffold
+    #[test]
+    fn exit_after_logoff_is_ignored() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.get_session_mut(&session)
+            .expect("the session is registered")
+            .set_waiting_for_logon();
+
+        assert_eq!(
+            ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN)),
+            None
+        );
+    }
+
+    /// A console session never hosts the process, so a stray report for one must not start it.
+    // oracle: scaffold
+    #[test]
+    fn exit_in_console_session_is_ignored() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.register_session(&session, SessionKind::Console, SessionReadiness::Ready);
+        ctx.get_session_mut(&session)
+            .expect("the session is registered")
+            .launch_id = Some(launch_id);
+
+        assert_eq!(
+            ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN)),
+            None
+        );
+    }
+
+    /// A session that logged off during the delay must not have the process started when the delay ends.
+    // oracle: scaffold
+    #[test]
+    fn relaunch_due_after_logoff_is_ignored() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+        ctx.get_session_mut(&session)
+            .expect("the session is registered")
+            .set_waiting_for_logon();
+
+        assert!(!ctx.should_relaunch(session.id, launch_id));
+    }
+
+    /// A relaunch scheduled for a launch that was since replaced must not start another process.
+    // oracle: scaffold
+    #[test]
+    fn relaunch_due_for_a_replaced_launch_is_ignored() {
+        let session = Session::new(1);
+        let mut ctx = SessionManagerCtx::default();
+        let launch_id = start_ready_remote_session(&mut ctx, &session);
+        ctx.handle_process_exit(&failed_exit(&session, launch_id, QUICK_RUN));
+        start_again(&mut ctx, &session);
+
+        assert!(!ctx.should_relaunch(session.id, launch_id));
     }
 
     #[test]
