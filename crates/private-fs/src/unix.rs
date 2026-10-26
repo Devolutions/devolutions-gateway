@@ -106,7 +106,16 @@ pub(crate) fn open_base(path: &Utf8Path, rule: &Rule) -> Result<Option<Dir>> {
 pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule, existing: Existing) -> Result<Dir> {
     check_creatable(path, rule, Kind::Directory)?;
     let c_name = c_name(path, name)?;
-    let open = || open_at(parent, path, name, libc::O_RDONLY | libc::O_DIRECTORY, Kind::Directory);
+    let open = || {
+        let open = || open_at(parent, path, name, libc::O_RDONLY | libc::O_DIRECTORY, Kind::Directory);
+        match open() {
+            Err(error) if existing == Existing::Repair && is_permission_denied(&error) => {
+                restore_owner_access(parent, &c_name, error)?;
+                open()
+            }
+            opened => opened,
+        }
+    };
     // A directory that exists is checked or repaired, so only one that must be created can inherit the parent's ACL.
     let (file, created) = match open()? {
         Some(file) => (file, false),
@@ -148,6 +157,26 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
         .sync_all()
         .map_err(|error| Error::io(parent_path(path), "sync directory", error))?;
     Ok(dir)
+}
+
+/// Gives the current user back access to the directory `name` of `parent`, which it owns but couldn't open, so that it
+/// can be repaired; fails with `denied` when `name` is not such a directory.
+///
+/// The parent is a checked directory, in which no other account can replace an entry between the look and the change.
+fn restore_owner_access(parent: &Dir, name: &CStr, denied: Error) -> Result<()> {
+    match stat_at(&parent.file, name) {
+        Ok(stat) if entry_kind(stat.st_mode) == EntryKind::Directory && stat.st_uid == effective_uid() => {}
+        _ => return Err(denied),
+    }
+    // SAFETY: The parent descriptor is open and the name is NUL-terminated.
+    if unsafe { libc::fchmodat(parent.file.as_raw_fd(), name.as_ptr(), MKDIR_MODE, 0) } != 0 {
+        return Err(Error::io(denied.path(), "change mode", io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+fn is_permission_denied(error: &Error) -> bool {
+    matches!(error.kind(), crate::ErrorKind::Io { source, .. } if permission_denied(source))
 }
 
 pub(crate) fn open_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule, _share: Share) -> Result<Option<Dir>> {

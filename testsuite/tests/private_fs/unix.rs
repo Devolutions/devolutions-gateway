@@ -234,6 +234,30 @@ fn an_existing_directory_open_to_others_is_refused_until_repaired() {
     assert!(base.open_dir("shared", &rule(), Share::Shared).unwrap().is_some());
 }
 
+// A repair that needed to open the directory first could never fix one whose mode shuts out its own owner.
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn a_directory_its_owner_cannot_open_is_repaired() {
+    let scratch = Scratch::new();
+    if scratch.as_root() {
+        skip(
+            "a_directory_its_owner_cannot_open_is_repaired",
+            "needs an account other than root, which opens any directory",
+        );
+        return;
+    }
+    let base = scratch.base();
+    drop(base.create_dir("locked", &rule(), Existing::Check).unwrap());
+    let locked = scratch.path.join("locked");
+    set_mode(&locked, 0o000);
+
+    assert!(base.create_dir("locked", &rule(), Existing::Check).is_err());
+    assert_eq!(mode(&locked), 0o000, "a check changed the directory");
+
+    base.create_dir("locked", &rule(), Existing::Repair).unwrap();
+    assert_eq!(mode(&locked), 0o700);
+}
+
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
 fn a_symbolic_link_from_the_first_existing_directory_down_is_refused() {
