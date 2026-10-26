@@ -11,10 +11,10 @@ use devolutions_gateway_task::{ShutdownSignal, Task};
 use tokio::sync::{RwLock, mpsc};
 use win_api_wrappers::process::{
     Process, StartupInfo, create_process_in_session, is_process_running_in_session,
-    terminate_process_by_name_in_session,
+    terminate_process_by_name_in_session_and_wait,
 };
 use win_api_wrappers::utils::{CommandLine, WideString};
-use win_api_wrappers::wts::session_has_logged_in_user;
+use win_api_wrappers::wts::{WTSConnectState, get_sessions, session_has_logged_in_user, session_uses_rdp};
 use windows::Win32::System::Threading::{
     CREATE_NEW_CONSOLE, CREATE_UNICODE_ENVIRONMENT, NORMAL_PRIORITY_CLASS, STARTF_USESHOWWINDOW,
 };
@@ -79,6 +79,8 @@ struct GatewaySession {
     launch_id: Option<u64>,
     /// Number of consecutive quick failures of the session process.
     consecutive_failures: u32,
+    /// A reconnect must finish terminating its old host before lookup can adopt another one.
+    termination_pending: bool,
 }
 
 // NOTE: `ceviche::controller::Session` do not implement `Debug` for session.
@@ -102,6 +104,7 @@ impl GatewaySession {
             readiness,
             launch_id: None,
             consecutive_failures: 0,
+            termination_pending: false,
         }
     }
 
@@ -214,18 +217,18 @@ impl SessionManagerCtx {
         session: &Session,
         is_running: impl FnOnce(&Session) -> anyhow::Result<bool>,
         start: impl FnOnce(&Session, u64) -> anyhow::Result<()>,
-    ) {
+    ) -> bool {
         let launch_id = self.last_launch_id + 1;
 
         let Some(gw_session) = self.get_session_mut(session) else {
             warn!(%session, "Session is not yet registered");
-            return;
+            return false;
         };
 
         match is_running(session) {
             Ok(true) => {
                 gw_session.set_session_ready();
-                return;
+                return true;
             }
             Ok(false) => {}
             Err(error) => {
@@ -235,7 +238,7 @@ impl SessionManagerCtx {
                     %session,
                     "Failed to check whether the session process is running"
                 );
-                return;
+                return false;
             }
         }
 
@@ -247,9 +250,11 @@ impl SessionManagerCtx {
                 gw_session.set_session_ready();
                 gw_session.launch_id = Some(launch_id);
                 self.last_launch_id = launch_id;
+                true
             }
             Err(error) => {
                 error!(%error, %session, "Failed to start session process");
+                false
             }
         }
     }
@@ -284,15 +289,29 @@ impl SessionManagerCtx {
         if STABLE_RUN_TIME <= run_time {
             gw_session.consecutive_failures = 0;
         }
+        warn!(
+            session = session_id,
+            launch_id,
+            exit_code = format!("{exit_code:#010X}"),
+            ?run_time,
+            "Session process failed"
+        );
+
+        self.retry_failed_launch(session_id, launch_id)
+    }
+
+    fn retry_failed_launch(&mut self, session_id: u32, launch_id: u64) -> Option<Duration> {
+        let gw_session = self
+            .get_session_mut(&Session::new(session_id))
+            .filter(|gw_session| gw_session.wants_launch(launch_id))?;
         gw_session.consecutive_failures += 1;
 
         if MAX_CONSECUTIVE_FAILURES <= gw_session.consecutive_failures {
             error!(
                 session = session_id,
                 launch_id,
-                exit_code = format!("{exit_code:#010X}"),
                 consecutive_failures = gw_session.consecutive_failures,
-                "Session process keeps failing; waiting for the next logon or unlock"
+                "Session process recovery keeps failing; waiting for the next logon or unlock"
             );
             gw_session.readiness = SessionReadiness::WaitingForLogonOrUnlock;
             gw_session.consecutive_failures = 0;
@@ -303,10 +322,8 @@ impl SessionManagerCtx {
         warn!(
             session = session_id,
             launch_id,
-            exit_code = format!("{exit_code:#010X}"),
-            ?run_time,
             ?delay,
-            "Session process failed; relaunching"
+            "Scheduling session process recovery"
         );
 
         Some(delay)
@@ -350,7 +367,75 @@ impl Task for SessionManager {
 
     const NAME: &'static str = "SessionManager";
 
-    async fn run(self, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+    async fn run(self, shutdown_signal: ShutdownSignal) -> anyhow::Result<()> {
+        self.run_with(shutdown_signal, &WindowsSessionSystem).await
+    }
+}
+
+trait SessionSystem: Sync {
+    fn active_remote_sessions(&self) -> anyhow::Result<Vec<Session>>;
+    fn has_logged_in_user(&self, session: &Session) -> anyhow::Result<bool>;
+    fn is_running(&self, session: &Session) -> anyhow::Result<bool>;
+    fn start_watched(
+        &self,
+        session: &Session,
+        launch_id: u64,
+        internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+    ) -> anyhow::Result<()>;
+    fn terminate(&self, session: &Session) -> anyhow::Result<()>;
+}
+
+struct WindowsSessionSystem;
+
+impl SessionSystem for WindowsSessionSystem {
+    fn active_remote_sessions(&self) -> anyhow::Result<Vec<Session>> {
+        let mut active_sessions = Vec::new();
+        for session in get_sessions()? {
+            if session.state != WTSConnectState::Active {
+                continue;
+            }
+
+            match session_uses_rdp(session.session_id) {
+                Ok(true) => active_sessions.push(Session::new(session.session_id)),
+                Ok(false) => {}
+                Err(error) => {
+                    warn!(
+                        session_id = session.session_id,
+                        %error,
+                        "Failed to query the protocol of an existing session"
+                    );
+                }
+            }
+        }
+        Ok(active_sessions)
+    }
+
+    fn has_logged_in_user(&self, session: &Session) -> anyhow::Result<bool> {
+        session_has_logged_in_user(session.id)
+    }
+
+    fn is_running(&self, session: &Session) -> anyhow::Result<bool> {
+        is_session_running_in_session(session)
+    }
+
+    fn start_watched(
+        &self,
+        session: &Session,
+        launch_id: u64,
+        internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+    ) -> anyhow::Result<()> {
+        let process = start_session_process(session)?;
+        watch_session_process(process, session.id, launch_id, internal_tx.clone());
+        Ok(())
+    }
+
+    fn terminate(&self, session: &Session) -> anyhow::Result<()> {
+        terminate_session_process(session)
+    }
+}
+
+impl SessionManager {
+    async fn run_with(self, mut shutdown_signal: ShutdownSignal, system: &dyn SessionSystem) -> anyhow::Result<()> {
         let Self {
             mut service_event_rx,
             ctx,
@@ -361,6 +446,22 @@ impl Task for SessionManager {
 
         // The loop keeps a sender, so the receiver never reports a closed channel.
         let (internal_tx, mut internal_rx) = mpsc::unbounded_channel();
+
+        // Keep queued SCM events so disconnects during enumeration still stop their hosts.
+        // UNTESTED: SCM delivers session changes while WTS enumeration runs.
+        // When changing service startup, verify this ordering in a live RDP session.
+        match system.active_remote_sessions() {
+            Ok(sessions) => {
+                let mut ctx = ctx.write().await;
+                for session in sessions {
+                    ctx.register_session(&session, SessionKind::Remote, SessionReadiness::WaitingForLogonOrUnlock);
+                    start_session_process_if_not_running(&mut ctx, system, &session, &internal_tx);
+                }
+            }
+            Err(error) => {
+                error!(%error, "Failed to enumerate existing remote sessions");
+            }
+        }
 
         loop {
             tokio::select! {
@@ -375,7 +476,11 @@ impl Task for SessionManager {
                         InternalEvent::RelaunchDue { session_id, launch_id } => {
                             if ctx.should_relaunch(session_id, launch_id) {
                                 info!(session = session_id, "Relaunching session process");
-                                start_session_process_if_not_running(&mut ctx, &Session::new(session_id), &internal_tx);
+                                if !start_session_process_if_not_running(&mut ctx, system, &Session::new(session_id), &internal_tx)
+                                    && let Some(delay) = ctx.retry_failed_launch(session_id, launch_id)
+                                {
+                                    schedule_relaunch(&internal_tx, session_id, launch_id, delay);
+                                }
                             }
                         }
                     }
@@ -404,15 +509,14 @@ impl Task for SessionManager {
                         }
                         AgentServiceEvent::SessionDisconnect(id) => {
                             info!(%id, "Session disconnected");
-                            terminate_session_process(&id);
+                            if let Err(error) = system.terminate(&id) {
+                                error!(%id, %error, "Failed to terminate disconnected session process");
+                            }
                             ctx.write().await.unregister_session(&id);
                         }
                         AgentServiceEvent::SessionRemoteConnect(id) => {
                             info!(%id, "Remote session connected");
-                            // Terminate old session process if it is already running.
-                            terminate_session_process(&id);
-
-                            let readiness = match session_has_logged_in_user(id.id) {
+                            let readiness = match system.has_logged_in_user(&id) {
                                 Ok(true) => SessionReadiness::WaitingForUnlock,
                                 Ok(false) => SessionReadiness::WaitingForLogon,
                                 Err(error) => {
@@ -428,6 +532,22 @@ impl Task for SessionManager {
                             {
                                 let mut ctx = ctx.write().await;
                                 ctx.register_session(&id, SessionKind::Remote, readiness);
+                                ctx.get_session_mut(&id).expect("session was just registered").termination_pending = true;
+
+                                if !finish_session_termination(&mut ctx, system, &id) {
+                                    continue;
+                                }
+
+                                // A queued connect may predate the startup snapshot and its user's logon.
+                                match system.active_remote_sessions() {
+                                    Ok(sessions) if sessions.iter().any(|session| session.id == id.id) => {
+                                        start_session_process_if_not_running(&mut ctx, system, &id, &internal_tx);
+                                    }
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        error!(%id, %error, "Failed to check whether the remote session is active");
+                                    }
+                                }
                             }
                         }
                         AgentServiceEvent::SessionRemoteDisconnect(id) => {
@@ -435,7 +555,9 @@ impl Task for SessionManager {
                             // Terminate session process when remote session is disconnected
                             // (NOTE: depending on the system settings, session could
                             // still be running in the background after RDP disconnect).
-                            terminate_session_process(&id);
+                            if let Err(error) = system.terminate(&id) {
+                                error!(%id, %error, "Failed to terminate disconnected session process");
+                            }
                             ctx.write().await.unregister_session(&id);
                         }
                         AgentServiceEvent::SessionLogon(id) => {
@@ -446,7 +568,7 @@ impl Task for SessionManager {
                             // session app on logon, if not yet started.
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Logon) {
-                                start_session_process_if_not_running(&mut ctx, &id, &internal_tx);
+                                start_session_process_if_not_running(&mut ctx, system, &id, &internal_tx);
                             }
                         }
                         AgentServiceEvent::SessionUnlock(id) => {
@@ -454,7 +576,7 @@ impl Task for SessionManager {
 
                             let mut ctx = ctx.write().await;
                             if ctx.should_start_session(&id, SessionReadinessEvent::Unlock) {
-                                start_session_process_if_not_running(&mut ctx, &id, &internal_tx);
+                                start_session_process_if_not_running(&mut ctx, system, &id, &internal_tx);
                             }
                         }
                         AgentServiceEvent::SessionLogoff(id) => {
@@ -490,14 +612,32 @@ impl Task for SessionManager {
 /// not relaunched until the next logon or unlock.
 fn start_session_process_if_not_running(
     ctx: &mut SessionManagerCtx,
+    system: &dyn SessionSystem,
     session: &Session,
     internal_tx: &mpsc::UnboundedSender<InternalEvent>,
-) {
-    ctx.start_process_if_not_running(session, is_session_running_in_session, |session, launch_id| {
-        let process = start_session_process(session)?;
-        watch_session_process(process, session.id, launch_id, internal_tx.clone());
-        Ok(())
-    });
+) -> bool {
+    if !finish_session_termination(ctx, system, session) {
+        return false;
+    }
+    ctx.start_process_if_not_running(
+        session,
+        |session| system.is_running(session),
+        |session, launch_id| system.start_watched(session, launch_id, internal_tx),
+    )
+}
+
+fn finish_session_termination(ctx: &mut SessionManagerCtx, system: &dyn SessionSystem, session: &Session) -> bool {
+    let Some(gw_session) = ctx.get_session_mut(session) else {
+        return false;
+    };
+    if gw_session.termination_pending {
+        if let Err(error) = system.terminate(session) {
+            error!(%session, %error, "Failed to finish terminating the previous session process");
+            return false;
+        }
+        gw_session.termination_pending = false;
+    }
+    true
 }
 
 /// Reports the exit of `process` to the session manager from a dedicated thread.
@@ -561,18 +701,16 @@ fn schedule_relaunch(
 }
 
 /// Terminates Devolutions Session process in the target session.
-fn terminate_session_process(session: &Session) {
-    match terminate_process_by_name_in_session(SESSION_BINARY, session.id) {
-        Ok(false) => {
+fn terminate_session_process(session: &Session) -> anyhow::Result<()> {
+    match terminate_process_by_name_in_session_and_wait(SESSION_BINARY, session.id, 1_000)? {
+        false => {
             trace!(%session, "Session process is not running");
         }
-        Ok(true) => {
+        true => {
             info!(%session, "Session process terminated");
         }
-        Err(error) => {
-            error!(%error, %session, "Failed to terminate session process");
-        }
     }
+    Ok(())
 }
 
 fn is_session_running_in_session(session: &Session) -> anyhow::Result<bool> {
@@ -650,15 +788,345 @@ fn session_app_path() -> Utf8PathBuf {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeSet, VecDeque};
+    use std::sync::Mutex;
     use std::time::Duration;
 
     use camino::Utf8Path;
+    use devolutions_gateway_task::{ChildTask, ShutdownHandle};
+    use tokio::sync::mpsc;
     use win_api_wrappers::utils::CommandLine;
 
     use super::{
-        GatewaySession, ProcessExit, Session, SessionKind, SessionManagerCtx, SessionReadiness, SessionReadinessEvent,
-        relaunch_delay, session_command_line,
+        AgentServiceEvent, GatewaySession, InternalEvent, ProcessExit, Session, SessionKind, SessionManager,
+        SessionManagerCtx, SessionReadiness, SessionReadinessEvent, SessionSystem, relaunch_delay,
+        session_command_line,
     };
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum HostAction {
+        Started(u32),
+        Stopped(u32),
+        FoundRunning(u32),
+    }
+
+    struct TestSessionSystem {
+        active_sessions: Vec<u32>,
+        events: mpsc::Sender<AgentServiceEvent>,
+        events_during_snapshot: Mutex<Vec<AgentServiceEvent>>,
+        lookup_failures: Mutex<VecDeque<bool>>,
+        termination_failures: Mutex<VecDeque<bool>>,
+        running: Mutex<BTreeSet<u32>>,
+        exit_on_start: Mutex<Option<u32>>,
+        actions: mpsc::UnboundedSender<HostAction>,
+    }
+
+    impl SessionSystem for TestSessionSystem {
+        fn active_remote_sessions(&self) -> anyhow::Result<Vec<Session>> {
+            for event in std::mem::take(&mut *self.events_during_snapshot.lock().expect("snapshot events lock")) {
+                assert!(self.events.try_send(event).is_ok(), "session event queue has capacity");
+            }
+            Ok(self.active_sessions.iter().copied().map(Session::new).collect())
+        }
+
+        fn has_logged_in_user(&self, _session: &Session) -> anyhow::Result<bool> {
+            Ok(true)
+        }
+
+        fn is_running(&self, session: &Session) -> anyhow::Result<bool> {
+            if self
+                .lookup_failures
+                .lock()
+                .expect("lookup failure lock")
+                .pop_front()
+                .unwrap_or(false)
+            {
+                anyhow::bail!("process lookup failed");
+            }
+            let running = self
+                .running
+                .lock()
+                .expect("running processes lock")
+                .contains(&session.id);
+            if running {
+                self.actions
+                    .send(HostAction::FoundRunning(session.id))
+                    .expect("host observer remains open");
+            }
+            Ok(running)
+        }
+
+        fn start_watched(
+            &self,
+            session: &Session,
+            launch_id: u64,
+            internal_tx: &mpsc::UnboundedSender<InternalEvent>,
+        ) -> anyhow::Result<()> {
+            assert!(
+                self.running.lock().expect("running processes lock").insert(session.id),
+                "duplicate host launch"
+            );
+            self.actions
+                .send(HostAction::Started(session.id))
+                .expect("host observer remains open");
+            if let Some(exit_code) = self.exit_on_start.lock().expect("process exit lock").take() {
+                self.running.lock().expect("running processes lock").remove(&session.id);
+                internal_tx
+                    .send(InternalEvent::ProcessExited(ProcessExit {
+                        session_id: session.id,
+                        launch_id,
+                        exit_code,
+                        run_time: Duration::ZERO,
+                    }))
+                    .expect("session manager remains open");
+            }
+            Ok(())
+        }
+
+        fn terminate(&self, session: &Session) -> anyhow::Result<()> {
+            if self
+                .termination_failures
+                .lock()
+                .expect("termination failure lock")
+                .pop_front()
+                .unwrap_or(false)
+            {
+                anyhow::bail!("previous process is still terminating");
+            }
+            if self.running.lock().expect("running processes lock").remove(&session.id) {
+                self.actions
+                    .send(HostAction::Stopped(session.id))
+                    .expect("host observer remains open");
+            }
+            Ok(())
+        }
+    }
+
+    fn start_test_manager(
+        active_sessions: Vec<u32>,
+        running: BTreeSet<u32>,
+        events_during_snapshot: Vec<AgentServiceEvent>,
+        lookup_failures: Vec<bool>,
+        exit_on_start: Option<u32>,
+        termination_failures: Vec<bool>,
+    ) -> (
+        ShutdownHandle,
+        ChildTask<anyhow::Result<()>>,
+        mpsc::UnboundedReceiver<HostAction>,
+    ) {
+        let manager = SessionManager::default();
+        let (shutdown, signal) = ShutdownHandle::new();
+        let (actions, observations) = mpsc::unbounded_channel();
+        let system = TestSessionSystem {
+            active_sessions,
+            events: manager.service_event_tx(),
+            events_during_snapshot: Mutex::new(events_during_snapshot),
+            lookup_failures: Mutex::new(lookup_failures.into()),
+            termination_failures: Mutex::new(termination_failures.into()),
+            running: Mutex::new(running),
+            exit_on_start: Mutex::new(exit_on_start),
+            actions,
+        };
+        let task = ChildTask::spawn(async move { manager.run_with(signal, &system).await });
+        (shutdown, task, observations)
+    }
+
+    async fn next_action(actions: &mut mpsc::UnboundedReceiver<HostAction>) -> HostAction {
+        tokio::time::timeout(Duration::from_secs(10), actions.recv())
+            .await
+            .expect("session manager did not act")
+            .expect("session manager stopped")
+    }
+
+    // oracle: reference deployed Agent 2BD6884A9E49A9D6FE80F6036907C48BECF180C0DBDD7AD93C3C7B80D571FA45
+    // launches a missing host in an already-active RDP session without new logon or unlock events.
+    #[tokio::test]
+    async fn already_active_remote_session_launches_without_new_events() {
+        let (shutdown, task, mut actions) = start_test_manager(vec![42], BTreeSet::new(), vec![], vec![], None, vec![]);
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    // oracle: mutant replayed connection events leave an active session waiting for an already-past logon.
+    #[tokio::test]
+    async fn reconnect_during_snapshot_restores_an_already_active_host() {
+        let (shutdown, task, mut actions) = start_test_manager(
+            vec![42],
+            BTreeSet::new(),
+            vec![
+                AgentServiceEvent::SessionRemoteDisconnect(Session::new(42)),
+                AgentServiceEvent::SessionRemoteConnect(Session::new(42)),
+            ],
+            vec![],
+            None,
+            vec![],
+        );
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Stopped(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    // oracle: reference deployed Agent 2BD6884A9E49A9D6FE80F6036907C48BECF180C0DBDD7AD93C3C7B80D571FA45
+    // adopts an existing host on restart without replacing it.
+    #[tokio::test]
+    async fn already_running_startup_host_is_adopted() {
+        let (shutdown, task, mut actions) =
+            start_test_manager(vec![42], BTreeSet::from([42]), vec![], vec![], None, vec![]);
+
+        assert_eq!(next_action(&mut actions).await, HostAction::FoundRunning(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+        assert!(
+            actions.try_recv().is_err(),
+            "startup must neither stop nor duplicate the host"
+        );
+    }
+
+    // oracle: mutant discarding notifications during the initial snapshot leaves a disconnected host running.
+    #[tokio::test]
+    async fn disconnect_during_snapshot_stops_the_host() {
+        let (shutdown, task, mut actions) = start_test_manager(
+            vec![42],
+            BTreeSet::new(),
+            vec![AgentServiceEvent::SessionRemoteDisconnect(Session::new(42))],
+            vec![],
+            None,
+            vec![],
+        );
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Stopped(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    // oracle: mutant a session absent from the snapshot loses its queued connection or logon event.
+    #[tokio::test]
+    async fn connection_during_snapshot_launches_after_logon() {
+        let (shutdown, task, mut actions) = start_test_manager(
+            vec![],
+            BTreeSet::new(),
+            vec![
+                AgentServiceEvent::SessionRemoteConnect(Session::new(42)),
+                AgentServiceEvent::SessionLogon(Session::new(42)),
+            ],
+            vec![],
+            None,
+            vec![],
+        );
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    // oracle: mutant a transient lookup error kills the manager instead of allowing a readiness retry.
+    #[tokio::test]
+    async fn process_lookup_failure_does_not_stop_later_readiness_events() {
+        let (shutdown, task, mut actions) = start_test_manager(
+            vec![],
+            BTreeSet::new(),
+            vec![
+                AgentServiceEvent::SessionRemoteConnect(Session::new(42)),
+                AgentServiceEvent::SessionLogon(Session::new(42)),
+                AgentServiceEvent::SessionUnlock(Session::new(42)),
+            ],
+            vec![true],
+            None,
+            vec![],
+        );
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    // oracle: mutant startup launches bypass the process-exit notification and relaunch path.
+    #[tokio::test]
+    async fn failed_startup_host_is_relaunched_through_the_watched_path() {
+        let (shutdown, task, mut actions) =
+            start_test_manager(vec![42], BTreeSet::new(), vec![], vec![], Some(1), vec![]);
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    // oracle: mutant a transient lookup failure during relaunch leaves the session Ready without another retry.
+    #[tokio::test]
+    async fn relaunch_lookup_failure_is_retried_without_another_service_event() {
+        let (shutdown, task, mut actions) =
+            start_test_manager(vec![42], BTreeSet::new(), vec![], vec![false, true], Some(1), vec![]);
+
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
+
+    // oracle: mutant reconnect adopts the old host before its asynchronous termination completes.
+    #[tokio::test]
+    async fn reconnect_does_not_adopt_a_host_still_terminating() {
+        let (shutdown, task, mut actions) = start_test_manager(
+            vec![42],
+            BTreeSet::from([42]),
+            vec![
+                AgentServiceEvent::SessionRemoteConnect(Session::new(42)),
+                AgentServiceEvent::SessionUnlock(Session::new(42)),
+            ],
+            vec![],
+            None,
+            vec![true],
+        );
+
+        assert_eq!(next_action(&mut actions).await, HostAction::FoundRunning(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Stopped(42));
+        assert_eq!(next_action(&mut actions).await, HostAction::Started(42));
+
+        shutdown.signal();
+        task.join()
+            .await
+            .expect("session manager task")
+            .expect("session manager result");
+    }
 
     fn make_session(kind: SessionKind, readiness: SessionReadiness) -> GatewaySession {
         GatewaySession::new(Session::new(1), kind, readiness)

@@ -12,7 +12,7 @@ use anyhow::{Context, Result, bail};
 use tracing::{error, warn};
 use windows::Win32::Foundation::{
     E_INVALIDARG, ERROR_INCORRECT_SIZE, ERROR_NO_MORE_FILES, FILETIME, FreeLibrary, HANDLE, HMODULE, HWND, LPARAM,
-    MAX_PATH, WAIT_EVENT, WAIT_FAILED, WPARAM,
+    MAX_PATH, WAIT_EVENT, WAIT_FAILED, WAIT_OBJECT_0, WPARAM,
 };
 use windows::Win32::Security::{TOKEN_ACCESS_MASK, TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY};
 use windows::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE};
@@ -31,8 +31,8 @@ use windows::Win32::System::Threading::{
     CREATE_UNICODE_ENVIRONMENT, CreateProcessAsUserW, CreateRemoteThread, EXTENDED_STARTUPINFO_PRESENT,
     GetCurrentProcess, GetCurrentProcessId, GetExitCodeProcess, GetProcessTimes, INFINITE,
     LPPROC_THREAD_ATTRIBUTE_LIST, LPTHREAD_START_ROUTINE, OpenProcess, OpenProcessToken, PEB, PROCESS_ACCESS_RIGHTS,
-    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_TERMINATE,
-    QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
+    PROCESS_BASIC_INFORMATION, PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, QueryFullProcessImageNameW, STARTUPINFOEXW, STARTUPINFOW, STARTUPINFOW_FLAGS, TerminateProcess,
     WaitForSingleObject,
 };
 use windows::Win32::UI::Shell::{SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW};
@@ -961,14 +961,27 @@ fn is_process_running_impl(process_name: &str, session_id: Option<u32>) -> Resul
 }
 
 pub fn terminate_process_by_name(process_name: &str) -> Result<bool> {
-    terminate_process_by_name_impl(process_name, None)
+    terminate_process_by_name_impl(process_name, None, None)
 }
 
 pub fn terminate_process_by_name_in_session(process_name: &str, session_id: u32) -> Result<bool> {
-    terminate_process_by_name_impl(process_name, Some(session_id))
+    terminate_process_by_name_impl(process_name, Some(session_id), None)
 }
 
-fn terminate_process_by_name_impl(process_name: &str, session_id: Option<u32>) -> Result<bool> {
+/// Terminates a process in the session and waits for its exit before returning success.
+pub fn terminate_process_by_name_in_session_and_wait(
+    process_name: &str,
+    session_id: u32,
+    timeout_ms: u32,
+) -> Result<bool> {
+    terminate_process_by_name_impl(process_name, Some(session_id), Some(timeout_ms))
+}
+
+fn terminate_process_by_name_impl(
+    process_name: &str,
+    session_id: Option<u32>,
+    timeout_ms: Option<u32>,
+) -> Result<bool> {
     for process in ProcessEntry32Iterator::new()? {
         if let Some(session_id) = session_id {
             let actual_session = match process_id_to_session(process.process_id()) {
@@ -984,22 +997,46 @@ fn terminate_process_by_name_impl(process_name: &str, session_id: Option<u32>) -
         }
 
         if str::eq_ignore_ascii_case(process.executable_name()?.as_str(), process_name) {
-            // SAFETY: `OpenProcess` is always safe to call and returns a valid handle on success.
-            let process = unsafe { OpenProcess(PROCESS_TERMINATE, false, process.process_id()) };
+            let rights = if timeout_ms.is_some() {
+                PROCESS_TERMINATE | PROCESS_SYNCHRONIZE
+            } else {
+                PROCESS_TERMINATE
+            };
+            // SAFETY: OpenProcess has no outstanding preconditions and returns an owned handle on success.
+            let process = unsafe { OpenProcess(rights, false, process.process_id()) };
 
             match process {
                 Ok(process) => {
+                    // SAFETY: OpenProcess returned a valid handle owned by the caller.
+                    let process = unsafe { Handle::new_owned(process) }?;
                     // SAFETY: `OpenProcess` ensures that the handle is valid.
                     unsafe {
-                        if let Err(error) = TerminateProcess(process, 1) {
+                        if let Err(error) = TerminateProcess(process.raw(), 1) {
+                            if timeout_ms.is_some() {
+                                return Err(error.into());
+                            }
                             warn!(process_name, session_id, %error, "TerminateProcess failed");
                             return Ok(false);
+                        }
+                    }
+
+                    if let Some(timeout_ms) = timeout_ms {
+                        // SAFETY: The handle is valid and was opened with SYNCHRONIZE.
+                        let wait = unsafe { WaitForSingleObject(process.raw(), timeout_ms) };
+                        if wait == WAIT_FAILED {
+                            return Err(Error::last_error().into());
+                        }
+                        if wait != WAIT_OBJECT_0 {
+                            bail!("process termination did not complete within {timeout_ms} ms");
                         }
                     }
 
                     return Ok(true);
                 }
                 Err(error) => {
+                    if timeout_ms.is_some() {
+                        return Err(error.into());
+                    }
                     warn!(process_name, session_id, %error, "OpenProcess failed");
                     continue;
                 }
