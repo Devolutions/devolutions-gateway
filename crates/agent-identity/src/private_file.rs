@@ -86,20 +86,27 @@ fn granted(rule: Rule, grant_current_user: bool) -> Rule {
     }
 }
 
-/// The rule of `<data-dir>`, `identity`, `authorities`, `keys`, `rejected`, every authority directory and every
-/// `identity.json`.
+/// The rule of `identity`, `authorities`, `keys`, `rejected`, every authority directory and every `identity.json`, and
+/// of `<data-dir>` when the agent creates it; an existing `<data-dir>` gets only the check of the directories above.
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): they are owned by the agent's account, which in production is
 /// SYSTEM or root.
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 pub(crate) fn tree_rule(grant_current_user: bool) -> Rule {
-    granted(Rule::new().owner(Account::CurrentUser), grant_current_user).exact()
+    tree_rule_owned_by(Account::CurrentUser, grant_current_user)
 }
 
-/// The rule of `identity/pending`, a drop box administrators can add a file to without listing or reading it.
-fn drop_box_rule(grant_current_user: bool) -> Rule {
-    tree_rule(grant_current_user).grant(Account::Administrators, Access::AddOnly)
+/// The rule of the tree directories as `owner` provisions them; an administrator's submission checks them with SYSTEM
+/// as the owner.
+fn tree_rule_owned_by(owner: Account, grant_current_user: bool) -> Rule {
+    granted(Rule::new().owner(owner), grant_current_user).exact()
+}
+
+/// The rule of `identity/pending` as `owner` provisions it, a drop box administrators can add a file to without listing
+/// or reading it.
+fn drop_box_rule_owned_by(owner: Account, grant_current_user: bool) -> Rule {
+    tree_rule_owned_by(owner, grant_current_user).grant(Account::Administrators, Access::AddOnly)
 }
 
 /// The rule of in-progress records, rejection markers and the Unix lock file, which the agent's account owns and which
@@ -112,6 +119,12 @@ pub(crate) fn state_file_rule(grant_current_user: bool) -> Rule {
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Pending-enrollment files"): on Windows, the exact check accepts the rule's DACL,
 /// plus a zero-access OWNER RIGHTS entry when an administrator who is not the agent's account owns the file.
+///
+/// UNTESTED: on Linux and macOS, a pending file owned by root is accepted when the agent runs as another account, since
+/// SYSTEM and Administrators are root there.
+/// Only root can create a root-owned file, and a test run as root is the agent's own account, so no test separates the
+/// two; when changing the owners, keep System and Administrators among them, because an `identity enroll` run as root
+/// writes the file as root.
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 fn pending_file_rule(grant_current_user: bool) -> Rule {
@@ -175,7 +188,11 @@ pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: boo
     for name in ["authorities", "keys", "rejected"] {
         provision(&identity, name, &rule)?;
     }
-    provision(&identity, "pending", &drop_box_rule(grant_current_user))?;
+    provision(
+        &identity,
+        "pending",
+        &drop_box_rule_owned_by(Account::CurrentUser, grant_current_user),
+    )?;
     return Ok(data);
 
     fn provision(parent: &Dir, name: &str, rule: &Rule) -> anyhow::Result<Dir> {
@@ -186,11 +203,6 @@ pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: boo
         }
         .context("provision identity directory")
     }
-}
-
-#[cfg(test)]
-pub(crate) fn prepare_directories(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
-    provision_directories(data_dir, grant_current_user).map(drop)
 }
 
 /// Checks, without changing anything, that every authority directory and its `identity.json` are owned by the agent's
@@ -228,15 +240,15 @@ pub(crate) fn check_stored_identities(data_dir: &Utf8Path, grant_current_user: b
     Ok(authority_ids)
 }
 
-/// Checks, without changing it, that an authority directory is owned by the agent's account and protected from other
-/// users, and returns whether it exists.
-pub(crate) fn check_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<bool> {
+/// Opens an authority directory, without changing it, once it is owned by the agent's account and protected from other
+/// users, and returns `None` when it doesn't exist.
+pub(crate) fn open_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Option<Dir>> {
     let (authorities, name) = match open_parent(path) {
         Ok(opened) => opened,
-        Err(error) if is_not_found(&error) => return Ok(false),
+        Err(error) if is_not_found(&error) => return Ok(None),
         Err(error) => return Err(untrusted_stored_identity(path, error)),
     };
-    Ok(open_authority(&authorities, name, path, grant_current_user)?.is_some())
+    open_authority(&authorities, name, path, grant_current_user)
 }
 
 fn open_authority(
@@ -250,27 +262,29 @@ fn open_authority(
         .map_err(|error| untrusted_stored_identity(path, error.into()))
 }
 
-/// Opens an authority directory's `identity.json`, without changing it, once it passes the trust check, and returns
-/// `None` when it doesn't exist.
+/// Opens the `identity.json` at `path` in its checked `authority` directory, without changing it, once it passes the
+/// trust check, and returns `None` when it doesn't exist.
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): the file must pass the check of its authority directory, so it is
 /// a regular file owned by the agent's account and is, on Unix, closed to group and other, or on Windows, protected by
 /// exactly the DACL the agent provisions for it.
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
-pub(crate) fn open_identity_file(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Option<File>> {
-    open_identity(path, grant_current_user, FileOptions::new().read(true))
+pub(crate) fn open_identity_file(
+    authority: &Dir,
+    path: &Utf8Path,
+    grant_current_user: bool,
+) -> anyhow::Result<Option<File>> {
+    open_identity_in(authority, path, grant_current_user, FileOptions::new().read(true))
 }
 
-fn open_identity(path: &Utf8Path, grant_current_user: bool, options: FileOptions) -> anyhow::Result<Option<File>> {
-    let authority = match open_parent(path) {
-        Ok((authority, _)) => authority,
-        Err(error) if is_not_found(&error) => return Ok(None),
-        Err(error) => return Err(untrusted_stored_identity(path, error)),
-    };
-    open_identity_in(&authority, path, grant_current_user, options)
-}
-
+/// Opens `identity.json` in its checked authority directory once it passes the trust check.
+///
+/// UNTESTED: an `identity.json` owned by another account fails the check, because that owner can always change its
+/// access.
+/// Only an elevated process on Windows or root on Linux and macOS can give a test file another owner, and the tests that
+/// do run that way cover the authority directory, which the same rule governs; when changing this, keep the agent's
+/// account the only owner the rule allows.
 fn open_identity_in(
     authority: &Dir,
     path: &Utf8Path,
@@ -281,12 +295,6 @@ fn open_identity_in(
     authority
         .open_file(name, &tree_rule(grant_current_user), options)
         .map_err(|error| untrusted_stored_identity(path, error.into()))
-}
-
-/// Creates a missing authority directory, and only checks an existing one, which is never repaired.
-#[cfg(test)]
-pub(crate) fn create_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
-    create_authority(path, grant_current_user).map(drop)
 }
 
 fn create_authority(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Dir> {
@@ -486,18 +494,12 @@ struct DropBox {
 
 #[cfg(windows)]
 impl DropBox {
-    /// The directories as the service running as SYSTEM provisions them.
-    fn provisioned_by_system() -> Self {
-        let system = || {
-            Rule::new()
-                .owner(Account::System)
-                .grant(Account::System, Access::Full)
-                .exact()
-        };
+    /// The directories as the service provisions them running as `owner`, with the rules it provisions them with.
+    fn provisioned_by(owner: Account, grant_current_user: bool) -> Self {
         Self {
-            base: system(),
-            identity: system(),
-            pending: system().grant(Account::Administrators, Access::AddOnly),
+            base: tree_rule_owned_by(owner, grant_current_user),
+            identity: tree_rule_owned_by(owner, grant_current_user),
+            pending: drop_box_rule_owned_by(owner, grant_current_user),
         }
     }
 }
@@ -515,21 +517,26 @@ pub(crate) fn submit_pending_as_administrator(
     path: &Utf8Path,
     contents: &[u8],
 ) -> anyhow::Result<()> {
-    let started = Instant::now();
-    // The backup privilege lets an administrator open the identity directories, which grant it no list or read access,
-    // to check who owns them and who can access them.
-    let _backup = private_fs::BackupPrivilege::enable().context("enable administrator backup privilege")?;
-    submit_into_drop_box(data_dir, path, contents, &DropBox::provisioned_by_system(), started)
+    submit_into_drop_box(
+        data_dir,
+        path,
+        contents,
+        &DropBox::provisioned_by(Account::System, false),
+        true,
+    )
 }
 
+/// Submits a pending-enrollment file into the drop box under `data_dir` once its directories pass `rules`, opening them
+/// with the backup privilege when `backup` is set.
 #[cfg(windows)]
 fn submit_into_drop_box(
     data_dir: &Utf8Path,
     path: &Utf8Path,
     contents: &[u8],
     rules: &DropBox,
-    started: Instant,
+    backup: bool,
 ) -> anyhow::Result<()> {
+    let started = Instant::now();
     let pending_path = data_dir.join("identity").join("pending");
     ensure!(
         path.parent() == Some(pending_path.as_path()),
@@ -537,10 +544,18 @@ fn submit_into_drop_box(
     );
     let name = path.file_name().context("pending file has no name")?;
     let pending = {
-        let data = retry_sharing_violation(started, || Ok(Dir::open_base(data_dir, &rules.base)?))
-            .and_then(|data| data.ok_or_else(not_found))
-            .context("inspect identity data directory")
-            .map_err(explain_unprepared_drop_box)?;
+        // The backup privilege lets an administrator open the identity directories, which grant it no list or read
+        // access, to check who owns them and who can access them; it ends before anything is written.
+        let _backup = backup
+            .then(private_fs::BackupPrivilege::enable)
+            .transpose()
+            .context("enable administrator backup privilege")?;
+        let data = retry_sharing_violation(started, SUBMISSION_TIMEOUT, || {
+            Ok(Dir::open_base(data_dir, &rules.base)?)
+        })
+        .and_then(|data| data.ok_or_else(not_found))
+        .context("inspect identity data directory")
+        .map_err(explain_unprepared_drop_box)?;
         let identity = open_drop_box_directory(&data, "identity", &rules.identity, started)
             .context("inspect protected identity directory")
             .map_err(explain_unprepared_drop_box)?;
@@ -550,7 +565,11 @@ fn submit_into_drop_box(
     };
     let staging = format!(".{name}-{}.tmp", Uuid::new_v4());
     let mut file = pending
-        .create_file(&staging, &pending_file_rule(false), FileOptions::new())
+        .create_file(
+            &staging,
+            &pending_file_rule(false),
+            FileOptions::new().share(Share::Exclusive),
+        )
         .context("submit pending enrollment")?;
     let published = file
         .write_all(contents)
@@ -575,23 +594,34 @@ fn submit_into_drop_box(
     published.map(drop)
 }
 
+/// How long an administrator's submission waits for the service to release the identity directory.
+#[cfg(windows)]
+const SUBMISSION_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[cfg(windows)]
 fn open_drop_box_directory(parent: &Dir, name: &str, rule: &Rule, started: Instant) -> anyhow::Result<Dir> {
-    retry_sharing_violation(started, || Ok(parent.open_dir(name, rule, Share::Shared)?))?.ok_or_else(not_found)
+    retry_sharing_violation(started, SUBMISSION_TIMEOUT, || {
+        Ok(parent.open_dir(name, rule, Share::Shared)?)
+    })?
+    .ok_or_else(not_found)
 }
 
-/// Retries `operation` while it fails with a sharing violation, as while the service holds the state lock, for 10 s
-/// from `started`.
+/// Retries `operation` while it fails with a sharing violation, as while another process holds the identity directory,
+/// until `timeout` after `started`.
 #[cfg(windows)]
-fn retry_sharing_violation<T>(started: Instant, mut operation: impl FnMut() -> anyhow::Result<T>) -> anyhow::Result<T> {
+pub(crate) fn retry_sharing_violation<T>(
+    started: Instant,
+    timeout: Duration,
+    mut operation: impl FnMut() -> anyhow::Result<T>,
+) -> anyhow::Result<T> {
     loop {
         match operation() {
             Err(error) if is_sharing_violation(&error) => {
-                let remaining = Duration::from_secs(10).saturating_sub(started.elapsed());
+                let remaining = timeout.saturating_sub(started.elapsed());
                 if remaining.is_zero() {
                     return Err(error);
                 }
-                std::thread::sleep(remaining.min(Duration::from_millis(100)));
+                std::thread::sleep(remaining.min(Duration::from_millis(25)));
             }
             result => return result,
         }
@@ -599,7 +629,7 @@ fn retry_sharing_violation<T>(started: Instant, mut operation: impl FnMut() -> a
 }
 
 #[cfg(windows)]
-fn is_sharing_violation(error: &anyhow::Error) -> bool {
+pub(crate) fn is_sharing_violation(error: &anyhow::Error) -> bool {
     use windows::Win32::Foundation::ERROR_SHARING_VIOLATION;
 
     error.chain().any(|cause| {
@@ -624,6 +654,42 @@ fn explain_unprepared_drop_box(error: anyhow::Error) -> anyhow::Error {
         error.context(ENROLLMENT_DIRECTORY_NOT_READY)
     } else {
         error
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn prepare_directories(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
+    provision_directories(data_dir, grant_current_user).map(drop)
+}
+
+/// Creates a missing authority directory, and only checks an existing one, which is never repaired.
+#[cfg(test)]
+pub(crate) fn create_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<()> {
+    create_authority(path, grant_current_user).map(drop)
+}
+
+/// An empty data directory under the system temporary directory, removed on drop.
+///
+/// The system temporary directory keeps test paths under Windows' 260-character limit wherever the repository is checked
+/// out, and its directories above pass the checks of the agent's state, which a workspace `target` directory's may not.
+#[cfg(test)]
+pub(crate) struct TestDir(pub(crate) Utf8PathBuf);
+
+#[cfg(test)]
+impl TestDir {
+    pub(crate) fn new() -> anyhow::Result<Self> {
+        let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
+            .join(format!("ai-{}", Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&path)?;
+        Ok(Self(path))
+    }
+}
+
+#[cfg(test)]
+impl Drop for TestDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -653,30 +719,17 @@ mod unix_tests {
 
     use super::*;
 
-    /// An empty data directory under the system temporary directory, removed on drop.
-    struct TestDir(Utf8PathBuf);
-
     impl TestDir {
-        fn new() -> anyhow::Result<Self> {
-            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-                .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
-                .join(format!("ai-{}", Uuid::new_v4().simple()));
-            fs::create_dir_all(&path)?;
-            fs::set_permissions(&path, fs::Permissions::from_mode(0o700))?;
-            prepare_directories(&path, true)?;
-            Ok(Self(path))
+        fn provisioned() -> anyhow::Result<Self> {
+            let directory = Self::new()?;
+            prepare_directories(&directory.0, true)?;
+            Ok(directory)
         }
 
         fn pending_file(&self) -> anyhow::Result<Utf8PathBuf> {
             let path = pending::file_path(&self.0, &"a".repeat(64))?;
             write_atomic(&self.0, &path, br#"{"version":1,"token":"x"}"#, true)?;
             Ok(path)
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
         }
     }
 
@@ -695,7 +748,7 @@ mod unix_tests {
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn a_pending_file_owned_by_another_account_is_ignored() -> anyhow::Result<()> {
-        let directory = TestDir::new()?;
+        let directory = TestDir::provisioned()?;
         let path = directory.pending_file()?;
         if !give_to_another_account(&path)? {
             return Ok(());
@@ -715,7 +768,7 @@ mod unix_tests {
     #[case::group_and_other_read(0o644)]
     #[case::group_write(0o620)]
     fn a_pending_file_open_to_group_or_other_is_ignored(#[case] mode: u32) -> anyhow::Result<()> {
-        let directory = TestDir::new()?;
+        let directory = TestDir::provisioned()?;
         let path = directory.pending_file()?;
         fs::set_permissions(&path, fs::Permissions::from_mode(mode))?;
 
@@ -728,7 +781,7 @@ mod unix_tests {
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn an_owner_only_pending_file_is_read() -> anyhow::Result<()> {
-        let directory = TestDir::new()?;
+        let directory = TestDir::provisioned()?;
         let path = directory.pending_file()?;
 
         open_pending_read(&path, true)?;
@@ -740,7 +793,7 @@ mod unix_tests {
     // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn an_authority_directory_owned_by_another_account_fails_the_check() -> anyhow::Result<()> {
-        let directory = TestDir::new()?;
+        let directory = TestDir::provisioned()?;
         let authority = directory
             .0
             .join("identity")
@@ -751,8 +804,9 @@ mod unix_tests {
             return Ok(());
         }
 
-        let error = check_authority_directory(&authority, true)
-            .expect_err("an authority directory owned by another account passed the check");
+        let error = open_authority_directory(&authority, true)
+            .err()
+            .context("an authority directory owned by another account passed the check")?;
 
         let untrusted = error
             .downcast_ref::<UntrustedStoredIdentity>()
@@ -776,20 +830,7 @@ mod windows_tests {
     use super::*;
     use crate::windows::test::{self as acl, Ace};
 
-    /// An empty data directory under the system temporary directory, removed on drop.
-    struct TestDir(Utf8PathBuf);
-
     impl TestDir {
-        fn new() -> anyhow::Result<Self> {
-            // The system temporary directory keeps test paths under Windows' 260-character limit wherever the repository
-            // is checked out.
-            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-                .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
-                .join(format!("ai-{}", Uuid::new_v4().simple()));
-            fs::create_dir_all(&path)?;
-            Ok(Self(path))
-        }
-
         fn provisioned() -> anyhow::Result<Self> {
             let directory = Self::new()?;
             prepare_directories(&directory.0, true)?;
@@ -809,20 +850,10 @@ mod windows_tests {
         }
     }
 
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
     /// The rules of a drop box that the current user provisioned under `__debug__.identity.acl_grant_current_user`, as a
     /// test session without SYSTEM can.
     fn provisioned_by_current_user() -> DropBox {
-        DropBox {
-            base: tree_rule(true),
-            identity: tree_rule(true),
-            pending: drop_box_rule(true),
-        }
+        DropBox::provisioned_by(Account::CurrentUser, true)
     }
 
     const INHERITED: u32 = CONTAINER_INHERIT_ACE.0 | OBJECT_INHERIT_ACE.0;
@@ -860,7 +891,8 @@ mod windows_tests {
         Ok(())
     }
 
-    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    // oracle: mutant dropping the guard lets an account other than SYSTEM create identity directories that only SYSTEM can
+    // open
     #[test]
     fn provisioning_without_system_or_the_debug_grant_is_refused() -> anyhow::Result<()> {
         if crate::windows::is_system()? {
@@ -1048,14 +1080,100 @@ mod windows_tests {
         let path = directory.pending_file('a');
         let rules = provisioned_by_current_user();
 
-        submit_into_drop_box(&directory.0, &path, b"test payload", &rules, Instant::now())?;
+        submit_into_drop_box(&directory.0, &path, b"test payload", &rules, false)?;
 
         assert!(fs::symlink_metadata(&path)?.file_type().is_file());
         assert!(File::open(&path).is_err());
         assert!(fs::OpenOptions::new().write(true).open(&path).is_err());
         assert!(fs::OpenOptions::new().access_mode(WRITE_DAC.0).open(&path).is_err());
-        submit_into_drop_box(&directory.0, &path, b"different payload", &rules, Instant::now())?;
+        submit_into_drop_box(&directory.0, &path, b"different payload", &rules, false)?;
         assert_eq!(fs::read_dir(directory.pending())?.count(), 1);
+        Ok(())
+    }
+
+    /// Runs `operation` impersonating a copy of the process token with the restore and take-ownership privileges enabled,
+    /// which let an elevated test give a directory SYSTEM as its owner and take it back.
+    fn with_restore_privilege<T>(operation: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+        use ::windows::Win32::Security::{
+            SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_QUERY,
+            TokenImpersonation,
+        };
+        use win_api_wrappers::process::Process;
+        use win_api_wrappers::security::privilege;
+
+        let mut token = Process::current_process()
+            .token(TOKEN_DUPLICATE | TOKEN_QUERY)?
+            .duplicate(
+                TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY | TOKEN_IMPERSONATE,
+                None,
+                SecurityImpersonation,
+                TokenImpersonation,
+            )?;
+        token.enable_privilege(privilege::SE_RESTORE_NAME)?;
+        token.enable_privilege(privilege::SE_TAKE_OWNERSHIP_NAME)?;
+        let _impersonation = token.impersonate()?;
+        operation()
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
+    #[test]
+    fn elevated_only_an_administrator_submits_into_the_drop_box_system_provisioned_and_a_replay_is_a_no_op()
+    -> anyhow::Result<()> {
+        use win_api_wrappers::token::Token;
+
+        if !Token::current_process_token().is_elevated()? || crate::windows::is_system()? {
+            writeln!(
+                io::stderr(),
+                "SKIP: elevated_only_an_administrator_submits_into_the_drop_box_system_provisioned_and_a_replay_is_a_no_op \
+                 needs an elevated administrator other than SYSTEM"
+            )?;
+            return Ok(());
+        }
+        let directory = TestDir::provisioned()?;
+        let system = acl::system_sid()?;
+        let user = acl::user_sid()?;
+        let add_only = (
+            Sid::from_well_known(WinBuiltinAdministratorsSid, None)?,
+            FILE_ADD_FILE.0 | SYNCHRONIZE.0,
+            NO_INHERITANCE.0,
+        );
+        let path = directory.pending_file('a');
+        // The directories as the service running as SYSTEM provisions them: SYSTEM owns them, only SYSTEM can list or
+        // read them, and administrators can only add a file to the drop box.
+        with_restore_privilege(|| {
+            for directory in [directory.identity(), directory.pending()] {
+                acl::set_owner(&directory, &system)?;
+            }
+            acl::set_dacl(&directory.pending(), &[full(&system, INHERITED), add_only.clone()])?;
+            acl::set_dacl(&directory.identity(), &[full(&system, INHERITED)])
+        })?;
+
+        let submitted = submit_pending_as_administrator(&directory.0, &path, b"test payload");
+        // The same token again finds its pending file there, so the second submission discards its staging file through
+        // the handle that created it, which is all the access an administrator has to it.
+        let replayed = submit_pending_as_administrator(&directory.0, &path, b"test payload");
+        // Taking ownership back gives the current user the owner's implicit right to change the DACLs.
+        with_restore_privilege(|| {
+            for directory in [directory.identity(), directory.pending()] {
+                acl::set_owner(&directory, &user)?;
+            }
+            acl::set_dacl(
+                &directory.identity(),
+                &[full(&system, INHERITED), full(&user, INHERITED)],
+            )?;
+            acl::set_dacl(
+                &directory.pending(),
+                &[full(&system, INHERITED), full(&user, INHERITED), add_only.clone()],
+            )
+        })?;
+
+        submitted?;
+        replayed?;
+        let entries = fs::read_dir(directory.pending())?
+            .map(|entry| Ok(entry?.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        assert_eq!(entries, [path.file_name().context("pending file has no name")?]);
         Ok(())
     }
 
@@ -1073,7 +1191,7 @@ mod windows_tests {
             &path,
             b"complete DPAPI blob",
             &provisioned_by_current_user(),
-            Instant::now(),
+            false,
         )?;
 
         assert!(fs::symlink_metadata(&path)?.file_type().is_file());
@@ -1108,7 +1226,7 @@ mod windows_tests {
         };
         let path = directory.pending_file('c');
 
-        let submitted = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, Instant::now());
+        let submitted = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, false);
         acl::set_dacl(
             &directory.pending(),
             &[full(&acl::system_sid()?, INHERITED), full(&acl::user_sid()?, INHERITED)],
@@ -1143,7 +1261,7 @@ mod windows_tests {
             &directory.pending_file('d'),
             b"test payload",
             &provisioned_by_current_user(),
-            Instant::now(),
+            false,
         )
         .expect_err("a redirected drop box accepted a pending enrollment");
 
@@ -1171,13 +1289,13 @@ mod windows_tests {
         // The test's data directory is the current user's, unlike the directories the service provisions.
         let rules = DropBox {
             base: tree_rule(true),
-            ..DropBox::provisioned_by_system()
+            ..DropBox::provisioned_by(Account::System, false)
         };
 
-        let missing = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, Instant::now())
+        let missing = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, false)
             .expect_err("a missing identity directory was accepted");
         prepare_directories(&directory.0, true)?;
-        let untrusted = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, Instant::now())
+        let untrusted = submit_into_drop_box(&directory.0, &path, b"test payload", &rules, false)
             .expect_err("a directory the current user provisioned was trusted as SYSTEM's");
 
         assert_eq!(missing.to_string(), ENROLLMENT_DIRECTORY_NOT_READY);
@@ -1197,8 +1315,6 @@ mod windows_tests {
         Ok(())
     }
 
-    // oracle: intent crates/agent-identity/INTENT.md §Local state
-    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
     #[test]
     fn retries_only_sharing_violations() -> anyhow::Result<()> {
         use ::windows::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION};
@@ -1208,15 +1324,17 @@ mod windows_tests {
                 i32::try_from(ERROR_SHARING_VIOLATION.0).expect("Win32 error codes fit an i32"),
             ))
         };
+        // oracle: mutant a sharing violation, as while the service holds the identity directory, fails at once
         let mut attempts = 0;
-        retry_sharing_violation(Instant::now(), || {
+        retry_sharing_violation(Instant::now(), SUBMISSION_TIMEOUT, || {
             attempts += 1;
             if attempts == 1 { Err(sharing()) } else { Ok(()) }
         })?;
         assert_eq!(attempts, 2);
 
+        // oracle: mutant any failure is retried until the timeout
         let mut attempts = 0;
-        let result: anyhow::Result<()> = retry_sharing_violation(Instant::now(), || {
+        let result: anyhow::Result<()> = retry_sharing_violation(Instant::now(), SUBMISSION_TIMEOUT, || {
             attempts += 1;
             Err(anyhow::Error::new(io::Error::from_raw_os_error(i32::try_from(
                 ERROR_ACCESS_DENIED.0,
@@ -1225,6 +1343,7 @@ mod windows_tests {
         assert!(result.is_err());
         assert_eq!(attempts, 1);
 
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
         let inaccessible = explain_unprepared_drop_box(
             anyhow::Error::new(io::Error::from(io::ErrorKind::PermissionDenied))
                 .context("inspect protected pending drop box"),

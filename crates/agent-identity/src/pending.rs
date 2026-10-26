@@ -282,16 +282,6 @@ mod tests {
 
     use super::*;
 
-    /// Creates an empty data directory under the system temporary directory, whose directories above pass the checks
-    /// of the agent's state, which a workspace `target` directory may not.
-    fn test_data_dir() -> anyhow::Result<Utf8PathBuf> {
-        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-            .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
-            .join(format!("ai-{}", uuid::Uuid::new_v4().simple()));
-        fs::create_dir_all(&dir)?;
-        Ok(dir)
-    }
-
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn only_matching_version_one_tokens_can_be_malformed() -> anyhow::Result<()> {
@@ -362,7 +352,8 @@ mod tests {
             URL_SAFE_NO_PAD.encode(r#"{"u":"https://example.test"}"#),
             "A".repeat(43)
         ))?;
-        let dir = test_data_dir()?;
+        let test_dir = private_file::TestDir::new()?;
+        let dir = test_dir.0.clone();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -402,7 +393,8 @@ mod tests {
             URL_SAFE_NO_PAD.encode(r#"{"u":"https://example.test"}"#),
             "A".repeat(43)
         );
-        let dir = test_data_dir()?;
+        let test_dir = private_file::TestDir::new()?;
+        let dir = test_dir.0.clone();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -462,7 +454,8 @@ mod tests {
             "A".repeat(43)
         );
         let token = Token::parse(&raw)?;
-        let dir = test_data_dir()?;
+        let test_dir = private_file::TestDir::new()?;
+        let dir = test_dir.0.clone();
         let hash = hex::encode(Sha256::digest(raw.as_bytes()));
         assert_eq!(
             file_path(&dir, &hash)?,

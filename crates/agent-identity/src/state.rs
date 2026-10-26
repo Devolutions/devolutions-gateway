@@ -194,13 +194,14 @@ impl Store {
     /// Reads an identity once every stored identity has passed [`Store::check_stored_identities`].
     fn read_stored_identity(&self, authority_id: Uuid) -> anyhow::Result<Option<StoredIdentity>> {
         let path = self.identity_path(authority_id);
-        if !private_file::check_authority_directory(
+        let Some(authority) = private_file::open_authority_directory(
             path.parent().context("identity file has no parent")?,
             self.acl_grant_current_user,
-        )? {
+        )?
+        else {
             return Ok(None);
-        }
-        let Some(file) = private_file::open_identity_file(&path, self.acl_grant_current_user)? else {
+        };
+        let Some(file) = private_file::open_identity_file(&authority, &path, self.acl_grant_current_user)? else {
             return Ok(None);
         };
         ensure!(
@@ -881,19 +882,9 @@ mod tests {
 
     use super::*;
 
-    struct TestDir(Utf8PathBuf);
+    use crate::private_file::TestDir;
 
     impl TestDir {
-        fn new() -> anyhow::Result<Self> {
-            // The system temporary directory keeps the deepest state path, a deleted key's tombstone, under Windows'
-            // 260-character limit wherever the repository is checked out.
-            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-                .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
-                .join(format!("ai-{}", Uuid::new_v4().simple()));
-            fs::create_dir_all(&path)?;
-            Ok(Self(path))
-        }
-
         fn supports_owner_only_files(&self) -> anyhow::Result<bool> {
             #[cfg(unix)]
             {
@@ -916,12 +907,6 @@ mod tests {
                 .join("identity")
                 .join("authorities")
                 .join(authority_id.to_string())
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
         }
     }
 

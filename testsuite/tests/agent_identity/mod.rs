@@ -314,10 +314,11 @@ async fn conformance() -> anyhow::Result<()> {
     ensure!(!agent_version.is_empty(), "workspace VERSION is empty");
     // The agent refuses a data directory with a directory above it that another account can rename, as a workspace
     // `target` directory's can be, and the system temporary directory's are not.
-    let work_dir = std::env::temp_dir().join("agent-identity-integration");
-    std::fs::create_dir_all(&work_dir)?;
-    let mut first_dir = tempfile::Builder::new().prefix("mock-1-").tempdir_in(&work_dir)?;
-    let second_dir = tempfile::Builder::new().prefix("mock-2-").tempdir_in(&work_dir)?;
+    let mut work_dir = tempfile::Builder::new()
+        .prefix("agent-identity-integration-")
+        .tempdir()?;
+    let mut first_dir = tempfile::Builder::new().prefix("mock-1-").tempdir_in(work_dir.path())?;
+    let second_dir = tempfile::Builder::new().prefix("mock-2-").tempdir_in(work_dir.path())?;
     let first = start_mock(first_dir.path()).await?;
     let second = start_mock(second_dir.path()).await?;
     let stdout_path = first_dir.path().join("runner-stdout.log");
@@ -358,6 +359,7 @@ async fn conformance() -> anyhow::Result<()> {
         // Without it, the `KEPT` paths that the runner printed point to deleted directories.
         // No test fails the runner on purpose, so check by hand with a failing agent test when changing this.
         first_dir.disable_cleanup(true);
+        work_dir.disable_cleanup(true);
         eprintln!(
             "Kept the Agent Identity conformance directory {}",
             first_dir.path().display()
