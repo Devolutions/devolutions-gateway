@@ -6178,6 +6178,8 @@ version = "0.0.0"
 dependencies = [
  "camino",
  "libc",
+ "win-api-wrappers",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -8135,6 +8137,7 @@ dependencies = [
  "network-scanner-proto",
  "nonempty",
  "picky",
+ "private-fs",
  "proxy-socks",
  "quinn",
  "rcgen",
