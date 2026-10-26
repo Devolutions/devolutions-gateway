@@ -312,7 +312,9 @@ async fn conformance() -> anyhow::Result<()> {
     let agent_version = std::fs::read_to_string(project_dir.join("VERSION")).context("read workspace VERSION")?;
     let agent_version = agent_version.trim();
     ensure!(!agent_version.is_empty(), "workspace VERSION is empty");
-    let work_dir = project_dir.join("target").join("agent-identity-integration");
+    // The agent refuses a data directory with a directory above it that another account can rename, as a workspace
+    // `target` directory's can be, and the system temporary directory's are not.
+    let work_dir = std::env::temp_dir().join("agent-identity-integration");
     std::fs::create_dir_all(&work_dir)?;
     let mut first_dir = tempfile::Builder::new().prefix("mock-1-").tempdir_in(&work_dir)?;
     let second_dir = tempfile::Builder::new().prefix("mock-2-").tempdir_in(&work_dir)?;

@@ -80,7 +80,7 @@ pub fn write(data_dir: &Utf8Path, token: &Token, grant_current_user: bool) -> an
     let contents = plaintext;
     #[cfg(windows)]
     if administrator_writer && !grant_current_user {
-        crate::windows::submit_pending_as_administrator(data_dir, &path, &contents)?;
+        private_file::submit_pending_as_administrator(data_dir, &path, &contents)?;
         return Ok(path);
     }
     let _lock = state_lock::acquire(data_dir, grant_current_user)?;
@@ -110,7 +110,7 @@ pub fn list(data_dir: &Utf8Path) -> anyhow::Result<Vec<Utf8PathBuf>> {
     Ok(paths)
 }
 
-fn pending_hash_from_name(name: &str) -> Option<&str> {
+pub(crate) fn pending_hash_from_name(name: &str) -> Option<&str> {
     name.strip_suffix(&format!(".{EXTENSION}"))
         .filter(|hash| valid_hash_hex(hash))
 }
@@ -282,6 +282,16 @@ mod tests {
 
     use super::*;
 
+    /// Creates an empty data directory under the system temporary directory, whose directories above pass the checks
+    /// of the agent's state, which a workspace `target` directory may not.
+    fn test_data_dir() -> anyhow::Result<Utf8PathBuf> {
+        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
+            .join(format!("ai-{}", uuid::Uuid::new_v4().simple()));
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
     #[test]
     fn only_matching_version_one_tokens_can_be_malformed() -> anyhow::Result<()> {
@@ -352,11 +362,7 @@ mod tests {
             URL_SAFE_NO_PAD.encode(r#"{"u":"https://example.test"}"#),
             "A".repeat(43)
         ))?;
-        let dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("pending-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&dir)?;
+        let dir = test_data_dir()?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -396,11 +402,7 @@ mod tests {
             URL_SAFE_NO_PAD.encode(r#"{"u":"https://example.test"}"#),
             "A".repeat(43)
         );
-        let dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("pending-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&dir)?;
+        let dir = test_data_dir()?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt as _;
@@ -460,11 +462,7 @@ mod tests {
             "A".repeat(43)
         );
         let token = Token::parse(&raw)?;
-        let dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("pending-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&dir)?;
+        let dir = test_data_dir()?;
         let hash = hex::encode(Sha256::digest(raw.as_bytes()));
         assert_eq!(
             file_path(&dir, &hash)?,
@@ -529,12 +527,12 @@ mod tests {
                 "files without a protected DACL must not be processed"
             );
             fs::remove_file(&independent)?;
-            crate::windows::assert_pending_protection(&path, true)?;
+            crate::windows::test::assert_pending_protection(&path, true)?;
             let protected_path = independent;
             if crate::windows::is_system()? {
                 assert_eq!(write(&dir, &other, false)?, protected_path);
                 assert_eq!(write(&dir, &other, false)?, protected_path);
-                crate::windows::assert_pending_protection(&protected_path, false)?;
+                crate::windows::test::assert_pending_protection(&protected_path, false)?;
                 fs::remove_file(protected_path)?;
             } else {
                 assert!(write(&dir, &other, false).is_err());
