@@ -229,8 +229,8 @@ async fn serve_channel(mut shutdown_signal: ShutdownSignal) -> anyhow::Result<Ch
     // and a thread that does not stop must end the process, because the agent does not replace a process that is
     // still running.
     // An ended channel is never reopened, so the process exits without depending on the thread.
-    // The thread can block in its synchronous `WriteFile`; when changing the IO thread or its join, check that the
-    // timeout still bounds that wait and that nothing on the runtime still waits for the thread.
+    // The thread waits for its cancelled overlapped IO to finish before it stops; when changing the IO thread or its
+    // join, check that the timeout still bounds that wait and that nothing on the runtime still waits for the thread.
     if let ChannelOutcome::Lost(error) | ChannelOutcome::NotNegotiated(error) = &outcome {
         select! {
             stopped = tokio::time::timeout(IO_THREAD_STOP_TIMEOUT, io_thread_stopped_rx) => {
