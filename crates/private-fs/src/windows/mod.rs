@@ -7,6 +7,7 @@
 mod nt;
 mod security;
 
+use std::cell::Cell;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::marker::PhantomData;
@@ -25,6 +26,7 @@ use windows::Win32::Security::{
     SetKernelObjectSecurity, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_PRIVILEGES,
     TOKEN_QUERY, TokenImpersonation,
 };
+use windows::Win32::Security::{GetTokenInformation, TOKEN_STATISTICS, TokenStatistics};
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_ACCESS_RIGHTS, FILE_ADD_FILE, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
@@ -113,8 +115,9 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
     let descriptor = Descriptor::new(&policy.accounts.user, &policy.dacl(&policy.accounts.user))
         .map_err(|error| Error::io(path, "build security descriptor", error))?;
     let request = Request {
-        // FILE_ADD_FILE lets the new directory's handle be flushed.
-        access: FILE_ACCESS_RIGHTS(DIRECTORY_ACCESS.0 | FILE_ADD_FILE.0),
+        // FILE_ADD_FILE lets the new directory's handle be flushed, and DELETE lets a directory that fails its rule be
+        // removed.
+        access: FILE_ACCESS_RIGHTS(DIRECTORY_ACCESS.0 | FILE_ADD_FILE.0 | DELETE.0),
         share: SHARE_ALL,
         disposition: FILE_CREATE,
         options: NTCREATEFILE_CREATE_OPTIONS(OPEN_OPTIONS.0 | FILE_DIRECTORY_FILE.0),
@@ -123,7 +126,11 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
     };
     match nt::create(parent.handle(), name, &request) {
         Ok(handle) => {
-            check_item(handle.as_handle(), path, Kind::Directory, &policy)?;
+            if let Err(error) = check_item(handle.as_handle(), path, Kind::Directory, &policy) {
+                // A directory that fails its rule, as on a volume that drops DACLs, is not left behind.
+                let _ = nt::delete(handle.as_handle());
+                return Err(error);
+            }
             // UNTESTED: once this returns, a power cut leaves the new directory's entry in its parent.
             // No test can cut the power; NTFS logs the entry's creation, and flushing the new directory commits the
             // log up to it.
@@ -219,7 +226,7 @@ pub(crate) fn create_file(
     let handle = nt::create(parent.handle(), name, &request).map_err(|error| Error::io(path, "create file", error))?;
     if let Err(error) = check_item(handle.as_handle(), path, Kind::File, &policy) {
         // A file that fails its rule, as on a volume that drops DACLs, is not left behind.
-        let _ = nt::delete_on_close(handle.as_handle());
+        let _ = nt::delete(handle.as_handle());
         return Err(error);
     }
     Ok(File::from(handle))
@@ -278,17 +285,20 @@ pub(crate) fn remove_file(parent: &Dir, path: &Utf8Path, name: &str) -> Result<b
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
         Err(error) => return Err(Error::io(path, "open file", error)),
     };
-    nt::delete_on_close(handle.as_handle()).map_err(|error| Error::io(path, "remove file", error))?;
+    nt::delete(handle.as_handle()).map_err(|error| Error::io(path, "remove file", error))?;
     Ok(true)
 }
 
 /// Removes `file`, which this directory's handle created as `name`, through the file's own handle.
 pub(crate) fn discard(_parent: &Dir, path: &Utf8Path, file: &File, _name: &str) -> Result<()> {
-    nt::delete_on_close(file.as_handle()).map_err(|error| Error::io(path, "remove file", error))
+    nt::delete(file.as_handle()).map_err(|error| Error::io(path, "remove file", error))
 }
 
 pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
-    let listed = nt::list(dir.handle()).map_err(|error| Error::io(path, "list directory", error))?;
+    // A handle of its own, so that listings on the same directory at once don't share one enumeration cursor.
+    let listing = reopen(dir.handle(), FILE_ACCESS_RIGHTS(FILE_LIST_DIRECTORY.0 | SYNCHRONIZE.0))
+        .map_err(|error| Error::io(path, "open directory", error))?;
+    let listed = nt::list(listing.as_handle()).map_err(|error| Error::io(path, "list directory", error))?;
     Ok(listed
         .into_iter()
         .map(|(name, attributes)| Entry {
@@ -306,9 +316,15 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
         .collect())
 }
 
-/// Windows has no directory fsync: [`create_dir`] and [`persist`] flush what they change.
-pub(crate) fn sync(_dir: &Dir, _path: &Utf8Path) -> Result<()> {
-    Ok(())
+pub(crate) fn sync(dir: &Dir, path: &Utf8Path) -> Result<()> {
+    // FlushFileBuffers needs write access, which on a directory is FILE_ADD_FILE.
+    let flushing = reopen(dir.handle(), FILE_ACCESS_RIGHTS(FILE_ADD_FILE.0 | SYNCHRONIZE.0))
+        .map_err(|error| Error::io(path, "open directory", error))?;
+    // UNTESTED: once this returns, a power cut leaves the entries created, renamed and removed in the directory.
+    // No test can cut the power; Windows has no directory fsync, but NTFS logs every change of an entry, and flushing a
+    // handle on the directory commits the log up to the last change.
+    // When changing this, keep a flush of a handle on the directory itself.
+    nt::flush(flushing.as_handle()).map_err(|error| Error::io(path, "flush directory", error))
 }
 
 pub(crate) fn check_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
@@ -340,17 +356,8 @@ pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> 
         access |= WRITE_OWNER.0;
         information |= OWNER_SECURITY_INFORMATION;
     }
-    // An empty name relative to a handle opens the object that handle refers to.
-    let request = Request {
-        access: FILE_ACCESS_RIGHTS(access),
-        share: SHARE_ALL,
-        disposition: FILE_OPEN,
-        options: OPEN_OPTIONS,
-        attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
-        descriptor: None,
-    };
-    let reopened =
-        nt::create(dir.handle(), "", &request).map_err(|error| Error::io(path, "open directory for repair", error))?;
+    let reopened = reopen(dir.handle(), FILE_ACCESS_RIGHTS(access))
+        .map_err(|error| Error::io(path, "open directory for repair", error))?;
     let original = nt::file_id(dir.handle()).map_err(|error| Error::io(path, "read file ID", error))?;
     let current = nt::file_id(reopened.as_handle()).map_err(|error| Error::io(path, "read file ID", error))?;
     if original != current {
@@ -378,10 +385,13 @@ pub(crate) fn check_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()
 ///
 /// The current thread impersonates a copy of the process token with the privilege enabled, and goes back to its earlier
 /// token when this is dropped, so it is tied to the thread that enabled it.
+/// A thread holds at most one at a time.
 #[derive(Debug)]
 pub struct BackupPrivilege {
     /// The thread's token before this one, which it impersonates again on drop.
     previous: Option<OwnedHandle>,
+    /// The ID of the token this sets on the thread, so that a drop restores the earlier token only over it.
+    token_id: LUID,
     _token: OwnedHandle,
     /// Impersonation is a property of the thread, so this stays on the thread that created it.
     _thread: PhantomData<*const ()>,
@@ -391,6 +401,14 @@ impl BackupPrivilege {
     pub fn enable() -> Result<Self> {
         let path = Utf8Path::new("");
         let error = |step, error| Error::io(path, step, nt::win32_error(error));
+        // Guards dropped out of order would restore each other's earlier token, so nesting is refused.
+        if BACKUP_PRIVILEGE_HELD.get() {
+            return Err(Error::io(
+                path,
+                "enable backup privilege",
+                io::Error::other("this thread already holds the backup privilege"),
+            ));
+        }
         // SAFETY: Getting the pseudo-handle of the current thread has no preconditions.
         let thread = unsafe { GetCurrentThread() };
         let mut previous = HANDLE::default();
@@ -453,19 +471,72 @@ impl BackupPrivilege {
         if last.raw_os_error() == Some(ERROR_NOT_ALL_ASSIGNED.0.cast_signed()) {
             return Err(Error::io(path, "enable backup privilege", last));
         }
+        let token_id =
+            token_id(token.as_handle()).map_err(|cause| Error::io(path, "read backup token statistics", cause))?;
         // SAFETY: The token is an impersonation token open with TOKEN_IMPERSONATE.
         unsafe { SetThreadToken(None, Some(raw(token.as_handle()))) }
             .map_err(|cause| error("impersonate backup token", cause))?;
+        BACKUP_PRIVILEGE_HELD.set(true);
         Ok(Self {
             previous,
+            token_id,
             _token: token,
             _thread: PhantomData,
         })
     }
 }
 
+thread_local! {
+    /// Whether a `BackupPrivilege` of this thread is alive.
+    static BACKUP_PRIVILEGE_HELD: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Returns the ID of a token, which tells apart two tokens even when they are copies of one.
+fn token_id(token: BorrowedHandle<'_>) -> io::Result<LUID> {
+    let mut statistics = TOKEN_STATISTICS::default();
+    let mut length = 0;
+    // SAFETY: The token is open with TOKEN_QUERY, and the output is a writable TOKEN_STATISTICS of the size passed.
+    unsafe {
+        GetTokenInformation(
+            raw(token),
+            TokenStatistics,
+            Some((&raw mut statistics).cast()),
+            u32::try_from(size_of::<TOKEN_STATISTICS>()).expect("TOKEN_STATISTICS is a few dozen bytes"),
+            &raw mut length,
+        )
+    }
+    .map_err(nt::win32_error)?;
+    Ok(statistics.TokenId)
+}
+
+/// Returns the ID of the token the current thread impersonates, or `None` when it impersonates none.
+fn thread_token_id() -> io::Result<Option<LUID>> {
+    // SAFETY: Getting the pseudo-handle of the current thread has no preconditions.
+    let thread = unsafe { GetCurrentThread() };
+    let mut token = HANDLE::default();
+    // SAFETY: The pseudo-handle of the current thread is always valid and the output is writable.
+    match unsafe { OpenThreadToken(thread, TOKEN_QUERY, true, &raw mut token) } {
+        Ok(()) => {
+            // SAFETY: OpenThreadToken succeeded, so the handle is open and nothing else owns it.
+            let token = unsafe { OwnedHandle::from_raw_handle(token.0) };
+            token_id(token.as_handle()).map(Some)
+        }
+        Err(cause) if cause.code() == ERROR_NO_TOKEN.to_hresult() => Ok(None),
+        Err(cause) => Err(nt::win32_error(cause)),
+    }
+}
+
 impl Drop for BackupPrivilege {
     fn drop(&mut self) {
+        BACKUP_PRIVILEGE_HELD.set(false);
+        // A thread that impersonates another token since is left with it: restoring the earlier token over it would
+        // take away an impersonation this guard didn't set.
+        let current = thread_token_id().ok().flatten();
+        if current.is_none_or(|current| {
+            (current.LowPart, current.HighPart) != (self.token_id.LowPart, self.token_id.HighPart)
+        }) {
+            return;
+        }
         // A failure leaves the thread with the backup privilege, and there is no caller to report it to.
         match &self.previous {
             Some(previous) => {
@@ -497,9 +568,14 @@ fn creation_policy(rule: &Rule, kind: Kind, path: &Utf8Path) -> Result<Policy> {
     Ok(policy)
 }
 
+/// Refuses a name that Win32 path functions would reach as another entry or as no entry at all, so that what
+/// private-fs creates and opens is what other programs see under that name.
 fn validate_name(path: &Utf8Path, name: &str) -> Result<()> {
     // A colon names an alternate data stream of a file, not an entry of the directory.
-    if name.contains(':') {
+    let stream = name.contains(':');
+    // Win32 path functions strip a trailing dot or space.
+    let stripped = name.ends_with(['.', ' ']);
+    if stream || stripped || is_reserved_device_name(name) {
         return Err(Error::io(
             path,
             "use entry name",
@@ -507,6 +583,38 @@ fn validate_name(path: &Utf8Path, name: &str) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// Reports whether Win32 path functions take `name` for a device rather than an entry, with or without an extension.
+fn is_reserved_device_name(name: &str) -> bool {
+    const DEVICES: [&str; 6] = ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
+    const NUMBERED: [&str; 2] = ["COM", "LPT"];
+    const DIGITS: [&str; 13] = [
+        "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "\u{b9}", "\u{b2}", "\u{b3}",
+    ];
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end_matches(' ')
+        .to_ascii_uppercase();
+    DEVICES.contains(&stem.as_str())
+        || NUMBERED
+            .iter()
+            .any(|prefix| stem.strip_prefix(prefix).is_some_and(|digit| DIGITS.contains(&digit)))
+}
+
+/// Opens the object `handle` refers to again, with `access`: an empty name relative to a handle names its object.
+fn reopen(handle: BorrowedHandle<'_>, access: FILE_ACCESS_RIGHTS) -> io::Result<OwnedHandle> {
+    let request = Request {
+        access,
+        share: SHARE_ALL,
+        disposition: FILE_OPEN,
+        options: OPEN_OPTIONS,
+        attributes: FILE_FLAGS_AND_ATTRIBUTES(0),
+        descriptor: None,
+    };
+    nt::create(handle, "", &request)
 }
 
 fn share_mode(share: Share) -> FILE_SHARE_MODE {
@@ -555,9 +663,13 @@ fn open_entry(
 }
 
 /// Refuses an item that is a link, isn't of `kind`, or is on a volume that doesn't enforce ACLs.
+///
+/// A reparse point that stands for another name, such as a symbolic link or a junction, is a link; one that only
+/// changes how its content is stored, such as a cloud placeholder, is not.
 fn classify(handle: BorrowedHandle<'_>, path: &Utf8Path, kind: Kind) -> Result<()> {
-    let attributes = nt::attributes(handle).map_err(|error| Error::io(path, "read attributes", error))?;
-    if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+    let (attributes, tag) =
+        nt::attributes_and_tag(handle).map_err(|error| Error::io(path, "read attributes", error))?;
+    if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 && nt::is_name_surrogate(tag) {
         return Err(Error::refused(path, Refusal::Link));
     }
     let is_directory = attributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0;
@@ -596,10 +708,9 @@ fn first_existing(path: &Utf8Path) -> Result<(Utf8PathBuf, Vec<String>)> {
     loop {
         match std::fs::symlink_metadata(&candidate) {
             Ok(metadata) => {
-                if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
-                    return Err(Error::refused(&candidate, Refusal::Link));
-                }
-                if !metadata.is_dir() {
+                // A reparse point is opened without following it, and refused as a link once its tag is read.
+                let reparse_point = metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0;
+                if !reparse_point && !metadata.is_dir() {
                     return Err(Error::refused(&candidate, Refusal::NotADirectory));
                 }
                 missing.reverse();
@@ -646,9 +757,12 @@ fn open_first_existing(path: &Utf8Path, policy: &Policy) -> Result<Dir> {
 fn check_above(path: &Utf8Path, policy: &Policy) -> Result<()> {
     let unreadable = |error| Error::refused(path, Refusal::Unreadable(error));
     let handle = open_path(path, CHECK_ACCESS).map_err(unreadable)?;
-    let attributes = nt::attributes(handle.as_handle()).map_err(unreadable)?;
+    let (attributes, tag) = nt::attributes_and_tag(handle.as_handle()).map_err(unreadable)?;
     // The path was resolved through every link, so a link on it now was put there since.
-    if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 || attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+    // A volume mounted on a folder is a name surrogate on the resolved path too, and is refused although nobody put it
+    // there since.
+    let link = attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 && nt::is_name_surrogate(tag);
+    if link || attributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
         return Err(Error::refused(path, Refusal::Replaceable));
     }
     let security = OwnerAndDacl::of_handle(handle.as_handle()).map_err(unreadable)?;

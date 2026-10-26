@@ -484,19 +484,29 @@ unsafe fn read_acl(acl: *mut ACL) -> io::Result<Vec<Ace>> {
         );
         let (mask, sid) = if has_sid {
             // These four types share the layout of ACCESS_ALLOWED_ACE: the header, the mask, then the SID.
-            if usize::from(header.AceSize) < offset_of!(ACCESS_ALLOWED_ACE, SidStart) + 8 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "access control entry too short",
-                ));
+            let too_short = || io::Error::new(io::ErrorKind::InvalidData, "access control entry too short");
+            let sid_offset = offset_of!(ACCESS_ALLOWED_ACE, SidStart);
+            let ace_size = usize::from(header.AceSize);
+            if ace_size < sid_offset + 1 /* Revision */ + 1
+            /* SubAuthorityCount */
+            {
+                return Err(too_short());
+            }
+            let count_pointer = pointer.cast::<u8>().wrapping_add(sid_offset + 1 /* Revision */);
+            // SAFETY: The entry is at least as long as the byte read, per its size checked above.
+            let sub_authority_count = usize::from(unsafe { count_pointer.read() });
+            let sid_size = 1 /* Revision */ + 1 /* SubAuthorityCount */ + 6 /* IdentifierAuthority */
+                + 4 /* SubAuthority */ * sub_authority_count;
+            if ace_size < sid_offset + sid_size {
+                return Err(too_short());
             }
             let mask_pointer = pointer.cast::<u8>().wrapping_add(offset_of!(ACCESS_ALLOWED_ACE, Mask));
-            // SAFETY: The entry is at least as long as the fields read, per its size checked above.
+            // SAFETY: The entry is at least as long as the fields read, per its sizes checked above.
             let mask = unsafe { mask_pointer.cast::<u32>().read_unaligned() };
             let sid_start = pointer
                 .cast::<u8>()
                 .wrapping_add(offset_of!(ACCESS_ALLOWED_ACE, SidStart));
-            // SAFETY: The entry holds a SID starting at SidStart, which from_psid validates before copying.
+            // SAFETY: The entry holds a whole SID starting at SidStart, per the size checked above.
             let sid = unsafe { Sid::from_psid(Security::PSID(sid_start.cast())) }.map_err(io::Error::other)?;
             (mask, Some(sid))
         } else {
@@ -524,9 +534,11 @@ pub(super) struct Descriptor {
 impl Descriptor {
     pub(super) fn new(owner: &Sid, entries: &[Entry]) -> io::Result<Self> {
         let too_large = || io::Error::new(io::ErrorKind::InvalidInput, "the access control list is too large");
-        // A SID is 8 bytes of header and 4 bytes per subauthority; an entry is its header and mask, then its SID.
+        // An entry is its header and mask, then its SID.
         let size = entries.iter().try_fold(size_of::<ACL>(), |size, (sid, _, _)| {
-            size.checked_add(offset_of!(ACCESS_ALLOWED_ACE, SidStart) + 8 + 4 * sid.sub_authorities().len())
+            let sid_size = 1 /* Revision */ + 1 /* SubAuthorityCount */ + 6 /* IdentifierAuthority */
+                + 4 /* SubAuthority */ * sid.sub_authorities().len();
+            size.checked_add(offset_of!(ACCESS_ALLOWED_ACE, SidStart) + sid_size)
         });
         // The ACL size is a 16-bit field.
         let size = size.and_then(|size| u16::try_from(size).ok()).ok_or_else(too_large)?;
@@ -755,9 +767,10 @@ mod tests {
         assert_eq!(refusal(checked), "Access");
     }
 
-    // oracle: intent crates/private-fs/INTENT.md §mechanisms
+    // oracle: reference crates/private-fs/src/rule.rs Rule
     #[test]
     fn a_check_refuses_a_deny_entry() {
+        // A rule names only accounts with access, so its DACL is allow entries only, and a deny entry is not one.
         // A check that skipped entries it can't compare would accept any other entry type.
         let security = security("O:{user}D:P(A;;FA;;;SY)(A;;;;;OW)(D;;FA;;;BU)");
         let checked = policy(&system_rule(), Kind::File).check(&security, Utf8Path::new("item"), &no_member);
@@ -782,7 +795,7 @@ mod tests {
 
     // oracle: intent crates/private-fs/INTENT.md §vocabulary
     #[test]
-    fn an_exact_check_refuses_owner_rights_wider_than_the_owner_s_access() {
+    fn a_check_refuses_owner_rights_wider_than_the_owner_s_access() {
         // The rule gives the owner no access, so OWNER RIGHTS must grant nothing; a narrower check also refuses more.
         let security = security("O:{user}D:P(A;;FA;;;SY)(A;;FR;;;OW)");
         let checked = policy(&system_rule(), Kind::File).check(&security, Utf8Path::new("item"), &no_member);
@@ -841,6 +854,46 @@ mod tests {
         let security = security(
             "O:SYD:P(A;;FA;;;SY)(A;;FA;;;S-1-15-3-3557520199-3666692283-3112367039-3524159787-2791857073-3163583606-3692855932)",
         );
+        let checked =
+            policy(&system_rule(), Kind::Directory).check_ancestor(&security, Utf8Path::new("item"), false, &no_member);
+        assert_eq!(refusal(checked), "accepted");
+    }
+
+    // oracle: spec MS-DTYP §2.4.4.6 ACCESS_ALLOWED_CALLBACK_ACE
+    #[test]
+    fn an_ancestor_callback_allow_entry_counts_as_an_allow_entry() {
+        // A callback entry grants its access whenever its condition holds, which the check can't evaluate.
+        let security = security("O:SYD:P(A;;FA;;;SY)(XA;;FA;;;BU;(Member_of {SID(BA)}))");
+        let checked =
+            policy(&system_rule(), Kind::Directory).check_ancestor(&security, Utf8Path::new("item"), false, &no_member);
+        assert_eq!(refusal(checked), "Replaceable");
+    }
+
+    // oracle: intent crates/private-fs/INTENT.md §paths
+    #[test]
+    fn an_ancestor_entry_of_an_unknown_type_is_unreadable() {
+        // An object entry, which file systems don't use, has a layout the check doesn't read.
+        let security = security("O:SYD:P(A;;FA;;;SY)(OA;;FA;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)");
+        let checked =
+            policy(&system_rule(), Kind::Directory).check_ancestor(&security, Utf8Path::new("item"), false, &no_member);
+        assert!(refusal(checked).starts_with("Unreadable"));
+    }
+
+    // oracle: spec MS-DTYP §2.4.2.4 Well-Known SID Structures
+    #[test]
+    fn an_ancestor_owner_rights_entry_is_the_allowed_owner_s() {
+        // OWNER RIGHTS stands for the owner, which the check has already allowed.
+        let security = security("O:SYD:P(A;;FA;;;SY)(A;;FA;;;OW)");
+        let checked =
+            policy(&system_rule(), Kind::Directory).check_ancestor(&security, Utf8Path::new("item"), false, &no_member);
+        assert_eq!(refusal(checked), "accepted");
+    }
+
+    // oracle: spec Microsoft Learn "AppContainer isolation"
+    #[test]
+    fn an_ancestor_entry_for_all_application_packages_is_ignored() {
+        // ALL APPLICATION PACKAGES, S-1-15-2-1, a package SID.
+        let security = security("O:SYD:P(A;;FA;;;SY)(A;;FA;;;AC)");
         let checked =
             policy(&system_rule(), Kind::Directory).check_ancestor(&security, Utf8Path::new("item"), false, &no_member);
         assert_eq!(refusal(checked), "accepted");

@@ -6,6 +6,7 @@
 use std::io::{Read as _, Write as _};
 use std::os::windows::fs::OpenOptionsExt as _;
 use std::os::windows::io::AsRawHandle as _;
+use std::process::{Command, Stdio};
 
 use anyhow::Context as _;
 use camino::{Utf8Path, Utf8PathBuf};
@@ -13,13 +14,16 @@ use private_fs::{
     Access, Account, BackupPrivilege, Dir, EntryKind, Error, ErrorKind, Existing, Fallback, FileOptions, Refusal,
     Replace, Rule, Share,
 };
+use rstest::rstest;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
-use win_api_wrappers::raw::Win32::Foundation::HANDLE;
-use win_api_wrappers::raw::Win32::Security::Authorization::{GRANT_ACCESS, SE_FILE_OBJECT};
+use win_api_wrappers::raw::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
+use win_api_wrappers::raw::Win32::Security::Authorization::{
+    ConvertSecurityDescriptorToStringSecurityDescriptorW, GRANT_ACCESS, SDDL_REVISION_1, SE_FILE_OBJECT,
+};
 use win_api_wrappers::raw::Win32::Security::{
-    self, ACE_FLAGS, SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE, TOKEN_IMPERSONATE, TOKEN_QUERY,
-    TokenImpersonation,
+    self, ACE_FLAGS, DACL_SECURITY_INFORMATION, SecurityImpersonation, TOKEN_ADJUST_PRIVILEGES, TOKEN_DUPLICATE,
+    TOKEN_IMPERSONATE, TOKEN_QUERY, TokenImpersonation,
 };
 use win_api_wrappers::raw::Win32::Storage::FileSystem::{FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT};
 use win_api_wrappers::security::acl::{
@@ -29,6 +33,7 @@ use win_api_wrappers::security::descriptor::SecurityDescriptor;
 use win_api_wrappers::security::privilege::SE_RESTORE_NAME;
 use win_api_wrappers::str::U16CString;
 use win_api_wrappers::token::Token;
+use windows::core::PWSTR;
 
 /// Full access: `STANDARD_RIGHTS_REQUIRED | SYNCHRONIZE | 0x1FF`, the value of `FILE_ALL_ACCESS`.
 const FULL: u32 = 0x001F_01FF;
@@ -106,16 +111,24 @@ fn user_rule() -> Rule {
 /// An allow entry: its SID, access mask and ACE flags.
 type AllowEntry = (Sid, u32, u32);
 
-/// Reads the owner and the DACL entries of `path`, sorted, failing unless the DACL is protected and allow-only.
-fn security(path: &Utf8Path) -> anyhow::Result<(Sid, Vec<AllowEntry>)> {
-    // The backup privilege, where the process token holds it, reads a DACL that gives the test's own token no access.
-    let _backup = BackupPrivilege::enable().ok();
-    let file = std::fs::OpenOptions::new()
+/// Opens `path` to read its owner and DACL, without following a reparse point.
+fn open_for_security(path: &Utf8Path) -> anyhow::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
         .access_mode(0x0002_0000) // READ_CONTROL
         .share_mode(0x7)
         .custom_flags((FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT).0)
         .open(path)
-        .with_context(|| format!("open {path} to read its security"))?;
+        .with_context(|| format!("open {path} to read its security"))
+}
+
+/// Reads the owner and the DACL entries of `path`, sorted, failing unless the DACL is protected and allow-only.
+fn security(path: &Utf8Path) -> anyhow::Result<(Sid, Vec<AllowEntry>)> {
+    security_of(&open_for_security(path)?)
+}
+
+/// Reads the owner and the DACL entries of an open file or directory, sorted, failing unless the DACL is protected and
+/// allow-only.
+fn security_of(file: &std::fs::File) -> anyhow::Result<(Sid, Vec<AllowEntry>)> {
     let descriptor = SecurityDescriptor::of_handle(HANDLE(file.as_raw_handle()), SE_FILE_OBJECT)?;
     let owner = descriptor.owner()?.context("no owner")?;
     let mut entries: Vec<_> = descriptor
@@ -125,6 +138,38 @@ fn security(path: &Utf8Path) -> anyhow::Result<(Sid, Vec<AllowEntry>)> {
         .collect();
     entries.sort();
     Ok((owner, entries))
+}
+
+/// Returns the whole DACL of `path` in SDDL, protected or not, inherited entries included.
+fn dacl_sddl(path: &Utf8Path) -> anyhow::Result<String> {
+    let file = open_for_security(path)?;
+    let descriptor = SecurityDescriptor::of_handle(HANDLE(file.as_raw_handle()), SE_FILE_OBJECT)?;
+    let mut sddl = PWSTR::null();
+    // SAFETY: The descriptor stays live through the call and the output is writable.
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor.as_raw(),
+            SDDL_REVISION_1,
+            DACL_SECURITY_INFORMATION,
+            &mut sddl,
+            None,
+        )
+    }?;
+    // SAFETY: The conversion returned a NUL-terminated string.
+    let text = unsafe { sddl.to_string() };
+    // SAFETY: The conversion allocated the string with LocalAlloc, and nothing uses it any more.
+    unsafe { LocalFree(Some(HLOCAL(sddl.0.cast()))) };
+    Ok(text?)
+}
+
+/// Makes `link` a directory junction to `target`, which, unlike a symbolic link, needs no privilege.
+fn junction(target: &Utf8Path, link: &Utf8Path) -> anyhow::Result<()> {
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J", link.as_str(), target.as_str()])
+        .stdout(Stdio::null())
+        .status()?;
+    anyhow::ensure!(status.success(), "mklink /J exited with {status}");
+    Ok(())
 }
 
 fn sorted(mut entries: Vec<AllowEntry>) -> Vec<AllowEntry> {
@@ -226,24 +271,21 @@ fn create_base_gives_each_new_directory_exactly_its_rule() -> anyhow::Result<()>
 fn a_created_file_takes_its_owner_s_implicit_access_away() -> anyhow::Result<()> {
     // Catches a file whose owner keeps the READ_CONTROL and WRITE_DAC that Windows gives an owner without an OWNER
     // RIGHTS entry, through which the owner can grant itself anything.
-    if let Err(error) = BackupPrivilege::enable() {
-        println!("SKIP: reading a DACL that grants the test nothing needs the backup privilege: {error}");
-        return Ok(());
-    }
     let test = TestDir::new();
     let base = Dir::create_base(test.path(), &user_rule())?;
     let rule = Rule::new()
         .owner(Account::CurrentUser)
         .grant(Account::System, Access::Full);
-    drop(base.create_file("file", &rule, FileOptions::new())?);
+    // The creating handle has READ_CONTROL whatever the DACL grants.
+    let file = base.create_file("file", &rule, FileOptions::new())?;
     assert_eq!(
-        security(&test.path().join("file"))?,
+        security_of(&file)?,
         (user(), sorted(vec![(system(), FULL, 0), (owner_rights(), 0, 0)]))
     );
     Ok(())
 }
 
-// oracle: spec Microsoft Learn "Privilege Constants" SE_BACKUP_NAME
+// oracle: spec Microsoft Learn "Privilege Constants" §SE_BACKUP_NAME
 #[test]
 fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
     // Catches a backup privilege that is not enabled on the thread, or opens that don't ask for backup intent.
@@ -379,14 +421,10 @@ fn a_repair_restores_the_rule_without_changing_what_lies_below() -> anyhow::Resu
     let base = Dir::create_base(test.path(), &user_rule())?;
     let child = base.create_dir("child", &user_rule(), Existing::Check)?;
     drop(child.create_file("file", &user_rule(), FileOptions::new())?);
-    let file = test.path().join("child").join("file");
-    set_dacl(
-        &file,
-        &[(user(), FULL, 0), (users(), READ, 0)],
-        InheritableAclKind::Protected,
-    )?;
-    let file_before = security(&file)?;
     drop(child);
+    let file = test.path().join("child").join("file");
+    // The file takes inherited entries from the directory, which a propagating repair would rewrite.
+    set_dacl(&file, &[(user(), FULL, 0)], InheritableAclKind::Inherit)?;
     set_dacl(
         &test.path().join("child"),
         &[
@@ -395,13 +433,15 @@ fn a_repair_restores_the_rule_without_changing_what_lies_below() -> anyhow::Resu
         ],
         InheritableAclKind::Protected,
     )?;
+    let file_before = dacl_sddl(&file)?;
+    assert!(file_before.contains("(A;ID;FA;;;BU)"), "{file_before}");
     let rule = user_rule().exact();
     drop(base.create_dir("child", &rule, Existing::Repair)?);
     assert_eq!(
         security(&test.path().join("child"))?,
         (user(), vec![(user(), FULL, INHERITED_BY_CHILDREN)])
     );
-    assert_eq!(security(&file)?, file_before);
+    assert_eq!(dacl_sddl(&file)?, file_before);
     Ok(())
 }
 
@@ -448,15 +488,12 @@ fn administrators_as_an_owner_allow_a_member_of_the_group() -> anyhow::Result<()
 
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
-fn open_dir_refuses_a_symbolic_link() -> anyhow::Result<()> {
+fn open_dir_refuses_a_junction() -> anyhow::Result<()> {
     // Catches an open that follows a link out of the checked directory.
     let test = TestDir::new();
     let base = Dir::create_base(test.path(), &user_rule())?;
     drop(base.create_dir("target", &user_rule(), Existing::Check)?);
-    if let Err(error) = std::os::windows::fs::symlink_dir(test.path().join("target"), test.path().join("link")) {
-        println!("SKIP: cannot create a symbolic link: {error}");
-        return Ok(());
-    }
+    junction(&test.path().join("target"), &test.path().join("link"))?;
     let error = refusal(base.open_dir("link", &user_rule(), Share::Shared));
     assert!(
         is_refused(&error, |refusal| matches!(refusal, Refusal::Link)),
@@ -471,10 +508,7 @@ fn create_base_refuses_a_link_as_the_first_existing_directory() -> anyhow::Resul
     // Catches a base directory resolved through a link that someone else can point elsewhere.
     let test = TestDir::new();
     Dir::create_base(&test.path().join("target"), &user_rule())?;
-    if let Err(error) = std::os::windows::fs::symlink_dir(test.path().join("target"), test.path().join("link")) {
-        println!("SKIP: cannot create a symbolic link: {error}");
-        return Ok(());
-    }
+    junction(&test.path().join("target"), &test.path().join("link"))?;
     let error = refusal(Dir::create_base(&test.path().join("link").join("new"), &user_rule()));
     assert!(
         is_refused(&error, |refusal| matches!(refusal, Refusal::Link)),
@@ -614,13 +648,12 @@ fn entries_lists_each_entry_with_its_kind() -> anyhow::Result<()> {
     let base = Dir::create_base(test.path(), &user_rule())?;
     drop(base.create_file("file", &user_rule(), FileOptions::new())?);
     drop(base.create_dir("directory", &user_rule(), Existing::Check)?);
-    let mut expected = vec![
+    junction(&test.path().join("directory"), &test.path().join("link"))?;
+    let expected = vec![
         ("directory".to_owned(), EntryKind::Directory),
         ("file".to_owned(), EntryKind::File),
+        ("link".to_owned(), EntryKind::Link),
     ];
-    if std::os::windows::fs::symlink_dir(test.path().join("directory"), test.path().join("link")).is_ok() {
-        expected.push(("link".to_owned(), EntryKind::Link));
-    }
     // The second listing checks that each listing starts from the first entry.
     for _ in 0..2 {
         let mut entries: Vec<_> = base
@@ -662,17 +695,75 @@ fn an_exclusive_open_makes_another_open_fail_with_a_sharing_violation() -> anyho
     Ok(())
 }
 
+#[rstest]
 // oracle: spec MS-FSCC §2.1.5 Pathname
-#[test]
-fn a_name_with_a_stream_separator_is_refused() -> anyhow::Result<()> {
-    // Catches a name that opens an alternate data stream of another entry, which has that entry's access.
+#[case::stream("file:stream")]
+// oracle: spec Microsoft Learn "Naming Files, Paths, and Namespaces" §Naming Conventions
+#[case::trailing_dot("file.")]
+// oracle: spec Microsoft Learn "Naming Files, Paths, and Namespaces" §Naming Conventions
+#[case::trailing_space("file ")]
+// oracle: spec Microsoft Learn "Naming Files, Paths, and Namespaces" §Naming Conventions
+#[case::device("nul")]
+// oracle: spec Microsoft Learn "Naming Files, Paths, and Namespaces" §Naming Conventions
+#[case::device_with_extension("COM1.txt")]
+fn a_name_win32_paths_reach_differently_is_refused(#[case] name: &str) -> anyhow::Result<()> {
+    // Catches an entry that Win32 path functions reach as another entry, a stream of one, or a device.
     let test = TestDir::new();
     let base = Dir::create_base(test.path(), &user_rule())?;
-    let error = refusal(base.create_file("file:stream", &user_rule(), FileOptions::new()));
+    let error = refusal(base.create_file(name, &user_rule(), FileOptions::new()));
     assert!(
         matches!(error.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::InvalidInput),
         "{error:?}"
     );
-    assert!(!test.path().join("file").exists());
+    assert!(base.entries()?.is_empty());
+    Ok(())
+}
+
+// oracle: reference crates/private-fs/src/unix.rs rename
+#[test]
+fn persist_replaces_a_destination_another_process_holds_open() -> anyhow::Result<()> {
+    // Catches a replacement that fails while a reader, sharing deletion as std does, holds the destination open.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    base.create_file("old", &user_rule(), FileOptions::new())?
+        .write_all(b"old")?;
+    let reader = std::fs::File::open(test.path().join("old"))?;
+    let mut new = base.create_file("new", &user_rule(), FileOptions::new())?;
+    new.write_all(b"new")?;
+    base.persist(&new, "new", "old", Replace::Allow)?;
+    drop((new, reader));
+    assert_eq!(std::fs::read(test.path().join("old"))?, b"new");
+    Ok(())
+}
+
+// oracle: reference crates/private-fs/src/unix.rs remove_file
+#[test]
+fn removing_a_file_another_process_holds_open_frees_its_name() -> anyhow::Result<()> {
+    // Catches a removal that leaves the name pending deletion until the reader closes it, so that creating it again
+    // fails.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    drop(base.create_file("file", &user_rule(), FileOptions::new())?);
+    let reader = std::fs::File::open(test.path().join("file"))?;
+    assert!(base.remove_file("file")?);
+    drop(base.create_file("file", &user_rule(), FileOptions::new())?);
+    drop(reader);
+    Ok(())
+}
+
+// oracle: reference crates/private-fs/src/windows/mod.rs BackupPrivilege
+#[test]
+fn a_thread_holds_one_backup_privilege_at_a_time() -> anyhow::Result<()> {
+    // Catches nested guards, whose drops out of order would leave the thread with the privilege.
+    let first = match BackupPrivilege::enable() {
+        Ok(first) => first,
+        Err(error) => {
+            println!("SKIP: the process token doesn't hold the backup privilege: {error}");
+            return Ok(());
+        }
+    };
+    assert!(BackupPrivilege::enable().is_err());
+    drop(first);
+    drop(BackupPrivilege::enable()?);
     Ok(())
 }

@@ -9,19 +9,22 @@ use std::os::windows::io::{AsRawHandle as _, BorrowedHandle, FromRawHandle as _,
 
 use windows::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows::Wdk::Storage::FileSystem::{
-    FILE_RENAME_INFORMATION, FileRenameInformation, NTCREATEFILE_CREATE_DISPOSITION, NTCREATEFILE_CREATE_OPTIONS,
-    NtCreateFile, NtSetInformationFile,
+    FILE_DISPOSITION_DELETE, FILE_DISPOSITION_POSIX_SEMANTICS, FILE_INFORMATION_CLASS, FILE_RENAME_INFORMATION,
+    FILE_RENAME_POSIX_SEMANTICS, FILE_RENAME_REPLACE_IF_EXISTS, FileDispositionInformation,
+    FileDispositionInformationEx, FileRenameInformation, FileRenameInformationEx, NTCREATEFILE_CREATE_DISPOSITION,
+    NTCREATEFILE_CREATE_OPTIONS, NtCreateFile, NtSetInformationFile,
 };
 use windows::Win32::Foundation::{
-    ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, UNICODE_STRING,
+    ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_INFO_CLASS,
+    STATUS_INVALID_PARAMETER, STATUS_NOT_SUPPORTED, UNICODE_STRING,
 };
 use windows::Win32::Security::SECURITY_DESCRIPTOR;
 use windows::Win32::Storage::FileSystem::{
-    FILE_ACCESS_RIGHTS, FILE_BASIC_INFO, FILE_DISPOSITION_INFO, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_BOTH_DIR_INFO,
-    FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_NAME_NORMALIZED, FILE_SHARE_MODE, FILE_STANDARD_INFO, FileBasicInfo,
-    FileDispositionInfo, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo,
-    FlushFileBuffers, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
-    GetVolumeInformationByHandleW, SetFileInformationByHandle, VOLUME_NAME_DOS,
+    FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO,
+    FILE_INFO_BY_HANDLE_CLASS, FILE_NAME_NORMALIZED, FILE_SHARE_MODE, FILE_STANDARD_INFO, FileAttributeTagInfo,
+    FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, FlushFileBuffers,
+    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+    GetVolumeInformationByHandleW, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
@@ -130,9 +133,19 @@ fn information<T: Default>(handle: BorrowedHandle<'_>, class: FILE_INFO_BY_HANDL
     Ok(info)
 }
 
-/// Returns the file attributes, such as `FILE_ATTRIBUTE_DIRECTORY` and `FILE_ATTRIBUTE_REPARSE_POINT`.
-pub(super) fn attributes(handle: BorrowedHandle<'_>) -> io::Result<u32> {
-    Ok(information::<FILE_BASIC_INFO>(handle, FileBasicInfo)?.FileAttributes)
+/// Returns the file attributes, such as `FILE_ATTRIBUTE_DIRECTORY` and `FILE_ATTRIBUTE_REPARSE_POINT`, and the reparse
+/// tag, which is meaningful only with `FILE_ATTRIBUTE_REPARSE_POINT`.
+pub(super) fn attributes_and_tag(handle: BorrowedHandle<'_>) -> io::Result<(u32, u32)> {
+    let info = information::<FILE_ATTRIBUTE_TAG_INFO>(handle, FileAttributeTagInfo)?;
+    Ok((info.FileAttributes, info.ReparseTag))
+}
+
+/// Reports whether a reparse tag makes its file or directory stand for another name, as symbolic links, junctions and
+/// volume mount points do, rather than only change how its content is stored, as cloud placeholders and deduplicated
+/// files do.
+pub(super) fn is_name_surrogate(tag: u32) -> bool {
+    // IsReparseTagNameSurrogate: the name surrogate bit of a reparse tag.
+    tag & 0x2000_0000 != 0
 }
 
 pub(super) fn link_count(handle: BorrowedHandle<'_>) -> io::Result<u32> {
@@ -191,6 +204,8 @@ pub(super) fn flush(handle: BorrowedHandle<'_>) -> io::Result<()> {
 
 /// Renames the file or directory `handle` refers to, to the entry `name` of the directory `root`.
 ///
+/// With POSIX semantics, a replaced destination that another process holds open, sharing deletion, doesn't make the
+/// rename fail.
 /// The handle needs `DELETE` access.
 pub(super) fn rename(
     handle: BorrowedHandle<'_>,
@@ -198,16 +213,46 @@ pub(super) fn rename(
     name: &str,
     replace: bool,
 ) -> io::Result<()> {
+    let mut flags = FILE_RENAME_POSIX_SEMANTICS;
+    if replace {
+        flags |= FILE_RENAME_REPLACE_IF_EXISTS;
+    }
+    let mut status = set_rename(handle, root, name, flags, FileRenameInformationEx)?;
+    if needs_legacy_class(status) {
+        // The legacy class reads ReplaceIfExists, a BOOLEAN, from the first byte of the same field.
+        status = set_rename(handle, root, name, u32::from(replace), FileRenameInformation)?;
+    }
+    if status.0 < 0 {
+        return Err(status_error(status));
+    }
+    Ok(())
+}
+
+/// Reports whether a failure of an extended information class means the file system knows only the legacy class, as
+/// before Windows 10 1709 or on FAT.
+fn needs_legacy_class(status: NTSTATUS) -> bool {
+    [
+        STATUS_INVALID_PARAMETER,
+        STATUS_NOT_SUPPORTED,
+        STATUS_INVALID_INFO_CLASS,
+    ]
+    .contains(&status)
+}
+
+fn set_rename(
+    handle: BorrowedHandle<'_>,
+    root: BorrowedHandle<'_>,
+    name: &str,
+    flags: u32,
+    class: FILE_INFORMATION_CLASS,
+) -> io::Result<NTSTATUS> {
+    let invalid_name = || io::Error::from(io::ErrorKind::InvalidFilename);
     let wide: Vec<u16> = name.encode_utf16().collect();
-    let name_bytes = wide
-        .len()
-        .checked_mul(size_of::<u16>())
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidFilename))?;
+    let name_bytes = wide.len().checked_mul(size_of::<u16>()).ok_or_else(invalid_name)?;
     let name_offset = offset_of!(FILE_RENAME_INFORMATION, FileName);
     let size = size_of::<FILE_RENAME_INFORMATION>()
         .checked_add(name_bytes)
-        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidFilename))?;
-    let invalid_name = || io::Error::from(io::ErrorKind::InvalidFilename);
+        .ok_or_else(invalid_name)?;
     // A u64 buffer is aligned for FILE_RENAME_INFORMATION, whose largest field is a handle.
     let mut buffer = vec![0u64; size.div_ceil(size_of::<u64>())];
     {
@@ -217,8 +262,7 @@ pub(super) fn rename(
             std::slice::from_raw_parts_mut(buffer.as_mut_ptr().cast::<u8>(), buffer.len() * size_of::<u64>())
         };
         let mut put = |offset: usize, value: &[u8]| bytes[offset..][..value.len()].copy_from_slice(value);
-        // ReplaceIfExists is a BOOLEAN at the start of the union.
-        put(offset_of!(FILE_RENAME_INFORMATION, Anonymous), &[u8::from(replace)]);
+        put(offset_of!(FILE_RENAME_INFORMATION, Anonymous), &flags.to_le_bytes());
         put(
             offset_of!(FILE_RENAME_INFORMATION, RootDirectory),
             &raw(root).0.addr().to_ne_bytes(),
@@ -231,43 +275,64 @@ pub(super) fn rename(
             put(name_offset + index * size_of::<u16>(), &unit.to_ne_bytes());
         }
     }
-    let mut status_block = IO_STATUS_BLOCK::default();
+    let size = u32::try_from(size).map_err(|_| invalid_name())?;
     // NtSetInformationFile takes the name relative to RootDirectory, which SetFileInformationByHandle refuses.
-    // SAFETY: The handle is open, the rename structure, with its root handle and name, stays live for the call, and the
-    // status block is writable.
-    let status = unsafe {
-        NtSetInformationFile(
-            raw(handle),
-            &raw mut status_block,
-            buffer.as_ptr().cast(),
-            u32::try_from(size).map_err(|_| invalid_name())?,
-            FileRenameInformation,
+    // SAFETY: The rename structure, with its root handle and name, stays live for the call and is `size` bytes long.
+    Ok(unsafe { set_information(handle, buffer.as_ptr().cast(), size, class) })
+}
+
+/// Deletes the file `handle` refers to.
+///
+/// With POSIX semantics its name goes at once, even while other handles to it stay open, so the name can be created
+/// again; with the legacy semantics of older systems and FAT, it goes once every handle to it is closed.
+/// The handle needs `DELETE` access.
+pub(super) fn delete(handle: BorrowedHandle<'_>) -> io::Result<()> {
+    let flags = FILE_DISPOSITION_DELETE.0 | FILE_DISPOSITION_POSIX_SEMANTICS.0;
+    // SAFETY: The flags, a FILE_DISPOSITION_INFORMATION_EX, stay live for the call.
+    let mut status = unsafe {
+        set_information(
+            handle,
+            (&raw const flags).cast(),
+            4, /* Flags */
+            FileDispositionInformationEx,
         )
     };
+    if needs_legacy_class(status) {
+        let delete_file = 1u8;
+        // SAFETY: The BOOLEAN DeleteFile, a FILE_DISPOSITION_INFORMATION, stays live for the call.
+        status = unsafe {
+            set_information(
+                handle,
+                (&raw const delete_file).cast(),
+                1, /* DeleteFile */
+                FileDispositionInformation,
+            )
+        };
+    }
     if status.0 < 0 {
         return Err(status_error(status));
     }
     Ok(())
 }
 
-/// Marks the file `handle` refers to for deletion once every handle to it is closed.
+/// # Safety
 ///
-/// The handle needs `DELETE` access.
-pub(super) fn delete_on_close(handle: BorrowedHandle<'_>) -> io::Result<()> {
-    let info = FILE_DISPOSITION_INFO { DeleteFile: true };
-    // SAFETY: The handle is open and the disposition structure stays live for the call.
-    unsafe {
-        SetFileInformationByHandle(
-            raw(handle),
-            FileDispositionInfo,
-            (&raw const info).cast(),
-            u32::try_from(size_of::<FILE_DISPOSITION_INFO>()).expect("FILE_DISPOSITION_INFO is one byte"),
-        )
-    }
-    .map_err(win32_error)
+/// `information` points to `length` bytes, live for the call, holding the structure `class` takes.
+unsafe fn set_information(
+    handle: BorrowedHandle<'_>,
+    information: *const core::ffi::c_void,
+    length: u32,
+    class: FILE_INFORMATION_CLASS,
+) -> NTSTATUS {
+    let mut status_block = IO_STATUS_BLOCK::default();
+    // SAFETY: The handle is open, the status block is writable, and per the function's contract the information is
+    // valid for the call.
+    unsafe { NtSetInformationFile(raw(handle), &raw mut status_block, information, length, class) }
 }
 
 /// Lists the entries of the directory `handle` refers to, with their file attributes, without `.` and `..`.
+///
+/// The listing moves the handle's enumeration cursor, so callers pass a handle that nothing else lists through.
 pub(super) fn list(handle: BorrowedHandle<'_>) -> io::Result<Vec<(OsString, u32)>> {
     // A u64 buffer is aligned for FILE_ID_BOTH_DIR_INFO, whose largest fields are 64-bit.
     let mut buffer = vec![0u64; 8 * 1024];
