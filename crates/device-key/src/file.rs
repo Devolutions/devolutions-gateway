@@ -242,20 +242,15 @@ fn cleanup_abandoned(dir: &Dir) -> anyhow::Result<()> {
         let Some(name) = abandoned_name(file_name) else {
             continue;
         };
-        // `crates/device-key/INTENT.md` ("Operations"): a leftover that can't be removed, as while another process
-        // holds it open, is an unexpected entry, which an operation skips; a later operation removes it.
-        // UNTESTED: on Linux and macOS, a leftover that can't be removed is skipped too.
-        // Only root can make an entry of the caller's own key directory unremovable, for example with an immutable
-        // attribute; when changing this, keep a failed removal from failing the operation on every platform.
+        // `crates/device-key/INTENT.md` ("Operations"): a leftover's name follows the crate's scheme, so it counts as the
+        // crate's own, and no leftover copy of a private key survives a later operation: one that can't be removed, as
+        // while another process holds it open, fails the operation, listing included.
         let file_name = if file_name.ends_with(".tmp") {
-            match retire(dir, file_name, name) {
-                Ok(file_name) => file_name,
-                Err(_) => continue,
-            }
+            retire(dir, file_name, name).context("retire abandoned key file")?
         } else {
             file_name.to_owned()
         };
-        let _ = dir.remove_file(&file_name);
+        dir.remove_file(&file_name).context("remove abandoned key file")?;
     }
     Ok(())
 }
@@ -810,7 +805,7 @@ mod tests {
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[cfg(windows)]
     #[test]
-    fn a_leftover_another_process_holds_open_is_skipped_by_listing() -> anyhow::Result<()> {
+    fn a_leftover_another_process_holds_open_fails_listing_until_it_is_released() -> anyhow::Result<()> {
         use std::os::windows::fs::OpenOptionsExt as _;
 
         let directory = KeyDirectory::new()?;
@@ -818,15 +813,19 @@ mod tests {
         let name = new_key_name(TEST_PREFIX);
         generate(&backend, &name)?;
         let leftover = create_leftover(&directory)?;
-        // A handle that shares nothing makes the cleanup's rename of the leftover fail.
+        // A handle that shares nothing makes the cleanup's rename of the leftover fail at once rather than wait.
         let held = fs::OpenOptions::new().read(true).share_mode(0).open(&leftover)?;
 
+        let started = Instant::now();
         let listed = list(&backend, TEST_PREFIX);
+        let elapsed = started.elapsed();
         drop(held);
 
-        assert_eq!(listed?, [name]);
+        assert!(listed.is_err(), "{listed:?}");
+        // Failing promptly means not waiting out a lock's time-out either.
+        assert!(elapsed < LOCK_TIMEOUT, "{elapsed:?}");
         assert!(leftover.exists());
-        assert!(list(&backend, TEST_PREFIX).is_ok());
+        assert_eq!(list(&backend, TEST_PREFIX)?, [name]);
         assert!(!leftover.exists());
         Ok(())
     }
