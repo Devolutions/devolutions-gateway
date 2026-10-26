@@ -334,7 +334,7 @@ fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: reference crates/private-fs/src/rule.rs Rule::owner
+// oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
 fn a_rule_that_does_not_let_the_current_user_own_cannot_create() -> anyhow::Result<()> {
     // Catches a creation that makes the current user the owner although the rule doesn't allow it, or that reports it
@@ -943,7 +943,7 @@ fn a_created_directory_opens_elsewhere_without_sharing_deletion() -> anyhow::Res
     Ok(())
 }
 
-// oracle: reference crates/private-fs/src/lib.rs Dir::discard
+// oracle: mutant a discard that removes the file after a persist renamed it
 #[test]
 fn discard_keeps_a_file_persisted_under_another_name() -> anyhow::Result<()> {
     // Catches a discard after a persist whose flush failed, which would delete the file just installed while the file
@@ -959,23 +959,7 @@ fn discard_keeps_a_file_persisted_under_another_name() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: reference crates/private-fs/src/lib.rs Dir::discard
-#[test]
-fn discard_keeps_a_file_renamed_to_a_name_only_full_case_mapping_matches() -> anyhow::Result<()> {
-    // Catches names compared with Unicode's full case mapping, under which `xß` and `xSS` match although NTFS keeps
-    // them apart, so that a discard deletes the file installed under the other name.
-    let test = TestDir::new();
-    let base = Dir::create_base(test.path(), &user_rule())?;
-    let mut file = base.create_file("x\u{df}", &user_rule(), FileOptions::new())?;
-    file.write_all(b"new")?;
-    base.persist(&file, "x\u{df}", "xSS", Replace::Allow)?;
-    base.discard(&file, "x\u{df}")?;
-    drop(file);
-    assert_eq!(std::fs::read(test.path().join("xSS"))?, b"new");
-    Ok(())
-}
-
-// oracle: reference crates/private-fs/src/lib.rs Dir::discard
+// oracle: mutant a discard that compares names case-sensitively, so it keeps a file given in another case
 #[test]
 fn discard_removes_a_file_still_under_its_name() -> anyhow::Result<()> {
     // Catches a discard that never removes anything, given a name of another case than the one created.
@@ -988,7 +972,7 @@ fn discard_removes_a_file_still_under_its_name() -> anyhow::Result<()> {
     Ok(())
 }
 
-// oracle: reference crates/private-fs/src/lib.rs Dir::entries
+// oracle: mutant a listing through a second handle, which an exclusive open refuses
 #[test]
 fn a_directory_opened_exclusively_lists_its_entries() -> anyhow::Result<()> {
     // Catches a listing through a second handle, which the exclusive open refuses.

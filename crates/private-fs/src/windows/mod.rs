@@ -976,7 +976,7 @@ mod tests {
     }
 
     // oracle: spec MS-FSCC §2.1.2.1 Reparse Tags
-    // oracle: reference crates/private-fs/src/error.rs Refusal
+    // oracle: intent crates/private-fs/INTENT.md §paths
     #[test]
     fn a_name_surrogate_item_is_a_link() {
         for tag in [SYMLINK, MOUNT_POINT] {
@@ -988,7 +988,7 @@ mod tests {
     }
 
     // oracle: spec MS-FSCC §2.1.2.1 Reparse Tags
-    // oracle: reference crates/private-fs/src/error.rs Refusal
+    // oracle: intent crates/private-fs/INTENT.md §mechanisms
     #[test]
     fn any_other_reparse_point_item_is_not_a_file() {
         // Opened without following the reparse point, a stub's content is not the file's, and a FIFO is not a file.
@@ -1001,7 +1001,6 @@ mod tests {
     }
 
     // oracle: spec MS-FSCC §2.1.2.1 Reparse Tags
-    // oracle: reference crates/private-fs/src/lib.rs EntryKind
     #[test]
     fn a_listed_reparse_point_is_a_link_only_when_it_stands_for_another_name() {
         assert_eq!(entry_kind(REPARSE_POINT, SYMLINK), EntryKind::Link);

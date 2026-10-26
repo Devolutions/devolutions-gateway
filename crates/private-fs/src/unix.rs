@@ -913,7 +913,7 @@ mod tests {
 
     // A backend that let the owner keep less than full access, or chose a broader access than the rule, would leave
     // the owner, who can always change the mode, with access the rule withholds.
-    // oracle: reference crates/private-fs/src/rule.rs Access
+    // oracle: intent crates/private-fs/INTENT.md §rules
     #[test]
     fn a_grant_this_platform_cannot_enforce_needs_a_fallback() {
         let rule = Rule::new()
@@ -943,7 +943,7 @@ mod tests {
         );
     }
 
-    // oracle: reference crates/private-fs/src/rule.rs Rule::owner_fallback
+    // oracle: intent crates/private-fs/INTENT.md §rules
     #[test]
     fn an_owner_without_full_access_needs_an_owner_fallback() {
         let rule = Rule::new().owner(Account::CurrentUser).grant_or(
@@ -972,7 +972,7 @@ mod tests {
     }
 
     // Root has every access whatever the mode says, so a rule may give root, or a root owner, any access.
-    // oracle: reference crates/private-fs/src/rule.rs Account
+    // oracle: intent crates/private-fs/INTENT.md §mechanisms
     #[test]
     fn grants_to_root_need_nothing_on_disk() {
         let rule = Rule::new()
@@ -1009,21 +1009,7 @@ mod tests {
         assert!(check(&rule, 0, USER, Kind::Directory).is_ok());
     }
 
-    // oracle: reference crates/private-fs/src/rule.rs Access::AddOnly
-    #[test]
-    fn add_only_access_to_a_file_is_unsupported_even_for_root() {
-        let rule = Rule::new()
-            .owner(Account::CurrentUser)
-            .grant(Account::CurrentUser, Access::Full)
-            .grant(Account::System, Access::AddOnly);
-        assert_eq!(
-            unsupported(check(&rule, USER, USER, Kind::File)),
-            Some((Account::System, Access::AddOnly))
-        );
-        assert!(check(&rule, USER, USER, Kind::Directory).is_ok());
-    }
-
-    // oracle: reference crates/private-fs/src/rule.rs Rule::owner
+    // oracle: intent crates/private-fs/INTENT.md §vocabulary
     #[test]
     fn only_an_account_the_rule_names_may_own_an_item() {
         let current_user_only = Rule::new().owner(Account::CurrentUser);

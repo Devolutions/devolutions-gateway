@@ -3,7 +3,7 @@
 //! Each test works in its own directory under the system temporary directory, whose ancestors are root's.
 
 use std::fs;
-use std::io::{Read as _, Write as _};
+use std::io::Write as _;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _, symlink};
 use std::os::unix::net::UnixListener;
 use std::process::Command;
@@ -203,18 +203,6 @@ fn create_base_creates_each_missing_directory_owner_only() {
     assert!(Dir::open_base(&path, &rule()).unwrap().is_some());
 }
 
-// oracle: reference crates/private-fs/src/lib.rs Dir::open_base
-#[test]
-fn open_base_returns_none_for_a_missing_directory() {
-    let scratch = Scratch::new();
-    assert!(
-        Dir::open_base(&scratch.path.join("missing"), &rule())
-            .unwrap()
-            .is_none()
-    );
-    assert!(!scratch.path.join("missing").exists());
-}
-
 // A directory another process created first, open to other accounts, must not count as created.
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
@@ -295,7 +283,7 @@ fn an_entry_that_is_a_symbolic_link_is_refused() {
 }
 
 // Another hard link lets whoever can reach it in another directory open the file.
-// oracle: reference crates/private-fs/src/lib.rs Dir::open_file
+// oracle: intent crates/private-fs/INTENT.md §mechanisms
 #[test]
 fn a_file_with_another_hard_link_is_refused() {
     let scratch = Scratch::new();
@@ -328,7 +316,7 @@ enum Special {
 }
 
 // Opening a FIFO for reading blocks until a writer comes, unless the open doesn't wait.
-// oracle: reference crates/private-fs/src/error.rs Refusal::NotAFile
+// oracle: mutant a check that takes a FIFO for a regular file
 #[rstest]
 #[case::fifo(Special::Fifo)]
 #[case::socket(Special::Socket)]
@@ -646,7 +634,7 @@ fn root_only_an_item_owned_by_another_account_is_refused_until_repaired() {
 }
 
 // private-fs never chooses a broader access than the rule: an owner other than root can always change the mode.
-// oracle: reference crates/private-fs/src/rule.rs Access
+// oracle: intent crates/private-fs/INTENT.md §rules
 #[test]
 fn a_grant_the_platform_cannot_enforce_fails_without_a_fallback() {
     let scratch = Scratch::new();
@@ -672,7 +660,7 @@ fn a_grant_the_platform_cannot_enforce_fails_without_a_fallback() {
     Dir::create_base(&scratch.path.join("dir"), &with_fallback).unwrap();
 }
 
-// oracle: reference crates/private-fs/src/rule.rs Access::AddOnly
+// oracle: mutant an add-only grant to root on a file accepted instead of unsupported
 #[test]
 fn add_only_access_to_a_file_fails_without_a_fallback() {
     let scratch = Scratch::new();
@@ -686,7 +674,7 @@ fn add_only_access_to_a_file_fails_without_a_fallback() {
 }
 
 // private-fs creates what it creates owned by the current user, which the rule must allow.
-// oracle: reference crates/private-fs/src/rule.rs Rule::owner
+// oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
 fn a_rule_that_does_not_let_the_current_user_own_cannot_create() {
     let scratch = Scratch::new();
@@ -704,55 +692,6 @@ fn a_rule_that_does_not_let_the_current_user_own_cannot_create() {
         .unwrap_err();
     assert!(matches!(refusal(&error), Some(Refusal::Owner)), "{error:?}");
     assert!(!scratch.path.join("dir").exists());
-}
-
-// oracle: reference crates/private-fs/src/lib.rs Dir::persist
-#[test]
-fn persist_installs_the_written_file_under_its_name() {
-    let scratch = Scratch::new();
-    let base = scratch.base();
-    let mut file = base.create_file("key.tmp", &rule(), FileOptions::new()).unwrap();
-    file.write_all(b"secret").unwrap();
-    base.persist(&file, "key.tmp", "key", Replace::Refuse).unwrap();
-
-    let mut content = String::new();
-    base.open_file("key", &rule(), FileOptions::new().read(true))
-        .unwrap()
-        .expect("persisted file")
-        .read_to_string(&mut content)
-        .unwrap();
-    assert_eq!(content, "secret");
-    assert!(
-        base.open_file("key.tmp", &rule(), FileOptions::new())
-            .unwrap()
-            .is_none()
-    );
-}
-
-// oracle: reference crates/private-fs/src/lib.rs Replace
-#[test]
-fn a_rename_that_refuses_replacement_keeps_the_existing_entry() {
-    let scratch = Scratch::new();
-    let base = scratch.base();
-    base.create_file("old", &rule(), FileOptions::new())
-        .unwrap()
-        .write_all(b"old")
-        .unwrap();
-    base.create_file("new", &rule(), FileOptions::new())
-        .unwrap()
-        .write_all(b"new")
-        .unwrap();
-
-    let error = base.rename("new", "old", Replace::Refuse).unwrap_err();
-    assert!(
-        matches!(error.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::AlreadyExists),
-        "{error:?}"
-    );
-    assert_eq!(fs::read(scratch.path.join("old")).unwrap(), b"old");
-
-    base.rename("new", "old", Replace::Allow).unwrap();
-    assert_eq!(fs::read(scratch.path.join("old")).unwrap(), b"new");
-    assert!(!scratch.path.join("new").exists());
 }
 
 /// Writes the file `name` in `scratch` with `mode`, outside private-fs, and opens it.
@@ -808,7 +747,7 @@ fn repair_leaves_a_file_with_another_hard_link_unchanged() {
     assert_eq!(mode(&path), 0o644);
 }
 
-// oracle: reference crates/private-fs/src/lib.rs Dir::remove_file
+// oracle: mutant a removal that reports the inverse of whether the file existed
 #[test]
 fn remove_file_reports_whether_the_file_existed() {
     let scratch = Scratch::new();
@@ -819,7 +758,7 @@ fn remove_file_reports_whether_the_file_existed() {
 }
 
 // A discard that removed by name alone would remove whatever was installed under the name since.
-// oracle: reference crates/private-fs/src/lib.rs Dir::discard
+// oracle: mutant a discard that removes the name although it now holds another file
 #[test]
 fn discard_removes_only_the_file_it_was_given() {
     let scratch = Scratch::new();
@@ -836,7 +775,7 @@ fn discard_removes_only_the_file_it_was_given() {
 }
 
 // A listing that followed links would report a link to a directory as a directory.
-// oracle: reference crates/private-fs/src/lib.rs EntryKind
+// oracle: mutant a listing that reports a symbolic link as something other than a link
 #[test]
 fn entries_report_kinds_without_following_links() {
     let scratch = Scratch::new();

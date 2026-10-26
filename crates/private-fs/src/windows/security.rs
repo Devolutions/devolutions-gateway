@@ -775,7 +775,7 @@ mod tests {
         assert_eq!(refusal(checked), "Access");
     }
 
-    // oracle: reference crates/private-fs/src/rule.rs Rule
+    // oracle: mutant a check that skips a deny entry instead of refusing it
     #[test]
     fn a_check_refuses_a_deny_entry() {
         // A rule names only accounts with access, so its DACL is allow entries only, and a deny entry is not one.
