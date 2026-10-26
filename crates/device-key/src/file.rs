@@ -163,7 +163,25 @@ pub(super) fn list(dir: &Utf8Path, prefix: &str) -> anyhow::Result<Vec<String>> 
     let Some(dir) = open_key_directory(dir)? else {
         return Ok(Vec::new());
     };
-    let _lock = lock_and_reconcile(&dir)?;
+    // `crates/device-key/INTENT.md` ("Operations"): listing skips an unexpected entry, a lock file that fails its rule
+    // included.
+    // Listing needs the lock only to remove leftovers first, and their names never end in `.p8`, so without the lock it
+    // lists the same keys and leaves the leftovers to a later operation.
+    let _lock = match lock_directory(&dir) {
+        Ok(lock) => {
+            cleanup_abandoned(&dir)?;
+            Some(lock)
+        }
+        Err(error)
+            if error
+                .chain()
+                .filter_map(|cause| cause.downcast_ref::<private_fs::Error>())
+                .any(private_fs::Error::is_refused) =>
+        {
+            None
+        }
+        Err(error) => return Err(error),
+    };
     let mut names = dir
         .entries()
         .context("list key directory")?
@@ -224,12 +242,20 @@ fn cleanup_abandoned(dir: &Dir) -> anyhow::Result<()> {
         let Some(name) = abandoned_name(file_name) else {
             continue;
         };
+        // `crates/device-key/INTENT.md` ("Operations"): a leftover that can't be removed, as while another process
+        // holds it open, is an unexpected entry, which an operation skips; a later operation removes it.
+        // UNTESTED: on Linux and macOS, a leftover that can't be removed is skipped too.
+        // Only root can make an entry of the caller's own key directory unremovable, for example with an immutable
+        // attribute; when changing this, keep a failed removal from failing the operation on every platform.
         let file_name = if file_name.ends_with(".tmp") {
-            retire(dir, file_name, name).context("retire abandoned key file")?
+            match retire(dir, file_name, name) {
+                Ok(file_name) => file_name,
+                Err(_) => continue,
+            }
         } else {
             file_name.to_owned()
         };
-        dir.remove_file(&file_name).context("remove abandoned key file")?;
+        let _ = dir.remove_file(&file_name);
     }
     Ok(())
 }
@@ -752,6 +778,56 @@ mod tests {
         );
         drop(lock);
         assert!(list(&directory.backend(), TEST_PREFIX)?.is_empty());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_lock_file_that_fails_its_rule_stops_every_operation_but_listing() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        let lock = directory.0.join(LOCK_NAME);
+        fs::remove_file(&lock)?;
+        // Created outside the crate, the file is readable by other accounts: on Unix through its mode, and on Windows
+        // through the entries it inherits from the key directory.
+        fs::write(&lock, b"")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o644))?;
+        }
+
+        assert_eq!(list(&backend, TEST_PREFIX)?, std::slice::from_ref(&name));
+        assert!(open(&backend, &name).is_err());
+        assert!(generate(&backend, &new_key_name(TEST_PREFIX)).is_err());
+        assert!(delete(&backend, &name).is_err());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[cfg(windows)]
+    #[test]
+    fn a_leftover_another_process_holds_open_is_skipped_by_listing() -> anyhow::Result<()> {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        let leftover = create_leftover(&directory)?;
+        // A handle that shares nothing makes the cleanup's rename of the leftover fail.
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&leftover)?;
+
+        let listed = list(&backend, TEST_PREFIX);
+        drop(held);
+
+        assert_eq!(listed?, [name]);
+        assert!(leftover.exists());
+        assert!(list(&backend, TEST_PREFIX).is_ok());
+        assert!(!leftover.exists());
         Ok(())
     }
 

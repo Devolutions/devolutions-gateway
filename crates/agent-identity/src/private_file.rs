@@ -538,33 +538,14 @@ fn submit_into_drop_box(
     rules: &DropBox,
     backup: bool,
 ) -> anyhow::Result<()> {
-    let started = Instant::now();
     let pending_path = data_dir.join("identity").join("pending");
     ensure!(
         path.parent() == Some(pending_path.as_path()),
         "pending file is outside the drop box"
     );
     let name = path.file_name().context("pending file has no name")?;
-    let pending = {
-        // The backup privilege lets an administrator open the identity directories, which grant it no list or read
-        // access, to check who owns them and who can access them; it ends before anything is written.
-        let _backup = backup
-            .then(private_fs::BackupPrivilege::enable)
-            .transpose()
-            .context("enable administrator backup privilege")?;
-        let data = retry_sharing_violation(started, SUBMISSION_TIMEOUT, SUBMISSION_RETRY_INTERVAL, || {
-            Ok(Dir::open_base(data_dir, &rules.base)?)
-        })
-        .and_then(|data| data.ok_or_else(not_found))
-        .context("inspect identity data directory")
-        .map_err(explain_unprepared_drop_box)?;
-        let identity = open_drop_box_directory(&data, "identity", &rules.identity, started)
-            .context("inspect protected identity directory")
-            .map_err(explain_unprepared_drop_box)?;
-        open_drop_box_directory(&identity, "pending", &rules.pending, started)
-            .context("inspect protected pending drop box")
-            .map_err(explain_unprepared_drop_box)?
-    };
+    // The state lock stays held until the file is published.
+    let (_state_lock, pending) = open_drop_box(data_dir, rules, backup)?;
     let staging = format!(".{name}-{}.tmp", Uuid::new_v4());
     let mut file = pending
         .create_file(
@@ -598,6 +579,37 @@ fn submit_into_drop_box(
     published.map(drop)
 }
 
+/// Opens the drop box under `data_dir` once its directories pass `rules`, with the backup privilege when `backup` is
+/// set, and returns the state lock on `identity` with it.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): every state change holds the exclusive lock on the identity
+/// directory, which on Windows is an unshared handle on it.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+#[cfg(windows)]
+fn open_drop_box(data_dir: &Utf8Path, rules: &DropBox, backup: bool) -> anyhow::Result<(Dir, Dir)> {
+    let started = Instant::now();
+    // The backup privilege lets an administrator open the identity directories, which grant it no list or read access,
+    // to check who owns them and who can access them; it ends before anything is written.
+    let _backup = backup
+        .then(private_fs::BackupPrivilege::enable)
+        .transpose()
+        .context("enable administrator backup privilege")?;
+    let data = retry_sharing_violation(started, SUBMISSION_TIMEOUT, SUBMISSION_RETRY_INTERVAL, || {
+        Ok(Dir::open_base(data_dir, &rules.base)?)
+    })
+    .and_then(|data| data.ok_or_else(not_found))
+    .context("inspect identity data directory")
+    .map_err(explain_unprepared_drop_box)?;
+    let identity = open_drop_box_directory(&data, "identity", &rules.identity, Share::Exclusive, started)
+        .context("inspect protected identity directory")
+        .map_err(explain_unprepared_drop_box)?;
+    let pending = open_drop_box_directory(&identity, "pending", &rules.pending, Share::Shared, started)
+        .context("inspect protected pending drop box")
+        .map_err(explain_unprepared_drop_box)?;
+    Ok((identity, pending))
+}
+
 /// How long an administrator's submission waits for the service to release the identity directory.
 #[cfg(windows)]
 const SUBMISSION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -607,9 +619,15 @@ const SUBMISSION_TIMEOUT: Duration = Duration::from_secs(10);
 const SUBMISSION_RETRY_INTERVAL: Duration = Duration::from_millis(100);
 
 #[cfg(windows)]
-fn open_drop_box_directory(parent: &Dir, name: &str, rule: &Rule, started: Instant) -> anyhow::Result<Dir> {
+fn open_drop_box_directory(
+    parent: &Dir,
+    name: &str,
+    rule: &Rule,
+    share: Share,
+    started: Instant,
+) -> anyhow::Result<Dir> {
     retry_sharing_violation(started, SUBMISSION_TIMEOUT, SUBMISSION_RETRY_INTERVAL, || {
-        Ok(parent.open_dir(name, rule, Share::Shared)?)
+        Ok(parent.open_dir(name, rule, share)?)
     })?
     .ok_or_else(not_found)
 }
@@ -956,6 +974,9 @@ mod windows_tests {
         let directory = TestDir::new()?;
         let identity = directory.identity();
         fs::create_dir(&identity)?;
+        // An elevated token makes BUILTIN\Administrators the owner of what it creates, so the agent's ownership is set
+        // explicitly.
+        acl::set_owner(&identity, &acl::user_sid()?)?;
         let users = Sid::from_well_known(WinBuiltinUsersSid, None)?;
         acl::set_dacl(&identity, &[(users, FILE_GENERIC_READ.0, 0)])?;
 
@@ -1086,7 +1107,12 @@ mod windows_tests {
         }
         acl::set_dacl(&path, &entries)?;
 
-        let read = open_pending_read(&path, false);
+        // The zero OWNER RIGHTS entry takes away even the owner's right to read the DACL, so the test reads the file as
+        // SYSTEM can, through the backup privilege, which private-fs opens with.
+        let read = {
+            let _backup = private_fs::BackupPrivilege::enable()?;
+            open_pending_read(&path, false)
+        };
 
         assert_eq!(read.is_ok(), readable, "{read:?}");
         Ok(())
@@ -1262,6 +1288,33 @@ mod windows_tests {
             .map(|entry| Ok(entry?.file_name()))
             .collect::<io::Result<Vec<_>>>()?;
         assert_eq!(entries, [path.file_name().context("pending file has no name")?]);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn a_submission_holds_the_state_lock_while_the_drop_box_is_open() -> anyhow::Result<()> {
+        let directory = TestDir::provisioned()?;
+        let data = Dir::open_base(directory.path(), &tree_rule(true))?.context("missing data directory")?;
+
+        let (state_lock, pending) = open_drop_box(directory.path(), &provisioned_by_current_user(), false)?;
+        let while_held = data.open_dir("identity", &tree_rule(true), Share::Shared);
+        drop((state_lock, pending));
+
+        let error = anyhow::Error::from(
+            while_held
+                .err()
+                .context("the identity directory opened while a submission held the drop box")?,
+        );
+        assert!(is_sharing_violation(&error), "{error:#}");
+        // Another process, such as an antivirus scan of the new directory, can hold it briefly without sharing.
+        let reopened = retry_sharing_violation(
+            Instant::now(),
+            Duration::from_secs(5),
+            Duration::from_millis(25),
+            || Ok(data.open_dir("identity", &tree_rule(true), Share::Shared)?),
+        )?;
+        assert!(reopened.is_some());
         Ok(())
     }
 
