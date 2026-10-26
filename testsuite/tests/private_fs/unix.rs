@@ -748,6 +748,59 @@ fn a_rename_that_refuses_replacement_keeps_the_existing_entry() {
     assert!(!scratch.path.join("new").exists());
 }
 
+/// Writes the file `name` in `scratch` with `mode`, outside private-fs, and opens it.
+fn plain_file(scratch: &Scratch, name: &str, mode: u32) -> (Utf8PathBuf, fs::File) {
+    let path = scratch.path.join(name);
+    fs::write(&path, b"content").unwrap();
+    set_mode(&path, mode);
+    let file = fs::File::open(&path).unwrap();
+    (path, file)
+}
+
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn repair_brings_a_file_open_to_others_into_line() {
+    let scratch = Scratch::new();
+    let (path, file) = plain_file(&scratch, "key", 0o644);
+    let error = private_fs::check_file(&file, &path, &rule()).unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
+
+    private_fs::repair_file(&file, &path, &rule()).unwrap();
+    assert_eq!(mode(&path), 0o600);
+    private_fs::check_file(&file, &path, &rule()).unwrap();
+}
+
+// A repair that failed on a file, for example on removing a default ACL that only a directory can have, would never
+// fix one.
+// oracle: intent crates/private-fs/INTENT.md §mechanisms
+#[test]
+fn repair_removes_a_file_acl() {
+    let scratch = Scratch::new();
+    let (path, file) = plain_file(&scratch, "key", 0o600);
+    if !acl::name_another_account(&path) {
+        skip("repair_removes_a_file_acl", "needs ACL support");
+        return;
+    }
+    let error = private_fs::check_file(&file, &path, &rule()).unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
+
+    private_fs::repair_file(&file, &path, &rule()).unwrap();
+    private_fs::check_file(&file, &path, &rule()).unwrap();
+}
+
+// Changing the mode through one name changes it for every other hard link to the file.
+// oracle: intent crates/private-fs/INTENT.md §mechanisms
+#[test]
+fn repair_leaves_a_file_with_another_hard_link_unchanged() {
+    let scratch = Scratch::new();
+    let (path, file) = plain_file(&scratch, "key", 0o644);
+    fs::hard_link(&path, scratch.path.join("other")).unwrap();
+
+    let error = private_fs::repair_file(&file, &path, &rule()).unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Link)), "{error:?}");
+    assert_eq!(mode(&path), 0o644);
+}
+
 // oracle: reference crates/private-fs/src/lib.rs Dir::remove_file
 #[test]
 fn remove_file_reports_whether_the_file_existed() {
