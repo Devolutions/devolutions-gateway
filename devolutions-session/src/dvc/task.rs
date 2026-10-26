@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use devolutions_agent_shared::temp_file::{BATCH_UTF8_PREAMBLE, POWERSHELL_UTF8_ENCODING_PREAMBLE, TmpFileGuard};
-use devolutions_gateway_task::{ChildTask, Task};
+use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use now_proto_pdu::ironrdp_core::IntoOwned;
 use now_proto_pdu::{
     ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
@@ -50,6 +50,14 @@ use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
 const DEFAULT_HEARTBEAT_INTERVAL: core::time::Duration = core::time::Duration::from_secs(60);
 const HANDSHAKE_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(5);
 
+/// Delay before reopening a channel after the first failure; it doubles with each consecutive failed reopen.
+const REOPEN_DELAY_FLOOR: core::time::Duration = core::time::Duration::from_secs(1);
+const REOPEN_DELAY_CAP: core::time::Duration = core::time::Duration::from_secs(10);
+/// Number of consecutive reopened channels that may fail to negotiate before the process gives up.
+const MAX_CONSECUTIVE_FAILED_REOPENS: usize = 5;
+/// Time the IO thread of a lost channel has to release it before the process gives up.
+const IO_THREAD_STOP_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(10);
+
 const GENERIC_ERROR_CODE_ENCODING: u32 = 0x00000001;
 const GENERIC_ERROR_CODE_TOO_LONG_ERROR: u32 = 0x00000002;
 const GENERIC_ERROR_CODE_OTHER: u32 = 0xFFFFFFFF;
@@ -63,62 +71,176 @@ impl Task for DvcIoTask {
 
     const NAME: &'static str = "DVC processing";
 
-    async fn run(self, shutdown_signal: devolutions_gateway_task::ShutdownSignal) -> Self::Output {
-        let (write_tx, write_rx) = winapi_signaled_mpsc_channel()?;
-        let (read_tx, read_rx) = bounded_mpsc_channel()?;
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        let channel_shutdown_signal = shutdown_signal.clone();
 
-        // WinAPI event to terminate DVC IO thread.
-        let io_thread_shutdown_event = Event::new_unnamed()?;
+        serve_dvc(move || serve_channel(channel_shutdown_signal.clone()), shutdown_signal).await
+    }
+}
 
-        let cloned_shutdown_event = io_thread_shutdown_event.clone();
+/// How serving one DVC channel ended.
+#[derive(Debug)]
+enum ChannelOutcome {
+    /// The channel was closed on purpose, by either peer or by shutdown, and must not be reopened.
+    Ended,
+    /// The channel failed before the client completed negotiation.
+    NotNegotiated(anyhow::Error),
+    /// The channel failed after the client completed negotiation.
+    Lost(anyhow::Error),
+}
 
-        let init_progress = Arc::new(DvcInitializationProgress::default());
-        let io_thread_progress = Arc::clone(&init_progress);
+impl ChannelOutcome {
+    fn new(result: anyhow::Result<()>, init_progress: &DvcInitializationProgress) -> Self {
+        match result {
+            Ok(()) => Self::Ended,
+            Err(error) if init_progress.negotiated() => Self::Lost(error),
+            Err(error) => Self::NotNegotiated(error),
+        }
+    }
+}
 
-        info!(
-            "Starting NowProto DVC v{}.{}",
-            NowProtoVersion::CURRENT.major,
-            NowProtoVersion::CURRENT.minor
-        );
+/// Serves DVC channels until one ends on purpose, reopening a channel lost after negotiation.
+///
+/// A first channel that never negotiates is not reopened: the client likely has no NOW listener, and reopening would
+/// keep a process alive that nobody can reach.
+/// Once a client has negotiated, a failed channel is reopened after a delay that grows with each consecutive reopen
+/// that fails to negotiate, until [`MAX_CONSECUTIVE_FAILED_REOPENS`] of them.
+async fn serve_dvc<F, Fut>(mut serve_channel: F, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<ChannelOutcome>>,
+{
+    // `None` until a negotiated channel is lost.
+    let mut failed_reopens: Option<usize> = None;
 
-        // Spawning thread is relatively short operation, so it could be executed synchronously.
-        let io_thread = std::thread::spawn(move || {
-            let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event, &io_thread_progress);
-
-            if let Err(error) = io_thread_result {
-                error!(%error, "DVC IO thread failed");
+    loop {
+        if let Some(failed_reopens) = failed_reopens {
+            select! {
+                () = tokio::time::sleep(reopen_delay(failed_reopens)) => {}
+                _ = shutdown_signal.wait() => return Ok(()),
             }
-        });
+        }
 
-        // Join thread some time in future.
-        tokio::task::spawn_blocking(move || {
-            if let Err(panic_payload) = io_thread.join() {
-                if let Some(s) = panic_payload.downcast_ref::<&dyn std::fmt::Debug>() {
-                    error!("DVC IO thread panic: {:?}", s);
+        match serve_channel().await? {
+            ChannelOutcome::Ended => return Ok(()),
+            ChannelOutcome::Lost(error) => {
+                warn!(
+                    error = format!("{error:#}"),
+                    "Lost the negotiated DVC channel; reopening it"
+                );
+                failed_reopens = Some(0);
+            }
+            ChannelOutcome::NotNegotiated(error) => {
+                let Some(previous_failures) = failed_reopens else {
+                    return Err(error);
+                };
+
+                let failures = previous_failures + 1;
+
+                if failures < MAX_CONSECUTIVE_FAILED_REOPENS {
+                    warn!(
+                        error = format!("{error:#}"),
+                        failures, "Failed to reopen the DVC channel"
+                    );
+                    failed_reopens = Some(failures);
                 } else {
-                    error!("DVC IO thread join failed.");
+                    return Err(error.context(format!("failed to reopen the DVC channel {failures} consecutive times")));
                 }
             }
-        });
-
-        info!("Processing DVC messages...");
-
-        let process_result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
-
-        // Send shutdown signal to IO thread to release WTS channel resources.
-        info!("Shutting down DVC IO thread");
-        let _ = io_thread_shutdown_event.set();
-
-        process_result?;
-
-        Ok(())
+        }
     }
+}
+
+fn reopen_delay(failed_reopens: usize) -> core::time::Duration {
+    let factor = u32::try_from(failed_reopens)
+        .ok()
+        .and_then(|exponent| 2u32.checked_pow(exponent))
+        .unwrap_or(u32::MAX);
+
+    REOPEN_DELAY_FLOOR.saturating_mul(factor).min(REOPEN_DELAY_CAP)
+}
+
+/// Opens one DVC channel and serves it until it ends.
+///
+/// Errors only when the process cannot go on serving channels at all.
+async fn serve_channel(mut shutdown_signal: ShutdownSignal) -> anyhow::Result<ChannelOutcome> {
+    let (write_tx, write_rx) = winapi_signaled_mpsc_channel()?;
+    let (read_tx, read_rx) = bounded_mpsc_channel()?;
+
+    // WinAPI event to terminate DVC IO thread.
+    let io_thread_shutdown_event = Event::new_unnamed()?;
+
+    let cloned_shutdown_event = io_thread_shutdown_event.clone();
+
+    // Each channel gets its own progress, and therefore its own negotiation deadline.
+    let init_progress = Arc::new(DvcInitializationProgress::default());
+    let io_thread_progress = Arc::clone(&init_progress);
+
+    info!(
+        "Starting NowProto DVC v{}.{}",
+        NowProtoVersion::CURRENT.major,
+        NowProtoVersion::CURRENT.minor
+    );
+
+    // Spawning thread is relatively short operation, so it could be executed synchronously.
+    let io_thread = std::thread::spawn(move || {
+        let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event, &io_thread_progress);
+
+        if let Err(error) = io_thread_result {
+            error!(%error, "DVC IO thread failed");
+        }
+    });
+
+    // Joined on a plain thread rather than the blocking pool, because the runtime waits for its blocking tasks when it
+    // shuts down, so an IO thread that never stops would keep the process alive.
+    let (io_thread_stopped_tx, io_thread_stopped_rx) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        if let Err(panic_payload) = io_thread.join() {
+            if let Some(s) = panic_payload.downcast_ref::<&dyn std::fmt::Debug>() {
+                error!("DVC IO thread panic: {:?}", s);
+            } else {
+                error!("DVC IO thread join failed.");
+            }
+        }
+
+        let _ = io_thread_stopped_tx.send(());
+    });
+
+    info!("Processing DVC messages...");
+
+    let process_result = process_messages(read_rx, write_tx, shutdown_signal.clone(), &init_progress).await;
+
+    // Send shutdown signal to IO thread to release WTS channel resources.
+    info!("Shutting down DVC IO thread");
+    let _ = io_thread_shutdown_event.set();
+
+    let outcome = ChannelOutcome::new(process_result, &init_progress);
+
+    // UNTESTED: a failed channel may be reopened, so its IO thread must release the WTS handle before the next open,
+    // and a thread that does not stop must end the process, because the agent does not replace a process that is
+    // still running.
+    // An ended channel is never reopened, so the process exits without depending on the thread.
+    // The thread can block in its synchronous `WriteFile`; when changing the IO thread or its join, check that the
+    // timeout still bounds that wait and that nothing on the runtime still waits for the thread.
+    if let ChannelOutcome::Lost(error) | ChannelOutcome::NotNegotiated(error) = &outcome {
+        select! {
+            stopped = tokio::time::timeout(IO_THREAD_STOP_TIMEOUT, io_thread_stopped_rx) => {
+                if stopped.is_err() {
+                    error!(error = format!("{error:#}"), "DVC channel failed");
+                    bail!("DVC IO thread did not stop within {IO_THREAD_STOP_TIMEOUT:?}");
+                }
+            }
+            _ = shutdown_signal.wait() => return Ok(ChannelOutcome::Ended),
+        }
+    }
+
+    Ok(outcome)
 }
 
 async fn process_messages(
     mut read_rx: Receiver<OwnedNowMessage>,
     dvc_tx: WinapiSignaledSender<OwnedNowMessage>,
-    mut shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    mut shutdown_signal: ShutdownSignal,
     init_progress: &DvcInitializationProgress,
 ) -> anyhow::Result<()> {
     let (io_notification_tx, mut task_rx) = mpsc::channel(100);
@@ -201,6 +323,7 @@ async fn process_messages(
         pwsh_executable.clone(),
     );
 
+    init_progress.mark_negotiated();
     info!("DVC negotiation completed");
 
     loop {
@@ -1324,18 +1447,191 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
+    use core::task::Poll;
     use core::time::Duration;
+    use std::collections::VecDeque;
 
-    use devolutions_gateway_task::ShutdownHandle;
+    use anyhow::anyhow;
+    use devolutions_gateway_task::{ShutdownHandle, ShutdownSignal};
     use futures::poll;
     use now_proto_pdu::{
         NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowMessage,
         NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
     };
+    use tokio::time::Instant;
 
-    use super::{DEFAULT_HEARTBEAT_INTERVAL, heartbeat_timer, process_messages, spawn_heartbeat};
+    use super::{
+        ChannelOutcome, DEFAULT_HEARTBEAT_INTERVAL, MAX_CONSECUTIVE_FAILED_REOPENS, REOPEN_DELAY_CAP,
+        REOPEN_DELAY_FLOOR, heartbeat_timer, process_messages, serve_dvc, spawn_heartbeat,
+    };
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
+
+    /// A negotiated channel whose IO ends, as when the client tears the DVC down while the RDP connection stays up,
+    /// must be told apart from one that never negotiated, because only the former is reopened.
+    // oracle: scaffold
+    #[tokio::test]
+    async fn read_channel_closing_after_negotiation_loses_the_channel() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        drop(read_tx);
+
+        let result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
+
+        let outcome = ChannelOutcome::new(result, &init_progress);
+        assert!(matches!(outcome, ChannelOutcome::Lost(_)), "{outcome:?}");
+    }
+
+    /// A channel whose IO ends before the client negotiates, as with a client that has no NOW listener, must not be
+    /// classified as lost, so it is never reopened.
+    // oracle: scaffold
+    #[tokio::test]
+    async fn read_channel_closing_before_negotiation_is_not_negotiated() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        drop(read_tx);
+
+        let result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
+
+        let outcome = ChannelOutcome::new(result, &init_progress);
+        assert!(matches!(outcome, ChannelOutcome::NotNegotiated(_)), "{outcome:?}");
+    }
+
+    /// A channel the client closes on purpose must end rather than be reopened against the client's will.
+    // oracle: spec Devolutions/now-proto@7519c6ff6cfa45bb70c3a3c67df2024d482eda53:protocols/docs/NOW-spec.md §NOW_CHANNEL_CLOSE_MSG
+    #[tokio::test]
+    async fn client_channel_close_ends_the_channel() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(NowChannelCloseMsg::default().into())
+            .await
+            .expect("queue channel close");
+
+        let result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
+
+        let outcome = ChannelOutcome::new(result, &init_progress);
+        assert!(matches!(outcome, ChannelOutcome::Ended), "{outcome:?}");
+    }
+
+    /// A first channel that never negotiates must end the loop with its error, so a client without a NOW listener
+    /// does not keep the process alive reopening a channel nobody serves.
+    // oracle: scaffold
+    #[tokio::test(start_paused = true)]
+    async fn unnegotiated_first_channel_is_not_reopened() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+
+        let (result, _) = serve_script([not_negotiated()], shutdown_signal).await;
+
+        assert!(result.is_err());
+    }
+
+    // oracle: scaffold
+    #[tokio::test(start_paused = true)]
+    async fn ended_channel_is_not_reopened() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+
+        let (result, _) = serve_script([ChannelOutcome::Ended], shutdown_signal).await;
+
+        result.expect("an ended channel ends the loop cleanly");
+    }
+
+    // oracle: scaffold
+    #[tokio::test(start_paused = true)]
+    async fn lost_channel_is_reopened_after_a_delay() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+
+        let (result, served_at) = serve_script([lost(), ChannelOutcome::Ended], shutdown_signal).await;
+
+        result.expect("the reopened channel ends the loop cleanly");
+        assert!(REOPEN_DELAY_FLOOR <= served_at[1] - served_at[0]);
+    }
+
+    /// A client that stopped serving NOW must not be retried forever, nor in a tight loop.
+    #[tokio::test(start_paused = true)]
+    async fn reopen_gives_up_after_consecutive_unnegotiated_channels() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let script = core::iter::once(lost())
+            .chain(core::iter::repeat_with(not_negotiated).take(MAX_CONSECUTIVE_FAILED_REOPENS));
+
+        let (result, served_at) = serve_script(script, shutdown_signal).await;
+
+        // oracle: scaffold
+        assert!(result.is_err());
+
+        let delays = served_at.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>();
+        // oracle: property monotonic
+        assert!(delays.windows(2).all(|w| w[0] <= w[1]), "{delays:?}");
+        // oracle: scaffold
+        assert!(
+            delays
+                .iter()
+                .all(|delay| REOPEN_DELAY_FLOOR <= *delay && *delay <= REOPEN_DELAY_CAP),
+            "{delays:?}"
+        );
+    }
+
+    /// A reopened channel that negotiates shows the client serves NOW again, so earlier failures must not count
+    /// toward giving up.
+    // oracle: scaffold
+    #[tokio::test(start_paused = true)]
+    async fn negotiated_reopen_resets_the_failure_budget() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let failures = || core::iter::repeat_with(not_negotiated).take(MAX_CONSECUTIVE_FAILED_REOPENS - 1);
+        let script = core::iter::once(lost())
+            .chain(failures())
+            .chain(core::iter::once(lost()))
+            .chain(failures())
+            .chain(core::iter::once(ChannelOutcome::Ended));
+
+        let (result, _) = serve_script(script, shutdown_signal).await;
+
+        result.expect("failures before a negotiated reopen do not end the loop");
+    }
+
+    /// A shutdown requested while waiting to reopen must end the loop at once, without opening another channel.
+    // oracle: scaffold
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_during_reopen_delay_stops_without_reopening() {
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let mut served = 0;
+
+        let mut serve = Box::pin(serve_dvc(
+            || {
+                served += 1;
+                async { Ok(lost()) }
+            },
+            shutdown_signal,
+        ));
+
+        assert!(poll!(serve.as_mut()).is_pending());
+        shutdown_handle.signal();
+
+        let Poll::Ready(result) = poll!(serve.as_mut()) else {
+            panic!("the loop is still waiting after shutdown");
+        };
+        result.expect("shutdown ends the loop cleanly");
+
+        drop(serve);
+        assert_eq!(served, 1);
+    }
 
     /// The negotiation reply must be the downgraded capset, so the client sees the capabilities
     /// and heartbeat interval the agent applies rather than the server default, which carries no
@@ -1528,5 +1824,42 @@ mod tests {
             matches!(message, NowMessage::Channel(NowChannelMessage::Heartbeat(_))),
             "expected a heartbeat, got {message:?}"
         );
+    }
+
+    /// Serves `outcomes` in order and returns the loop result with the instant each channel was served.
+    ///
+    /// Panics unless the loop serves every outcome and no more.
+    async fn serve_script(
+        outcomes: impl IntoIterator<Item = ChannelOutcome>,
+        shutdown_signal: ShutdownSignal,
+    ) -> (anyhow::Result<()>, Vec<Instant>) {
+        let mut outcomes = outcomes.into_iter().collect::<VecDeque<_>>();
+        let mut served_at = Vec::new();
+
+        let result = serve_dvc(
+            || {
+                served_at.push(Instant::now());
+                let outcome = outcomes.pop_front().expect("channel served more times than scripted");
+                async { Ok(outcome) }
+            },
+            shutdown_signal,
+        )
+        .await;
+
+        assert!(
+            outcomes.is_empty(),
+            "{} scripted channels were never served",
+            outcomes.len()
+        );
+
+        (result, served_at)
+    }
+
+    fn lost() -> ChannelOutcome {
+        ChannelOutcome::Lost(anyhow!("channel lost"))
+    }
+
+    fn not_negotiated() -> ChannelOutcome {
+        ChannelOutcome::NotNegotiated(anyhow!("channel not negotiated"))
     }
 }

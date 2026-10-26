@@ -78,15 +78,17 @@ impl DvcInitializationError {
     }
 }
 
-/// Counters and signalling shared between the DVC IO thread and the DVC task.
+/// Counters and signalling shared between the DVC IO thread and the DVC task for one channel.
 ///
 /// Beyond diagnostics, this gates the negotiation deadline, which must not start before the
-/// channel is open.
+/// channel is open, and records whether negotiation completed, which decides whether a failed
+/// channel is reopened.
 #[derive(Debug, Default)]
 pub struct DvcInitializationProgress {
     open_attempts: AtomicU32,
     channel_opened: AtomicBool,
     channel_opened_notify: Notify,
+    negotiated: AtomicBool,
 }
 
 impl DvcInitializationProgress {
@@ -131,6 +133,15 @@ impl DvcInitializationProgress {
     /// Whether the DVC channel was successfully opened at any point.
     pub fn channel_opened(&self) -> bool {
         self.channel_opened.load(Ordering::Relaxed)
+    }
+
+    pub fn mark_negotiated(&self) {
+        self.negotiated.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether the client completed capability negotiation on this channel.
+    pub fn negotiated(&self) -> bool {
+        self.negotiated.load(Ordering::Relaxed)
     }
 }
 
