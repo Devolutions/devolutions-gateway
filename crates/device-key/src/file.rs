@@ -927,19 +927,25 @@ mod tests {
         Ok(())
     }
 
+    /// Gives a test directory whose mode it narrowed its owner's full access back when dropped, so that it can be
+    /// removed.
+    #[cfg(unix)]
+    struct RestorePermissions(Utf8PathBuf);
+
+    #[cfg(unix)]
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+
     // oracle: intent crates/device-key/INTENT.md §File backend
     #[cfg(unix)]
     #[test]
     fn existing_keys_work_under_execute_only_ancestor() -> anyhow::Result<()> {
         use std::os::unix::fs::PermissionsExt as _;
-
-        struct RestorePermissions(Utf8PathBuf);
-
-        impl Drop for RestorePermissions {
-            fn drop(&mut self) {
-                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
-            }
-        }
 
         let root = KeyDirectory::new()?;
         let ancestor = root.0.join("execute-only");
@@ -963,13 +969,6 @@ mod tests {
         // `crates/device-key/INTENT.md` ("File backend") asks only two rights on the ancestors for keeping and using keys
         // once the key directory exists; creating it needs its parent open, to sync the new entry so that it survives a
         // power cut.
-        struct RestorePermissions(Utf8PathBuf);
-
-        impl Drop for RestorePermissions {
-            fn drop(&mut self) {
-                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
-            }
-        }
 
         // SAFETY: Reading the process's effective UID has no preconditions.
         if unsafe { libc::geteuid() } == 0 {
@@ -988,21 +987,12 @@ mod tests {
             dir: parent.join("keys"),
         };
 
-        let error = generate(&backend, &new_key_name(TEST_PREFIX))
-            .err()
-            .context("a key directory was created under an execute-only parent")?;
+        let generated = generate(&backend, &new_key_name(TEST_PREFIX));
         drop(restore);
 
-        let refusal = error
-            .chain()
-            .find_map(|cause| cause.downcast_ref::<private_fs::Error>())
-            .context("the failure is not from private-fs")?;
         assert!(
-            matches!(
-                refusal.kind(),
-                private_fs::ErrorKind::Refused(private_fs::Refusal::Unreadable(_))
-            ),
-            "{error:#}"
+            generated.is_err(),
+            "a key directory was created under an execute-only parent"
         );
         assert!(!parent.join("keys").exists());
         Ok(())

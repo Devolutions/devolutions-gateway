@@ -87,8 +87,8 @@ fn granted(rule: Rule, grant_current_user: bool) -> Rule {
 }
 
 /// The rule of `identity`, `authorities`, `keys`, `rejected`, every authority directory and every `identity.json`, and
-/// of `<data-dir>` when the agent creates it; an existing `<data-dir>` gets only the check of the directories above, and
-/// the directories above it that the agent creates keep the access they inherit.
+/// of `<data-dir>` and its missing parents when the agent creates them; an existing `<data-dir>` gets only the check of
+/// the directories above.
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): they are owned by the agent's account, which in production is
 /// SYSTEM or root.
@@ -173,8 +173,9 @@ fn open_parent(path: &Utf8Path) -> anyhow::Result<(Dir, &str)> {
 
 /// Provisions the identity directories, and returns `<data-dir>`.
 ///
-/// A missing `<data-dir>` is created with the identity rule, and its missing parents as the platform creates any
-/// directory, so that they keep the access they inherit: they are not the agent's identity directories.
+/// A missing `<data-dir>` and its missing parents are created with the identity rule, by handle and refusing links, so
+/// that no directory created on the way can be replaced or redirected by another account.
+/// The installer and the configuration create `<data-dir>` in production, so this applies only where they didn't.
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): an identity directory with a wrong owner or wrong permissions is
 /// reset, without changing anything below it.
@@ -186,9 +187,6 @@ pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: boo
         grant_current_user || crate::windows::is_system()?,
         "identity directory must be created by SYSTEM"
     );
-    if let Some(parent) = data_dir.parent().filter(|parent| !parent.as_str().is_empty()) {
-        std::fs::create_dir_all(parent).context("create the parent of the identity data directory")?;
-    }
     let rule = tree_rule(grant_current_user);
     let data = Dir::create_base(data_dir, &rule).context("open identity data directory")?;
     let identity = provision(&data, "identity", &rule)?;
@@ -785,20 +783,12 @@ mod unix_tests {
 
     // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
-    fn provisioning_under_a_missing_parent_leaves_the_parent_its_default_mode() -> anyhow::Result<()> {
+    fn provisioning_gives_a_missing_data_directory_the_identity_rule() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
-        let parent = directory.0.join("parent");
-        let data_dir = parent.join("data");
-        // A directory the platform creates by default gets the mode the process umask leaves.
-        let default = directory.0.join("default");
-        fs::create_dir(&default)?;
+        let data_dir = directory.0.join("parent").join("data");
 
         prepare_directories(&data_dir, true)?;
 
-        assert_eq!(
-            fs::metadata(&parent)?.permissions().mode(),
-            fs::metadata(&default)?.permissions().mode()
-        );
         assert_eq!(fs::metadata(&data_dir)?.permissions().mode() & 0o777, 0o700);
         Ok(())
     }
@@ -971,14 +961,12 @@ mod windows_tests {
 
     // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
-    fn provisioning_under_a_missing_parent_leaves_the_parent_its_inherited_access() -> anyhow::Result<()> {
+    fn provisioning_gives_a_missing_data_directory_the_identity_rule() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
-        let parent = directory.0.join("parent");
-        let data_dir = parent.join("data");
+        let data_dir = directory.0.join("parent").join("data");
 
         prepare_directories(&data_dir, true)?;
 
-        assert_eq!(acl::protected_dacl_of(&parent)?, None);
         assert_eq!(
             acl::protected_dacl_of(&data_dir)?,
             Some(acl::sorted(&[
