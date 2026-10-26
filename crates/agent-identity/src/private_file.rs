@@ -88,12 +88,13 @@ fn granted(rule: Rule, grant_current_user: bool) -> Rule {
 
 /// The rule of `<data-dir>`, `identity`, `authorities`, `keys`, `rejected`, every authority directory and every
 /// `identity.json`.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): they are owned by the agent's account, which in production is
+/// SYSTEM or root.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 pub(crate) fn tree_rule(grant_current_user: bool) -> Rule {
-    granted(
-        Rule::new().owner(Account::CurrentUser).owner(Account::System),
-        grant_current_user,
-    )
-    .exact()
+    granted(Rule::new().owner(Account::CurrentUser), grant_current_user).exact()
 }
 
 /// The rule of `identity/pending`, a drop box administrators can add a file to without listing or reading it.
@@ -101,13 +102,10 @@ fn drop_box_rule(grant_current_user: bool) -> Rule {
     tree_rule(grant_current_user).grant(Account::Administrators, Access::AddOnly)
 }
 
-/// The rule of in-progress records, rejection markers and the Unix lock file, which are checked for giving no account
-/// more than it allows.
+/// The rule of in-progress records, rejection markers and the Unix lock file, which the agent's account owns and which
+/// are checked for giving no account more than it allows.
 pub(crate) fn state_file_rule(grant_current_user: bool) -> Rule {
-    granted(
-        Rule::new().owner(Account::CurrentUser).owner(Account::System),
-        grant_current_user,
-    )
+    granted(Rule::new().owner(Account::CurrentUser), grant_current_user)
 }
 
 /// The rule of a pending-enrollment file, which an administrator can own.
@@ -396,8 +394,8 @@ fn persist_replacing(directory: &Dir, file: &File, temporary: &str, name: &str) 
 
 /// Opens a rejection marker or an in-progress record once it passes the trust check.
 ///
-/// The check accepts SYSTEM and the agent's account, whether or not the agent runs as SYSTEM, so that a reader that
-/// doesn't know the configured grant can tell a file the agent wrote from one another account wrote.
+/// The check lets the file give SYSTEM and the agent's account access, whether or not the agent runs as SYSTEM, so that
+/// a reader that doesn't know the configured grant can tell a file the agent wrote from one another account wrote.
 pub(crate) fn open_read(path: &Utf8Path) -> anyhow::Result<File> {
     open_checked(path, &state_file_rule(true))
 }
