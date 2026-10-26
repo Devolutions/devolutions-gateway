@@ -52,6 +52,39 @@ fn untrusted() -> anyhow::Error {
     anyhow::Error::new(UntrustedStateFile)
 }
 
+/// Turns a failed check of the authority directory or `identity.json` at `path` into an [`UntrustedStoredIdentity`] when
+/// it fails the trust check, and leaves any other failure, which only kept the check from running, an ordinary error.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): only a stored identity that fails the check stops all identity
+/// processing.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+fn check_failure(path: &Utf8Path, error: anyhow::Error) -> anyhow::Error {
+    if fails_trust_check(&error) {
+        anyhow::Error::new(UntrustedStoredIdentity {
+            path: path.to_owned(),
+            source: error,
+        })
+    } else {
+        error.context(format!("check stored identity {path}"))
+    }
+}
+
+/// Reports whether a failed check found a stored identity untrusted, rather than an I/O error keeping it from running.
+///
+/// Denied access counts as untrusted, because the agent never closes its own state to itself.
+fn fails_trust_check(error: &anyhow::Error) -> bool {
+    let cause = error.root_cause();
+    if let Some(error) = cause.downcast_ref::<std::io::Error>() {
+        return error.kind() == ErrorKind::PermissionDenied;
+    }
+    #[cfg(windows)]
+    if let Some(error) = cause.downcast_ref::<windows::core::Error>() {
+        return error.code() == windows::Win32::Foundation::ERROR_ACCESS_DENIED.to_hresult();
+    }
+    true
+}
+
 struct TemporaryFile(Utf8PathBuf);
 
 impl Drop for TemporaryFile {
@@ -138,22 +171,17 @@ pub(crate) fn check_stored_identities(data_dir: &Utf8Path, grant_current_user: b
 /// Checks, without changing it, that an authority directory is owned by the agent's account and protected from other
 /// users, and returns whether it exists.
 pub(crate) fn check_authority_directory(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<bool> {
-    let untrusted = |source| {
-        anyhow::Error::new(UntrustedStoredIdentity {
-            path: path.to_owned(),
-            source,
-        })
-    };
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
         Err(error) => {
-            return Err(untrusted(
+            return Err(check_failure(
+                path,
                 anyhow::Error::new(error).context("inspect authority directory"),
             ));
         }
     };
-    verify_authority_directory(path, &metadata, grant_current_user).map_err(untrusted)?;
+    verify_authority_directory(path, &metadata, grant_current_user).map_err(|error| check_failure(path, error))?;
     Ok(true)
 }
 
@@ -215,7 +243,7 @@ pub(crate) fn check_identity_file(path: &Utf8Path, grant_current_user: bool) -> 
     classify_identity_file(path, open_trusted_identity_file(path, grant_current_user, false)).map(drop)
 }
 
-/// Turns a failure to open a trusted `identity.json` into an absent file, or else into an [`UntrustedStoredIdentity`].
+/// Turns a failure to open a trusted `identity.json` into an absent file, or else as [`check_failure`] does.
 fn classify_identity_file(path: &Utf8Path, opened: anyhow::Result<File>) -> anyhow::Result<Option<File>> {
     match opened {
         Ok(file) => Ok(Some(file)),
@@ -226,10 +254,7 @@ fn classify_identity_file(path: &Utf8Path, opened: anyhow::Result<File>) -> anyh
         {
             Ok(None)
         }
-        Err(source) => Err(anyhow::Error::new(UntrustedStoredIdentity {
-            path: path.to_owned(),
-            source,
-        })),
+        Err(error) => Err(check_failure(path, error)),
     }
 }
 
@@ -618,6 +643,9 @@ fn sync_directory(path: &Utf8Path) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_NOT_ENOUGH_MEMORY, WIN32_ERROR};
+
     use super::*;
 
     // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
@@ -652,6 +680,38 @@ mod tests {
         let agent = unsafe { libc::geteuid() };
         assert!(verify_unix_directory_access(0o700, agent.wrapping_add(1), agent).is_err());
         assert!(verify_unix_directory_access(0o700, agent, agent).is_ok());
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[rstest::rstest]
+    #[case::check_finding(anyhow::anyhow!("authority directory is open to other users"), true)]
+    #[case::denied_access(failed_open(ErrorKind::PermissionDenied), true)]
+    #[case::file_in_use(failed_open(ErrorKind::ResourceBusy), false)]
+    #[case::interrupted_call(failed_open(ErrorKind::Interrupted), false)]
+    #[cfg_attr(windows, case::denied_security_read(failed_security_read(ERROR_ACCESS_DENIED), true))]
+    #[cfg_attr(windows, case::out_of_memory(failed_security_read(ERROR_NOT_ENOUGH_MEMORY), false))]
+    fn only_a_failed_check_makes_an_untrusted_stored_identity(#[case] error: anyhow::Error, #[case] untrusted: bool) {
+        // Only an authority directory or `identity.json` that fails the check stops all identity processing, so an I/O
+        // error that only kept the check from running is not an untrusted stored identity.
+        // Denied access is one, because the state the agent provisions never denies the agent's account.
+        let path = Utf8Path::new("identity/authorities/00000000-0000-0000-0000-000000000000");
+
+        let error = check_failure(path, error);
+
+        assert_eq!(
+            error.chain().any(|cause| cause.is::<UntrustedStoredIdentity>()),
+            untrusted,
+            "{error:#}"
+        );
+    }
+
+    fn failed_open(kind: ErrorKind) -> anyhow::Error {
+        anyhow::Error::new(std::io::Error::from(kind)).context("open authority directory")
+    }
+
+    #[cfg(windows)]
+    fn failed_security_read(code: WIN32_ERROR) -> anyhow::Error {
+        anyhow::Error::new(windows::core::Error::from_hresult(code.to_hresult())).context("inspect identity file DACL")
     }
 
     // oracle: intent crates/agent-identity/INTENT.md §Local state

@@ -330,6 +330,35 @@ jobs:
         env:
           AWS_LC_SYS_NO_ASM: true
 
+      # A failed Agent Identity conformance run keeps its work directory, whose agent data directories and logs are the
+      # only record of the state that made it fail.
+      # The filter matches that directory under `target`, the temporary directory or `ProgramData`, and a file the runner
+      # cannot read, such as one only SYSTEM can open, is reported and skipped.
+      # UNTESTED: these steps run only after a failure; when changing them, check by hand with a failing conformance test
+      # that the artifact holds the kept agent data directories.
+      - name: Collect kept Agent Identity conformance directories
+        if: ${{ failure() }}
+        shell: pwsh
+        run: |
+          $Destination = Join-Path $Env:RUNNER_TEMP 'agent-identity-conformance'
+          New-Item -ItemType Directory -Force $Destination | Out-Null
+          $Parents = @('target', [IO.Path]::GetTempPath(), $Env:ProgramData) | Where-Object { $_ }
+          $Index = 0
+          Get-ChildItem -Path $Parents -Directory -Filter 'agent-identity-integration*' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              $Index++
+              $Copy = Join-Path $Destination "$Index-$($_.Name)"
+              Copy-Item -LiteralPath $_.FullName -Destination $Copy -Recurse -ErrorAction Continue
+            }
+
+      - name: Upload kept Agent Identity conformance directories
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-identity-conformance-${{ matrix.os }}-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-identity-conformance
+          if-no-files-found: ignore
+
       - name: Timing-sensitive tests
         run: |
           cargo test --locked --target ${{ matrix.target }} -p testsuite --test integration_tests timing:: -- --ignored --test-threads=1
