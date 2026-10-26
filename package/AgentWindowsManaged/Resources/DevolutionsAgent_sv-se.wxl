@@ -22,6 +22,9 @@
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
                 <String Id="Dotnet48IsRequired">Produkten kräver Microsoft .NET Framework 4.8. Vill du hämta den nu?</String>
+                <String Id="IdentityEnrollmentTokenBothSet">Ange IDENTITY_ENROLLMENT_TOKEN eller IDENTITY_ENROLLMENT_TOKEN_FILE, inte båda.</String>
+                <String Id="IdentityEnrollmentTokenFileEmpty">Första raden i registreringstokenfilen {0} är tom.</String>
+                <String Id="IdentityEnrollmentTokenFileUnreadable">Det går inte att läsa registreringstokenfilen {0}: {1}</String>
                 <String Id="NewerInstalled">En nyare version av produkten är redan installerad.</String>
                 <String Id="OS2Old">Produkten kräver minst Windows 8 eller Windows Server 2012 R2</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">Det finns ett problem med angivna data. Rätta felet och försök igen.</String>

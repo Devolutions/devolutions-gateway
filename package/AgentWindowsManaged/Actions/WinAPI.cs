@@ -27,6 +27,10 @@ internal static class WinAPI
 
     internal static uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x04;
 
+    internal const uint NCRYPT_MACHINE_KEY_FLAG = 0x00000020;
+
+    internal const int NTE_NO_MORE_ITEMS = unchecked((int)0x8009002A);
+
     internal const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
 
     internal const uint SC_MANAGER_CONNECT = 0x0001;
@@ -268,6 +272,23 @@ internal static class WinAPI
         [MarshalAs(UnmanagedType.LPWStr)] string lpNewFileName,
         uint dwFlags
     );
+
+    [DllImport("ncrypt", CharSet = CharSet.Unicode)]
+    internal static extern int NCryptEnumKeys(
+        IntPtr hProvider,
+        string pszScope,
+        out IntPtr ppKeyName,
+        ref IntPtr ppEnumState,
+        uint dwFlags);
+
+    [DllImport("ncrypt")]
+    internal static extern int NCryptFreeBuffer(IntPtr pvInput);
+
+    [DllImport("ncrypt")]
+    internal static extern int NCryptFreeObject(IntPtr hObject);
+
+    [DllImport("ncrypt", CharSet = CharSet.Unicode)]
+    internal static extern int NCryptOpenStorageProvider(out IntPtr phProvider, string pszProviderName, uint dwFlags);
 
     [DllImport("advapi32", EntryPoint = "OpenSCManagerW", SetLastError = true)]
     internal static extern IntPtr OpenSCManager(IntPtr machineName, IntPtr databaseName, uint dwAccess);

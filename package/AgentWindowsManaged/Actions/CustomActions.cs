@@ -16,6 +16,7 @@ using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using WixSharp;
@@ -674,6 +675,157 @@ namespace DevolutionsAgent.Actions
             }
         }
 
+        [CustomAction]
+        public static ActionResult EnrollAgentIdentity(Session session)
+        {
+            ActionResult Fail(string message)
+            {
+                session.Log(message);
+                using Record record = new(0) { FormatString = EscapeFormatted(message) };
+                session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+                return ActionResult.Failure;
+            }
+
+            try
+            {
+                string token = DecodePropertyData(session, AgentProperties.IdentityEnrollmentTokenEncoded).Trim();
+                string Redact(string s) => token.Length == 0 ? s : s.Replace(token, "***");
+
+                (string fileName, string arguments, string input) =
+                    AgentIdentity.EnrollCommand(session.Property(AgentProperties.InstallDir), token);
+                session.Log($"Running Agent Identity enrollment: {fileName} {arguments}");
+                AgentRunResult result = RunAgentCommand(fileName, arguments, input, ProgramDataDirectory, 60_000);
+
+                if (result.TimedOut)
+                {
+                    return Fail("Agent Identity enrollment timed out.");
+                }
+
+                if (!string.IsNullOrEmpty(result.Stdout))
+                {
+                    session.Log($"enrollment stdout: {Redact(result.Stdout)}");
+                }
+                if (!string.IsNullOrEmpty(result.Stderr))
+                {
+                    session.Log($"enrollment stderr: {Redact(result.Stderr)}");
+                }
+
+                if (result.ExitCode != 0)
+                {
+                    string detail = !string.IsNullOrWhiteSpace(result.Stderr) ? Redact(result.Stderr).Trim() : $"exit code {result.ExitCode}";
+                    return Fail($"Agent Identity enrollment failed: {detail}");
+                }
+
+                session.Log("Agent Identity enrollment token handed to the agent");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                return Fail($"Agent Identity enrollment failed: {e.Message}");
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult ReadIdentityEnrollmentTokenFile(Session session)
+        {
+            ActionResult Fail(string id, params object[] args)
+            {
+                string message = string.Format(Program.Localize(session.Property("ProductLanguage"), id), args);
+                session.Log(message);
+                using Record record = new(0) { FormatString = EscapeFormatted(message) };
+                session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+                return ActionResult.Failure;
+            }
+
+            if (!string.IsNullOrEmpty(session.Property(AgentProperties.IdentityEnrollmentToken)))
+            {
+                return Fail(Strings.IdentityEnrollmentTokenBothSet);
+            }
+
+            string path = session.Property(AgentProperties.IdentityEnrollmentTokenFile);
+            string token;
+
+            try
+            {
+                // A relative path resolves against the folder of the .msi, so that a deployment can ship the file
+                // beside it.
+                path = Path.Combine(Path.GetDirectoryName(session.Property("OriginalDatabase")), path);
+
+                using StreamReader reader = new(path);
+                token = reader.ReadLine()?.Trim() ?? string.Empty;
+            }
+            catch (Exception e)
+            {
+                return Fail(Strings.IdentityEnrollmentTokenFileUnreadable, path, e.Message);
+            }
+
+            if (token.Length == 0)
+            {
+                return Fail(Strings.IdentityEnrollmentTokenFileEmpty, path);
+            }
+
+            session[AgentProperties.IdentityEnrollmentToken] = token;
+            session.Log($"Read the Agent Identity enrollment token from {path}");
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult RemoveAgentIdentity(Session session)
+        {
+            // UNTESTED: a failure to list or delete a key, or to delete the identity folder, is logged and the cleanup
+            // goes on.
+            // A failed cleanup must not leave a product that can't be uninstalled, and a later install of the agent
+            // deletes leftover keys with its prefix when it starts.
+            // When changing this action, keep each step in its own try and keep returning success.
+
+            // Keys go first, as the agent deletes a key before its record, so that an interrupted cleanup leaves no key
+            // that the identity files don't name.
+            List<string> keyNames = new();
+
+            try
+            {
+                keyNames = MachineKeys.List().Where(AgentIdentity.IsKeyName).ToList();
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to list Agent Identity device keys: {e}");
+            }
+
+            foreach (string keyName in keyNames)
+            {
+                try
+                {
+                    MachineKeys.Delete(keyName);
+                    session.Log($"deleted Agent Identity device key {keyName}");
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to delete Agent Identity device key {keyName}: {e}");
+                }
+            }
+
+            string identityDirectory = Path.Combine(ProgramDataDirectory, "identity");
+
+            try
+            {
+                if (Directory.Exists(identityDirectory))
+                {
+                    // UNTESTED: Directory.Delete deletes a junction or symbolic link without recursing into its target.
+                    // Otherwise a link planted in the identity folder would make the uninstall delete files elsewhere.
+                    // When replacing this call, keep the deletion from following reparse points.
+                    Directory.Delete(identityDirectory, true);
+                    session.Log($"deleted {identityDirectory}");
+                }
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to delete {identityDirectory}: {e}");
+            }
+
+            return ActionResult.Success;
+        }
+
         // When TimedOut is true the child was killed, so ExitCode/Stdout/Stderr carry no meaning —
         // callers must check TimedOut first.
         private sealed class AgentRunResult
@@ -882,6 +1034,15 @@ namespace DevolutionsAgent.Actions
                 .Select(s => s.Trim())
                 .Where(s => !string.IsNullOrEmpty(s))
                 .ToArray();
+
+        /// <summary>
+        /// Escapes <paramref name="text"/> so that Windows Installer shows it verbatim as a formatted message.
+        /// </summary>
+        /// <remarks>
+        /// The installer formats a message's text, which would replace bracketed agent output such as
+        /// <c>[CustomActionData]</c> with a property value.
+        /// </remarks>
+        internal static string EscapeFormatted(string text) => Regex.Replace(text, @"[\[\]]", m => $"[\\{m.Value}]");
 
         private static string DecodePropertyData(Session session, string encodedProperty)
         {
@@ -1712,6 +1873,7 @@ namespace DevolutionsAgent.Actions
                 (AgentProperties.AgentTunnelAdvertiseDomains, AgentProperties.AgentTunnelAdvertiseDomainsEncoded),
                 (AgentProperties.AgentTunnelIncludeDetectedDomain, AgentProperties.AgentTunnelIncludeDetectedDomainEncoded),
                 (AgentProperties.AgentTunnelDetectedDomain, AgentProperties.AgentTunnelDetectedDomainEncoded),
+                (AgentProperties.IdentityEnrollmentToken, AgentProperties.IdentityEnrollmentTokenEncoded),
             })
             {
                 string value = session.Property(source) ?? string.Empty;

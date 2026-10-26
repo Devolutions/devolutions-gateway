@@ -69,6 +69,24 @@ internal static class AgentActions
     };
 
     /// <summary>
+    /// Set the Agent Identity enrollment token from the file <c>IDENTITY_ENROLLMENT_TOKEN_FILE</c> names, so that
+    /// <see cref="encodePropertyData"/> hands it to <see cref="enrollAgentIdentity"/>
+    /// </summary>
+    /// <remarks>
+    /// Its condition mirrors <see cref="enrollAgentIdentity"/>'s, so that a repair, a maintenance run or an uninstall
+    /// never reads the file.
+    /// </remarks>
+    private static readonly ManagedAction readIdentityEnrollmentTokenFile = new(
+        new Id($"CA.{nameof(readIdentityEnrollmentTokenFile)}"),
+        CustomActions.ReadIdentityEnrollmentTokenFile,
+        Return.check, When.Before, new Step(encodePropertyData.Id),
+        new Condition($"NOT Installed AND {AgentProperties.IdentityEnrollmentTokenFile}"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+    };
+
+    /// <summary>
     /// Set the ARP installation location to the chosen install directory
     /// </summary>
     private static readonly SetPropertyAction setArpInstallLocation = new("ARPINSTALLLOCATION", $"[{AgentProperties.InstallDir}]")
@@ -151,7 +169,7 @@ internal static class AgentActions
         Impersonate = false,
     };
 
-    private static readonly ElevatedManagedAction cleanAgentConfigIfNeeded = new(
+    internal static readonly ElevatedManagedAction cleanAgentConfigIfNeeded = new(
         new Id($"CA.{nameof(cleanAgentConfigIfNeeded)}"),
         CustomActions.CleanAgentConfig,
         Return.check,
@@ -183,13 +201,64 @@ internal static class AgentActions
     /// <remarks>
     /// Ensures a default configuration file is created
     /// </remarks>
-    private static readonly WixQuietExecAction initAgentConfigIfNeeded = new(
+    internal static readonly WixQuietExecAction initAgentConfigIfNeeded = new(
         new Id($"CA.{nameof(initAgentConfigIfNeeded)}"),
         $"[{AgentProperties.InstallDir}]{Includes.EXECUTABLE_NAME}",
         "config init",
         Return.check,
         When.After, new Step(cleanAgentConfigIfNeeded.Id),
         AgentProperties.firstInstall.Equal(true) & AgentProperties.configureAgent.Equal(false),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
+    /// <summary>
+    /// Hand the Agent Identity enrollment token to <c>identity enroll -</c> running as SYSTEM
+    /// </summary>
+    /// <remarks>
+    /// As SYSTEM, <c>identity enroll</c> neither uses nor waits for the service's drop box.
+    /// <c>pending::write</c> (crates/agent-identity/src/pending.rs) submits through the drop box only for an
+    /// administrator who isn't SYSTEM.
+    /// For SYSTEM, it takes the state lock, which first provisions the identity directories with the service's
+    /// protected ACLs (<c>private_file::prepare_directories</c>), then writes the pending file itself.
+    /// The action therefore needs only the installed executable and agent.json, and the service consumes the pending
+    /// file when StartServices starts it.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction enrollAgentIdentity = new(
+        new Id($"CA.{nameof(enrollAgentIdentity)}"),
+        CustomActions.EnrollAgentIdentity,
+        Return.check,
+        When.After, new Step(initAgentConfigIfNeeded.Id),
+        new Condition($"NOT Installed AND {AgentProperties.IdentityEnrollmentToken}"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        // Keeps the CustomActionData, which holds the encoded token, out of the MSI log.
+        // WiX also lists the property that carries it in MsiHiddenProperties, which hides it from the property log.
+        AttributesDefinition = "HideTarget=yes",
+        UsesProperties = string.Join(";", new[]
+        {
+            AgentProperties.IdentityEnrollmentTokenEncoded,
+            AgentProperties.InstallDir,
+        }.Select(p => $"{p}=[{p}]")),
+    };
+
+    /// <summary>
+    /// Delete the Agent Identity state and device keys on a full uninstall, without contacting any authority
+    /// </summary>
+    /// <remarks>
+    /// A major upgrade, a repair or a maintenance run keeps them.
+    /// RemoveFiles runs after StopServices, so the stopped service holds neither the identity state lock nor a key.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction removeAgentIdentity = new(
+        new Id($"CA.{nameof(removeAgentIdentity)}"),
+        CustomActions.RemoveAgentIdentity,
+        Return.ignore,
+        When.After, Step.RemoveFiles,
+        new Condition("REMOVE=\"ALL\" AND NOT UPGRADINGPRODUCTCODE"),
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
@@ -503,6 +572,7 @@ internal static class AgentActions
         isUninstalling,
         isMaintenance,
         setInstallId,
+        readIdentityEnrollmentTokenFile,
         encodePropertyData,
         getNetFxInstalledVersion,
         checkNetFxInstalledVersion,
@@ -521,6 +591,8 @@ internal static class AgentActions
         createProgramDataPedmDirectories,
         setProgramDataPedmDirectoryPermissions,
         initAgentConfigIfNeeded,
+        enrollAgentIdentity,
+        removeAgentIdentity,
         registerExplorerCommand,
         registerExplorerCommandRollback,
         unregisterExplorerCommand,

@@ -99,6 +99,18 @@
         {
           "id": "Dotnet48IsRequired",
           "text": "The product requires Microsoft .NET Framework 4.8. Would you like to download it now?"
+        },
+        {
+          "id": "IdentityEnrollmentTokenBothSet",
+          "text": "Set IDENTITY_ENROLLMENT_TOKEN or IDENTITY_ENROLLMENT_TOKEN_FILE, not both."
+        },
+        {
+          "id": "IdentityEnrollmentTokenFileUnreadable",
+          "text": "Can't read the enrollment token file {0}: {1}"
+        },
+        {
+          "id": "IdentityEnrollmentTokenFileEmpty",
+          "text": "The first line of the enrollment token file {0} is empty."
         }
       ],
       "buttons": [
