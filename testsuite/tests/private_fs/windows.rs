@@ -577,6 +577,26 @@ fn a_directory_above_whose_entries_others_can_delete_is_refused() -> anyhow::Res
     Ok(())
 }
 
+// oracle: intent crates/device-key/INTENT.md §Operations
+#[test]
+fn a_missing_directory_under_a_replaceable_one_is_reported_missing() -> anyhow::Result<()> {
+    // Catches an open that refuses a missing directory, which has nothing to protect, because of a directory above it.
+    let test = TestDir::new();
+    std::fs::create_dir(test.path())?;
+    set_dacl(
+        test.path(),
+        &[(user(), FULL, INHERITED_BY_CHILDREN), (users(), DELETE_CHILD, 0)],
+        InheritableAclKind::Protected,
+    )?;
+    assert!(Dir::open_base(&test.path().join("missing"), &user_rule())?.is_none());
+    let error = refusal(Dir::open_base(test.path(), &user_rule()));
+    assert!(
+        is_refused(&error, |refusal| matches!(refusal, Refusal::Replaceable)),
+        "{error:?}"
+    );
+    Ok(())
+}
+
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
 fn a_directory_above_others_can_only_add_to_is_accepted() -> anyhow::Result<()> {

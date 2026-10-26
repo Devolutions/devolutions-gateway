@@ -36,10 +36,10 @@ pub enum Refusal {
     Access,
     /// Its volume ignores or fakes ownership, or doesn't keep access control lists.
     Volume,
-    /// It is a directory above, and an account other than the system account, administrators and the accounts the rule
-    /// allows can rename or replace it.
+    /// It is the first existing directory of the path or a directory above it, and an account other than the system
+    /// account, administrators and the accounts the rule allows can rename or replace it.
     Replaceable,
-    /// It is a directory above, and its owner or access can't be read.
+    /// It is the first existing directory of the path or a directory above it, and its owner or access can't be read.
     Unreadable(io::Error),
 }
 

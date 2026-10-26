@@ -137,6 +137,12 @@ impl Dir {
     /// That first directory and everything below it must not be a link.
     /// Each directory created has exactly `rule` from the moment it exists, and one that another process creates first
     /// counts as created only if it passes `rule`.
+    ///
+    /// Only the directories this creates are checked against `rule`, including one another process creates after it was
+    /// found missing.
+    /// The first directory of `path` that exists, which is `path` itself when it exists, is the caller's starting point
+    /// rather than something `rule` covers: it gets only the owner and replacement check above, so a directory an
+    /// installer made can serve as a base.
     pub fn create_base(path: &Utf8Path, rule: &Rule) -> Result<Self> {
         sys::create_base(path, rule).map(|inner| Self {
             inner,
@@ -144,9 +150,17 @@ impl Dir {
         })
     }
 
-    /// Opens the existing directory at `path`, with the checks of [`Dir::create_base`] on it and the directories above it,
-    /// and returns `None` when it doesn't exist.
+    /// Opens the existing directory at `path`, and returns `None` when it doesn't exist, without checking anything.
+    ///
+    /// The directory, the directories above it up to the root, and those between them get the owner and replacement
+    /// check of [`Dir::create_base`], not `rule`, which only names the accounts that check allows.
+    /// Check the returned directory with [`Dir::check`] where it must itself satisfy `rule`.
+    /// A missing directory has nothing to protect, so a caller that must refuse a path an account could hide creates the
+    /// directory with [`Dir::create_base`] instead.
     pub fn open_base(path: &Utf8Path, rule: &Rule) -> Result<Option<Self>> {
+        if std::fs::symlink_metadata(path).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound) {
+            return Ok(None);
+        }
         Ok(sys::open_base(path, rule)?.map(|inner| Self {
             inner,
             path: path.to_owned(),
@@ -209,13 +223,17 @@ impl Dir {
     /// Makes `file`, written under the name `from` in this directory, durable under the name `to`.
     ///
     /// Once this returns, a power cut leaves `to` with the content of `file`.
+    /// After a failure, `file` may be under either name.
     pub fn persist(&self, file: &File, from: &str, to: &str, replace: Replace) -> Result<()> {
         let path = self.child(from)?;
         self.child(to)?;
         sys::persist(&self.inner, &path, file, from, to, replace)
     }
 
-    /// Removes the file `name` that this handle created as `file`, through `file` itself where the platform allows.
+    /// Removes `file`, which this handle created as `name`, and never another file.
+    ///
+    /// On Linux and macOS, it removes `file` only while it is still at `name`; on Windows, it removes `file` through its
+    /// own handle, wherever it is.
     ///
     /// A file can be created with a rule that gives its creator no access once created, so removing it by name again
     /// could be refused.
@@ -236,6 +254,10 @@ impl Dir {
     }
 
     /// Makes the entries created, renamed and removed in this directory durable.
+    ///
+    /// On Windows, flushing a directory needs `FILE_ADD_FILE` on it: a directory that [`Dir::create_dir`] created holds it
+    /// already, and any other is opened again with it, which fails when the directory is open exclusively or its rule
+    /// doesn't give the current user that access.
     pub fn sync(&self) -> Result<()> {
         sys::sync(&self.inner, &self.path)
     }

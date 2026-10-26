@@ -347,6 +347,20 @@ fn a_directory_above_that_others_can_write_is_refused() {
     assert!(!shared.join("base").exists());
 }
 
+// A missing directory has nothing to protect, so opening it reports it missing whatever the directories above allow.
+// oracle: intent crates/device-key/INTENT.md §Operations
+#[test]
+fn a_missing_directory_under_a_replaceable_one_is_reported_missing() {
+    let scratch = Scratch::new();
+    let shared = scratch.path.join("shared");
+    fs::create_dir(&shared).unwrap();
+    set_mode(&shared, 0o777);
+
+    assert!(Dir::open_base(&shared.join("missing"), &rule()).unwrap().is_none());
+    let error = Dir::open_base(&shared, &rule()).unwrap_err();
+    assert!(matches!(refusal(&error), Some(Refusal::Replaceable)), "{error:?}");
+}
+
 // Any member of the group can rename or replace the directory's entries, and administrators are root alone.
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
