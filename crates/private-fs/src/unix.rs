@@ -3,8 +3,6 @@
 //! The owner of a file or directory can always change its mode, so it always has full access, and root can access
 //! everything whatever the mode says.
 //! A rule therefore reduces to an owner, mode `0700` for a directory or `0600` for a file, and no extended ACL.
-//! A check refuses group and other bits, and under an exact rule also owner bits other than the rule's, which leave the
-//! owner less than its full access until it changes the mode back.
 
 use std::ffi::{CStr, CString, OsString};
 use std::fs::{File, Metadata, OpenOptions, Permissions};
@@ -47,6 +45,23 @@ pub(crate) struct Dir {
 enum Kind {
     Directory,
     File,
+}
+
+impl Kind {
+    /// The permission bits a rule maps to: owner-only, `0700` for a directory and `0600` for a file.
+    fn mode(self) -> u32 {
+        match self {
+            Kind::Directory => DIR_MODE,
+            Kind::File => FILE_MODE,
+        }
+    }
+
+    fn inspect_step(self) -> &'static str {
+        match self {
+            Kind::Directory => "inspect directory",
+            Kind::File => "inspect file",
+        }
+    }
 }
 
 /// The accounts that may own a directory above a base directory, or be able to rename or replace it.
@@ -408,12 +423,10 @@ pub(crate) fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<(
 
 /// Brings the owner, mode and ACLs of the open directory or file `file` into line with `rule`, then checks it.
 fn repair_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
-    let (mode, step) = match kind {
-        Kind::Directory => (DIR_MODE, "inspect directory"),
-        Kind::File => (FILE_MODE, "inspect file"),
-    };
     let euid = effective_uid();
-    let metadata = file.metadata().map_err(|error| Error::io(path, step, error))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| Error::io(path, kind.inspect_step(), error))?;
     // A repair changes nothing that the check would refuse whatever the repair did, such as another hard link, whose
     // mode the change would also give to the other name.
     match kind {
@@ -429,11 +442,21 @@ fn repair_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<
         euid
     };
     check_rule(path, rule, owner, euid, kind)?;
+    let has_extended_acl = match os::check_no_extended_acl(file, path, kind == Kind::Directory) {
+        Ok(()) => false,
+        Err(error) if error.is_refused() => true,
+        Err(error) => return Err(error),
+    };
+    // An item that already has the rule's owner and mode, and no extended ACL, is left unwritten, so a repair on every
+    // start doesn't touch its change time; the setuid, setgid and sticky bits give no account access and are ignored.
+    if owner == metadata.uid() && metadata.mode() & 0o777 == kind.mode() && !has_extended_acl {
+        return check_item(file, path, rule, kind);
+    }
     if owner != metadata.uid() {
         std::os::unix::fs::fchown(file, Some(owner), None).map_err(|error| Error::io(path, "change owner", error))?;
     }
     os::remove_extended_acl(file, path)?;
-    file.set_permissions(Permissions::from_mode(mode))
+    file.set_permissions(Permissions::from_mode(kind.mode()))
         .map_err(|error| Error::io(path, "change mode", error))?;
     check_item(file, path, rule, kind)
 }
@@ -614,11 +637,11 @@ fn replaceable(mode: u32, acl: &os::AncestorAcl, allowed: &Allowed) -> bool {
 
 /// Gives the directory or file that was just created as `file` its rule's mode, then checks it.
 fn protect_created(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
-    let (expected, step) = match kind {
-        Kind::Directory => (DIR_MODE, "inspect directory"),
-        Kind::File => (FILE_MODE, "inspect file"),
-    };
-    let mode = file.metadata().map_err(|error| Error::io(path, step, error))?.mode();
+    let expected = kind.mode();
+    let mode = file
+        .metadata()
+        .map_err(|error| Error::io(path, kind.inspect_step(), error))?
+        .mode();
     // UNTESTED: a umask that removes owner bits doesn't leave the new directory or file without the owner's access.
     // The umask is process-wide, so a test can't set one without racing every other test.
     // When changing this, keep the mode change before the check.
@@ -630,11 +653,9 @@ fn protect_created(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Res
 }
 
 fn check_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
-    let step = match kind {
-        Kind::Directory => "inspect directory",
-        Kind::File => "inspect file",
-    };
-    let metadata = file.metadata().map_err(|error| Error::io(path, step, error))?;
+    let metadata = file
+        .metadata()
+        .map_err(|error| Error::io(path, kind.inspect_step(), error))?;
     match kind {
         Kind::Directory if !metadata.is_dir() => return Err(Error::refused(path, Refusal::NotADirectory)),
         Kind::File if !metadata.is_file() => return Err(Error::refused(path, Refusal::NotAFile)),
@@ -648,14 +669,6 @@ fn check_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<(
     }
     check_rule(path, rule, metadata.uid(), euid, kind)?;
     if metadata.mode() & GROUP_OTHER_BITS != 0 {
-        return Err(Error::refused(path, Refusal::Access));
-    }
-    // The setuid, setgid and sticky bits give no account access, so even an exact rule ignores them.
-    let expected = match kind {
-        Kind::Directory => DIR_MODE,
-        Kind::File => FILE_MODE,
-    };
-    if rule.exact && metadata.mode() & 0o777 != expected {
         return Err(Error::refused(path, Refusal::Access));
     }
     os::check_no_extended_acl(file, path, kind == Kind::Directory)

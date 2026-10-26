@@ -222,22 +222,40 @@ fn an_existing_directory_open_to_others_is_refused_until_repaired() {
     assert!(base.open_dir("shared", &rule(), Share::Shared).unwrap().is_some());
 }
 
-// Catches an exact check that accepted a mode taking access away from the owner, which a repair then never resets.
-// oracle: intent crates/private-fs/INTENT.md §vocabulary
+// Catches a repair that kept a mode the owner narrowed, which a check accepts since the owner can change it back.
+// oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
-fn an_exact_rule_requires_the_rule_s_mode_and_a_repair_restores_it() {
+fn a_repair_restores_a_mode_the_owner_narrowed() {
     let scratch = Scratch::new();
     let base = scratch.base();
     drop(base.create_dir("dir", &rule(), Existing::Check).unwrap());
     let dir = scratch.path.join("dir");
     set_mode(&dir, 0o500);
 
-    assert!(base.open_dir("dir", &rule(), Share::Shared).unwrap().is_some());
-    let error = base.open_dir("dir", &rule().exact(), Share::Shared).unwrap_err();
-    assert!(matches!(refusal(&error), Some(Refusal::Access)), "{error:?}");
+    assert!(base.open_dir("dir", &rule().exact(), Share::Shared).unwrap().is_some());
 
     base.create_dir("dir", &rule().exact(), Existing::Repair).unwrap();
     assert_eq!(mode(&dir), 0o700);
+}
+
+// A repair at every start that rewrote a correct directory would change it each time for nothing.
+// oracle: mutant a repair that changes the mode or ACL of a directory that already has the rule's
+#[test]
+fn a_repair_writes_nothing_to_a_directory_that_has_the_rule() {
+    let scratch = Scratch::new();
+    let base = scratch.base();
+    drop(base.create_dir("dir", &rule(), Existing::Check).unwrap());
+    let dir = scratch.path.join("dir");
+    let ctime = |path: &Utf8Path| {
+        let metadata = fs::symlink_metadata(path).unwrap();
+        (metadata.ctime(), metadata.ctime_nsec())
+    };
+    let before = ctime(&dir);
+    // Lets the clock pass a coarse kernel timestamp's tick, so that a write would show in the change time.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+
+    base.create_dir("dir", &rule().exact(), Existing::Repair).unwrap();
+    assert_eq!(ctime(&dir), before);
 }
 
 // Catches a repair that opens the directory first, which could never fix one whose mode shuts out its own owner.
