@@ -49,6 +49,7 @@ mcp-proxy.path = "../crates/mcp-proxy"
 network-scanner = { path = "../crates/network-scanner", features = ["test-utils"] }
 network-scanner-proto = { path = "../crates/network-scanner-proto" }
 nonempty = "0.12"
+private-fs.path = "../crates/private-fs"
 picky = { version = "7.0.0-rc.25", default-features = false, features = ["jose"] }
 proxy-socks = { path = "../crates/proxy-socks" }
 quinn = "0.11"

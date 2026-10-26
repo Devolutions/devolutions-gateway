@@ -3,12 +3,14 @@ name = "private-fs"
 version = "0.0.0"
 authors = ["Devolutions Inc. <infos@devolutions.net>"]
 edition = "2024"
-description = "Unix helpers for files and directories that only their owner can access"
+description = "Files and directories that only the accounts a rule allows can access"
 publish = false
 
 [lints]
 workspace = true
 
-[target.'cfg(unix)'.dependencies]
+[dependencies]
 camino = "1"
+
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
