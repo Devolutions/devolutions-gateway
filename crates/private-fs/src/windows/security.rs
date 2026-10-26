@@ -329,7 +329,8 @@ impl Policy {
 /// Reports whether `sid` is an AppContainer package SID (S-1-15-2-...) or capability SID (S-1-15-3-...).
 ///
 /// An entry for one never grants access by itself: Windows grants an AppContainer process only the access that both
-/// its user and groups, and its package and capabilities, are granted, and other processes don't hold these SIDs.
+/// its user and groups, and its package and capabilities, are granted, and other processes don't hold these SIDs, as
+/// Microsoft Learn "Launch an AppContainer" states in "AppContainer overview".
 /// Windows puts such entries on user profile directories, such as `AppData\Local`.
 fn is_app_container(sid: &Sid) -> bool {
     // SECURITY_APP_PACKAGE_AUTHORITY.
@@ -487,17 +488,16 @@ unsafe fn read_acl(acl: *mut ACL) -> io::Result<Vec<Ace>> {
             let too_short = || io::Error::new(io::ErrorKind::InvalidData, "access control entry too short");
             let sid_offset = offset_of!(ACCESS_ALLOWED_ACE, SidStart);
             let ace_size = usize::from(header.AceSize);
-            if ace_size < sid_offset + 1 /* Revision */ + 1
+            let count_offset = sid_offset + 1 /* Revision */;
+            if ace_size < count_offset + 1
             /* SubAuthorityCount */
             {
                 return Err(too_short());
             }
-            let count_pointer = pointer.cast::<u8>().wrapping_add(sid_offset + 1 /* Revision */);
+            let count_pointer = pointer.cast::<u8>().wrapping_add(count_offset);
             // SAFETY: The entry is at least as long as the byte read, per its size checked above.
             let sub_authority_count = usize::from(unsafe { count_pointer.read() });
-            let sid_size = 1 /* Revision */ + 1 /* SubAuthorityCount */ + 6 /* IdentifierAuthority */
-                + 4 /* SubAuthority */ * sub_authority_count;
-            if ace_size < sid_offset + sid_size {
+            if ace_size < sid_offset + sid_size(sub_authority_count) {
                 return Err(too_short());
             }
             let mask_pointer = pointer.cast::<u8>().wrapping_add(offset_of!(ACCESS_ALLOWED_ACE, Mask));
@@ -522,6 +522,12 @@ unsafe fn read_acl(acl: *mut ACL) -> io::Result<Vec<Ace>> {
     Ok(entries)
 }
 
+/// Returns the size of a SID with `sub_authority_count` subauthorities, per [MS-DTYP] §2.4.2.2 SID.
+fn sid_size(sub_authority_count: usize) -> usize {
+    let header = 1 /* Revision */ + 1 /* SubAuthorityCount */ + 6 /* IdentifierAuthority */;
+    header + 4 /* SubAuthority */ * sub_authority_count
+}
+
 /// An absolute security descriptor with an owner and a protected DACL, for creating an item or setting its
 /// security.
 pub(super) struct Descriptor {
@@ -535,10 +541,8 @@ impl Descriptor {
     pub(super) fn new(owner: &Sid, entries: &[Entry]) -> io::Result<Self> {
         let too_large = || io::Error::new(io::ErrorKind::InvalidInput, "the access control list is too large");
         // An entry is its header and mask, then its SID.
-        let size = entries.iter().try_fold(size_of::<ACL>(), |size, (sid, _, _)| {
-            let sid_size = 1 /* Revision */ + 1 /* SubAuthorityCount */ + 6 /* IdentifierAuthority */
-                + 4 /* SubAuthority */ * sid.sub_authorities().len();
-            size.checked_add(offset_of!(ACCESS_ALLOWED_ACE, SidStart) + sid_size)
+        let size = entries.iter().try_fold(8 /* ACL header */, |size: usize, (sid, _, _)| {
+            size.checked_add(offset_of!(ACCESS_ALLOWED_ACE, SidStart) + sid_size(sid.sub_authorities().len()))
         });
         // The ACL size is a 16-bit field.
         let size = size.and_then(|size| u16::try_from(size).ok()).ok_or_else(too_large)?;
@@ -847,7 +851,7 @@ mod tests {
         assert_eq!(refusal(checked), "accepted");
     }
 
-    // oracle: spec Microsoft Learn "AppContainer isolation"
+    // oracle: spec Microsoft Learn "Launch an AppContainer" §AppContainer overview
     #[test]
     fn an_ancestor_entry_for_an_app_container_capability_is_ignored() {
         // The capability SID that Windows puts on AppData\Local, with full access.
@@ -889,7 +893,7 @@ mod tests {
         assert_eq!(refusal(checked), "accepted");
     }
 
-    // oracle: spec Microsoft Learn "AppContainer isolation"
+    // oracle: spec Microsoft Learn "Launch an AppContainer" §AppContainer overview
     #[test]
     fn an_ancestor_entry_for_all_application_packages_is_ignored() {
         // ALL APPLICATION PACKAGES, S-1-15-2-1, a package SID.

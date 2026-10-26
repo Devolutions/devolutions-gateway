@@ -300,7 +300,7 @@ fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
         matches!(denied.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied),
         "{denied:?}"
     );
-    let _backup = match BackupPrivilege::enable() {
+    let backup = match BackupPrivilege::enable() {
         Ok(backup) => backup,
         Err(error) => {
             println!("SKIP: the process token doesn't hold the backup privilege: {error}");
@@ -308,6 +308,13 @@ fn the_backup_privilege_opens_a_file_the_token_cannot() -> anyhow::Result<()> {
         }
     };
     assert!(base.open_file("file", &rule, FileOptions::new())?.is_some());
+    // Dropping the guard takes the privilege away again.
+    drop(backup);
+    let denied = refusal(base.open_file("file", &rule, FileOptions::new()));
+    assert!(
+        matches!(denied.kind(), ErrorKind::Io { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied),
+        "{denied:?}"
+    );
     Ok(())
 }
 
@@ -719,7 +726,7 @@ fn a_name_win32_paths_reach_differently_is_refused(#[case] name: &str) -> anyhow
     Ok(())
 }
 
-// oracle: reference crates/private-fs/src/unix.rs rename
+// oracle: spec IEEE Std 1003.1-2017 §rename
 #[test]
 fn persist_replaces_a_destination_another_process_holds_open() -> anyhow::Result<()> {
     // Catches a replacement that fails while a reader, sharing deletion as std does, holds the destination open.
@@ -736,7 +743,7 @@ fn persist_replaces_a_destination_another_process_holds_open() -> anyhow::Result
     Ok(())
 }
 
-// oracle: reference crates/private-fs/src/unix.rs remove_file
+// oracle: spec IEEE Std 1003.1-2017 §unlink
 #[test]
 fn removing_a_file_another_process_holds_open_frees_its_name() -> anyhow::Result<()> {
     // Catches a removal that leaves the name pending deletion until the reader closes it, so that creating it again
@@ -751,7 +758,7 @@ fn removing_a_file_another_process_holds_open_frees_its_name() -> anyhow::Result
     Ok(())
 }
 
-// oracle: reference crates/private-fs/src/windows/mod.rs BackupPrivilege
+// oracle: mutant guards nested on one thread, whose drops out of order leave the thread with the privilege
 #[test]
 fn a_thread_holds_one_backup_privilege_at_a_time() -> anyhow::Result<()> {
     // Catches nested guards, whose drops out of order would leave the thread with the privilege.

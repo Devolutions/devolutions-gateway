@@ -15,16 +15,16 @@ use windows::Wdk::Storage::FileSystem::{
     NTCREATEFILE_CREATE_OPTIONS, NtCreateFile, NtSetInformationFile,
 };
 use windows::Win32::Foundation::{
-    ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_INFO_CLASS,
-    STATUS_INVALID_PARAMETER, STATUS_NOT_SUPPORTED, UNICODE_STRING,
+    ERROR_NO_MORE_FILES, HANDLE, NTSTATUS, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_DEVICE_REQUEST,
+    STATUS_INVALID_INFO_CLASS, STATUS_INVALID_PARAMETER, STATUS_NOT_IMPLEMENTED, STATUS_NOT_SUPPORTED, UNICODE_STRING,
 };
 use windows::Win32::Security::SECURITY_DESCRIPTOR;
 use windows::Win32::Storage::FileSystem::{
-    FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAGS_AND_ATTRIBUTES, FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO,
-    FILE_INFO_BY_HANDLE_CLASS, FILE_NAME_NORMALIZED, FILE_SHARE_MODE, FILE_STANDARD_INFO, FileAttributeTagInfo,
-    FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, FlushFileBuffers,
-    GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
-    GetVolumeInformationByHandleW, VOLUME_NAME_DOS,
+    FILE_ACCESS_RIGHTS, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_FLAGS_AND_ATTRIBUTES,
+    FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO, FILE_INFO_BY_HANDLE_CLASS, FILE_NAME_NORMALIZED, FILE_SHARE_MODE,
+    FILE_STANDARD_INFO, FileAttributeTagInfo, FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo,
+    FileStandardInfo, FlushFileBuffers, GETFINALPATHNAMEBYHANDLE_FLAGS, GetFileInformationByHandleEx,
+    GetFinalPathNameByHandleW, GetVolumeInformationByHandleW, VOLUME_NAME_DOS,
 };
 use windows::Win32::System::IO::IO_STATUS_BLOCK;
 use windows::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
@@ -218,6 +218,9 @@ pub(super) fn rename(
         flags |= FILE_RENAME_REPLACE_IF_EXISTS;
     }
     let mut status = set_rename(handle, root, name, flags, FileRenameInformationEx)?;
+    // UNTESTED: where the file system lacks the extended class, the legacy class renames, with or without replacing.
+    // Tests run on NTFS of a Windows that has it; when changing this, check on FAT or an older Windows, or force the
+    // fallback, that every rename test still passes.
     if needs_legacy_class(status) {
         // The legacy class reads ReplaceIfExists, a BOOLEAN, from the first byte of the same field.
         status = set_rename(handle, root, name, u32::from(replace), FileRenameInformation)?;
@@ -235,6 +238,8 @@ fn needs_legacy_class(status: NTSTATUS) -> bool {
         STATUS_INVALID_PARAMETER,
         STATUS_NOT_SUPPORTED,
         STATUS_INVALID_INFO_CLASS,
+        STATUS_INVALID_DEVICE_REQUEST,
+        STATUS_NOT_IMPLEMENTED,
     ]
     .contains(&status)
 }
@@ -297,6 +302,9 @@ pub(super) fn delete(handle: BorrowedHandle<'_>) -> io::Result<()> {
             FileDispositionInformationEx,
         )
     };
+    // UNTESTED: where the file system lacks the extended class, the legacy class deletes once every handle is closed.
+    // Tests run on NTFS of a Windows that has it; when changing this, check on FAT or an older Windows, or force the
+    // fallback, that every removal test but the one needing POSIX semantics still passes.
     if needs_legacy_class(status) {
         let delete_file = 1u8;
         // SAFETY: The BOOLEAN DeleteFile, a FILE_DISPOSITION_INFORMATION, stays live for the call.
@@ -330,10 +338,11 @@ unsafe fn set_information(
     unsafe { NtSetInformationFile(raw(handle), &raw mut status_block, information, length, class) }
 }
 
-/// Lists the entries of the directory `handle` refers to, with their file attributes, without `.` and `..`.
+/// Lists the entries of the directory `handle` refers to, with their file attributes and reparse tags, without `.`
+/// and `..`.
 ///
 /// The listing moves the handle's enumeration cursor, so callers pass a handle that nothing else lists through.
-pub(super) fn list(handle: BorrowedHandle<'_>) -> io::Result<Vec<(OsString, u32)>> {
+pub(super) fn list(handle: BorrowedHandle<'_>) -> io::Result<Vec<(OsString, u32, u32)>> {
     // A u64 buffer is aligned for FILE_ID_BOTH_DIR_INFO, whose largest fields are 64-bit.
     let mut buffer = vec![0u64; 8 * 1024];
     let byte_length = buffer.len() * size_of::<u64>();
@@ -364,7 +373,7 @@ pub(super) fn list(handle: BorrowedHandle<'_>) -> io::Result<Vec<(OsString, u32)
 }
 
 /// Appends the entries of one buffer of `FILE_ID_BOTH_DIR_INFO` records to `entries`.
-fn parse_listing(bytes: &[u8], entries: &mut Vec<(OsString, u32)>) -> io::Result<()> {
+fn parse_listing(bytes: &[u8], entries: &mut Vec<(OsString, u32, u32)>) -> io::Result<()> {
     let invalid = || io::Error::new(io::ErrorKind::InvalidData, "malformed directory listing");
     let mut offset = 0usize;
     loop {
@@ -375,6 +384,12 @@ fn parse_listing(bytes: &[u8], entries: &mut Vec<(OsString, u32)>) -> io::Result
         };
         let next = field(offset_of!(FILE_ID_BOTH_DIR_INFO, NextEntryOffset))?;
         let attributes = field(offset_of!(FILE_ID_BOTH_DIR_INFO, FileAttributes))?;
+        // A reparse point's entry holds its reparse tag in EaSize, per [MS-FSCC] §2.4.17.
+        let tag = if attributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            field(offset_of!(FILE_ID_BOTH_DIR_INFO, EaSize))?
+        } else {
+            0
+        };
         let name_length =
             usize::try_from(field(offset_of!(FILE_ID_BOTH_DIR_INFO, FileNameLength))?).map_err(|_| invalid())?;
         let start = offset + offset_of!(FILE_ID_BOTH_DIR_INFO, FileName);
@@ -387,7 +402,7 @@ fn parse_listing(bytes: &[u8], entries: &mut Vec<(OsString, u32)>) -> io::Result
             .collect();
         let name = OsString::from_wide(&units);
         if name != "." && name != ".." {
-            entries.push((name, attributes));
+            entries.push((name, attributes, tag));
         }
         if next == 0 {
             return Ok(());
