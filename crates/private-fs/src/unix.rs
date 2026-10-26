@@ -393,8 +393,8 @@ pub(crate) fn entries(dir: &Dir, path: &Utf8Path) -> Result<Vec<Entry>> {
             Ok(stat) => (entry_kind(stat.st_mode), Some(link_count(stat.st_nlink))),
             // The entry was removed since it was read.
             Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            // An entry that can't be inspected, as under a directory without search access, is still listed, with the
-            // kind the directory reports and no link count.
+            // An entry that can't be inspected, after an I/O error for example, is still listed, with the kind the
+            // directory reports and no link count.
             Err(_) => (dirent_kind(entry.d_type), None),
         };
         entries.push(Entry {

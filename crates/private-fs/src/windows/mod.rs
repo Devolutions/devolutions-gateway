@@ -406,6 +406,11 @@ enum Links {
 ///
 /// The entry is opened with FILE_READ_ATTRIBUTES only, which the directory's FILE_LIST_DIRECTORY grants whatever the
 /// entry's own DACL says, without following a reparse point.
+///
+/// UNTESTED: an entry whose DACL grants the caller nothing still gets its link count, through the directory's
+/// FILE_LIST_DIRECTORY.
+/// No test lists such a file: a caller that keeps a key it can't open listed depends on it.
+/// When changing this, keep asking for FILE_READ_ATTRIBUTES alone.
 fn entry_links(dir: BorrowedHandle<'_>, name: &OsStr) -> Links {
     // A listed name need not be valid UTF-16, so it is opened as listed.
     let name: Vec<u16> = name.encode_wide().collect();
@@ -421,7 +426,7 @@ fn entry_links(dir: BorrowedHandle<'_>, name: &OsStr) -> Links {
     };
     let handle = match nt::open_listed(dir, &name, &request) {
         Ok(Some(handle)) => handle,
-        // Pending deletion, the entry goes once its last handle closes, as one removed since it was listed has.
+        // An entry pending deletion goes once its last handle closes, as one removed since it was listed has gone.
         Ok(None) => return Links::Gone,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Links::Gone,
         Err(_) => return Links::Unreadable,
