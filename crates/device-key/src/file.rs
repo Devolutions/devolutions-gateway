@@ -63,8 +63,10 @@ fn key_file_rule() -> Rule {
         .grant(Account::System, Access::Full)
 }
 
+const KEY_FILE_SUFFIX: &str = ".p8";
+
 fn key_file_name(name: &str) -> String {
-    format!("{name}.p8")
+    format!("{name}{KEY_FILE_SUFFIX}")
 }
 
 #[cfg(windows)]
@@ -152,15 +154,7 @@ pub(super) fn delete(dir: &Utf8Path, name: &str) -> anyhow::Result<()> {
     if !listed_with_exact_name(&dir, &file_name)? {
         return Ok(());
     }
-    // On Windows, a removed file keeps its name until every handle on it is closed, so the key file is first renamed to
-    // free its name at once.
-    #[cfg(windows)]
-    let file_name = {
-        let tombstone = tombstone_name(name);
-        dir.rename(&file_name, &tombstone, Replace::Refuse)
-            .context("retire key file")?;
-        tombstone
-    };
+    let file_name = retire(&dir, &file_name, name).context("retire key file")?;
     dir.remove_file(&file_name).context("delete key file")?;
     Ok(())
 }
@@ -176,7 +170,7 @@ pub(super) fn list(dir: &Utf8Path, prefix: &str) -> anyhow::Result<Vec<String>> 
         .into_iter()
         .filter(|entry| entry.kind == EntryKind::File)
         .filter_map(|entry| {
-            let name = entry.name.to_str()?.strip_suffix(".p8")?;
+            let name = entry.name.to_str()?.strip_suffix(KEY_FILE_SUFFIX)?;
             name_matches_prefix(name, prefix).then(|| name.to_owned())
         })
         .collect::<Vec<_>>();
@@ -220,7 +214,8 @@ fn abandoned_name(file_name: &str) -> Option<&str> {
 fn cleanup_abandoned(dir: &Dir) -> anyhow::Result<()> {
     // A creator holds this lock until it removes its temporary, so every remaining temporary is abandoned.
     for entry in dir.entries().context("inspect abandoned key files")? {
-        if entry.kind == EntryKind::Directory {
+        // The crate creates only regular files, and anything else at one of its names is not its own.
+        if entry.kind != EntryKind::File {
             continue;
         }
         let Some(file_name) = entry.name.to_str() else {
@@ -229,20 +224,30 @@ fn cleanup_abandoned(dir: &Dir) -> anyhow::Result<()> {
         let Some(name) = abandoned_name(file_name) else {
             continue;
         };
-        #[cfg(not(windows))]
-        let _ = name;
-        #[cfg(windows)]
-        let file_name = &if file_name.ends_with(".tmp") {
-            let tombstone = tombstone_name(name);
-            dir.rename(file_name, &tombstone, Replace::Refuse)
-                .context("retire abandoned key file")?;
-            tombstone
+        let file_name = if file_name.ends_with(".tmp") {
+            retire(dir, file_name, name).context("retire abandoned key file")?
         } else {
             file_name.to_owned()
         };
-        dir.remove_file(file_name).context("remove abandoned key file")?;
+        dir.remove_file(&file_name).context("remove abandoned key file")?;
     }
     Ok(())
+}
+
+/// Renames `file_name`, a file of the key `name`, to a tombstone on Windows, and returns the name to remove.
+///
+/// Where Windows can't remove a file with POSIX semantics, such as on FAT or before Windows 10 1709, a removed file keeps
+/// its name until every handle on it is closed, so it is renamed first to free its name at once.
+#[cfg(windows)]
+fn retire(dir: &Dir, file_name: &str, name: &str) -> anyhow::Result<String> {
+    let tombstone = tombstone_name(name);
+    dir.rename(file_name, &tombstone, Replace::Refuse)?;
+    Ok(tombstone)
+}
+
+#[cfg(not(windows))]
+fn retire(_: &Dir, file_name: &str, _: &str) -> anyhow::Result<String> {
+    Ok(file_name.to_owned())
 }
 
 fn lock_options() -> FileOptions {
@@ -577,6 +582,36 @@ mod tests {
         for file_name in &outside_files {
             assert!(directory.0.join(file_name).is_file(), "{file_name}");
         }
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_link_at_a_leftover_name_is_skipped_by_listing() -> anyhow::Result<()> {
+        // Catches a cleanup that treats a link named like a leftover as one, which then fails every operation.
+        let directory = KeyDirectory::new()?;
+        let leftover = create_leftover(&directory)?;
+        let target = directory.0.join("target");
+        fs::create_dir(&target)?;
+        let link = directory
+            .0
+            .join(format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4()));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link)?;
+        // A directory junction needs no privilege, unlike a symbolic link.
+        #[cfg(windows)]
+        ensure!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J", link.as_str(), target.as_str()])
+                .output()?
+                .status
+                .success(),
+            "create junction"
+        );
+
+        assert!(list(&directory.backend(), TEST_PREFIX)?.is_empty());
+        assert!(!leftover.exists());
+        assert!(fs::symlink_metadata(&link).is_ok());
         Ok(())
     }
 
