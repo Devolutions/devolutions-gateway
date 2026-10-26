@@ -346,6 +346,50 @@ paths:
       security:
       - jrec_token:
         - pull
+  /jet/jrec/search:
+    post:
+      tags:
+      - Jrec
+      summary: Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+      description: |-
+        The query is a case-insensitive substring, and an empty query matches every line.
+        In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
+        once unescaped, so field names, numbers, booleans and null never match.
+        Any other line, such as one still being written, is matched as raw text.
+        A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually
+        matched as raw text.
+        Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched.
+        Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
+
+        Results come in pages.
+        To get the next page, send the same `query`, `recordings` and `startTime` again,
+        with the `nextCursor` of the previous page as `cursor`.
+        Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not
+        searched.
+      operationId: SearchRecordings
+      requestBody:
+        description: JSON-encoded search request
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordingSearchRequest'
+        required: true
+      responses:
+        '200':
+          description: Matching log lines
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordingSearchResponse'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+      security:
+      - scope_token:
+        - gateway.recordings.search
   /jet/jrl:
     post:
       tags:
@@ -1326,6 +1370,7 @@ components:
       - gateway.net.monitor.drain
       - gateway.agent.delete
       - gateway.agent.read
+      - gateway.recordings.search
     AckRequest:
       type: object
       required:
@@ -2196,6 +2241,107 @@ components:
       enum:
       - Spki
       - Pkcs1
+    RecordingSearchHit:
+      type: object
+      description: A line that matches the search text.
+      required:
+      - recordingId
+      - fileName
+      - lineNumber
+      - offset
+      - line
+      - truncated
+      properties:
+        fileName:
+          type: string
+          description: Name of the `.slog` artifact holding the line, as listed in `recording.json`.
+        line:
+          type: string
+          description: The line's text without its line break; bytes that are not UTF-8 read as U+FFFD.
+        lineNumber:
+          type: integer
+          format: int64
+          description: Number of the line in the file, counting from 1.
+          minimum: 1
+        offset:
+          type: integer
+          format: int64
+          description: Byte offset of the line in the file.
+          minimum: 0
+        recordingId:
+          type: string
+          format: uuid
+          description: The recording whose artifact holds the line.
+        truncated:
+          type: boolean
+          description: The line is longer than 256 KiB, so `line` holds only its start, and the file holds the rest.
+    RecordingSearchRequest:
+      type: object
+      description: |-
+        What to search for, and in which recordings.
+
+        Unknown fields are rejected, so that an option added later is never silently ignored by a Gateway that predates it.
+      required:
+      - query
+      - recordings
+      properties:
+        cursor:
+          type: string
+          description: |-
+            Where the page starts: the `nextCursor` of the previous page, sent unchanged with the same `query`,
+            `recordings` and `startTime`.
+          nullable: true
+        maxHits:
+          type: integer
+          format: int32
+          description: Most hits in the page, from 1 to 1000; 1000 when missing.
+          nullable: true
+          maximum: 1000
+          minimum: 1
+        query:
+          type: string
+          description: |-
+            Text to search for, ignoring case; leading and trailing spaces are part of it, and an empty text matches every
+            line.
+        recordings:
+          $ref: '#/components/schemas/RecordingSelection'
+        startTime:
+          allOf:
+          - $ref: '#/components/schemas/StartTimeRange'
+          nullable: true
+      additionalProperties: false
+    RecordingSearchResponse:
+      type: object
+      description: The lines that match the search text.
+      required:
+      - hits
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecordingSearchHit'
+          description: Matching lines, newest recording first when searching all recordings, otherwise in the requested order.
+        nextCursor:
+          type: string
+          description: |-
+            Where the next page starts; absent when every log has been read.
+
+            The cursor is opaque, and its format may change between versions.
+            A page with fewer hits than asked for may still be followed by more pages.
+          nullable: true
+    RecordingSelection:
+      oneOf:
+      - type: string
+        enum:
+        - all
+      - type: array
+        items:
+          type: string
+          format: uuid
+      description: |-
+        `"all"`, or a list of recording IDs.
+
+        A repeated ID is searched once, and an empty list searches nothing.
     ScanOriginDto:
       type: string
       enum:
@@ -2349,6 +2495,24 @@ components:
           minimum: 0
     SetUpdateScheduleResponse:
       type: object
+    StartTimeRange:
+      type: object
+      description: |-
+        A range of recording start times, as written in `recording.json`, that includes `from` and excludes `to`.
+
+        A missing end leaves that side of the range open.
+      properties:
+        from:
+          type: string
+          format: date-time
+          description: Earliest start time searched.
+          nullable: true
+        to:
+          type: string
+          format: date-time
+          description: Recordings that start at this time or later are not searched.
+          nullable: true
+      additionalProperties: false
     SubProvisionerKey:
       type: object
       required:
