@@ -115,9 +115,10 @@ mod tests {
         let directory = private_file::TestDir::new()?;
         let lock = acquire(directory.path(), true)?;
         let (sender, receiver) = std::sync::mpsc::channel();
+        let path = directory.path();
         std::thread::scope(|scope| {
-            let worker = scope.spawn(|| {
-                let result = acquire(directory.path(), true).map(|_lock| ());
+            let worker = scope.spawn(move || {
+                let result = acquire(path, true).map(|_lock| ());
                 let _ = sender.send(result);
             });
             std::thread::sleep(Duration::from_millis(50));

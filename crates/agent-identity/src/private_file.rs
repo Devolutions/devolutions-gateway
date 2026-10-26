@@ -197,8 +197,10 @@ pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: boo
 
     fn provision(parent: &Dir, name: &str, rule: &Rule) -> anyhow::Result<Dir> {
         // Repairing only a directory that fails its rule leaves a correct one unwritten.
+        // A directory whose access denies the agent fails to open rather than failing the rule, and is repaired too,
+        // since repair needs only the access its owner always keeps.
         match parent.create_dir(name, rule, Existing::Check) {
-            Err(error) if error.is_refused() => parent.create_dir(name, rule, Existing::Repair),
+            Err(error) if fails_trust_check(&error) => parent.create_dir(name, rule, Existing::Repair),
             created => created,
         }
         .context("provision identity directory")
@@ -835,7 +837,9 @@ mod windows_tests {
     use ::windows::Win32::Security::{
         CONTAINER_INHERIT_ACE, NO_INHERITANCE, OBJECT_INHERIT_ACE, WinBuiltinAdministratorsSid, WinBuiltinUsersSid,
     };
-    use ::windows::Win32::Storage::FileSystem::{FILE_ADD_FILE, FILE_ALL_ACCESS, SYNCHRONIZE, WRITE_DAC};
+    use ::windows::Win32::Storage::FileSystem::{
+        FILE_ADD_FILE, FILE_ALL_ACCESS, FILE_GENERIC_READ, SYNCHRONIZE, WRITE_DAC,
+    };
     use win_api_wrappers::identity::sid::Sid;
 
     use super::*;
@@ -942,6 +946,28 @@ mod windows_tests {
 
         replaced?;
         assert_eq!(fs::read(&path)?, b"new");
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn repairs_a_directory_whose_access_denies_the_agent() -> anyhow::Result<()> {
+        // Catches a start-up that repairs only a directory failing its rule, not one it can't open.
+        let directory = TestDir::new()?;
+        let identity = directory.identity();
+        fs::create_dir(&identity)?;
+        let users = Sid::from_well_known(WinBuiltinUsersSid, None)?;
+        acl::set_dacl(&identity, &[(users, FILE_GENERIC_READ.0, 0)])?;
+
+        prepare_directories(&directory.0, true)?;
+
+        assert_eq!(
+            acl::protected_dacl_of(&identity)?,
+            Some(acl::sorted(&[
+                full(&acl::system_sid()?, INHERITED),
+                full(&acl::user_sid()?, INHERITED)
+            ]))
+        );
         Ok(())
     }
 

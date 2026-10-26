@@ -377,7 +377,7 @@ fn a_check_refuses_an_account_the_rule_does_not_name() -> anyhow::Result<()> {
 
 // oracle: intent crates/private-fs/INTENT.md §mechanisms
 #[test]
-fn a_check_refuses_an_unprotected_dacl() -> anyhow::Result<()> {
+fn a_check_refuses_inherited_entries() -> anyhow::Result<()> {
     // Catches a check that ignores inherited entries, which the parent directory decides.
     let test = TestDir::new();
     let base = Dir::create_base(test.path(), &user_rule())?;

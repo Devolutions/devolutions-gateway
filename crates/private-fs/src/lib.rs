@@ -234,7 +234,8 @@ impl Dir {
     /// Removes `file`, which this handle created as `name`, while it is still at `name`, and never another file.
     ///
     /// After a failed [`Dir::persist`], it removes the file only if the rename didn't happen.
-    /// On Windows, names compare as NTFS compares them, ignoring case.
+    /// On Windows, names compare as NTFS compares them, ignoring case, so a rename that changes only case counts as the
+    /// same name.
     ///
     /// A file can be created with a rule that gives its creator no access once created, so removing it by name again
     /// could be refused.
