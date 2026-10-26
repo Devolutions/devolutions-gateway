@@ -660,7 +660,7 @@ fn identity_view(state: &State, identity: &Identity, now: i64) -> Value {
     if let Some(current) = identity.current_cert() {
         view["certificate"] = json!({
             "issuerThumbprint": current.issuer,
-            "validUntil": rfc3339(current.not_after),
+            "validTo": rfc3339(current.not_after),
         });
     }
     view
@@ -696,7 +696,7 @@ fn certificate_view(cert: &Cert) -> Value {
         },
         "thumbprint": cert.thumbprint,
         "validFrom": rfc3339(cert.not_before),
-        "validUntil": rfc3339(cert.not_after),
+        "validTo": rfc3339(cert.not_after),
     })
 }
 
@@ -875,7 +875,7 @@ fn rotation_view(state: &State, now: i64) -> Value {
                 json!({
                     "thumbprint": root.thumbprint,
                     "validFrom": rfc3339(root.not_before),
-                    "validUntil": rfc3339(root.not_after),
+                    "validTo": rfc3339(root.not_after),
                 })
             })
     };
