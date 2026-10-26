@@ -814,6 +814,35 @@ fn a_created_directory_opens_elsewhere_without_sharing_deletion() -> anyhow::Res
     Ok(())
 }
 
+// oracle: reference crates/private-fs/src/lib.rs Dir::discard
+#[test]
+fn discard_keeps_a_file_persisted_under_another_name() -> anyhow::Result<()> {
+    // Catches a discard after a persist whose flush failed, which would delete the file just installed while the file
+    // it replaced is already gone.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let mut file = base.create_file("new", &user_rule(), FileOptions::new())?;
+    file.write_all(b"new")?;
+    base.persist(&file, "new", "installed", Replace::Allow)?;
+    base.discard(&file, "new")?;
+    drop(file);
+    assert_eq!(std::fs::read(test.path().join("installed"))?, b"new");
+    Ok(())
+}
+
+// oracle: reference crates/private-fs/src/lib.rs Dir::discard
+#[test]
+fn discard_removes_a_file_still_under_its_name() -> anyhow::Result<()> {
+    // Catches a discard that never removes anything, given a name of another case than the one created.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let file = base.create_file("staged", &user_rule(), FileOptions::new())?;
+    base.discard(&file, "STAGED")?;
+    drop(file);
+    assert!(!test.path().join("staged").exists());
+    Ok(())
+}
+
 // oracle: reference crates/private-fs/src/lib.rs Dir::entries
 #[test]
 fn a_directory_opened_exclusively_lists_its_entries() -> anyhow::Result<()> {

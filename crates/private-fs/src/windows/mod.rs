@@ -337,8 +337,21 @@ pub(crate) fn remove_file(parent: &Dir, path: &Utf8Path, name: &str) -> Result<b
     Ok(true)
 }
 
-/// Removes `file`, which this directory's handle created as `name`, through the file's own handle.
-pub(crate) fn discard(_parent: &Dir, path: &Utf8Path, file: &File, _name: &str) -> Result<()> {
+/// Removes `file` while it is still the entry `name` of this directory, through the file's own handle, and does
+/// nothing once it has been renamed, as by a persist whose flush failed after its rename.
+///
+/// The file's own handle deletes it because an account that may only add to the directory has no access by name.
+pub(crate) fn discard(parent: &Dir, path: &Utf8Path, file: &File, name: &str) -> Result<()> {
+    validate_name(path, name)?;
+    let read_path = |handle| nt::final_path(handle).map_err(|error| Error::io(path, "read file path", error));
+    let directory = read_path(parent.handle())?;
+    let current = read_path(file.as_handle())?;
+    let separator = if directory.ends_with('\\') { "" } else { "\\" };
+    let expected = format!("{directory}{separator}{name}");
+    // Windows file names are case-insensitive.
+    if current.to_uppercase() != expected.to_uppercase() {
+        return Ok(());
+    }
     nt::delete(file.as_handle()).map_err(|error| Error::io(path, "remove file", error))
 }
 
