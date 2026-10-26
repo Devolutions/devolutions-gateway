@@ -499,6 +499,26 @@ fn a_repair_restores_the_rule_without_changing_what_lies_below() -> anyhow::Resu
     Ok(())
 }
 
+// oracle: mutant a repair that writes the owner and DACL of a directory already in line with its rule
+#[test]
+fn a_repair_of_a_directory_already_in_line_writes_nothing() -> anyhow::Result<()> {
+    // Catches a repair that writes the DACL every time, which a directory whose rule gives its owner read and write
+    // but not WRITE_DAC refuses, so a repair at every start-up would fail on a correct directory.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    let rule = Rule::new()
+        .owner(Account::CurrentUser)
+        .grant(Account::CurrentUser, Access::ReadWrite)
+        .exact();
+    let child = base.create_dir("child", &rule, Existing::Check)?;
+    let before = security(&test.path().join("child"))?;
+    child.repair(&rule)?;
+    drop(child);
+    drop(base.create_dir("child", &rule, Existing::Repair)?);
+    assert_eq!(security(&test.path().join("child"))?, before);
+    Ok(())
+}
+
 // oracle: intent crates/private-fs/INTENT.md §paths
 #[test]
 fn a_repair_restores_a_directory_whose_dacl_grants_its_owner_nothing() -> anyhow::Result<()> {

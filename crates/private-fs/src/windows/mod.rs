@@ -185,9 +185,10 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
             }
             Existing::Repair => {
                 // A directory whose DACL no longer grants the current user anything is still repairable by its owner,
-                // so it is opened with the repair's access only, and opened normally once repaired.
+                // so it is opened with what reading its owner and DACL needs, within the owner's implicit access, and
+                // opened normally once repaired; the repair itself asks for WRITE_DAC only when it writes.
                 let request = Request {
-                    access: REPAIR_ACCESS,
+                    access: FILE_ACCESS_RIGHTS(READ_CONTROL.0 | FILE_READ_ATTRIBUTES.0),
                     share: SHARE_ALL,
                     disposition: FILE_OPEN,
                     options: REPAIR_OPTIONS,
@@ -477,6 +478,11 @@ fn repair(handle: BorrowedHandle<'_>, path: &Utf8Path, kind: Kind, policy: &Poli
     classify(handle, path, kind)?;
     let security =
         OwnerAndDacl::of_handle(handle).map_err(|error| Error::io(path, "read access control list", error))?;
+    // An item already in line with the rule, owner included, is left as it is: nothing is written, so a repair at every
+    // start-up changes nothing on a correct item and needs no WRITE_DAC on it.
+    if policy.check_exactly(&security, path, &administrators_member).is_ok() {
+        return Ok(());
+    }
     let current_owner = security.owner();
     let owner_allowed = match current_owner {
         Some(owner) => policy.owner_allowed(owner, path, &administrators_member)?,
@@ -952,6 +958,10 @@ fn check_above(path: &Utf8Path, policy: &Policy) -> Result<()> {
     }
     // A folder on which a volume without a drive letter is mounted resolves to its own path, but opens the mounted
     // volume's root, so the folder's own owner and DACL can't be read through it, which fails the check.
+    // UNTESTED: a folder above a base on which a volume without a drive letter is mounted is refused.
+    // Mounting a volume on a folder needs elevation, which tests can't rely on, and `is_mount_folder` is tested alone;
+    // when changing this, keep asking for the path within the volume through the same READ_CONTROL-only handle, and
+    // keep refusing a volume's root reached below the root of a path.
     let in_volume = nt::path_in_volume(handle.as_handle()).map_err(unreadable)?;
     if is_mount_folder(&in_volume, path) {
         return Err(unreadable(io::Error::new(

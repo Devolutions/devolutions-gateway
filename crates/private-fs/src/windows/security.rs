@@ -191,6 +191,26 @@ impl Policy {
 
     /// Checks the owner and DACL of an item against the rule.
     pub(super) fn check(&self, security: &OwnerAndDacl, path: &Utf8Path, membership: &Membership<'_>) -> Result<()> {
+        self.check_with(self.exact, security, path, membership)
+    }
+
+    /// Checks the owner and DACL of an item exactly against the rule, whether or not the rule is exact.
+    pub(super) fn check_exactly(
+        &self,
+        security: &OwnerAndDacl,
+        path: &Utf8Path,
+        membership: &Membership<'_>,
+    ) -> Result<()> {
+        self.check_with(true, security, path, membership)
+    }
+
+    fn check_with(
+        &self,
+        exact: bool,
+        security: &OwnerAndDacl,
+        path: &Utf8Path,
+        membership: &Membership<'_>,
+    ) -> Result<()> {
         let refused = |refusal| Error::refused(path, refusal);
         let owner = security.owner.as_ref().ok_or_else(|| refused(Refusal::Owner))?;
         if !self.owner_allowed(owner, path, membership)? {
@@ -237,7 +257,7 @@ impl Policy {
         if owner_access != Some(Access::Full) && !owner_rights.iter().any(applies_to_item) {
             return Err(refused(Refusal::Access));
         }
-        if self.exact {
+        if exact {
             let mut expected = self.entries();
             expected.sort();
             others.sort();
