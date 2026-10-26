@@ -1,5 +1,7 @@
 mod process;
 
+mod child;
+
 mod process_tree;
 
 mod powershell;
@@ -40,6 +42,23 @@ use protocol::{
 const PROTOCOL_VERSION: &str = "poc.v1";
 const CAPABILITY_JOB_EXECUTION: &str = "job_execution";
 const CAPABILITY_PSREMOTING_TUNNEL: &str = "psremoting_grpc_tunnel";
+const CAPABILITY_JOB_EXECUTION_RUN_AS: &str = "job_execution_run_as";
+
+impl std::fmt::Debug for protocol::ProcessCredential {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("ProcessCredential([REDACTED])")
+    }
+}
+
+impl Drop for protocol::ProcessCredential {
+    fn drop(&mut self) {
+        use zeroize::Zeroize as _;
+
+        self.username.zeroize();
+        self.password.zeroize();
+        self.domain.zeroize();
+    }
+}
 
 pub struct PsuAgentTask {
     conf_handle: ConfHandle,
@@ -342,16 +361,18 @@ impl PsuAgent {
 
                 let default_executable = self.powershell_executable.clone();
                 let registry = registry.clone();
+                let credential_transport_secure = self.conf.server_url.scheme() == "https";
 
                 process_tasks.spawn(async move {
                     process::run_process(
-                        start_process,
+                        *start_process,
                         channels,
                         outgoing_tx,
                         registry,
                         agent_id,
                         connection_id,
                         default_executable,
+                        credential_transport_secure,
                     )
                     .await
                 });
@@ -390,6 +411,23 @@ impl PsuAgent {
     }
 
     fn create_registration_message(&self, powershell_version: String) -> AgentMessage {
+        let mut capabilities = vec![
+            AgentCapability {
+                name: CAPABILITY_JOB_EXECUTION.to_owned(),
+                version: PROTOCOL_VERSION.to_owned(),
+            },
+            AgentCapability {
+                name: CAPABILITY_PSREMOTING_TUNNEL.to_owned(),
+                version: PROTOCOL_VERSION.to_owned(),
+            },
+        ];
+        if cfg!(windows) && self.conf.server_url.scheme() == "https" {
+            capabilities.push(AgentCapability {
+                name: CAPABILITY_JOB_EXECUTION_RUN_AS.to_owned(),
+                version: PROTOCOL_VERSION.to_owned(),
+            });
+        }
+
         AgentMessage {
             request_id: Uuid::new_v4().simple().to_string(),
             agent_id: self.agent_id.clone(),
@@ -404,16 +442,7 @@ impl PsuAgent {
                 architecture: std::env::consts::ARCH.to_owned(),
                 agent_version: env!("CARGO_PKG_VERSION").to_owned(),
                 protocol_version: PROTOCOL_VERSION.to_owned(),
-                capabilities: vec![
-                    AgentCapability {
-                        name: CAPABILITY_JOB_EXECUTION.to_owned(),
-                        version: PROTOCOL_VERSION.to_owned(),
-                    },
-                    AgentCapability {
-                        name: CAPABILITY_PSREMOTING_TUNNEL.to_owned(),
-                        version: PROTOCOL_VERSION.to_owned(),
-                    },
-                ],
+                capabilities,
                 powershell_runtimes: vec![PowerShellRuntime {
                     runtime_id: "pwsh-default".to_owned(),
                     kind: "pwsh".to_owned(),
@@ -611,6 +640,120 @@ mod tests {
             b'P',
             "HTTP connection must start with the HTTP/2 preface"
         );
+    }
+
+    #[tokio::test]
+    async fn https_rejects_untrusted_certificate_without_plaintext_fallback() {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let certificate =
+            rcgen::generate_simple_self_signed(vec!["localhost".to_owned()]).expect("generate certificate");
+        let mut config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(
+                vec![certificate.cert.der().clone()],
+                rustls::pki_types::PrivatePkcs8KeyDer::from(certificate.key_pair.serialize_der()).into(),
+            )
+            .expect("TLS server configuration");
+        config.alpn_protocols = vec![b"h2".to_vec()];
+        let acceptor = tokio_rustls::TlsAcceptor::from(std::sync::Arc::new(config));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind endpoint");
+        let address = listener.local_addr().expect("listener address");
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept TLS connection");
+            assert!(
+                acceptor.accept(stream).await.is_err(),
+                "untrusted certificate must fail TLS"
+            );
+        });
+        let endpoint = psu_endpoint(
+            &format!("https://localhost:{}", address.port()),
+            &ConnectionSettings::default(),
+        )
+        .expect("create endpoint");
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), endpoint.connect())
+                .await
+                .expect("TLS verification timed out")
+                .is_err()
+        );
+        server.await.expect("TLS server panicked");
+    }
+
+    #[test]
+    fn http_registration_does_not_advertise_run_as() {
+        let agent = test_agent("http://localhost:5000", "token", ConnectionSettings::default());
+        let registration = agent.create_registration_message("7".to_owned());
+        let Some(AgentPayload::RegisterAgent(registration)) = registration.payload else {
+            panic!("expected registration");
+        };
+        assert!(
+            !registration
+                .capabilities
+                .iter()
+                .any(|capability| capability.name == CAPABILITY_JOB_EXECUTION_RUN_AS)
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_https_registration_advertises_run_as_contract() {
+        let agent = test_agent("https://localhost:5001", "token", ConnectionSettings::default());
+        let registration = agent.create_registration_message("7".to_owned());
+        let Some(AgentPayload::RegisterAgent(registration)) = registration.payload else {
+            panic!("expected registration");
+        };
+        let capability = registration
+            .capabilities
+            .iter()
+            .find(|capability| capability.name == CAPABILITY_JOB_EXECUTION_RUN_AS)
+            .expect("run-as capability");
+        assert_eq!(capability.version, "poc.v1");
+    }
+
+    #[test]
+    fn credential_is_redacted_in_enclosing_protocol_debug_output() {
+        let mut message = start_process("job", "pwsh", &[]);
+        let Some(ServerPayload::StartProcess(request)) = message.payload.as_mut() else {
+            panic!("expected StartProcess");
+        };
+        request.credential = Some(protocol::ProcessCredential {
+            username: "private-user".to_owned(),
+            password: "private-password".to_owned(),
+            domain: "private-domain".to_owned(),
+        });
+        let debug = format!("{message:?}");
+        assert!(debug.contains("[REDACTED]"));
+        for secret in ["private-user", "private-password", "private-domain"] {
+            assert!(!debug.contains(secret));
+        }
+    }
+
+    #[test]
+    fn credential_wire_tags_match_the_psu_contract() {
+        use prost::Message as _;
+
+        let request = protocol::StartProcess {
+            credential: Some(protocol::ProcessCredential {
+                username: "u".to_owned(),
+                password: "p".to_owned(),
+                domain: ".".to_owned(),
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            request.encode_to_vec(),
+            [
+                0x4a, 9, // StartProcess.credential, field 9.
+                0x0a, 1, b'u', // ProcessCredential.username, field 1.
+                0x12, 1, b'p', // ProcessCredential.password, field 2.
+                0x1a, 1, b'.', // ProcessCredential.domain, field 3.
+            ]
+        );
+        let legacy_request = protocol::StartProcess::decode(&[0x0a, 1, b'j', 0x12, 1, b's'][..])
+            .expect("decode legacy StartProcess without credential");
+        assert!(legacy_request.credential.is_none());
+        assert_eq!(legacy_request.correlation_id, "j");
+        assert_eq!(legacy_request.stream_id, "s");
     }
 
     #[test]
@@ -849,7 +992,7 @@ mod tests {
     }
 
     fn start_process(id: &str, executable: &str, arguments: &[&str]) -> protocol::ServerMessage {
-        server_message(ServerPayload::StartProcess(protocol::StartProcess {
+        server_message(ServerPayload::StartProcess(Box::new(protocol::StartProcess {
             correlation_id: id.to_owned(),
             stream_id: id.to_owned(),
             executable: executable.to_owned(),
@@ -857,7 +1000,8 @@ mod tests {
             working_directory: String::new(),
             environment: HashMap::new(),
             metadata: HashMap::new(),
-        }))
+            credential: None,
+        })))
     }
 
     #[tokio::test]

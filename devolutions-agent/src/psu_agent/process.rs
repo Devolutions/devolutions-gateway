@@ -6,12 +6,13 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
-use tokio::process::{Child, ChildStdin, Command};
+use tokio::process::{ChildStdin, Command};
 use tokio::sync::mpsc::error::{SendError, TrySendError};
 use tokio::sync::{Mutex, mpsc, watch};
 use tokio::task::{AbortHandle, JoinHandle};
 use tokio::time::{Instant, MissedTickBehavior};
 
+use crate::psu_agent::child::Child;
 use crate::psu_agent::process_tree::ProcessTree;
 use crate::psu_agent::protocol::agent_message::Payload as AgentPayload;
 use crate::psu_agent::protocol::{AgentMessage, ProcessCompleted, ProcessStarted, StartProcess, StreamData};
@@ -698,6 +699,7 @@ pub(super) async fn run_process(
     agent_id: String,
     connection_id: String,
     default_executable: String,
+    credential_transport_secure: bool,
 ) -> anyhow::Result<()> {
     let correlation_id = request.correlation_id.clone();
     let stream_id = request.stream_id.clone();
@@ -711,6 +713,7 @@ pub(super) async fn run_process(
         agent_id,
         connection_id,
         default_executable,
+        credential_transport_secure,
     )
     .await;
 
@@ -721,13 +724,14 @@ pub(super) async fn run_process(
 
 #[allow(clippy::too_many_arguments)]
 async fn run_process_inner(
-    request: StartProcess,
+    mut request: StartProcess,
     channels: ProcessChannels,
     outgoing_tx: mpsc::Sender<AgentMessage>,
     registry: &ProcessRegistry,
     agent_id: String,
     connection_id: String,
     default_executable: String,
+    credential_transport_secure: bool,
 ) -> anyhow::Result<()> {
     let ProcessChannels {
         registration,
@@ -743,7 +747,7 @@ async fn run_process_inner(
         request.executable.clone()
     };
 
-    info!(correlation_id = %request.correlation_id, executable = %executable, arguments = ?request.arguments, "Starting PSU gRPC child process");
+    info!(correlation_id = %request.correlation_id, executable = %executable, "Starting PSU gRPC child process");
 
     let mut command = Command::new(&executable);
     command
@@ -753,7 +757,9 @@ async fn run_process_inner(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    if !request.working_directory.trim().is_empty() && std::path::Path::new(&request.working_directory).is_dir() {
+    if !request.working_directory.trim().is_empty()
+        && (request.credential.is_some() || std::path::Path::new(&request.working_directory).is_dir())
+    {
         command.current_dir(&request.working_directory);
     }
 
@@ -764,8 +770,8 @@ async fn run_process_inner(
     ProcessTree::prepare(&mut command);
 
     let started = async {
-        let mut child = command.spawn()?;
-        let process_tree = ProcessTree::attach(&mut child).await?;
+        let mut child = Child::spawn(command, request.credential.take(), credential_transport_secure).await?;
+        let process_tree = child.attach_tree().await?;
         anyhow::Ok((child, process_tree))
     }
     .await
@@ -780,9 +786,9 @@ async fn run_process_inner(
     let process_id_u32 = child.id().unwrap_or(0);
     let process_id = i32::try_from(process_id_u32).unwrap_or(i32::MAX);
 
-    let stdin = child.stdin.take().context("child process stdin was not piped")?;
-    let stdout = child.stdout.take().context("child process stdout was not piped")?;
-    let stderr = child.stderr.take().context("child process stderr was not piped")?;
+    let stdin = child.take_stdin().context("child process stdin was not piped")?;
+    let stdout = child.take_stdout().context("child process stdout was not piped")?;
+    let stderr = child.take_stderr().context("child process stderr was not piped")?;
 
     // Output is held back until ProcessStarted is sent, so that the server sees it first.
     let (process_started_tx, process_started_rx) = watch::channel(false);
@@ -1387,6 +1393,7 @@ mod tests {
             working_directory: String::new(),
             environment: HashMap::new(),
             metadata: HashMap::new(),
+            credential: None,
         }
     }
 
@@ -1417,6 +1424,7 @@ mod tests {
             "agent-id".to_owned(),
             "connection-id".to_owned(),
             "pwsh".to_owned(),
+            false,
         ));
         (task, outgoing_rx)
     }
@@ -2319,6 +2327,7 @@ mod tests {
             "agent-id".to_owned(),
             "connection-id".to_owned(),
             "pwsh".to_owned(),
+            false,
         ));
 
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -2643,6 +2652,43 @@ mod tests {
         let outcome = collect_outcome(task, outgoing_rx, Duration::from_secs(20)).await;
         assert!(!outcome.stream_closed.error, "{}", outcome.stream_closed.reason);
         assert!(!outcome.completed.canceled);
+    }
+
+    #[tokio::test]
+    async fn plaintext_credentials_report_failure_and_release_registration_without_starting() {
+        let registry = ProcessRegistry::default();
+        let mut request = start_request("credential-job", Path::new("must-not-start"));
+        request.credential = Some(crate::psu_agent::protocol::ProcessCredential {
+            username: "private-user".to_owned(),
+            password: "private-password".to_owned(),
+            domain: ".".to_owned(),
+        });
+        let (task, mut outgoing_rx) = spawn_process(&registry, request, 8).await;
+        let error = task
+            .await
+            .expect("process task panicked")
+            .expect_err("plaintext credentials must fail");
+        assert!(format!("{error:#}").contains("credentialed execution requires HTTPS"));
+
+        let closed = outgoing_rx.recv().await.expect("stream closed");
+        let Some(AgentPayload::StreamClosed(closed)) = closed.payload else {
+            panic!("rejection must close the stream without ProcessStarted");
+        };
+        assert!(closed.error);
+        assert_eq!(closed.stream_id, "credential-job");
+        assert!(!closed.reason.contains("private-password"));
+        let completed = outgoing_rx.recv().await.expect("process completed");
+        let Some(AgentPayload::ProcessCompleted(completed)) = completed.payload else {
+            panic!("rejection must report ProcessCompleted");
+        };
+        assert_eq!(completed.correlation_id, "credential-job");
+        assert_eq!(completed.exit_code, -1);
+        assert!(!completed.canceled);
+        assert!(!completed.error_message.contains("private-password"));
+        assert!(outgoing_rx.recv().await.is_none());
+        let inner = registry.inner.lock().await;
+        assert!(inner.streams.is_empty());
+        assert!(inner.processes.is_empty());
     }
 
     #[tokio::test]
