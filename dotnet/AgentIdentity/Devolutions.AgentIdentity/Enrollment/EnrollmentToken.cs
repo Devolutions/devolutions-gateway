@@ -72,6 +72,8 @@ public sealed class EnrollmentToken
     /// The bag holds the JSON object <c>{"u": &lt;productBaseUrl&gt;}</c>,
     /// with the URL in normalized absolute form and without trailing slashes,
     /// since the agent appends <c>/api/agent-identity/v1/...</c> to it.
+    /// Normalizing can change the text, such as a host's case or a default port,
+    /// so the URL as the administrator entered it may differ from <see cref="ProductBaseUrl"/>, which the bag holds.
     /// The secret is 32 bytes from <paramref name="randomNumberGenerator"/>.
     /// </remarks>
     /// <param name="productBaseUrl">
