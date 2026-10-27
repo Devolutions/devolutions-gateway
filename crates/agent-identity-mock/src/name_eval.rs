@@ -1,7 +1,7 @@
 //! Metadata limits ([CONTRACT.agent-identity.md][contract], "3. Metadata") and friendly-name format evaluation
 //! ([shared intent][intent], "Enrollment").
 //!
-//! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#3-metadata
+//! [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#metadata
 //! [intent]: ../../../docs/agent-identity/INTENT.agent-identity.md#enrollment
 
 use serde_json::{Map, Value};
@@ -66,7 +66,7 @@ pub(crate) fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), Str
 ///
 /// The contract lists them as code points rather than as Unicode general category `Cf`, so that the agent and every authority agree on the set whatever Unicode version their runtimes ship.
 ///
-/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#3-metadata
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#metadata
 fn is_invisible_format_character(c: char) -> bool {
     matches!(
         c,

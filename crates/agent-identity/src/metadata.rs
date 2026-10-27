@@ -270,7 +270,7 @@ mod tests {
         }
     }
 
-    // These are the format characters (Unicode general category `Cf`) that render visibly, which the list leaves out.
+    // These are the format characters (`Cf`) that the contract's list leaves out.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     #[rstest]
@@ -284,11 +284,20 @@ mod tests {
     #[case::egyptian_hieroglyph_format_controls('\u{13430}', '\u{1343F}')]
     #[case::shorthand_format_controls('\u{1BCA0}', '\u{1BCA3}')]
     #[case::musical_symbol_format_controls('\u{1D173}', '\u{1D17A}')]
-    fn keeps_visible_format_characters(#[case] first: char, #[case] last: char) {
+    fn keeps_format_characters_the_contract_leaves_out(#[case] first: char, #[case] last: char) {
         for ch in first..=last {
             let code = u32::from(ch);
             assert_eq!(sanitized_hostname(format!("a{ch}b")), format!("a{ch}b"), "U+{code:04X}");
         }
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[test]
+    fn removes_format_characters_before_truncating_to_1024_bytes() {
+        assert_eq!(
+            sanitized_hostname(format!("\u{200B}{}", "a".repeat(1024))),
+            "a".repeat(1024)
+        );
     }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata

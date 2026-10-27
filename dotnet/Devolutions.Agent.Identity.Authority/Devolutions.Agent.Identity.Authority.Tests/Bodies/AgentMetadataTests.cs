@@ -44,9 +44,9 @@ public class AgentMetadataTests
         (0xE0020, 0xE007F),
     ];
 
-    // The characters of general category Format (Cf) that the list leaves out because they are visible marks,
+    // The format characters (`Cf`) that the contract's list leaves out,
     // as inclusive ranges.
-    private static readonly (int First, int Last)[] VisibleFormatRanges =
+    private static readonly (int First, int Last)[] UnlistedFormatRanges =
     [
         (0x0600, 0x0605),
         (0x06DD, 0x06DD),
@@ -263,14 +263,14 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(codePoint)}name")]));
     }
 
-    // The list is closed, so a value may hold the visible format marks it leaves out,
+    // The list is closed, so a value may hold the format characters it leaves out,
     // which a check of the runtime's Format category would refuse.
-    public static TheoryData<int> VisibleFormatCharacters => new(CodePoints(VisibleFormatRanges));
+    public static TheoryData<int> UnlistedFormatCharacters => new(CodePoints(UnlistedFormatRanges));
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
-    [MemberData(nameof(VisibleFormatCharacters))]
-    public void AcceptsValueWithVisibleFormatCharacter(int codePoint)
+    [MemberData(nameof(UnlistedFormatCharacters))]
+    public void AcceptsValueWithUnlistedFormatCharacter(int codePoint)
     {
         AssertValid(AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(codePoint)}name")]));
     }
