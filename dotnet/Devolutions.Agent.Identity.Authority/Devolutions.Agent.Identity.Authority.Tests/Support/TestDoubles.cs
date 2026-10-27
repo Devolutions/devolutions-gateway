@@ -44,6 +44,11 @@ internal sealed class FakeCertificateRegistry : ICertificateRegistry
     /// </summary>
     public Task? Gate { get; set; }
 
+    /// <summary>
+    /// An action that every lookup runs before it answers, when set, such as moving a test's clock on.
+    /// </summary>
+    public Action? OnLookup { get; set; }
+
     public void Register(string thumbprint, RegisteredCertificate certificate)
     {
         _certificates[thumbprint] = certificate;
@@ -67,6 +72,7 @@ internal sealed class FakeCertificateRegistry : ICertificateRegistry
         CancellationToken cancellationToken)
     {
         Lookups.Add(thumbprint);
+        OnLookup?.Invoke();
 
         if (Gate is { } gate)
         {

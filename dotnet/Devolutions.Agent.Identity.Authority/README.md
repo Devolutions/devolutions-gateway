@@ -31,6 +31,7 @@ The host provides these dependencies, with the guarantees the library relies on:
   Index certificates by `AgentIdentityProtocol.ComputeThumbprint`, not by the SHA-1 `X509Certificate2.Thumbprint`.
   Each `RegisteredCertificate` holds the DER exactly as issued, and the current `Status` and `IdentityRevoked`, so that a revocation takes effect from the next request.
 - `INonceStore.TryRecordAsync` records a `keyid` and `nonce` pair, or returns false when the pair is already recorded, in one atomic operation, and keeps the pair until `retainUntil`.
+  `retainUntil` falls 60 s after the last instant at which the signature could be accepted again, a margin for the time the call takes, so a store whose calls complete within 60 s may discard the pair at `retainUntil`.
 - `IRootSigner` holds the root that issues new certificates and a `SignatureGenerator` over its private key.
   Its `Certificate` must have a Subject Key Identifier extension, which becomes the Authority Key Identifier of each issued certificate; without one, `IdentityCertificateIssuer.Issue` throws `ArgumentException`.
   The root must also fit the chain profile (CONTRACT.agent-identity.md [§4]): a P-256 or P-384 key, basicConstraints with `cA` set, key usage with `keyCertSign`, and a `SignatureGenerator` that signs with `ecdsa-with-SHA256` for a P-256 key or `ecdsa-with-SHA384` for a P-384 key; otherwise `Issue` throws `ArgumentException`.
@@ -41,7 +42,7 @@ The host provides these dependencies, with the guarantees the library relies on:
 
 The library puts this load on the registry and the nonce store:
 
-- Each signed request that passes parsing, the tag and the time window costs one `FindByThumbprintAsync`, and only one whose signature verifies also costs one `TryRecordAsync` (CONTRACT.agent-identity.md [§6]).
+- Each signed request that passes parsing, the tag and the time window costs one `FindByThumbprintAsync`, and only one whose signature verifies, and whose window has not closed since, also costs one `TryRecordAsync` (CONTRACT.agent-identity.md [§6]).
   The thumbprint comes from the request, so an unauthenticated client can drive lookups with random `keyid`s.
 - Each channel stream whose opening verifies costs two registry reads, one for the opening and one when the handshake ends, as CONTRACT.agent-identity.md [§7.4] requires, and one nonce write.
 
