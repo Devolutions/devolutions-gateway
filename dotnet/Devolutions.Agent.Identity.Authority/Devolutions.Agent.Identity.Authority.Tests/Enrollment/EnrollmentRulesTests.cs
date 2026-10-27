@@ -88,7 +88,7 @@ public class EnrollmentRulesTests
     // so a decision to create one carries the count of identities it was made from, the token's own,
     // for the host to count the use only while the stored count still holds it.
     // A decision carrying another count would let two concurrent enrollments both pass the last use.
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: mutant a decision to create an identity that carries another count than the token's IdentitiesCreated
     [Theory]
     [InlineData(0)]
     [InlineData(9)]

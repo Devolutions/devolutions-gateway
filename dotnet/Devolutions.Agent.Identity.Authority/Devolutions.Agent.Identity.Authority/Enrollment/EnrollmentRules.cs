@@ -36,9 +36,8 @@ public static class EnrollmentRules
     /// <para>
     /// The decision holds only for the state it was made from.
     /// The host creates the identity, inserts its key under a unique index of every issued key,
-    /// and counts the use only while the stored count still equals
-    /// <see cref="EnrollmentDecision.ExpectedIdentitiesCreated"/>, or is still below
-    /// <see cref="EnrollmentTokenState.MaxUses"/>, in one transaction,
+    /// and counts the use only while the stored count is still below <see cref="EnrollmentTokenState.MaxUses"/>,
+    /// or, stricter, still equals <see cref="EnrollmentDecision.ExpectedIdentitiesCreated"/>, in one transaction,
     /// and decides again from the stored state when the count or the index refuses it, acting on the new decision,
     /// so that concurrent enrollments never create more than <see cref="EnrollmentTokenState.MaxUses"/> identities
     /// with one token, and of two concurrent enrollments with one CSR key, exactly one creates the identity

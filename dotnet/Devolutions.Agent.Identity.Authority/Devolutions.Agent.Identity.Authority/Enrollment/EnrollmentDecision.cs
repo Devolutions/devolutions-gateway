@@ -56,9 +56,9 @@ public sealed class EnrollmentDecision
     /// when <see cref="Outcome"/> is <see cref="EnrollmentOutcome.CreateIdentity"/>; otherwise null.
     /// </summary>
     /// <remarks>
-    /// The authority counts the token use with an update that succeeds only while the stored count still equals this
-    /// value, or, equivalently for the limit, is still below the token's <see cref="EnrollmentTokenState.MaxUses"/>,
-    /// in the transaction that creates the identity,
+    /// The authority counts the token use in the transaction that creates the identity, with an update that succeeds
+    /// only while the stored count is still below the token's <see cref="EnrollmentTokenState.MaxUses"/>,
+    /// or, stricter, only while it still equals this value,
     /// so that concurrent enrollments never create more identities than that limit.
     /// When the update fails, the authority decides again from the stored state and acts on the new decision,
     /// discarding any certificate issued from this one.

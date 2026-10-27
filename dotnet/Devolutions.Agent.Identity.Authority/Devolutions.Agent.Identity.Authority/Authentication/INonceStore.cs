@@ -19,7 +19,7 @@ public interface INonceStore
     /// The instant until which the store keeps the pair.
     /// It falls 60 s after the last instant at which the signature could be accepted again,
     /// a margin for the time that this call takes,
-    /// so a store whose calls complete within 60 s may discard the pair from then on.
+    /// so a store whose calls complete in under 60 s may discard the pair once it has passed.
     /// </param>
     /// <param name="cancellationToken">A token that cancels the operation.</param>
     /// <returns>True when this call recorded the pair; false when the pair was already recorded.</returns>

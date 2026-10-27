@@ -31,7 +31,7 @@ The host provides these dependencies, with the guarantees the library relies on:
   Index certificates by `AgentIdentityProtocol.ComputeThumbprint`, not by the SHA-1 `X509Certificate2.Thumbprint`.
   Each `RegisteredCertificate` holds the DER exactly as issued, and the current `Status` and `IdentityRevoked`, so that a revocation takes effect from the next request.
 - `INonceStore.TryRecordAsync` records a `keyid` and `nonce` pair, or returns false when the pair is already recorded, in one atomic operation, and keeps the pair until `retainUntil`.
-  `retainUntil` falls 60 s after the last instant at which the signature could be accepted again, a margin for the time the call takes, so a store whose calls complete within 60 s may discard the pair at `retainUntil`.
+  `retainUntil` falls 60 s after the last instant at which the signature could be accepted again, a margin for the time the call takes, so a store whose calls complete in under 60 s may discard the pair once `retainUntil` has passed.
 - `IRootSigner` holds the root that issues new certificates and a `SignatureGenerator` over its private key.
   Its `Certificate` must have a Subject Key Identifier extension, which becomes the Authority Key Identifier of each issued certificate; without one, `IdentityCertificateIssuer.Issue` throws `ArgumentException`.
   The root must also fit the chain profile (CONTRACT.agent-identity.md [§4]): a P-256 or P-384 key, basicConstraints with `cA` set, key usage with `keyCertSign`, and a `SignatureGenerator` that signs with `ecdsa-with-SHA256` for a P-256 key or `ecdsa-with-SHA384` for a P-384 key; otherwise `Issue` throws `ArgumentException`.
@@ -45,10 +45,11 @@ To keep the concurrency properties of CONTRACT.agent-identity.md [§2.1], the ho
 
 - Keep a unique index on the SPKI SHA-256 of every issued key, those of current, pending and retired certificates and the retained records of deleted identities' keys, and insert each key in the transaction that stores its certificate.
   Two requests can both find a key unissued, and the index lets only one of them issue it.
-- Count a token use with an update that succeeds only while the stored count still equals the decision's `ExpectedIdentitiesCreated`, or, equivalently for the limit, is still below the token's `MaxUses`, in the transaction that creates the identity.
+- Count a token use with an update that succeeds only while the stored count is still below the token's `MaxUses`, in the transaction that creates the identity.
+  A host may instead require the count to still equal the decision's `ExpectedIdentitiesCreated`, which also refuses when another enrollment took a use below the limit, at the cost of deciding again more often when many devices enroll with one token at once.
   Two enrollments can both decide from the count before the token's last use, and the update lets only one of them create an identity.
 - When that update fails or the key insert hits the unique index, roll the transaction back, look the key up again, call `Decide` again from the stored state, and act on the new decision as for a new request: discard any certificate issued from the old decision, and issue again from the new one.
-  The new decision gives the replay, the pending certificate or the error that the other request's commit calls for, or, when another enrollment took a use below the limit, a new identity to create under a new `NewIdentityId`, which the discarded certificate does not name.
+  The new decision gives the replay, the pending certificate or the error that the other request's commit calls for, or, when the stored count changed but is still below the limit, a new identity to create under a new `NewIdentityId`, which the discarded certificate does not name.
 
 The library puts this load on the registry and the nonce store:
 
@@ -110,7 +111,7 @@ Each then acts for the result's `Identity` only.
    - `Reject`: answer with `Error`.
    - `ReturnPendingCertificate`: keep the identity's pending certificate, which holds the key.
    - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision and the body's `Csr`, passing the `EnrollmentUrl` stored with the identity so that every certificate of the identity names the same URL, and store it as the identity's pending certificate; the renew CSR's own enrollment URL is ignored (CONTRACT.agent-identity.md [§4]).
-     Store the certificate, insert its key and retire whichever pending certificate the identity holds then, in one transaction, so that two concurrent renewals with different keys leave one pending certificate, and decide again when the key insert fails, as [Host dependencies][host-dependencies] describes.
+     Store the certificate, insert its key and retire whichever pending certificate the identity holds then, in one transaction that first locks the identity's record, so that two concurrent renewals with different keys leave one pending certificate, and decide again when the key insert fails, as [Host dependencies][host-dependencies] describes.
 3. Replace the identity's metadata, set its `last_seen_at` to the current time, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.agent-identity.md [§5.3]).
 
 ### `confirm`
