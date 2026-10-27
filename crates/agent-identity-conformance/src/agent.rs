@@ -261,13 +261,53 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
             "agent metadata version differs from --agent-version"
         );
     }
-    #[cfg(target_os = "linux")]
-    if Path::new("/etc/machine-id").exists() {
-        let expected = std::fs::read_to_string("/etc/machine-id").context("read Linux machine ID")?;
-        ensure!(
-            metadata["machine_id"] == expected.trim(),
+    if cfg!(target_os = "linux") {
+        check_machine_id(
+            metadata,
+            expected_machine_id(read_host_machine_id()?.as_deref()).as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+/// The contents of the Linux `/etc/machine-id`, or `None` when the host has no such file.
+fn read_host_machine_id() -> anyhow::Result<Option<String>> {
+    match std::fs::read_to_string("/etc/machine-id") {
+        Ok(contents) => Ok(Some(contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).context("read Linux machine ID"),
+    }
+}
+
+/// The `machine_id` an agent must report on a Linux host whose `/etc/machine-id` holds `host_contents`, or `None` when it must omit the key.
+///
+/// The agent sends the file as-is (§3.1) after the sanitising every value goes through, so the expectation is what that leaves.
+/// An optional key left empty is omitted, so a missing or empty file expects no `machine_id` at all.
+fn expected_machine_id(host_contents: Option<&str>) -> Option<String> {
+    let mut sanitised = String::new();
+    for character in host_contents?.chars().filter(|character| {
+        *character >= '\u{20}'
+            && !('\u{7f}'..='\u{9f}').contains(character)
+            && !is_invisible_format_character(*character)
+    }) {
+        if sanitised.len() + character.len_utf8() > 1024 {
+            break;
+        }
+        sanitised.push(character);
+    }
+    (!sanitised.is_empty()).then_some(sanitised)
+}
+
+fn check_machine_id(metadata: &Value, expected: Option<&str>) -> anyhow::Result<()> {
+    match expected {
+        Some(expected) => ensure!(
+            metadata["machine_id"] == expected,
             "agent metadata machine_id differs from /etc/machine-id"
-        );
+        ),
+        None => ensure!(
+            metadata.get("machine_id").is_none(),
+            "agent metadata carries a machine_id although /etc/machine-id provides none"
+        ),
     }
     Ok(())
 }
@@ -6109,9 +6149,10 @@ mod tests {
             });
             // The check compares `machine_id` with the host's on Linux, so the fixture carries the host's.
             if cfg!(target_os = "linux")
-                && let Ok(machine_id) = std::fs::read_to_string("/etc/machine-id")
+                && let Some(machine_id) =
+                    expected_machine_id(read_host_machine_id().expect("read host machine ID").as_deref())
             {
-                metadata["machine_id"] = machine_id.trim().into();
+                metadata["machine_id"] = machine_id.into();
             }
             metadata
         };
@@ -6517,6 +6558,36 @@ mod tests {
         Ok(())
     }
 
+    /// `machine_id` is optional (§3.1), so a host that provides no value expects the key to be absent, and a host that provides one expects exactly that value.
+    #[test]
+    fn machine_id_is_compared_only_when_the_host_provides_one() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        let with = |machine_id: &str| json!({ "machine_id": machine_id });
+        let without = json!({});
+        for empty in [None, Some(""), Some("\n"), Some("\u{200B}\n")] {
+            let expected = expected_machine_id(empty);
+            assert_eq!(expected, None, "{empty:?} leaves nothing for the agent to send");
+            check_machine_id(&without, expected.as_deref())
+                .expect("an agent that omits machine_id on a host without one conforms");
+            check_machine_id(&with("invented"), expected.as_deref())
+                .expect_err("a machine_id the host does not provide");
+        }
+        // The file ends with a newline, which the agent's removal of control characters drops.
+        let expected = expected_machine_id(Some("0123abcd\n"));
+        assert_eq!(expected.as_deref(), Some("0123abcd"));
+        check_machine_id(&with("0123abcd"), expected.as_deref()).expect("the host's value");
+        check_machine_id(&with("4567ef01"), expected.as_deref()).expect_err("a different machine_id");
+        check_machine_id(&without, expected.as_deref()).expect_err("a missing machine_id on a host that provides one");
+    }
+
+    /// The agent truncates a value to 1024 UTF-8 bytes on a character boundary (§3.1), so the expectation does too.
+    #[test]
+    fn expected_machine_id_is_truncated_on_a_character_boundary() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        let host = format!("{}\u{e9}", "a".repeat(1023));
+        assert_eq!(expected_machine_id(Some(&host)), Some("a".repeat(1023)));
+    }
+
     #[test]
     fn agent_metadata_requires_c14_fields_and_stable_platform_values() -> anyhow::Result<()> {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
@@ -6527,9 +6598,10 @@ mod tests {
             "arch": std::env::consts::ARCH,
             "agent_version": "2026.3.0"
         });
-        #[cfg(target_os = "linux")]
-        if Path::new("/etc/machine-id").exists() {
-            metadata["machine_id"] = json!(std::fs::read_to_string("/etc/machine-id")?.trim());
+        if cfg!(target_os = "linux")
+            && let Some(machine_id) = expected_machine_id(read_host_machine_id()?.as_deref())
+        {
+            metadata["machine_id"] = json!(machine_id);
         }
         validate_agent_metadata(&metadata, Some("2026.3.0"))?;
         for key in REQUIRED_METADATA_KEYS {
