@@ -1,11 +1,12 @@
 using System;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
 using DevolutionsAgent.Actions;
+
+using Microsoft.Win32.SafeHandles;
 
 using Xunit;
 using Xunit.Abstractions;
@@ -38,7 +39,7 @@ public sealed class SecureDirectoryTests
         string identity = folder.CreateDirectory(IdentityNames);
         string pending = Directory.CreateDirectory(Path.Combine(identity, "pending")).FullName;
         File.WriteAllText(Path.Combine(pending, "token.dat"), "deleted");
-        CreateJunction(Path.Combine(pending, "link"), outside);
+        TempFolder.CreateJunction(Path.Combine(pending, "link"), outside);
 
         SecureDirectory.DeleteTree(folder.Path, IdentityNames, this.logger);
 
@@ -55,7 +56,7 @@ public sealed class SecureDirectoryTests
         File.WriteAllText(Path.Combine(outside, "file.txt"), "kept");
         folder.CreateDirectory("Devolutions", "Agent");
         string identity = Path.Combine(folder.Path, "Devolutions", "Agent", "identity");
-        CreateJunction(identity, outside);
+        TempFolder.CreateJunction(identity, outside);
 
         SecureDirectory.DeleteTree(folder.Path, IdentityNames, this.logger);
 
@@ -63,7 +64,7 @@ public sealed class SecureDirectoryTests
         Assert.True(File.Exists(Path.Combine(outside, "file.txt")));
     }
 
-    // oracle: mutant the deletion follows a junction at the data directory into its target
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
     [Fact]
     public void DeleteTreeDeletesNothingThroughAJunctionAboveThePath()
     {
@@ -72,14 +73,14 @@ public sealed class SecureDirectoryTests
         string outsideIdentity = folder.CreateDirectory("outside", "identity");
         File.WriteAllText(Path.Combine(outsideIdentity, "file.txt"), "kept");
         folder.CreateDirectory("Devolutions");
-        CreateJunction(Path.Combine(folder.Path, "Devolutions", "Agent"), outside);
+        TempFolder.CreateJunction(Path.Combine(folder.Path, "Devolutions", "Agent"), outside);
 
         SecureDirectory.DeleteTree(folder.Path, IdentityNames, this.logger);
 
         Assert.True(File.Exists(Path.Combine(outsideIdentity, "file.txt")));
     }
 
-    // oracle: mutant the security is applied through a junction to its target
+    // oracle: scaffold
     [Fact]
     public void SetSecurityRefusesAJunctionAndLeavesItsTargetUnchanged()
     {
@@ -87,14 +88,14 @@ public sealed class SecureDirectoryTests
         string target = folder.CreateDirectory("target");
         string before = Sddl(target);
         string link = Path.Combine(folder.Path, "link");
-        CreateJunction(link, target);
+        TempFolder.CreateJunction(link, target);
 
         Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(link, ProtectedSddl));
 
         Assert.Equal(before, Sddl(target));
     }
 
-    // oracle: mutant the owner or the DACL is left out, or the DACL loses its protection
+    // oracle: property round-trip
     [Fact]
     public void SetSecurityAppliesTheOwnerAndTheProtectedDacl()
     {
@@ -106,7 +107,7 @@ public sealed class SecureDirectoryTests
         AssertProtectedSecurity(path);
     }
 
-    // oracle: mutant inheritable entries are propagated to existing children
+    // oracle: scaffold
     [Fact]
     public void SetSecurityLeavesExistingChildrenUnchanged()
     {
@@ -120,7 +121,7 @@ public sealed class SecureDirectoryTests
         Assert.Equal(before, Sddl(child));
     }
 
-    // oracle: mutant the directory is created with the DACL inherited from its parent
+    // oracle: property round-trip
     [Fact]
     public void CreateGivesTheNewDirectoryExactlyTheSecurityDescriptor()
     {
@@ -150,28 +151,18 @@ public sealed class SecureDirectoryTests
         Assert.True(expected == SecureDirectory.IsTrustedOwner(new SecurityIdentifier(sid)), name);
     }
 
-    // oracle: mutant the owner is read from the target of a junction
+    // oracle: property round-trip
     [Fact]
-    public void ReadOwnerReportsAJunctionItself()
-    {
-        using TempFolder folder = new();
-        string link = Path.Combine(folder.Path, "link");
-        CreateJunction(link, folder.CreateDirectory("target"));
-
-        Assert.True(SecureDirectory.ReadOwner(link).IsReparsePoint);
-    }
-
-    // oracle: mutant the owner is not read from the directory
-    [Fact]
-    public void ReadOwnerReadsTheOwnerOfADirectory()
+    public void ReadSecurityReadsTheOwnerAndTheDaclThatSetSecurityApplied()
     {
         using TempFolder folder = new();
         string path = folder.CreateDirectory("data");
         SecureDirectory.SetSecurity(path, ProtectedSddl);
 
-        (SecurityIdentifier owner, bool isReparsePoint) = SecureDirectory.ReadOwner(path);
+        using SafeFileHandle handle = SecureDirectory.OpenToRead(path, hold: false);
+        (RawSecurityDescriptor security, bool isReparsePoint) = SecureDirectory.ReadSecurity(handle);
 
-        Assert.Equal(CurrentUser, owner);
+        Assert.Equal(ProtectedSddl, security.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
         Assert.False(isReparsePoint);
     }
 
@@ -206,70 +197,4 @@ public sealed class SecureDirectoryTests
         new DirectoryInfo(path)
             .GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access)
             .GetSecurityDescriptorSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
-
-    /// <summary>
-    /// Creates a junction at <paramref name="link"/> to the directory <paramref name="target"/>, which needs no
-    /// elevation.
-    /// </summary>
-    private static void CreateJunction(string link, string target)
-    {
-        ProcessStartInfo startInfo = new("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
-        {
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-        };
-
-        using Process process = Process.Start(startInfo);
-        string output = process.StandardOutput.ReadToEnd() + process.StandardError.ReadToEnd();
-        process.WaitForExit();
-
-        Assert.True(process.ExitCode == 0, output);
-    }
-
-    private sealed class OutputLogger(ITestOutputHelper output) : ILogger
-    {
-        public void Log(string msg) => output.WriteLine(msg);
-
-        public void Log(string format, params object[] args) => output.WriteLine(format, args);
-    }
-
-    /// <summary>
-    /// A new, empty folder under the temporary directory, deleted with its content on disposal.
-    /// </summary>
-    private sealed class TempFolder : IDisposable
-    {
-        public string Path { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"secure-directory-{Guid.NewGuid():N}");
-
-        public TempFolder() => Directory.CreateDirectory(this.Path);
-
-        /// <summary>
-        /// Creates the directory <paramref name="names"/> below this folder, with its parents.
-        /// </summary>
-        public string CreateDirectory(params string[] names) =>
-            Directory.CreateDirectory(System.IO.Path.Combine([this.Path, .. names])).FullName;
-
-        public void Dispose()
-        {
-            // A recursive Directory.Delete fails on a junction without elevation, so junctions go first.
-            RemoveJunctions(this.Path);
-            Directory.Delete(this.Path, recursive: true);
-        }
-
-        private static void RemoveJunctions(string directory)
-        {
-            foreach (string entry in Directory.GetDirectories(directory))
-            {
-                if (File.GetAttributes(entry).HasFlag(FileAttributes.ReparsePoint))
-                {
-                    Directory.Delete(entry);
-                }
-                else
-                {
-                    RemoveJunctions(entry);
-                }
-            }
-        }
-    }
 }

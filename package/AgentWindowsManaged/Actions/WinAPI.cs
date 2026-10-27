@@ -29,6 +29,8 @@ internal static class WinAPI
 
     internal const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
 
+    internal const uint FILE_DELETE_CHILD = 0x00000040;
+
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
 
     internal const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
@@ -46,6 +48,8 @@ internal static class WinAPI
     internal static uint FILE_SHARE_WRITE = 0x00000002;
 
     internal const int FileDispositionInfo = 4;
+
+    internal const uint GENERIC_ALL = 0x10000000;
 
     internal static uint GENERIC_WRITE = 0x40000000;
 
@@ -66,8 +70,6 @@ internal static class WinAPI
     internal const uint OWNER_SECURITY_INFORMATION = 0x00000001;
 
     internal const uint READ_CONTROL = 0x00020000;
-
-    internal const int SE_FILE_OBJECT = 1;
 
     internal const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
 
@@ -397,16 +399,14 @@ internal static class WinAPI
         uint cchFilePath,
         uint dwFlags);
 
-    [DllImport("advapi32")]
-    internal static extern uint GetSecurityInfo(
-        SafeFileHandle handle,
-        int ObjectType,
-        uint SecurityInfo,
-        out IntPtr ppsidOwner,
-        IntPtr ppsidGroup,
-        IntPtr ppDacl,
-        IntPtr ppSacl,
-        out IntPtr ppSecurityDescriptor);
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetKernelObjectSecurity(
+        SafeFileHandle Handle,
+        uint RequestedInformation,
+        byte[] pSecurityDescriptor,
+        uint nLength,
+        out uint lpnLengthNeeded);
 
     [DllImport("kernel32", SetLastError = true)]
     internal static extern IntPtr GetStdHandle(int nStdHandle);

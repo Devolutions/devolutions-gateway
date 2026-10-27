@@ -117,6 +117,22 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string IdentityEnrollmentTokenFileEmpty = "IdentityEnrollmentTokenFileEmpty";		
 		/// <summary>
+		/// Can't use the folder {0} because it is a link. Delete the link, then try again.
+		/// </summary>
+		public const string DataFolderIsLink = "DataFolderIsLink";		
+		/// <summary>
+		/// Can't use the folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again.
+		/// </summary>
+		public const string DataFolderOwnedByUntrustedAccount = "DataFolderOwnedByUntrustedAccount";		
+		/// <summary>
+		/// Can't use the folder {0} because {1} can replace it or what it contains. Remove that permission, then try again.
+		/// </summary>
+		public const string DataFolderReplaceableByUntrustedAccount = "DataFolderReplaceableByUntrustedAccount";		
+		/// <summary>
+		/// Can't read the owner or the permissions of the folder {0}. Check them, then try again.
+		/// </summary>
+		public const string DataFolderSecurityUnreadable = "DataFolderSecurityUnreadable";		
+		/// <summary>
 		/// View
 		/// </summary>
 		public const string ViewButton = "ViewButton";		

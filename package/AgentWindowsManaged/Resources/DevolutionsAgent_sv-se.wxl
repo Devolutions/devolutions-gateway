@@ -21,6 +21,10 @@
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
+                <String Id="DataFolderIsLink">Det går inte att använda mappen {0} eftersom den är en länk. Ta bort länken och försök igen.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Det går inte att använda mappen {0} eftersom den ägs av {1}. Endast SYSTEM eller en administratör får äga den. Byt ägare och försök igen.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Det går inte att använda mappen {0} eftersom {1} kan ersätta den eller dess innehåll. Ta bort den behörigheten och försök igen.</String>
+                <String Id="DataFolderSecurityUnreadable">Det går inte att läsa ägaren eller behörigheterna för mappen {0}. Kontrollera dem och försök igen.</String>
                 <String Id="Dotnet48IsRequired">Produkten kräver Microsoft .NET Framework 4.8. Vill du hämta den nu?</String>
                 <String Id="IdentityEnrollmentTokenBothSet">Ange IDENTITY_ENROLLMENT_TOKEN eller IDENTITY_ENROLLMENT_TOKEN_FILE, inte båda.</String>
                 <String Id="IdentityEnrollmentTokenFileEmpty">Första raden i registreringstokenfilen {0} är tom.</String>

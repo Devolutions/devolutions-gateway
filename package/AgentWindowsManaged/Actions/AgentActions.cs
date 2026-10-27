@@ -110,19 +110,45 @@ internal static class AgentActions
     // Deferred sequence
 
     /// <summary>
-    /// Create the path %ProgramData%\Devolutions\Agent if it does not exist
+    /// Fail the run, with an error naming the folder, when %ProgramData%\Devolutions or %ProgramData%\Devolutions\Agent
+    /// is a link or is controlled by an account that is not an administrator
+    /// </summary>
+    /// <remarks>
+    /// The major upgrade removes the installed product at RemoveExistingProducts, right after InstallInitialize, so
+    /// running before it fails an install, an upgrade, a repair or a maintenance run before it changes anything.
+    /// A full uninstall is never refused, so that a machine can always be uninstalled.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction checkProgramDataDirectory = new(
+        new Id($"CA.{nameof(checkProgramDataDirectory)}"),
+        CustomActions.CheckProgramDataDirectory,
+        Return.check,
+        When.Before, Step.RemoveExistingProducts,
+        new Condition("NOT (REMOVE=\"ALL\")"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = "ProductLanguage=[ProductLanguage]",
+    };
+
+    /// <summary>
+    /// Create the path %ProgramData%\Devolutions\Agent if it does not exist, after checking its folders again as
+    /// <see cref="checkProgramDataDirectory"/> does
     /// </summary>
     /// <remarks>
     /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
     /// it's easy to create it with a custom action than workaround Windows Installer.
     /// </remarks>
-    private static readonly ElevatedManagedAction createProgramDataDirectory = new(
+    internal static readonly ElevatedManagedAction createProgramDataDirectory = new(
         new Id($"CA.{nameof(createProgramDataDirectory)}"),
         CustomActions.CreateProgramDataDirectory,
         Return.check,
         When.After, Step.CreateFolders,
-        Condition.Always,
-        Sequence.InstallExecuteSequence);
+        new Condition("NOT (REMOVE=\"ALL\")"),
+        Sequence.InstallExecuteSequence)
+    {
+        UsesProperties = "ProductLanguage=[ProductLanguage]",
+    };
 
     /// <summary>
     /// Create the path %ProgramData%\Devolutions\Agent\Pedm and subfolders if they do not exist
@@ -586,6 +612,7 @@ internal static class AgentActions
         configurePsuAgent,
         rollbackConfigurePsuAgent,
         commitConfigurePsuAgent,
+        checkProgramDataDirectory,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,

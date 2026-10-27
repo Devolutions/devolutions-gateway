@@ -149,19 +149,38 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
+        public static ActionResult CheckProgramDataDirectory(Session session)
+        {
+            try
+            {
+                DataFolderRefusal refusal = DataFolders.Check(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    LogDelegate.WithSession(session));
+
+                return refusal is null ? ActionResult.Success : Refuse(session, refusal);
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to check {ProgramDataDirectory}: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
         public static ActionResult CreateProgramDataDirectory(Session session)
         {
             string path = ProgramDataDirectory;
 
             try
             {
-                // The data directory gets its security descriptor when it is created, so that it never exists with the
-                // DACL it would inherit from ProgramData, which lets users add entries.
-                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                DataFolderRefusal refusal = DataFolders.Create(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    Includes.PROGRAM_DATA_SDDL,
+                    LogDelegate.WithSession(session));
 
-                if (!SecureDirectory.Create(path, Includes.PROGRAM_DATA_SDDL) && !Directory.Exists(path))
+                if (refusal is not null)
                 {
-                    throw new IOException($"{path} exists and is not a directory");
+                    return Refuse(session, refusal);
                 }
 
                 session.Log($"created directory at {path} or already exists");
@@ -173,6 +192,22 @@ namespace DevolutionsAgent.Actions
             }
 
             return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Logs the error for <paramref name="refusal"/> in the installer's language and shows it, which a silent install
+        /// only logs.
+        /// </summary>
+        private static ActionResult Refuse(Session session, DataFolderRefusal refusal)
+        {
+            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows.
+            // No test runs the data folder actions, which read the machine's own ProgramData.
+            // When changing this, keep sending it with InstallMessage.Error, as ReadIdentityEnrollmentTokenFile does.
+            string message = refusal.Message(session.Property("ProductLanguage"));
+            session.Log(message);
+            using Record record = new(0) { FormatString = EscapeFormatted(message) };
+            session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+            return ActionResult.Failure;
         }
 
         [CustomAction]

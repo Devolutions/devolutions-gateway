@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.AccessControl;
 using System.Security.Principal;
 
 namespace DevolutionsAgent.Actions;
@@ -94,38 +95,46 @@ internal static class SecureDirectory
     }
 
     /// <summary>
-    /// The owner of the entry <paramref name="path"/> names, opened without following a link, and whether that entry
-    /// is a reparse point.
+    /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, to read its security.
     /// </summary>
-    internal static (SecurityIdentifier Owner, bool IsReparsePoint) ReadOwner(string path)
+    /// <param name="hold">
+    /// Whether to deny delete sharing, so that the entry can't be renamed or replaced while the handle is open.
+    /// </param>
+    internal static SafeFileHandle OpenToRead(string path, bool hold) =>
+        Open(path, WinAPI.READ_CONTROL | WinAPI.FILE_READ_ATTRIBUTES, hold ? HeldShare : AnyShare);
+
+    /// <summary>
+    /// The owner and the DACL of the entry <paramref name="handle"/> holds, and whether that entry is a reparse point.
+    /// </summary>
+    internal static (RawSecurityDescriptor Security, bool IsReparsePoint) ReadSecurity(SafeFileHandle handle)
     {
-        using SafeFileHandle handle = Open(path, WinAPI.READ_CONTROL | WinAPI.FILE_READ_ATTRIBUTES, AnyShare);
         bool isReparsePoint = (GetAttributes(handle) & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        const uint information = WinAPI.OWNER_SECURITY_INFORMATION | WinAPI.DACL_SECURITY_INFORMATION;
 
-        uint error = WinAPI.GetSecurityInfo(
-            handle,
-            WinAPI.SE_FILE_OBJECT,
-            WinAPI.OWNER_SECURITY_INFORMATION,
-            out IntPtr owner,
-            IntPtr.Zero,
-            IntPtr.Zero,
-            IntPtr.Zero,
-            out IntPtr descriptor);
+        // The first call only reports the size the second needs.
+        WinAPI.GetKernelObjectSecurity(handle, information, null, 0, out uint size);
+        int error = Marshal.GetLastWin32Error();
 
-        if (error != 0)
+        if (size == 0)
         {
-            throw new Win32Exception((int)error);
+            throw new Win32Exception(error);
         }
 
-        try
+        byte[] descriptor = new byte[size];
+
+        if (!WinAPI.GetKernelObjectSecurity(handle, information, descriptor, size, out _))
         {
-            return (new SecurityIdentifier(owner), isReparsePoint);
+            throw new Win32Exception(Marshal.GetLastWin32Error());
         }
-        finally
-        {
-            WinAPI.LocalFree(descriptor);
-        }
+
+        return (new RawSecurityDescriptor(descriptor, 0), isReparsePoint);
     }
+
+    /// <summary>
+    /// Whether <paramref name="sid"/> is SYSTEM, Administrators or TrustedInstaller.
+    /// </summary>
+    internal static bool IsPrivileged(SecurityIdentifier sid) =>
+        sid.IsWellKnown(WellKnownSidType.LocalSystemSid) || sid == Administrators || sid == TrustedInstaller;
 
     /// <summary>
     /// Whether <paramref name="owner"/> may own the agent's data: SYSTEM, Administrators, TrustedInstaller, or a member
@@ -140,7 +149,7 @@ internal static class SecureDirectory
     /// <exception cref="Win32Exception">Authz failed and the local member list of Administrators can't be read.</exception>
     internal static bool IsTrustedOwner(SecurityIdentifier owner)
     {
-        if (owner.IsWellKnown(WellKnownSidType.LocalSystemSid) || owner == Administrators || owner == TrustedInstaller)
+        if (IsPrivileged(owner))
         {
             return true;
         }
@@ -291,7 +300,7 @@ internal static class SecureDirectory
     private static bool IsPlainDirectory(uint attributes) =>
         (attributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0 && (attributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) == 0;
 
-    private static bool IsNotFound(Win32Exception e) =>
+    internal static bool IsNotFound(Win32Exception e) =>
         e.NativeErrorCode is WinAPI.ERROR_FILE_NOT_FOUND or WinAPI.ERROR_PATH_NOT_FOUND;
 
     /// <summary>
