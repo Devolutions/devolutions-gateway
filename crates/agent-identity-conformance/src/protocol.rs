@@ -26,7 +26,8 @@ use x509_cert::ext::pkix::{
 
 use crate::client::{
     Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field,
-    https_authority_and_path, token_bag, token_base_url, with_upper_case_scheme,
+    https_authority_and_path, invisible_format_character_range_ends, token_bag, token_base_url,
+    unlisted_format_character_neighbors, with_upper_case_scheme,
 };
 use crate::dvls::{
     self, CertificateStatus, Credential, IdentityQuery, IdentityRecord, IdentityStatus, Permission, Refusal,
@@ -1160,6 +1161,56 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
         record.metadata_value("custom_key") == Some("kept"),
         "unknown metadata key was not retained"
     );
+    Ok(())
+}
+
+/// CONTRACT.agent-identity.md §3: a metadata value holds "no invisible format character", a closed list of code points.
+///
+/// An authority holds the list as ranges, so each refused enrollment holds one end of a range, in a hostname that differs only by that code point from the hostname of the accepted control.
+/// The control also holds each code point that [`unlisted_format_character_neighbors`] names, each under an unknown key, which §3 stores as-is.
+pub(crate) async fn p_metadata_invisible_format_characters(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    let listed = invisible_format_character_range_ends();
+    // One use per refused enrollment, so that an authority counting them still leaves the control a use, and the count names the fault.
+    let token = token(&ctx, listed.len() as u64 + 1).await?;
+    for character in listed {
+        let reply = ctx
+            .target
+            .enroll(
+                &token.text,
+                &KeyPair::generate()?,
+                &json!({ "hostname": format!("host{character}name") }),
+            )
+            .await?;
+        expect_error(&reply, 400, "invalid_request")
+            .with_context(|| format!("hostname holding U+{:04X}", u32::from(character)))?;
+    }
+    ensure!(
+        ctx.target.management().token(&token.id).await?.used_count == 0,
+        "an enrollment refused for an invisible format character consumed a token use"
+    );
+    let mut metadata = serde_json::Map::new();
+    metadata.insert("hostname".to_owned(), json!("hostname"));
+    for character in unlisted_format_character_neighbors() {
+        metadata.insert(
+            format!("u{:04x}", u32::from(character)),
+            json!(format!("host{character}name")),
+        );
+    }
+    let key = KeyPair::generate()?;
+    let reply = ctx
+        .target
+        .enroll(&token.text, &key, &Value::Object(metadata.clone()))
+        .await?;
+    let enrolled = Identity::from_enrollment(&token.text, key, &reply)
+        .context("enrollment holding only code points outside the list of invisible format characters")?;
+    let record = identity_record(&ctx.target, &enrolled.identity_id).await?;
+    for (name, value) in &metadata {
+        ensure!(
+            record.metadata_value(name) == value.as_str(),
+            "metadata {name} was not stored as sent"
+        );
+    }
     Ok(())
 }
 
@@ -3481,6 +3532,8 @@ pub(crate) async fn p_channel_hello_invalid_metadata_rejected(ctx: Context) -> a
         ("an uppercase key", vec![("Hostname", "host")]),
         ("a 65-character key", vec![(long_key.as_str(), "host")]),
         ("a control character", vec![("hostname", "bad\u{7}host")]),
+        // The last listed code point is outside the Basic Multilingual Plane, where a check over UTF-16 code units goes wrong.
+        ("an invisible format character", vec![("hostname", "bad\u{E007F}host")]),
         ("a 1025-byte value", vec![("hostname", long_value.as_str())]),
         ("33 keys", numbered_keys.iter().map(|key| (key.as_str(), "v")).collect()),
         (
@@ -7618,8 +7671,11 @@ pub(crate) async fn p_friendly_name_white_space_and_truncation(ctx: Context) -> 
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
     let cases = [
         ("\u{3000}\u{a0}name\u{2003}\u{1680}", "name".to_owned()),
-        // U+200B ZERO WIDTH SPACE is not `White_Space`.
-        ("\u{200b}name\u{200b}", "\u{200b}name\u{200b}".to_owned()),
+        // U+1D173 MUSICAL SYMBOL BEGIN BEAM is a format character (`Cf`) but neither `White_Space` nor listed in CONTRACT.agent-identity.md §3, so a hostname may hold it, and a trim that also removes format characters fails here.
+        // oracle: spec Unicode PropList.txt §White_Space
+        // oracle: spec Unicode UnicodeData.txt §General_Category
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+        ("\u{1D173}name\u{1D173}", "\u{1D173}name\u{1D173}".to_owned()),
         (&*format!("{}{}", " ".repeat(10), "x".repeat(300)), "x".repeat(255)),
         (
             &*format!("{}\u{3000}{}", "a".repeat(254), "b".repeat(10)),
