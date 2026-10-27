@@ -139,6 +139,34 @@ async fn a_push_closed_as_ended_leaves_the_active_recordings_without_waiting_for
 
 // oracle: intent devolutions-gateway/src/recording.intent.md §Ending a recording
 #[tokio::test]
+async fn a_push_closed_as_ended_leaves_the_active_recordings_while_another_waits_for_a_reconnection() {
+    let recordings = tempfile::tempdir().expect("create recording dir");
+    let config = DgwConfig::builder()
+        .disable_token_validation(true)
+        .recording_path(recordings.path().to_path_buf())
+        .build()
+        .init()
+        .expect("init gateway config");
+    let _gateway = start_dgw(&config).await.expect("start gateway");
+    let waiting = Uuid::new_v4();
+    let ended = Uuid::new_v4();
+
+    // The waiting recording holds Gateway's removal timer at its one-hour deadline.
+    push_and_close(config.http_port(), waiting, CloseCode::Normal).await;
+    push_and_close(config.http_port(), ended, CloseCode::from(RECORDING_ENDED_CLOSE_CODE)).await;
+
+    let started = Instant::now();
+    while active_recordings(config.http_port()).await.contains(&ended) {
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "the ended recording waits for the other recording's reconnection"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+// oracle: intent devolutions-gateway/src/recording.intent.md §Ending a recording
+#[tokio::test]
 async fn a_push_closed_normally_keeps_the_recording_open_for_a_reconnection() {
     let recordings = tempfile::tempdir().expect("create recording dir");
     let config = DgwConfig::builder()
