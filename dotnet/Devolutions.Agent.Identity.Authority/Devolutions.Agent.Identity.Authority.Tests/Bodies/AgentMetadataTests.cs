@@ -28,20 +28,28 @@ public class AgentMetadataTests
         ],
     };
 
-    // The invisible format characters that CONTRACT.agent-identity.md §3 lists, as inclusive ranges.
-    private static readonly (int First, int Last)[] InvisibleFormatRanges =
+    // The invisible format characters that CONTRACT.agent-identity.md §3 lists, as inclusive ranges,
+    // each named as the contract writes it.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    private static readonly (string Name, int First, int Last)[] InvisibleFormatRanges =
     [
-        (0x00AD, 0x00AD),
-        (0x061C, 0x061C),
-        (0x180E, 0x180E),
-        (0x200B, 0x200F),
-        (0x202A, 0x202E),
-        (0x2060, 0x2064),
-        (0x2066, 0x206F),
-        (0xFEFF, 0xFEFF),
-        (0xFFF9, 0xFFFB),
-        (0xE0001, 0xE0001),
-        (0xE0020, 0xE007F),
+        ("U+00AD", 0x00AD, 0x00AD),
+        ("U+034F", 0x034F, 0x034F),
+        ("U+061C", 0x061C, 0x061C),
+        ("U+115F–U+1160", 0x115F, 0x1160),
+        ("U+17B4–U+17B5", 0x17B4, 0x17B5),
+        ("U+180B–U+180F", 0x180B, 0x180F),
+        ("U+200B–U+200F", 0x200B, 0x200F),
+        ("U+202A–U+202E", 0x202A, 0x202E),
+        ("U+2060–U+206F", 0x2060, 0x206F),
+        ("U+3164", 0x3164, 0x3164),
+        ("U+FE00–U+FE0F", 0xFE00, 0xFE0F),
+        ("U+FEFF", 0xFEFF, 0xFEFF),
+        ("U+FFA0", 0xFFA0, 0xFFA0),
+        ("U+FFF0–U+FFFB", 0xFFF0, 0xFFFB),
+        ("U+1BCA0–U+1BCA3", 0x1BCA0, 0x1BCA3),
+        ("U+1D173–U+1D17A", 0x1D173, 0x1D17A),
+        ("U+E0000–U+E0FFF", 0xE0000, 0xE0FFF),
     ];
 
     // The format characters (`Cf`) that the contract's list leaves out,
@@ -56,8 +64,6 @@ public class AgentMetadataTests
         (0x110BD, 0x110BD),
         (0x110CD, 0x110CD),
         (0x13430, 0x1343F),
-        (0x1BCA0, 0x1BCA3),
-        (0x1D173, 0x1D17A),
     ];
 
     public static TheoryData<string> FailureNames => new(Failures.Keys);
@@ -240,27 +246,47 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate([new("hostname", $"host{(char)codePoint}name")]));
     }
 
-    // No invisible format character, including the tag characters past U+FFFF, which UTF-16 writes as a surrogate pair.
-    public static TheoryData<int> InvisibleFormatCharacters => new(CodePoints(InvisibleFormatRanges));
-
-    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-    [Theory]
-    [MemberData(nameof(InvisibleFormatCharacters))]
-    public void RejectsValueWithInvisibleFormatCharacter(int codePoint)
+    // No invisible format character, including those past U+FFFF, which UTF-16 writes as a surrogate pair.
+    public static TheoryData<string, int, int> InvisibleFormatRangeRows
     {
-        AssertInvalid(AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(codePoint)}name")]));
+        get
+        {
+            TheoryData<string, int, int> rows = [];
+            foreach ((string name, int first, int last) in InvisibleFormatRanges)
+            {
+                rows.Add(name, first, last);
+            }
+
+            return rows;
+        }
     }
 
-    // The neighbors of the invisible format ranges, which the list leaves out.
-    public static TheoryData<int> CharactersNextToAnInvisibleFormatRange =>
-        new(InvisibleFormatRanges.SelectMany(range => new[] { range.First - 1, range.Last + 1 }).Distinct());
-
+    // Both ends of a range, so that a range cut short at either end fails.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
-    [MemberData(nameof(CharactersNextToAnInvisibleFormatRange))]
-    public void AcceptsValueWithCharacterNextToAnInvisibleFormatRange(int codePoint)
+    [MemberData(nameof(InvisibleFormatRangeRows))]
+    public void RejectsValueWithInvisibleFormatCharacterAtEitherEndOfARange(string range, int first, int last)
     {
-        AssertValid(AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(codePoint)}name")]));
+        AssertInvalid(
+            AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(first)}name")]),
+            $"first of {range}");
+        AssertInvalid(
+            AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(last)}name")]),
+            $"last of {range}");
+    }
+
+    // The neighbors of a range, which the list leaves out, so that a range extended at either end fails.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    [Theory]
+    [MemberData(nameof(InvisibleFormatRangeRows))]
+    public void AcceptsValueWithCharacterNextToAnInvisibleFormatRange(string range, int first, int last)
+    {
+        AssertValid(
+            AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(first - 1)}name")]),
+            $"before {range}");
+        AssertValid(
+            AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(last + 1)}name")]),
+            $"after {range}");
     }
 
     // The list is closed, so a value may hold the format characters it leaves out,
@@ -335,12 +361,15 @@ public class AgentMetadataTests
         Assert.DoesNotContain(LeakedValue, result.FailureDetail);
     }
 
+    public static TheoryData<int> InvisibleFormatRangeEnds =>
+        new(InvisibleFormatRanges.SelectMany(range => new[] { range.First, range.Last }).Distinct());
+
     // The refused character is part of the value, so the detail holds neither the character
     // nor its code point in a hexadecimal rendering such as U+0007, 0x07, 0x0007 or 0007.
     // oracle: intent dotnet/Devolutions.Agent.Identity.Authority/INTENT.md §Failure details
     [Theory]
     [MemberData(nameof(ControlCharacters))]
-    [MemberData(nameof(InvisibleFormatCharacters))]
+    [MemberData(nameof(InvisibleFormatRangeEnds))]
     public void FailureDetailDoesNotNameTheRefusedCharacter(int codePoint)
     {
         string character = char.ConvertFromUtf32(codePoint);
@@ -366,9 +395,9 @@ public class AgentMetadataTests
         Assert.Throws<ArgumentException>(() => AgentMetadata.Validate([new(key!, value!)]));
     }
 
-    private static AgentMetadata AssertValid(MetadataValidationResult result)
+    private static AgentMetadata AssertValid(MetadataValidationResult result, string? form = null)
     {
-        Assert.True(result.Succeeded, result.FailureDetail);
+        Assert.True(result.Succeeded, form is null ? result.FailureDetail : $"{form}: {result.FailureDetail}");
 
         return result.Metadata;
     }
