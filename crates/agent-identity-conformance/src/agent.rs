@@ -6156,8 +6156,8 @@ mod tests {
             }
             metadata
         };
-        validate_agent_metadata(&metadata("host\u{2065}name"), None).expect("U+2065 is outside the list");
-        for character in ['\u{00AD}', '\u{E007F}'] {
+        validate_agent_metadata(&metadata("host\u{2070}name"), None).expect("U+2070 is outside the list");
+        for character in ['\u{00AD}', '\u{E0FFF}'] {
             let refused = validate_agent_metadata(&metadata(&format!("host{character}name")), None)
                 .expect_err(&format!("U+{:04X} is listed", u32::from(character)));
             assert!(

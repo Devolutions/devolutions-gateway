@@ -1167,19 +1167,21 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
 /// CONTRACT.agent-identity.md §3: a metadata value holds "no invisible format character", a closed list of code points.
 ///
 /// An authority that holds the list as ranges goes wrong at their ends, so each refused enrollment holds one end of a range, inserted into the hostname of the accepted control and otherwise identical to it.
-/// The control hostname holds each code point that [`unlisted_format_character_neighbors`] names, and so does an unknown key per code point, which §3 stores as-is.
+/// The control hostname holds each code point that [`unlisted_format_character_neighbors`] names, and so does an unknown key per pair of them, which §3 stores as-is.
+/// Pairs, each named after its first code point, keep the control within the limit of 32 keys.
 /// One more refused enrollment holds a listed code point in an unknown key, since §3 applies to every value.
 pub(crate) async fn p_metadata_invisible_format_characters(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-    let neighbors = unlisted_format_character_neighbors().into_iter().collect::<String>();
+    let neighbors = unlisted_format_character_neighbors();
     let mut control = serde_json::Map::new();
-    control.insert("hostname".to_owned(), json!(format!("host{neighbors}name")));
-    for character in neighbors.chars() {
+    for pair in neighbors.chunks(2) {
         control.insert(
-            format!("u{:04x}", u32::from(character)),
-            json!(format!("host{character}name")),
+            format!("u{:04x}", u32::from(pair[0])),
+            json!(format!("host{}name", pair.iter().collect::<String>())),
         );
     }
+    let neighbors = neighbors.into_iter().collect::<String>();
+    control.insert("hostname".to_owned(), json!(format!("host{neighbors}name")));
     let mut refused = Vec::new();
     for character in invisible_format_character_range_ends() {
         let mut metadata = control.clone();
@@ -3537,7 +3539,7 @@ pub(crate) async fn p_channel_hello_invalid_metadata_rejected(ctx: Context) -> a
         ("a 65-character key", vec![(long_key.as_str(), "host")]),
         ("a control character", vec![("hostname", "bad\u{7}host")]),
         // The last listed code point is outside the Basic Multilingual Plane, where a check over UTF-16 code units goes wrong.
-        ("an invisible format character", vec![("hostname", "bad\u{E007F}host")]),
+        ("an invisible format character", vec![("hostname", "bad\u{E0FFF}host")]),
         ("a 1025-byte value", vec![("hostname", long_value.as_str())]),
         ("33 keys", numbered_keys.iter().map(|key| (key.as_str(), "v")).collect()),
         (
@@ -7675,13 +7677,13 @@ pub(crate) async fn p_friendly_name_white_space_and_truncation(ctx: Context) -> 
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
     let cases = [
         ("\u{3000}\u{a0}name\u{2003}\u{1680}", "name".to_owned()),
-        // U+0600 ARABIC NUMBER SIGN and U+1D173 MUSICAL SYMBOL BEGIN BEAM are format characters (`Cf`) but neither `White_Space` nor listed in CONTRACT.agent-identity.md §3, so a hostname may hold them, and a trim that also removes format characters fails here.
-        // U+0600 is one UTF-16 code unit and U+1D173 two, so a trim over code units fails on the first and a trim over scalar values on both.
+        // U+0600 ARABIC NUMBER SIGN and U+13430 EGYPTIAN HIEROGLYPH VERTICAL JOINER are format characters (`Cf`) but neither `White_Space` nor listed in CONTRACT.agent-identity.md §3, so a hostname may hold them, and a trim that also removes format characters fails here.
+        // U+0600 is one UTF-16 code unit and U+13430 two, so a trim over code units fails on the first and a trim over scalar values on both.
         // oracle: spec Unicode 18.0.0 PropList.txt §White_Space
         // oracle: spec Unicode 15.0.0 UnicodeData.txt §General_Category
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
         ("\u{0600}name\u{0600}", "\u{0600}name\u{0600}".to_owned()),
-        ("\u{1D173}name\u{1D173}", "\u{1D173}name\u{1D173}".to_owned()),
+        ("\u{13430}name\u{13430}", "\u{13430}name\u{13430}".to_owned()),
         (&*format!("{}{}", " ".repeat(10), "x".repeat(300)), "x".repeat(255)),
         (
             &*format!("{}\u{3000}{}", "a".repeat(254), "b".repeat(10)),
