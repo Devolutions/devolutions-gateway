@@ -125,7 +125,7 @@ public sealed class DataFolderTests
         DataFolderRefusal refusal = DataFolders.Evaluate(
             "folder", new RawSecurityDescriptor(sddl), isLink: false, isDirectory: true, checkAccess);
 
-        Assert.True(expected == Describe(refusal), $"{scenario}: {Describe(refusal)}");
+        Assert.Equal((scenario, expected), (scenario, Describe(refusal)));
     }
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
@@ -374,8 +374,11 @@ public sealed class DataFolderTests
     [Fact]
     public void CheckRunsBeforeTheMajorUpgradeRemovesTheInstalledProduct()
     {
-        Assert.Equal(When.Before, GatewayActions.checkProgramDataDirectory.When);
-        Assert.Equal(Step.RemoveExistingProducts.ToString(), GatewayActions.checkProgramDataDirectory.Step.ToString());
+        Assert.Equal(
+            (When.Before, Step.RemoveExistingProducts.ToString(), UpgradeSchedule.afterInstallInitialize),
+            (GatewayActions.checkProgramDataDirectory.When,
+                GatewayActions.checkProgramDataDirectory.Step.ToString(),
+                Program.MajorUpgrade.Schedule));
     }
 
     [Theory]

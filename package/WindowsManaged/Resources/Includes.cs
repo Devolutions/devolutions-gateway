@@ -36,8 +36,9 @@ namespace DevolutionsGateway.Resources
             /// Administrators (BA)	Full Access (FA)
             /// Users (BU)	Read, Execute
         /// Only SYSTEM, administrators and the service account can change what the Gateway stores there, so no other
-        /// account gets more than read access; a service account that is LOCAL SERVICE gets its rights through its own
-        /// entries.
+        /// account gets more than read access.
+        /// LOCAL SERVICE, which earlier installers gave write access, has no entry, and the installer doesn't accept it as
+        /// the service account.
         /// The service account gets no Delete on the folder itself, so that only SYSTEM and administrators can rename or
         /// replace it, while an inherit-only entry gives it Delete on the files and subfolders it manages below.
         /// </remarks>
@@ -53,8 +54,7 @@ namespace DevolutionsGateway.Resources
             /// Local System (SY)	Full Access (FA)
             /// Service account	Read, Write, Execute
             /// Administrators (BA)	Full Access (FA)
-        /// Only SYSTEM, administrators and the service account can read or change the users database; a service account
-        /// that is LOCAL SERVICE gets its rights through its own entry.
+        /// Only SYSTEM, administrators and the service account can read or change the users database.
         /// </remarks>
         private const string USERS_FILE_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;{0})(A;;FA;;;BA)";
 

@@ -160,6 +160,8 @@ internal static class DataFolders
     /// inherit from ProgramData, which lets users add entries.
     /// The entries below an existing <c>Gateway</c> get what it now passes on, and lose what it passed on before, which
     /// only its DACL before the reset tells apart from their explicit entries.
+    /// The users database directly below keeps its security here, because another action replaces it, and the entries
+    /// Gateway passes on would let users read it until then.
     /// </remarks>
     /// <returns>
     /// The first refusal, in which case nothing is created or changed below <c>Devolutions</c>, or <c>null</c>.
@@ -223,8 +225,10 @@ internal static class DataFolders
                 // reset in the same call that changes its DACL, while its previous DACL can still be read.
                 // Tests check SetSecurityAndInheritBelow, not that an existing Gateway is reset with it here, because
                 // the user running them isn't a trusted owner.
-                // When changing this, reset the entries below in the same call that changes the DACL of Gateway.
-                SecureDirectory.SetSecurityAndInheritBelow(existing, gateway, sddl, logger);
+                // When changing this, reset the entries below in the same call that changes the DACL of Gateway, and
+                // keep the users database out of it, so that it never gets what Gateway passes on to users.
+                SecureDirectory.SetSecurityAndInheritBelow(
+                    existing, gateway, sddl, [CustomActions.DefaultUsersFile], logger);
                 logger.Log($"reset the owner and the DACL of {gateway} and the entries below it");
 
                 return null;

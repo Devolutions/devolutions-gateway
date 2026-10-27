@@ -35,8 +35,9 @@ public sealed class SecureDirectoryTests
     // No CREATOR OWNER entry, because Windows keeps the entry it gave a folder's owner as an explicit one when the
     // folder's parent didn't mark its DACL auto-inherited, where SetSecurityAndInheritBelow counts it as inherited,
     // which grants the same access.
+    // No LOCAL SERVICE entry, which SetSecurityAndInheritBelow removes where Windows keeps it.
     private static readonly string TreeSddl =
-        $"O:{CurrentUser}D:PAI(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OI;FR;;;BU)(A;CI;0x1200a9;;;LS)";
+        $"O:{CurrentUser}D:PAI(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OI;FR;;;BU)(A;CI;0x1200a9;;;AU)";
 
     private static readonly string[] UsersFileNames = ["Devolutions", "Gateway", "users.txt"];
 
@@ -44,14 +45,14 @@ public sealed class SecureDirectoryTests
 
     public SecureDirectoryTests(ITestOutputHelper output) => this.logger = new OutputLogger(output);
 
-    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+// oracle: spec Microsoft Learn CreateFileW §dwShareMode, FILE_SHARE_DELETE
     [Fact]
     public void HeldDirectoryCantBeRenamedUntilItsHandleIsClosed()
     {
         AssertHoldsUntilClosed(path => SecureDirectory.Hold(path));
     }
 
-    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+// oracle: spec Microsoft Learn CreateFileW §dwShareMode, FILE_SHARE_DELETE
     [Fact]
     public void DirectoryOpenedToReadAndHoldCantBeRenamedUntilItsHandleIsClosed()
     {
@@ -60,73 +61,30 @@ public sealed class SecureDirectoryTests
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
-    public void SetSecurityRefusesAJunctionAndLeavesItsTargetUnchanged()
-    {
-        using TempFolder folder = new();
-        string target = folder.CreateDirectory("target");
-        string before = Sddl(target);
-        TempFolder.CreateJunction(Path.Combine(folder.Path, "link"), target);
-
-        Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(folder.Path, ["link"], ProtectedSddl));
-
-        Assert.Equal(before, Sddl(target));
-    }
-
-    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
-    [Fact]
-    public void SetSecurityRefusesAJunctionAboveTheFolderAndLeavesTheFolderBelowItsTargetUnchanged()
-    {
-        using TempFolder folder = new();
-        string target = folder.CreateDirectory("target");
-        string below = folder.CreateDirectory("target", "data");
-        string before = Sddl(below);
-        TempFolder.CreateJunction(Path.Combine(folder.Path, "link"), target);
-
-        Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(folder.Path, ["link", "data"], ProtectedSddl));
-
-        Assert.Equal(before, Sddl(below));
-    }
-
-    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
-    [Fact]
-    public void SetSecurityRefusesAFileAndLeavesItUnchanged()
+    public void SetSecurityAndInheritBelowRefusesAFileAndLeavesItUnchanged()
     {
         using TempFolder folder = new();
         string path = Path.Combine(folder.Path, "data");
         File.WriteAllText(path, "");
         string before = FileSddl(path);
+        using SafeFileHandle handle = SecureDirectory.HoldToSetSecurity(path);
 
-        Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(folder.Path, ["data"], ProtectedSddl));
+        Assert.Throws<IOException>(
+            () => SecureDirectory.SetSecurityAndInheritBelow(handle, path, ProtectedSddl, [], this.logger));
 
         Assert.Equal(before, FileSddl(path));
     }
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
-    public void SetSecurityAppliesTheOwnerAndTheProtectedDacl()
+    public void SetSecurityAndInheritBelowAppliesTheOwnerAndTheProtectedDacl()
     {
         using TempFolder folder = new();
-        string path = folder.CreateDirectory("parent", "data");
+        string gateway = CreateGatewayFolder(folder.Path);
 
-        SecureDirectory.SetSecurity(folder.Path, ["parent", "data"], ProtectedSddl);
+        this.SetSecurityAndInheritBelow(folder.Path, ProtectedSddl);
 
-        AssertProtectedSecurity(new DirectoryInfo(path).GetAccessControl());
-    }
-
-    // The files below the folder get the folder's entries from SetSecurityAndInheritBelow, which keeps the explicit
-    // entries a file has, so a reset that rewrote the files' DACLs here would drop entries an administrator added.
-    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
-    [Fact]
-    public void SetSecurityLeavesExistingChildrenUnchanged()
-    {
-        using TempFolder folder = new();
-        folder.CreateDirectory("data");
-        string child = folder.CreateDirectory("data", "child");
-        string before = RawSddl(child);
-
-        SecureDirectory.SetSecurity(folder.Path, ["data"], ProtectedSddl);
-
-        Assert.Equal(before, RawSddl(child));
+        AssertProtectedSecurity(new DirectoryInfo(gateway).GetAccessControl());
     }
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
@@ -158,16 +116,16 @@ public sealed class SecureDirectoryTests
     [InlineData("NETWORK SERVICE", "S-1-5-20", false)]
     public void OwnerIsTrustedOnlyWhenPrivileged(string name, string sid, bool expected)
     {
-        Assert.True(expected == SecureDirectory.IsTrustedOwner(new SecurityIdentifier(sid)), name);
+        Assert.Equal((name, expected), (name, SecureDirectory.IsTrustedOwner(new SecurityIdentifier(sid))));
     }
 
     // oracle: property round-trip
     [Fact]
-    public void ReadSecurityReadsTheOwnerAndTheDaclThatSetSecurityApplied()
+    public void ReadSecurityReadsTheOwnerAndTheDaclThatCreateApplied()
     {
         using TempFolder folder = new();
-        string path = folder.CreateDirectory("data");
-        SecureDirectory.SetSecurity(folder.Path, ["data"], ProtectedSddl);
+        string path = Path.Combine(folder.Path, "data");
+        Assert.True(SecureDirectory.Create(path, ProtectedSddl));
 
         using SafeFileHandle handle = SecureDirectory.OpenToRead(path, hold: false);
         (RawSecurityDescriptor security, bool isReparsePoint, bool isDirectory) = SecureDirectory.ReadSecurity(handle);
@@ -195,17 +153,23 @@ public sealed class SecureDirectoryTests
         AssertInheritsAsWindows(scenario, subfolders, (gateway, file) => ProtectFile(file), TreeSddl);
     }
 
-    // oracle: reference System.IO.Directory.SetAccessControl and File.SetAccessControl, then SetAccessRuleProtection(false, false) top-down, run live
+    // An administrator who protects a folder below Gateway decides who may use it, so the folder keeps its DACL, and
+    // the files below it get what it passes on.
+    // oracle: reference System.IO.Directory.SetAccessControl and File.SetAccessControl, then SetAccessRuleProtection(false, false) top-down on files and unprotected folders, run live
     [Theory]
     [InlineData("a folder directly in the folder", "sub")]
     [InlineData("a folder two levels down", "sub", "deeper")]
-    public void InheritBelowGivesAProtectedFolderTheDaclWindowsGivesItWhenItsProtectionIsRemoved(
+    public void InheritBelowKeepsTheDaclOfAProtectedFolderAndResetsTheFilesBelowItAgainstIt(
         string scenario, params string[] subfolders)
     {
         AssertInheritsAsWindows(
             scenario,
             subfolders,
-            (gateway, file) => ProtectDirectory(Path.GetDirectoryName(file)),
+            (gateway, file) =>
+            {
+                ProtectDirectory(Path.GetDirectoryName(file));
+                ProtectFile(file);
+            },
             TreeSddl);
     }
 
@@ -227,25 +191,35 @@ public sealed class SecureDirectoryTests
             $"O:{CurrentUser}D:PAI(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OICI;0x1301ff;;;NS)");
     }
 
+    // An earlier installer gave Gateway a DACL that LOCAL SERVICE could write through, stored without being marked
+    // auto-inherited, so a folder below holds what it inherited as plain entries.
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
-    public void InheritBelowRemovesAnEntryTheFolderNoLongerPassesOnFromASubfolderAndItsFiles()
+    public void InheritBelowReplacesTheLocalServiceEntriesAnEarlierInstallerPassedOnByTheServiceAccount()
     {
         using TempFolder folder = new();
         folder.CreateDirectory("Devolutions");
+        string gateway = Path.Combine(folder.Path, "Devolutions", "Gateway");
         Assert.True(SecureDirectory.Create(
-            Path.Combine(folder.Path, "Devolutions", "Gateway"),
-            $"O:{CurrentUser}D:PAI(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)"));
+            gateway, $"O:{CurrentUser}D:P(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)"));
+        Assert.Equal(
+            (ControlFlags)0,
+            new RawSecurityDescriptor(RawSddl(gateway)).ControlFlags & ControlFlags.DiscretionaryAclAutoInherited);
         string recordings = folder.CreateDirectory("Devolutions", "Gateway", "recordings");
         string file = Path.Combine(recordings, "file.txt");
         File.WriteAllText(file, "");
-        Assert.True(Allows(LocalService, File.GetAccessControl(file)), "the file starts with the entry");
+        // As stored, since .NET reads a DACL through GetNamedSecurityInfo, which tells inherited entries apart.
+        Assert.True(
+            new RawSecurityDescriptor(RawSddl(recordings)).DiscretionaryAcl
+                .Cast<CommonAce>()
+                .Any(ace => ace.SecurityIdentifier == LocalService && (ace.AceFlags & AceFlags.Inherited) == 0),
+            "the subfolder starts with a plain entry for LOCAL SERVICE");
+        Assert.True(Allows(LocalService, File.GetAccessControl(file)), "the file starts with an entry for LOCAL SERVICE");
 
-        SecureDirectory.SetSecurityAndInheritBelow(
+        // The installer's template, with NETWORK SERVICE as the service account and the current user as the owner.
+        this.SetSecurityAndInheritBelow(
             folder.Path,
-            GatewayNames,
-            $"O:{CurrentUser}D:PAI(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;NS)",
-            this.logger);
+            $"O:{CurrentUser}D:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201ff;;;NS)(A;OICIIO;0x1301ff;;;NS)(A;OICI;FA;;;{CurrentUser})");
 
         Assert.Equal(
             (false, true, false, true),
@@ -253,6 +227,64 @@ public sealed class SecureDirectoryTests
                 Allows(NetworkService, Directory.GetAccessControl(recordings)),
                 Allows(LocalService, File.GetAccessControl(file)),
                 Allows(NetworkService, File.GetAccessControl(file))));
+    }
+
+    // Earlier installers gave LOCAL SERVICE write access, which a protected folder holds as explicit entries.
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void InheritBelowRemovesLocalServiceFromAProtectedFolderAndAFileBelowItAndKeepsTheirOtherEntries()
+    {
+        using TempFolder folder = new();
+        folder.CreateDirectory("Devolutions");
+        string gateway = Path.Combine(folder.Path, "Devolutions", "Gateway");
+        Assert.True(SecureDirectory.Create(gateway, TreeSddl));
+        string sub = folder.CreateDirectory("Devolutions", "Gateway", "sub");
+        DirectorySecurity subSecurity = new();
+        subSecurity.SetSecurityDescriptorSddlForm(
+            $"D:P(A;OICI;FA;;;{CurrentUser})(A;OICI;0x1301ff;;;LS)(A;OICI;FR;;;BU)", AccessControlSections.Access);
+        Directory.SetAccessControl(sub, subSecurity);
+        string file = Path.Combine(sub, "file.txt");
+        File.WriteAllText(file, "");
+        FileSecurity fileSecurity = new();
+        fileSecurity.SetSecurityDescriptorSddlForm(
+            $"D:P(A;;FA;;;{CurrentUser})(A;;0x1301ff;;;LS)", AccessControlSections.Access);
+        File.SetAccessControl(file, fileSecurity);
+
+        this.SetSecurityAndInheritBelow(folder.Path, TreeSddl);
+
+        DirectorySecurity subAfter = Directory.GetAccessControl(sub);
+        FileSecurity fileAfter = File.GetAccessControl(file);
+        Assert.Equal(
+            (true, false, true, true, false, false, true, true),
+            (subAfter.AreAccessRulesProtected,
+                Allows(LocalService, subAfter),
+                Allows(CurrentUser, subAfter),
+                Allows(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null), subAfter),
+                fileAfter.AreAccessRulesProtected,
+                Allows(LocalService, fileAfter),
+                Allows(CurrentUser, fileAfter),
+                Allows(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null), fileAfter)));
+    }
+
+    // Another action gives the users database a DACL that only SYSTEM, administrators and the service account can
+    // read, so resetting it here first would let users read it, through what Gateway passes on, until then.
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void InheritBelowLeavesAnEntryItIsToldToKeepUnchangedAndResetsTheOthers()
+    {
+        using TempFolder folder = new();
+        folder.CreateDirectory("Devolutions");
+        string gateway = Path.Combine(folder.Path, "Devolutions", "Gateway");
+        Assert.True(SecureDirectory.Create(gateway, TreeSddl));
+        string users = CreateProtectedFile(Path.Combine(gateway, "users.txt"));
+        string other = CreateProtectedFile(Path.Combine(gateway, "other.txt"));
+        string before = FileSddl(users);
+
+        this.SetSecurityAndInheritBelow(folder.Path, TreeSddl, "users.txt");
+
+        Assert.Equal(
+            (before, false),
+            (FileSddl(users), File.GetAccessControl(other).AreAccessRulesProtected));
     }
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
@@ -266,7 +298,7 @@ public sealed class SecureDirectoryTests
         string before = FileSddl(target);
         TempFolder.CreateJunction(Path.Combine(gateway, "link"), outside);
 
-        SecureDirectory.SetSecurityAndInheritBelow(folder.Path, GatewayNames, ProtectedSddl, this.logger);
+        this.SetSecurityAndInheritBelow(folder.Path, ProtectedSddl);
 
         Assert.Equal(before, FileSddl(target));
     }
@@ -281,26 +313,25 @@ public sealed class SecureDirectoryTests
         string before = FileSddl(outside);
         TempFolder.CreateHardLink(Path.Combine(gateway, "link.txt"), outside);
 
-        SecureDirectory.SetSecurityAndInheritBelow(folder.Path, GatewayNames, ProtectedSddl, this.logger);
+        this.SetSecurityAndInheritBelow(folder.Path, ProtectedSddl);
 
         Assert.Equal(before, FileSddl(outside));
     }
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
-    public void InheritBelowRefusesAJunctionAtTheFolderAndLeavesTheFilesBehindItUnchanged()
+    public void InheritBelowRefusesAJunctionAtTheFolderAndLeavesItsTargetAndTheFilesBehindItUnchanged()
     {
         using TempFolder folder = new();
         folder.CreateDirectory("Devolutions");
         string outside = folder.CreateDirectory("outside");
         string target = CreateProtectedFile(Path.Combine(outside, "file.txt"));
-        string before = FileSddl(target);
+        (string, string) before = (Sddl(outside), FileSddl(target));
         TempFolder.CreateJunction(Path.Combine(folder.Path, "Devolutions", "Gateway"), outside);
 
-        Assert.Throws<IOException>(
-            () => SecureDirectory.SetSecurityAndInheritBelow(folder.Path, GatewayNames, ProtectedSddl, this.logger));
+        Assert.Throws<IOException>(() => this.SetSecurityAndInheritBelow(folder.Path, ProtectedSddl));
 
-        Assert.Equal(before, FileSddl(target));
+        Assert.Equal(before, (Sddl(outside), FileSddl(target)));
     }
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
@@ -334,6 +365,22 @@ public sealed class SecureDirectoryTests
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
+    public void SetFileSecurityRefusesAJunctionAboveTheFileAndLeavesTheFileBehindItUnchanged()
+    {
+        using TempFolder folder = new();
+        string target = folder.CreateDirectory("outside");
+        string file = CreateProtectedFile(Path.Combine(target, "users.txt"));
+        string before = FileSddl(file);
+        folder.CreateDirectory("Devolutions");
+        TempFolder.CreateJunction(Path.Combine(folder.Path, "Devolutions", "Gateway"), target);
+
+        Assert.Throws<IOException>(() => SecureDirectory.SetFileSecurity(folder.Path, UsersFileNames, ProtectedSddl));
+
+        Assert.Equal(before, FileSddl(file));
+    }
+
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [Fact]
     public void SetFileSecurityRefusesAFileWithAnotherHardLinkAndLeavesItUnchanged()
     {
         using TempFolder folder = new();
@@ -356,11 +403,7 @@ public sealed class SecureDirectoryTests
     public void SetFileSecurityReportsAMissingFileAsNotFound(string scenario, params string[] existing)
     {
         using TempFolder folder = new();
-
-        if (existing.Length > 0)
-        {
-            folder.CreateDirectory(existing);
-        }
+        folder.CreateDirectory(existing);
 
         Win32Exception e = Assert.Throws<Win32Exception>(
             () => SecureDirectory.SetFileSecurity(folder.Path, UsersFileNames, ProtectedSddl));
@@ -372,7 +415,8 @@ public sealed class SecureDirectoryTests
     /// Asserts that <see cref="SecureDirectory.SetSecurityAndInheritBelow"/>, given <paramref name="sddl"/>, gives
     /// <c>Gateway</c>, the folders <c>Gateway\<paramref name="subfolders"/></c> and a file in the last one the DACLs
     /// that .NET gives the same entries in an identical tree when it sets the DACL of <c>Gateway</c>, which Windows
-    /// passes on, then removes the protection of each entry below, from the top down.
+    /// passes on, then sets each folder below its own DACL again, which Windows passes on, and removes the protection
+    /// of the file, from the top down.
     /// </summary>
     /// <param name="prepare">
     /// Changes each tree, given the path of <c>Gateway</c> and of the file, before the DACLs are set.
@@ -396,15 +440,15 @@ public sealed class SecureDirectoryTests
         gateway.SetSecurityDescriptorSddlForm(sddl, AccessControlSections.Owner | AccessControlSections.Access);
         string written = gateway.GetSecurityDescriptorSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
 
-        SecureDirectory.SetSecurityAndInheritBelow(actual, GatewayNames, written, this.logger);
+        this.SetSecurityAndInheritBelow(actual, written);
 
         Directory.SetAccessControl(Path.Combine(expected, directories[0]), gateway);
 
         // Top-down, because SetNamedSecurityInfo computes what an entry inherits from its parent's current DACL.
+        // A protected folder keeps its DACL, and an unprotected one gets what its parent now passes on.
         foreach (string directory in directories.Skip(1))
         {
             DirectorySecurity reference = Directory.GetAccessControl(Path.Combine(expected, directory));
-            reference.SetAccessRuleProtection(false, false);
             Directory.SetAccessControl(Path.Combine(expected, directory), reference);
         }
 
@@ -421,6 +465,17 @@ public sealed class SecureDirectoryTests
         Assert.True(
             Sddls(expected).SequenceEqual(Sddls(actual)),
             $"{scenario}: {string.Join(" ", Sddls(expected))} {string.Join(" ", Sddls(actual))}");
+    }
+
+    /// <summary>
+    /// Calls <see cref="SecureDirectory.SetSecurityAndInheritBelow"/> on <c>Devolutions\Gateway</c> under
+    /// <paramref name="root"/>, opened as the installer opens it, keeping the entries named <paramref name="kept"/>.
+    /// </summary>
+    private void SetSecurityAndInheritBelow(string root, string sddl, params string[] kept)
+    {
+        string gateway = Path.Combine(root, "Devolutions", "Gateway");
+        using SafeFileHandle handle = SecureDirectory.HoldToSetSecurity(gateway);
+        SecureDirectory.SetSecurityAndInheritBelow(handle, gateway, sddl, kept, this.logger);
     }
 
     /// <summary>
