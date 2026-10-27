@@ -146,9 +146,8 @@ fn windows_host_name(format: windows::Win32::System::SystemInformation::COMPUTER
 
 #[cfg(target_os = "linux")]
 fn machine_id() -> Option<String> {
-    std::fs::read_to_string("/etc/machine-id")
-        .ok()
-        .map(|value| value.trim().to_owned())
+    // The contract sends the file as-is: `sanitize` drops the trailing newline and any other control character.
+    std::fs::read_to_string("/etc/machine-id").ok()
 }
 
 #[cfg(target_os = "macos")]
