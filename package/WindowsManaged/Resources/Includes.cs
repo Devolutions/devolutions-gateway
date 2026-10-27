@@ -27,7 +27,7 @@ namespace DevolutionsGateway.Resources
         internal static string INFO_URL = "https://server.devolutions.net";
 
         /// <summary>
-        /// SDDL template for the desired %programdata%\devolutions\gateway ACL. `{0}` is the SID of the service account.
+        /// SDDL template for the desired %programdata%\devolutions\gateway owner and ACL. `{0}` is the SID of the service account.
         /// Easiest way to generate an SDDL is to configure the required access, and then query the path with PowerShell: `Get-Acl | Format-List`
         /// </summary>
         /// <remarks>
@@ -40,7 +40,7 @@ namespace DevolutionsGateway.Resources
         private const string PROGRAM_DATA_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;0x1301ff;;;{0})(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 
         /// <summary>
-        /// SDDL template for the desired %programdata%\devolutions\gateway\users.txt ACL. `{0}` is the SID of the service account.
+        /// SDDL template for the desired %programdata%\devolutions\gateway\users.txt owner and ACL. `{0}` is the SID of the service account.
         /// </summary>
         /// <remarks>
         /// Owner  : NT AUTHORITY\SYSTEM
