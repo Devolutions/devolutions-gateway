@@ -11,11 +11,11 @@ use ironrdp_connector::sspi::generator::GeneratorState;
 use ironrdp_pdu::nego::{ConnectionConfirm, ConnectionRequest, ResponseFlags, SecurityProtocol};
 use ironrdp_pdu::x224::X224;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 
 use super::credssp::TsRequestHint;
 use super::mock_kdc::send_kdc_tcp;
-use super::rdp::record_cookie;
+use super::rdp::{LocalhostListener, record_cookie};
 use super::tls::{install_crypto_provider, server_public_key, tls_acceptor};
 use super::{KERBEROS_TARGET_USER, REALM, SERVICE_HOST, TARGET_PASSWORD, TARGET_USER, TERMSRV_KEY};
 
@@ -43,12 +43,8 @@ impl MockRdp {
 
     async fn start(mode: MockRdpMode) -> anyhow::Result<Self> {
         install_crypto_provider();
-        // Dual-stack so Windows `localhost` (IPv6 first) still hits the fake server.
-        let listener = match TcpListener::bind("[::]:0").await {
-            Ok(listener) => listener,
-            Err(_) => TcpListener::bind("127.0.0.1:0").await.context("bind mock RDP")?,
-        };
-        let port = listener.local_addr().context("mock RDP local_addr")?.port();
+        let listener = LocalhostListener::bind().await.context("bind mock RDP")?;
+        let port = listener.port()?;
         let credssp_ok = Arc::new(AtomicBool::new(false));
         let finished_account = Arc::new(Mutex::new(None));
         let cookies = Arc::new(Mutex::new(Vec::new()));
