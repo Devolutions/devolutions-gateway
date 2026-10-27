@@ -146,7 +146,9 @@ fn windows_host_name(format: windows::Win32::System::SystemInformation::COMPUTER
 
 #[cfg(target_os = "linux")]
 fn machine_id() -> Option<String> {
-    // The contract sends the file as-is: `sanitize` drops the trailing newline and any other control character.
+    // UNTESTED: The agent sends the file as-is (CONTRACT.agent-identity.md §3.1), so this must not trim.
+    // `sanitize` already removes the trailing newline and any other control character, and surrounding spaces must reach the authority unchanged.
+    // The conformance suite notices a trim only on a host whose file has such spaces.
     std::fs::read_to_string("/etc/machine-id").ok()
 }
 
