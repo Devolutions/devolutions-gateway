@@ -192,7 +192,7 @@ async fn only_a_new_task_runs_on_created_and_gets_a_job() {
     assert!(harness.job_queue_rx.try_recv().is_err(), "one job only");
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
+// oracle: mutant a job that cannot be queued is ignored, so the Task stays queued and its creation succeeds
 #[tokio::test]
 async fn a_task_whose_job_cannot_be_queued_fails() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
@@ -211,7 +211,7 @@ async fn a_task_whose_job_cannot_be_queued_fails() {
     assert_eq!(*harness.ended.lock(), [id], "what was set up for the Task is dropped");
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
+// oracle: mutant the job is queued before the Task is prepared, so a Task that cannot be prepared still gets a job
 #[tokio::test]
 async fn a_task_that_cannot_be_prepared_fails_without_a_job() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
@@ -353,7 +353,7 @@ async fn resume_queues_only_the_tasks_left_without_a_job() {
     );
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
+// oracle: mutant a panicking attempt fails the Task as internal instead of panicked
 #[tokio::test]
 async fn a_panicking_attempt_fails_the_task() {
     let mut harness = Harness::new(|_| panic!("the attempt panics")).await;
@@ -407,7 +407,7 @@ async fn a_recoverable_failure_is_retried_up_to_the_last_attempt() {
     );
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
+// oracle: mutant a queued Task of an unknown kind is never failed
 #[tokio::test]
 async fn invalid_parameters_and_unknown_kinds_fail_the_task() {
     let harness = Harness::new(|value| Ok(json!(value))).await;
