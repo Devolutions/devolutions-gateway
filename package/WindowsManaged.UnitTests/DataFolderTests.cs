@@ -65,26 +65,42 @@ public sealed class DataFolderTests
     [InlineData("Users own Gateway", Gateway, "O:BU" + InheritedDacl, "Owner " + Users)]
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("NETWORK SERVICE owns Gateway", Gateway, "O:NS" + InheritedDacl, "Owner S-1-5-20")]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users may delete Devolutions", Devolutions, "O:SYD:(A;;SD;;;BU)", "Access " + Users)]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users may change the DACL", Devolutions, "O:SYD:(A;;WD;;;BU)", "Access " + Users)]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users may take ownership", Devolutions, "O:SYD:(A;;WO;;;BU)", "Access " + Users)]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users may delete entries", Devolutions, "O:SYD:(A;;0x40;;;BU)", "Access " + Users)]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users have generic all", Devolutions, "O:SYD:(A;;GA;;;BU)", "Access " + Users)]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users may delete through a conditional entry", Devolutions, "O:SYD:(XA;;SD;;;BU;(Member_of {SID(BU)}))", "Access " + Users)]
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("null DACL", Devolutions, "O:SYD:NO_ACCESS_CONTROL", "Access " + Everyone)]
     // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
     [InlineData("Users get full control of entries created below", Devolutions, "O:SYD:(A;OICIIO;FA;;;BU)", "none")]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users may only add entries", Devolutions, "O:SYD:(A;CI;DCLCRPCR;;;BU)", "none")]
-    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("Users are denied deletion", Devolutions, "O:SYD:(D;;SD;;;BU)", "none")]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("SYSTEM has full control", Devolutions, "O:SYD:(A;OICI;FA;;;SY)", "none")]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("Administrators have full control", Devolutions, "O:SYD:(A;OICI;FA;;;BA)", "none")]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("Everyone may delete Devolutions", Devolutions, "O:SYD:(A;;SD;;;WD)", "Access " + Everyone)]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("Everyone may change the DACL", Devolutions, "O:SYD:(A;;WD;;;WD)", "Access " + Everyone)]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("Everyone may take ownership", Devolutions, "O:SYD:(A;;WO;;;WD)", "Access " + Everyone)]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("Everyone may delete entries", Devolutions, "O:SYD:(A;;0x40;;;WD)", "Access " + Everyone)]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("Everyone has generic all", Devolutions, "O:SYD:(A;;GA;;;WD)", "Access " + Everyone)]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("NETWORK SERVICE has full control", Devolutions, "O:SYD:(A;OICI;FA;;;NS)", "Access S-1-5-20")]
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("TrustedInstaller has full control", Devolutions, "O:SYD:(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)", "none")]
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder

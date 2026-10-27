@@ -235,12 +235,13 @@ internal static class DataFolders
     /// link.
     /// </summary>
     /// <remarks>
-    /// The DACL rule is the one the Devolutions Agent and its installer apply to a directory above their data, so that
-    /// both installers accept the same <c>Devolutions</c> folder they share.
+    /// The DACL rule trusts the accounts the owner rule trusts, because an account that may own the folder gains nothing
+    /// from an entry it could give itself as the owner, and a <c>Devolutions</c> folder that an administrator's
+    /// application created first, without elevation, carries a full-control entry for that administrator.
     /// </remarks>
     /// <param name="checkAccess">
-    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller or OWNER RIGHTS
-    /// replace the folder or what it contains.
+    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller, a member of
+    /// Administrators or OWNER RIGHTS replace the folder or what it contains.
     /// </param>
     /// <returns>The refusal, or <c>null</c> when the folder passes.</returns>
     internal static DataFolderRefusal Evaluate(
@@ -261,7 +262,7 @@ internal static class DataFolders
             return new DataFolderRefusal(folder, DataFolderProblem.Unreadable);
         }
 
-        // The DACL is checked before the owner, whose trust may need a directory lookup.
+        // The DACL is checked before the owner, so that a refusal names an account that may replace the folder first.
         if (checkAccess)
         {
             // A null DACL grants every right to everyone.
@@ -284,7 +285,8 @@ internal static class DataFolders
                     case AceType.AccessAllowed:
                     case AceType.AccessAllowedCallback:
                         break;
-                    // The Devolutions Agent refuses an entry of any other type, so the installer does too.
+                    // An entry of another type, such as an object entry, which directory service objects use, isn't
+                    // expected on a folder, so the installer refuses rather than guesses what it grants.
                     default:
                         return new DataFolderRefusal(folder, DataFolderProblem.Unreadable);
                 }
@@ -297,29 +299,37 @@ internal static class DataFolders
 
                 CommonAce entry = (CommonAce)ace;
 
+                // UNTESTED: an entry for a member of Administrators, such as an administrator's user account, is trusted
+                // as the owner rule trusts it; no test runs with such an account.
+                // When changing this, keep trusting in an entry exactly the accounts trusted as the owner.
                 if ((unchecked((uint)entry.AccessMask) & ReplaceRights) != 0
-                    && !SecureDirectory.IsPrivileged(entry.SecurityIdentifier)
                     && entry.SecurityIdentifier != OwnerRights
-                    && !IsAppContainer(entry.SecurityIdentifier))
+                    && !IsAppContainer(entry.SecurityIdentifier)
+                    && !IsTrusted(entry.SecurityIdentifier))
                 {
                     return new DataFolderRefusal(folder, DataFolderProblem.Access, entry.SecurityIdentifier);
                 }
             }
         }
 
-        bool trusted;
+        return IsTrusted(security.Owner) ? null : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
+    }
 
+    /// <summary>
+    /// Whether <paramref name="sid"/> may own the Gateway's data, as <see cref="SecureDirectory.IsTrustedOwner"/>
+    /// decides.
+    /// </summary>
+    private static bool IsTrusted(SecurityIdentifier sid)
+    {
         try
         {
-            trusted = SecureDirectory.IsTrustedOwner(security.Owner);
+            return SecureDirectory.IsTrustedOwner(sid);
         }
         catch (Exception)
         {
-            // An owner whose group membership can't be resolved isn't known to be an administrator.
-            trusted = false;
+            // An account whose group membership can't be resolved isn't known to be an administrator.
+            return false;
         }
-
-        return trusted ? null : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
     }
 
     /// <summary>
