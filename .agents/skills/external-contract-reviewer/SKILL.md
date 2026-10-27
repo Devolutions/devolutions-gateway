@@ -3,8 +3,6 @@ name: external-contract-reviewer
 description: Review Devolutions Gateway changes against authoritative external contracts. Use when a diff may affect HTTP or OpenAPI behavior, WebSocket behavior, relay or tunneling semantics, configuration schemas, or agent and platform protocols.
 ---
 
-# External contract reviewer
-
 First decide whether the change materially affects an externally visible contract.
 Do not force this review onto internal refactors, tests, tooling, or implementation details that preserve observable behavior.
 

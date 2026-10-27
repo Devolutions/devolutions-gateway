@@ -3,8 +3,6 @@ name: prepare-release
 description: "Prepares a Devolutions Gateway / Devolutions Agent release commit: bumps the version, generates and inserts the changelog, creates Jira tickets, generates the ToolBox changelog, and produces the final release commit."
 ---
 
-# Prepare Release Skill
-
 This skill walks through every step needed to produce the `chore(release): prepare for <VERSION>` commit for Devolutions Gateway and Devolutions Agent.
 
 > The user is responsible for creating and checking out the release branch beforehand. This skill does **not** create or switch branches.
