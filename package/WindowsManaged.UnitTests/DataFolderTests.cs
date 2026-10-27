@@ -44,7 +44,6 @@ public sealed class DataFolderTests
     [
         nameof(CustomActions.CheckProgramDataDirectory),
         nameof(CustomActions.CreateProgramDataDirectory),
-        nameof(CustomActions.SetProgramDataDirectoryPermissions),
         nameof(CustomActions.SetUsersDatabaseFilePermissions),
     ];
 
@@ -332,7 +331,6 @@ public sealed class DataFolderTests
     // oracle: spec Windows Installer §Obtaining Context Information for Deferred Execution Custom Actions
     [Theory]
     [InlineData(nameof(CustomActions.CreateProgramDataDirectory))]
-    [InlineData(nameof(CustomActions.SetProgramDataDirectoryPermissions))]
     [InlineData(nameof(CustomActions.SetUsersDatabaseFilePermissions))]
     public void SecurityResetGetsTheServiceAccount(string method)
     {
@@ -343,7 +341,7 @@ public sealed class DataFolderTests
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Theory]
-    [InlineData(nameof(CustomActions.SetProgramDataDirectoryPermissions))]
+    [InlineData(nameof(CustomActions.CreateProgramDataDirectory))]
     [InlineData(nameof(CustomActions.SetUsersDatabaseFilePermissions))]
     public void FailedSecurityResetFailsTheRun(string method)
     {

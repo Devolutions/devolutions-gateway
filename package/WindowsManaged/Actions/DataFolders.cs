@@ -216,9 +216,11 @@ internal static class DataFolders
                 // owner, as the installer's SYSTEM process is; tests run as a user and set the user as the owner.
                 // When changing this, keep resetting the security of an existing Gateway on this handle, so that only
                 // the accounts the installer provisions can change what the Gateway stores there.
+                // Files and folders created before Gateway got its current DACL keep the entries they inherited then,
+                // such as none for a service account chosen later, or one for an account that no longer has access,
+                // so each one gets the entries Gateway now passes on, and loses the ones it passed on before.
                 // UNTESTED: the entries below an existing Gateway lose what it passed on before only when they are
-                // reset here, while its previous DACL can still be read; the security reset run afterwards sees the
-                // new DACL as the previous one.
+                // reset in the same call that changes its DACL, while its previous DACL can still be read.
                 // Tests check SetSecurityAndInheritBelow, not that an existing Gateway is reset with it here, because
                 // the user running them isn't a trusted owner.
                 // When changing this, reset the entries below in the same call that changes the DACL of Gateway.

@@ -950,34 +950,6 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
-        public static ActionResult SetProgramDataDirectoryPermissions(Session session)
-        {
-            try
-            {
-                string root = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
-                string[] names = ["Devolutions", "Gateway"];
-
-                // Files and folders created before the program data directory got its current DACL keep the entries
-                // they inherited then, such as none for a service account chosen later, so each one's DACL protection
-                // is removed and the entries its folder passes on are applied again.
-                // The entries the directory passed on before are removed when CreateProgramDataDirectory resets it,
-                // the last time its previous DACL can be read.
-                SecureDirectory.SetSecurityAndInheritBelow(
-                    root,
-                    names,
-                    Includes.ProgramDataSddl(GetServiceAccountSid(session)),
-                    LogDelegate.WithSession(session));
-
-                return ActionResult.Success;
-            }
-            catch (Exception e)
-            {
-                session.Log($"failed to set permissions: {e}");
-                return ActionResult.Failure;
-            }
-        }
-
-        [CustomAction]
         public static ActionResult SetCertificatePrivateKeyPermissions(Session session)
         {
             try

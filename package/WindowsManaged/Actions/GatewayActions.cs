@@ -176,7 +176,8 @@ internal static class GatewayActions
 
     /// <summary>
     /// Create the path %programdata%\Devolutions\Gateway with its owner and ACL if it does not exist, or reset both on
-    /// an existing one, after checking its folders again as <see cref="checkProgramDataDirectory"/> does
+    /// an existing one and let the files and folders below inherit its entries, after checking its folders again as
+    /// <see cref="checkProgramDataDirectory"/> does
     /// </summary>
     /// <remarks>
     /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
@@ -193,22 +194,6 @@ internal static class GatewayActions
         Execute = Execute.deferred,
         Impersonate = false,
         UsesProperties = $"{UseProperties(new IWixProperty[] { GatewayProperties.serviceAccountSid })};{ProductLanguage}",
-    };
-
-    /// <summary>
-    /// Set or reset the owner and ACL on %programdata%\Devolutions\Gateway, and let the files below inherit its entries
-    /// </summary>
-    private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
-        new Id($"CA.{nameof(setProgramDataDirectoryPermissions)}"),
-        CustomActions.SetProgramDataDirectoryPermissions,
-        Return.check,
-        When.After, new Step(createProgramDataDirectory.Id),
-        Condition.NOT_BeingRemoved,
-        Sequence.InstallExecuteSequence)
-    {
-        Execute = Execute.deferred,
-        Impersonate = false,
-        UsesProperties = UseProperties(new IWixProperty[] { GatewayProperties.serviceAccountSid }),
     };
 
     /// <summary>
@@ -591,7 +576,6 @@ internal static class GatewayActions
         setArpInstallLocation,
         checkProgramDataDirectory,
         createProgramDataDirectory,
-        setProgramDataDirectoryPermissions,
         setUserDatabasePermissions,
         cleanGatewayConfigIfNeeded,
         cleanGatewayConfigIfNeededRollback,
