@@ -33,6 +33,7 @@ use testsuite::rdp_injection::{
 use tokio::io::AsyncWriteExt as _;
 use tokio::net::TcpStream;
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §2
 #[tokio::test]
 async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Result<()> {
     install_crypto_provider();
@@ -72,6 +73,7 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
         rdp.finished_account(),
         rdp.cookies()
     );
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     anyhow::ensure!(
         rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
         "RDP X.224 cookie must be {KERBEROS_TARGET_USER}; cookies={:?}",
@@ -82,6 +84,7 @@ async fn kerberos_injection_completes_credssp_against_mock_kdc() -> anyhow::Resu
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §2
 #[tokio::test]
 async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()> {
     install_crypto_provider();
@@ -162,6 +165,7 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
         "RDP CredSSP Finished account must be administrator; got={:?}",
         rdp.finished_account()
     );
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     anyhow::ensure!(
         rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
         "RDP X.224 cookie must be {KERBEROS_TARGET_USER}; cookies={:?}",
@@ -172,6 +176,7 @@ async fn kerberos_client_and_target_legs_complete_credssp() -> anyhow::Result<()
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §4
 #[tokio::test]
 async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     install_crypto_provider();
@@ -233,6 +238,7 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
         "wrong password must not obtain a TGS; requests={:?}",
         kdc.requests()
     );
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     anyhow::ensure!(
         rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
         "wrong password still rewrites the X.224 cookie; cookies={:?}",
@@ -248,6 +254,7 @@ async fn kerberos_wrong_target_password_fails_closed() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §4
 #[tokio::test]
 async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
     install_crypto_provider();
@@ -289,6 +296,7 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
         rdp.finished_account(),
         gateway.logs.snapshot()
     );
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     anyhow::ensure!(
         rdp.cookies().iter().any(|cookie| cookie == KERBEROS_TARGET_USER),
         "KDC down still rewrites the X.224 cookie; cookies={:?}",
@@ -309,6 +317,7 @@ async fn kerberos_kdc_down_fails_closed() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §4
 #[tokio::test]
 async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
     let rdp = FakeClosedTarget::start().await?;
@@ -350,6 +359,7 @@ async fn kerberos_missing_krb_kdc_fails_closed() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §1
 #[tokio::test]
 async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
     install_crypto_provider();
@@ -378,6 +388,7 @@ async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
         "RDP NTLM CredSSP Finished account must be {TARGET_USER}; got={:?}",
         rdp.finished_account()
     );
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     anyhow::ensure!(
         rdp.cookies().iter().any(|cookie| cookie == TARGET_USER),
         "RDP X.224 cookie must be {TARGET_USER}; cookies={:?}",
@@ -388,6 +399,7 @@ async fn ntlm_injection_completes_credssp_both_legs() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §1
 #[tokio::test]
 async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
     let Some(bin) = require_ironrdp_agent()? else {
@@ -436,6 +448,7 @@ async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
         "RDP NTLM CredSSP Finished account must be {TARGET_USER}; got={:?}",
         rdp.finished_account()
     );
+    // oracle: mutant rewriting the client's X.224 request on the RDCleanPath path
     anyhow::ensure!(
         rdp.cookies().iter().any(|cookie| cookie == PROXY_USER),
         "RDCleanPath forwards the client X.224 cookie; cookies={:?}",
@@ -448,6 +461,7 @@ async fn ironrdp_agent_rdcleanpath_ntlm_injection() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §2
 #[tokio::test]
 async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
     let Some(bin) = require_ironrdp_agent()? else {
@@ -505,6 +519,7 @@ async fn ironrdp_agent_rdcleanpath_kerberos_injection() -> anyhow::Result<()> {
         "RDP CredSSP Finished account must be administrator; got={:?}",
         rdp.finished_account()
     );
+    // oracle: mutant rewriting the client's X.224 request on the RDCleanPath path
     anyhow::ensure!(
         rdp.cookies().iter().any(|cookie| cookie == PROXY_USER),
         "RDCleanPath forwards the client X.224 cookie; cookies={:?}",

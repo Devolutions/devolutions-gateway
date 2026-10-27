@@ -32,6 +32,5 @@ pub const INJECT_LOG: &str = "RDP-TLS forwarding with credential injection";
 pub const FORWARD_LOG: &str = "Upstream forwarding";
 pub const MISSING_LOG: &str = "missing or expired; re-provision to retry";
 pub const PUBLISHED_KDC_LOG: &str = "Published synthetic KDC";
-pub const REGISTERED_KDC_LOG: &str = "Registered synthetic KDC for credential-injection session";
 pub const RDCLEANPATH_INJECT_LOG: &str = "Switching to RdpProxy for credential injection (WebSocket)";
 pub const RDCLEANPATH_FORWARD_LOG: &str = "RDP-TLS forwarding (RDCleanPath)";
