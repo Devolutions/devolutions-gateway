@@ -469,7 +469,7 @@ pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> 
 ///
 /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-pub(crate) const INVISIBLE_FORMAT_CHARACTERS: [RangeInclusive<char>; 11] = [
+const INVISIBLE_FORMAT_CHARACTERS: [RangeInclusive<char>; 11] = [
     '\u{00AD}'..='\u{00AD}',
     '\u{061C}'..='\u{061C}',
     '\u{180E}'..='\u{180E}',
@@ -489,7 +489,9 @@ pub(crate) fn is_invisible_format_character(character: char) -> bool {
         .any(|range| range.contains(&character))
 }
 
-/// The first and last code point of each range of [`INVISIBLE_FORMAT_CHARACTERS`], in order, where an implementation that holds the list as ranges goes wrong.
+/// The first and last code point of each range of [`INVISIBLE_FORMAT_CHARACTERS`], in order.
+///
+/// An implementation that holds the list as ranges goes wrong at their ends, so these are the code points worth sending.
 ///
 /// A single code point is both ends of its range, and appears once.
 pub(crate) fn invisible_format_character_range_ends() -> Vec<char> {
@@ -513,7 +515,7 @@ pub(crate) fn unlisted_format_character_neighbors() -> Vec<char> {
         .collect::<Vec<_>>();
     // U+2065 is just outside both U+2060–U+2064 and U+2066–U+206F.
     neighbors.dedup();
-    // oracle: spec Unicode UnicodeData.txt §General_Category
+    // oracle: spec Unicode 15.0.0 UnicodeData.txt §General_Category
     // U+0600 ARABIC NUMBER SIGN, U+110BD KAITHI NUMBER SIGN and U+1D173 MUSICAL SYMBOL BEGIN BEAM are each `Cf`.
     neighbors.extend(['\u{0600}', '\u{110BD}', '\u{1D173}']);
     neighbors
@@ -522,6 +524,64 @@ pub(crate) fn unlisted_format_character_neighbors() -> Vec<char> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invisible_format_character_lists_match_the_contract() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+        assert_eq!(
+            invisible_format_character_range_ends(),
+            [
+                '\u{00AD}',
+                '\u{061C}',
+                '\u{180E}',
+                '\u{200B}',
+                '\u{200F}',
+                '\u{202A}',
+                '\u{202E}',
+                '\u{2060}',
+                '\u{2064}',
+                '\u{2066}',
+                '\u{206F}',
+                '\u{FEFF}',
+                '\u{FFF9}',
+                '\u{FFFB}',
+                '\u{E0001}',
+                '\u{E0020}',
+                '\u{E007F}',
+            ]
+        );
+        let neighbors = unlisted_format_character_neighbors();
+        assert_eq!(
+            neighbors,
+            [
+                '\u{00AC}',
+                '\u{00AE}',
+                '\u{061B}',
+                '\u{061D}',
+                '\u{180D}',
+                '\u{180F}',
+                '\u{200A}',
+                '\u{2010}',
+                '\u{2029}',
+                '\u{202F}',
+                '\u{205F}',
+                '\u{2065}',
+                '\u{2070}',
+                '\u{FEFE}',
+                '\u{FF00}',
+                '\u{FFF8}',
+                '\u{FFFC}',
+                '\u{E0000}',
+                '\u{E0002}',
+                '\u{E001F}',
+                '\u{E0080}',
+                '\u{0600}',
+                '\u{110BD}',
+                '\u{1D173}',
+            ]
+        );
+        assert!(!neighbors.into_iter().any(is_invisible_format_character));
+    }
 
     #[test]
     fn error_body_server_time_must_end_in_z() -> anyhow::Result<()> {
