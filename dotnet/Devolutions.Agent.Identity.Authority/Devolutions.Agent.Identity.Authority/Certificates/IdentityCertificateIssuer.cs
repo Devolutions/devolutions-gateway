@@ -60,15 +60,19 @@ public static class IdentityCertificateIssuer
     /// <para>
     /// Taking the decision rather than an ID keeps the authority from certifying a key for an identity
     /// that no enrollment created.
+    /// Requiring the key that the decision was made for keeps it from certifying a key whose lookup no decision saw,
+    /// which could be a key already issued.
     /// A renewal certifies a key for an existing identity,
-    /// so it uses the overload that takes the identity that the renew request proved.
+    /// so it uses the overload that takes the renewal decision.
     /// </para>
     /// </remarks>
     /// <param name="creating">
     /// The decision of <see cref="EnrollmentRules.Decide"/> to create the identity,
     /// whose <see cref="EnrollmentDecision.Outcome"/> is <see cref="EnrollmentOutcome.CreateIdentity"/>.
     /// </param>
-    /// <param name="csr">The validated CSR whose key the certificate is for.</param>
+    /// <param name="csr">
+    /// The validated CSR whose key the certificate is for, the key that <paramref name="creating"/> was made for.
+    /// </param>
     /// <param name="issuer">The root that signs the certificate.</param>
     /// <param name="lifetime">The certificate lifetime, usually <see cref="DefaultLifetime"/>.</param>
     /// <param name="timeProvider">The clock, read once.</param>
@@ -76,6 +80,8 @@ public static class IdentityCertificateIssuer
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
     /// <paramref name="creating"/> does not create an identity;
+    /// or the SHA-256 digest of the <c>SubjectPublicKeyInfo</c> of <paramref name="csr"/> is not the
+    /// <see cref="EnrollmentDecision.SubjectPublicKeyInfoSha256"/> of <paramref name="creating"/>;
     /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second;
     /// or the issuer is outside the chain profile of CONTRACT.agent-identity.md §4:
     /// its certificate has neither a P-256 nor a P-384 key, no basicConstraints with cA set or no key usage with
@@ -99,6 +105,8 @@ public static class IdentityCertificateIssuer
         {
             throw new ArgumentException("The enrollment decision does not create an identity.", nameof(creating));
         }
+
+        ThrowIfNotTheDecidedKey(csr, creating.SubjectPublicKeyInfoSha256);
 
         // A decision to create an identity always carries the ID minted for it and the token's URL.
         return Issue(
@@ -255,31 +263,44 @@ public static class IdentityCertificateIssuer
     }
 
     /// <summary>
-    /// Issues the pending certificate of a renewal, for the identity that signed the renew request.
+    /// Issues the pending certificate that a renewal decision calls for,
+    /// for the identity that signed the renew request.
     /// </summary>
     /// <remarks>
-    /// The certificate is the one that the other overload issues, with <see cref="AuthenticatedIdentity.IdentityId"/>
-    /// as the identity ID and <paramref name="enrollmentUrl"/> in the enrollment URL extension.
-    /// Taking the identity that the signature check produced, rather than an ID,
-    /// keeps a renewal from certifying a key for an identity that a request only named.
+    /// <para>
+    /// The certificate is the one that the other overload issues, with the identity ID of the
+    /// <see cref="AuthenticatedIdentity"/> that <paramref name="issuing"/> was decided for
+    /// and <paramref name="enrollmentUrl"/> in the enrollment URL extension.
+    /// </para>
+    /// <para>
+    /// Only <see cref="RenewalRules.Decide"/> produces a decision, from the identity that the signature check produced,
+    /// so taking the decision rather than an ID keeps a renewal from certifying a key for an identity that a request
+    /// only named.
+    /// Requiring the key that the decision was made for keeps it from certifying a key whose lookup no decision saw,
+    /// which could be a key already issued.
+    /// </para>
     /// </remarks>
-    /// <param name="renewing">
-    /// The identity that a <c>renew</c> request proved, as <see cref="RequestAuthenticator.AuthenticateAsync"/>
-    /// returns it for <see cref="AgentOperation.Renew"/>.
+    /// <param name="issuing">
+    /// The decision of <see cref="RenewalRules.Decide"/> to issue a pending certificate,
+    /// whose <see cref="RenewalDecision.Outcome"/> is <see cref="RenewalOutcome.IssuePendingCertificate"/>.
     /// </param>
     /// <param name="enrollmentUrl">
     /// The identity's enrollment URL, the <see cref="EnrollmentDecision.EnrollmentUrl"/> of the decision that created
     /// it, which every certificate of the identity names.
     /// </param>
-    /// <param name="csr">The validated CSR whose key the certificate is for.</param>
+    /// <param name="csr">
+    /// The validated CSR whose key the certificate is for, the key that <paramref name="issuing"/> was made for.
+    /// </param>
     /// <param name="issuer">The root that signs the certificate.</param>
     /// <param name="lifetime">The certificate lifetime, usually <see cref="DefaultLifetime"/>.</param>
     /// <param name="timeProvider">The clock, read once.</param>
     /// <param name="random">The source of the serial number.</param>
     /// <exception cref="ArgumentNullException">An argument is null.</exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="renewing"/> was authenticated for another operation than <c>renew</c>;
+    /// <paramref name="issuing"/> does not issue a pending certificate;
     /// or <paramref name="enrollmentUrl"/> is empty, ends in a slash or is not ASCII;
+    /// or the SHA-256 digest of the <c>SubjectPublicKeyInfo</c> of <paramref name="csr"/> is not the
+    /// <see cref="RenewalDecision.SubjectPublicKeyInfoSha256"/> of <paramref name="issuing"/>;
     /// or the issuer certificate has no subject key identifier, or its <c>notAfter</c> is not after the current second;
     /// or the issuer is outside the chain profile of CONTRACT.agent-identity.md §4:
     /// its certificate has neither a P-256 nor a P-384 key, no basicConstraints with cA set or no key usage with
@@ -290,7 +311,7 @@ public static class IdentityCertificateIssuer
     /// <paramref name="lifetime"/> is shorter than one second.
     /// </exception>
     public static X509Certificate2 Issue(
-        AuthenticatedIdentity renewing,
+        RenewalDecision issuing,
         string enrollmentUrl,
         CertificateSigningRequest csr,
         IRootSigner issuer,
@@ -298,11 +319,11 @@ public static class IdentityCertificateIssuer
         TimeProvider timeProvider,
         RandomNumberGenerator random)
     {
-        ArgumentNullException.ThrowIfNull(renewing);
+        ArgumentNullException.ThrowIfNull(issuing);
 
-        if (renewing.Operation != AgentOperation.Renew)
+        if (issuing.Outcome != RenewalOutcome.IssuePendingCertificate)
         {
-            throw new ArgumentException("The identity was not authenticated by a renew request.", nameof(renewing));
+            throw new ArgumentException("The renewal decision does not issue a pending certificate.", nameof(issuing));
         }
 
         ArgumentNullException.ThrowIfNull(enrollmentUrl);
@@ -315,7 +336,22 @@ public static class IdentityCertificateIssuer
                 nameof(enrollmentUrl));
         }
 
-        return Issue(renewing.IdentityId, enrollmentUrl, csr, issuer, lifetime, timeProvider, random);
+        ThrowIfNotTheDecidedKey(csr, issuing.SubjectPublicKeyInfoSha256);
+
+        // A decision to issue a pending certificate always carries the identity that it was made for.
+        return Issue(issuing.Renewing!.IdentityId, enrollmentUrl, csr, issuer, lifetime, timeProvider, random);
+    }
+
+    // CONTRACT.agent-identity.md §2.1: every issued key is unique by SPKI SHA-256,
+    // which the decision's key lookup checked for its own CSR key only.
+    private static void ThrowIfNotTheDecidedKey(CertificateSigningRequest csr, ReadOnlyMemory<byte> decidedKey)
+    {
+        ArgumentNullException.ThrowIfNull(csr);
+
+        if (!csr.SubjectPublicKeyInfoSha256.Span.SequenceEqual(decidedKey.Span))
+        {
+            throw new ArgumentException("The CSR key is not the key that the decision was made for.", nameof(csr));
+        }
     }
 
     private static DateTimeOffset TruncateToSecond(DateTimeOffset value)

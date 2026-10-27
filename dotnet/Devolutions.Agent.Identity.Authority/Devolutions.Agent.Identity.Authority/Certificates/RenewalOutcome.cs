@@ -12,7 +12,7 @@ public enum RenewalOutcome
 
     /// <summary>
     /// Issue a pending certificate for the CSR key, with the <see cref="IdentityCertificateIssuer"/> overload that
-    /// takes the renewing identity, and retire the identity's previous pending certificate, if any.
+    /// takes the decision, and retire the identity's previous pending certificate, if any.
     /// </summary>
     IssuePendingCertificate = 1,
 

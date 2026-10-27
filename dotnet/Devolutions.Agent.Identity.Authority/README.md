@@ -10,7 +10,7 @@ The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolut
 - Request authentication: `RequestAuthenticator` verifies the signed `renew`, `confirm` and `check-in` requests and the signed opening of an agent channel stream (CONTRACT.agent-identity.md [§6]).
 - Request bodies: `EnrollRequestBody`, `RenewRequestBody` and `CheckInRequestBody` parse a body and validate its CSR (`CertificateSigningRequest`) and metadata (`AgentMetadata`), and `ConfirmRequestBody` checks that a `confirm` body is empty.
 - Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the issued certificate that holds the CSR key.
-- Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of the new identity that an enrollment decision creates, or of the identity that a renew request proved.
+- Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of the new identity that an enrollment decision creates, or the pending certificate that a renewal decision calls for, each for the CSR key that the decision was made for.
 - Responses: `IdentityConfig` holds an identity's config, and `ResponseBodies` writes the bodies of the `trust-anchor`, `enroll`, `renew` and `check-in` responses.
 - Agent channel: `ChannelOpening` verifies the handshake that authenticates a stream, and `ChannelMessages` builds the `ConfigUpdate`, `RenewRequested` and `Reconnect` messages that the authority pushes.
 - Errors: `AgentIdentityError` gives each error its code, HTTP status and message, and writes its JSON body and gRPC exception.
@@ -39,6 +39,16 @@ The host provides these dependencies, with the guarantees the library relies on:
 - `TimeProvider` is the authority's clock, usually `TimeProvider.System`, which decides signature freshness, certificate validity and handshake deadlines.
   Take the `now` of `EnrollmentRules.Decide` and the `serverTime` of every error from the same clock, since the agent corrects its own clock from `server_time`.
 - `RandomNumberGenerator` must be cryptographically secure, such as `RandomNumberGenerator.Create()`, since it supplies channel challenges, token secrets and certificate serial numbers.
+
+A decision of `EnrollmentRules.Decide` or `RenewalRules.Decide` holds only for the stored state it was made from, which a concurrent request can change before the host acts on it.
+To keep the concurrency properties of CONTRACT.agent-identity.md [§2.1], the host follows these rules:
+
+- Keep a unique index on the SPKI SHA-256 of every issued key, those of current, pending and retired certificates and the retained records of deleted identities' keys, and insert each key in the transaction that stores its certificate.
+  Two requests can both find a key unissued, and the index lets only one of them issue it.
+- Count a token use with an update that succeeds only while the stored count still equals the decision's `ExpectedIdentitiesCreated`, or, equivalently for the limit, is still below the token's `MaxUses`, in the transaction that creates the identity.
+  Two enrollments can both decide from the count before the token's last use, and the update lets only one of them create an identity.
+- When that update fails or the key insert hits the unique index, roll the transaction back, look the key up again and call `Decide` again from the stored state.
+  The new decision then gives the replay, the pending certificate or the error that the other request's commit calls for, or, when only the count moved, a new identity to create.
 
 The library puts this load on the registry and the nonce store:
 
@@ -78,8 +88,8 @@ Answer with `ResponseBodies.TrustAnchor`, given the published roots: one normall
 5. Pass the token's `EnrollmentTokenState`, with the `ProductBaseUrl` stored for it, the body's `Csr`, the match and the current time to `EnrollmentRules.Decide`, and act on its `Outcome`; a CSR that names no enrollment URL, or not the token's, gets `token_url_mismatch` before any key rule applies (CONTRACT.agent-identity.md [§2.1]):
    - `Reject`: answer with `Error`.
    - `ReturnExistingIdentity`: take identity `ExistingIdentityId`, and change nothing, not even its `last_seen_at`, since a replay proves no current possession of the device key.
-   - `CreateIdentity`: take `NewIdentityId`, which the library minted, as the identity's ID, issue its certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision, which names the decision's `EnrollmentUrl` in it, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata, its `EnrollmentUrl`, the key's `SubjectPublicKeyInfoSha256`, and the current time as its `last_seen_at`.
-     Create the identity and count the token use atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent enrollments.
+   - `CreateIdentity`: take `NewIdentityId`, which the library minted, as the identity's ID, issue its certificate, which names the decision's `EnrollmentUrl`, with the `IdentityCertificateIssuer.Issue` overload that takes the decision and the body's `Csr`, name it with `FriendlyNameFormat.Evaluate`, create its config with `IdentityConfig.Create`, and store it with its metadata, its `EnrollmentUrl`, the key's `SubjectPublicKeyInfoSha256`, and the current time as its `last_seen_at`.
+     Create the identity, insert its key and count the token use in one transaction, and decide again when the transaction fails, as [Host dependencies][host-dependencies] describes.
 6. Answer with `ResponseBodies.Enroll`, given the authority ID and the ID taken in step 5, with that identity's current certificate chain, leaf first, and config (CONTRACT.agent-identity.md [§5.2]).
 
 ### Signed requests
@@ -96,11 +106,11 @@ Each then acts for the result's `Identity` only.
 ### `renew`
 
 1. Look up the CSR key as for `enroll`, passing false for `enrolledWithPresentedToken`.
-2. Pass `Identity` and the match to `RenewalRules.Decide`, and act on its `Outcome`:
+2. Pass `Identity`, the body's `Csr` and the match to `RenewalRules.Decide`, and act on its `Outcome`:
    - `Reject`: answer with `Error`.
    - `ReturnPendingCertificate`: keep the identity's pending certificate, which holds the key.
-   - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the `AuthenticatedIdentity`, passing the `EnrollmentUrl` stored with the identity so that every certificate of the identity names the same URL, and store it as the identity's pending certificate, retiring the previous one; the renew CSR's own enrollment URL is ignored (CONTRACT.agent-identity.md [§4]).
-     Store it atomically, as CONTRACT.agent-identity.md [§2.1] requires of concurrent renewals.
+   - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision and the body's `Csr`, passing the `EnrollmentUrl` stored with the identity so that every certificate of the identity names the same URL, and store it as the identity's pending certificate, retiring the previous one; the renew CSR's own enrollment URL is ignored (CONTRACT.agent-identity.md [§4]).
+     Store the certificate and insert its key in one transaction, and decide again when the key insert fails, as [Host dependencies][host-dependencies] describes.
 3. Replace the identity's metadata, set its `last_seen_at` to the current time, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.agent-identity.md [§5.3]).
 
 ### `confirm`
@@ -167,8 +177,10 @@ Log `FailureDetail` beside the error: it names the rule that the request broke a
 
 Only the signature check, `RequestAuthenticator.AuthenticateAsync`, and the channel handshake, `ChannelOpening.VerifyHelloAsync`, create an `AuthenticatedIdentity`, which has no public constructor.
 Code that acts for an identity should take one, so that it acts for the identity a signature proved, never for an identity ID that the agent or a caller sent.
-The library does so itself: `RenewalRules.Decide` and the renewal overload of `IdentityCertificateIssuer.Issue` take the renewing `AuthenticatedIdentity`, and throw `ArgumentException` for one authenticated for another operation.
-The certificate of a new identity is issued from the `EnrollmentDecision` that creates it, which only `EnrollmentRules.Decide` produces, under the `NewIdentityId` that it minted; the overload that takes the decision throws `ArgumentException` for one of another outcome.
+The library does so itself: `RenewalRules.Decide` takes the renewing `AuthenticatedIdentity`, and throws `ArgumentException` for one authenticated for another operation.
+A renewal's certificate is issued from the `RenewalDecision` that only `RenewalRules.Decide` produces, for the identity that it was given.
+The certificate of a new identity is issued from the `EnrollmentDecision` that creates it, which only `EnrollmentRules.Decide` produces, under the `NewIdentityId` that it minted.
+Each `IdentityCertificateIssuer.Issue` overload throws `ArgumentException` for a decision of another outcome, and for a CSR whose key is not the one that the decision was made for, since the decision's key lookup covered that key alone.
 No `IdentityCertificateIssuer.Issue` overload takes an identity ID.
 A verified channel opening yields only a `ChannelOpening`, whose identity stays hidden until the agent signs the stream's challenge, since signed opening headers are not tied to one stream and can be captured by a TLS-terminating proxy, TLS inspection or a header log (security invariant 7 of [INTENT.agent-identity.md][invariants]).
 For the same reason, `AuthenticateAsync` throws `ArgumentOutOfRangeException` for `AgentOperation.Connect`.
@@ -207,3 +219,4 @@ Implement the `AgentChannel` service with that package; a feed that serves this 
 [invariants]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/INTENT.agent-identity.md#security-invariants
 [last-seen-at]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/INTENT.agent-identity.md#configuration-and-metadata
 [errors]: #errors
+[host-dependencies]: #host-dependencies

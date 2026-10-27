@@ -22,7 +22,8 @@ public static class EnrollmentRules
     /// then <c>token_expired</c> once <paramref name="now"/> reaches its expiry;
     /// <c>token_exhausted</c> once it has created <see cref="EnrollmentTokenState.MaxUses"/> identities;
     /// a new identity, whose ID, <see cref="EnrollmentDecision.NewIdentityId"/>, is minted at random for this decision,
-    /// and whose certificates name <see cref="EnrollmentDecision.EnrollmentUrl"/>.
+    /// whose certificates name <see cref="EnrollmentDecision.EnrollmentUrl"/>,
+    /// and whose certificate holds the CSR key, <see cref="EnrollmentDecision.SubjectPublicKeyInfoSha256"/>.
     /// </para>
     /// <para>
     /// The CSR key lookup takes the first matching rule:
@@ -34,7 +35,10 @@ public static class EnrollmentRules
     /// </para>
     /// <para>
     /// The decision holds only for the state it was made from.
-    /// The host creates the identity and counts the use atomically,
+    /// The host creates the identity, inserts its key under a unique index of every issued key,
+    /// and counts the use only while the stored count still equals
+    /// <see cref="EnrollmentDecision.ExpectedIdentitiesCreated"/>, in one transaction,
+    /// and decides again from the stored state when the count or the index refuses it,
     /// so that concurrent enrollments never create more than <see cref="EnrollmentTokenState.MaxUses"/> identities
     /// with one token, and of two concurrent enrollments with one CSR key, exactly one creates the identity
     /// and the other gets the replay.
@@ -97,7 +101,11 @@ public static class EnrollmentRules
                 "The token has created its maximum number of identities.");
         }
 
-        return EnrollmentDecision.CreateIdentity(Guid.NewGuid(), enrollmentUrl);
+        return EnrollmentDecision.CreateIdentity(
+            Guid.NewGuid(),
+            enrollmentUrl,
+            token.IdentitiesCreated,
+            csr.SubjectPublicKeyInfoSha256);
     }
 
     // The key rules after the replay, in their order; a deleted identity matches only its own rule.
