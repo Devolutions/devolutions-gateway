@@ -1,5 +1,6 @@
 //! Minimal RDP protocol pieces: the client's opening bytes and loopback targets.
 
+use std::net::{Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -135,6 +136,37 @@ impl FakeRdpTarget {
                 );
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+/// Listens on 127.0.0.1 and ::1 at one port, for targets reached as `localhost`.
+///
+/// Windows resolves `localhost` to ::1 first, and a wildcard listener raises a firewall prompt.
+pub(crate) struct LocalhostListener {
+    v4: TcpListener,
+    v6: Option<TcpListener>,
+}
+
+impl LocalhostListener {
+    pub(crate) async fn bind() -> anyhow::Result<Self> {
+        let v4 = TcpListener::bind("127.0.0.1:0").await.context("bind 127.0.0.1")?;
+        let port = v4.local_addr().context("loopback local_addr")?.port();
+        let v6 = TcpListener::bind((Ipv6Addr::LOCALHOST, port)).await.ok();
+        Ok(Self { v4, v6 })
+    }
+
+    pub(crate) fn port(&self) -> anyhow::Result<u16> {
+        Ok(self.v4.local_addr().context("loopback local_addr")?.port())
+    }
+
+    pub(crate) async fn accept(&self) -> std::io::Result<(TcpStream, SocketAddr)> {
+        match &self.v6 {
+            Some(v6) => tokio::select! {
+                accepted = self.v4.accept() => accepted,
+                accepted = v6.accept() => accepted,
+            },
+            None => self.v4.accept().await,
         }
     }
 }
