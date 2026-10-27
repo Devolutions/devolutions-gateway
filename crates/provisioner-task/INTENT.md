@@ -13,7 +13,10 @@ Only these transitions exist:
 - `Running` -> `Succeeded`
 - `Running` -> `Failed`
 
-Each Task has a deadline. While the Task runs, its deadline may move forward each time it makes progress.
+Each Task has a deadline.
+While the Task runs, its deadline may move forward each time it makes progress.
+Some work has no known length: a recording can be arbitrarily long, so any fixed deadline would leave some recordings impossible to analyze.
+With a moving deadline, a Task fails only once it stops making progress, however long it runs.
 An unfinished Task past its deadline is failed, so a lost job can't block its target forever.
 
 # Tasks and jobs
