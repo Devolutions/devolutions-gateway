@@ -68,8 +68,12 @@ impl ProvisionerTask for Echo {
                 Err(AttemptError::Recoverable(Recoverable::Storage))
             }
             PROGRESS => {
-                for step in 0..5 {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                // 4 s of work outlasts the first deadline, 2 to 3 s away, so only the progress keeps the attempt running.
+                for step in 0..8 {
+                    tokio::select! {
+                        () = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+                        () = attempt.cancel.cancelled() => return Err(AttemptError::Recoverable(Recoverable::Storage)),
+                    }
                     attempt.report_progress(json!({ "step": step })).await;
                 }
                 Ok(json!("done"))
