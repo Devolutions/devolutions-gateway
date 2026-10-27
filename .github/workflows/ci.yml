@@ -259,12 +259,34 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+          # Detecting changes compares the commit with its first parent.
+          fetch-depth: 2
+
+      # Installing Pester from PSGallery fails at times, so a commit that leaves the check alone skips its tests.
+      # The steps are skipped rather than the job, because the success job requires every job to succeed.
+      - name: Detect changes to the check
+        id: changes
+        run: |
+          $Changed = 'true'
+          if (('${{ github.event_name }}' -In 'pull_request', 'push') -And -Not '${{ inputs.ref }}') {
+            $Files = git diff --name-only HEAD^1 HEAD -- ci/check-oracle-markers.ps1 ci/check-oracle-markers.Tests.ps1
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+            if (-Not $Files) {
+              $Changed = 'false'
+            }
+          }
+          echo "changed=$Changed" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
 
       - name: Install Pester
+        if: ${{ steps.changes.outputs.changed == 'true' }}
         run: Install-Module Pester -RequiredVersion 5.6.0 -Force
         shell: pwsh
 
       - name: Pester tests
+        if: ${{ steps.changes.outputs.changed == 'true' }}
         run: |
           Import-Module Pester -RequiredVersion 5.6.0
           $Result = Invoke-Pester ci/check-oracle-markers.Tests.ps1 -PassThru
