@@ -49,12 +49,39 @@ pub(crate) fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), Str
         {
             return Err(format!("metadata value for {key:?} contains control characters"));
         }
+        if value.chars().any(is_invisible_format_character) {
+            return Err(format!(
+                "metadata value for {key:?} contains invisible format characters"
+            ));
+        }
         total += key.len() + value.len();
     }
     if total > MAX_METADATA_TOTAL_BYTES {
         return Err(format!("metadata object exceeds {MAX_METADATA_TOTAL_BYTES} bytes"));
     }
     Ok(())
+}
+
+/// Whether `c` is an invisible format character that [CONTRACT.agent-identity.md][contract] ("3. Metadata") refuses in a metadata value.
+///
+/// The contract lists them as code points rather than as Unicode general category `Cf`, so that the agent and every authority agree on the set whatever Unicode version their runtimes ship.
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#3-metadata
+fn is_invisible_format_character(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{61c}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{e0001}'
+            | '\u{e0020}'..='\u{e007f}'
+    )
 }
 
 fn valid_metadata_key(key: &str) -> bool {
@@ -170,8 +197,8 @@ mod tests {
         Map::from_iter([("hostname".to_owned(), Value::String(value.to_owned()))])
     }
 
-    /// CONTRACT.agent-identity.md §3 limits: at most 32 keys, each matching `^[a-z][a-z0-9_]{0,63}$`, each value at
-    /// most 1024 UTF-8 bytes without a C0, DEL or C1 control character, and at most 16 KiB of keys and values in all.
+    /// CONTRACT.agent-identity.md §3 limits: at most 32 keys, each matching `^[a-z][a-z0-9_]{0,63}$`, each value at most 1024 UTF-8 bytes without a C0, DEL or C1 control character or a listed invisible format character, and at most 16 KiB of keys and values in all.
+    /// The tests below cover the invisible format characters.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     #[rstest]
     #[case::keys_32(entries(32, 1), true)]
@@ -193,6 +220,55 @@ mod tests {
         assert_eq!(validate_metadata(&metadata).is_ok(), accepted);
     }
 
+    /// Whether a value holding `c` between other characters is accepted.
+    fn accepts_value_holding(c: char) -> bool {
+        validate_metadata(&with_value(&format!("host{c}name"))).is_ok()
+    }
+
+    /// CONTRACT.agent-identity.md §3 refuses a value holding an invisible format character, which it lists as these code points and ranges, so the code points on either side of each are accepted.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    #[rstest]
+    #[case::soft_hyphen('\u{ad}', '\u{ad}')]
+    #[case::arabic_letter_mark('\u{61c}', '\u{61c}')]
+    #[case::mongolian_vowel_separator('\u{180e}', '\u{180e}')]
+    #[case::zero_width_and_directional_marks('\u{200b}', '\u{200f}')]
+    #[case::directional_embeddings_and_overrides('\u{202a}', '\u{202e}')]
+    #[case::word_joiner_and_invisible_operators('\u{2060}', '\u{2064}')]
+    #[case::directional_isolates_and_deprecated_formats('\u{2066}', '\u{206f}')]
+    #[case::zero_width_no_break_space('\u{feff}', '\u{feff}')]
+    #[case::interlinear_annotations('\u{fff9}', '\u{fffb}')]
+    #[case::language_tag('\u{e0001}', '\u{e0001}')]
+    #[case::tags('\u{e0020}', '\u{e007f}')]
+    fn listed_format_characters_are_refused_but_not_their_neighbors(#[case] first: char, #[case] last: char) {
+        for c in first..=last {
+            assert!(!accepts_value_holding(c), "U+{:04X} is accepted", u32::from(c));
+        }
+        let before = char::from_u32(u32::from(first) - 1).expect("not a surrogate");
+        let after = char::from_u32(u32::from(last) + 1).expect("not a surrogate");
+        for c in [before, after] {
+            assert!(accepts_value_holding(c), "U+{:04X} is refused", u32::from(c));
+        }
+    }
+
+    /// CONTRACT.agent-identity.md §3 refuses only the invisible format characters it lists as code points, so a code point of Unicode general category `Cf` that it leaves out is accepted.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    #[rstest]
+    #[case::arabic_number_signs('\u{600}', '\u{605}')]
+    #[case::arabic_end_of_ayah('\u{6dd}', '\u{6dd}')]
+    #[case::syriac_abbreviation_mark('\u{70f}', '\u{70f}')]
+    #[case::arabic_pound_and_piastre_marks_above('\u{890}', '\u{891}')]
+    #[case::arabic_disputed_end_of_ayah('\u{8e2}', '\u{8e2}')]
+    #[case::kaithi_number_sign('\u{110bd}', '\u{110bd}')]
+    #[case::kaithi_number_sign_above('\u{110cd}', '\u{110cd}')]
+    #[case::egyptian_hieroglyph_format_controls('\u{13430}', '\u{1343f}')]
+    #[case::shorthand_format_controls('\u{1bca0}', '\u{1bca3}')]
+    #[case::musical_symbol_beams_and_phrases('\u{1d173}', '\u{1d17a}')]
+    fn format_characters_the_contract_leaves_out_are_accepted(#[case] first: char, #[case] last: char) {
+        for c in first..=last {
+            assert!(accepts_value_holding(c), "U+{:04X} is refused", u32::from(c));
+        }
+    }
+
     /// [Shared intent][intent] ("Enrollment"): "The result is trimmed, truncated to 255 Unicode scalar values without splitting one,
     /// and trimmed again, so a stored name never starts or ends with white space (Unicode `White_Space`);
     /// an empty result falls back to the identity ID."
@@ -204,7 +280,7 @@ mod tests {
     #[case::trimmed_before_truncation(format!("  {}", "a".repeat(255)), "a".repeat(255))]
     #[case::truncated_by_scalar_value("é".repeat(300), "é".repeat(255))]
     #[case::unicode_white_space("\u{3000}host\u{a0}\u{2029}".to_owned(), "host".to_owned())]
-    #[case::not_white_space("\u{200b}host".to_owned(), "\u{200b}host".to_owned())]
+    #[case::not_white_space("\u{2800}host".to_owned(), "\u{2800}host".to_owned())]
     #[case::empty_falls_back_to_identity_id("\u{3000} ".to_owned(), uuid::Uuid::nil().to_string())]
     fn friendly_name_is_trimmed_truncated_and_trimmed_again(#[case] hostname: String, #[case] expected: String) {
         let metadata = Map::from_iter([("hostname".to_owned(), Value::String(hostname))]);
