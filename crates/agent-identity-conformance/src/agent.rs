@@ -289,19 +289,25 @@ fn removed_from_metadata(character: char) -> bool {
 /// The `machine_id` check's expectation on this host: the Linux `/etc/machine-id` as the agent must report it, and nothing elsewhere.
 ///
 /// Windows and macOS values are not compared, because the suite has no independent reading of the SMBIOS UUID or `IOPlatformUUID`.
-fn host_machine_id() -> anyhow::Result<ExpectedMachineId> {
+fn host_machine_id() -> ExpectedMachineId {
     if !cfg!(target_os = "linux") {
-        return Ok(ExpectedMachineId::NotCompared);
+        return ExpectedMachineId::NotCompared;
     }
-    Ok(expected_machine_id(read_host_machine_id()?.as_deref()))
+    machine_id_expectation(std::fs::read_to_string("/etc/machine-id"))
 }
 
-/// The contents of the Linux `/etc/machine-id`, or `None` when the host has no such file.
-fn read_host_machine_id() -> anyhow::Result<Option<String>> {
-    match std::fs::read_to_string("/etc/machine-id") {
-        Ok(contents) => Ok(Some(contents)),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error).context("read Linux machine ID"),
+/// The expectation from reading the Linux `/etc/machine-id`.
+///
+/// A missing file means the OS provides no value, so the agent must omit the key.
+/// Any other failure, such as a permission denial, a directory at that path, or contents that are not UTF-8, leaves the suite unable to know what the host provides, so the value is not compared rather than the whole run aborted.
+fn machine_id_expectation(read: std::io::Result<String>) -> ExpectedMachineId {
+    match read {
+        Ok(contents) => expected_machine_id(Some(&contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => expected_machine_id(None),
+        Err(error) => {
+            eprintln!("WARN cannot read the Linux machine ID, so the agent's machine_id is not compared: {error}");
+            ExpectedMachineId::NotCompared
+        }
     }
 }
 
@@ -318,10 +324,11 @@ fn expected_machine_id(host_contents: Option<&str>) -> ExpectedMachineId {
         .chars()
         .filter(|character| !removed_from_metadata(*character))
     {
-        if sanitised.len() + character.len_utf8() > 1024 {
+        if sanitised.len() + character.len_utf8() <= 1024 {
+            sanitised.push(character);
+        } else {
             break;
         }
-        sanitised.push(character);
     }
     if sanitised.is_empty() {
         ExpectedMachineId::Absent
@@ -1017,7 +1024,7 @@ impl AgentCase {
         validate_agent_metadata(
             &serde_json::to_value(&record.metadata)?,
             self.ctx.agent_version.as_deref(),
-            &host_machine_id()?,
+            &host_machine_id(),
         )
     }
 
@@ -6705,6 +6712,36 @@ mod tests {
                 expected_machine_id(Some(host_contents)),
                 ExpectedMachineId::Value(expected.to_owned()),
                 "host contents {host_contents:?}"
+            );
+        }
+    }
+
+    /// A missing `/etc/machine-id` means the OS provides no value, so the agent must omit the key ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent"), while a file the suite cannot read tells it nothing about what the host provides.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn machine_id_expectation_follows_how_the_host_file_read_ended() {
+        use std::io::{Error, ErrorKind};
+
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        assert_eq!(
+            machine_id_expectation(Ok(String::from("0123abcd\n"))),
+            ExpectedMachineId::Value("0123abcd".to_owned())
+        );
+        assert_eq!(
+            machine_id_expectation(Err(Error::from(ErrorKind::NotFound))),
+            ExpectedMachineId::Absent
+        );
+        // oracle: mutant an unreadable file aborting the run, or being read as a file that is absent
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::InvalidData,
+            ErrorKind::IsADirectory,
+        ] {
+            assert_eq!(
+                machine_id_expectation(Err(Error::from(kind))),
+                ExpectedMachineId::NotCompared,
+                "read error {kind:?}"
             );
         }
     }
