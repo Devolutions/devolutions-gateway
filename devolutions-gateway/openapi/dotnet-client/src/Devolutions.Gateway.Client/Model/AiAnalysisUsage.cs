@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Tokens counted by an AI provider
+    /// Tokens the AI provider counted for an AI analysis Task, over all its attempts
     /// </summary>
     [DataContract(Name = "AiAnalysisUsage")]
     public partial class AiAnalysisUsage : IValidatableObject
@@ -43,10 +43,12 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="inputTokens">inputTokens (required).</param>
         /// <param name="outputTokens">outputTokens (required).</param>
-        public AiAnalysisUsage(long inputTokens = default(long), long outputTokens = default(long))
+        /// <param name="unreportedRequests">Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one still waiting for it; while it is not 0, &#x60;inputTokens&#x60; and &#x60;outputTokens&#x60; are short of what the provider billed. (required).</param>
+        public AiAnalysisUsage(long inputTokens = default(long), long outputTokens = default(long), long unreportedRequests = default(long))
         {
             this.InputTokens = inputTokens;
             this.OutputTokens = outputTokens;
+            this.UnreportedRequests = unreportedRequests;
         }
 
         /// <summary>
@@ -62,6 +64,13 @@ namespace Devolutions.Gateway.Client.Model
         public long OutputTokens { get; set; }
 
         /// <summary>
+        /// Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one still waiting for it; while it is not 0, &#x60;inputTokens&#x60; and &#x60;outputTokens&#x60; are short of what the provider billed.
+        /// </summary>
+        /// <value>Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one still waiting for it; while it is not 0, &#x60;inputTokens&#x60; and &#x60;outputTokens&#x60; are short of what the provider billed.</value>
+        [DataMember(Name = "unreportedRequests", IsRequired = true, EmitDefaultValue = true)]
+        public long UnreportedRequests { get; set; }
+
+        /// <summary>
         /// Returns the string presentation of the object
         /// </summary>
         /// <returns>String presentation of the object</returns>
@@ -71,6 +80,7 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("class AiAnalysisUsage {\n");
             sb.Append("  InputTokens: ").Append(InputTokens).Append("\n");
             sb.Append("  OutputTokens: ").Append(OutputTokens).Append("\n");
+            sb.Append("  UnreportedRequests: ").Append(UnreportedRequests).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }
@@ -101,6 +111,12 @@ namespace Devolutions.Gateway.Client.Model
             if (this.OutputTokens < (long)0)
             {
                 yield return new ValidationResult("Invalid value for OutputTokens, must be a value greater than or equal to 0.", new [] { "OutputTokens" });
+            }
+
+            // UnreportedRequests (long) minimum
+            if (this.UnreportedRequests < (long)0)
+            {
+                yield return new ValidationResult("Invalid value for UnreportedRequests, must be a value greater than or equal to 0.", new [] { "UnreportedRequests" });
             }
 
             yield break;

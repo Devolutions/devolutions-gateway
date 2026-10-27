@@ -7,14 +7,15 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+import { AiAnalysisUsage } from './aiAnalysisUsage';
 
 
 /**
- * Payload of a `running` AI analysis Task: its progress
+ * Payload of a `running` AI analysis Task: its progress, and the tokens it used so far
  */
 export interface AiAnalysisRunningPayload { 
     /**
-     * Work done in the step: bytes read while `reading`, parts described while `describing`.
+     * Work done in the step: bytes read while `reading`, parts described while `describing`; absent in the other steps.
      */
     done?: number | null;
     /**
@@ -22,8 +23,9 @@ export interface AiAnalysisRunningPayload {
      */
     step: string;
     /**
-     * Work the step has in all, in the same unit as `done`.
+     * Work the step has in all, in the same unit as `done`; absent in the other steps.
      */
     total?: number | null;
+    usage: AiAnalysisUsage;
 }
 

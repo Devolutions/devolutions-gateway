@@ -11,11 +11,11 @@ import { AiAnalysisUsage } from './aiAnalysisUsage';
 
 
 /**
- * Payload of a `succeeded` AI analysis Task: the log it added to the session
+ * Payload of a `succeeded` AI analysis Task: the log it put in the session
  */
 export interface AiAnalysisSucceededPayload { 
     /**
-     * Name of the new log in the session manifest, such as `ai-analysis-0.slog`.
+     * Name of the log in the session manifest, such as `ai-analysis-0.slog`.
      */
     fileName: string;
     /**
@@ -26,6 +26,6 @@ export interface AiAnalysisSucceededPayload {
      * Versions of the prompts that wrote the log, such as `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
      */
     promptVersion: string;
-    usage?: AiAnalysisUsage | null;
+    usage: AiAnalysisUsage;
 }
 

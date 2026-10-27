@@ -49,7 +49,7 @@ namespace Devolutions.Gateway.Client.Model
         /// </summary>
         /// <param name="attempts">Number of attempts started so far. (required).</param>
         /// <param name="createdAt">When the Task was created. (required).</param>
-        /// <param name="deadlineAt">Latest time an unfinished Task becomes failed, waiting and retries included; it fails as &#x60;timed out&#x60; earlier once too little time is left for another attempt. (required).</param>
+        /// <param name="deadlineAt">Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress. (required).</param>
         /// <param name="finishedAt">When it succeeded or failed..</param>
         /// <param name="id">Task ID, chosen by the provisioner. (required).</param>
         /// <param name="kind">Kind of work, such as &#x60;recording-ai-analysis&#x60;. (required).</param>
@@ -103,9 +103,9 @@ namespace Devolutions.Gateway.Client.Model
         public DateTime CreatedAt { get; set; }
 
         /// <summary>
-        /// Latest time an unfinished Task becomes failed, waiting and retries included; it fails as &#x60;timed out&#x60; earlier once too little time is left for another attempt.
+        /// Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress.
         /// </summary>
-        /// <value>Latest time an unfinished Task becomes failed, waiting and retries included; it fails as &#x60;timed out&#x60; earlier once too little time is left for another attempt.</value>
+        /// <value>Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress.</value>
         [DataMember(Name = "deadlineAt", IsRequired = true, EmitDefaultValue = true)]
         public DateTime DeadlineAt { get; set; }
 

@@ -7,23 +7,15 @@
  * https://openapi-generator.tech
  * Do not edit the class manually.
  */
+import { AiAnalysisError } from './aiAnalysisError';
+import { AiAnalysisUsage } from './aiAnalysisUsage';
 
 
 /**
- * Payload of a `failed` AI analysis Task: why it failed
+ * Payload of a `failed` AI analysis Task: why it failed, and the tokens it used
  */
 export interface AiAnalysisFailedPayload { 
-    /**
-     * Number of attempts started.
-     */
-    attempts: number;
-    /**
-     * What went wrong: a text, except for `timed out`, where it is `{ \"lastPayload\": <payload before the timeout> }`.
-     */
-    details: any | null;
-    /**
-     * Kind of failure: `permanent error`, `attempts exhausted`, `key lost`, `timed out`, `invalid task` or `not queued`.
-     */
-    reason: string;
+    error: AiAnalysisError;
+    usage?: AiAnalysisUsage | null;
 }
 

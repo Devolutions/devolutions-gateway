@@ -23,7 +23,7 @@ export interface TaskInfo {
      */
     createdAt: string;
     /**
-     * Latest time an unfinished Task becomes failed, waiting and retries included; it fails as `timed out` earlier once too little time is left for another attempt.
+     * Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress.
      */
     deadlineAt: string;
     /**

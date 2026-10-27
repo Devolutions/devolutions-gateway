@@ -10,10 +10,14 @@
 
 
 /**
- * Tokens counted by an AI provider
+ * Tokens the AI provider counted for an AI analysis Task, over all its attempts
  */
 export interface AiAnalysisUsage { 
     inputTokens: number;
     outputTokens: number;
+    /**
+     * Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one still waiting for it; while it is not 0, `inputTokens` and `outputTokens` are short of what the provider billed.
+     */
+    unreportedRequests: number;
 }
 

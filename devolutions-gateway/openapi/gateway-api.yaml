@@ -396,15 +396,17 @@ paths:
       - Jrec
       summary: Starts an AI analysis of a recorded session
       description: |-
-        Gateway asks the AI provider what the user did in the session recording, and adds the answer to the session as a
-        new log, listed under `artifacts.ai-analysis` in its manifest.
+        Gateway asks the AI provider what the user did in the session recording, and puts the answer in the session as its
+        log, listed under `artifacts.ai-analysis` in its manifest.
         The answer is in the `language` of the request, English without one.
         The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
         which the `Location` header of a 202 answer names.
 
         Sending the same request again returns the same Task and starts nothing new.
-        A new Task for the session starts from scratch: it removes the earlier AI analysis of the session, even a succeeded
-        one, so a session holds at most one.
+        A new Task for the session starts from scratch, and replaces the earlier AI analysis of the session once its success
+        is recorded, so a session holds at most one; a Task that fails leaves the earlier analysis in place and removes
+        everything it made.
+        A Task fails if it does not start within 2 hours, or, once it runs, after 30 minutes without progress.
         The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
         Tasks.
       operationId: StartAiAnalysis
@@ -466,7 +468,8 @@ paths:
       - Jrec
       summary: Gets an AI analysis of a recorded session
       description: |-
-        Returns the Task of the analysis: its state, its progress while it runs, and its result once it is over.
+        Returns the Task of the analysis: its state, its progress while it runs, its result once it is over, and the tokens
+        it used in every state but `queued`.
         Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
       operationId: GetAiAnalysis
       parameters:
@@ -1563,6 +1566,14 @@ components:
       - offline
       - online
       - unresponsive
+    AiAnalysisBadAnswer:
+      type: string
+      description: What was wrong with an answer of the AI provider
+      enum:
+      - invalid
+      - truncated
+      - refused
+      - notExpectedJson
     AiAnalysisConflict:
       type: object
       description: Why an AI analysis cannot start now
@@ -1582,24 +1593,62 @@ components:
       - task_id_conflict
       - recording_active
       - analysis_in_progress
-    AiAnalysisFailedPayload:
+    AiAnalysisError:
       type: object
-      description: 'Payload of a `failed` AI analysis Task: why it failed'
+      description: |-
+        Why an AI analysis Task failed: a kind, with the fields of that kind; there is no text for people, so the caller
+        words it
       required:
-      - reason
-      - details
-      - attempts
+      - kind
       properties:
-        attempts:
+        file:
+          type: string
+          description: Recording file that cannot be read, for `unreadableRecording`.
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/AiAnalysisErrorKind'
+        last:
+          allOf:
+          - $ref: '#/components/schemas/AiAnalysisRecoverableError'
+          nullable: true
+        status:
           type: integer
           format: int32
-          description: Number of attempts started.
+          description: HTTP status the AI provider answered, for `aiRejected`.
+          nullable: true
           minimum: 0
-        details:
-          description: 'What went wrong: a text, except for `timed out`, where it is `{ "lastPayload": <payload before the timeout> }`.'
-        reason:
-          type: string
-          description: 'Kind of failure: `permanent error`, `attempts exhausted`, `key lost`, `timed out`, `invalid task` or `not queued`.'
+        why:
+          allOf:
+          - $ref: '#/components/schemas/AiAnalysisBadAnswer'
+          nullable: true
+    AiAnalysisErrorKind:
+      type: string
+      description: Kind of failure of an AI analysis Task
+      enum:
+      - aiRejected
+      - aiBadAnswer
+      - keyLost
+      - noRecording
+      - mixedRecording
+      - unreadableRecording
+      - invalidTask
+      - panicked
+      - internal
+      - attemptsExhausted
+      - deadlinePassed
+      - notQueued
+    AiAnalysisFailedPayload:
+      type: object
+      description: 'Payload of a `failed` AI analysis Task: why it failed, and the tokens it used'
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/AiAnalysisError'
+        usage:
+          allOf:
+          - $ref: '#/components/schemas/AiAnalysisUsage'
+          nullable: true
     AiAnalysisParams:
       type: object
       description: 'Params of an AI analysis Task: what was asked, without the API key and the base URL'
@@ -1623,6 +1672,27 @@ components:
           description: Model identifier, passed to the provider as is.
         provider:
           $ref: '#/components/schemas/AiProvider'
+    AiAnalysisRecoverableError:
+      type: object
+      description: A failure of an attempt that was worth another attempt
+      required:
+      - kind
+      properties:
+        kind:
+          $ref: '#/components/schemas/AiAnalysisRecoverableErrorKind'
+        status:
+          type: integer
+          format: int32
+          description: HTTP status the AI provider answered, for `aiBusy`.
+          nullable: true
+          minimum: 0
+    AiAnalysisRecoverableErrorKind:
+      type: string
+      description: Kind of a failure worth another attempt
+      enum:
+      - aiUnreachable
+      - aiBusy
+      - storage
     AiAnalysisRequest:
       type: object
       description: Settings of an AI analysis
@@ -1664,14 +1734,15 @@ components:
           description: Task ID, chosen by the caller so it can send the same request again safely.
     AiAnalysisRunningPayload:
       type: object
-      description: 'Payload of a `running` AI analysis Task: its progress'
+      description: 'Payload of a `running` AI analysis Task: its progress, and the tokens it used so far'
       required:
       - step
+      - usage
       properties:
         done:
           type: integer
           format: int64
-          description: 'Work done in the step: bytes read while `reading`, parts described while `describing`.'
+          description: 'Work done in the step: bytes read while `reading`, parts described while `describing`; absent in the other steps.'
           nullable: true
           minimum: 0
         step:
@@ -1682,20 +1753,23 @@ components:
         total:
           type: integer
           format: int64
-          description: Work the step has in all, in the same unit as `done`.
+          description: Work the step has in all, in the same unit as `done`; absent in the other steps.
           nullable: true
           minimum: 0
+        usage:
+          $ref: '#/components/schemas/AiAnalysisUsage'
     AiAnalysisSucceededPayload:
       type: object
-      description: 'Payload of a `succeeded` AI analysis Task: the log it added to the session'
+      description: 'Payload of a `succeeded` AI analysis Task: the log it put in the session'
       required:
       - fileName
       - model
+      - usage
       - promptVersion
       properties:
         fileName:
           type: string
-          description: Name of the new log in the session manifest, such as `ai-analysis-0.slog`.
+          description: Name of the log in the session manifest, such as `ai-analysis-0.slog`.
         model:
           type: string
           description: Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
@@ -1705,15 +1779,14 @@ components:
             Versions of the prompts that wrote the log, such as
             `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
         usage:
-          allOf:
-          - $ref: '#/components/schemas/AiAnalysisUsage'
-          nullable: true
+          $ref: '#/components/schemas/AiAnalysisUsage'
     AiAnalysisUsage:
       type: object
-      description: Tokens counted by an AI provider
+      description: Tokens the AI provider counted for an AI analysis Task, over all its attempts
       required:
       - inputTokens
       - outputTokens
+      - unreportedRequests
       properties:
         inputTokens:
           type: integer
@@ -1722,6 +1795,13 @@ components:
         outputTokens:
           type: integer
           format: int64
+          minimum: 0
+        unreportedRequests:
+          type: integer
+          format: int64
+          description: |-
+            Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one
+            still waiting for it; while it is not 0, `inputTokens` and `outputTokens` are short of what the provider billed.
           minimum: 0
     AiProvider:
       type: string
@@ -2873,8 +2953,8 @@ components:
           type: string
           format: date-time
           description: |-
-            Latest time an unfinished Task becomes failed, waiting and retries included; it fails as `timed out` earlier
-            once too little time is left for another attempt.
+            Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or
+            the Task makes progress.
         finishedAt:
           type: string
           format: date-time

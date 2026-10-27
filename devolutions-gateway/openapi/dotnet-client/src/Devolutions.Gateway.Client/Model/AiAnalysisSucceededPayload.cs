@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Payload of a &#x60;succeeded&#x60; AI analysis Task: the log it added to the session
+    /// Payload of a &#x60;succeeded&#x60; AI analysis Task: the log it put in the session
     /// </summary>
     [DataContract(Name = "AiAnalysisSucceededPayload")]
     public partial class AiAnalysisSucceededPayload : IValidatableObject
@@ -41,10 +41,10 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="AiAnalysisSucceededPayload" /> class.
         /// </summary>
-        /// <param name="fileName">Name of the new log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;. (required).</param>
+        /// <param name="fileName">Name of the log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;. (required).</param>
         /// <param name="model">Model that wrote the log, as reported by the AI provider; the requested model when it reports none. (required).</param>
         /// <param name="promptVersion">Versions of the prompts that wrote the log, such as &#x60;session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36&#x60;. (required).</param>
-        /// <param name="usage">usage.</param>
+        /// <param name="usage">usage (required).</param>
         public AiAnalysisSucceededPayload(string fileName = default(string), string model = default(string), string promptVersion = default(string), AiAnalysisUsage usage = default(AiAnalysisUsage))
         {
             // to ensure "fileName" is required (not null)
@@ -65,13 +65,18 @@ namespace Devolutions.Gateway.Client.Model
                 throw new ArgumentNullException("promptVersion is a required property for AiAnalysisSucceededPayload and cannot be null");
             }
             this.PromptVersion = promptVersion;
+            // to ensure "usage" is required (not null)
+            if (usage == null)
+            {
+                throw new ArgumentNullException("usage is a required property for AiAnalysisSucceededPayload and cannot be null");
+            }
             this.Usage = usage;
         }
 
         /// <summary>
-        /// Name of the new log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;.
+        /// Name of the log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;.
         /// </summary>
-        /// <value>Name of the new log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;.</value>
+        /// <value>Name of the log in the session manifest, such as &#x60;ai-analysis-0.slog&#x60;.</value>
         [DataMember(Name = "fileName", IsRequired = true, EmitDefaultValue = true)]
         public string FileName { get; set; }
 
@@ -92,7 +97,7 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Gets or Sets Usage
         /// </summary>
-        [DataMember(Name = "usage", EmitDefaultValue = true)]
+        [DataMember(Name = "usage", IsRequired = true, EmitDefaultValue = true)]
         public AiAnalysisUsage Usage { get; set; }
 
         /// <summary>

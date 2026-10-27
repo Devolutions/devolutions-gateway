@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Payload of a &#x60;failed&#x60; AI analysis Task: why it failed
+    /// Payload of a &#x60;failed&#x60; AI analysis Task: why it failed, and the tokens it used
     /// </summary>
     [DataContract(Name = "AiAnalysisFailedPayload")]
     public partial class AiAnalysisFailedPayload : IValidatableObject
@@ -41,46 +41,30 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="AiAnalysisFailedPayload" /> class.
         /// </summary>
-        /// <param name="attempts">Number of attempts started. (required).</param>
-        /// <param name="details">What went wrong: a text, except for &#x60;timed out&#x60;, where it is &#x60;{ \&quot;lastPayload\&quot;: &lt;payload before the timeout&gt; }&#x60;. (required).</param>
-        /// <param name="reason">Kind of failure: &#x60;permanent error&#x60;, &#x60;attempts exhausted&#x60;, &#x60;key lost&#x60;, &#x60;timed out&#x60;, &#x60;invalid task&#x60; or &#x60;not queued&#x60;. (required).</param>
-        public AiAnalysisFailedPayload(int attempts = default(int), Object details = default(Object), string reason = default(string))
+        /// <param name="error">error (required).</param>
+        /// <param name="usage">usage.</param>
+        public AiAnalysisFailedPayload(AiAnalysisError error = default(AiAnalysisError), AiAnalysisUsage usage = default(AiAnalysisUsage))
         {
-            this.Attempts = attempts;
-            // to ensure "details" is required (not null)
-            if (details == null)
+            // to ensure "error" is required (not null)
+            if (error == null)
             {
-                throw new ArgumentNullException("details is a required property for AiAnalysisFailedPayload and cannot be null");
+                throw new ArgumentNullException("error is a required property for AiAnalysisFailedPayload and cannot be null");
             }
-            this.Details = details;
-            // to ensure "reason" is required (not null)
-            if (reason == null)
-            {
-                throw new ArgumentNullException("reason is a required property for AiAnalysisFailedPayload and cannot be null");
-            }
-            this.Reason = reason;
+            this.Error = error;
+            this.Usage = usage;
         }
 
         /// <summary>
-        /// Number of attempts started.
+        /// Gets or Sets Error
         /// </summary>
-        /// <value>Number of attempts started.</value>
-        [DataMember(Name = "attempts", IsRequired = true, EmitDefaultValue = true)]
-        public int Attempts { get; set; }
+        [DataMember(Name = "error", IsRequired = true, EmitDefaultValue = true)]
+        public AiAnalysisError Error { get; set; }
 
         /// <summary>
-        /// What went wrong: a text, except for &#x60;timed out&#x60;, where it is &#x60;{ \&quot;lastPayload\&quot;: &lt;payload before the timeout&gt; }&#x60;.
+        /// Gets or Sets Usage
         /// </summary>
-        /// <value>What went wrong: a text, except for &#x60;timed out&#x60;, where it is &#x60;{ \&quot;lastPayload\&quot;: &lt;payload before the timeout&gt; }&#x60;.</value>
-        [DataMember(Name = "details", IsRequired = true, EmitDefaultValue = true)]
-        public Object Details { get; set; }
-
-        /// <summary>
-        /// Kind of failure: &#x60;permanent error&#x60;, &#x60;attempts exhausted&#x60;, &#x60;key lost&#x60;, &#x60;timed out&#x60;, &#x60;invalid task&#x60; or &#x60;not queued&#x60;.
-        /// </summary>
-        /// <value>Kind of failure: &#x60;permanent error&#x60;, &#x60;attempts exhausted&#x60;, &#x60;key lost&#x60;, &#x60;timed out&#x60;, &#x60;invalid task&#x60; or &#x60;not queued&#x60;.</value>
-        [DataMember(Name = "reason", IsRequired = true, EmitDefaultValue = true)]
-        public string Reason { get; set; }
+        [DataMember(Name = "usage", EmitDefaultValue = true)]
+        public AiAnalysisUsage Usage { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
@@ -90,9 +74,8 @@ namespace Devolutions.Gateway.Client.Model
         {
             StringBuilder sb = new StringBuilder();
             sb.Append("class AiAnalysisFailedPayload {\n");
-            sb.Append("  Attempts: ").Append(Attempts).Append("\n");
-            sb.Append("  Details: ").Append(Details).Append("\n");
-            sb.Append("  Reason: ").Append(Reason).Append("\n");
+            sb.Append("  Error: ").Append(Error).Append("\n");
+            sb.Append("  Usage: ").Append(Usage).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }
@@ -113,12 +96,6 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Validation Result</returns>
         IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
-            // Attempts (int) minimum
-            if (this.Attempts < (int)0)
-            {
-                yield return new ValidationResult("Invalid value for Attempts, must be a value greater than or equal to 0.", new [] { "Attempts" });
-            }
-
             yield break;
         }
     }

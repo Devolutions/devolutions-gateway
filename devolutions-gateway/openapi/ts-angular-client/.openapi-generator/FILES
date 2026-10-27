@@ -26,10 +26,15 @@ model/addressFamily.ts
 model/agentDomainAdvertisement.ts
 model/agentInfo.ts
 model/agentStatus.ts
+model/aiAnalysisBadAnswer.ts
 model/aiAnalysisConflict.ts
 model/aiAnalysisConflictCode.ts
+model/aiAnalysisError.ts
+model/aiAnalysisErrorKind.ts
 model/aiAnalysisFailedPayload.ts
 model/aiAnalysisParams.ts
+model/aiAnalysisRecoverableError.ts
+model/aiAnalysisRecoverableErrorKind.ts
 model/aiAnalysisRequest.ts
 model/aiAnalysisRunningPayload.ts
 model/aiAnalysisSucceededPayload.ts

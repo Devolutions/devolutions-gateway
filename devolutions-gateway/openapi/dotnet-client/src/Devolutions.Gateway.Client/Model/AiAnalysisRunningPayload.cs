@@ -28,7 +28,7 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// Payload of a &#x60;running&#x60; AI analysis Task: its progress
+    /// Payload of a &#x60;running&#x60; AI analysis Task: its progress, and the tokens it used so far
     /// </summary>
     [DataContract(Name = "AiAnalysisRunningPayload")]
     public partial class AiAnalysisRunningPayload : IValidatableObject
@@ -41,10 +41,11 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="AiAnalysisRunningPayload" /> class.
         /// </summary>
-        /// <param name="done">Work done in the step: bytes read while &#x60;reading&#x60;, parts described while &#x60;describing&#x60;..</param>
+        /// <param name="done">Work done in the step: bytes read while &#x60;reading&#x60;, parts described while &#x60;describing&#x60;; absent in the other steps..</param>
         /// <param name="step">Current step: &#x60;preparing&#x60; (the attempt starts), &#x60;reading&#x60; (the recordings are read), &#x60;describing&#x60; (the AI is asked about the recording, part by part), then &#x60;writing&#x60; (the log is written). (required).</param>
-        /// <param name="total">Work the step has in all, in the same unit as &#x60;done&#x60;..</param>
-        public AiAnalysisRunningPayload(long? done = default(long?), string step = default(string), long? total = default(long?))
+        /// <param name="total">Work the step has in all, in the same unit as &#x60;done&#x60;; absent in the other steps..</param>
+        /// <param name="usage">usage (required).</param>
+        public AiAnalysisRunningPayload(long? done = default(long?), string step = default(string), long? total = default(long?), AiAnalysisUsage usage = default(AiAnalysisUsage))
         {
             // to ensure "step" is required (not null)
             if (step == null)
@@ -52,14 +53,20 @@ namespace Devolutions.Gateway.Client.Model
                 throw new ArgumentNullException("step is a required property for AiAnalysisRunningPayload and cannot be null");
             }
             this.Step = step;
+            // to ensure "usage" is required (not null)
+            if (usage == null)
+            {
+                throw new ArgumentNullException("usage is a required property for AiAnalysisRunningPayload and cannot be null");
+            }
+            this.Usage = usage;
             this.Done = done;
             this.Total = total;
         }
 
         /// <summary>
-        /// Work done in the step: bytes read while &#x60;reading&#x60;, parts described while &#x60;describing&#x60;.
+        /// Work done in the step: bytes read while &#x60;reading&#x60;, parts described while &#x60;describing&#x60;; absent in the other steps.
         /// </summary>
-        /// <value>Work done in the step: bytes read while &#x60;reading&#x60;, parts described while &#x60;describing&#x60;.</value>
+        /// <value>Work done in the step: bytes read while &#x60;reading&#x60;, parts described while &#x60;describing&#x60;; absent in the other steps.</value>
         [DataMember(Name = "done", EmitDefaultValue = true)]
         public long? Done { get; set; }
 
@@ -71,11 +78,17 @@ namespace Devolutions.Gateway.Client.Model
         public string Step { get; set; }
 
         /// <summary>
-        /// Work the step has in all, in the same unit as &#x60;done&#x60;.
+        /// Work the step has in all, in the same unit as &#x60;done&#x60;; absent in the other steps.
         /// </summary>
-        /// <value>Work the step has in all, in the same unit as &#x60;done&#x60;.</value>
+        /// <value>Work the step has in all, in the same unit as &#x60;done&#x60;; absent in the other steps.</value>
         [DataMember(Name = "total", EmitDefaultValue = true)]
         public long? Total { get; set; }
+
+        /// <summary>
+        /// Gets or Sets Usage
+        /// </summary>
+        [DataMember(Name = "usage", IsRequired = true, EmitDefaultValue = true)]
+        public AiAnalysisUsage Usage { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
@@ -88,6 +101,7 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("  Done: ").Append(Done).Append("\n");
             sb.Append("  Step: ").Append(Step).Append("\n");
             sb.Append("  Total: ").Append(Total).Append("\n");
+            sb.Append("  Usage: ").Append(Usage).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }

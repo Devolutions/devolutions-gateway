@@ -1,13 +1,12 @@
 # Devolutions.Gateway.Client.Model.AiAnalysisFailedPayload
-Payload of a `failed` AI analysis Task: why it failed
+Payload of a `failed` AI analysis Task: why it failed, and the tokens it used
 
 ## Properties
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**Attempts** | **int** | Number of attempts started. | 
-**Details** | **Object** | What went wrong: a text, except for &#x60;timed out&#x60;, where it is &#x60;{ \&quot;lastPayload\&quot;: &lt;payload before the timeout&gt; }&#x60;. | 
-**Reason** | **string** | Kind of failure: &#x60;permanent error&#x60;, &#x60;attempts exhausted&#x60;, &#x60;key lost&#x60;, &#x60;timed out&#x60;, &#x60;invalid task&#x60; or &#x60;not queued&#x60;. | 
+**Error** | [**AiAnalysisError**](AiAnalysisError.md) |  | 
+**Usage** | [**AiAnalysisUsage**](AiAnalysisUsage.md) |  | [optional] 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 
