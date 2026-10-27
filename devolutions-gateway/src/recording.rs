@@ -1407,6 +1407,7 @@ mod tests {
         .await
         .expect("stream ended without waiting for a reconnection")
         .expect("stream state alive");
+        // oracle: mutant the manager holding an ended recording for the token's reconnection window
         assert!(harness.sender.get_state(id).await.expect("get state").is_none());
         assert!(!harness.sender.active_recordings.cloned().contains(&id));
     }
