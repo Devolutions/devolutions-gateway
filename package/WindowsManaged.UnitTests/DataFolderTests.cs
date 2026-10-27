@@ -362,6 +362,32 @@ public sealed class DataFolderTests
         Assert.Equal(Step.RemoveExistingProducts.ToString(), GatewayActions.checkProgramDataDirectory.Step.ToString());
     }
 
+    // The service account is the current user, who can then create entries in the folder without elevation.
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void ServiceAccountCantDeleteTheGatewayFolderButCanDeleteWhatIsBelowIt()
+    {
+        using TempFolder folder = new();
+        string gateway = folder.CreateDirectory("Gateway");
+        DirectorySecurity security = new();
+        security.SetSecurityDescriptorSddlForm(Includes.ProgramDataSddl(CurrentUser), AccessControlSections.Access);
+        Directory.SetAccessControl(gateway, security);
+        string file = Path.Combine(gateway, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        string subfolder = Directory.CreateDirectory(Path.Combine(gateway, "sub")).FullName;
+
+        FileSystemRights onFolder = RightsOf(CurrentUser, Directory.GetAccessControl(gateway));
+        FileSystemRights onFile = RightsOf(CurrentUser, System.IO.File.GetAccessControl(file));
+        FileSystemRights onSubfolder = RightsOf(CurrentUser, Directory.GetAccessControl(subfolder));
+
+        Assert.Equal(
+            (false, true, true, true),
+            (onFolder.HasFlag(FileSystemRights.Delete),
+                onFolder.HasFlag(FileSystemRights.DeleteSubdirectoriesAndFiles),
+                onFile.HasFlag(FileSystemRights.Delete),
+                onSubfolder.HasFlag(FileSystemRights.Delete)));
+    }
+
     /// <summary>
     /// A security descriptor that grants Users <paramref name="right"/> on the folder.
     /// </summary>
@@ -377,6 +403,17 @@ public sealed class DataFolderTests
     /// </summary>
     private static string Describe(DataFolderRefusal refusal) =>
         refusal is null ? "none" : $"{refusal.Problem} {refusal.Account}".TrimEnd();
+
+    /// <summary>
+    /// The rights the allow entries of <paramref name="security"/> grant <paramref name="account"/> on the object itself.
+    /// </summary>
+    private static FileSystemRights RightsOf(SecurityIdentifier account, FileSystemSecurity security) =>
+        security.GetAccessRules(true, true, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>()
+            .Where(rule => rule.IdentityReference.Equals(account)
+                && rule.AccessControlType == AccessControlType.Allow
+                && !rule.PropagationFlags.HasFlag(PropagationFlags.InheritOnly))
+            .Aggregate((FileSystemRights)0, (rights, rule) => rights | rule.FileSystemRights);
 
     private static string[] Placeholders(string text) =>
         Regex.Matches(text, @"\{\d+\}").Cast<Match>().Select(m => m.Value).OrderBy(p => p).ToArray();
