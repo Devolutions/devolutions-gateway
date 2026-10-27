@@ -231,8 +231,8 @@ internal static class DataFolders
     /// a folder the agent then refuses to use.
     /// </remarks>
     /// <param name="checkAccess">
-    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller or OWNER RIGHTS
-    /// replace the folder or what it contains.
+    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller, a member of
+    /// Administrators or OWNER RIGHTS replace the folder or what it contains.
     /// </param>
     /// <returns>The refusal, or <c>null</c> when the folder passes.</returns>
     internal static DataFolderRefusal Evaluate(
@@ -290,28 +290,33 @@ internal static class DataFolders
                 CommonAce entry = (CommonAce)ace;
 
                 if ((unchecked((uint)entry.AccessMask) & ReplaceRights) != 0
-                    && !SecureDirectory.IsPrivileged(entry.SecurityIdentifier)
                     && entry.SecurityIdentifier != OwnerRights
-                    && !IsAppContainer(entry.SecurityIdentifier))
+                    && !IsAppContainer(entry.SecurityIdentifier)
+                    && !IsTrusted(entry.SecurityIdentifier))
                 {
                     return new DataFolderRefusal(folder, DataFolderProblem.Access, entry.SecurityIdentifier);
                 }
             }
         }
 
-        bool trusted;
+        return IsTrusted(security.Owner) ? null : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
+    }
 
+    /// <summary>
+    /// Whether <paramref name="sid"/> is SYSTEM, Administrators, TrustedInstaller or a member of Administrators, the
+    /// accounts that may own the folder or rename and replace it.
+    /// </summary>
+    private static bool IsTrusted(SecurityIdentifier sid)
+    {
         try
         {
-            trusted = SecureDirectory.IsTrustedOwner(security.Owner);
+            return SecureDirectory.IsTrustedOwner(sid);
         }
         catch (Exception)
         {
-            // An owner whose group membership can't be resolved isn't known to be an administrator.
-            trusted = false;
+            // An account whose group membership can't be resolved isn't known to be an administrator.
+            return false;
         }
-
-        return trusted ? null : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
     }
 
     /// <summary>

@@ -62,6 +62,9 @@ public sealed class DataFolderTests
     [InlineData("Users own Agent", Agent, "O:BU" + InheritedDacl, "Owner " + Users)]
     // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
     [InlineData("Users may delete Devolutions", Devolutions, "O:SYD:(A;;SD;;;BU)", "Access " + Users)]
+    // The built-in Administrator account (LA) is a member of Administrators on every machine.
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("a member of Administrators may delete Devolutions", Devolutions, "O:SYD:(A;OICI;FA;;;LA)", "none")]
     // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
     [InlineData("Users may change the DACL", Devolutions, "O:SYD:(A;;WD;;;BU)", "Access " + Users)]
     // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
