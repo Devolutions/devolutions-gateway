@@ -25,8 +25,8 @@ use x509_cert::ext::pkix::{
 };
 
 use crate::client::{
-    Identity, Reply, Target, Token, count, decoded_certificate, expect_error, expect_status, field,
-    https_authority_and_path, invisible_format_character_range_ends, token_bag, token_base_url,
+    INTERIOR_INVISIBLE_FORMAT_CHARACTERS, Identity, Reply, Target, Token, count, decoded_certificate, expect_error,
+    expect_status, field, https_authority_and_path, invisible_format_character_range_ends, token_bag, token_base_url,
     unlisted_format_character_neighbors, with_upper_case_scheme,
 };
 use crate::dvls::{
@@ -1166,7 +1166,7 @@ pub(crate) async fn p_metadata_limits(ctx: Context) -> anyhow::Result<()> {
 
 /// CONTRACT.agent-identity.md §3: a metadata value holds "no invisible format character", a closed list of code points.
 ///
-/// An authority that holds the list as ranges goes wrong at their ends, so each refused enrollment holds one end of a range, inserted into the hostname of the accepted control and otherwise identical to it.
+/// An authority that holds the list as ranges goes wrong at their ends, and one that holds it in pieces goes wrong where a range runs on between them, so each refused enrollment holds one end of a range or one code point inside a range, inserted into the hostname of the accepted control and otherwise identical to it.
 /// The control hostname holds each code point that [`unlisted_format_character_neighbors`] names, and so does an unknown key per pair of them, which §3 stores as-is.
 /// Pairs, each named after its first code point, keep the control within the limit of 32 keys.
 /// One more refused enrollment holds a listed code point in an unknown key, since §3 applies to every value.
@@ -1183,7 +1183,10 @@ pub(crate) async fn p_metadata_invisible_format_characters(ctx: Context) -> anyh
     let neighbors = neighbors.into_iter().collect::<String>();
     control.insert("hostname".to_owned(), json!(format!("host{neighbors}name")));
     let mut refused = Vec::new();
-    for character in invisible_format_character_range_ends() {
+    let listed = invisible_format_character_range_ends()
+        .into_iter()
+        .chain(INTERIOR_INVISIBLE_FORMAT_CHARACTERS);
+    for character in listed {
         let mut metadata = control.clone();
         metadata.insert("hostname".to_owned(), json!(format!("host{character}{neighbors}name")));
         refused.push((format!("hostname holding U+{:04X}", u32::from(character)), metadata));
@@ -1214,7 +1217,9 @@ pub(crate) async fn p_metadata_invisible_format_characters(ctx: Context) -> anyh
     for (name, value) in control.as_object().into_iter().flatten() {
         ensure!(
             record.metadata_value(name) == value.as_str(),
-            "metadata {name} was not stored as sent"
+            "metadata {name} was stored as {:?} instead of {:?}",
+            record.metadata_value(name),
+            value.as_str()
         );
     }
     Ok(())

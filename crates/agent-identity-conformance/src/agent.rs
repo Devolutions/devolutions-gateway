@@ -23,8 +23,8 @@ use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
 use crate::client::{
-    Target, Token, count, decoded_certificate, expect_error, expect_status, field,
-    invisible_format_character_range_ends, is_invisible_format_character, token_bag, token_base_url,
+    INTERIOR_INVISIBLE_FORMAT_CHARACTERS, Target, Token, count, decoded_certificate, expect_error, expect_status,
+    field, invisible_format_character_range_ends, is_invisible_format_character, token_bag, token_base_url,
     unlisted_format_character_neighbors, with_bag_url, with_upper_case_scheme,
 };
 use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
@@ -216,7 +216,26 @@ fn is_record_temporary(path: &Path) -> bool {
             .is_some_and(|hash| temporary_name(name, &format!("{hash}.in-progress.json")))
 }
 
-fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> anyhow::Result<()> {
+/// What the metadata check requires of the agent's `machine_id`.
+///
+/// [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent" has the agent send a value only when the OS provides one, and the check can read the Linux value from the host alone.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExpectedMachineId {
+    /// The host's value is not available to the check, so whatever the agent sent is accepted.
+    NotCompared,
+    /// The host provides no value, so the agent must omit the key.
+    Absent,
+    /// The host provides this value, so the agent must send exactly it.
+    Value(String),
+}
+
+fn validate_agent_metadata(
+    metadata: &Value,
+    agent_version: Option<&str>,
+    machine_id: &ExpectedMachineId,
+) -> anyhow::Result<()> {
     let values = metadata.as_object().context("agent metadata is not an object")?;
     let mut total_bytes = 0;
     for (key, value) in values {
@@ -230,14 +249,8 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
         ensure!(!value.is_empty(), "agent metadata {key} is empty");
         ensure!(value.len() <= 1024, "agent metadata {key} exceeds 1024 UTF-8 bytes");
         ensure!(
-            value
-                .chars()
-                .all(|character| character >= '\u{20}' && !('\u{7f}'..='\u{9f}').contains(&character)),
-            "agent metadata {key} contains a C0/C1 control character"
-        );
-        ensure!(
-            !value.chars().any(is_invisible_format_character),
-            "agent metadata {key} contains an invisible format character"
+            !value.chars().any(removed_from_metadata),
+            "agent metadata {key} contains a control character or an invisible format character"
         );
         total_bytes += key.len() + value.len();
     }
@@ -261,13 +274,26 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
             "agent metadata version differs from --agent-version"
         );
     }
-    if cfg!(target_os = "linux") {
-        check_machine_id(
-            metadata,
-            expected_machine_id(read_host_machine_id()?.as_deref()).as_deref(),
-        )?;
+    check_machine_id(metadata, machine_id)
+}
+
+/// Whether the agent removes `character` from every metadata value it sends, and the authority refuses it in one.
+///
+/// [CONTRACT.agent-identity.md] §3 "Metadata" excludes the C0, DEL, C1 and invisible format characters, and §3.1 "Metadata sent by the agent" has the agent remove them.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+fn removed_from_metadata(character: char) -> bool {
+    character < '\u{20}' || ('\u{7f}'..='\u{9f}').contains(&character) || is_invisible_format_character(character)
+}
+
+/// The `machine_id` check's expectation on this host: the Linux `/etc/machine-id` as the agent must report it, and nothing elsewhere.
+///
+/// Windows and macOS values are not compared, because the suite has no independent reading of the SMBIOS UUID or `IOPlatformUUID`.
+fn host_machine_id() -> anyhow::Result<ExpectedMachineId> {
+    if !cfg!(target_os = "linux") {
+        return Ok(ExpectedMachineId::NotCompared);
     }
-    Ok(())
+    Ok(expected_machine_id(read_host_machine_id()?.as_deref()))
 }
 
 /// The contents of the Linux `/etc/machine-id`, or `None` when the host has no such file.
@@ -279,34 +305,42 @@ fn read_host_machine_id() -> anyhow::Result<Option<String>> {
     }
 }
 
-/// The `machine_id` an agent must report on a Linux host whose `/etc/machine-id` holds `host_contents`, or `None` when it must omit the key.
+/// The `machine_id` an agent must report on a Linux host whose `/etc/machine-id` holds `host_contents`, which is `None` when the host has no such file.
 ///
-/// The agent sends the file as-is (§3.1) after the sanitising every value goes through, so the expectation is what that leaves.
+/// The agent sends the file as-is ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent") after the removal every value goes through, so the expectation is what that leaves, without trimming.
 /// An optional key left empty is omitted, so a missing or empty file expects no `machine_id` at all.
-fn expected_machine_id(host_contents: Option<&str>) -> Option<String> {
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+fn expected_machine_id(host_contents: Option<&str>) -> ExpectedMachineId {
     let mut sanitised = String::new();
-    for character in host_contents?.chars().filter(|character| {
-        *character >= '\u{20}'
-            && !('\u{7f}'..='\u{9f}').contains(character)
-            && !is_invisible_format_character(*character)
-    }) {
+    for character in host_contents
+        .unwrap_or_default()
+        .chars()
+        .filter(|character| !removed_from_metadata(*character))
+    {
         if sanitised.len() + character.len_utf8() > 1024 {
             break;
         }
         sanitised.push(character);
     }
-    (!sanitised.is_empty()).then_some(sanitised)
+    if sanitised.is_empty() {
+        ExpectedMachineId::Absent
+    } else {
+        ExpectedMachineId::Value(sanitised)
+    }
 }
 
-fn check_machine_id(metadata: &Value, expected: Option<&str>) -> anyhow::Result<()> {
+fn check_machine_id(metadata: &Value, expected: &ExpectedMachineId) -> anyhow::Result<()> {
+    let sent = metadata.get("machine_id");
     match expected {
-        Some(expected) => ensure!(
-            metadata["machine_id"] == expected,
-            "agent metadata machine_id differs from /etc/machine-id"
+        ExpectedMachineId::NotCompared => {}
+        ExpectedMachineId::Absent => ensure!(
+            sent.is_none(),
+            "agent metadata carries machine_id {sent:?} although the host provides none"
         ),
-        None => ensure!(
-            metadata.get("machine_id").is_none(),
-            "agent metadata carries a machine_id although /etc/machine-id provides none"
+        ExpectedMachineId::Value(expected) => ensure!(
+            sent == Some(&Value::String(expected.clone())),
+            "agent metadata machine_id is {sent:?} instead of the host's {expected:?}"
         ),
     }
     Ok(())
@@ -983,6 +1017,7 @@ impl AgentCase {
         validate_agent_metadata(
             &serde_json::to_value(&record.metadata)?,
             self.ctx.agent_version.as_deref(),
+            &host_machine_id()?,
         )
     }
 
@@ -4526,17 +4561,22 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
     .await
 }
 
-/// CONTRACT.agent-identity.md §3.1: the agent "removes [...] the invisible format characters of §3" from each value it sends, and "A required key that ends up empty gets the value `unknown`".
+/// [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent": the agent "removes [...] the invisible format characters of §3" from each value it sends, and "A required key that ends up empty gets the value `unknown`".
 ///
 /// The metadata override replaces collected values before each send (the agent's intent, "Configuration"), so the values this test sets go through that removal.
-/// The hostname holds every end of a listed range before, between and after code points that the list leaves out, which the agent keeps.
+/// The hostname holds every end of a listed range, and code points inside the ranges that a list kept in pieces would miss, before, between and after code points that the list leaves out, which the agent keeps.
 /// The OS name, a required key, and the domain, an optional one, hold only listed code points, so the agent sends `unknown` for the first and omits the second.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 pub(crate) async fn a_metadata_invisible_format_characters_removed(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
     with_agent(ctx, None, true, async move |case| {
         let target = case.ctx.target.clone();
-        let listed = invisible_format_character_range_ends();
+        let listed = invisible_format_character_range_ends()
+            .into_iter()
+            .chain(INTERIOR_INVISIBLE_FORMAT_CHARACTERS)
+            .collect::<Vec<_>>();
         let only_listed = listed.iter().collect::<String>();
         let mut hostname = format!("{only_listed}host");
         let mut expected = "host".to_owned();
@@ -6136,33 +6176,66 @@ mod tests {
 
     use super::*;
 
+    /// Agent metadata that conforms to [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent", apart from the `machine_id` that each caller decides.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    fn agent_metadata(hostname: &str) -> Value {
+        json!({
+            "hostname": hostname,
+            "os_name": "os",
+            "os_version": "1",
+            "arch": std::env::consts::ARCH,
+            "agent_version": "1",
+        })
+    }
+
     #[test]
     fn agent_metadata_check_refuses_listed_format_characters_only() {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-        let metadata = |hostname: &str| {
-            let mut metadata = json!({
-                "hostname": hostname,
-                "os_name": "os",
-                "os_version": "1",
-                "arch": std::env::consts::ARCH,
-                "agent_version": "1",
-            });
-            // The check compares `machine_id` with the host's on Linux, so the fixture carries the host's.
-            if cfg!(target_os = "linux")
-                && let Some(machine_id) =
-                    expected_machine_id(read_host_machine_id().expect("read host machine ID").as_deref())
-            {
-                metadata["machine_id"] = machine_id.into();
-            }
-            metadata
-        };
-        validate_agent_metadata(&metadata("host\u{2070}name"), None).expect("U+2070 is outside the list");
-        for character in ['\u{00AD}', '\u{E0FFF}'] {
-            let refused = validate_agent_metadata(&metadata(&format!("host{character}name")), None)
-                .expect_err(&format!("U+{:04X} is listed", u32::from(character)));
+        validate_agent_metadata(
+            &agent_metadata("host\u{2070}name"),
+            None,
+            &ExpectedMachineId::NotCompared,
+        )
+        .expect("U+2070 is outside the list");
+        let listed = invisible_format_character_range_ends()
+            .into_iter()
+            .chain(INTERIOR_INVISIBLE_FORMAT_CHARACTERS);
+        for character in listed {
+            let refused = validate_agent_metadata(
+                &agent_metadata(&format!("host{character}name")),
+                None,
+                &ExpectedMachineId::NotCompared,
+            )
+            .expect_err(&format!("U+{:04X} is listed", u32::from(character)));
             assert!(
                 refused.to_string().contains("invisible format character"),
                 "U+{:04X} was refused for another reason: {refused}",
+                u32::from(character)
+            );
+        }
+    }
+
+    #[test]
+    fn agent_metadata_check_refuses_c0_del_and_c1_characters_only() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+        for character in ['\u{0}', '\u{1F}', '\u{7F}', '\u{80}', '\u{9F}'] {
+            validate_agent_metadata(
+                &agent_metadata(&format!("host{character}name")),
+                None,
+                &ExpectedMachineId::NotCompared,
+            )
+            .expect_err(&format!("U+{:04X} is a control character", u32::from(character)));
+        }
+        for character in [' ', '~', '\u{A0}'] {
+            let accepted = validate_agent_metadata(
+                &agent_metadata(&format!("host{character}name")),
+                None,
+                &ExpectedMachineId::NotCompared,
+            );
+            assert!(
+                accepted.is_ok(),
+                "U+{:04X} is not a control character, yet was refused: {accepted:?}",
                 u32::from(character)
             );
         }
@@ -6558,34 +6631,96 @@ mod tests {
         Ok(())
     }
 
-    /// `machine_id` is optional (§3.1), so a host that provides no value expects the key to be absent, and a host that provides one expects exactly that value.
+    /// A host without a `machine_id` provides none for the agent to send, so the agent must omit the key, because [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent" has it sent "when the OS provides a value".
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
     #[test]
-    fn machine_id_is_compared_only_when_the_host_provides_one() {
+    fn machine_id_is_refused_when_the_host_provides_none() {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
-        let with = |machine_id: &str| json!({ "machine_id": machine_id });
-        let without = json!({});
-        for empty in [None, Some(""), Some("\n"), Some("\u{200B}\n")] {
-            let expected = expected_machine_id(empty);
-            assert_eq!(expected, None, "{empty:?} leaves nothing for the agent to send");
-            check_machine_id(&without, expected.as_deref())
-                .expect("an agent that omits machine_id on a host without one conforms");
-            check_machine_id(&with("invented"), expected.as_deref())
-                .expect_err("a machine_id the host does not provide");
+        for host_contents in [None, Some(""), Some("\n"), Some("\u{200B}\n")] {
+            let expected = expected_machine_id(host_contents);
+            assert_eq!(
+                expected,
+                ExpectedMachineId::Absent,
+                "host contents {host_contents:?} leave nothing for the agent to send"
+            );
+            validate_agent_metadata(&agent_metadata("host"), None, &expected).unwrap_or_else(|error| {
+                panic!("an agent that omits machine_id on a host with contents {host_contents:?} was refused: {error}")
+            });
+            let mut invented = agent_metadata("host");
+            invented["machine_id"] = json!("invented");
+            validate_agent_metadata(&invented, None, &expected).expect_err(&format!(
+                "a machine_id the host does not provide, with host contents {host_contents:?}"
+            ));
         }
-        // The file ends with a newline, which the agent's removal of control characters drops.
-        let expected = expected_machine_id(Some("0123abcd\n"));
-        assert_eq!(expected.as_deref(), Some("0123abcd"));
-        check_machine_id(&with("0123abcd"), expected.as_deref()).expect("the host's value");
-        check_machine_id(&with("4567ef01"), expected.as_deref()).expect_err("a different machine_id");
-        check_machine_id(&without, expected.as_deref()).expect_err("a missing machine_id on a host that provides one");
     }
 
-    /// The agent truncates a value to 1024 UTF-8 bytes on a character boundary (§3.1), so the expectation does too.
+    /// A host with a `machine_id` has the agent send exactly that value ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent"), so a different value and a missing key both fail.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn machine_id_must_equal_the_host_value() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        let expected = ExpectedMachineId::Value("0123abcd".to_owned());
+        let mut sent = agent_metadata("host");
+        sent["machine_id"] = json!("0123abcd");
+        validate_agent_metadata(&sent, None, &expected).expect("the host's value, sent as-is");
+        sent["machine_id"] = json!("4567ef01");
+        let mismatch = validate_agent_metadata(&sent, None, &expected)
+            .expect_err("machine_id 4567ef01 against the host's 0123abcd")
+            .to_string();
+        assert!(
+            mismatch.contains("4567ef01") && mismatch.contains("0123abcd"),
+            "the mismatch message names neither the sent nor the expected value: {mismatch}"
+        );
+        sent["machine_id"] = json!(" 0123abcd ");
+        validate_agent_metadata(&sent, None, &expected).expect_err("machine_id padded with spaces against 0123abcd");
+        sent.as_object_mut().expect("fixture is an object").remove("machine_id");
+        validate_agent_metadata(&sent, None, &expected).expect_err("a missing machine_id against the host's 0123abcd");
+    }
+
+    /// Where the check cannot read the host's value, the agent's `machine_id` is accepted whether it is present or not.
+    #[test]
+    fn machine_id_is_not_compared_when_the_host_value_is_unavailable() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        let mut sent = agent_metadata("host");
+        validate_agent_metadata(&sent, None, &ExpectedMachineId::NotCompared).expect("a missing machine_id");
+        sent["machine_id"] = json!("any-value");
+        validate_agent_metadata(&sent, None, &ExpectedMachineId::NotCompared).expect("machine_id any-value");
+    }
+
+    /// The agent sends `/etc/machine-id` "as-is" ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent") after the removal every value goes through, which drops control characters and trims nothing.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn expected_machine_id_removes_control_characters_and_trims_nothing() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        for (host_contents, expected) in [
+            ("0123abcd\n", "0123abcd"),
+            (" 0123abcd \u{7f}\n", " 0123abcd "),
+            ("0123\u{80}abcd\u{9f}", "0123abcd"),
+            ("0123\u{ad}abcd", "0123abcd"),
+        ] {
+            assert_eq!(
+                expected_machine_id(Some(host_contents)),
+                ExpectedMachineId::Value(expected.to_owned()),
+                "host contents {host_contents:?}"
+            );
+        }
+    }
+
+    /// The agent truncates a value to 1024 UTF-8 bytes on a character boundary ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent"), so the expectation does too.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
     #[test]
     fn expected_machine_id_is_truncated_on_a_character_boundary() {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
         let host = format!("{}\u{e9}", "a".repeat(1023));
-        assert_eq!(expected_machine_id(Some(&host)), Some("a".repeat(1023)));
+        assert_eq!(
+            expected_machine_id(Some(&host)),
+            ExpectedMachineId::Value("a".repeat(1023)),
+            "1023 bytes, then a two-byte character that does not fit"
+        );
     }
 
     #[test]
@@ -6598,34 +6733,30 @@ mod tests {
             "arch": std::env::consts::ARCH,
             "agent_version": "2026.3.0"
         });
-        if cfg!(target_os = "linux")
-            && let Some(machine_id) = expected_machine_id(read_host_machine_id()?.as_deref())
-        {
-            metadata["machine_id"] = json!(machine_id);
-        }
-        validate_agent_metadata(&metadata, Some("2026.3.0"))?;
+        let not_compared = ExpectedMachineId::NotCompared;
+        validate_agent_metadata(&metadata, Some("2026.3.0"), &not_compared)?;
         for key in REQUIRED_METADATA_KEYS {
             let mut missing = metadata.clone();
             missing.as_object_mut().context("fixture metadata")?.remove(key);
             ensure!(
-                validate_agent_metadata(&missing, Some("2026.3.0")).is_err(),
+                validate_agent_metadata(&missing, Some("2026.3.0"), &not_compared).is_err(),
                 "missing {key} was accepted"
             );
         }
         let mut unknown = metadata.clone();
         unknown["custom"] = json!("value");
         ensure!(
-            validate_agent_metadata(&unknown, None).is_err(),
+            validate_agent_metadata(&unknown, None, &not_compared).is_err(),
             "unknown metadata key was accepted"
         );
         metadata["arch"] = json!("wrong-platform");
         ensure!(
-            validate_agent_metadata(&metadata, None).is_err(),
+            validate_agent_metadata(&metadata, None, &not_compared).is_err(),
             "wrong architecture was accepted"
         );
         metadata["arch"] = json!(std::env::consts::ARCH);
         ensure!(
-            validate_agent_metadata(&metadata, Some("different-version")).is_err(),
+            validate_agent_metadata(&metadata, Some("different-version"), &not_compared).is_err(),
             "wrong agent version was accepted"
         );
         Ok(())
