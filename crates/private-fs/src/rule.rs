@@ -4,7 +4,7 @@
 /// |---|---|---|
 /// | [`Account::CurrentUser`] | the effective user ID | the user of the process token |
 /// | [`Account::System`] | root | LocalSystem |
-/// | [`Account::Administrators`] | root | BUILTIN\Administrators; as an owner, also any member of it |
+/// | [`Account::Administrators`] | root | BUILTIN\Administrators; as an owner, or in an entry of a directory above, also any member of it |
 ///
 /// On Linux and macOS, root can access everything whatever the rule says, so a grant to [`Account::System`] or
 /// [`Account::Administrators`] needs nothing on disk there.

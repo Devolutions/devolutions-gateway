@@ -277,6 +277,9 @@ impl Policy {
 
     /// Checks a directory above the item: its owner is the system account, administrators or an account of the rule,
     /// and no other account can rename or replace it or an entry of it.
+    ///
+    /// Administrators include any member of BUILTIN\Administrators, as an owner and in an entry, since a member can
+    /// make itself the owner of any directory anyway.
     pub(super) fn check_ancestor(
         &self,
         security: &OwnerAndDacl,
@@ -296,15 +299,15 @@ impl Policy {
             .contains(&sid)
                 || self.rule_sids.contains(sid)
         };
+        let is_member =
+            |sid: &Sid| membership(sid).map_err(|error| Error::io(path, "check administrators membership", error));
         let Some(owner) = &security.owner else {
             return Err(Error::refused(
                 path,
                 Refusal::Unreadable(io::Error::new(io::ErrorKind::InvalidData, "the directory has no owner")),
             ));
         };
-        if !allowed(owner)
-            && !membership(owner).map_err(|error| Error::io(path, "check administrators membership", error))?
-        {
+        if !allowed(owner) && !is_member(owner)? {
             return Err(Error::refused(path, Refusal::Replaceable));
         }
         // A missing or NULL DACL grants everyone full access.
@@ -340,7 +343,7 @@ impl Policy {
             let Some(sid) = &ace.sid else {
                 return Err(Error::refused(path, Refusal::Replaceable));
             };
-            if !allowed(sid) && !is_app_container(sid) && ace.mask & replacing != 0 {
+            if ace.mask & replacing != 0 && !allowed(sid) && !is_app_container(sid) && !is_member(sid)? {
                 return Err(Error::refused(path, Refusal::Replaceable));
             }
         }

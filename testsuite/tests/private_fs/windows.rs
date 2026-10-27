@@ -18,6 +18,7 @@ use private_fs::{
     Replace, Rule, Share,
 };
 use rstest::rstest;
+use win_api_wrappers::identity::account::lookup_account_by_name;
 use win_api_wrappers::identity::sid::Sid;
 use win_api_wrappers::process::Process;
 use win_api_wrappers::raw::Win32::Foundation::{HANDLE, HLOCAL, LocalFree};
@@ -650,6 +651,30 @@ fn a_directory_above_whose_entries_others_can_delete_is_refused() -> anyhow::Res
         "{error:?}"
     );
     assert_eq!(error.path(), test.path());
+    Ok(())
+}
+
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[test]
+fn a_directory_above_whose_entries_an_administrators_member_can_delete_is_accepted() -> anyhow::Result<()> {
+    // Catches an ancestor check that, for an entry, compares with the BUILTIN\Administrators SID only.
+    // The built-in Administrator account, whose RID is 500, is always a member of Administrators.
+    let computer = U16CString::from_str(std::env::var("COMPUTERNAME")?)?;
+    let machine = lookup_account_by_name(&computer)?;
+    assert_eq!(
+        machine.ty,
+        Security::SidTypeDomain,
+        "the computer name names the machine's account domain"
+    );
+    let administrator = Sid::from_well_known(Security::WinAccountAdministratorSid, Some(&machine.sid))?;
+    let test = TestDir::new();
+    std::fs::create_dir(test.path())?;
+    set_dacl(
+        test.path(),
+        &[(user(), FULL, INHERITED_BY_CHILDREN), (administrator, FULL, 0)],
+        InheritableAclKind::Protected,
+    )?;
+    Dir::create_base(&test.path().join("base"), &user_rule())?;
     Ok(())
 }
 
