@@ -25,6 +25,7 @@ public class ChannelHandshakeTests
     {
         ["a key outside the pattern"] = new($"{LeakedKey}\n", LeakedValue),
         ["a value with a control character"] = new(LeakedKey, $"{LeakedValue}\u0007"),
+        ["a value with an invisible format character"] = new(LeakedKey, $"{LeakedValue}\u202E"),
         ["a value of 1025 UTF-8 bytes"] = new(LeakedKey, LeakedValue + new string('a', 1025 - LeakedValue.Length)),
     };
 
