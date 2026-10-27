@@ -40,6 +40,28 @@ export interface WheelSpeedControl {
   step: number;
 }
 
+/** One option of the mode toggle. */
+export interface ToolbarModeOption {
+  id: string;
+  label: string;
+  tooltip: string;
+  active: boolean;
+  enabled: boolean;
+}
+
+/** Optional text toggle rendered next to the screen-mode group, e.g. a protocol's control mode. */
+export interface ToolbarModeToggle {
+  ariaLabel: string;
+  options: ToolbarModeOption[];
+}
+
+/** Read-only status pill rendered after the drag handle. */
+export interface ToolbarStatusBadge {
+  id: string;
+  label: string;
+  tone?: 'danger';
+}
+
 /** Single consolidated config object — forward-looking type for future API migration.
  *  The component still accepts individual @Input() fields; this type is used by
  *  wrapper components and will replace the scattered inputs in a later PR. */

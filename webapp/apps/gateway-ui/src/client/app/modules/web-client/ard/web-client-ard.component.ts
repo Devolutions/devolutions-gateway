@@ -12,17 +12,56 @@ import { EMPTY, from, Observable, of } from 'rxjs';
 import { catchError, map, switchMap, takeUntil, tap } from 'rxjs/operators';
 import '@devolutions/iron-remote-desktop/iron-remote-desktop.js';
 import {
+  ardControlMode,
+  ardControlStateCallback,
+  ardCurtainFailedCallback,
+  ardHideCurtain,
   ardOnlyInputEncryption,
   ardQualityMode,
+  ardShowCurtain,
   Backend,
   resolutionQuality,
   wheelSpeedFactor,
 } from '@devolutions/iron-remote-desktop-vnc';
 import { DVL_ARD_ICON, JET_ARD_URL } from '@gateway/app.constants';
+import {
+  ArdControlPending,
+  ArdControlState,
+  ArdCurtainFailure,
+} from '@gateway/modules/web-client/ard/ard-control.model';
+import { buildArdModeToggle, buildArdStatusBadges } from '@gateway/modules/web-client/ard/ard-control-toolbar';
 import { AnalyticService, ProtocolString } from '@gateway/shared/services/analytic.service';
-import { WheelSpeedControl } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
+import {
+  ClipboardActionButton,
+  ToolbarAction,
+} from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-action.model';
+import {
+  ToolbarModeToggle,
+  ToolbarStatusBadge,
+  WheelSpeedControl,
+} from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
+import { ArdControlMode, DefaultArdStartMode } from '@shared/interfaces/ard-control.interfaces';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
+
+// At connect time the session falls back to Observe; a later request keeps the current mode.
+const StartModeNotAllowedMessage = "That mode isn't allowed. You're observing.";
+const ModeNotAllowedMessage = "That mode isn't allowed";
+const ControlRevokedMessage = 'The remote user no longer allows control';
+const ControlGrantedMessage = 'Control is available again';
+const ArdControlRequestFailedMessage = 'The control request failed';
+
+// Re-enables the controls if the session never settles a mode or hide-curtain request.
+// Showing the curtain has no timeout: a mode request would cancel it, and the session settles every curtain request
+// it sends on the Mac's next screen report.
+const ArdPendingTimeoutMs = 10_000;
+
+const CurtainFailureMessages: Record<ArdCurtainFailure, string> = {
+  'login-window': "Can't show the curtain while the Mac is at the login window",
+  'lock-screen': "Can't show the curtain while the Mac is at its lock screen",
+  'not-shown': "Can't show the curtain right now",
+  'not-hidden': "Can't hide the curtain right now",
+};
 
 @Component({
   standalone: false,
@@ -47,6 +86,30 @@ export class WebClientArdComponent
   };
   // ──
 
+  // ── ARD control state ─────────────────────────────────────────────────────
+  // Kept here rather than in the toolbar because the first report arrives before the first frame,
+  // while the toolbar only exists once the session is live.
+  // UNTESTED: only onArdControlState() assigns ardControl, so the UI never shows a state the Mac didn't confirm.
+  // Only a settling report or curtain failure (see ArdControlPending), a rejected invokeExtension, or the timeout
+  // clears ardPending; clearing it earlier lets a mode request cancel a curtain in flight.
+  ardControl: ArdControlState | undefined;
+  ardPending: ArdControlPending | undefined;
+  private ardPendingTimeout: ReturnType<typeof setTimeout> | undefined;
+  // Read only while a mode request is in flight.
+  private ardRequestedMode: ArdControlMode = DefaultArdStartMode;
+  private ardStartMode: ArdControlMode = DefaultArdStartMode;
+
+  // Toolbar views of the ARD control state, rebuilt by refreshArdToolbar().
+  ardModeToggle: ToolbarModeToggle | null = null;
+  ardStatusBadges: ToolbarStatusBadge[] = [];
+  ardSessionActions: ToolbarAction[] = [];
+
+  curtainDialogVisible = false;
+  curtainMessage = '';
+  // The session ends on a longer message.
+  readonly maxCurtainMessageBytes = 512;
+  // ──
+
   constructor(
     protected renderer: Renderer2,
     protected utils: UtilsService,
@@ -65,10 +128,34 @@ export class WebClientArdComponent
     super.ngOnInit();
   }
 
+  ngOnDestroy(): void {
+    clearTimeout(this.ardPendingTimeout);
+    super.ngOnDestroy();
+  }
+
   // ── Floating toolbar handlers ─────────────────────────────────────────────
   onCursorCrosshairChange(enabled: boolean): void {
     if (enabled !== this.cursorOverrideActive) {
       this.toggleCursorKind();
+    }
+  }
+
+  toggleCursorKind(): void {
+    this.cursorOverrideActive = !this.cursorOverrideActive;
+    this.applyCursorStyle();
+  }
+
+  // The session drops input while observing; the default cursor signals that.
+  private applyCursorStyle(): void {
+    if (!this.remoteClient) {
+      return;
+    }
+    if (this.ardControl?.mode === 'observe') {
+      this.remoteClient.setCursorStyleOverride('default');
+    } else if (this.cursorOverrideActive) {
+      this.remoteClient.setCursorStyleOverride('url("assets/images/crosshair.png") 7 7, default');
+    } else {
+      this.remoteClient.setCursorStyleOverride(null);
     }
   }
 
@@ -87,6 +174,158 @@ export class WebClientArdComponent
     this.isFullScreenMode = false;
 
     this.scaleTo(ScreenScale.Fit);
+  }
+  // ──
+
+  // ── ARD control handlers ──────────────────────────────────────────────────
+  onArdModeChange(mode: string): void {
+    this.ardRequestedMode = mode as ArdControlMode;
+    this.invokeArdControl('mode', ardControlMode(this.ardRequestedMode));
+  }
+
+  get curtainMessageTooLong(): boolean {
+    return new TextEncoder().encode(this.curtainMessage).length > this.maxCurtainMessageBytes;
+  }
+
+  openCurtainDialog(): void {
+    this.curtainMessage = '';
+    this.curtainDialogVisible = true;
+  }
+
+  submitCurtain(): void {
+    if (this.curtainMessageTooLong || this.ardPending) {
+      return;
+    }
+    this.curtainDialogVisible = false;
+    this.invokeArdControl('show-curtain', ardShowCurtain(this.curtainMessage));
+  }
+
+  private invokeArdControl(pending: ArdControlPending, extension: unknown): void {
+    this.setArdPending(pending);
+    try {
+      this.remoteClient.invokeExtension(extension);
+    } catch (err) {
+      // The session reports no state change for a request it rejected outright.
+      this.setArdPending(undefined);
+      this.webClientError(ArdControlRequestFailedMessage);
+      console.error(err);
+    }
+  }
+
+  private setArdPending(pending: ArdControlPending | undefined): void {
+    clearTimeout(this.ardPendingTimeout);
+    this.ardPending = pending;
+    this.ardPendingTimeout =
+      pending && pending !== 'show-curtain'
+        ? setTimeout(() => this.setArdPending(undefined), ArdPendingTimeoutMs)
+        : undefined;
+    this.refreshArdToolbar();
+  }
+
+  private refreshArdToolbar(): void {
+    const state = this.ardControl;
+    if (!state) {
+      return;
+    }
+    this.ardModeToggle = buildArdModeToggle(state, this.ardPending);
+    this.ardStatusBadges = buildArdStatusBadges(state);
+
+    if (!state.curtainOn && !state.curtainAvailable) {
+      this.ardSessionActions = [];
+      return;
+    }
+    const { curtainOn } = state;
+    this.ardSessionActions = [
+      {
+        id: curtainOn ? 'ard-hide-curtain' : 'ard-show-curtain',
+        label: curtainOn ? 'Hide curtain' : 'Show curtain',
+        tooltip: curtainOn
+          ? 'Remove the curtain from the Mac and return to the previous control mode.'
+          : "Take exclusive control and cover the Mac's screen with a curtain for the person at the Mac.",
+        icon: curtainOn ? 'dvl-icon dvl-icon-unlock' : 'dvl-icon dvl-icon-lock',
+        section: 'Screen',
+        action: curtainOn
+          ? () => this.invokeArdControl('hide-curtain', ardHideCurtain())
+          : () => this.openCurtainDialog(),
+        enabled: () => !this.ardPending,
+      },
+    ];
+  }
+
+  private isArdPendingSettled(pending: ArdControlPending, state: ArdControlState): boolean {
+    switch (pending) {
+      case 'mode': {
+        // The request is only queued, so a server report handled before it may arrive first.
+        const requested = this.ardRequestedMode;
+        return state.mode === requested || !state.availableModes.includes(requested);
+      }
+      // A failure is reported through onArdCurtainFailed() instead.
+      case 'show-curtain':
+        return state.curtainOn;
+      case 'hide-curtain':
+        return !state.curtainOn;
+    }
+  }
+
+  private onArdCurtainFailed(failure: ArdCurtainFailure): void {
+    if (this.ardPending && this.ardPending !== 'mode') {
+      this.setArdPending(undefined);
+    }
+    this.webClientWarning(CurtainFailureMessages[failure]);
+  }
+
+  private onArdControlState(state: ArdControlState): void {
+    const previous = this.ardControl;
+    const pending = this.ardPending;
+    const settled = pending !== undefined && this.isArdPendingSettled(pending, state);
+    this.ardControl = state;
+    if (settled) {
+      this.setArdPending(undefined);
+    } else {
+      this.refreshArdToolbar();
+    }
+    this.applyCursorStyle();
+    if (!state.curtainAvailable || state.curtainOn) {
+      this.curtainDialogVisible = false;
+    }
+
+    if (!previous) {
+      if (state.mode !== this.ardStartMode) {
+        this.webClientWarning(StartModeNotAllowedMessage);
+      }
+      return;
+    }
+
+    // curtainAvailable alone also flips when the displayed session changes, so only availableModes tells
+    // whether the remote user revoked or granted control.
+    const hadControl = previous.availableModes.some((mode) => mode !== 'observe');
+    const hasControl = state.availableModes.some((mode) => mode !== 'observe');
+    const revoked = hadControl && !hasControl && state.mode === 'observe';
+
+    if (settled) {
+      if (pending === 'mode' && state.mode !== this.ardRequestedMode) {
+        this.webClientWarning(revoked ? ControlRevokedMessage : ModeNotAllowedMessage);
+      }
+      return;
+    }
+
+    // A curtain change from the Mac's side updates the toolbar silently.
+    if (revoked) {
+      this.webClientWarning(ControlRevokedMessage);
+    } else if (!hadControl && hasControl) {
+      this.gatewayAlertMessageService.addInfo(ControlGrantedMessage);
+    }
+  }
+
+  protected setupClipboardHandling(autoClipboard?: boolean): void {
+    super.setupClipboardHandling(autoClipboard);
+    // The session drops clipboard in both directions while observing.
+    this.clipboardActionButtons = this.clipboardActionButtons.map(
+      (button): ClipboardActionButton => ({
+        ...button,
+        enabled: () => this.ardControl?.mode !== 'observe' && button.enabled(),
+      }),
+    );
   }
   // ──
 
@@ -127,6 +366,7 @@ export class WebClientArdComponent
       ardQualityMode,
       wheelSpeedFactor = 1,
       ardOnlyInputEncryption,
+      ardStartMode,
     } = formData;
     const extractedData: ExtractedHostnamePort = this.utils.string.extractHostnameAndPort(hostname, DefaultArdPort);
 
@@ -144,6 +384,7 @@ export class WebClientArdComponent
       gatewayAddress,
       resolutionQuality,
       ardQualityMode,
+      ardStartMode,
       wheelSpeedFactor,
       sessionId,
       ardOnlyInputEncryption,
@@ -174,6 +415,11 @@ export class WebClientArdComponent
 
     configBuilder.withExtension(ardOnlyInputEncryption(connectionParameters.ardOnlyInputEncryption));
     configBuilder.withExtension(wheelSpeedFactor(connectionParameters.wheelSpeedFactor));
+
+    this.ardStartMode = connectionParameters.ardStartMode;
+    configBuilder.withExtension(ardControlMode(connectionParameters.ardStartMode));
+    configBuilder.withExtension(ardControlStateCallback((state) => this.onArdControlState(state)));
+    configBuilder.withExtension(ardCurtainFailedCallback((failure) => this.onArdCurtainFailed(failure)));
 
     const config = configBuilder.build();
 

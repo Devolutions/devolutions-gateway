@@ -81,24 +81,32 @@
   &:hover { background: var(--toolbar-btn-active-hover-bg); }
 }
 
-// Ctrl+Alt+Del pill — natural width, inset border
+// Text buttons (Ctrl+Alt+Del pill, mode-toggle options) — natural width
 // height comes from .toolbar-button (always co-applied); only width/padding differ
-.toolbar-button-cad {
+.toolbar-button-cad,
+.toolbar-button-text {
   width: auto;
   padding: 0 10px;
+}
+
+// Shared by text buttons and status badges
+.toolbar-button-cad span,
+.toolbar-button-text span,
+.toolbar-status-badge {
+  font-family: var(--toolbar-font-family);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--toolbar-cad-text-color);
+  white-space: nowrap;
+}
+
+// Ctrl+Alt+Del pill — inset border
+.toolbar-button-cad {
   background: var(--toolbar-cad-bg);
   box-shadow: inset 0 0 0 1px var(--toolbar-cad-border-color);
 
   &:hover { background: var(--toolbar-cad-hover-bg); }
-
-  span {
-    font-family: var(--toolbar-font-family);
-    font-size: 12px;
-    font-weight: 400;
-    line-height: 1;
-    color: var(--toolbar-cad-text-color);
-    white-space: nowrap;
-  }
 }
 
 // Grouped section container (Minimize / Fullscreen / Fit)
@@ -112,12 +120,27 @@
   flex-shrink: 0;
 }
 
-// Close button — solid danger background
-.toolbar-button-close {
+// Mode toggle: vertical docks pin .toolbar-btn-section to 36px, which text labels don't fit.
+// Three classes outrank the dock rules without extending the shared vertical placeholder, which would emit this rule once per vertical dock.
+.floating-session-toolbar .toolbar-btn-section.toolbar-btn-section-text {
+  width: auto;
+}
+
+// Read-only status pill (e.g. "Curtain on")
+.toolbar-status-badge {
+  flex-shrink: 0;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--toolbar-btn-group-bg);
+}
+
+// Close button and danger badge — solid danger background
+.toolbar-button-close,
+.toolbar-status-badge-danger {
   background: var(--toolbar-close-bg);
   color: var(--toolbar-close-color);
-
-  &:hover { background: var(--toolbar-close-hover-bg); }
 }
+
+.toolbar-button-close:hover { background: var(--toolbar-close-hover-bg); }
 
 

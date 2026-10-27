@@ -99,6 +99,9 @@ container without consuming layout space.
 | `initialWheelSpeed` | `number` | `1` | Seed the wheel-speed slider value. |
 | `wheelSpeedControl` | `WheelSpeedControl \| null` | `null` | Slider config (min/max/step/label). |
 | `clipboardActionButtons` | `ClipboardActionButton[]` | `[]` | Action buttons rendered in the dropdown Clipboard section. |
+| `sessionActions` | `ToolbarAction[]` | `[]` | Action buttons rendered in the dropdown above Clipboard, grouped by `section` (heading defaults to **Session**). |
+| `modeToggle` | `ToolbarModeToggle \| null` | `null` | Text toggle rendered after the screen-mode group. |
+| `statusBadges` | `ToolbarStatusBadge[]` | `[]` | Read-only status pills rendered after the drag handle. |
 | `sessionInfo` | `ToolbarSessionInfo \| null` | `null` | Data source for the Session info popover default renderer. |
 | `sessionInfoTemplate` | `TemplateRef<ToolbarSessionInfoTemplateContext> \| null` | `null` | Optional custom popover template. When omitted, the default key/value renderer is used. |
 | `iconColorActive` | `string` | `'#0068C3'` | Active fill color for the dropdown dock-position SVG buttons. |
@@ -137,6 +140,7 @@ If you later want persistence, a host-owned service or `localStorage` keyed by p
 | `unicodeKeyboardChange` | `boolean` | User toggles unicode keyboard. |
 | `cursorCrosshairChange` | `boolean` | User toggles cursor crosshair. |
 | `wheelSpeedChange` | `number` | User changes the wheel-speed slider. |
+| `modeToggleChange` | `string` | User picks an enabled, inactive `modeToggle` option; the payload is its `id`. |
 
 `sessionInfoPress` is optional and can be used for host-side telemetry; the popover UI is owned by the toolbar itself.
 

@@ -11,13 +11,16 @@ import {
   TemplateRef,
   ViewChild,
 } from '@angular/core';
-import { ClipboardActionButton } from './models/floating-session-toolbar-action.model';
+import { ClipboardActionButton, ToolbarAction } from './models/floating-session-toolbar-action.model';
 import {
   FreePosition,
   ScreenMode,
   ToolbarFeatures,
   ToolbarMode,
+  ToolbarModeOption,
+  ToolbarModeToggle,
   ToolbarPosition,
+  ToolbarStatusBadge,
   WheelSpeedControl,
 } from './models/floating-session-toolbar-config.model';
 import {
@@ -112,15 +115,31 @@ export class FloatingSessionToolbarComponent implements OnDestroy {
   @Input() sessionInfo: ToolbarSessionInfo | null = null;
   @Input() sessionInfoTemplate: TemplateRef<ToolbarSessionInfoTemplateContext> | null = null;
 
+  // ── Mode toggle and status badges ─────────────────────────────────────────
+  @Input() modeToggle: ToolbarModeToggle | null = null;
+  @Input() statusBadges: ToolbarStatusBadge[] = [];
+
+  // ── Session actions ───────────────────────────────────────────────────────
+  @Input() sessionActions: ToolbarAction[] = [];
+
+  /** Session actions grouped by optional `section`, preserving first-seen order. */
+  protected get groupedSessionActions(): Array<{ section: string | null; actions: ToolbarAction[] }> {
+    return this.groupActions(this.sessionActions);
+  }
+
   // ── Clipboard actions ─────────────────────────────────────────────────────
   @Input() clipboardActionButtons: ClipboardActionButton[] = [];
 
   /** Clipboard actions grouped by optional `section`, preserving first-seen order. */
   protected get groupedClipboardActions(): Array<{ section: string | null; actions: ClipboardActionButton[] }> {
-    const groups: Array<{ section: string | null; actions: ClipboardActionButton[] }> = [];
-    const bySection = new Map<string | null, ClipboardActionButton[]>();
+    return this.groupActions(this.clipboardActionButtons);
+  }
 
-    for (const action of this.clipboardActionButtons) {
+  private groupActions(actions: ToolbarAction[]): Array<{ section: string | null; actions: ToolbarAction[] }> {
+    const groups: Array<{ section: string | null; actions: ToolbarAction[] }> = [];
+    const bySection = new Map<string | null, ToolbarAction[]>();
+
+    for (const action of actions) {
       const key = action.section?.trim() || null;
       let bucket = bySection.get(key);
       if (!bucket) {
@@ -144,6 +163,8 @@ export class FloatingSessionToolbarComponent implements OnDestroy {
   @Output() readonly windowsKeyPress = new EventEmitter<void>();
   @Output() readonly sessionInfoPress = new EventEmitter<void>();
   @Output() readonly ctrlAltDelPress = new EventEmitter<void>();
+  /** Emits the id of the mode-toggle option the user picked; the host decides whether it becomes active. */
+  @Output() readonly modeToggleChange = new EventEmitter<string>();
 
   // Settings-change events — emitted whenever the user toggles a setting so
   // the host component can react (e.g. call setKeyboardUnicodeMode).
@@ -253,6 +274,12 @@ export class FloatingSessionToolbarComponent implements OnDestroy {
 
   onCloseSession(): void {
     this.sessionClose.emit();
+  }
+
+  selectModeToggleOption(option: ToolbarModeOption): void {
+    if (option.enabled && !option.active) {
+      this.modeToggleChange.emit(option.id);
+    }
   }
 
   toggleMenu(): void {

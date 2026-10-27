@@ -15,14 +15,38 @@
     <div class="toolbar-overlay-anchor">
       <ard-toolbar-wrapper
         [actions]="clipboardActionButtons"
+        [sessionActions]="ardSessionActions"
+        [modeToggle]="ardModeToggle"
+        [statusBadges]="ardStatusBadges"
         [sessionInfo]="sessionInfo"
         [initialState]="{ cursorCrosshair: cursorOverrideActive, wheelSpeed: wheelSpeed }"
         [wheelSpeedControl]="wheelSpeedControl"
         (sessionClose)="startTerminationProcess()"
         (screenModeChange)="handleScreenModeChange($event)"
         (cursorCrosshairChange)="onCursorCrosshairChange($event)"
-        (wheelSpeedChange)="onWheelSpeedChange($event)">
+        (wheelSpeedChange)="onWheelSpeedChange($event)"
+        (controlModeChange)="onArdModeChange($event)">
       </ard-toolbar-wrapper>
     </div>
   }
+
+  <p-dialog header="Show curtain" [modal]="true" [(visible)]="curtainDialogVisible" [style]="{ width: '420px' }" appendTo="body">
+    <form class="ard-curtain-form" (ngSubmit)="submitCurtain()">
+      <label for="ardCurtainMessage">Message shown on the Mac</label>
+      <input pInputText
+             id="ardCurtainMessage"
+             name="curtainMessage"
+             type="text"
+             autocomplete="off"
+             [(ngModel)]="curtainMessage"
+             [attr.aria-invalid]="curtainMessageTooLong"/>
+      @if (curtainMessageTooLong) {
+        <span class="form-helper-text" role="alert">The message must be at most {{ maxCurtainMessageBytes }} bytes.</span>
+      }
+      <div class="ard-curtain-form-actions">
+        <p-button type="button" label="Cancel" severity="secondary" (onClick)="curtainDialogVisible = false"></p-button>
+        <p-button type="submit" label="Show" [disabled]="curtainMessageTooLong || !!ardPending"></p-button>
+      </div>
+    </form>
+  </p-dialog>
 </div>

@@ -20,6 +20,12 @@
     <i class="dvl-icon dvl-icon-move" aria-hidden="true"></i>
   </button>
 
+  @for (badge of statusBadges; track badge.id) {
+    <span class="toolbar-status-badge"
+      [class.toolbar-status-badge-danger]="badge.tone === 'danger'"
+      role="status">{{ badge.label }}</span>
+  }
+
   @if (features.windowsKey) {
     <button type="button" class="toolbar-button"
       aria-label="Windows key" title="Send Windows key"
@@ -83,6 +89,25 @@
         (click)="setScreenMode('fit')">
         <i class="dvl-icon dvl-icon-screen" aria-hidden="true"></i>
       </button>
+    </div>
+  }
+
+  @if (modeToggle) {
+    <div class="toolbar-divider" aria-hidden="true"></div>
+    <div class="toolbar-btn-section toolbar-btn-section-text" role="radiogroup" [attr.aria-label]="modeToggle.ariaLabel">
+      @for (option of modeToggle.options; track option.id) {
+        <button
+          type="button"
+          role="radio"
+          class="toolbar-button toolbar-button-text"
+          [class.toolbar-button-active]="option.active"
+          [attr.aria-checked]="option.active"
+          [disabled]="!option.enabled"
+          [title]="option.tooltip"
+          (click)="selectModeToggleOption(option)">
+          <span>{{ option.label }}</span>
+        </button>
+      }
     </div>
   }
 
@@ -229,6 +254,25 @@
                 (input)="onWheelSpeedInput(wheelSpeedSlider.value)"
               />
             </div>
+          }
+        }
+
+        <!-- Session actions — only rendered when the host passes them in -->
+        @if (sessionActions.length > 0) {
+          <div class="dropdown-splitter"></div>
+          @for (group of groupedSessionActions; track group.section ?? '__default__') {
+            <div class="dropdown-section-title">{{ group.section ?? 'Session' }}</div>
+            @for (btn of group.actions; track btn.id ?? btn.label) {
+              <button
+                type="button"
+                class="dropdown-action-btn"
+                [disabled]="!btn.enabled()"
+                [title]="btn.tooltip"
+                (click)="showMenu = false; btn.action()">
+                <i [class]="btn.icon" aria-hidden="true"></i>
+                <span>{{ btn.label }}</span>
+              </button>
+            }
           }
         }
 
