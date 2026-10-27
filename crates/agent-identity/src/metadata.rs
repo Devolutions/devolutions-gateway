@@ -44,13 +44,41 @@ pub fn collect(agent_version: &str, override_path: Option<&Utf8Path>) -> Metadat
     sanitize(values)
 }
 
+/// Removes from each value the characters that [CONTRACT.agent-identity.md §3 "Metadata"][metadata] forbids, then
+/// applies the length and empty-value rules of [§3.1 "Metadata sent by the agent"][agent-metadata].
+///
+/// The forbidden characters are the contract's closed list of code points, not a Unicode category lookup,
+/// because the contract fixes them as code points so that the agent and every authority agree whatever Unicode
+/// version their runtimes ship.
+///
+/// [metadata]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#metadata
+/// [agent-metadata]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-metadata
 fn sanitize(values: Metadata) -> Metadata {
     values
         .into_iter()
         .filter_map(|(key, value)| {
             let sanitized: String = value
                 .chars()
-                .filter(|ch| !matches!(ch, '\u{0}'..='\u{1f}' | '\u{7f}'..='\u{9f}'))
+                .filter(|ch| {
+                    !matches!(
+                        ch,
+                        // C0, DEL and C1 control characters.
+                        '\u{0}'..='\u{1F}'
+                            | '\u{7F}'..='\u{9F}'
+                            // Invisible format characters.
+                            | '\u{AD}'
+                            | '\u{61C}'
+                            | '\u{180E}'
+                            | '\u{200B}'..='\u{200F}'
+                            | '\u{202A}'..='\u{202E}'
+                            | '\u{2060}'..='\u{2064}'
+                            | '\u{2066}'..='\u{206F}'
+                            | '\u{FEFF}'
+                            | '\u{FFF9}'..='\u{FFFB}'
+                            | '\u{E0001}'
+                            | '\u{E0020}'..='\u{E007F}'
+                    )
+                })
                 .scan(0, |length, ch| {
                     *length += ch.len_utf8();
                     (*length <= 1024).then_some(ch)
@@ -190,7 +218,94 @@ fn machine_id() -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
+
     use super::*;
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[rstest]
+    #[case::c0('\u{0}', '\u{1F}')]
+    #[case::del_and_c1('\u{7F}', '\u{9F}')]
+    #[case::soft_hyphen('\u{AD}', '\u{AD}')]
+    #[case::arabic_letter_mark('\u{61C}', '\u{61C}')]
+    #[case::mongolian_vowel_separator('\u{180E}', '\u{180E}')]
+    #[case::zero_width_and_directional_marks('\u{200B}', '\u{200F}')]
+    #[case::directional_embeddings_and_overrides('\u{202A}', '\u{202E}')]
+    #[case::word_joiner_and_invisible_operators('\u{2060}', '\u{2064}')]
+    #[case::directional_isolates_and_deprecated_controls('\u{2066}', '\u{206F}')]
+    #[case::byte_order_mark('\u{FEFF}', '\u{FEFF}')]
+    #[case::interlinear_annotations('\u{FFF9}', '\u{FFFB}')]
+    #[case::language_tag('\u{E0001}', '\u{E0001}')]
+    #[case::tags('\u{E0020}', '\u{E007F}')]
+    fn removes_each_forbidden_code_point(#[case] first: char, #[case] last: char) {
+        for ch in first..=last {
+            let code = u32::from(ch);
+            assert_eq!(sanitized_hostname(format!("a{ch}b")), "ab", "U+{code:04X}");
+        }
+    }
+
+    // Each case is the run of allowed code points from just after one forbidden range to just before the next, or to
+    // the last code point.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[rstest]
+    #[case::after_c0('\u{20}', '\u{7E}')]
+    #[case::after_c1('\u{A0}', '\u{AC}')]
+    #[case::after_soft_hyphen('\u{AE}', '\u{61B}')]
+    #[case::after_arabic_letter_mark('\u{61D}', '\u{180D}')]
+    #[case::after_mongolian_vowel_separator('\u{180F}', '\u{200A}')]
+    #[case::after_directional_marks('\u{2010}', '\u{2029}')]
+    #[case::after_directional_overrides('\u{202F}', '\u{205F}')]
+    #[case::after_invisible_operators('\u{2065}', '\u{2065}')]
+    #[case::after_deprecated_controls('\u{2070}', '\u{FEFE}')]
+    #[case::after_byte_order_mark('\u{FF00}', '\u{FFF8}')]
+    #[case::after_interlinear_annotations('\u{FFFC}', '\u{E0000}')]
+    #[case::after_language_tag('\u{E0002}', '\u{E001F}')]
+    #[case::after_tags('\u{E0080}', '\u{10FFFF}')]
+    fn keeps_code_points_just_outside_forbidden_ranges(#[case] first: char, #[case] last: char) {
+        for ch in [first, last] {
+            let code = u32::from(ch);
+            assert_eq!(sanitized_hostname(format!("a{ch}b")), format!("a{ch}b"), "U+{code:04X}");
+        }
+    }
+
+    // These are the format characters (Unicode general category `Cf`) that render visibly, which the list leaves out.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[rstest]
+    #[case::arabic_number_signs('\u{600}', '\u{605}')]
+    #[case::arabic_end_of_ayah('\u{6DD}', '\u{6DD}')]
+    #[case::syriac_abbreviation_mark('\u{70F}', '\u{70F}')]
+    #[case::arabic_currency_marks_above('\u{890}', '\u{891}')]
+    #[case::arabic_disputed_end_of_ayah('\u{8E2}', '\u{8E2}')]
+    #[case::kaithi_number_sign('\u{110BD}', '\u{110BD}')]
+    #[case::kaithi_number_sign_above('\u{110CD}', '\u{110CD}')]
+    #[case::egyptian_hieroglyph_format_controls('\u{13430}', '\u{1343F}')]
+    #[case::shorthand_format_controls('\u{1BCA0}', '\u{1BCA3}')]
+    #[case::musical_symbol_format_controls('\u{1D173}', '\u{1D17A}')]
+    fn keeps_visible_format_characters(#[case] first: char, #[case] last: char) {
+        for ch in first..=last {
+            let code = u32::from(ch);
+            assert_eq!(sanitized_hostname(format!("a{ch}b")), format!("a{ch}b"), "U+{code:04X}");
+        }
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[test]
+    fn replaces_a_required_value_of_only_format_characters_with_unknown() {
+        assert_eq!(
+            sanitized_hostname("\u{200B}\u{2066}\u{FEFF}\u{E0041}".into()),
+            "unknown"
+        );
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[test]
+    fn omits_an_optional_value_of_only_format_characters() {
+        let values = Metadata::from([("domain".to_owned(), "\u{AD}\u{202E}\u{E007F}".to_owned())]);
+        assert!(!sanitize(values).contains_key("domain"));
+    }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     #[test]
@@ -261,5 +376,10 @@ mod tests {
             Some("12345678-9abc-def0-0123-456789abcdef")
         );
         assert!(smbios_uuid(&raw[..raw.len() - 1]).is_none());
+    }
+
+    fn sanitized_hostname(value: String) -> String {
+        let mut values = sanitize(Metadata::from([("hostname".to_owned(), value)]));
+        values.remove("hostname").expect("hostname is a required key")
     }
 }
