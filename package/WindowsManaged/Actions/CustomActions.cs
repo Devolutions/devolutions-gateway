@@ -23,7 +23,6 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using WixSharp;
@@ -521,21 +520,19 @@ namespace DevolutionsGateway.Actions
         /// </summary>
         private static ActionResult Refuse(Session session, DataFolderRefusal refusal)
         {
-            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows.
+            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows,
+            // with its text in a record field, which the installer shows as written rather than reading brackets in it
+            // as property references.
             // No test runs the data folder actions, which read the machine's own ProgramData.
-            // When changing this, keep sending it with InstallMessage.Error, as ValidateServiceAccount does.
+            // When changing this, keep sending it with InstallMessage.Error, as ValidateServiceAccount does, and keep the
+            // text out of the format string.
             string message = refusal.Message(session.Property("ProductLanguage"));
             session.Log(message);
-            using Record record = new(0) { FormatString = EscapeFormatted(message) };
+            using Record record = new(1) { FormatString = "[1]" };
+            record.SetString(1, message);
             session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
             return ActionResult.Failure;
         }
-
-        /// <summary>
-        /// <paramref name="text"/> with each bracket escaped, so that a formatted record shows it as written rather than
-        /// reading it as a property reference.
-        /// </summary>
-        private static string EscapeFormatted(string text) => Regex.Replace(text, @"[\[\]]", m => $"[\\{m.Value}]");
 
         [CustomAction]
         public static ActionResult GetInstallDirFromRegistry(Session session)

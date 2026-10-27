@@ -251,7 +251,7 @@ internal static class DataFolders
     /// </param>
     /// <returns>The refusal, or <c>null</c> when the folder passes.</returns>
     internal static DataFolderRefusal Evaluate(
-        string folder, RawSecurityDescriptor security, bool isLink, bool isDirectory, bool checkAccess)
+        string folder, RawSecurityDescriptor security, bool isLink, bool isDirectory, bool checkAccess, ILogger logger)
     {
         if (isLink)
         {
@@ -311,29 +311,32 @@ internal static class DataFolders
                 if ((unchecked((uint)entry.AccessMask) & ReplaceRights) != 0
                     && entry.SecurityIdentifier != OwnerRights
                     && !IsAppContainer(entry.SecurityIdentifier)
-                    && !IsTrusted(entry.SecurityIdentifier))
+                    && !IsTrusted(entry.SecurityIdentifier, logger))
                 {
                     return new DataFolderRefusal(folder, DataFolderProblem.Access, entry.SecurityIdentifier);
                 }
             }
         }
 
-        return IsTrusted(security.Owner) ? null : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
+        return IsTrusted(security.Owner, logger)
+            ? null
+            : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
     }
 
     /// <summary>
     /// Whether <paramref name="sid"/> may own the Gateway's data, as <see cref="SecureDirectory.IsTrustedOwner"/>
     /// decides.
     /// </summary>
-    private static bool IsTrusted(SecurityIdentifier sid)
+    private static bool IsTrusted(SecurityIdentifier sid, ILogger logger)
     {
         try
         {
-            return SecureDirectory.IsTrustedOwner(sid);
+            return SecureDirectory.IsTrustedOwner(sid, logger);
         }
-        catch (Exception)
+        catch (Exception e)
         {
             // An account whose group membership can't be resolved isn't known to be an administrator.
+            logger.Log($"failed to tell whether {sid} is a member of Administrators, so it isn't trusted: {e}");
             return false;
         }
     }
@@ -353,7 +356,7 @@ internal static class DataFolders
         {
             handle = open(path);
             (RawSecurityDescriptor security, bool isLink, bool isDirectory) = SecureDirectory.ReadSecurity(handle);
-            DataFolderRefusal refusal = Evaluate(path, security, isLink, isDirectory, checkAccess);
+            DataFolderRefusal refusal = Evaluate(path, security, isLink, isDirectory, checkAccess, logger);
 
             logger.Log(refusal is null
                 ? $"checked {path}"

@@ -123,7 +123,7 @@ public sealed class DataFolderTests
     public void RefusalFollowsTheOwnerAndTheDacl(string scenario, bool checkAccess, string sddl, string expected)
     {
         DataFolderRefusal refusal = DataFolders.Evaluate(
-            "folder", new RawSecurityDescriptor(sddl), isLink: false, isDirectory: true, checkAccess);
+            "folder", new RawSecurityDescriptor(sddl), isLink: false, isDirectory: true, checkAccess, this.logger);
 
         Assert.Equal((scenario, expected), (scenario, Describe(refusal)));
     }
@@ -135,7 +135,7 @@ public sealed class DataFolderTests
     public void LinkIsRefusedWhateverItsSecurity(bool checkAccess)
     {
         DataFolderRefusal refusal = DataFolders.Evaluate(
-            "folder", new RawSecurityDescriptor("O:SY" + InheritedDacl), isLink: true, isDirectory: true, checkAccess);
+            "folder", new RawSecurityDescriptor("O:SY" + InheritedDacl), isLink: true, isDirectory: true, checkAccess, this.logger);
 
         Assert.Equal("Link", Describe(refusal));
     }
@@ -147,7 +147,7 @@ public sealed class DataFolderTests
     public void FileIsRefusedWhateverItsSecurity(bool checkAccess)
     {
         DataFolderRefusal refusal = DataFolders.Evaluate(
-            "folder", new RawSecurityDescriptor("O:SY" + InheritedDacl), isLink: false, isDirectory: false, checkAccess);
+            "folder", new RawSecurityDescriptor("O:SY" + InheritedDacl), isLink: false, isDirectory: false, checkAccess, this.logger);
 
         Assert.Equal("File", Describe(refusal));
     }

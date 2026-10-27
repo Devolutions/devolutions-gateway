@@ -45,14 +45,14 @@ public sealed class SecureDirectoryTests
 
     public SecureDirectoryTests(ITestOutputHelper output) => this.logger = new OutputLogger(output);
 
-// oracle: spec Microsoft Learn CreateFileW §dwShareMode, FILE_SHARE_DELETE
+    // oracle: spec Microsoft Learn CreateFileW §dwShareMode, FILE_SHARE_DELETE
     [Fact]
     public void HeldDirectoryCantBeRenamedUntilItsHandleIsClosed()
     {
         AssertHoldsUntilClosed(path => SecureDirectory.Hold(path));
     }
 
-// oracle: spec Microsoft Learn CreateFileW §dwShareMode, FILE_SHARE_DELETE
+    // oracle: spec Microsoft Learn CreateFileW §dwShareMode, FILE_SHARE_DELETE
     [Fact]
     public void DirectoryOpenedToReadAndHoldCantBeRenamedUntilItsHandleIsClosed()
     {
@@ -87,6 +87,8 @@ public sealed class SecureDirectoryTests
         AssertProtectedSecurity(new DirectoryInfo(gateway).GetAccessControl());
     }
 
+    // The installer's templates mark the DACL auto-inherited, so that the entries created below hold what they inherit
+    // as inherited entries, which a later reset tells apart from their explicit ones without the folder's earlier DACL.
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CreateGivesTheNewDirectoryExactlyTheSecurityDescriptor()
@@ -94,9 +96,12 @@ public sealed class SecureDirectoryTests
         using TempFolder folder = new();
         string path = Path.Combine(folder.Path, "data");
 
-        Assert.True(SecureDirectory.Create(path, ProtectedSddl));
+        Assert.True(SecureDirectory.Create(path, ProtectedSddl.Replace("D:P", "D:PAI")));
 
         AssertProtectedSecurity(new DirectoryInfo(path).GetAccessControl());
+        Assert.Equal(
+            ControlFlags.DiscretionaryAclAutoInherited,
+            new RawSecurityDescriptor(RawSddl(path)).ControlFlags & ControlFlags.DiscretionaryAclAutoInherited);
     }
 
     [Theory]
@@ -114,9 +119,10 @@ public sealed class SecureDirectoryTests
     [InlineData("LOCAL SERVICE", "S-1-5-19", false)]
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [InlineData("NETWORK SERVICE", "S-1-5-20", false)]
-    public void OwnerIsTrustedOnlyWhenPrivileged(string name, string sid, bool expected)
+    public void WellKnownOwnerIsTrustedOnlyWhenPrivileged(string name, string sid, bool expected)
     {
-        Assert.Equal((name, expected), (name, SecureDirectory.IsTrustedOwner(new SecurityIdentifier(sid))));
+        Assert.Equal(
+            (name, expected), (name, SecureDirectory.IsTrustedOwner(new SecurityIdentifier(sid), this.logger)));
     }
 
     // oracle: property round-trip
@@ -176,19 +182,25 @@ public sealed class SecureDirectoryTests
     // A file or folder created before the folder got its current DACL holds the entries it inherited then, such as
     // none for a service account chosen later, or one for an account that no longer has access, until its inherited
     // entries are computed again.
+    // Earlier installers stored the folder's DACL without marking it auto-inherited, so the entries below hold what
+    // they inherited as plain entries, which only the folder's earlier DACL tells apart from explicit ones.
     // oracle: reference System.IO.Directory.SetAccessControl and File.SetAccessControl, then SetAccessRuleProtection(false, false) top-down, run live
     [Theory]
-    [InlineData("a file directly in the folder")]
-    [InlineData("a file in a subfolder", "sub")]
-    [InlineData("a file two subfolders down", "sub", "deeper")]
+    [InlineData("a file directly in the folder", true)]
+    [InlineData("a file in a subfolder", true, "sub")]
+    [InlineData("a file two subfolders down", true, "sub", "deeper")]
+    [InlineData("a file directly in a folder not marked auto-inherited", false)]
+    [InlineData("a file in a subfolder of a folder not marked auto-inherited", false, "sub")]
+    [InlineData("a file two subfolders down a folder not marked auto-inherited", false, "sub", "deeper")]
     public void InheritBelowGivesEntriesWithStaleInheritedEntriesTheDaclWindowsGivesThem(
-        string scenario, params string[] subfolders)
+        string scenario, bool autoInherited, params string[] subfolders)
     {
         AssertInheritsAsWindows(
             scenario,
             subfolders,
             (gateway, file) => { },
-            $"O:{CurrentUser}D:PAI(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OICI;0x1301ff;;;NS)");
+            $"O:{CurrentUser}D:PAI(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)(A;OICI;0x1301ff;;;NS)",
+            autoInherited ? TreeSddl : TreeSddl.Replace("D:PAI", "D:P"));
     }
 
     // An earlier installer gave Gateway a DACL that LOCAL SERVICE could write through, stored without being marked
@@ -421,14 +433,15 @@ public sealed class SecureDirectoryTests
     /// <param name="prepare">
     /// Changes each tree, given the path of <c>Gateway</c> and of the file, before the DACLs are set.
     /// </param>
+    /// <param name="treeSddl">The security descriptor <c>Gateway</c> is created with.</param>
     private void AssertInheritsAsWindows(
-        string scenario, string[] subfolders, Action<string, string> prepare, string sddl)
+        string scenario, string[] subfolders, Action<string, string> prepare, string sddl, string treeSddl = null)
     {
         using TempFolder folder = new();
         string actual = Path.Combine(folder.Path, "actual");
         string expected = Path.Combine(folder.Path, "expected");
-        CreateTree(actual, subfolders, prepare);
-        CreateTree(expected, subfolders, prepare);
+        CreateTree(actual, subfolders, prepare, treeSddl ?? TreeSddl);
+        CreateTree(expected, subfolders, prepare, treeSddl ?? TreeSddl);
         string[] directories = Enumerable.Range(0, subfolders.Length + 1)
             .Select(depth => Path.Combine([.. GatewayNames, .. subfolders.Take(depth)]))
             .ToArray();
@@ -479,16 +492,16 @@ public sealed class SecureDirectoryTests
     }
 
     /// <summary>
-    /// Creates <c>Devolutions\Gateway\<paramref name="subfolders"/></c> under <paramref name="root"/>, with a protected
-    /// DACL on <c>Gateway</c> whose entries a file inherits in several ways, and a file in the last folder, then calls
+    /// Creates <c>Devolutions\Gateway\<paramref name="subfolders"/></c> under <paramref name="root"/>, with the security
+    /// descriptor <paramref name="sddl"/> on <c>Gateway</c>, and a file in the last folder, then calls
     /// <paramref name="prepare"/> with the paths of <c>Gateway</c> and of the file.
     /// </summary>
     /// <returns>The path of the file.</returns>
-    private static string CreateTree(string root, string[] subfolders, Action<string, string> prepare)
+    private static string CreateTree(string root, string[] subfolders, Action<string, string> prepare, string sddl)
     {
         Directory.CreateDirectory(Path.Combine(root, "Devolutions"));
         string gateway = Path.Combine(root, "Devolutions", "Gateway");
-        Assert.True(SecureDirectory.Create(gateway, TreeSddl));
+        Assert.True(SecureDirectory.Create(gateway, sddl));
         string path = gateway;
 
         foreach (string subfolder in subfolders)

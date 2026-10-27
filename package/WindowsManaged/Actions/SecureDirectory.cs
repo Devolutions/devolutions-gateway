@@ -61,6 +61,24 @@ internal static class SecureDirectory
 
         if (WinAPI.CreateDirectory(path, ref attributes))
         {
+            // CreateDirectory stores the DACL without marking it auto-inherited, even when asked to, so the DACL is set
+            // again through the new directory's handle; until then, the directory has the same entries without the mark.
+            if (descriptor is not null && RequestAutoInherit(descriptor, sddl))
+            {
+                using SafeFileHandle handle = Open(
+                    path, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.FILE_READ_ATTRIBUTES, HeldShare);
+
+                if (!IsPlainDirectory(GetInformation(handle).dwFileAttributes))
+                {
+                    throw new IOException($"{path} changed while it was being created");
+                }
+
+                if (!WinAPI.SetKernelObjectSecurity(handle, WinAPI.DACL_SECURITY_INFORMATION, descriptor.Pointer))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+            }
+
             return true;
         }
 
@@ -244,7 +262,7 @@ internal static class SecureDirectory
     /// local member list of Administrators.
     /// </remarks>
     /// <exception cref="Win32Exception">Authz failed and the local member list of Administrators can't be read.</exception>
-    internal static bool IsTrustedOwner(SecurityIdentifier owner)
+    internal static bool IsTrustedOwner(SecurityIdentifier owner, ILogger logger)
     {
         if (IsPrivileged(owner))
         {
@@ -261,8 +279,9 @@ internal static class SecureDirectory
         {
             groups = AuthzGroups(owner);
         }
-        catch (Exception)
+        catch (Exception e)
         {
+            logger.Log($"failed to resolve the groups of {owner}, checking the local members of Administrators: {e}");
             return LocalAdministrators().Contains(owner);
         }
 
@@ -535,20 +554,37 @@ internal static class SecureDirectory
     private static void Apply(SafeFileHandle handle, string sddl)
     {
         using SecurityDescriptor descriptor = new(sddl);
-
-        // Without this request, the file system stores the DACL without marking it auto-inherited, and the entries
-        // created below then hold what they inherit as explicit entries.
-        if ((new RawSecurityDescriptor(sddl).ControlFlags & ControlFlags.DiscretionaryAclAutoInherited) != 0
-            && !WinAPI.SetSecurityDescriptorControl(
-                descriptor.Pointer, WinAPI.SE_DACL_AUTO_INHERIT_REQ, WinAPI.SE_DACL_AUTO_INHERIT_REQ))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
+        RequestAutoInherit(descriptor, sddl);
 
         if (!WinAPI.SetKernelObjectSecurity(handle, OwnerAndDacl, descriptor.Pointer))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
+    }
+
+    /// <summary>
+    /// Asks the file system to store the DACL of <paramref name="descriptor"/> marked auto-inherited when
+    /// <paramref name="sddl"/>, its source, marks it so.
+    /// </summary>
+    /// <remarks>
+    /// Without this request, setting the DACL stores it without the mark, and the entries created below then hold what
+    /// they inherit as explicit entries.
+    /// </remarks>
+    /// <returns>Whether the mark was requested.</returns>
+    private static bool RequestAutoInherit(SecurityDescriptor descriptor, string sddl)
+    {
+        if ((new RawSecurityDescriptor(sddl).ControlFlags & ControlFlags.DiscretionaryAclAutoInherited) == 0)
+        {
+            return false;
+        }
+
+        if (!WinAPI.SetSecurityDescriptorControl(
+                descriptor.Pointer, WinAPI.SE_DACL_AUTO_INHERIT_REQ, WinAPI.SE_DACL_AUTO_INHERIT_REQ))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        return true;
     }
 
     /// <summary>
