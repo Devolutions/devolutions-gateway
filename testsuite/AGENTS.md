@@ -1,5 +1,3 @@
-# Testsuite
-
 New integration tests go in this crate's single test binary, so the suite links once and runs as one process.
 A test either drives a shipped binary or exercises the public API of a library crate under `crates/`.
 Drive the binary whenever the behaviour is reachable that way.

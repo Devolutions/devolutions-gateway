@@ -3,8 +3,6 @@ name: changelog-to-jira
 description: Creates missing DGW Jira tickets from CHANGELOG.md entries and updates the file with the new ticket links.
 ---
 
-# Changelog to Jira Skill
-
 This skill reads `CHANGELOG.md`, identifies entries that don't have a `DGW-*` Jira ticket, groups similar entries together, creates them in the DGW project, infers the assignee from the commit author, transitions them to Done, and updates `CHANGELOG.md` with the new ticket links.
 
 ## Scope
