@@ -6100,18 +6100,30 @@ mod tests {
     fn agent_metadata_check_refuses_listed_format_characters_only() {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
         let metadata = |hostname: &str| {
-            json!({
+            let mut metadata = json!({
                 "hostname": hostname,
                 "os_name": "os",
                 "os_version": "1",
                 "arch": std::env::consts::ARCH,
                 "agent_version": "1",
-            })
+            });
+            // The check compares `machine_id` with the host's on Linux, so the fixture carries the host's.
+            if cfg!(target_os = "linux")
+                && let Ok(machine_id) = std::fs::read_to_string("/etc/machine-id")
+            {
+                metadata["machine_id"] = machine_id.trim().into();
+            }
+            metadata
         };
         validate_agent_metadata(&metadata("host\u{2065}name"), None).expect("U+2065 is outside the list");
         for character in ['\u{00AD}', '\u{E007F}'] {
-            let refused = validate_agent_metadata(&metadata(&format!("host{character}name")), None);
-            assert!(refused.is_err(), "U+{:04X} is listed", u32::from(character));
+            let refused = validate_agent_metadata(&metadata(&format!("host{character}name")), None)
+                .expect_err(&format!("U+{:04X} is listed", u32::from(character)));
+            assert!(
+                refused.to_string().contains("invisible format character"),
+                "U+{:04X} was refused for another reason: {refused}",
+                u32::from(character)
+            );
         }
     }
 
