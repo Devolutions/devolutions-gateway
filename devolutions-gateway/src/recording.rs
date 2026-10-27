@@ -210,7 +210,9 @@ where
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
 
-        // A producer that said its recording is over is not coming back, even if writing its last bytes failed.
+        // UNTESTED: a recording its producer ended ends at once, even when writing its last bytes failed.
+        // The producer is not coming back, and no test makes writing the recording file fail.
+        // When changing this, keep calling `push_end` whatever `res` holds.
         let end = push_end();
 
         info!(?res, ?end, "Recording finished");
