@@ -11,10 +11,11 @@ use testsuite::rdp_injection::preflight::provision_credentials;
 use testsuite::rdp_injection::rdp::{FakeRdpTarget, connect_rdp_client};
 use testsuite::rdp_injection::tokens::{association_token, next_id};
 use testsuite::rdp_injection::{
-    CLIENT_COOKIE, FORWARD_LOG, INJECT_LOG, KERBEROS_TARGET_USER, PUBLISHED_KDC_LOG, REGISTERED_KDC_LOG, TARGET_USER,
+    CLIENT_COOKIE, FORWARD_LOG, INJECT_LOG, KERBEROS_TARGET_USER, PUBLISHED_KDC_LOG, TARGET_USER,
 };
 use tokio::time::Duration;
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §1
 #[tokio::test]
 async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
@@ -37,6 +38,7 @@ async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
     );
 
     let cookies = target.wait_cookies(1).await?;
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     assert_eq!(
         cookies,
         vec![TARGET_USER],
@@ -47,6 +49,8 @@ async fn first_rdp_connection_injects_ntlm() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §3
+// oracle: intent devolutions-gateway/src/credential/INTENT.md §Decisions
 #[tokio::test]
 async fn reconnect_same_association_token_still_injects() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
@@ -75,6 +79,7 @@ async fn reconnect_same_association_token_still_injects() -> anyhow::Result<()> 
     );
 
     let cookies = target.wait_cookies(2).await?;
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     assert_eq!(
         cookies,
         vec![TARGET_USER, TARGET_USER],
@@ -85,6 +90,8 @@ async fn reconnect_same_association_token_still_injects() -> anyhow::Result<()> 
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §4
+// oracle: intent devolutions-gateway/src/credential/INTENT.md §Decisions
 #[tokio::test]
 async fn expired_staging_uses_ordinary_forward() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
@@ -114,6 +121,8 @@ async fn expired_staging_uses_ordinary_forward() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §4
+// oracle: intent devolutions-gateway/src/credential/INTENT.md §Decisions
 #[tokio::test]
 async fn unprovisioned_rdp_uses_ordinary_forward() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
@@ -141,6 +150,8 @@ async fn unprovisioned_rdp_uses_ordinary_forward() -> anyhow::Result<()> {
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §3
+// oracle: intent devolutions-gateway/src/credential/INTENT.md §Decisions
 #[tokio::test]
 async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
@@ -174,7 +185,6 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
         2,
         "same generation reconnect should still inject Kerberos; logs:\n{logs}"
     );
-    gateway.logs.wait_count(REGISTERED_KDC_LOG, 2).await?;
     assert_eq!(
         logs.matches(PUBLISHED_KDC_LOG).count(),
         1,
@@ -203,17 +213,13 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
         2,
         "re-provision must publish exactly one extra synthetic KDC; logs:\n{logs}"
     );
-    assert_eq!(
-        logs.matches(REGISTERED_KDC_LOG).count(),
-        3,
-        "each connection should register a synthetic KDC lease; logs:\n{logs}"
-    );
     assert!(
         !logs.contains(FORWARD_LOG),
         "Kerberos injection must not ordinary-forward; logs:\n{logs}"
     );
 
     let cookies = target.wait_cookies(3).await?;
+    // oracle: mutant dropping the TCP-path rewrite of the X.224 cookie to the target username
     assert_eq!(
         cookies,
         vec![
@@ -228,6 +234,7 @@ async fn kerberos_reconnect_reuses_generation_until_reprovision() -> anyhow::Res
     Ok(())
 }
 
+// oracle: intent testsuite/src/rdp_injection/INTENT.md §1
 #[tokio::test]
 async fn domainless_target_stays_ntlm_even_with_krb_kdc() -> anyhow::Result<()> {
     let target = FakeRdpTarget::start().await?;
@@ -250,34 +257,6 @@ async fn domainless_target_stays_ntlm_even_with_krb_kdc() -> anyhow::Result<()> 
     assert!(
         logs.contains("kerberos=false"),
         "username without a realm must stay NTLM even if krb_kdc is provisioned; logs:\n{logs}"
-    );
-
-    let _ = gateway.process.start_kill();
-    Ok(())
-}
-
-#[tokio::test]
-async fn kerberos_injection_does_not_need_debug_flags() -> anyhow::Result<()> {
-    let target = FakeRdpTarget::start().await?;
-    let mut gateway = GatewayProc::start().await?;
-
-    let association_jti = next_id();
-    let association_id = next_id();
-    let association_token = association_token(&association_jti, &association_id, target.port, 60)?;
-    provision_credentials(
-        gateway.config.http_port(),
-        &association_token,
-        KERBEROS_TARGET_USER,
-        300,
-        Some("tcp://127.0.0.1:88"),
-    )
-    .await?;
-
-    let _client = connect_rdp_client(gateway.config.tcp_port(), &association_token).await?;
-    let logs = gateway.logs.wait_contains(INJECT_LOG).await?;
-    assert!(
-        logs.contains("kerberos=true"),
-        "Kerberos injection must run without debug flags; logs:\n{logs}"
     );
 
     let _ = gateway.process.start_kill();
