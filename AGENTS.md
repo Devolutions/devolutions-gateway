@@ -1,7 +1,5 @@
 # Devolutions Gateway
 
-Reusable agent skills live in `.agents/skills/`; use the matching skill before committing, opening a pull request, posting a GitHub comment, or writing prose.
-
 Start a work session with `/contribute`, which picks the delivery flow by scale and the skills each step needs.
 
 ## Intent files
