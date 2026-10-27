@@ -422,7 +422,7 @@ async fn endpoints_require_their_scope() {
         assert_eq!(response.status(), StatusCode::FORBIDDEN, "{scope}");
     }
 
-    for scope in [START_SCOPE, "gateway.sessions.read"] {
+    for scope in [START_SCOPE, "gateway.sessions.read", "gateway.recordings.read"] {
         let (status, _) = gateway.get_analysis(session_id, Uuid::new_v4(), scope).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{scope}");
     }
