@@ -646,7 +646,7 @@ async fn a_session_mixing_terminal_and_video_fails() {
     assert_eq!(task.payload["error"], json!({ "kind": "mixedRecording" }));
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+// oracle: mutant a recording deleted after the Task starts fails it as internal instead of noRecording
 #[tokio::test]
 async fn recording_deleted_after_start_fails() {
     let harness = Harness::new().await;
@@ -1134,7 +1134,7 @@ async fn a_new_task_that_fails_keeps_an_earlier_success_whose_log_was_not_listed
     );
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+// oracle: mutant the log left unlisted by a Task that has no record is kept
 #[tokio::test]
 async fn a_new_task_removes_a_log_left_unlisted_by_an_unknown_task() {
     let harness = Harness::new().await;
