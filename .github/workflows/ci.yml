@@ -282,7 +282,19 @@ jobs:
 
       - name: Install Pester
         if: ${{ steps.changes.outputs.changed == 'true' }}
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Force
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Pester tests
@@ -696,7 +708,19 @@ jobs:
 
       - name: Install Pester
         id: prepare
-        run: Install-Module Pester -RequiredVersion 5.6.0
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Build module
@@ -743,7 +767,19 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Install Pester for Windows PowerShell
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: powershell
 
       - name: Run service account tests in Windows PowerShell
@@ -756,7 +792,19 @@ jobs:
         shell: powershell
 
       - name: Install Pester for PowerShell 7
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Run service account tests in PowerShell 7
