@@ -269,7 +269,7 @@ mod tests {
     #[case::after_arabic_letter_mark('\u{61D}', '\u{115E}')]
     #[case::after_hangul_jamo_fillers('\u{1161}', '\u{17B3}')]
     #[case::after_khmer_inherent_vowels('\u{17B6}', '\u{180A}')]
-    #[case::after_mongolian_vowel_separator('\u{1810}', '\u{200A}')]
+    #[case::after_mongolian_variation_selectors_and_vowel_separator('\u{1810}', '\u{200A}')]
     #[case::after_directional_marks('\u{2010}', '\u{2029}')]
     #[case::after_directional_overrides('\u{202F}', '\u{205F}')]
     #[case::after_deprecated_controls('\u{2070}', '\u{3163}')]
