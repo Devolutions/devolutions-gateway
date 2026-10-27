@@ -23,6 +23,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using WixSharp;
@@ -520,19 +521,26 @@ namespace DevolutionsGateway.Actions
         /// </summary>
         private static ActionResult Refuse(Session session, DataFolderRefusal refusal)
         {
-            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows,
-            // with its text in a record field, which the installer shows as written rather than reading brackets in it
-            // as property references.
+            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows.
             // No test runs the data folder actions, which read the machine's own ProgramData.
-            // When changing this, keep sending it with InstallMessage.Error, as ValidateServiceAccount does, and keep the
-            // text out of the format string.
+            // When changing this, keep sending it with InstallMessage.Error, as ValidateServiceAccount does.
             string message = refusal.Message(session.Property("ProductLanguage"));
             session.Log(message);
-            using Record record = new(1) { FormatString = "[1]" };
-            record.SetString(1, message);
+            using Record record = MessageRecord(message);
             session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
             return ActionResult.Failure;
         }
+
+        /// <summary>
+        /// A record that the installer formats to <paramref name="text"/> as written, rather than reading brackets in it
+        /// as property references.
+        /// </summary>
+        /// <remarks>
+        /// The installer replaces a property reference in a field it inserts as well as in the format string, so each
+        /// bracket is escaped instead.
+        /// </remarks>
+        internal static Record MessageRecord(string text) =>
+            new(0) { FormatString = Regex.Replace(text, @"[\[\]]", m => $"[\\{m.Value}]") };
 
         [CustomAction]
         public static ActionResult GetInstallDirFromRegistry(Session session)

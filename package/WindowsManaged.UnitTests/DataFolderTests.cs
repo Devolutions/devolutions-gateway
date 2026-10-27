@@ -10,6 +10,8 @@ using DevolutionsGateway.Actions;
 using DevolutionsGateway.Properties;
 using DevolutionsGateway.Resources;
 
+using Record = Microsoft.Deployment.WindowsInstaller.Record;
+
 using WixSharp;
 
 using Xunit;
@@ -288,6 +290,23 @@ public sealed class DataFolderTests
         Assert.Equal(messages.Length, messages.Distinct().Count());
         // A language the installer doesn't have falls back to English, as the rest of the installer does.
         Assert.Equal(messages[0], refusal.Message("1053"));
+    }
+
+    // The error names a folder, whose path may hold brackets, which the installer would otherwise read as property
+    // references.
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void ErrorIsShownAsWritten()
+    {
+        const string Text = @"C:\[SECRET]\x] [y [\[]";
+
+        string shown = WithSession(["SECRET=value"], session =>
+        {
+            using Record record = CustomActions.MessageRecord(Text);
+            return session.FormatRecord(record);
+        });
+
+        Assert.Equal(Text, shown);
     }
 
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder

@@ -87,9 +87,6 @@ public sealed class SecureDirectoryTests
         AssertProtectedSecurity(new DirectoryInfo(gateway).GetAccessControl());
     }
 
-    // The installer's templates mark the DACL auto-inherited, so that the entries created below hold what they inherit
-    // as inherited entries, which a later reset tells apart from their explicit ones without the folder's earlier DACL.
-    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CreateGivesTheNewDirectoryExactlyTheSecurityDescriptor()
     {
@@ -98,7 +95,12 @@ public sealed class SecureDirectoryTests
 
         Assert.True(SecureDirectory.Create(path, ProtectedSddl.Replace("D:P", "D:PAI")));
 
+        // oracle: intent package/WindowsManaged/INTENT.md §Data folder
         AssertProtectedSecurity(new DirectoryInfo(path).GetAccessControl());
+        // The installer's templates mark the DACL auto-inherited, so that the entries created below hold what they
+        // inherit as inherited entries, which a later reset tells apart from their explicit ones without the folder's
+        // earlier DACL.
+        // oracle: mutant Create stores the DACL without its auto-inherited mark
         Assert.Equal(
             ControlFlags.DiscretionaryAclAutoInherited,
             new RawSecurityDescriptor(RawSddl(path)).ControlFlags & ControlFlags.DiscretionaryAclAutoInherited);

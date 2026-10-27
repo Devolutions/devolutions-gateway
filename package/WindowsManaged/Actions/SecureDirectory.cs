@@ -53,6 +53,7 @@ internal static class SecureDirectory
     internal static bool Create(string path, string sddl)
     {
         using SecurityDescriptor descriptor = sddl is null ? null : new(sddl);
+        bool autoInherited = descriptor is not null && RequestAutoInherit(descriptor, sddl);
         WinAPI.SECURITY_ATTRIBUTES attributes = new()
         {
             nLength = (uint)Marshal.SizeOf<WinAPI.SECURITY_ATTRIBUTES>(),
@@ -61,12 +62,14 @@ internal static class SecureDirectory
 
         if (WinAPI.CreateDirectory(path, ref attributes))
         {
-            // CreateDirectory stores the DACL without marking it auto-inherited, even when asked to, so the DACL is set
-            // again through the new directory's handle; until then, the directory has the same entries without the mark.
-            if (descriptor is not null && RequestAutoInherit(descriptor, sddl))
+            // CreateDirectory stores the DACL without marking it auto-inherited, even with SE_DACL_AUTO_INHERIT_REQ set,
+            // so the DACL is set again through the new directory's handle; until then, the directory has the same
+            // entries without the mark.
+            // The handle doesn't hold the directory, because the check and the set both act on the entry it opened.
+            if (autoInherited)
             {
                 using SafeFileHandle handle = Open(
-                    path, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.FILE_READ_ATTRIBUTES, HeldShare);
+                    path, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.FILE_READ_ATTRIBUTES, AnyShare);
 
                 if (!IsPlainDirectory(GetInformation(handle).dwFileAttributes))
                 {
