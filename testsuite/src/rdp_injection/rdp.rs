@@ -179,8 +179,8 @@ pub struct FakeClosedTarget {
 
 impl FakeClosedTarget {
     pub async fn start() -> anyhow::Result<Self> {
-        let listener = TcpListener::bind("127.0.0.1:0").await.context("bind closed target")?;
-        let port = listener.local_addr()?.port();
+        let listener = LocalhostListener::bind().await.context("bind closed target")?;
+        let port = listener.port()?;
         let accepted = Arc::new(AtomicUsize::new(0));
         let accepted_task = Arc::clone(&accepted);
         tokio::spawn(async move {
