@@ -1388,6 +1388,30 @@ mod tests {
         assert_eq!(recording.file_names, ["ai-analysis-0.slog"]);
     }
 
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
+    #[tokio::test]
+    async fn lists_logs_in_manifest_order_files_first() {
+        let root = tempfile::tempdir().expect("temp dir");
+        std::fs::write(
+            root.path().join("recording.json"),
+            r#"{"startTime":100,"files":[{"fileName":"recording-1.slog"},{"fileName":"recording-0.slog"}],"artifacts":{"ai-analysis":[{"fileName":"ai-analysis-1.slog"},{"fileName":"ai-analysis-0.slog"}]}}"#,
+        )
+        .expect("write manifest");
+        let dir = Utf8PathBuf::from_path_buf(root.path().to_owned()).expect("UTF-8 path");
+
+        let recording = read_recording_logs(dir, Uuid::nil()).await.expect("readable manifest");
+
+        assert_eq!(
+            recording.file_names,
+            [
+                "recording-1.slog",
+                "recording-0.slog",
+                "ai-analysis-1.slog",
+                "ai-analysis-0.slog"
+            ]
+        );
+    }
+
     /// Lists the recordings of a root holding a folder per name, each with a manifest that starts at the same time.
     async fn list_recording_folders(names: impl IntoIterator<Item = String>) -> Vec<Uuid> {
         let root = tempfile::tempdir().expect("temp dir");
