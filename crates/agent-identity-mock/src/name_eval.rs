@@ -64,7 +64,7 @@ pub(crate) fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), Str
 
 /// Whether `c` is an invisible format character that [CONTRACT.agent-identity.md][contract] ("3. Metadata") refuses in a metadata value.
 ///
-/// The contract lists them as code points rather than as Unicode general category `Cf`, so that the agent and every authority agree on the set whatever Unicode version their runtimes ship.
+/// The contract lists them as code points rather than through a Unicode property such as `Default_Ignorable_Code_Point` or general category `Cf`, so that the agent and every authority agree on the set whatever Unicode version their runtimes ship.
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#metadata
 fn is_invisible_format_character(c: char) -> bool {
