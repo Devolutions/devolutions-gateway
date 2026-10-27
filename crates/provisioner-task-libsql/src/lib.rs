@@ -879,7 +879,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_attempt_start_sets_the_deadline() {
-        // oracle: intent crates/provisioner-task/INTENT.md §invariants
+        // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
         let store = store().await;
         let task = new_task("session-1");
         create(&store, task.clone()).await;

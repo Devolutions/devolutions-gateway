@@ -994,7 +994,7 @@ async fn a_new_task_that_fails_keeps_the_earlier_analysis() {
     assert!(dir.join("ai-analysis-0.slog").exists());
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn a_failed_task_reports_the_tokens_it_spent() {
     let harness = Harness::new().await;
