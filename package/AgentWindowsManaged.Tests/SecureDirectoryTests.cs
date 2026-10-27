@@ -182,11 +182,11 @@ public sealed class SecureDirectoryTests
         using TempFolder folder = new();
         folder.CreateDirectory("data");
         string child = folder.CreateDirectory("data", "child");
-        string before = Sddl(child);
+        string before = RawSddl(child);
 
         SecureDirectory.SetSecurity(folder.Path, ["data"], ProtectedSddl);
 
-        Assert.Equal(before, Sddl(child));
+        Assert.Equal(before, RawSddl(child));
     }
 
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
@@ -230,7 +230,10 @@ public sealed class SecureDirectoryTests
         using SafeFileHandle handle = SecureDirectory.OpenToRead(path, hold: false);
         (RawSecurityDescriptor security, bool isReparsePoint, bool isDirectory) = SecureDirectory.ReadSecurity(handle);
 
-        Assert.Equal(ProtectedSddl, security.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
+        // Both sides go through the same SDDL rendering, which writes some account SIDs as aliases such as LA.
+        Assert.Equal(
+            new RawSecurityDescriptor(ProtectedSddl).GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access),
+            security.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
         Assert.False(isReparsePoint);
         Assert.True(isDirectory);
     }
@@ -286,4 +289,15 @@ public sealed class SecureDirectoryTests
         new DirectoryInfo(path)
             .GetAccessControl(AccessControlSections.Owner | AccessControlSections.Access)
             .GetSecurityDescriptorSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
+
+    /// <summary>
+    /// The owner and DACL of the directory <paramref name="path"/> as stored, without the canonical ordering that
+    /// <see cref="DirectorySecurity"/> applies when it reads them.
+    /// </summary>
+    private static string RawSddl(string path)
+    {
+        using SafeFileHandle handle = SecureDirectory.OpenToRead(path, hold: false);
+        return SecureDirectory.ReadSecurity(handle).Security
+            .GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
+    }
 }
