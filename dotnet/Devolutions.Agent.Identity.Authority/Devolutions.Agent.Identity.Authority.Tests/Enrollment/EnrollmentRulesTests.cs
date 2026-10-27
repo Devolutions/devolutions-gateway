@@ -86,8 +86,8 @@ public class EnrollmentRulesTests
 
     // Concurrent identity creations never create more than `max_uses` identities with one token,
     // so a decision to create one carries the count of identities it was made from, the token's own,
-    // for the host to count the use only while the stored count still holds it.
-    // A decision carrying another count would let two concurrent enrollments both pass the last use.
+    // for a host that counts the use only while the stored count still equals it.
+    // A decision carrying another count would have that update refuse every enrollment.
     // oracle: mutant a decision to create an identity that carries another count than the token's IdentitiesCreated
     [Theory]
     [InlineData(0)]

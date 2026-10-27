@@ -137,7 +137,7 @@ public class RequestAuthenticatorVectorTests
 
     // CONTRACT.agent-identity.md §6 step 6 accepts each (keyid, nonce) pair once, and the shared intent keeps each
     // accepted nonce until 60 s after its signature expires, the last instant at which step 3 accepts the signature.
-    // The store call follows the last check of the window and may discard the pair at retainUntil,
+    // The store call follows the last check of the window and may discard the pair once retainUntil has passed,
     // so a copy of the signature accepted at that instant reaches the store after it, and the pair must outlive it.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication

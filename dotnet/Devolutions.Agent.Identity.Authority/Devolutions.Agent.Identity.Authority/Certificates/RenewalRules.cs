@@ -26,9 +26,9 @@ public static class RenewalRules
     /// Every accepted request, including one that gets the pending certificate again, replaces the identity's metadata.
     /// The decision holds only for the state it was made from.
     /// The host stores the pending certificate, inserts its key under a unique index of every issued key,
-    /// and retires the pending certificate that the identity holds then, in one transaction that first locks the
-    /// identity's record, and decides again from the stored state when the index refuses the key, acting on the new
-    /// decision, so that of two concurrent renewals with one CSR key,
+    /// and retires the pending certificate that the identity holds then, in one transaction that first takes a write
+    /// lock on the identity's record, and decides again from the stored state when the index refuses the key,
+    /// acting on the new decision, so that of two concurrent renewals with one CSR key,
     /// exactly one issues the certificate and the other gets that pending certificate,
     /// and two concurrent renewals with different keys leave one pending certificate.
     /// </para>
