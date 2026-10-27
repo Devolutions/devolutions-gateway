@@ -523,7 +523,8 @@ namespace DevolutionsGateway.Actions
         {
             // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows.
             // No test runs the data folder actions, which read the machine's own ProgramData.
-            // When changing this, keep sending it with InstallMessage.Error, as ValidateServiceAccount does.
+            // When changing this, keep sending it with InstallMessage.Error, in a record built by MessageRecord so that the
+            // installer shows the text as written.
             string message = refusal.Message(session.Property("ProductLanguage"));
             session.Log(message);
             using Record record = MessageRecord(message);
