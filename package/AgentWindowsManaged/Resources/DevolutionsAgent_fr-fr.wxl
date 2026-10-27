@@ -15,6 +15,7 @@
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
+                <String Id="DataFolderIsFile">Impossible d'utiliser {0}, car c'est un fichier et non un dossier. Supprimez le fichier, puis réessayez.</String>
                 <String Id="DataFolderIsLink">Impossible d'utiliser le dossier {0}, car c'est un lien. Supprimez le lien, puis réessayez.</String>
                 <String Id="DataFolderOwnedByUntrustedAccount">Impossible d'utiliser le dossier {0}, car il appartient à {1}. Seul SYSTEM ou un administrateur peut en être propriétaire. Changez son propriétaire, puis réessayez.</String>
                 <String Id="DataFolderReplaceableByUntrustedAccount">Impossible d'utiliser le dossier {0}, car {1} peut remplacer le dossier ou son contenu. Retirez cette autorisation, puis réessayez.</String>

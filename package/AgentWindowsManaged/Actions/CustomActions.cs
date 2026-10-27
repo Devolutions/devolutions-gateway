@@ -1928,7 +1928,10 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SecureDirectory.SetSecurity(ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                SecureDirectory.SetSecurity(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent"],
+                    Includes.PROGRAM_DATA_SDDL);
                 return ActionResult.Success;
             }
             catch (Exception e)
@@ -1943,7 +1946,18 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SecureDirectory.SetSecurity(Path.Combine(ProgramDataDirectory, "pedm"), Includes.PROGRAM_DATA_PEDM_SDDL);
+                SecureDirectory.SetSecurity(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent", "pedm"],
+                    Includes.PROGRAM_DATA_PEDM_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Win32Exception e) when (e.NativeErrorCode == WinAPI.ERROR_FILE_NOT_FOUND)
+            {
+                // UNTESTED: a missing pedm folder doesn't fail the run, as only the PEDM feature creates it.
+                // No test runs this action, which reads the machine's own ProgramData.
+                // When changing this, keep accepting a missing pedm folder and nothing else that fails to open.
+                session.Log($"no pedm folder to set permissions on: {e.Message}");
                 return ActionResult.Success;
             }
             catch (Exception e)

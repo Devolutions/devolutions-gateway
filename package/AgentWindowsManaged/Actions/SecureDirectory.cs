@@ -27,27 +27,27 @@ internal static class SecureDirectory
     private static readonly SecurityIdentifier TrustedInstaller =
         new("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
 
-    // UNTESTED: the deletion holds each directory handle, without FILE_SHARE_DELETE, until the entries below the
-    // directory are done.
-    // Renaming or replacing a directory needs delete access to it, so no path below a held directory can be redirected
-    // to another folder.
-    // When changing how the deletion opens or closes a directory, keep this share mode and keep the handle open that long.
+    /// <summary>
+    /// The share mode of a handle that holds its entry: renaming or replacing an entry needs delete access to it, which
+    /// this denies, so no path through a held directory can be redirected to another folder.
+    /// </summary>
     private static readonly uint HeldShare = WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE;
 
     private static readonly uint AnyShare = WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE | WinAPI.FILE_SHARE_DELETE;
 
     /// <summary>
     /// Creates the directory <paramref name="path"/> with the security descriptor <paramref name="sddl"/>, so that it
-    /// never exists with the DACL it would inherit from its parent.
+    /// never exists with the DACL it would inherit from its parent, or with the security it inherits when
+    /// <paramref name="sddl"/> is <c>null</c>.
     /// </summary>
     /// <returns><c>false</c> when an entry named <paramref name="path"/> already exists, which is left unchanged.</returns>
     internal static bool Create(string path, string sddl)
     {
-        using SecurityDescriptor descriptor = new(sddl);
+        using SecurityDescriptor descriptor = sddl is null ? null : new(sddl);
         WinAPI.SECURITY_ATTRIBUTES attributes = new()
         {
             nLength = (uint)Marshal.SizeOf<WinAPI.SECURITY_ATTRIBUTES>(),
-            lpSecurityDescriptor = descriptor.Pointer,
+            lpSecurityDescriptor = descriptor?.Pointer ?? IntPtr.Zero,
         };
 
         if (WinAPI.CreateDirectory(path, ref attributes))
@@ -66,18 +66,66 @@ internal static class SecureDirectory
     }
 
     /// <summary>
-    /// Sets the owner and the DACL of the directory <paramref name="path"/> to those of <paramref name="sddl"/>.
+    /// Sets the owner and the DACL of the directory
+    /// <c><paramref name="root"/>\<paramref name="names"/>[0]\…\<paramref name="names"/>[n-1]</c> to those of
+    /// <paramref name="sddl"/>, without following any link.
+    /// </summary>
+    /// <remarks>
+    /// Each directory above the target is held while the next one is opened, so the target is below the directories
+    /// checked.
+    /// </remarks>
+    /// <exception cref="IOException">An entry on the path is a reparse point or not a directory.</exception>
+    internal static void SetSecurity(string root, string[] names, string sddl)
+    {
+        List<SafeFileHandle> parents = new();
+
+        try
+        {
+            string path = root;
+
+            foreach (string name in names.Take(names.Length - 1))
+            {
+                path = Path.Combine(path, name);
+                SafeFileHandle parent = Hold(path);
+                parents.Add(parent);
+
+                if (!IsPlainDirectory(GetAttributes(parent)))
+                {
+                    throw new IOException($"{path} is a reparse point or not a directory");
+                }
+            }
+
+            string target = Path.Combine(path, names[names.Length - 1]);
+            using SafeFileHandle handle = OpenToSetSecurity(target);
+            SetSecurity(handle, target, sddl);
+        }
+        finally
+        {
+            parents.ForEach(parent => parent.Dispose());
+        }
+    }
+
+    /// <summary>
+    /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, to read its security and to
+    /// set it with <see cref="SetSecurity(SafeFileHandle, string, string)"/>.
+    /// </summary>
+    internal static SafeFileHandle OpenToSetSecurity(string path) =>
+        Open(
+            path,
+            WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.WRITE_OWNER | WinAPI.FILE_READ_ATTRIBUTES,
+            AnyShare);
+
+    /// <summary>
+    /// Sets the owner and the DACL of the directory <paramref name="handle"/> holds, opened from <paramref name="path"/>
+    /// by <see cref="OpenToSetSecurity"/>, to those of <paramref name="sddl"/>.
     /// </summary>
     /// <remarks>
     /// Only the directory changes: unlike <c>SetSecurityInfo</c>, this doesn't propagate inheritable entries to existing
     /// children, so the entries below keep the security they have.
     /// </remarks>
-    /// <exception cref="IOException"><paramref name="path"/> is a reparse point or not a directory.</exception>
-    internal static void SetSecurity(string path, string sddl)
+    /// <exception cref="IOException">The entry is a reparse point or not a directory.</exception>
+    internal static void SetSecurity(SafeFileHandle handle, string path, string sddl)
     {
-        using SafeFileHandle handle = Open(
-            path, WinAPI.WRITE_DAC | WinAPI.WRITE_OWNER | WinAPI.FILE_READ_ATTRIBUTES, AnyShare);
-
         if (!IsPlainDirectory(GetAttributes(handle)))
         {
             throw new IOException($"{path} is a reparse point or not a directory");
@@ -97,18 +145,34 @@ internal static class SecureDirectory
     /// <summary>
     /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, to read its security.
     /// </summary>
-    /// <param name="hold">
-    /// Whether to deny delete sharing, so that the entry can't be renamed or replaced while the handle is open.
-    /// </param>
+    /// <param name="hold">Whether to hold the entry as <see cref="Hold"/> does.</param>
     internal static SafeFileHandle OpenToRead(string path, bool hold) =>
-        Open(path, WinAPI.READ_CONTROL | WinAPI.FILE_READ_ATTRIBUTES, hold ? HeldShare : AnyShare);
+        hold
+            ? Hold(path, WinAPI.READ_CONTROL)
+            : Open(path, WinAPI.READ_CONTROL | WinAPI.FILE_READ_ATTRIBUTES, AnyShare);
 
     /// <summary>
-    /// The owner and the DACL of the entry <paramref name="handle"/> holds, and whether that entry is a reparse point.
+    /// Opens the directory <paramref name="path"/> names, a link itself rather than its target, with
+    /// <paramref name="access"/>, so that it can't be renamed or replaced while the handle is open.
     /// </summary>
-    internal static (RawSecurityDescriptor Security, bool IsReparsePoint) ReadSecurity(SafeFileHandle handle)
+    /// <remarks>
+    /// A share mode binds only a handle with an access right that takes part in sharing checks, which
+    /// <c>READ_CONTROL</c> and <c>FILE_READ_ATTRIBUTES</c> don't, so the handle also has <c>FILE_TRAVERSE</c>, the right
+    /// that resolving a path below the directory needs.
+    /// </remarks>
+    internal static SafeFileHandle Hold(string path, uint access = 0) =>
+        Open(path, access | WinAPI.FILE_TRAVERSE | WinAPI.FILE_READ_ATTRIBUTES, HeldShare);
+
+    /// <summary>
+    /// The owner and the DACL of the entry <paramref name="handle"/> holds, whether that entry is a reparse point, and
+    /// whether it is a directory.
+    /// </summary>
+    internal static (RawSecurityDescriptor Security, bool IsReparsePoint, bool IsDirectory) ReadSecurity(
+        SafeFileHandle handle)
     {
-        bool isReparsePoint = (GetAttributes(handle) & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        uint attributes = GetAttributes(handle);
+        bool isReparsePoint = (attributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+        bool isDirectory = (attributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0;
         const uint information = WinAPI.OWNER_SECURITY_INFORMATION | WinAPI.DACL_SECURITY_INFORMATION;
 
         // The first call only reports the size the second needs.
@@ -127,7 +191,7 @@ internal static class SecureDirectory
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
 
-        return (new RawSecurityDescriptor(descriptor, 0), isReparsePoint);
+        return (new RawSecurityDescriptor(descriptor, 0), isReparsePoint, isDirectory);
     }
 
     /// <summary>
@@ -184,6 +248,11 @@ internal static class SecureDirectory
     internal static void DeleteTree(string root, string[] names, ILogger logger)
     {
         string target = Path.Combine([root, .. names]);
+
+        // UNTESTED: each directory handle stays open until the entries below the directory are done, so that no path
+        // below it can be redirected while the deletion runs.
+        // Tests check that a held directory can't be renamed, not when the deletion closes its handle.
+        // When changing how the deletion opens or closes a directory, keep each handle open that long.
         List<SafeFileHandle> handles = new();
 
         try
@@ -193,7 +262,7 @@ internal static class SecureDirectory
             foreach (string name in names.Take(names.Length - 1))
             {
                 path = Path.Combine(path, name);
-                SafeFileHandle parent = Open(path, WinAPI.FILE_READ_ATTRIBUTES, HeldShare);
+                SafeFileHandle parent = Hold(path);
                 handles.Add(parent);
 
                 if (!IsPlainDirectory(GetAttributes(parent)))

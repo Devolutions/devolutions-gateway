@@ -80,6 +80,44 @@ public sealed class SecureDirectoryTests
         Assert.True(File.Exists(Path.Combine(outsideIdentity, "file.txt")));
     }
 
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Fact]
+    public void DeleteTreeKeepsGoingAfterAFailureAndKeepsOnlyWhatItCouldntDelete()
+    {
+        using TempFolder folder = new();
+        string identity = folder.CreateDirectory(IdentityNames);
+        string pending = folder.CreateDirectory([.. IdentityNames, "pending"]);
+        string held = Path.Combine(pending, "held.dat");
+        File.WriteAllText(held, "kept");
+        File.WriteAllText(Path.Combine(pending, "sibling.dat"), "deleted");
+        File.WriteAllText(Path.Combine(identity, "other.dat"), "deleted");
+
+        // Opened without delete sharing, the file can't be deleted while the stream is open.
+        using (new FileStream(held, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        {
+            SecureDirectory.DeleteTree(folder.Path, IdentityNames, this.logger);
+        }
+
+        Assert.Equal([held], Directory.GetFileSystemEntries(identity, "*", SearchOption.AllDirectories)
+            .Where(File.Exists)
+            .ToArray());
+        Assert.Equal([pending], Directory.GetDirectories(identity));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    [Fact]
+    public void HeldDirectoryCantBeRenamedUntilItsHandleIsClosed()
+    {
+        AssertHoldsUntilClosed(path => SecureDirectory.Hold(path));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void DirectoryOpenedToReadAndHoldCantBeRenamedUntilItsHandleIsClosed()
+    {
+        AssertHoldsUntilClosed(path => SecureDirectory.OpenToRead(path, hold: true));
+    }
+
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void SetSecurityRefusesAJunctionAndLeavesItsTargetUnchanged()
@@ -87,12 +125,40 @@ public sealed class SecureDirectoryTests
         using TempFolder folder = new();
         string target = folder.CreateDirectory("target");
         string before = Sddl(target);
-        string link = Path.Combine(folder.Path, "link");
-        TempFolder.CreateJunction(link, target);
+        TempFolder.CreateJunction(Path.Combine(folder.Path, "link"), target);
 
-        Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(link, ProtectedSddl));
+        Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(folder.Path, ["link"], ProtectedSddl));
 
         Assert.Equal(before, Sddl(target));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void SetSecurityRefusesAJunctionAboveTheFolderAndLeavesTheFolderBelowItsTargetUnchanged()
+    {
+        using TempFolder folder = new();
+        string target = folder.CreateDirectory("target");
+        string below = folder.CreateDirectory("target", "data");
+        string before = Sddl(below);
+        TempFolder.CreateJunction(Path.Combine(folder.Path, "link"), target);
+
+        Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(folder.Path, ["link", "data"], ProtectedSddl));
+
+        Assert.Equal(before, Sddl(below));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void SetSecurityRefusesAFileAndLeavesItUnchanged()
+    {
+        using TempFolder folder = new();
+        string path = Path.Combine(folder.Path, "data");
+        File.WriteAllText(path, "");
+        string before = File.GetAccessControl(path).GetSecurityDescriptorSddlForm(AccessControlSections.All);
+
+        Assert.Throws<IOException>(() => SecureDirectory.SetSecurity(folder.Path, ["data"], ProtectedSddl));
+
+        Assert.Equal(before, File.GetAccessControl(path).GetSecurityDescriptorSddlForm(AccessControlSections.All));
     }
 
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
@@ -100,23 +166,25 @@ public sealed class SecureDirectoryTests
     public void SetSecurityAppliesTheOwnerAndTheProtectedDacl()
     {
         using TempFolder folder = new();
-        string path = folder.CreateDirectory("data");
+        string path = folder.CreateDirectory("parent", "data");
 
-        SecureDirectory.SetSecurity(path, ProtectedSddl);
+        SecureDirectory.SetSecurity(folder.Path, ["parent", "data"], ProtectedSddl);
 
         AssertProtectedSecurity(path);
     }
 
-    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    // The agent requires its directories to have exactly the DACL it provisions, so propagated entries would make it
+    // refuse them.
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     [Fact]
     public void SetSecurityLeavesExistingChildrenUnchanged()
     {
         using TempFolder folder = new();
-        string path = folder.CreateDirectory("data");
+        folder.CreateDirectory("data");
         string child = folder.CreateDirectory("data", "child");
         string before = Sddl(child);
 
-        SecureDirectory.SetSecurity(path, ProtectedSddl);
+        SecureDirectory.SetSecurity(folder.Path, ["data"], ProtectedSddl);
 
         Assert.Equal(before, Sddl(child));
     }
@@ -151,19 +219,40 @@ public sealed class SecureDirectoryTests
         Assert.True(expected == SecureDirectory.IsTrustedOwner(new SecurityIdentifier(sid)), name);
     }
 
-    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    // oracle: property round-trip
     [Fact]
     public void ReadSecurityReadsTheOwnerAndTheDaclThatSetSecurityApplied()
     {
         using TempFolder folder = new();
         string path = folder.CreateDirectory("data");
-        SecureDirectory.SetSecurity(path, ProtectedSddl);
+        SecureDirectory.SetSecurity(folder.Path, ["data"], ProtectedSddl);
 
         using SafeFileHandle handle = SecureDirectory.OpenToRead(path, hold: false);
-        (RawSecurityDescriptor security, bool isReparsePoint) = SecureDirectory.ReadSecurity(handle);
+        (RawSecurityDescriptor security, bool isReparsePoint, bool isDirectory) = SecureDirectory.ReadSecurity(handle);
 
         Assert.Equal(ProtectedSddl, security.GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access));
         Assert.False(isReparsePoint);
+        Assert.True(isDirectory);
+    }
+
+    /// <summary>
+    /// Asserts that a directory <paramref name="hold"/> opens can't be renamed while the handle is open, and can once it
+    /// is closed.
+    /// </summary>
+    private static void AssertHoldsUntilClosed(Func<string, SafeFileHandle> hold)
+    {
+        using TempFolder folder = new();
+        string path = folder.CreateDirectory("held");
+        string renamed = Path.Combine(folder.Path, "renamed");
+
+        using (hold(path))
+        {
+            Assert.Throws<IOException>(() => Directory.Move(path, renamed));
+            Assert.True(Directory.Exists(path));
+        }
+
+        Directory.Move(path, renamed);
+        Assert.True(Directory.Exists(renamed));
     }
 
     /// <summary>

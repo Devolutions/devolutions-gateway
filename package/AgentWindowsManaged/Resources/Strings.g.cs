@@ -121,6 +121,10 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string DataFolderIsLink = "DataFolderIsLink";		
 		/// <summary>
+		/// Can't use {0} because it is a file, not a folder. Delete the file, then try again.
+		/// </summary>
+		public const string DataFolderIsFile = "DataFolderIsFile";		
+		/// <summary>
 		/// Can't use the folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again.
 		/// </summary>
 		public const string DataFolderOwnedByUntrustedAccount = "DataFolderOwnedByUntrustedAccount";		

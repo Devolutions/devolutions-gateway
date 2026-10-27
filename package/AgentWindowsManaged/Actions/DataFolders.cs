@@ -19,6 +19,11 @@ internal enum DataFolderProblem
     Link,
 
     /// <summary>
+    /// The entry is a file, not a folder.
+    /// </summary>
+    File,
+
+    /// <summary>
     /// The folder's owner, who can always change its permissions, is not trusted.
     /// </summary>
     Owner,
@@ -57,6 +62,7 @@ internal sealed class DataFolderRefusal(string folder, DataFolderProblem problem
         string id = this.Problem switch
         {
             DataFolderProblem.Link => Strings.DataFolderIsLink,
+            DataFolderProblem.File => Strings.DataFolderIsFile,
             DataFolderProblem.Owner => Strings.DataFolderOwnedByUntrustedAccount,
             DataFolderProblem.Access => Strings.DataFolderReplaceableByUntrustedAccount,
             DataFolderProblem.Unreadable => Strings.DataFolderSecurityUnreadable,
@@ -119,7 +125,9 @@ internal static class DataFolders
     internal static DataFolderRefusal Check(string root, ILogger logger)
     {
         string devolutions = Path.Combine(root, Devolutions);
-        DataFolderRefusal refusal = Inspect(devolutions, hold: true, checkAccess: true, logger, out SafeFileHandle handle);
+        DataFolderRefusal refusal = Inspect(
+            devolutions, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: true, logger,
+            out SafeFileHandle handle);
 
         using (handle)
         {
@@ -132,7 +140,9 @@ internal static class DataFolders
             // A test reaches it only below a Devolutions folder that passes, which needs an owner that a test without
             // elevation can't set.
             // When changing this, keep Agent checked in both, without the DACL rule, as the installer resets its DACL.
-            refusal = Inspect(Path.Combine(devolutions, Agent), hold: false, checkAccess: false, logger, out SafeFileHandle agent);
+            refusal = Inspect(
+                Path.Combine(devolutions, Agent), path => SecureDirectory.OpenToRead(path, hold: false),
+                checkAccess: false, logger, out SafeFileHandle agent);
             agent?.Dispose();
 
             return refusal;
@@ -141,27 +151,31 @@ internal static class DataFolders
 
     /// <summary>
     /// Creates <c>Devolutions\Agent</c> under <paramref name="root"/> with the security descriptor
-    /// <paramref name="sddl"/>, after checking <c>Devolutions</c> and, when it already exists, <c>Agent</c>.
+    /// <paramref name="sddl"/>, after checking <c>Devolutions</c>, or checks an existing <c>Agent</c> and resets its owner
+    /// and DACL to those of <paramref name="sddl"/>.
     /// </summary>
     /// <remarks>
     /// A missing <c>Devolutions</c> is created with the DACL it inherits, then checked like an existing one.
     /// <c>Agent</c> gets its security descriptor when it is created, so that it never exists with the DACL it would
     /// inherit from ProgramData, which lets users add entries.
     /// </remarks>
-    /// <returns>The first refusal, in which case nothing is created below <c>Devolutions</c>, or <c>null</c>.</returns>
-    /// <exception cref="IOException"><c>Agent</c> exists and is not a directory.</exception>
+    /// <returns>
+    /// The first refusal, in which case nothing is created or changed below <c>Devolutions</c>, or <c>null</c>.
+    /// </returns>
     internal static DataFolderRefusal Create(string root, string sddl, ILogger logger)
     {
         string devolutions = Path.Combine(root, Devolutions);
         string agent = Path.Combine(devolutions, Agent);
 
-        Directory.CreateDirectory(devolutions);
+        SecureDirectory.Create(devolutions, sddl: null);
 
-        // UNTESTED: the handle on Devolutions denies delete sharing until Agent is created or checked below it.
-        // Renaming or replacing a folder needs delete access to it, so Agent is created or checked in the folder just
-        // checked, not in one put at that path afterwards.
-        // When changing this, keep the share mode of that handle and keep it open until Agent is done.
-        DataFolderRefusal refusal = Inspect(devolutions, hold: true, checkAccess: true, logger, out SafeFileHandle handle);
+        // UNTESTED: the handle on Devolutions stays open until Agent is created, or checked and reset, below it, so that
+        // this happens in the folder just checked, not in one put at that path afterwards.
+        // Tests check that a held folder can't be renamed, not how long this handle stays open.
+        // When changing this, keep the handle open until Agent is done.
+        DataFolderRefusal refusal = Inspect(
+            devolutions, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: true, logger,
+            out SafeFileHandle handle);
 
         using (handle)
         {
@@ -181,15 +195,30 @@ internal static class DataFolders
                 return null;
             }
 
-            refusal = Inspect(agent, hold: false, checkAccess: false, logger, out SafeFileHandle existing);
-            existing?.Dispose();
+            refusal = Inspect(
+                agent, SecureDirectory.OpenToSetSecurity, checkAccess: false, logger, out SafeFileHandle existing);
 
-            if (refusal is null && !Directory.Exists(agent))
+            using (existing)
             {
-                throw new IOException($"{agent} exists and is not a directory");
-            }
+                if (refusal is not null)
+                {
+                    return refusal;
+                }
 
-            return refusal;
+                if (existing is null)
+                {
+                    throw new IOException($"{agent} was deleted after it was found");
+                }
+
+                // UNTESTED: setting the owner to SYSTEM succeeds only for a caller allowed to give an object another
+                // owner, as the installer's SYSTEM process is; tests run as a user and set the user as the owner.
+                // When changing this, keep resetting the security of an existing Agent on this handle, as the agent
+                // refuses a data folder whose DACL isn't the one provisioned.
+                SecureDirectory.SetSecurity(existing, agent, sddl);
+                logger.Log($"reset the owner and the DACL of {agent}");
+
+                return null;
+            }
         }
     }
 
@@ -202,16 +231,21 @@ internal static class DataFolders
     /// a folder the agent then refuses to use.
     /// </remarks>
     /// <param name="checkAccess">
-    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller or the owner
+    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller or OWNER RIGHTS
     /// replace the folder or what it contains.
     /// </param>
     /// <returns>The refusal, or <c>null</c> when the folder passes.</returns>
     internal static DataFolderRefusal Evaluate(
-        string folder, RawSecurityDescriptor security, bool isLink, bool checkAccess)
+        string folder, RawSecurityDescriptor security, bool isLink, bool isDirectory, bool checkAccess)
     {
         if (isLink)
         {
             return new DataFolderRefusal(folder, DataFolderProblem.Link);
+        }
+
+        if (!isDirectory)
+        {
+            return new DataFolderRefusal(folder, DataFolderProblem.File);
         }
 
         if (security.Owner is null)
@@ -281,20 +315,21 @@ internal static class DataFolders
     }
 
     /// <summary>
-    /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, and evaluates its security.
+    /// Opens the entry <paramref name="path"/> names with <paramref name="open"/>, which opens a link itself rather than
+    /// its target, and evaluates its security.
     /// </summary>
     /// <param name="handle">The open entry, or <c>null</c> when nothing exists at <paramref name="path"/>.</param>
     /// <returns>The refusal, or <c>null</c> when the entry passes or doesn't exist.</returns>
     private static DataFolderRefusal Inspect(
-        string path, bool hold, bool checkAccess, ILogger logger, out SafeFileHandle handle)
+        string path, Func<string, SafeFileHandle> open, bool checkAccess, ILogger logger, out SafeFileHandle handle)
     {
         handle = null;
 
         try
         {
-            handle = SecureDirectory.OpenToRead(path, hold);
-            (RawSecurityDescriptor security, bool isLink) = SecureDirectory.ReadSecurity(handle);
-            DataFolderRefusal refusal = Evaluate(path, security, isLink, checkAccess);
+            handle = open(path);
+            (RawSecurityDescriptor security, bool isLink, bool isDirectory) = SecureDirectory.ReadSecurity(handle);
+            DataFolderRefusal refusal = Evaluate(path, security, isLink, isDirectory, checkAccess);
 
             logger.Log(refusal is null
                 ? $"checked {path}"

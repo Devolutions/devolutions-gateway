@@ -47,6 +47,8 @@ internal static class WinAPI
 
     internal static uint FILE_SHARE_WRITE = 0x00000002;
 
+    internal const uint FILE_TRAVERSE = 0x00000020;
+
     internal const int FileDispositionInfo = 4;
 
     internal const uint GENERIC_ALL = 0x10000000;

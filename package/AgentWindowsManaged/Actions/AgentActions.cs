@@ -173,9 +173,9 @@ internal static class AgentActions
     private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
         new Id($"CA.{nameof(setProgramDataDirectoryPermissions)}"),
         CustomActions.SetProgramDataDirectoryPermissions,
-        Return.ignore,
+        Return.check,
         When.After, new Step(createProgramDataDirectory.Id),
-        Condition.Always,
+        new Condition("NOT (REMOVE=\"ALL\")"),
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
@@ -183,14 +183,14 @@ internal static class AgentActions
     };
 
     /// <summary>
-    /// Set or reset the ACL on %ProgramData%\Devolutions\Agent\pedm
+    /// Set or reset the ACL on %ProgramData%\Devolutions\Agent\pedm, when it exists
     /// </summary>
     private static readonly ElevatedManagedAction setProgramDataPedmDirectoryPermissions = new(
         new Id($"CA.{nameof(setProgramDataPedmDirectoryPermissions)}"),
         CustomActions.SetProgramDataPedmDirectoryPermissions,
-        Return.ignore,
+        Return.check,
         When.After, new Step(createProgramDataPedmDirectories.Id),
-        Condition.Always,
+        new Condition("NOT (REMOVE=\"ALL\")"),
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,

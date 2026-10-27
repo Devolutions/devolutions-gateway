@@ -93,6 +93,10 @@
           "text": "Impossible d'utiliser le dossier {0}, car c'est un lien. Supprimez le lien, puis réessayez."
         },
         {
+          "id": "DataFolderIsFile",
+          "text": "Impossible d'utiliser {0}, car c'est un fichier et non un dossier. Supprimez le fichier, puis réessayez."
+        },
+        {
           "id": "DataFolderOwnedByUntrustedAccount",
           "text": "Impossible d'utiliser le dossier {0}, car il appartient à {1}. Seul SYSTEM ou un administrateur peut en être propriétaire. Changez son propriétaire, puis réessayez."
         },
