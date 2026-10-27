@@ -80,7 +80,7 @@ public sealed class SecureDirectoryTests
         Assert.True(File.Exists(Path.Combine(outsideIdentity, "file.txt")));
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void SetSecurityRefusesAJunctionAndLeavesItsTargetUnchanged()
     {
@@ -95,7 +95,7 @@ public sealed class SecureDirectoryTests
         Assert.Equal(before, Sddl(target));
     }
 
-    // oracle: property round-trip
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void SetSecurityAppliesTheOwnerAndTheProtectedDacl()
     {
@@ -107,7 +107,7 @@ public sealed class SecureDirectoryTests
         AssertProtectedSecurity(path);
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void SetSecurityLeavesExistingChildrenUnchanged()
     {
@@ -121,7 +121,7 @@ public sealed class SecureDirectoryTests
         Assert.Equal(before, Sddl(child));
     }
 
-    // oracle: property round-trip
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CreateGivesTheNewDirectoryExactlyTheSecurityDescriptor()
     {
@@ -134,24 +134,24 @@ public sealed class SecureDirectoryTests
     }
 
     [Theory]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs TrustedWriters::AdminOrTrustedInstaller
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("SYSTEM", "S-1-5-18", true)]
-    // oracle: reference crates/agent-identity/src/windows.rs owner_is_administrator_member
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Administrators", "S-1-5-32-544", true)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs TrustedWriters::AdminOrTrustedInstaller
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("TrustedInstaller", "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464", true)]
-    // oracle: reference crates/agent-identity/src/windows.rs owner_is_administrator_member
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Everyone", "S-1-1-0", false)]
-    // oracle: reference crates/agent-identity/src/windows.rs owner_is_administrator_member
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users", "S-1-5-32-545", false)]
-    // oracle: reference crates/agent-identity/src/windows.rs owner_is_administrator_member
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("LOCAL SERVICE", "S-1-5-19", false)]
     public void OwnerIsTrustedOnlyWhenPrivileged(string name, string sid, bool expected)
     {
         Assert.True(expected == SecureDirectory.IsTrustedOwner(new SecurityIdentifier(sid)), name);
     }
 
-    // oracle: property round-trip
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void ReadSecurityReadsTheOwnerAndTheDaclThatSetSecurityApplied()
     {

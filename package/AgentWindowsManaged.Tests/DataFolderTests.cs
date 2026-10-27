@@ -53,39 +53,39 @@ public sealed class DataFolderTests
     public DataFolderTests(ITestOutputHelper output) => this.logger = new OutputLogger(output);
 
     [Theory]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("SYSTEM owns Devolutions", Devolutions, "O:SY" + InheritedDacl, "none")]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Administrators own Devolutions", Devolutions, "O:BA" + InheritedDacl, "none")]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users own Devolutions", Devolutions, "O:BU" + InheritedDacl, "Owner " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Everyone owns Devolutions", Devolutions, "O:WD" + InheritedDacl, "Owner " + Everyone)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users own Agent", Agent, "O:BU" + InheritedDacl, "Owner " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users may delete Devolutions", Devolutions, "O:SYD:(A;;SD;;;BU)", "Access " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users may change the DACL", Devolutions, "O:SYD:(A;;WD;;;BU)", "Access " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users may take ownership", Devolutions, "O:SYD:(A;;WO;;;BU)", "Access " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users may delete entries", Devolutions, "O:SYD:(A;;0x40;;;BU)", "Access " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users have generic all", Devolutions, "O:SYD:(A;;GA;;;BU)", "Access " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users may delete through a conditional entry", Devolutions, "O:SYD:(XA;;SD;;;BU;(Member_of {SID(BU)}))", "Access " + Users)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("null DACL", Devolutions, "O:SYD:NO_ACCESS_CONTROL", "Access " + Everyone)]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users get full control of entries created below", Devolutions, "O:SYD:(A;OICIIO;FA;;;BU)", "none")]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users may only add entries", Devolutions, "O:SYD:(A;CI;DCLCRPCR;;;BU)", "none")]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users are denied deletion", Devolutions, "O:SYD:(D;;SD;;;BU)", "none")]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("TrustedInstaller has full control", Devolutions, "O:SYD:(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)", "none")]
-    // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("no owner", Devolutions, "D:(A;;FA;;;SY)", "Unreadable")]
     // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
     [InlineData("OWNER RIGHTS has full control", Devolutions, "O:SYD:(A;OICI;FA;;;OW)", "none")]
@@ -101,7 +101,7 @@ public sealed class DataFolderTests
     [InlineData("an inherit-only object entry", Devolutions, "O:SYD:(OA;CIIO;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "Unreadable")]
     // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
     [InlineData("Users may delete through a conditional object entry", Devolutions, "O:SYD:(ZA;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU;(Member_of {SID(BU)}))", "Unreadable")]
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("Users have full control of Agent", Agent, "O:SYD:(A;OICI;FA;;;BU)", "none")]
     public void RefusalFollowsTheOwnerAndTheDacl(string scenario, bool checkAccess, string sddl, string expected)
     {
@@ -110,7 +110,7 @@ public sealed class DataFolderTests
         Assert.True(expected == Describe(refusal), $"{scenario}: {Describe(refusal)}");
     }
 
-    // oracle: reference crates/now-package-broker/src/policy_security.rs retain_policy_no_reparse_directory_chain
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Theory]
     [InlineData(Devolutions)]
     [InlineData(Agent)]
@@ -122,7 +122,7 @@ public sealed class DataFolderTests
         Assert.Equal("Link", Describe(refusal));
     }
 
-    // oracle: reference crates/now-package-broker/src/policy_security.rs retain_policy_no_reparse_directory_chain
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CheckRefusesAJunctionAtDevolutions()
     {
@@ -145,13 +145,13 @@ public sealed class DataFolderTests
 
         DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger);
 
-        // oracle: reference crates/now-package-broker/src/policy_security.rs retain_policy_no_reparse_directory_chain
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
         Assert.Equal((devolutions, "Link"), (refusal?.Folder, Describe(refusal)));
-        // oracle: scaffold
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
         Assert.Empty(Directory.GetFileSystemEntries(target));
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CheckRefusesADevolutionsFolderWhoseEntriesUsersMayDelete()
     {
@@ -164,7 +164,7 @@ public sealed class DataFolderTests
         Assert.Equal((devolutions, "Access " + Users), (refusal?.Folder, Describe(refusal)));
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CreateRefusesADevolutionsFolderWhoseEntriesUsersMayDeleteAndCreatesNothingInIt()
     {
@@ -178,7 +178,7 @@ public sealed class DataFolderTests
         Assert.Empty(Directory.GetFileSystemEntries(devolutions));
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CheckRefusesADevolutionsFolderWhoseSecurityItCantRead()
     {
@@ -193,7 +193,7 @@ public sealed class DataFolderTests
         Assert.Equal((devolutions, "Unreadable"), (refusal?.Folder, Describe(refusal)));
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CheckPassesWhenTheFoldersDontExist()
     {
@@ -202,7 +202,7 @@ public sealed class DataFolderTests
         Assert.Null(DataFolders.Check(folder.Path, this.logger));
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void ErrorNamesTheFolderAndTheAccountOrItsSidWhenItHasNone()
     {
@@ -219,7 +219,7 @@ public sealed class DataFolderTests
         Assert.Contains(Unnamed, replaceable);
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void ErrorIsInTheInstallerLanguage()
     {
@@ -232,7 +232,7 @@ public sealed class DataFolderTests
         Assert.Equal(english, refusal.Message("1031"));
     }
 
-    // oracle: spec .agents/skills/installer-localization/SKILL.md §Change strings
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Theory]
     [InlineData(Strings.DataFolderIsLink)]
     [InlineData(Strings.DataFolderOwnedByUntrustedAccount)]
@@ -259,7 +259,7 @@ public sealed class DataFolderTests
     {
         ManagedAction action = ActionOf(method);
 
-        // oracle: scaffold
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
         Assert.Equal(Return.check, action.Return);
         // A deferred action reads only the properties its action data carries.
         // oracle: spec Windows Installer §Obtaining Context Information for Deferred Execution Custom Actions
@@ -267,19 +267,19 @@ public sealed class DataFolderTests
     }
 
     [Theory]
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("first install", true)]
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("major upgrade", true, "WIX_UPGRADE_DETECTED={00000000-0000-0000-0000-000000000001}")]
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("repair", true, "Installed=00:00:00", "REINSTALL=ALL")]
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("maintenance adding a feature", true, "Installed=00:00:00", "ADDLOCAL=F.Session")]
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("maintenance removing a feature", true, "Installed=00:00:00", "REMOVE=F.Session")]
-    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("full uninstall", false, "Installed=00:00:00", "REMOVE=ALL")]
-    // oracle: intent package/AgentWindowsManaged/INTENT.md §Agent Identity
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [InlineData("old product removed by a major upgrade", false, "Installed=00:00:00", "REMOVE=ALL", "UPGRADINGPRODUCTCODE={00000000-0000-0000-0000-000000000002}")]
     public void DataFoldersAreCheckedOnEveryRunButAFullUninstall(string scenario, bool expected, params string[] properties)
     {
@@ -290,7 +290,7 @@ public sealed class DataFolderTests
         Assert.True(evaluated.All(e => e == expected), $"{scenario}: {string.Join(", ", evaluated)}");
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void CheckRunsBeforeTheMajorUpgradeRemovesTheInstalledProduct()
     {
@@ -298,7 +298,7 @@ public sealed class DataFolderTests
         Assert.Equal(Step.RemoveExistingProducts.ToString(), AgentActions.checkProgramDataDirectory.Step.ToString());
     }
 
-    // oracle: scaffold
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void PedmFolderIsCreatedAfterTheAgentFolder()
     {
