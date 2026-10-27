@@ -155,8 +155,16 @@ namespace DevolutionsAgent.Actions
 
             try
             {
-                DirectoryInfo di = Directory.CreateDirectory(path);
-                session.Log($"created directory at {di.FullName} or already exists");
+                // The data directory gets its security descriptor when it is created, so that it never exists with the
+                // DACL it would inherit from ProgramData, which lets users add entries.
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+
+                if (!SecureDirectory.Create(path, Includes.PROGRAM_DATA_SDDL) && !Directory.Exists(path))
+                {
+                    throw new IOException($"{path} exists and is not a directory");
+                }
+
+                session.Log($"created directory at {path} or already exists");
             }
             catch (Exception e)
             {
@@ -805,22 +813,18 @@ namespace DevolutionsAgent.Actions
                 }
             }
 
-            string identityDirectory = Path.Combine(ProgramDataDirectory, "identity");
-
+            // The deletion never follows a link, so that a link in the data directory can't make the uninstall delete
+            // files elsewhere.
             try
             {
-                if (Directory.Exists(identityDirectory))
-                {
-                    // UNTESTED: Directory.Delete deletes a junction or symbolic link without recursing into its target.
-                    // Otherwise a link planted in the identity folder would make the uninstall delete files elsewhere.
-                    // When replacing this call, keep the deletion from following reparse points.
-                    Directory.Delete(identityDirectory, true);
-                    session.Log($"deleted {identityDirectory}");
-                }
+                SecureDirectory.DeleteTree(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent", "identity"],
+                    LogDelegate.WithSession(session));
             }
             catch (Exception e)
             {
-                session.Log($"failed to delete {identityDirectory}: {e}");
+                session.Log($"failed to delete the Agent Identity state: {e}");
             }
 
             return ActionResult.Success;
@@ -1889,7 +1893,7 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                SecureDirectory.SetSecurity(ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
                 return ActionResult.Success;
             }
             catch (Exception e)
@@ -1904,7 +1908,7 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, "pedm"), Includes.PROGRAM_DATA_PEDM_SDDL);
+                SecureDirectory.SetSecurity(Path.Combine(ProgramDataDirectory, "pedm"), Includes.PROGRAM_DATA_PEDM_SDDL);
                 return ActionResult.Success;
             }
             catch (Exception e)
