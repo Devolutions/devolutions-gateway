@@ -145,52 +145,70 @@ internal static class SecureDirectory
     }
 
     /// <summary>
-    /// Gives each file below the directory
-    /// <c><paramref name="root"/>\<paramref name="names"/>[0]\…\<paramref name="names"/>[n-1]</c> an unprotected DACL
-    /// made of its explicit entries and the entries it inherits from the directory that holds it, without following
-    /// any link.
+    /// Sets the owner and the DACL of the directory
+    /// <c><paramref name="root"/>\<paramref name="names"/>[0]\…\<paramref name="names"/>[n-1]</c> to those of
+    /// <paramref name="sddl"/>, then gives each file and directory below it an unprotected DACL made of its explicit
+    /// entries and the entries it inherits from the directory that holds it, without following any link.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The result is what <c>SetNamedSecurityInfo</c> computes for a file whose DACL protection is removed, so a file
-    /// created before the directory got its current DACL gets the entries the directory now passes on.
+    /// The result is what <c>SetNamedSecurityInfo</c> computes when it sets the directory's DACL and passes it on, and
+    /// then when it removes the DACL protection of each entry below, top-down.
+    /// An entry gets the entries its directory now passes on, and loses the ones the directory passed on before: an
+    /// entry whose DACL isn't marked auto-inherited holds what it inherited as explicit entries, which are told apart
+    /// by comparing them with what its directory passed on before the change, as Windows does.
     /// The inherited entries are computed from the security read through the directory handle held, rather than by
     /// <c>SetSecurityInfo</c>, which reads the parent's security through a path it resolves again, and written through
-    /// the file's handle.
+    /// the entry's handle.
+    /// A directory gets its DACL before the entries below it, which inherit from its new DACL.
     /// </para>
     /// <para>
     /// Each directory is held while the entries below it are opened, so no path below it can be redirected.
     /// A reparse point, such as a junction or a symbolic link, is neither followed nor changed, and a file with more
     /// than one hard link is skipped, because its security is shared with every other name of the file, which may be
     /// outside the tree.
-    /// Directories keep their security, and one replaced while the walk reaches it fails the walk.
+    /// A directory replaced while the walk reaches it fails the walk.
     /// </para>
     /// </remarks>
     /// <exception cref="IOException">
-    /// An entry on the path to the directory is a reparse point or not a directory.
+    /// The directory or an entry on the path to it is a reparse point or not a directory.
     /// </exception>
-    internal static void InheritInFiles(string root, string[] names, ILogger logger)
+    internal static void SetSecurityAndInheritBelow(string root, string[] names, string sddl, ILogger logger)
     {
         List<SafeFileHandle> held = new();
 
         try
         {
             string path = Path.Combine(HoldParents(root, names, held), names[names.Length - 1]);
-            SafeFileHandle directory = Hold(path, WinAPI.READ_CONTROL);
+            SafeFileHandle directory = HoldToSetSecurity(path);
             held.Add(directory);
-
-            if (!IsPlainDirectory(GetInformation(directory).dwFileAttributes))
-            {
-                throw new IOException($"{path} is a reparse point or not a directory");
-            }
-
-            using WindowsIdentity identity = WindowsIdentity.GetCurrent();
-            InheritInFiles(directory, path, identity.Token, logger);
+            SetSecurityAndInheritBelow(directory, path, sddl, logger);
         }
         finally
         {
             held.ForEach(handle => handle.Dispose());
         }
+    }
+
+    /// <summary>
+    /// Sets the owner and the DACL of the directory <paramref name="directory"/> holds, opened from
+    /// <paramref name="path"/> by <see cref="HoldToSetSecurity"/>, to those of <paramref name="sddl"/>, then gives each
+    /// entry below it the entries it inherits, as
+    /// <see cref="SetSecurityAndInheritBelow(string, string[], string, ILogger)"/> describes.
+    /// </summary>
+    /// <exception cref="IOException">The directory is a reparse point or not a directory.</exception>
+    internal static void SetSecurityAndInheritBelow(SafeFileHandle directory, string path, string sddl, ILogger logger)
+    {
+        if (!IsPlainDirectory(GetInformation(directory).dwFileAttributes))
+        {
+            throw new IOException($"{path} is a reparse point or not a directory");
+        }
+
+        byte[] previous = ReadDescriptor(directory, OwnerGroupAndDacl);
+        Apply(directory, sddl);
+
+        using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+        InheritBelow(directory, path, previous, identity.Token, logger);
     }
 
     /// <summary>
@@ -221,6 +239,14 @@ internal static class SecureDirectory
 
         Apply(handle, sddl);
     }
+
+    /// <summary>
+    /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, to read its security and to
+    /// set it with <see cref="SetSecurityAndInheritBelow(SafeFileHandle, string, string, ILogger)"/>, holding it as
+    /// <see cref="Hold"/> does.
+    /// </summary>
+    internal static SafeFileHandle HoldToSetSecurity(string path) =>
+        Hold(path, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.WRITE_OWNER);
 
     /// <summary>
     /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, to read its security.
@@ -329,11 +355,13 @@ internal static class SecureDirectory
     }
 
     /// <summary>
-    /// Gives each file below the directory <paramref name="directory"/> holds, opened from <paramref name="path"/> by
+    /// Gives each entry below the directory <paramref name="directory"/> holds, opened from <paramref name="path"/> by
     /// <see cref="Hold"/> with <c>READ_CONTROL</c>, the entries it inherits, as
-    /// <see cref="InheritInFiles(string, string[], ILogger)"/> describes.
+    /// <see cref="SetSecurityAndInheritBelow"/> describes, given the security descriptor <paramref name="previous"/>
+    /// the directory had before its DACL changed.
     /// </summary>
-    private static void InheritInFiles(SafeFileHandle directory, string path, IntPtr token, ILogger logger)
+    private static void InheritBelow(
+        SafeFileHandle directory, string path, byte[] previous, IntPtr token, ILogger logger)
     {
         byte[] parent = ReadDescriptor(directory, OwnerGroupAndDacl);
 
@@ -358,7 +386,7 @@ internal static class SecureDirectory
             {
                 // ReOpenFile refuses a directory, so the directory is held through its path, which the directories held
                 // above pin, and compared with the entry first opened.
-                using SafeFileHandle child = Hold(entry, WinAPI.READ_CONTROL);
+                using SafeFileHandle child = Hold(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC);
                 WinAPI.BY_HANDLE_FILE_INFORMATION held = GetInformation(child);
 
                 if (!IsSameEntry(information, held) || !IsPlainDirectory(held.dwFileAttributes))
@@ -366,7 +394,9 @@ internal static class SecureDirectory
                     throw new IOException($"{entry} changed while its security was being reset");
                 }
 
-                InheritInFiles(child, entry, token, logger);
+                byte[] before = ReadDescriptor(child, OwnerGroupAndDacl);
+                Inherit(child, parent, previous, isDirectory: true, token);
+                InheritBelow(child, entry, before, token, logger);
             }
             else if (information.nNumberOfLinks > 1)
             {
@@ -375,28 +405,29 @@ internal static class SecureDirectory
             else
             {
                 using SafeFileHandle file = Reopen(handle, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC, AnyShare);
-                Inherit(file, parent, token);
+                Inherit(file, parent, previous, isDirectory: false, token);
             }
         }
     }
 
     /// <summary>
-    /// Replaces the DACL of the file <paramref name="file"/> holds by an unprotected one made of its explicit entries
-    /// and the entries it inherits from the security descriptor <paramref name="parent"/> of its directory.
+    /// Replaces the DACL of the file or directory <paramref name="entry"/> holds by an unprotected one made of its
+    /// explicit entries and the entries it inherits from the security descriptor <paramref name="parent"/> of its
+    /// directory, which had the security descriptor <paramref name="previous"/> when the entry got its DACL.
     /// </summary>
-    private static void Inherit(SafeFileHandle file, byte[] parent, IntPtr token)
+    private static void Inherit(SafeFileHandle entry, byte[] parent, byte[] previous, bool isDirectory, IntPtr token)
     {
         WinAPI.GENERIC_MAPPING mapping = WinAPI.FileGenericMapping;
-        byte[] descriptor = ReadDescriptor(file, OwnerGroupAndDacl);
+        byte[] descriptor = ReadDescriptor(entry, OwnerGroupAndDacl);
         RawSecurityDescriptor current = new(descriptor, 0);
 
-        // A DACL not marked auto-inherited holds the entries it inherited as explicit ones, as a file created in a
+        // A DACL not marked auto-inherited holds the entries it inherited as explicit ones, as an entry created in a
         // folder whose DACL isn't marked auto-inherited does, so these are told apart by comparing them with what the
-        // parent passes on, as Windows does.
+        // parent passed on before its DACL changed, as Windows does when it passes a new DACL on.
         if ((current.ControlFlags & ControlFlags.DiscretionaryAclAutoInherited) == 0)
         {
             if (!WinAPI.ConvertToAutoInheritPrivateObjectSecurity(
-                    parent, descriptor, out IntPtr converted, IntPtr.Zero, false, ref mapping))
+                    previous, descriptor, out IntPtr converted, IntPtr.Zero, isDirectory, ref mapping))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             }
@@ -427,7 +458,8 @@ internal static class SecureDirectory
         }
 
         // An unprotected, auto-inherited creator DACL with only the explicit entries, so that the new DACL keeps them,
-        // and adds the entries the parent passes on to a file, as Windows does when a DACL's protection is removed.
+        // and adds the entries the parent passes on to an entry of its kind, as Windows does when a DACL's protection
+        // is removed.
         RawSecurityDescriptor unprotected = new(
             (current.ControlFlags & ~ControlFlags.DiscretionaryAclProtected) | ControlFlags.DiscretionaryAclAutoInherited,
             current.Owner,
@@ -442,7 +474,7 @@ internal static class SecureDirectory
                 creator,
                 out IntPtr computed,
                 IntPtr.Zero,
-                false,
+                isDirectory,
                 WinAPI.SEF_DACL_AUTO_INHERIT | WinAPI.SEF_AVOID_OWNER_CHECK | WinAPI.SEF_AVOID_PRIVILEGE_CHECK,
                 token,
                 ref mapping))
@@ -459,7 +491,7 @@ internal static class SecureDirectory
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             }
 
-            if (!WinAPI.SetKernelObjectSecurity(file, WinAPI.DACL_SECURITY_INFORMATION, computed))
+            if (!WinAPI.SetKernelObjectSecurity(entry, WinAPI.DACL_SECURITY_INFORMATION, computed))
             {
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             }
@@ -486,6 +518,15 @@ internal static class SecureDirectory
     private static void Apply(SafeFileHandle handle, string sddl)
     {
         using SecurityDescriptor descriptor = new(sddl);
+
+        // Without this request, the file system stores the DACL without marking it auto-inherited, and the entries
+        // created below then hold what they inherit as explicit entries.
+        if ((new RawSecurityDescriptor(sddl).ControlFlags & ControlFlags.DiscretionaryAclAutoInherited) != 0
+            && !WinAPI.SetSecurityDescriptorControl(
+                descriptor.Pointer, WinAPI.SE_DACL_AUTO_INHERIT_REQ, WinAPI.SE_DACL_AUTO_INHERIT_REQ))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
 
         if (!WinAPI.SetKernelObjectSecurity(handle, OwnerAndDacl, descriptor.Pointer))
         {

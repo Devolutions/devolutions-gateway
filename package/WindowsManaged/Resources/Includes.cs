@@ -32,14 +32,16 @@ namespace DevolutionsGateway.Resources
         /// </summary>
         /// <remarks>
             /// Local System (SY)	Full Access (FA)
-            /// Local Service (LS)	Read, Execute
             /// Service account	Read, Execute, Write, Delete Subfolders and Files on the folder; also Delete on everything below it
             /// Administrators (BA)	Full Access (FA)
             /// Users (BU)	Read, Execute
+        /// Only SYSTEM, administrators and the service account can change what the Gateway stores there, so no other
+        /// account gets more than read access; a service account that is LOCAL SERVICE gets its rights through its own
+        /// entries.
         /// The service account gets no Delete on the folder itself, so that only SYSTEM and administrators can rename or
         /// replace it, while an inherit-only entry gives it Delete on the files and subfolders it manages below.
         /// </remarks>
-        private const string PROGRAM_DATA_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;0x1201ff;;;{0})(A;OICIIO;0x1301ff;;;{0})(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+        private const string PROGRAM_DATA_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201ff;;;{0})(A;OICIIO;0x1301ff;;;{0})(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 
         /// <summary>
         /// SDDL template for the desired %programdata%\devolutions\gateway\users.txt owner and ACL. `{0}` is the SID of the service account.
@@ -49,11 +51,12 @@ namespace DevolutionsGateway.Resources
         /// Group  : NT AUTHORITY\SYSTEM
         /// Access :
             /// Local System (SY)	Full Access (FA)
-            /// Local Service (LS)	Read, Execute, Modify (Write)
-            /// Service account	Read, Execute, Modify (Write)
+            /// Service account	Read, Write, Execute
             /// Administrators (BA)	Full Access (FA)
+        /// Only SYSTEM, administrators and the service account can read or change the users database; a service account
+        /// that is LOCAL SERVICE gets its rights through its own entry.
         /// </remarks>
-        private const string USERS_FILE_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;LS)(A;;0x1201bf;;;{0})(A;;FA;;;BA)";
+        private const string USERS_FILE_SDDL_TEMPLATE = "O:SYG:SYD:PAI(A;;FA;;;SY)(A;;0x1201bf;;;{0})(A;;FA;;;BA)";
 
         internal static string ProgramDataSddl(SecurityIdentifier serviceAccount) => string.Format(PROGRAM_DATA_SDDL_TEMPLATE, serviceAccount.Value);
 

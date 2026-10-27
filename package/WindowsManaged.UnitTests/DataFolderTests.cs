@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.AccessControl;
@@ -362,6 +364,46 @@ public sealed class DataFolderTests
         Assert.Equal(Step.RemoveExistingProducts.ToString(), GatewayActions.checkProgramDataDirectory.Step.ToString());
     }
 
+    [Theory]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("the data folder")]
+    // oracle: intent package/WindowsManaged/INTENT.md §Data folder
+    [InlineData("the users database")]
+    public void OnlySystemAdministratorsAndTheServiceAccountCanChangeTheData(string template)
+    {
+        SecurityIdentifier service = new("S-1-5-80-1-2-3-4-5");
+        RawSecurityDescriptor descriptor = new(Templates[template](service));
+        // Every right that changes an entry, its content or its security, including through a generic right.
+        const int changing = 0x2 | 0x4 | 0x10 | 0x40 | 0x100 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000;
+
+        string[] writers = descriptor.DiscretionaryAcl
+            .Cast<CommonAce>()
+            .Where(ace => ace.AceQualifier == AceQualifier.AccessAllowed && (ace.AccessMask & changing) != 0)
+            .Select(ace => ace.SecurityIdentifier.Value)
+            .Distinct()
+            .OrderBy(sid => sid, StringComparer.Ordinal)
+            .ToArray();
+        string[] expected = new[] { "S-1-5-18", "S-1-5-32-544", service.Value }
+            .OrderBy(sid => sid, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, writers);
+    }
+
+    // A service account that is LOCAL SERVICE gets its rights through the service account's entries.
+    // oracle: mutant an entry of its own for LOCAL SERVICE, such as read access
+    [Theory]
+    [InlineData("the data folder")]
+    [InlineData("the users database")]
+    public void LocalServiceHasNoEntryOfItsOwn(string template)
+    {
+        RawSecurityDescriptor descriptor = new(Templates[template](new SecurityIdentifier("S-1-5-80-1-2-3-4-5")));
+
+        Assert.DoesNotContain(
+            descriptor.DiscretionaryAcl.Cast<CommonAce>(),
+            ace => ace.SecurityIdentifier.Equals(new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null)));
+    }
+
     // The service account is the current user, who can then create entries in the folder without elevation.
     // oracle: intent package/WindowsManaged/INTENT.md §Data folder
     [Fact]
@@ -403,6 +445,12 @@ public sealed class DataFolderTests
     /// </summary>
     private static string Describe(DataFolderRefusal refusal) =>
         refusal is null ? "none" : $"{refusal.Problem} {refusal.Account}".TrimEnd();
+
+    private static readonly Dictionary<string, Func<SecurityIdentifier, string>> Templates = new()
+    {
+        ["the data folder"] = Includes.ProgramDataSddl,
+        ["the users database"] = Includes.UsersFileSddl,
+    };
 
     /// <summary>
     /// The rights the allow entries of <paramref name="security"/> grant <paramref name="account"/> on the object itself.

@@ -158,6 +158,8 @@ internal static class DataFolders
     /// A missing <c>Devolutions</c> is created with the DACL it inherits, then checked like an existing one.
     /// <c>Gateway</c> gets its security descriptor when it is created, so that it never exists with the DACL it would
     /// inherit from ProgramData, which lets users add entries.
+    /// The entries below an existing <c>Gateway</c> get what it now passes on, and lose what it passed on before, which
+    /// only its DACL before the reset tells apart from their explicit entries.
     /// </remarks>
     /// <returns>
     /// The first refusal, in which case nothing is created or changed below <c>Devolutions</c>, or <c>null</c>.
@@ -196,7 +198,7 @@ internal static class DataFolders
             }
 
             refusal = Inspect(
-                gateway, SecureDirectory.OpenToSetSecurity, checkAccess: false, logger, out SafeFileHandle existing);
+                gateway, SecureDirectory.HoldToSetSecurity, checkAccess: false, logger, out SafeFileHandle existing);
 
             using (existing)
             {
@@ -214,8 +216,14 @@ internal static class DataFolders
                 // owner, as the installer's SYSTEM process is; tests run as a user and set the user as the owner.
                 // When changing this, keep resetting the security of an existing Gateway on this handle, so that only
                 // the accounts the installer provisions can change what the Gateway stores there.
-                SecureDirectory.SetSecurity(existing, gateway, sddl);
-                logger.Log($"reset the owner and the DACL of {gateway}");
+                // UNTESTED: the entries below an existing Gateway lose what it passed on before only when they are
+                // reset here, while its previous DACL can still be read; the security reset run afterwards sees the
+                // new DACL as the previous one.
+                // Tests check SetSecurityAndInheritBelow, not that an existing Gateway is reset with it here, because
+                // the user running them isn't a trusted owner.
+                // When changing this, reset the entries below in the same call that changes the DACL of Gateway.
+                SecureDirectory.SetSecurityAndInheritBelow(existing, gateway, sddl, logger);
+                logger.Log($"reset the owner and the DACL of {gateway} and the entries below it");
 
                 return null;
             }
