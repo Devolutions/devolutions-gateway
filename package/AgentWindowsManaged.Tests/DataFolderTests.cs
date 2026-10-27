@@ -231,12 +231,13 @@ public sealed class DataFolderTests
 
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
-    public void CheckRefusesADevolutionsFolderWhoseSecurityItCantRead()
+    public void CheckRefusesADevolutionsFolderItCantOpenAsUnreadable()
     {
         using TempFolder folder = new();
         string devolutions = Path.Combine(folder.Path, "Devolutions");
-        // The OWNER RIGHTS entry takes away the owner's implicit right to read the security descriptor, and the current
-        // user keeps only the rights to list the folder, read its attributes and synchronize, which deleting it needs.
+        // Opening the folder fails with access denied, not with not-found: the current user, its owner, is granted
+        // neither READ_CONTROL, as the OWNER RIGHTS entry takes away the owner's implicit one, nor FILE_TRAVERSE.
+        // The user keeps the rights to list the folder, read its attributes and synchronize, which deleting it needs.
         Assert.True(SecureDirectory.Create(devolutions, $"O:{CurrentUser}D:P(A;;0;;;OW)(A;OICI;FA;;;SY)(A;;0x100081;;;{CurrentUser})"));
 
         DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger);
