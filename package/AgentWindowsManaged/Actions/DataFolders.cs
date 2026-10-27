@@ -108,6 +108,11 @@ internal static class DataFolders
         WinAPI.DELETE | WinAPI.WRITE_DAC | WinAPI.WRITE_OWNER | WinAPI.FILE_DELETE_CHILD | WinAPI.GENERIC_ALL;
 
     /// <summary>
+    /// OWNER RIGHTS, whose entry applies to the owner, which is checked on its own.
+    /// </summary>
+    private static readonly SecurityIdentifier OwnerRights = new("S-1-3-4");
+
+    /// <summary>
     /// Checks <c>Devolutions</c> and <c>Devolutions\Agent</c> under <paramref name="root"/> without changing anything.
     /// </summary>
     /// <returns>The first refusal, or <c>null</c> when both folders pass.</returns>
@@ -192,9 +197,13 @@ internal static class DataFolders
     /// Whether the installer refuses to use <paramref name="folder"/>, given its security descriptor and whether it is a
     /// link.
     /// </summary>
+    /// <remarks>
+    /// The DACL rule refuses what the agent refuses for a directory above its data, so that the installer never prepares
+    /// a folder the agent then refuses to use.
+    /// </remarks>
     /// <param name="checkAccess">
-    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators or TrustedInstaller replace the
-    /// folder or what it contains.
+    /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller or the owner
+    /// replace the folder or what it contains.
     /// </param>
     /// <returns>The refusal, or <c>null</c> when the folder passes.</returns>
     internal static DataFolderRefusal Evaluate(
@@ -222,12 +231,34 @@ internal static class DataFolders
 
             foreach (GenericAce ace in security.DiscretionaryAcl)
             {
+                switch (ace.AceType)
+                {
+                    // A deny entry only takes access away.
+                    case AceType.AccessDenied:
+                    case AceType.AccessDeniedCallback:
+                    case AceType.AccessDeniedObject:
+                    case AceType.AccessDeniedCallbackObject:
+                        continue;
+                    case AceType.AccessAllowed:
+                    case AceType.AccessAllowedCallback:
+                        break;
+                    // The agent refuses an entry of any other type, so the installer does too.
+                    default:
+                        return new DataFolderRefusal(folder, DataFolderProblem.Unreadable);
+                }
+
                 // An inherit-only entry applies to the entries created below the folder, not to the folder.
-                if (ace is KnownAce entry
-                    && IsAllow(entry.AceType)
-                    && (entry.AceFlags & AceFlags.InheritOnly) == 0
-                    && (unchecked((uint)entry.AccessMask) & ReplaceRights) != 0
-                    && !SecureDirectory.IsPrivileged(entry.SecurityIdentifier))
+                if ((ace.AceFlags & AceFlags.InheritOnly) != 0)
+                {
+                    continue;
+                }
+
+                CommonAce entry = (CommonAce)ace;
+
+                if ((unchecked((uint)entry.AccessMask) & ReplaceRights) != 0
+                    && !SecureDirectory.IsPrivileged(entry.SecurityIdentifier)
+                    && entry.SecurityIdentifier != OwnerRights
+                    && !IsAppContainer(entry.SecurityIdentifier))
                 {
                     return new DataFolderRefusal(folder, DataFolderProblem.Access, entry.SecurityIdentifier);
                 }
@@ -282,10 +313,18 @@ internal static class DataFolders
         }
     }
 
-    private static bool IsAllow(AceType type) =>
-        type is AceType.AccessAllowed
-            or AceType.AccessAllowedCompound
-            or AceType.AccessAllowedObject
-            or AceType.AccessAllowedCallback
-            or AceType.AccessAllowedCallbackObject;
+    /// <summary>
+    /// Whether <paramref name="sid"/> is an AppContainer package SID (<c>S-1-15-2-…</c>) or capability SID
+    /// (<c>S-1-15-3-…</c>).
+    /// </summary>
+    /// <remarks>
+    /// An entry for one never grants access by itself: Windows grants an AppContainer process only the access that both
+    /// its user and its package and capabilities are granted, and no other process holds these SIDs.
+    /// </remarks>
+    private static bool IsAppContainer(SecurityIdentifier sid)
+    {
+        // SECURITY_APP_PACKAGE_AUTHORITY, then SECURITY_APP_PACKAGE_BASE_RID or SECURITY_CAPABILITY_BASE_RID.
+        string[] parts = sid.Value.Split('-');
+        return parts.Length > 3 && parts[2] == "15" && parts[3] is "2" or "3";
+    }
 }

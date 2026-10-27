@@ -156,12 +156,14 @@ internal static class AgentActions
     /// <remarks>
     /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
     /// it's easy to create it with a custom action than workaround Windows Installer.
+    /// It runs after <see cref="createProgramDataDirectory"/>, which checks the folders above and creates Agent with its
+    /// own security descriptor, so that it never creates Agent itself with an inherited DACL.
     /// </remarks>
-    private static readonly ElevatedManagedAction createProgramDataPedmDirectories = new(
+    internal static readonly ElevatedManagedAction createProgramDataPedmDirectories = new(
         new Id($"CA.{nameof(createProgramDataPedmDirectories)}"),
         CustomActions.CreateProgramDataPedmDirectories,
         Return.check,
-        When.After, Step.CreateFolders,
+        When.After, new Step(createProgramDataDirectory.Id),
         Features.PEDM_FEATURE.BeingInstall(),
         Sequence.InstallExecuteSequence);
 

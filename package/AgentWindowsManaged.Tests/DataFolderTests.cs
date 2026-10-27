@@ -87,8 +87,20 @@ public sealed class DataFolderTests
     [InlineData("TrustedInstaller has full control", Devolutions, "O:SYD:(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)", "none")]
     // oracle: reference crates/now-package-broker/src/policy_security.rs verify_policy_ancestor_directory_security
     [InlineData("no owner", Devolutions, "D:(A;;FA;;;SY)", "Unreadable")]
-    // oracle: scaffold
-    [InlineData("Users may delete through an object entry", Devolutions, "O:SYD:(OA;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "Access " + Users)]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("OWNER RIGHTS has full control", Devolutions, "O:SYD:(A;OICI;FA;;;OW)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("an AppContainer package has full control", Devolutions, "O:SYD:(A;OICI;FA;;;S-1-15-2-1)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("an AppContainer capability has full control", Devolutions, "O:SYD:(A;OICI;FA;;;S-1-15-3-1)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users are denied deletion through an object entry", Devolutions, "O:SYD:(OD;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may delete through an object entry", Devolutions, "O:SYD:(OA;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "Unreadable")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("an inherit-only object entry", Devolutions, "O:SYD:(OA;CIIO;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "Unreadable")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may delete through a conditional object entry", Devolutions, "O:SYD:(ZA;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU;(Member_of {SID(BU)}))", "Unreadable")]
     // oracle: scaffold
     [InlineData("Users have full control of Agent", Agent, "O:SYD:(A;OICI;FA;;;BU)", "none")]
     public void RefusalFollowsTheOwnerAndTheDacl(string scenario, bool checkAccess, string sddl, string expected)
@@ -284,6 +296,15 @@ public sealed class DataFolderTests
     {
         Assert.Equal(When.Before, AgentActions.checkProgramDataDirectory.When);
         Assert.Equal(Step.RemoveExistingProducts.ToString(), AgentActions.checkProgramDataDirectory.Step.ToString());
+    }
+
+    // oracle: scaffold
+    [Fact]
+    public void PedmFolderIsCreatedAfterTheAgentFolder()
+    {
+        // Created first, the pedm folder would also create Agent, with the DACL it inherits.
+        Assert.Equal(When.After, AgentActions.createProgramDataPedmDirectories.When);
+        Assert.Equal(AgentActions.createProgramDataDirectory.Id, AgentActions.createProgramDataPedmDirectories.Step.ToString());
     }
 
     /// <summary>
