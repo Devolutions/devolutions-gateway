@@ -303,6 +303,10 @@ public sealed class RequestAuthenticator
         // The store keeps a pair only until the margin after the window closes, so a request whose window closed during
         // the steps above could reach the store after a copy's pair was discarded, and both would be accepted.
         // This is step 3 evaluated at a later now, so clock_skew is the earliest failing step.
+        // UNTESTED: this reading is the last clock reading and the last await before TryRecordAsync,
+        // because NonceRetentionMargin covers only the time that the store call takes after it.
+        // Work awaited between them would let a copy of the signature reach the store after its pair was discarded.
+        // Keep this check immediately before the store call, or widen the margin for whatever is added.
         if (!IsWithinWindow(fields.Created, fields.Expires, _timeProvider.GetUtcNow()))
         {
             return Verification.Reject(

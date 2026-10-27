@@ -57,6 +57,8 @@ public class RenewalRulesTests
 
         Assert.Equal(RenewalOutcome.ReturnPendingCertificate, decision.Outcome);
         Assert.Null(decision.Error);
+        // oracle: mutant a decision to return the pending certificate that carries the key digest of a decision to issue
+        Assert.True(decision.SubjectPublicKeyInfoSha256.IsEmpty);
     }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
@@ -75,6 +77,8 @@ public class RenewalRulesTests
         // oracle: mutant an empty failure detail for the CSR key of a deleted identity, of another identity,
         // or of a current or retired certificate of the renewing identity
         Assert.False(string.IsNullOrEmpty(decision.FailureDetail));
+        // oracle: mutant a refusal that carries the key digest of a decision to issue
+        Assert.True(decision.SubjectPublicKeyInfoSha256.IsEmpty);
     }
 
     // If the CSR key was never issued, the server issues a new pending certificate
@@ -100,8 +104,7 @@ public class RenewalRulesTests
     public async Task IssuePendingCertificateCarriesTheSpkiSha256OfTheCsrKey()
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        CertificateSigningRequest csr =
-            CertificateSigningRequest.Validate(TestEnrollmentUrl.Request(key, "https://host/dvls")).Csr!;
+        CertificateSigningRequest csr = TestEnrollmentUrl.Csr(key, "https://host/dvls");
         AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
 
         RenewalDecision decision = RenewalRules.Decide(renewing, csr, null);

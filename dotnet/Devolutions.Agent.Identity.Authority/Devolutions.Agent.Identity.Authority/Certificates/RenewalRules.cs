@@ -25,8 +25,9 @@ public static class RenewalRules
     /// <para>
     /// Every accepted request, including one that gets the pending certificate again, replaces the identity's metadata.
     /// The decision holds only for the state it was made from.
-    /// The host stores the pending certificate and inserts its key under a unique index of every issued key,
-    /// in one transaction, and decides again from the stored state when the index refuses the key,
+    /// The host stores the pending certificate, inserts its key under a unique index of every issued key,
+    /// and retires the pending certificate that the identity holds then, in one transaction,
+    /// and decides again from the stored state when the index refuses the key, acting on the new decision,
     /// so that of two concurrent renewals with one CSR key,
     /// exactly one issues the certificate and the other gets that pending certificate.
     /// </para>
@@ -78,6 +79,6 @@ public static class RenewalRules
             return RenewalDecision.Reject("The CSR key belongs to a current or retired certificate of the identity.");
         }
 
-        return RenewalDecision.ReturnPendingCertificate();
+        return RenewalDecision.ReturnPendingCertificate;
     }
 }

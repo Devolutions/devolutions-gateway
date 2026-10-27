@@ -156,7 +156,6 @@ public class RequestAuthenticatorVectorTests
         (string KeyId, string Nonce, DateTimeOffset RetainUntil) call = Assert.Single(authority.Nonces.Calls);
         Assert.Equal(Parameter(signatureInput, "keyid"), call.KeyId);
         Assert.Equal(Parameter(signatureInput, "nonce"), call.Nonce);
-        Assert.True(call.RetainUntil > windowEnd);
         // oracle: mutant a retainUntil whose margin past the window's end is not 60 s, such as one tick
         Assert.Equal(windowEnd.AddSeconds(60), call.RetainUntil);
     }

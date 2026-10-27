@@ -63,15 +63,8 @@ public sealed class RenewalDecision
             null);
     }
 
-    internal static RenewalDecision ReturnPendingCertificate()
-    {
-        return new RenewalDecision(
-            RenewalOutcome.ReturnPendingCertificate,
-            null,
-            ReadOnlyMemory<byte>.Empty,
-            null,
-            null);
-    }
+    internal static RenewalDecision ReturnPendingCertificate { get; } =
+        new(RenewalOutcome.ReturnPendingCertificate, null, ReadOnlyMemory<byte>.Empty, null, null);
 
     internal static RenewalDecision Reject(string failureDetail)
     {

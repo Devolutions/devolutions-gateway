@@ -96,7 +96,7 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     public IdentityCertificateIssuerTests()
     {
         _root = CreateRoot(Now.AddDays(-1), Now.AddYears(10));
-        _csr = CertificateSigningRequest.Validate(TestEnrollmentUrl.Request(_agentKey, TokenUrl)).Csr!;
+        _csr = TestEnrollmentUrl.Csr(_agentKey, TokenUrl);
         _creating = EnrollmentRules.Decide(UsableToken, _csr, null, Now);
     }
 

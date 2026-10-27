@@ -110,25 +110,27 @@ public class EnrollmentRulesTests
     public void CreateIdentityCarriesTheSpkiSha256OfTheCsrKey()
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-        CertificateSigningRequest csr =
-            CertificateSigningRequest.Validate(TestEnrollmentUrl.Request(key, TokenUrl)).Csr!;
+        CertificateSigningRequest csr = TestEnrollmentUrl.Csr(key, TokenUrl);
 
         EnrollmentDecision decision = EnrollmentRules.Decide(Token(), csr, null, Now);
 
         Assert.Equal(SHA256.HashData(key.ExportSubjectPublicKeyInfo()), decision.SubjectPublicKeyInfoSha256.ToArray());
     }
 
-    // A refusal creates no identity, and a replay returns the identity that the key already belongs to.
+    // A refusal creates no identity, and a replay returns the identity that the key already belongs to,
+    // so neither carries what creating one takes.
     [Theory]
-    // oracle: mutant a refusal that carries a new identity ID
+    // oracle: mutant a refusal that carries a new identity ID, a count of identities created, or a key digest
     [InlineData(EnrollmentOutcome.Reject)]
-    // oracle: mutant a replay that carries a new identity ID
+    // oracle: mutant a replay that carries a new identity ID, a count of identities created, or a key digest
     [InlineData(EnrollmentOutcome.ReturnExistingIdentity)]
-    public void CarriesNoNewIdentityIdWhenCreatingNone(EnrollmentOutcome outcome)
+    public void CarriesNoNewIdentityWhenCreatingNone(EnrollmentOutcome outcome)
     {
         EnrollmentDecision decision = DecisionsButCreateIdentity[outcome];
 
         Assert.Null(decision.NewIdentityId);
+        Assert.Null(decision.ExpectedIdentitiesCreated);
+        Assert.True(decision.SubjectPublicKeyInfoSha256.IsEmpty);
     }
 
     // When several outcomes apply, the earliest wins:

@@ -9,7 +9,7 @@ The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolut
   The host stores the token's `SecretHash` and its `ProductBaseUrl`, never its `Value`, which it shows once and never logs.
 - Request authentication: `RequestAuthenticator` verifies the signed `renew`, `confirm` and `check-in` requests and the signed opening of an agent channel stream (CONTRACT.agent-identity.md [§6]).
 - Request bodies: `EnrollRequestBody`, `RenewRequestBody` and `CheckInRequestBody` parse a body and validate its CSR (`CertificateSigningRequest`) and metadata (`AgentMetadata`), and `ConfirmRequestBody` checks that a `confirm` body is empty.
-- Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the issued certificate that holds the CSR key.
+- Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the request's CSR and the issued certificate that holds its key.
 - Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of the new identity that an enrollment decision creates, or the pending certificate that a renewal decision calls for, each for the CSR key that the decision was made for.
 - Responses: `IdentityConfig` holds an identity's config, and `ResponseBodies` writes the bodies of the `trust-anchor`, `enroll`, `renew` and `check-in` responses.
 - Agent channel: `ChannelOpening` verifies the handshake that authenticates a stream, and `ChannelMessages` builds the `ConfigUpdate`, `RenewRequested` and `Reconnect` messages that the authority pushes.
@@ -47,8 +47,8 @@ To keep the concurrency properties of CONTRACT.agent-identity.md [§2.1], the ho
   Two requests can both find a key unissued, and the index lets only one of them issue it.
 - Count a token use with an update that succeeds only while the stored count still equals the decision's `ExpectedIdentitiesCreated`, or, equivalently for the limit, is still below the token's `MaxUses`, in the transaction that creates the identity.
   Two enrollments can both decide from the count before the token's last use, and the update lets only one of them create an identity.
-- When that update fails or the key insert hits the unique index, roll the transaction back, look the key up again and call `Decide` again from the stored state.
-  The new decision then gives the replay, the pending certificate or the error that the other request's commit calls for, or, when only the count moved, a new identity to create.
+- When that update fails or the key insert hits the unique index, roll the transaction back, look the key up again, call `Decide` again from the stored state, and act on the new decision as for a new request: discard any certificate issued from the old decision, and issue again from the new one.
+  The new decision gives the replay, the pending certificate or the error that the other request's commit calls for, or, when another enrollment took a use below the limit, a new identity to create under a new `NewIdentityId`, which the discarded certificate does not name.
 
 The library puts this load on the registry and the nonce store:
 
@@ -109,8 +109,8 @@ Each then acts for the result's `Identity` only.
 2. Pass `Identity`, the body's `Csr` and the match to `RenewalRules.Decide`, and act on its `Outcome`:
    - `Reject`: answer with `Error`.
    - `ReturnPendingCertificate`: keep the identity's pending certificate, which holds the key.
-   - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision and the body's `Csr`, passing the `EnrollmentUrl` stored with the identity so that every certificate of the identity names the same URL, and store it as the identity's pending certificate, retiring the previous one; the renew CSR's own enrollment URL is ignored (CONTRACT.agent-identity.md [§4]).
-     Store the certificate and insert its key in one transaction, and decide again when the key insert fails, as [Host dependencies][host-dependencies] describes.
+   - `IssuePendingCertificate`: issue a certificate with the `IdentityCertificateIssuer.Issue` overload that takes the decision and the body's `Csr`, passing the `EnrollmentUrl` stored with the identity so that every certificate of the identity names the same URL, and store it as the identity's pending certificate; the renew CSR's own enrollment URL is ignored (CONTRACT.agent-identity.md [§4]).
+     Store the certificate, insert its key and retire whichever pending certificate the identity holds then, in one transaction, so that two concurrent renewals with different keys leave one pending certificate, and decide again when the key insert fails, as [Host dependencies][host-dependencies] describes.
 3. Replace the identity's metadata, set its `last_seen_at` to the current time, and answer with `ResponseBodies.Renew`, given the pending certificate's chain (CONTRACT.agent-identity.md [§5.3]).
 
 ### `confirm`
