@@ -261,18 +261,18 @@ public class AgentMetadataTests
         }
     }
 
-    // Both ends of a range, so that a range cut short at either end fails.
+    // Every code point of a range, so that a gap or a cut end anywhere in it fails.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [Theory]
     [MemberData(nameof(InvisibleFormatRangeRows))]
-    public void RejectsValueWithInvisibleFormatCharacterAtEitherEndOfARange(string range, int first, int last)
+    public void RejectsValueWithEveryInvisibleFormatCharacterOfARange(string range, int first, int last)
     {
-        AssertInvalid(
-            AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(first)}name")]),
-            $"first of {range}");
-        AssertInvalid(
-            AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(last)}name")]),
-            $"last of {range}");
+        for (int cp = first; cp <= last; cp++)
+        {
+            AssertInvalid(
+                AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(cp)}name")]),
+                $"U+{cp:X4} in {range}");
+        }
     }
 
     // The neighbors of a range, which the list leaves out, so that a range extended at either end fails.
