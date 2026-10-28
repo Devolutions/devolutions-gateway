@@ -201,18 +201,26 @@ pub type AnyPermanent = Permanent<serde_json::Value, serde_json::Value>;
 /// [`AttemptError`] with the failures of its kind of task as JSON.
 type AnyAttemptError = AttemptError<serde_json::Value, serde_json::Value>;
 
+/// `error` with the failures of its kind as JSON; one that cannot be written as JSON is an internal failure.
+fn erase_permanent<F: Serialize, R: Serialize>(error: Permanent<F, R>) -> AnyPermanent {
+    error
+        .try_map(serde_json::to_value, serde_json::to_value)
+        .unwrap_or_else(|error| {
+            error!(%error, "Failed to write a Task failure as JSON");
+            Permanent::Internal
+        })
+}
+
 fn erase_attempt_error<F: Serialize, R: Serialize>(error: AttemptError<F, R>) -> AnyAttemptError {
     match error {
-        AttemptError::Recoverable(error) => AttemptError::Recoverable(json!(error)),
-        AttemptError::Permanent(error) => AttemptError::Permanent(match error {
-            Permanent::InvalidTask => Permanent::InvalidTask,
-            Permanent::Panicked => Permanent::Panicked,
-            Permanent::Internal => Permanent::Internal,
-            Permanent::AttemptsExhausted { last } => Permanent::AttemptsExhausted { last: json!(last) },
-            Permanent::DeadlinePassed => Permanent::DeadlinePassed,
-            Permanent::NotQueued => Permanent::NotQueued,
-            Permanent::Task(failure) => Permanent::Task(json!(failure)),
-        }),
+        AttemptError::Recoverable(error) => match serde_json::to_value(error) {
+            Ok(error) => AttemptError::Recoverable(error),
+            Err(error) => {
+                error!(%error, "Failed to write a Task failure as JSON");
+                AttemptError::Permanent(Permanent::Internal)
+            }
+        },
+        AttemptError::Permanent(error) => AttemptError::Permanent(erase_permanent(error)),
     }
 }
 
@@ -253,7 +261,8 @@ impl<T: ProvisionerTask> AnyProvisionerTask for T {
     }
 
     fn restart_failure(&self) -> Option<AnyPermanent> {
-        ProvisionerTask::restart_failure(self).map(|failure| Permanent::Task(json!(failure)))
+        ProvisionerTask::restart_failure(self)
+            .map(|failure| erase_permanent(Permanent::<_, T::Recoverable>::Kind(failure)))
     }
 
     async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AnyAttemptError> {
@@ -704,7 +713,13 @@ impl ProvisionerTaskRunner {
                     .context("queue the next attempt")?;
             }
             Err(AttemptError::Recoverable(error)) => {
-                warn!(task.id = %task_id, task.kind = %record.kind, attempts, %error, "Task failed after its last attempt");
+                warn!(
+                    task.id = %task_id,
+                    task.kind = %record.kind,
+                    attempts,
+                    %error,
+                    "Task failed after its last attempt"
+                );
                 self.fail(
                     task.as_ref(),
                     task_id,
@@ -715,7 +730,13 @@ impl ProvisionerTaskRunner {
                 .await?;
             }
             Err(AttemptError::Permanent(error)) => {
-                warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, "Task failed");
+                warn!(
+                    task.id = %task_id,
+                    task.kind = %record.kind,
+                    attempts,
+                    error = %serde_json::to_value(&error).unwrap_or_default(),
+                    "Task failed"
+                );
                 self.fail(task.as_ref(), task_id, job_token, &error, last).await?;
             }
         }

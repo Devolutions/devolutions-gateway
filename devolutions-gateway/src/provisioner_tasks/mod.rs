@@ -37,15 +37,15 @@ pub enum AttemptError<F, R> {
 
 impl<F, R> AttemptError<F, R> {
     /// A permanent failure of the Task's own kind of work.
-    pub fn task(failure: F) -> Self {
-        Self::Permanent(Permanent::Task(failure))
+    pub fn of_kind(failure: F) -> Self {
+        Self::Permanent(Permanent::Kind(failure))
     }
 }
 
 /// Why a Task failed, as the `error` of its payload: a closed set of kinds without text for people, since the caller
 /// words them.
 ///
-/// The kinds below can happen to any Task, while [`Permanent::Task`] holds those of its own kind of work, so a new kind
+/// The kinds below can happen to any Task, while [`Permanent::Kind`] holds those of its own kind of work, so a new kind
 /// of Task brings its failures without adding to these.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
@@ -64,5 +64,24 @@ pub enum Permanent<F, R> {
     NotQueued,
     /// A failure of the Task's own kind of work, which names its own `kind`.
     #[serde(untagged)]
-    Task(F),
+    Kind(F),
+}
+
+impl<F, R> Permanent<F, R> {
+    /// The same failure, with the failures of its kind converted by `kind` and `last`.
+    pub fn try_map<G, S, E>(
+        self,
+        kind: impl FnOnce(F) -> Result<G, E>,
+        last: impl FnOnce(R) -> Result<S, E>,
+    ) -> Result<Permanent<G, S>, E> {
+        Ok(match self {
+            Self::InvalidTask => Permanent::InvalidTask,
+            Self::Panicked => Permanent::Panicked,
+            Self::Internal => Permanent::Internal,
+            Self::AttemptsExhausted { last: failure } => Permanent::AttemptsExhausted { last: last(failure)? },
+            Self::DeadlinePassed => Permanent::DeadlinePassed,
+            Self::NotQueued => Permanent::NotQueued,
+            Self::Kind(failure) => Permanent::Kind(kind(failure)?),
+        })
+    }
 }

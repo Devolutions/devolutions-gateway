@@ -59,11 +59,11 @@ impl From<RecordingAnalysisError> for AnalysisError {
     fn from(error: RecordingAnalysisError) -> Self {
         match error {
             RecordingAnalysisError::Ai(error) => Self::from(error),
-            RecordingAnalysisError::NoRecording => Self::task(Failure::NoRecording),
+            RecordingAnalysisError::NoRecording => Self::of_kind(Failure::NoRecording),
             RecordingAnalysisError::InvalidRecording { file_name, .. } => {
-                Self::task(Failure::UnreadableRecording { file: file_name })
+                Self::of_kind(Failure::UnreadableRecording { file: file_name })
             }
-            RecordingAnalysisError::Truncated => Self::task(Failure::AiBadAnswer {
+            RecordingAnalysisError::Truncated => Self::of_kind(Failure::AiBadAnswer {
                 why: BadAnswer::Truncated,
             }),
             // The runner cancels an attempt only once its Task is past its deadline.
@@ -75,14 +75,14 @@ impl From<RecordingAnalysisError> for AnalysisError {
 
 impl From<Error> for AnalysisError {
     fn from(error: Error) -> Self {
-        let bad_answer = |why| Self::task(Failure::AiBadAnswer { why });
+        let bad_answer = |why| Self::of_kind(Failure::AiBadAnswer { why });
 
         match &error {
             Error::Transport { .. } => Self::Recoverable(Recoverable::AiUnreachable),
             Error::Status { status, .. } if error.is_transient() => {
                 Self::Recoverable(Recoverable::AiBusy { status: *status })
             }
-            Error::Status { status, .. } => Self::task(Failure::AiRejected { status: *status }),
+            Error::Status { status, .. } => Self::of_kind(Failure::AiRejected { status: *status }),
             Error::InvalidResponse { .. } => bad_answer(BadAnswer::Invalid),
             Error::Truncated { .. } => bad_answer(BadAnswer::Truncated),
             Error::Refused { .. } => bad_answer(BadAnswer::Refused),
@@ -95,6 +95,40 @@ impl From<Error> for AnalysisError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // oracle: mutant a failure of the AI analysis takes the name of one any Task may have, so callers mix them up
+    #[test]
+    fn ai_analysis_failures_have_names_of_their_own() {
+        fn kind(failure: impl serde::Serialize) -> serde_json::Value {
+            serde_json::to_value(failure).expect("JSON")["kind"].clone()
+        }
+
+        let shared = [
+            Permanent::<(), ()>::InvalidTask,
+            Permanent::Panicked,
+            Permanent::Internal,
+            Permanent::AttemptsExhausted { last: () },
+            Permanent::DeadlinePassed,
+            Permanent::NotQueued,
+        ]
+        .map(kind);
+
+        for failure in [
+            Failure::AiRejected { status: 401 },
+            Failure::AiBadAnswer {
+                why: BadAnswer::Invalid,
+            },
+            Failure::KeyLost,
+            Failure::NoRecording,
+            Failure::MixedRecording,
+            Failure::UnreadableRecording {
+                file: "recording-0.webm".to_owned(),
+            },
+        ] {
+            let name = kind(&failure);
+            assert!(!shared.contains(&name), "{name} is also a failure any Task may have");
+        }
+    }
 
     // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
     #[test]
@@ -122,18 +156,18 @@ mod tests {
         for code in [400, 401, 403, 404] {
             assert_eq!(
                 attempt(status(code, None)),
-                AnalysisError::task(Failure::AiRejected { status: code })
+                AnalysisError::of_kind(Failure::AiRejected { status: code })
             );
         }
 
         assert_eq!(
             attempt(status(429, Some("insufficient_quota"))),
-            AnalysisError::task(Failure::AiRejected { status: 429 }),
+            AnalysisError::of_kind(Failure::AiRejected { status: 429 }),
             "a spent quota"
         );
         assert_eq!(
             AnalysisError::from(RecordingAnalysisError::Truncated),
-            AnalysisError::task(Failure::AiBadAnswer {
+            AnalysisError::of_kind(Failure::AiBadAnswer {
                 why: BadAnswer::Truncated
             })
         );
@@ -141,7 +175,7 @@ mod tests {
             attempt(Error::Refused {
                 reason: "content filter".to_owned()
             }),
-            AnalysisError::task(Failure::AiBadAnswer {
+            AnalysisError::of_kind(Failure::AiBadAnswer {
                 why: BadAnswer::Refused
             })
         );

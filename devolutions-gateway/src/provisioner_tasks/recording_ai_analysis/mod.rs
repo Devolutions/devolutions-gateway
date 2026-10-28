@@ -414,7 +414,7 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
         let Some(secret) = secret else {
             warn!(task.id = %attempt.task_id, attempts = attempt.attempts, "AI analysis lost its API key");
-            return Err(AnalysisError::task(Failure::KeyLost));
+            return Err(AnalysisError::of_kind(Failure::KeyLost));
         };
 
         let access = AiAccess::from_secret(&secret).map_err(|error| {
@@ -480,7 +480,7 @@ impl RecordingAiAnalysis {
             .get_finished(session_id)
             .await
             .map_err(|error| match error {
-                FinishedRecordingError::NotFound => AnalysisError::task(Failure::NoRecording),
+                FinishedRecordingError::NotFound => AnalysisError::of_kind(Failure::NoRecording),
                 error => {
                     error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to read the recording");
                     AnalysisError::Permanent(Permanent::Internal)
@@ -488,8 +488,8 @@ impl RecordingAiAnalysis {
             })?;
 
         let manifest = analysis_manifest(&recording.manifest).map_err(|error| match error {
-            RecordingsError::Mixed => AnalysisError::task(Failure::MixedRecording),
-            _ => AnalysisError::task(Failure::NoRecording),
+            RecordingsError::Mixed => AnalysisError::of_kind(Failure::MixedRecording),
+            _ => AnalysisError::of_kind(Failure::NoRecording),
         })?;
         let manifest_path = recording.manifest_path();
 
