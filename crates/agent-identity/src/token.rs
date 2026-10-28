@@ -46,8 +46,7 @@ impl Token {
             .as_object()
             .and_then(|fields| fields.get("u"))
             .and_then(serde_json::Value::as_str)
-            // Certificates carry `u` as an `IA5String`, so it holds only ASCII characters.
-            .filter(|url| url.is_ascii() && is_base_url(url))
+            .filter(|url| is_base_url(url))
             .context("invalid enrollment authority URL")?;
         let base_url = base_url.trim_end_matches('/').to_owned();
         Ok(Self {
@@ -90,15 +89,17 @@ pub(crate) fn is_base_url(url: &str) -> bool {
 /// shared by a token's `u` ([CONTRACT.agent-identity.md §2 "Enrollment token"][token]) and `agent_channel_url`
 /// ([CONTRACT.agent-identity.md §5.2 "`POST enroll`"][enroll]).
 ///
-/// The URL is read as text first: it begins with `https://`, compared as written, and contains no `@`, since any `@` counts
-/// as a user name even with nothing before it.
+/// The URL is read as text first: it holds only printable ASCII characters, begins with `https://`, compared as written,
+/// and contains no `@`, since any `@` counts as a user name even with nothing before it.
+/// Certificates carry the URL as an `IA5String`, so it holds only ASCII characters, and a URI never holds white space or
+/// control characters, which the `url` crate removes or trims rather than refusing, joining the text around them.
 /// URL parsers disagree on forms such as `https://@host` or `https:host`, which the `url` crate accepts as `https`
 /// URLs without a user name, so the text decides before the parsed URL is checked.
 ///
 /// [token]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
 /// [enroll]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enroll
 pub(crate) fn parse_base_url(url: &str) -> Option<Url> {
-    if !url.starts_with("https://") || url.contains('@') {
+    if !url.bytes().all(|byte| byte.is_ascii_graphic()) || !url.starts_with("https://") || url.contains('@') {
         return None;
     }
     Url::parse(url).ok().filter(|url| {
@@ -218,5 +219,26 @@ mod tests {
         let error = Token::parse(&raw).expect_err("a non-ASCII base URL was accepted");
         // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
         assert!(!error.to_string().contains(&raw), "{error}");
+    }
+
+    /// `u` is an absolute URL read as text, and a URI holds no white space or control character (RFC 3986 §2), which
+    /// the `url` crate would remove or trim rather than refuse.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: spec RFC 3986 §2
+    #[rstest]
+    #[case::tab_in_host("https://example.test\t.evil.test/dvls")]
+    #[case::line_feed_in_host("https://example.test\n.evil.test/dvls")]
+    #[case::carriage_return_in_host("https://example.test\r.evil.test/dvls")]
+    #[case::space_in_path("https://example.test/dv ls")]
+    #[case::trailing_space("https://example.test/dvls ")]
+    #[case::nul_in_path("https://example.test/dv\u{0}ls")]
+    #[case::trailing_unit_separator("https://example.test/dvls\u{1f}")]
+    #[case::delete_in_path("https://example.test/dv\u{7f}ls")]
+    fn rejects_a_base_url_with_white_space_or_a_control_character(#[case] u: &str) {
+        let raw = token_with_bag(&serde_json::json!({ "u": u }).to_string());
+        assert!(
+            Token::parse(&raw).is_err(),
+            "a base URL with white space or a control character was accepted"
+        );
     }
 }

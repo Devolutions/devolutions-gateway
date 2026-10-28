@@ -56,6 +56,7 @@ pub fn check_in_interval(base: Duration, jitter: f64) -> Duration {
 mod tests {
     use std::time::UNIX_EPOCH;
 
+    use rstest::rstest;
     use serde_json::json;
 
     use super::*;
@@ -178,5 +179,25 @@ mod tests {
         assert_eq!(check_in_interval(day, 0.0), Duration::from_secs(77_760));
         assert_eq!(check_in_interval(day, 0.5), day);
         assert_eq!(check_in_interval(day, 1.0), Duration::from_secs(95_040));
+    }
+
+    /// `agent_channel_url` is read as text like a token's `u`, which holds only ASCII characters, and a URI holds no
+    /// white space or control character (RFC 3986 §2), which the `url` crate would remove or trim rather than refuse.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    // oracle: spec RFC 3986 §2
+    #[rstest]
+    #[case::tab_in_host("https://example.test\t.evil.test/dvls")]
+    #[case::line_feed_in_host("https://example.test\n.evil.test/dvls")]
+    #[case::carriage_return_in_host("https://example.test\r.evil.test/dvls")]
+    #[case::space_in_path("https://example.test/dv ls")]
+    #[case::trailing_space("https://example.test/dvls ")]
+    #[case::nul_in_path("https://example.test/dv\u{0}ls")]
+    #[case::trailing_unit_separator("https://example.test/dvls\u{1f}")]
+    #[case::delete_in_path("https://example.test/dv\u{7f}ls")]
+    #[case::non_ascii_host("https://exämple.test/dvls")]
+    fn a_channel_url_with_white_space_a_control_or_a_non_ascii_character_is_malformed(#[case] url: &str) {
+        let config = json!({"version": 1, "revision": 1, "agent_channel_url": url});
+        assert_eq!(channel_url(&config), ChannelUrl::Malformed);
     }
 }
