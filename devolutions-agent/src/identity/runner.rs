@@ -269,9 +269,14 @@ impl Runner {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): `previous` alongside `pending` holds the expired
         // pending key of a pending-key recovery; alone, it holds the old key of a confirmed renewal.
         let recovering = identity.keys.previous.is_some() && identity.keys.pending.is_some();
-        if identity.keys.previous.is_some() && !recovering {
-            store.remove_previous_key(&mut identity)?;
-        }
+        // `crates/agent-identity/INTENT.md` ("Identities"): the old key of a confirmed renewal in an unavailable key
+        // storage keeps its slot, and the identity goes on with its streams and check-in.
+        // No new renewal starts meanwhile, because a pending slot beside it would read as a pending-key recovery.
+        // UNTESTED: a kept previous key holds new renewals back and nothing else, and its removal is retried at the
+        // pace of the pending-directory poll; the store's keeping of it is tested, this wiring isn't.
+        // When changing this, never start a renewal while the identity holds the old key of a confirmed renewal.
+        let previous_kept =
+            identity.keys.previous.is_some() && !recovering && !store.remove_previous_key(&mut identity)?;
         let confirming = identity
             .keys
             .pending
@@ -340,6 +345,11 @@ impl Runner {
         // and check-in still runs meanwhile; the hold decision is tested, this wiring isn't.
         // When changing this, keep `holds_renewal` before every `renew` of a renewal that isn't in progress, and the
         // wake-up at its next check.
+        let renewal_wake = if previous_kept {
+            renewal_wake.max(now + poll_interval(&self.shared.settings))
+        } else {
+            renewal_wake
+        };
         if renewal_wake <= now && !self.holds_renewal(&identity)? {
             self.renew(&mut identity, false).await?;
             return Ok(Some(Instant::now()));
@@ -460,6 +470,9 @@ impl Runner {
         let Some(key) = self.open_usable(&pending)? else {
             // `CONTRACT.agent-identity.md` §5.7: the key storage policy places the fresh key of that renewal, and may
             // hold it back.
+            // UNTESTED: an unusable certified pending key is replaced only once the policy no longer holds its renewal
+            // back; no test drives a runner through a hold.
+            // When changing this, check the hold before `replace_pending_key`, which creates the fresh key.
             if self.holds_renewal(identity)? {
                 return Ok(());
             }
@@ -794,6 +807,10 @@ impl Runner {
 
     /// Applies a stored config to the key storage policy decisions: a held renewal is checked again at once, and the
     /// next step checks whether the policy calls for a renewal (`CONTRACT.agent-identity.md` §7.3 step 7).
+    ///
+    /// UNTESTED: a stored config resets the hold backoff, so that a config that releases a held renewal takes effect at
+    /// once rather than after the backoff; no test drives a runner through a hold.
+    /// When changing this, keep the reset on every stored config, from check-in and pushed alike.
     fn config_stored(&mut self) {
         self.hold_retry.succeeded();
         self.policy_check_due = true;
@@ -821,7 +838,7 @@ impl Runner {
             .unavailable
             .report_held(self.identity_id, self.authority_id, &policy);
         self.hold_retry.failed(&self.shared.settings, None);
-        debug!(
+        trace!(
             authority_id = %self.authority_id,
             "Agent Identity renewal is held back by the key storage policy"
         );
@@ -834,12 +851,9 @@ impl Runner {
     /// the policy is found to call for it; a later check that still finds it called for keeps that time, so that
     /// repeated config changes never postpone it.
     fn schedule_policy_renewal(&mut self, identity: &StoredIdentity, now: Instant) -> anyhow::Result<()> {
-        self.policy_renewal = if self.policy_calls_for_renewal(identity)? {
-            let jitter = policy_renewal_jitter(&self.shared.settings, rand::thread_rng().gen_range(0.0..=1.0));
-            Some(self.policy_renewal.unwrap_or(now + jitter))
-        } else {
-            None
-        };
+        let calls_for_renewal = self.policy_calls_for_renewal(identity)?;
+        let jitter = policy_renewal_jitter(&self.shared.settings, rand::thread_rng().gen_range(0.0..=1.0));
+        self.policy_renewal = policy_renewal_at(self.policy_renewal, calls_for_renewal, now + jitter);
         Ok(())
     }
 
@@ -1063,6 +1077,18 @@ fn policy_renewal_jitter(settings: &IdentityDebugConf, sample: f64) -> Duration 
     }
 }
 
+/// Returns when a renewal that the key storage policy calls for becomes due, given the one already scheduled, whether
+/// the policy calls for one now, and `candidate`, the time a newly called-for renewal takes.
+///
+/// A renewal still called for keeps the time it was scheduled for, so that repeated config changes never postpone it.
+fn policy_renewal_at(scheduled: Option<Instant>, calls_for_renewal: bool, candidate: Instant) -> Option<Instant> {
+    if calls_for_renewal {
+        Some(scheduled.unwrap_or(candidate))
+    } else {
+        None
+    }
+}
+
 fn later(at: Instant, retry_at: Option<Instant>) -> Instant {
     retry_at.map_or(at, |retry_at| retry_at.max(at))
 }
@@ -1240,6 +1266,35 @@ mod tests {
             policy_renewal_jitter(&IdentityDebugConf::default(), sample),
             Duration::from_secs(jitter_secs)
         );
+    }
+
+    #[test]
+    fn a_renewal_the_policy_calls_for_takes_the_time_drawn_when_it_is_first_called_for() {
+        // oracle: intent crates/agent-identity/INTENT.md §key-storage
+        // The renewal waits first for a renewal jitter, here the candidate time.
+        let now = Instant::now();
+        let candidate = now + Duration::from_secs(300);
+        assert_eq!(policy_renewal_at(None, true, candidate), Some(candidate));
+    }
+
+    #[test]
+    fn a_renewal_still_called_for_keeps_its_scheduled_time() {
+        // oracle: mutant a later check draws a new jitter and postpones a renewal already scheduled
+        // A config stored while the renewal is scheduled must not move it, or repeated config changes could postpone it.
+        let now = Instant::now();
+        let scheduled = now + Duration::from_secs(60);
+        assert_eq!(
+            policy_renewal_at(Some(scheduled), true, now + Duration::from_secs(900)),
+            Some(scheduled)
+        );
+    }
+
+    #[test]
+    fn a_renewal_no_longer_called_for_is_dropped() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+        // The agent renews without a schedule or request only while all the conditions hold.
+        let now = Instant::now();
+        assert_eq!(policy_renewal_at(Some(now), false, now), None);
     }
 
     #[test]
