@@ -610,7 +610,12 @@ fn a_repair_of_access_refuses_an_owner_the_rule_does_not_allow_without_changing_
         &[(user(), READ_CONTROL | WRITE_DAC | WRITE_OWNER | READ_ATTRIBUTES, 0)],
         InheritableAclKind::Protected,
     )?;
-    let before = security(&child)?;
+    // An open through `std` adds SYNCHRONIZE, which this DACL withholds, so the test reads as a backup operator.
+    let read_as_backup = || {
+        let _backup = BackupPrivilege::enable()?;
+        security(&child)
+    };
+    let before = read_as_backup()?;
 
     let error = refusal(base.create_dir("child", &user_rule().exact(), Existing::RepairAccess));
 
@@ -618,7 +623,7 @@ fn a_repair_of_access_refuses_an_owner_the_rule_does_not_allow_without_changing_
         is_refused(&error, |refusal| matches!(refusal, Refusal::Owner)),
         "{error:?}"
     );
-    assert_eq!(security(&child)?, before);
+    assert_eq!(read_as_backup()?, before);
     // The DACL is enough for a repair to take the directory, so the refusal above is the repair of access's own.
     drop(base.create_dir("child", &user_rule().exact(), Existing::Repair)?);
     assert_eq!(security(&child)?.0, user());
