@@ -35,6 +35,9 @@ public static class KeyStorageNames
     /// since an agent newer than the library may report a name that the contract added later.
     /// The agent reports the names without proof, so they may guide the choice of a key storage policy,
     /// but never grant or refuse anything.
+    /// Before passing reported names to <see cref="KeyStoragePolicy.Create"/>, keep only those in <see cref="All"/>,
+    /// each once: otherwise a newer agent's name makes it throw, and the authority would refuse a request because of
+    /// unverified metadata (CONTRACT.agent-identity.md §3.1).
     /// </remarks>
     /// <param name="value">The value of the metadata key.</param>
     /// <returns>The reported names.</returns>

@@ -78,7 +78,7 @@ public class KeyStoragePolicyTests
     // oracle: spec RFC 8259 §4
     [InlineData("""{"required":false,"backends":["file"]}""", new[] { "file" }, false)]
     // oracle: spec RFC 8259 §7
-    [InlineData("""{"backends":["tpm"],"required":true}""", new[] { "tpm" }, true)]
+    [InlineData("""{"backends":["\u0074pm"],"required":true}""", new[] { "tpm" }, true)]
     public void TryParseReadsAPolicy(string json, string[] backends, bool required)
     {
         Assert.True(KeyStoragePolicy.TryParse(Encoding.UTF8.GetBytes(json), out KeyStoragePolicy? policy));
@@ -108,6 +108,8 @@ public class KeyStoragePolicyTests
     [InlineData("""{"backends":[1],"required":true}""")]
     [InlineData("""{"backends":[null],"required":true}""")]
     [InlineData("""{"backends":[["tpm"]],"required":true}""")]
+    // oracle: mutant a TryParse that ignores a member other than backends and required
+    [InlineData("""{"backends":["tpm"],"required":true,"extra":1}""")]
     public void TryParseRejectsAPolicyOutsideTheRules(string json)
     {
         Assert.False(KeyStoragePolicy.TryParse(Encoding.UTF8.GetBytes(json), out KeyStoragePolicy? policy));
@@ -120,7 +122,7 @@ public class KeyStoragePolicyTests
     [Theory]
     [InlineData("""{"backends":["tpm"],"required":true,"required":false}""")]
     // oracle: spec RFC 8259 §7
-    [InlineData("""{"backends":["tpm"],"required":true,"required":true}""")]
+    [InlineData("""{"backends":["tpm"],"required":true,"requir\u0065d":true}""")]
     [InlineData("""{"backends":["tpm"],"backends":["file"],"required":true}""")]
     // oracle: spec RFC 8259 §2
     [InlineData("")]
@@ -131,6 +133,25 @@ public class KeyStoragePolicyTests
     public void TryParseRejectsJsonThatParsersCanReadDifferently(string json)
     {
         Assert.False(KeyStoragePolicy.TryParse(Encoding.UTF8.GetBytes(json), out _));
+    }
+
+    // A policy is written into a config once, so a host that reuses its list of names afterwards
+    // changes neither the policy nor the config that carries it.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Fact]
+    public void PolicyKeepsItsNamesWhenTheCallerChangesItsList()
+    {
+        List<string> names = ["tpm", "windows_software_provider"];
+        KeyStoragePolicy policy = KeyStoragePolicy.Create(names, required: true);
+        IdentityConfig config = IdentityConfig.Create(1, keyStorage: policy);
+
+        names[0] = "file";
+        names.Add("tpm");
+
+        Assert.Equal(["tpm", "windows_software_provider"], policy.Backends);
+        Assert.True(JsonElement.DeepEquals(
+            TestJson.Parse("""{ "backends": ["tpm", "windows_software_provider"], "required": true }"""),
+            TestJson.Members(config.ToUtf8Json())["key_storage"]));
     }
 
     // Every order of every non-empty set of table names, each required or not.
