@@ -121,6 +121,26 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string WindowsPowerShell51IsRequired = "WindowsPowerShell51IsRequired";		
 		/// <summary>
+		/// Can't use the folder {0} because it is a link. Delete the link, then try again.
+		/// </summary>
+		public const string DataFolderIsLink = "DataFolderIsLink";		
+		/// <summary>
+		/// Can't use {0} because it is a file, not a folder. Delete the file, then try again.
+		/// </summary>
+		public const string DataFolderIsFile = "DataFolderIsFile";		
+		/// <summary>
+		/// Can't use the folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again.
+		/// </summary>
+		public const string DataFolderOwnedByUntrustedAccount = "DataFolderOwnedByUntrustedAccount";		
+		/// <summary>
+		/// Can't use the folder {0} because {1} can replace it or what it contains. Remove that permission, then try again.
+		/// </summary>
+		public const string DataFolderReplaceableByUntrustedAccount = "DataFolderReplaceableByUntrustedAccount";		
+		/// <summary>
+		/// Can't read the owner or the permissions of the folder {0}. Check them, then try again.
+		/// </summary>
+		public const string DataFolderSecurityUnreadable = "DataFolderSecurityUnreadable";		
+		/// <summary>
 		/// Find your public key for {0} or {1}
 		/// </summary>
 		public const string FindYourPublicKeyForXorX = "FindYourPublicKeyForXorX";		
@@ -195,7 +215,7 @@ namespace DevolutionsGateway.Resources
 		/// <summary>
 		/// Agent Tunnel
 		/// </summary>
-		public const string Group_AgentTunnel = "Group_AgentTunnel";
+		public const string Group_AgentTunnel = "Group_AgentTunnel";		
 		/// <summary>
 		/// External Access
 		/// </summary>
@@ -419,11 +439,11 @@ namespace DevolutionsGateway.Resources
 		/// <summary>
 		/// Enabled
 		/// </summary>
-		public const string Property_EnableAgentTunnel = "Property_EnableAgentTunnel";
+		public const string Property_EnableAgentTunnel = "Property_EnableAgentTunnel";		
 		/// <summary>
 		/// UDP Port
 		/// </summary>
-		public const string Property_AgentTunnelPort = "Property_AgentTunnelPort";
+		public const string Property_AgentTunnelPort = "Property_AgentTunnelPort";		
 		/// <summary>
 		/// Directory
 		/// </summary>
@@ -587,11 +607,11 @@ namespace DevolutionsGateway.Resources
 		/// <summary>
 		/// Enable Agent Tunnel
 		/// </summary>
-		public const string EnableAgentTunnel = "EnableAgentTunnel";
+		public const string EnableAgentTunnel = "EnableAgentTunnel";		
 		/// <summary>
 		/// UDP port
 		/// </summary>
-		public const string AgentTunnelUdpPort = "AgentTunnelUdpPort";
+		public const string AgentTunnelUdpPort = "AgentTunnelUdpPort";		
 		/// <summary>
 		/// Enable the Gateway web interface
 		/// </summary>

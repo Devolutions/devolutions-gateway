@@ -148,34 +148,52 @@ internal static class GatewayActions
     // Deferred sequence
 
     /// <summary>
-    /// Create the path %programdata%\Devolutions\Gateway if it does not exist
+    /// The action data that passes the installer's language to a deferred action, which shows its errors in it.
     /// </summary>
-    /// <remarks>
-    /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
-    /// it's easy to create it with a custom action than workaround Windows Installer.
-    /// </remarks>
-    private static readonly ElevatedManagedAction createProgramDataDirectory = new(
-        new Id($"CA.{nameof(createProgramDataDirectory)}"),
-        CustomActions.CreateProgramDataDirectory,
-        Return.check,
-        When.After, Step.CreateFolders,
-        Condition.Always,
-        Sequence.InstallExecuteSequence);
+    private const string ProductLanguage = "ProductLanguage=[ProductLanguage]";
 
     /// <summary>
-    /// Set or reset the ACL on %programdata%\Devolutions\Gateway
+    /// Fail the run, with an error naming the folder, when %programdata%\Devolutions or %programdata%\Devolutions\Gateway
+    /// is a link or is controlled by an account that is not an administrator
     /// </summary>
-    private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
-        new Id($"CA.{nameof(setProgramDataDirectoryPermissions)}"),
-        CustomActions.SetProgramDataDirectoryPermissions,
+    /// <remarks>
+    /// The major upgrade removes the installed product at RemoveExistingProducts, right after InstallInitialize, so
+    /// running before it fails an install, an upgrade, a repair or a maintenance run before it changes anything.
+    /// A full uninstall is never refused, so that a machine can always be uninstalled.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction checkProgramDataDirectory = new(
+        new Id($"CA.{nameof(checkProgramDataDirectory)}"),
+        CustomActions.CheckProgramDataDirectory,
         Return.check,
-        When.After, new Step(createProgramDataDirectory.Id),
+        When.Before, Step.RemoveExistingProducts,
         Condition.NOT_BeingRemoved,
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
         Impersonate = false,
-        UsesProperties = UseProperties(new IWixProperty[] { GatewayProperties.serviceAccountSid }),
+        UsesProperties = ProductLanguage,
+    };
+
+    /// <summary>
+    /// Create the path %programdata%\Devolutions\Gateway with its owner and ACL if it does not exist, or reset both on
+    /// an existing one and let the files and folders below inherit its entries, after checking its folders again as
+    /// <see cref="checkProgramDataDirectory"/> does
+    /// </summary>
+    /// <remarks>
+    /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
+    /// it's easy to create it with a custom action than workaround Windows Installer.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction createProgramDataDirectory = new(
+        new Id($"CA.{nameof(createProgramDataDirectory)}"),
+        CustomActions.CreateProgramDataDirectory,
+        Return.check,
+        When.After, Step.CreateFolders,
+        Condition.NOT_BeingRemoved,
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = $"{UseProperties(new IWixProperty[] { GatewayProperties.serviceAccountSid })};{ProductLanguage}",
     };
 
     /// <summary>
@@ -556,8 +574,8 @@ internal static class GatewayActions
         queryGatewayServiceAccount,
         validateServiceAccount,
         setArpInstallLocation,
+        checkProgramDataDirectory,
         createProgramDataDirectory,
-        setProgramDataDirectoryPermissions,
         setUserDatabasePermissions,
         cleanGatewayConfigIfNeeded,
         cleanGatewayConfigIfNeededRollback,

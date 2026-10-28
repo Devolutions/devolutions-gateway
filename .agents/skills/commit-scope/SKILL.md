@@ -3,8 +3,6 @@ name: commit-scope
 description: Select commit and PR scopes in the Devolutions Gateway repository. Use whenever composing or reviewing a Conventional Commit subject, especially for shared libraries, packaging, tests, documentation, CI, or changes spanning products.
 ---
 
-# Devolutions Gateway commit scope
-
 Choose scopes by affected deliverable, not file location or internal component.
 
 1. Inspect the diff and repository instructions.

@@ -1,12 +1,8 @@
-# Devolutions Gateway
-
-Reusable agent skills live in `.agents/skills/`; use the matching skill before committing, opening a pull request, posting a GitHub comment, or writing prose.
-
 Start a work session with `/contribute`, which picks the delivery flow by scale and the skills each step needs.
 
 ## Intent files
 
-`INTENT.md` and `*.intent.md` files contain human-owned intent for the software.
+`INTENT*.md` and `*.intent*.md` files contain human-owned intent for the software.
 Read all applicable intent files before modifying code.
 Do not create, modify, or delete intent files.
 If a requested change conflicts with intent, stop and surface the conflict for human resolution.

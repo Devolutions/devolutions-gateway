@@ -46,7 +46,7 @@ impl ManualProxyConfig {
 
             // Domain suffix match (starts with dot).
             if let Some(suffix) = pattern.strip_prefix('.') {
-                if host.ends_with(suffix) || host == suffix {
+                if host == suffix || host.ends_with(pattern) {
                     return true;
                 }
                 continue;
@@ -124,6 +124,96 @@ impl Default for ProxyConfig {
     }
 }
 
+/// Windows automatic proxy configuration, which System mode doesn't evaluate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AutomaticConfiguration {
+    /// "Automatically detect settings", which discovers a configuration script through WPAD.
+    pub automatic_detection: bool,
+    /// "Use automatic configuration script", which names a PAC script.
+    pub configuration_script: bool,
+}
+
+impl AutomaticConfiguration {
+    /// Reads the WinINet `DefaultConnectionSettings` value, whose ninth byte holds the low byte of its
+    /// `INTERNET_PER_CONN_FLAGS`.
+    #[cfg(any(windows, test))]
+    fn from_default_connection_settings(settings: &[u8]) -> Self {
+        // `PROXY_TYPE_AUTO_PROXY_URL` and `PROXY_TYPE_AUTO_DETECT` of `wininet.h`.
+        const AUTO_PROXY_URL: u8 = 0x04;
+        const AUTO_DETECT: u8 = 0x08;
+
+        let flags = settings
+            .get(4 /* Version */ + 4 /* Counter */)
+            .copied()
+            .unwrap_or_default();
+        Self {
+            automatic_detection: flags & AUTO_DETECT != 0,
+            configuration_script: flags & AUTO_PROXY_URL != 0,
+        }
+    }
+}
+
+/// What System mode reads of the system proxy settings, for a warning about the automatic configuration it skips.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SystemProxySettings {
+    /// Whether the system settings name a proxy, which System mode selects from instead of connecting directly.
+    pub names_proxy: bool,
+    /// The automatic configuration that the WinINet settings of the current user or of the machine enable.
+    pub automatic_configuration: AutomaticConfiguration,
+}
+
+/// Reads whether the system settings name a proxy, and which automatic configuration the WinINet settings that System
+/// mode reads enable.
+///
+/// System mode reads the WinINet settings of the current user and of the machine, and takes no proxy from settings that
+/// enable automatic configuration.
+/// Settings that were never saved enable none, as do platforms other than Windows.
+pub fn read_system_proxy_settings() -> anyhow::Result<SystemProxySettings> {
+    // UNTESTED: these are the settings System mode selects from, so that a proxy they name, such as the current user's,
+    // silences a warning about the automatic configuration of other settings.
+    // When changing this, check that a proxy set for the service account with automatic configuration still enabled for
+    // the machine logs no warning.
+    let names_proxy = proxy_cfg::get_proxy_config()
+        .map_err(|e| anyhow::anyhow!("failed to detect proxy configuration: {e}"))?
+        .is_some();
+    Ok(SystemProxySettings {
+        names_proxy,
+        automatic_configuration: windows_automatic_configuration()?,
+    })
+}
+
+#[cfg(windows)]
+fn windows_automatic_configuration() -> std::io::Result<AutomaticConfiguration> {
+    use winreg::RegKey;
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+
+    const CONNECTIONS: &str = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections";
+
+    // UNTESTED: the registry is machine state a unit test can't set without changing the machine.
+    // When changing this, check a PAC script and automatic detection, each set for the service account and for the
+    // machine, and a hive without the `Connections` key.
+    let mut configuration = AutomaticConfiguration::default();
+    for hive in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        let settings = match RegKey::predef(hive)
+            .open_subkey(CONNECTIONS)
+            .and_then(|connections| connections.get_raw_value("DefaultConnectionSettings"))
+        {
+            Ok(settings) => settings,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let enabled = AutomaticConfiguration::from_default_connection_settings(&settings.bytes);
+        configuration.automatic_detection |= enabled.automatic_detection;
+        configuration.configuration_script |= enabled.configuration_script;
+    }
+    Ok(configuration)
+}
+
+#[cfg(not(windows))]
+fn windows_automatic_configuration() -> std::io::Result<AutomaticConfiguration> {
+    Ok(AutomaticConfiguration::default())
+}
+
 /// Generates a cache key for HTTP clients based on URL and proxy configuration.
 ///
 /// Keys are based on scheme, host, port, and proxy configuration.
@@ -195,15 +285,12 @@ impl ClientCache {
     }
 }
 
-/// Detects proxy configuration for a specific target URL using system settings.
-///
-/// This function uses `proxy_cfg::get_proxy_config()` and then calls
-/// `get_proxy_for_url()` method to detect proxy configuration from system
-/// settings (WinHTTP on Windows, environment variables on Unix).
-///
-/// Returns `Ok(None)` if no proxy is configured or if proxy detection fails.
-fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
-    // Try to detect proxy using system configuration.
+/// Reads the proxy that the system settings (WinHTTP on Windows, environment variables on Unix) name for `url`, as
+/// written there, or `None` when they name none, such as for a target in their bypass list.
+pub fn system_proxy_for_url(url: &Url) -> anyhow::Result<Option<String>> {
+    // UNTESTED: System mode uses the machine's proxy settings (environment variables or WinHTTP).
+    // A unit test can't set them without changing the machine or racing other tests over the environment.
+    // When changing this, check a target behind a system proxy and one in its bypass list.
     let proxy_config = match proxy_cfg::get_proxy_config()
         .map_err(|e| anyhow::anyhow!("failed to detect proxy configuration: {e}"))?
     {
@@ -211,16 +298,65 @@ fn detect_system_proxy_for_url(url: &Url) -> anyhow::Result<Option<Url>> {
         None => return Ok(None),
     };
 
-    // Get the proxy URL for the specific target URL.
     // This handles NO_PROXY exclusions automatically.
-    let proxy_url = match proxy_config.get_proxy_for_url(url) {
-        Some(url) => url,
-        None => return Ok(None),
-    };
+    Ok(proxy_config.get_proxy_for_url(url))
+}
 
-    let proxy_url = Url::parse(&proxy_url).context("invalid proxy URL from system settings")?;
+/// Parses a proxy from system settings, reading one without a scheme, such as `10.0.0.1:8080`, as an `http://` URL,
+/// as reqwest does.
+fn parse_system_proxy(proxy: &str) -> anyhow::Result<Url> {
+    match Url::parse(proxy) {
+        Err(url::ParseError::RelativeUrlWithoutBase) => Url::parse(&format!("http://{proxy}")),
+        parsed => parsed.map(read_as_http),
+    }
+    .context("invalid proxy URL from system settings")
+}
 
-    Ok(Some(proxy_url))
+/// Reads a proxy written without a scheme as an `http://` URL, as reqwest does.
+///
+/// `proxy.corp:8080` parses as a URL whose scheme is `proxy.corp` and which has no host; every client then sees the
+/// same `http://proxy.corp:8080/`, so that identity requests and the channel go through the same proxy.
+/// A URL that doesn't read as one is kept, so that its client still refuses it.
+fn read_as_http(proxy: Url) -> Url {
+    if proxy.has_host() || proxy.as_str().contains("://") {
+        return proxy;
+    }
+    Url::parse(&format!("http://{proxy}"))
+        .ok()
+        .filter(Url::has_host)
+        .unwrap_or(proxy)
+}
+
+/// Returns the proxy that `config` selects for `url`, or `None` to connect directly, including when System mode can't
+/// read the system proxy settings or the proxy they name.
+///
+/// Every client applies this one rule, so that the same target goes through the same proxy whichever client
+/// connects to it.
+pub fn proxy_for_url(url: &Url, config: &ProxyConfig) -> Option<Url> {
+    try_proxy_for_url(url, config, system_proxy_for_url).ok().flatten()
+}
+
+/// Returns the proxy that `config` selects for `url`, or `None` to connect directly, and fails when System mode can't
+/// read, through `system_proxy`, the system proxy settings or the proxy they name.
+///
+/// It selects as [`proxy_for_url`] does, for a client that must not connect directly around a proxy it can't read.
+/// `system_proxy` is [`system_proxy_for_url`] outside tests.
+pub fn try_proxy_for_url(
+    url: &Url,
+    config: &ProxyConfig,
+    system_proxy: impl FnOnce(&Url) -> anyhow::Result<Option<String>>,
+) -> anyhow::Result<Option<Url>> {
+    match config {
+        ProxyConfig::Off => Ok(None),
+        ProxyConfig::System => system_proxy(url)?.map(|proxy| parse_system_proxy(&proxy)).transpose(),
+        ProxyConfig::Manual(manual) => {
+            if manual.should_bypass(url) {
+                Ok(None)
+            } else {
+                Ok(manual.select_proxy(url).cloned().map(read_as_http))
+            }
+        }
+    }
 }
 
 /// Builds a reqwest client with proxy configuration for a specific target URL.
@@ -242,26 +378,7 @@ pub fn build_client_with_proxy(
     url: &Url,
     config: &ProxyConfig,
 ) -> reqwest::Result<reqwest::Client> {
-    let proxy_url = match config {
-        ProxyConfig::Off => {
-            // No proxy mode - never use a proxy.
-            None
-        }
-        ProxyConfig::System => {
-            // System mode - use environment variables or WinHTTP.
-            detect_system_proxy_for_url(url).ok().flatten()
-        }
-        ProxyConfig::Manual(manual) => {
-            // Manual mode - check exclude list, then use configured URLs.
-            if manual.should_bypass(url) {
-                None
-            } else {
-                manual.select_proxy(url).cloned()
-            }
-        }
-    };
-
-    if let Some(proxy_url) = proxy_url {
+    if let Some(proxy_url) = proxy_for_url(url, config) {
         // Create reqwest::Proxy from the proxy URL.
         let proxy = reqwest::Proxy::all(proxy_url.clone()).inspect_err(|error| {
             warn!(%proxy_url, %error, "Failed to configure proxy");
@@ -325,4 +442,104 @@ pub fn get_or_create_cached_client(
     cache.insert(cache_key, client.clone());
 
     Ok(client)
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn manual(exclude: &[&str]) -> ProxyConfig {
+        let url = |url| Url::parse(url).expect("valid proxy URL");
+        ProxyConfig::Manual(ManualProxyConfig {
+            http: Some(url("http://http-proxy.test:3128")),
+            https: Some(url("http://https-proxy.test:3128")),
+            all: Some(url("http://all-proxy.test:3128")),
+            exclude: exclude.iter().map(|pattern| (*pattern).to_owned()).collect(),
+        })
+    }
+
+    #[rstest]
+    #[case::off(ProxyConfig::Off, "https://authority.test/dvls", None)]
+    #[case::manual_https(manual(&[]), "https://authority.test/dvls", Some("http://https-proxy.test:3128/"))]
+    #[case::manual_http(manual(&[]), "http://authority.test/dvls", Some("http://http-proxy.test:3128/"))]
+    #[case::manual_bypassed(manual(&[".test"]), "https://authority.test/dvls", None)]
+    fn selects_the_proxy_the_mode_and_exclude_list_name(
+        #[case] config: ProxyConfig,
+        #[case] target: &str,
+        #[case] expected: Option<&str>,
+    ) -> anyhow::Result<()> {
+        // oracle: mutant `proxy_for_url` selects no proxy, or ignores the exclude list
+        let selected = proxy_for_url(&Url::parse(target)?, &config);
+        assert_eq!(selected.as_ref().map(Url::as_str), expected);
+        Ok(())
+    }
+
+    #[test]
+    fn domain_exclusion_respects_label_boundaries() -> anyhow::Result<()> {
+        // oracle: mutant an exclude entry `.corp.local` matches any host ending in `corp.local`, such as `evilcorp.local`
+        let config = ManualProxyConfig {
+            exclude: vec![".corp.local".to_owned()],
+            ..Default::default()
+        };
+        for (target, bypass) in [
+            ("https://corp.local", true),
+            ("https://a.corp.local", true),
+            ("https://evilcorp.local", false),
+        ] {
+            assert_eq!(config.should_bypass(&Url::parse(target)?), bypass, "{target}");
+        }
+        Ok(())
+    }
+
+    // oracle: spec Windows SDK wininet.h §INTERNET_PER_CONN_FLAGS
+    // oracle: reference proxy_cfg 0.4.2 `win_inet_get_autoconfig_type`, which reads these flags from the ninth byte
+    #[rstest]
+    #[case::direct(0x01, false, false)]
+    #[case::named_proxy(0x03, false, false)]
+    #[case::configuration_script(0x05, false, true)]
+    #[case::automatic_detection(0x09, true, false)]
+    fn reads_the_automatic_configuration_flags_of_the_connection_settings(
+        #[case] flags: u8,
+        #[case] automatic_detection: bool,
+        #[case] configuration_script: bool,
+    ) {
+        // Version, counter, then the `PROXY_TYPE_*` flags, each a little-endian 32-bit value.
+        let settings = [0x46, 0, 0, 0, 0x02, 0, 0, 0, flags, 0, 0, 0];
+        let expected = AutomaticConfiguration {
+            automatic_detection,
+            configuration_script,
+        };
+        assert_eq!(
+            AutomaticConfiguration::from_default_connection_settings(&settings),
+            expected
+        );
+    }
+
+    // oracle: reference reqwest 0.12.28 `IntoProxy`, which reads a proxy URL without a scheme as an `http://` URL
+    #[rstest]
+    #[case::ipv4("10.0.0.1:8080", "http://10.0.0.1:8080/")]
+    #[case::ipv6("[::1]:8080", "http://[::1]:8080/")]
+    #[case::host_name("proxy.corp:8080", "http://proxy.corp:8080/")]
+    #[case::with_scheme("https://proxy.test:3128", "https://proxy.test:3128/")]
+    fn a_system_proxy_without_a_scheme_is_an_http_proxy(
+        #[case] setting: &str,
+        #[case] expected: &str,
+    ) -> anyhow::Result<()> {
+        assert_eq!(parse_system_proxy(setting)?.as_str(), expected);
+        Ok(())
+    }
+
+    // oracle: reference reqwest 0.12.28 `IntoProxy`, which reads a proxy URL without a scheme as an `http://` URL
+    #[test]
+    fn a_manual_proxy_without_a_scheme_is_an_http_proxy() -> anyhow::Result<()> {
+        let config = ProxyConfig::Manual(ManualProxyConfig {
+            all: Some(Url::parse("localhost:8080")?),
+            ..Default::default()
+        });
+        let selected = proxy_for_url(&Url::parse("https://authority.test/dvls")?, &config);
+        assert_eq!(selected.as_ref().map(Url::as_str), Some("http://localhost:8080/"));
+        Ok(())
+    }
 }

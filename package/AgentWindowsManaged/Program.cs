@@ -385,6 +385,7 @@ internal class Program
         projectProperties.Add(new Property(AgentProperties.AgentTunnelAdvertiseDomainsEncoded, "") { Secure = true });
         projectProperties.Add(new Property(AgentProperties.AgentTunnelIncludeDetectedDomainEncoded, "") { Secure = true });
         projectProperties.Add(new Property(AgentProperties.AgentTunnelDetectedDomainEncoded, "") { Secure = true });
+        projectProperties.AddRange(CreateIdentityEnrollmentProperties());
 
         project.Properties = projectProperties.ToArray();
         project.ManagedUI = new ManagedUI();
@@ -433,6 +434,21 @@ internal class Program
         }
     }
 
+    /// <summary>
+    /// The Agent Identity enrollment token property, its encoded copy, and the property naming a file that holds the
+    /// token.
+    /// </summary>
+    /// <remarks>
+    /// The first two hold the token, so they are hidden to keep it out of the MSI log; the file path is no secret.
+    /// All are secure, so that a value given on the command line reaches the elevated execute sequence.
+    /// </remarks>
+    internal static Property[] CreateIdentityEnrollmentProperties() =>
+    [
+        new(AgentProperties.IdentityEnrollmentToken, "") { Hidden = true, Secure = true },
+        new(AgentProperties.IdentityEnrollmentTokenEncoded, "") { Hidden = true, Secure = true },
+        new(AgentProperties.IdentityEnrollmentTokenFile, "") { Secure = true },
+    ];
+
     internal static RegValue CreateEventLogSourceRegistryValue(bool win64) =>
         new(
             RegistryHive.LocalMachine,
@@ -447,6 +463,45 @@ internal class Program
             // written by an administrator or another installer.
             RegistryKeyAction = RegistryKeyAction.create,
         };
+
+    /// <summary>
+    /// The installer string <paramref name="id"/> in the language whose LCID is <paramref name="productLanguage"/>, or
+    /// in English when the installer doesn't have that language.
+    /// </summary>
+    /// <remarks>
+    /// Custom actions show their messages with it, because the managed UI's localization isn't available to them.
+    /// They pass the <c>ProductLanguage</c> property, which the language transform Windows Installer applied sets, so
+    /// that their messages match the rest of the installer.
+    /// </remarks>
+    internal static string Localize(string productLanguage, string id)
+    {
+        string culture = Languages.Keys
+            .FirstOrDefault(x => new CultureInfo(x).LCID.ToString(CultureInfo.InvariantCulture) == productLanguage) ?? enUS.Key;
+
+        return LoadStrings(culture).TryGetValue(id, out string text) ? text : id;
+    }
+
+    /// <summary>
+    /// The installer strings of <paramref name="culture"/> by ID, read from the localization file embedded in this
+    /// assembly.
+    /// </summary>
+    private static Dictionary<string, string> LoadStrings(string culture)
+    {
+        using Stream stream = Assembly.GetExecutingAssembly()
+            .GetManifestResourceStream($"DevolutionsAgent.Resources.{Languages[culture]}");
+
+        XmlDocument xml = new();
+        xml.Load(stream);
+
+        Dictionary<string, string> strings = new();
+
+        foreach (XmlNode s in xml.GetElementsByTagName("String"))
+        {
+            strings.Add(s.Attributes["Id"].Value, s.InnerText);
+        }
+
+        return strings;
+    }
 
     private static void Project_UnhandledException(ExceptionEventArgs e)
     {
@@ -470,18 +525,7 @@ internal class Program
             _ => enUS.Key,
         };
 
-        using Stream stream = Assembly.GetExecutingAssembly()
-            .GetManifestResourceStream($"DevolutionsAgent.Resources.{Languages[lcid]}");
-
-        XmlDocument xml = new();
-        xml.Load(stream);
-
-        Dictionary<string, string> strings = new();
-
-        foreach (XmlNode s in xml.GetElementsByTagName("String"))
-        {
-            strings.Add(s.Attributes["Id"].Value, s.InnerText);
-        }
+        Dictionary<string, string> strings = LoadStrings(lcid);
 
         string I18n(string key)
         {

@@ -115,6 +115,26 @@
         {
           "id": "WindowsPowerShell51IsRequired",
           "text": "Dieses Produkt erfordert Windows PowerShell 5.1"
+        },
+        {
+          "id": "DataFolderIsLink",
+          "text": "Der Ordner {0} kann nicht verwendet werden, da er ein Link ist. Löschen Sie den Link und versuchen Sie es erneut."
+        },
+        {
+          "id": "DataFolderIsFile",
+          "text": "{0} kann nicht verwendet werden, da es eine Datei und kein Ordner ist. Löschen Sie die Datei und versuchen Sie es erneut."
+        },
+        {
+          "id": "DataFolderOwnedByUntrustedAccount",
+          "text": "Der Ordner {0} kann nicht verwendet werden, da er {1} gehört. Nur SYSTEM oder ein Administrator darf ihn besitzen. Ändern Sie den Besitzer und versuchen Sie es erneut."
+        },
+        {
+          "id": "DataFolderReplaceableByUntrustedAccount",
+          "text": "Der Ordner {0} kann nicht verwendet werden, da {1} ihn oder seinen Inhalt ersetzen kann. Entfernen Sie diese Berechtigung und versuchen Sie es erneut."
+        },
+        {
+          "id": "DataFolderSecurityUnreadable",
+          "text": "Der Besitzer oder die Berechtigungen des Ordners {0} können nicht gelesen werden. Überprüfen Sie sie und versuchen Sie es erneut."
         }
       ],
       "links": [

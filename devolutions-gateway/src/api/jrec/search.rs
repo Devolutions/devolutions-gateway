@@ -1,12 +1,15 @@
+use std::cmp::Reverse;
 use std::collections::HashSet;
-use std::io;
+use std::io::{self, SeekFrom};
+use std::mem;
 
 use axum::Json;
 use axum::extract::State;
 use camino::{Utf8Path, Utf8PathBuf};
+use sha2::{Digest as _, Sha256};
 use time::OffsetDateTime;
 use tokio::fs::File;
-use tokio::io::{AsyncBufReadExt as _, BufReader};
+use tokio::io::{AsyncBufReadExt as _, AsyncSeekExt as _, BufReader};
 use uuid::Uuid;
 
 use super::is_safe_recording_file_name;
@@ -16,12 +19,12 @@ use crate::extract::RecordingsSearchScope;
 use crate::http::HttpError;
 use crate::token::RecordingFileType;
 
-/// Most hits returned by one search.
+/// Most hits returned by one page, and the page size when the request does not set one.
 const MAX_HITS: usize = 1_000;
 
-/// Log bytes one search reads before it stops, so that searching every recording takes a bounded time.
+/// Log bytes one page reads before it ends, so that every page takes a bounded time.
 ///
-/// A search reads past it by about [`MAX_LINE_BYTES`] at most, to finish reading the start of a line.
+/// A page reads past it by about [`MAX_LINE_BYTES`] at most, to finish reading the start of a line.
 const MAX_SCANNED_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Bytes of a line that are matched and returned; the rest of a longer line is skipped.
@@ -42,6 +45,14 @@ pub(crate) struct RecordingSearchRequest {
     /// Only search the recordings that started in this range.
     #[serde(default)]
     start_time: Option<StartTimeRange>,
+    /// Most hits in the page, from 1 to 1000; 1000 when missing.
+    #[serde(default)]
+    #[cfg_attr(feature = "openapi", schema(minimum = 1, maximum = 1000))]
+    max_hits: Option<u32>,
+    /// Where the page starts: the `nextCursor` of the previous page, sent unchanged with the same `query`,
+    /// `recordings` and `startTime`.
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 /// `"all"`, or a list of recording IDs.
@@ -122,8 +133,12 @@ impl StartTimeRange {
 pub(crate) struct RecordingSearchResponse {
     /// Matching lines, newest recording first when searching all recordings, otherwise in the requested order.
     hits: Vec<RecordingSearchHit>,
-    /// The search stopped before reading every log, so more lines may match.
-    limit_reached: bool,
+    /// Where the next page starts; absent when every log has been read.
+    ///
+    /// The cursor is opaque, and its format may change between versions.
+    /// A page with fewer hits than asked for may still be followed by more pages.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_cursor: Option<String>,
 }
 
 /// A line that matches the search text.
@@ -156,6 +171,12 @@ pub(crate) struct RecordingSearchHit {
 /// matched as raw text.
 /// Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched.
 /// Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
+///
+/// Results come in pages.
+/// To get the next page, send the same `query`, `recordings` and `startTime` again,
+/// with the `nextCursor` of the previous page as `cursor`.
+/// Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not
+/// searched.
 #[cfg_attr(feature = "openapi", utoipa::path(
     post,
     operation_id = "SearchRecordings",
@@ -176,23 +197,82 @@ pub(crate) async fn search_recordings(
     Json(request): Json<RecordingSearchRequest>,
 ) -> Result<Json<RecordingSearchResponse>, HttpError> {
     let text = SearchText::new(&request.query);
+    let max_hits = page_size(request.max_hits).ok_or_else(|| HttpError::bad_request().msg("invalid maxHits"))?;
+    let invalid_cursor = || HttpError::bad_request().msg("invalid cursor for this search");
+
+    // A cursor is only followed in the search it came from, which these fields identify.
+    let search_id = {
+        let listed_ids = match &request.recordings {
+            RecordingSelection::All(AllRecordings::All) => None,
+            RecordingSelection::Listed(recording_ids) => Some(recording_ids),
+        };
+        let start_time = request.start_time.as_ref().map(|range| {
+            (
+                range.from.map(OffsetDateTime::unix_timestamp_nanos),
+                range.to.map(OffsetDateTime::unix_timestamp_nanos),
+            )
+        });
+
+        let search =
+            serde_json::to_vec(&(&request.query, listed_ids, start_time)).expect("a search serializes to JSON");
+        hex::encode(&Sha256::digest(search)[..16])
+    };
+
+    let mut cursor = request
+        .cursor
+        .map(|cursor| {
+            Cursor::decode(&cursor)
+                .filter(|cursor| cursor.search_id == search_id)
+                .ok_or_else(invalid_cursor)
+        })
+        .transpose()?;
+
+    let listed_ids = match request.recordings {
+        RecordingSelection::All(AllRecordings::All) => None,
+        RecordingSelection::Listed(recording_ids) => {
+            let mut seen = HashSet::new();
+            Some(
+                recording_ids
+                    .into_iter()
+                    .filter(|recording_id| seen.insert(*recording_id))
+                    .collect::<Vec<_>>(),
+            )
+        }
+    };
 
     let recording_root = conf_handle.get_conf().recording_path.clone();
 
-    let mut recordings = match request.recordings {
-        RecordingSelection::All(AllRecordings::All) => all_recording_logs_newest_first(&recording_root)
-            .await
-            .map_err(HttpError::internal().with_msg("failed recording listing").err())?,
-        RecordingSelection::Listed(recording_ids) => {
-            let mut seen = HashSet::new();
-            let mut recordings = Vec::with_capacity(recording_ids.len());
-            for recording_id in recording_ids
-                .into_iter()
-                .filter(|recording_id| seen.insert(*recording_id))
-            {
-                let recording_dir = recording_root.join(recording_id.to_string());
-                recordings.extend(read_recording_logs(recording_dir, recording_id).await);
+    let mut recordings = match listed_ids {
+        None => {
+            let mut recordings = all_recording_logs_newest_first(&recording_root)
+                .await
+                .map_err(HttpError::internal().with_msg("failed recording listing").err())?;
+
+            if let Some(cursor) = &cursor {
+                let cursor_key = newest_first(cursor.start_time, cursor.recording_id);
+                let resumed = recordings.partition_point(|recording| {
+                    newest_first(recording.start_time, recording.recording_id) < cursor_key
+                });
+                recordings.drain(..resumed);
             }
+
+            recordings
+        }
+        Some(recording_ids) => {
+            let resumed = match &cursor {
+                Some(cursor) => recording_ids
+                    .iter()
+                    .position(|recording_id| *recording_id == cursor.recording_id)
+                    .ok_or_else(invalid_cursor)?,
+                None => 0,
+            };
+
+            let mut recordings = Vec::with_capacity(recording_ids.len() - resumed);
+            for recording_id in &recording_ids[resumed..] {
+                let recording_dir = recording_root.join(recording_id.to_string());
+                recordings.extend(read_recording_logs(recording_dir, *recording_id).await);
+            }
+
             recordings
         }
     };
@@ -201,28 +281,110 @@ pub(crate) async fn search_recordings(
         recordings.retain(|recording| start_time.contains(recording.start_time));
     }
 
-    let mut search = Search::new(text);
+    let mut search = Search::new(text, max_hits);
 
     for recording in recordings {
-        for file_name in &recording.file_names {
+        let (first_file, mut position) = match cursor.take() {
+            Some(cursor) if cursor.recording_id == recording.recording_id => {
+                // Searching the recording again from its first log would return hits twice.
+                let Some(index) = recording
+                    .file_names
+                    .iter()
+                    .position(|file_name| *file_name == cursor.file_name)
+                else {
+                    continue;
+                };
+
+                (index, cursor.position)
+            }
+            _ => (0, FilePosition::default()),
+        };
+
+        for file_name in &recording.file_names[first_file..] {
             let path = recording.dir.join(file_name);
 
-            match search.search_file(recording.recording_id, file_name, &path).await {
-                Ok(()) => {}
+            match search
+                .search_file(recording.recording_id, file_name, &path, mem::take(&mut position))
+                .await
+            {
+                Ok(None) => {}
+                Ok(Some(position)) => {
+                    let next_cursor = Cursor {
+                        search_id,
+                        recording_id: recording.recording_id,
+                        start_time: recording.start_time,
+                        file_name: file_name.clone(),
+                        position,
+                    };
+
+                    return Ok(Json(search.into_response(Some(next_cursor.encode()))));
+                }
                 // A recording can be deleted while it is searched.
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {
                     trace!(%path, "Recording log listed in the manifest is missing");
                 }
                 Err(error) => warn!(%path, %error, "Failed to search a recording log"),
             }
-
-            if search.limit_reached {
-                return Ok(Json(search.into_response()));
-            }
         }
     }
 
-    Ok(Json(search.into_response()))
+    Ok(Json(search.into_response(None)))
+}
+
+/// The number of hits a page holds at most, or `None` when `max_hits` is out of range.
+fn page_size(max_hits: Option<u32>) -> Option<usize> {
+    let Some(max_hits) = max_hits else {
+        return Some(MAX_HITS);
+    };
+
+    let max_hits = usize::try_from(max_hits).ok()?;
+    (1..=MAX_HITS).contains(&max_hits).then_some(max_hits)
+}
+
+/// Where the next page of a search starts.
+///
+/// The caller gets it as an opaque string: hex-encoded JSON.
+/// A cursor cannot reach a file the search would not read, because only its recording ID and file name are matched
+/// against the searched recordings and their manifests, and neither is ever joined into a path.
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Cursor {
+    search_id: String,
+    recording_id: Uuid,
+    start_time: i64,
+    file_name: String,
+    position: FilePosition,
+}
+
+impl Cursor {
+    fn encode(&self) -> String {
+        let json = serde_json::to_vec(self).expect("a cursor serializes to JSON");
+        hex::encode(json)
+    }
+
+    fn decode(cursor: &str) -> Option<Self> {
+        let json = hex::decode(cursor).ok()?;
+        let cursor: Self = serde_json::from_slice(&json).ok()?;
+
+        // A caller can edit a cursor, and reading on from a position past these bounds would overflow.
+        // Every line takes at least one byte, so a cursor Gateway made never counts more lines than bytes.
+        let FilePosition {
+            offset, line_number, ..
+        } = cursor.position;
+        (line_number <= offset && i64::try_from(offset).is_ok()).then_some(cursor)
+    }
+}
+
+/// Where reading continues in one log.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FilePosition {
+    /// Bytes from the start of the file.
+    offset: u64,
+    /// Lines whose start was read before `offset`, so that line numbers go on counting from there.
+    line_number: u64,
+    /// The position is inside a line longer than [`MAX_LINE_BYTES`], whose rest is skipped up to its line break.
+    in_long_line: bool,
 }
 
 /// The query, lowercased the same way as the text it is compared with.
@@ -522,77 +684,90 @@ impl<'a> JsonCursor<'a> {
     }
 }
 
+/// One page of a search.
 struct Search {
     text: SearchText,
+    max_hits: usize,
     hits: Vec<RecordingSearchHit>,
     scanned_bytes: u64,
-    limit_reached: bool,
 }
 
 impl Search {
-    fn new(text: SearchText) -> Self {
+    fn new(text: SearchText, max_hits: usize) -> Self {
         Self {
             text,
+            max_hits,
             hits: Vec::new(),
             scanned_bytes: 0,
-            limit_reached: false,
         }
     }
 
-    fn into_response(self) -> RecordingSearchResponse {
+    fn into_response(self, next_cursor: Option<String>) -> RecordingSearchResponse {
         RecordingSearchResponse {
             hits: self.hits,
-            limit_reached: self.limit_reached,
+            next_cursor,
         }
     }
 
-    /// Adds the lines of one log that match the search text.
-    async fn search_file(&mut self, recording_id: Uuid, file_name: &str, path: &Utf8Path) -> io::Result<()> {
-        let mut reader = BufReader::new(File::open(path).await?);
+    /// Adds the lines of one log that match the search text, reading from `position` on.
+    ///
+    /// Returns where the next page continues when the page ends in this log, and `None` when the log is done.
+    async fn search_file(
+        &mut self,
+        recording_id: Uuid,
+        file_name: &str,
+        path: &Utf8Path,
+        mut position: FilePosition,
+    ) -> io::Result<Option<FilePosition>> {
+        let mut file = File::open(path).await?;
+        file.seek(SeekFrom::Start(position.offset)).await?;
+
+        let mut reader = BufReader::new(file);
         let mut line = Vec::new();
-        let mut line_number = 0;
-        let mut offset = 0;
 
         loop {
+            if position.in_long_line {
+                let budget = MAX_SCANNED_BYTES.saturating_sub(self.scanned_bytes);
+                let skipped = skip_rest_of_line(&mut reader, budget).await?;
+                self.scanned_bytes += skipped.bytes;
+                position.offset += skipped.bytes;
+
+                if !skipped.finished {
+                    return Ok(Some(position));
+                }
+
+                position.in_long_line = false;
+            }
+
+            let here = position;
+
             if MAX_SCANNED_BYTES <= self.scanned_bytes {
-                self.limit_reached = !reader.fill_buf().await?.is_empty();
-                return Ok(());
+                let at_end = reader.fill_buf().await?.is_empty();
+                return Ok((!at_end).then_some(here));
             }
 
             let Some(read) = read_line(&mut reader, &mut line).await? else {
-                return Ok(());
+                return Ok(None);
             };
             self.scanned_bytes += read.bytes;
-            line_number += 1;
-            let line_offset = offset;
-            offset += read.bytes;
+            position.line_number += 1;
+            position.offset += read.bytes;
+            position.in_long_line = read.rest_unread;
 
             if self.text.is_in(&line) {
-                if MAX_HITS <= self.hits.len() {
-                    self.limit_reached = true;
-                    return Ok(());
+                // The hit that does not fit opens the next page, which always keeps its first hit.
+                if self.max_hits <= self.hits.len() {
+                    return Ok(Some(here));
                 }
 
                 self.hits.push(RecordingSearchHit {
                     recording_id,
                     file_name: file_name.to_owned(),
-                    line_number,
-                    offset: line_offset,
+                    line_number: position.line_number,
+                    offset: here.offset,
                     line: String::from_utf8_lossy(&line).into_owned(),
                     truncated: read.truncated,
                 });
-            }
-
-            if read.rest_unread {
-                let budget = MAX_SCANNED_BYTES.saturating_sub(self.scanned_bytes);
-                let skipped = skip_rest_of_line(&mut reader, budget).await?;
-                self.scanned_bytes += skipped.bytes;
-                offset += skipped.bytes;
-
-                if !skipped.finished {
-                    self.limit_reached = true;
-                    return Ok(());
-                }
             }
         }
     }
@@ -686,10 +861,17 @@ async fn all_recording_logs_newest_first(recording_root: &Utf8Path) -> anyhow::R
         recordings.extend(read_recording_logs(dir, recording_id).await);
     }
 
-    // Ordering by ID too keeps the order of recordings that start together the same on every request.
-    recordings.sort_unstable_by(|a, b| (b.start_time, b.recording_id).cmp(&(a.start_time, a.recording_id)));
+    recordings.sort_unstable_by_key(|recording| newest_first(recording.start_time, recording.recording_id));
 
     Ok(recordings)
+}
+
+/// Sort key of the order `"all"` searches recordings in: newest first by start time, then by ID.
+///
+/// Ordering by ID too keeps the order of recordings that start together the same on every page,
+/// so that a cursor finds its place in the next page's listing.
+fn newest_first(start_time: i64, recording_id: Uuid) -> Reverse<(i64, Uuid)> {
+    Reverse((start_time, recording_id))
 }
 
 struct LineRead {
@@ -775,7 +957,7 @@ struct Skipped {
 }
 
 /// Consumes the rest of a line up to its line break, reading at most `budget` bytes,
-/// so that a log without line breaks cannot make one search read all of it.
+/// so that a log without line breaks cannot make one page read all of it.
 async fn skip_rest_of_line(reader: &mut BufReader<File>, budget: u64) -> io::Result<Skipped> {
     let mut bytes = 0;
 
@@ -809,18 +991,32 @@ mod tests {
 
     use super::*;
 
-    async fn search_log(query: &str, content: &[u8]) -> Search {
-        let dir = tempfile::tempdir().expect("temp dir");
+    fn write_log(dir: &tempfile::TempDir, content: &[u8]) -> Utf8PathBuf {
         let path = Utf8PathBuf::from_path_buf(dir.path().join("ai-analysis-0.slog")).expect("UTF-8 path");
         std::fs::write(&path, content).expect("write log");
+        path
+    }
 
-        let mut search = Search::new(SearchText::new(query));
-        search
-            .search_file(Uuid::nil(), "ai-analysis-0.slog", &path)
+    async fn search_page(
+        query: &str,
+        max_hits: usize,
+        path: &Utf8Path,
+        position: FilePosition,
+    ) -> (Search, Option<FilePosition>) {
+        let mut search = Search::new(SearchText::new(query), max_hits);
+        let next = search
+            .search_file(Uuid::nil(), "ai-analysis-0.slog", path, position)
             .await
             .expect("search log");
 
-        search
+        (search, next)
+    }
+
+    async fn search_log(query: &str, content: &[u8]) -> Search {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_log(&dir, content);
+
+        search_page(query, MAX_HITS, &path, FilePosition::default()).await.0
     }
 
     fn hit_lines(search: &Search) -> Vec<(u64, &str)> {
@@ -1038,7 +1234,7 @@ mod tests {
     }
 
     // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Hits
-    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Limits
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
     #[test]
     fn limits_match_the_intent() {
         assert_eq!(MAX_LINE_BYTES, 256 * 1024);
@@ -1046,47 +1242,122 @@ mod tests {
         assert_eq!(MAX_SCANNED_BYTES, 16 * 1024 * 1024);
     }
 
-    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Limits
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
     #[tokio::test]
-    async fn stops_at_the_hit_limit() {
-        let content = "hit\n".repeat(MAX_HITS + 1);
-
-        let search = search_log("hit", content.as_bytes()).await;
-
-        assert_eq!(search.hits.len(), MAX_HITS);
-        assert!(search.limit_reached);
-    }
-
-    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Limits
-    #[tokio::test]
-    async fn stops_inside_a_line_without_breaks_at_the_read_budget() {
+    async fn continues_a_line_without_breaks_on_the_next_page() {
         let budget = usize::try_from(MAX_SCANNED_BYTES).expect("budget fits in usize");
         let mut content = b"hit\n".to_vec();
         content.resize(content.len() + budget + 1024 * 1024, b'x');
         content.extend_from_slice(b"\nhit\n");
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_log(&dir, &content);
 
-        let search = search_log("hit", &content).await;
+        let (first, next) = search_page("hit", MAX_HITS, &path, FilePosition::default()).await;
+        let (second, last) = search_page("hit", MAX_HITS, &path, next.expect("a second page")).await;
 
-        assert_eq!(hit_lines(&search), [(1, "hit")]);
-        assert!(search.limit_reached);
-        assert!(search.scanned_bytes <= MAX_SCANNED_BYTES);
+        assert!(first.scanned_bytes <= MAX_SCANNED_BYTES);
+        assert_eq!(hit_lines(&first), [(1, "hit")]);
+        assert_eq!(hit_lines(&second), [(3, "hit")]);
+        assert_eq!(last, None);
     }
 
-    // oracle: mutant limitReached set when the read budget runs out exactly where the log ends
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
+    #[rstest]
+    #[case::missing(None, Some(MAX_HITS))]
+    #[case::one(Some(1), Some(1))]
+    #[case::most(Some(1_000), Some(1_000))]
+    #[case::zero(Some(0), None)]
+    #[case::over_the_most(Some(1_001), None)]
+    fn accepts_a_page_size_from_1_to_1000(#[case] max_hits: Option<u32>, #[case] expected: Option<usize>) {
+        assert_eq!(page_size(max_hits), expected);
+    }
+
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
     #[rstest]
     #[case::with_a_final_line_break(b"\n".as_slice())]
     #[case::without_one(b"".as_slice())]
     #[tokio::test]
-    async fn reaches_no_limit_when_the_read_budget_ends_with_the_log(#[case] end: &[u8]) {
+    async fn gives_no_next_page_when_the_read_budget_ends_with_the_log(#[case] end: &[u8]) {
         let budget = usize::try_from(MAX_SCANNED_BYTES).expect("budget fits in usize");
         let mut content = b"hit\n".to_vec();
         content.resize(budget - end.len(), b'x');
         content.extend_from_slice(end);
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = write_log(&dir, &content);
 
-        let search = search_log("hit", &content).await;
+        let (search, next) = search_page("hit", MAX_HITS, &path, FilePosition::default()).await;
 
         assert_eq!(hit_lines(&search), [(1, "hit")]);
-        assert!(!search.limit_reached);
+        assert_eq!(next, None);
+    }
+
+    proptest::proptest! {
+        // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
+        #[test]
+        fn returns_each_hit_once_across_pages(
+            lines in proptest::collection::vec("[a-c ]{0,4}(hit)?[a-c ]{0,4}", 0..30),
+            max_hits in 1..=5usize,
+        ) {
+            let content = lines.join("\n");
+            let dir = tempfile::tempdir().expect("temp dir");
+            let path = write_log(&dir, content.as_bytes());
+
+            let mut expected = Vec::new();
+            let mut offset = 0;
+            for (line, line_number) in lines.iter().zip(1..) {
+                if line.contains("hit") {
+                    expected.push((line_number, offset, line.clone()));
+                }
+                offset += u64::try_from(line.len() + 1).expect("line length fits in u64");
+            }
+
+            let runtime = tokio::runtime::Builder::new_current_thread().build().expect("runtime");
+            let mut hits = Vec::new();
+            let mut pages = 0;
+            let mut position = Some(FilePosition::default());
+            while let Some(start) = position {
+                pages += 1;
+                proptest::prop_assert!(pages <= expected.len() + 1, "paging does not end");
+
+                let (page, next) = runtime.block_on(search_page("hit", max_hits, &path, start));
+                proptest::prop_assert!(page.hits.len() <= max_hits);
+                hits.extend(page.hits.into_iter().map(|hit| (hit.line_number, hit.offset, hit.line)));
+                position = next;
+            }
+
+            proptest::prop_assert_eq!(hits, expected);
+        }
+    }
+
+    fn cursor_at(offset: u64, line_number: u64) -> Cursor {
+        Cursor {
+            search_id: "0".repeat(32),
+            recording_id: Uuid::nil(),
+            start_time: 100,
+            file_name: "ai-analysis-0.slog".to_owned(),
+            position: FilePosition {
+                offset,
+                line_number,
+                in_long_line: false,
+            },
+        }
+    }
+
+    // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
+    #[rstest]
+    #[case::start(0, 0, true)]
+    #[case::one_byte_per_line(10, 10, true)]
+    #[case::more_lines_than_bytes(10, 11, false)]
+    #[case::last_seek_position(i64::MAX.unsigned_abs(), 0, true)]
+    #[case::past_the_last_seek_position(i64::MAX.unsigned_abs() + 1, 0, false)]
+    fn accepts_only_cursors_whose_position_can_exist(
+        #[case] offset: u64,
+        #[case] line_number: u64,
+        #[case] accepted: bool,
+    ) {
+        let cursor = cursor_at(offset, line_number).encode();
+
+        assert_eq!(Cursor::decode(&cursor).is_some(), accepted);
     }
 
     // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched

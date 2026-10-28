@@ -1910,16 +1910,17 @@ mod tests {
         const LINES_PER_FRAME: usize = 64;
 
         let temp_dir = tempfile::tempdir().expect("create temp dir");
-        // Reads one 1 KiB line every 50 ms, so writing a 64 KiB frame into a full Unix pipe takes twice the stall
-        // timeout. On Windows, the pipe absorbs both frames, so the test only checks that slow reading is not
-        // mistaken for a stall. The
-        // reader handles a first line before reporting that it started, so loading the cmdlets it uses is not
-        // mistaken for a stall.
+        // Reads one 1 KiB line every 50 ms, so writing a 64 KiB frame into a full Unix pipe takes twice the stall timeout.
+        // On Unix, the reader drains the rest at full speed once the first frame is read, so the lines left in the pipe when the last write completes do not outlast the exit grace period on a slow runner.
+        // On Windows, the pipe absorbs both frames, so the test only checks that slow reading is not mistaken for a stall.
+        // The reader handles a first line before reporting that it started, so loading the cmdlets it uses is not mistaken for a stall.
         let script = write_script(
             temp_dir.path(),
             "slow-reader",
             "@powershell -NoLogo -NoProfile -NonInteractive -Command \"$null = [Console]::In.ReadLine(); Start-Sleep -Milliseconds 1; [Console]::Out.WriteLine('started'); [Console]::Out.Flush(); while ($null -ne [Console]::In.ReadLine()) { Start-Sleep -Milliseconds 50 }\"\n",
-            "read -r line\necho started\nwhile IFS= read -r line; do sleep 0.05; done\n",
+            &format!(
+                "read -r line\necho started\nslow={LINES_PER_FRAME}\nwhile IFS= read -r line; do if [ \"$slow\" -gt 0 ]; then slow=$((slow - 1)); sleep 0.05; fi; done\n"
+            ),
         );
         let limits = StdinLimits {
             stall_timeout: Duration::from_millis(1500),

@@ -19,6 +19,8 @@ const DEFAULT_RDP_PORT: u16 = 3389;
 pub struct Conf {
     pub log_file: Utf8PathBuf,
     pub verbosity_profile: dto::VerbosityProfile,
+    /// Defined in the identity module, [`crate::identity::config`].
+    pub identity: crate::identity::config::IdentityConf,
     pub updater: dto::UpdaterConf,
     pub remote_desktop: RemoteDesktopConf,
     pub pedm: dto::PedmConf,
@@ -288,6 +290,11 @@ impl TryFrom<dto::PsuConf> for Option<PsuConf> {
 impl Conf {
     pub fn from_conf_file(conf_file: &dto::ConfFile) -> anyhow::Result<Self> {
         let data_dir = get_data_dir();
+        let identity = conf_file.identity.clone().unwrap_or_default();
+        let mut debug = conf_file.debug.clone().unwrap_or_default();
+        if let Some(settings) = &mut debug.identity {
+            settings.normalize(&data_dir)?;
+        }
 
         let log_file = conf_file
             .log_file
@@ -305,6 +312,7 @@ impl Conf {
         Ok(Conf {
             log_file,
             verbosity_profile: conf_file.verbosity_profile.unwrap_or_default(),
+            identity,
             updater: conf_file.updater.clone().unwrap_or_default(),
             remote_desktop,
             pedm: conf_file.pedm.clone().unwrap_or_default(),
@@ -323,7 +331,7 @@ impl Conf {
                 .pipe(TunnelConf::from_dto)
                 .context("invalid tunnel config")?,
             proxy: conf_file.proxy.clone().unwrap_or_default(),
-            debug: conf_file.debug.clone().unwrap_or_default(),
+            debug,
         })
     }
 }
@@ -457,7 +465,7 @@ pub fn get_conf_file_path() -> Utf8PathBuf {
     get_data_dir().join("agent.json")
 }
 
-fn normalize_data_path(path: &Utf8Path, data_dir: &Utf8Path) -> Utf8PathBuf {
+pub(crate) fn normalize_data_path(path: &Utf8Path, data_dir: &Utf8Path) -> Utf8PathBuf {
     if path.is_absolute() {
         path.to_owned()
     } else {
@@ -853,6 +861,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_file: Option<Utf8PathBuf>,
 
+        /// Agent Identity configuration, defined in the identity module, [`crate::identity::config`].
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub identity: Option<crate::identity::config::IdentityConf>,
+
         #[serde(skip_serializing_if = "Option::is_none")]
         pub updater: Option<UpdaterConf>,
 
@@ -903,6 +915,7 @@ pub mod dto {
             Self {
                 verbosity_profile: None,
                 log_file: None,
+                identity: None,
                 updater: Some(UpdaterConf {
                     enabled: true,
                     schedule: None,
@@ -957,6 +970,10 @@ pub mod dto {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub log_directives: Option<String>,
 
+        /// Agent Identity test-only knobs, defined in the identity module, [`crate::identity::config`].
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pub identity: Option<crate::identity::config::IdentityDebugConf>,
+
         /// Skip MSI installation in updater module
         ///
         /// Useful for debugging updater logic without actually changing the system.
@@ -1005,6 +1022,7 @@ pub mod dto {
         fn default() -> Self {
             Self {
                 log_directives: None,
+                identity: None,
                 skip_msi_install: false,
                 enable_unstable: false,
                 productinfo_url: None,
