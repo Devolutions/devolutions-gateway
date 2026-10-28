@@ -36,7 +36,9 @@ use super::{AttemptError, Permanent, Recoverable};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
-use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender, remux_pending};
+use crate::recording::{
+    FinishedRecordingError, JrecManifest, REMUX_MARKER_STALE_AFTER, RecordingMessageSender, remux_pending,
+};
 use crate::secret_store::{SecretId, SecretStore};
 
 pub const KIND: &str = "recording-ai-analysis";
@@ -46,6 +48,9 @@ pub const START_WINDOW: time::Duration = time::Duration::hours(2);
 
 /// Time a running AI analysis may go without progress before it fails.
 pub const PROGRESS_TIMEOUT: time::Duration = time::Duration::minutes(30);
+
+// Waiting for a remux is no progress, so a mark that no remux will remove must stop counting before the wait times out.
+const _: () = assert!(REMUX_MARKER_STALE_AFTER.as_secs() < PROGRESS_TIMEOUT.whole_seconds().unsigned_abs());
 
 /// Time between two checks for a remux of the session.
 const REMUX_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
