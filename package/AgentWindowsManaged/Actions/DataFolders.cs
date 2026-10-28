@@ -151,8 +151,8 @@ internal static class DataFolders
 
     /// <summary>
     /// Creates <c>Devolutions\Agent</c> under <paramref name="root"/> with the security descriptor
-    /// <paramref name="sddl"/>, after checking <c>Devolutions</c>, or checks an existing <c>Agent</c> and resets its owner
-    /// and DACL to those of <paramref name="sddl"/>.
+    /// <paramref name="sddl"/>, after checking <c>Devolutions</c>, or checks an existing <c>Agent</c>, resets its owner
+    /// and DACL to those of <paramref name="sddl"/> and removes LOCAL SERVICE from the DACLs below it.
     /// </summary>
     /// <remarks>
     /// A missing <c>Devolutions</c> is created with the DACL it inherits, then checked like an existing one.
@@ -196,7 +196,7 @@ internal static class DataFolders
             }
 
             refusal = Inspect(
-                agent, SecureDirectory.OpenToSetSecurity, checkAccess: false, logger, out SafeFileHandle existing);
+                agent, SecureDirectory.HoldToSetSecurity, checkAccess: false, logger, out SafeFileHandle existing);
 
             using (existing)
             {
@@ -214,8 +214,14 @@ internal static class DataFolders
                 // owner, as the installer's SYSTEM process is; tests run as a user and set the user as the owner.
                 // When changing this, keep resetting the security of an existing Agent on this handle, as the agent
                 // refuses a data folder whose DACL isn't the one provisioned.
-                SecureDirectory.SetSecurity(existing, agent, sddl);
-                logger.Log($"reset the owner and the DACL of {agent}");
+                // UNTESTED: the handle on Agent holds it until the entries below are done, so that the walk below
+                // happens in the folder just checked and reset, not in one put at that path afterwards.
+                // Tests check SetSecurityAndRemoveLocalServiceBelow, not that an existing Agent is reset with it here,
+                // because the user running them isn't a trusted owner.
+                // When changing this, keep opening Agent with HoldToSetSecurity and keep the handle open until the walk
+                // returns.
+                SecureDirectory.SetSecurityAndRemoveLocalServiceBelow(existing, agent, sddl, logger);
+                logger.Log($"reset the owner and the DACL of {agent} and removed LOCAL SERVICE below it");
 
                 return null;
             }

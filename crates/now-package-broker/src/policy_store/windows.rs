@@ -265,9 +265,9 @@ fn open_directory_no_reparse(path: &Path) -> anyhow::Result<File> {
 ///
 /// This only verifies `path` itself; callers additionally verify retained ancestors with
 /// [`policy_security::verified_policy_ancestor_digest`], so an untrusted principal further
-/// up the tree (e.g. on the shared `%ProgramData%\Devolutions\Agent` parent, where the
-/// installer grants `LOCAL SERVICE` write access for unrelated Agent features) cannot
-/// delete or replace this directory out from under an already-verified identity check.
+/// up the tree (e.g. one granted write access on the shared `%ProgramData%\Devolutions\Agent`
+/// parent) cannot delete or replace this directory out from under an already-verified
+/// identity check.
 fn open_and_verify_directory_identity(path: &Path) -> anyhow::Result<(File, PathBuf)> {
     let handle = open_directory_no_reparse(path)?;
     verify_directory_handle_type(&handle, &path.display().to_string())?;

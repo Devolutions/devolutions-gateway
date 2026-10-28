@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.InteropServices;
 
 using Xunit;
 
@@ -41,6 +42,18 @@ internal sealed class TempFolder : IDisposable
 
         Assert.True(process.ExitCode == 0, output);
     }
+
+    /// <summary>
+    /// Creates a hard link at <paramref name="link"/> to the file <paramref name="target"/>, which needs no elevation.
+    /// </summary>
+    public static void CreateHardLink(string link, string target)
+    {
+        Assert.True(CreateHardLinkW(link, target, IntPtr.Zero), $"CreateHardLink failed: {Marshal.GetLastWin32Error()}");
+    }
+
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateHardLinkW(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
 
     public void Dispose()
     {

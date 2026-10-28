@@ -149,6 +149,24 @@ public sealed class DataFolderTests
 
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
+    public void AgentFolderSecurityLetsOnlySystemAndAdministratorsChangeWhatTheAgentStores()
+    {
+        // FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, which changes nothing.
+        const uint readAndExecute = 0x1200a9;
+
+        string[] writers = new RawSecurityDescriptor(Includes.PROGRAM_DATA_SDDL).DiscretionaryAcl
+            .Cast<CommonAce>()
+            .Where(ace => ace.AceQualifier == AceQualifier.AccessAllowed
+                && (unchecked((uint)ace.AccessMask) & ~readAndExecute) != 0)
+            .Select(ace => ace.SecurityIdentifier.Value)
+            .OrderBy(sid => sid, System.StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(["S-1-5-18", "S-1-5-32-544"], writers);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
     public void CheckRefusesAFileAtDevolutions()
     {
         using TempFolder folder = new();

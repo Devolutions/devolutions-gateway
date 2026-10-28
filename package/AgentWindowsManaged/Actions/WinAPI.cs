@@ -97,6 +97,8 @@ internal static class WinAPI
 
     internal const uint SERVICE_STOPPED = 0x00000001;
 
+    internal const ushort SE_DACL_AUTO_INHERIT_REQ = 0x0100;
+
     internal static uint STARTF_USESTDHANDLES = 0x00000100;
 
     internal static int STD_INPUT_HANDLE = -10;
@@ -480,6 +482,13 @@ internal static class WinAPI
     public static extern bool QueryServiceStatusEx(IntPtr serviceHandle, uint infoLevel, IntPtr buffer, uint bufferSize,
         out uint bytesNeeded);
 
+    [DllImport("kernel32", SetLastError = true)]
+    internal static extern SafeFileHandle ReOpenFile(
+        SafeFileHandle hOriginalFile,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        uint dwFlagsAndAttributes);
+
     [DllImport("user32", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
     internal static extern int SendMessage(
         IntPtr hWnd,
@@ -497,6 +506,13 @@ internal static class WinAPI
 
     [DllImport("advapi32", SetLastError = true, CharSet = CharSet.Unicode)]
     internal static extern bool SetFileSecurityW(string lpFileName, uint SecurityInformation, IntPtr pSecurityDescriptor);
+
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetSecurityDescriptorControl(
+        IntPtr pSecurityDescriptor,
+        ushort ControlBitsOfInterest,
+        ushort ControlBitsToSet);
 
     [DllImport("advapi32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

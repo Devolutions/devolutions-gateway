@@ -21,6 +21,8 @@ internal static class SecureDirectory
 {
     private static readonly SecurityIdentifier Administrators = new(WellKnownSidType.BuiltinAdministratorsSid, null);
 
+    private static readonly SecurityIdentifier LocalService = new(WellKnownSidType.LocalServiceSid, null);
+
     /// <summary>
     /// NT SERVICE\TrustedInstaller, the Windows Modules Installer service.
     /// </summary>
@@ -106,25 +108,63 @@ internal static class SecureDirectory
     }
 
     /// <summary>
+    /// Sets the owner and the DACL of the directory <paramref name="directory"/> holds, opened from
+    /// <paramref name="path"/> by <see cref="HoldToSetSecurity"/>, to those of <paramref name="sddl"/>, then removes each
+    /// allow entry for LOCAL SERVICE from the DACL of every file and directory below it, without following any link.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Earlier installers gave LOCAL SERVICE write access on the directory, which the entries below hold as inherited
+    /// entries, or as explicit ones where their DACL is protected or not marked auto-inherited, so every allow entry for
+    /// LOCAL SERVICE goes, explicit or inherited.
+    /// Each entry keeps its other entries, in their order, and its DACL's control flags, such as its protection and its
+    /// auto-inherited mark, and a DACL without an allow entry for LOCAL SERVICE isn't written, rather than reset to what
+    /// <paramref name="sddl"/> passes on, because the agent refuses its identity directories and files unless they keep
+    /// exactly the DACL it provisions.
+    /// </para>
+    /// <para>
+    /// Each directory is held while the entries below it are opened, so no path below it can be redirected.
+    /// A reparse point, such as a junction or a symbolic link, is neither followed nor changed, and a file with more
+    /// than one hard link is skipped, because its security is shared with every other name of the file, which may be
+    /// outside the tree.
+    /// A directory replaced while the walk reaches it fails the walk.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="IOException">The directory is a reparse point or not a directory.</exception>
+    internal static void SetSecurityAndRemoveLocalServiceBelow(
+        SafeFileHandle directory, string path, string sddl, ILogger logger)
+    {
+        SetSecurity(directory, path, sddl);
+        RemoveLocalServiceBelow(path, logger);
+    }
+
+    /// <summary>
     /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, to read its security and to
     /// set it with <see cref="SetSecurity(SafeFileHandle, string, string)"/>.
     /// </summary>
-    internal static SafeFileHandle OpenToSetSecurity(string path) =>
+    private static SafeFileHandle OpenToSetSecurity(string path) =>
         Open(
             path,
             WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.WRITE_OWNER | WinAPI.FILE_READ_ATTRIBUTES,
             AnyShare);
 
     /// <summary>
+    /// Opens the entry <paramref name="path"/> names, a link itself rather than its target, to read its security and to
+    /// set it with <see cref="SetSecurityAndRemoveLocalServiceBelow"/>, holding it as <see cref="Hold"/> does.
+    /// </summary>
+    internal static SafeFileHandle HoldToSetSecurity(string path) =>
+        Hold(path, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.WRITE_OWNER);
+
+    /// <summary>
     /// Sets the owner and the DACL of the directory <paramref name="handle"/> holds, opened from <paramref name="path"/>
-    /// by <see cref="OpenToSetSecurity"/>, to those of <paramref name="sddl"/>.
+    /// with <c>READ_CONTROL</c>, <c>WRITE_DAC</c> and <c>WRITE_OWNER</c>, to those of <paramref name="sddl"/>.
     /// </summary>
     /// <remarks>
     /// Only the directory changes: unlike <c>SetSecurityInfo</c>, this doesn't propagate inheritable entries to existing
     /// children, so the entries below keep the security they have.
     /// </remarks>
     /// <exception cref="IOException">The entry is a reparse point or not a directory.</exception>
-    internal static void SetSecurity(SafeFileHandle handle, string path, string sddl)
+    private static void SetSecurity(SafeFileHandle handle, string path, string sddl)
     {
         if (!IsPlainDirectory(GetAttributes(handle)))
         {
@@ -173,23 +213,8 @@ internal static class SecureDirectory
         uint attributes = GetAttributes(handle);
         bool isReparsePoint = (attributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
         bool isDirectory = (attributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0;
-        const uint information = WinAPI.OWNER_SECURITY_INFORMATION | WinAPI.DACL_SECURITY_INFORMATION;
-
-        // The first call only reports the size the second needs.
-        WinAPI.GetKernelObjectSecurity(handle, information, null, 0, out uint size);
-        int error = Marshal.GetLastWin32Error();
-
-        if (size == 0)
-        {
-            throw new Win32Exception(error);
-        }
-
-        byte[] descriptor = new byte[size];
-
-        if (!WinAPI.GetKernelObjectSecurity(handle, information, descriptor, size, out _))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
+        byte[] descriptor = ReadDescriptor(
+            handle, WinAPI.OWNER_SECURITY_INFORMATION | WinAPI.DACL_SECURITY_INFORMATION);
 
         return (new RawSecurityDescriptor(descriptor, 0), isReparsePoint, isDirectory);
     }
@@ -333,6 +358,147 @@ internal static class SecureDirectory
     }
 
     /// <summary>
+    /// Removes each allow entry for LOCAL SERVICE from the DACL of every file and directory below the directory
+    /// <paramref name="path"/>, which the caller holds, as <see cref="SetSecurityAndRemoveLocalServiceBelow"/> describes.
+    /// </summary>
+    private static void RemoveLocalServiceBelow(string path, ILogger logger)
+    {
+        // UNTESTED: each directory handle stays open until the entries below the directory are done, and a directory is
+        // walked only when the handle held is the entry first opened, so that no path below it can be redirected while
+        // the walk runs.
+        // Tests check that a held directory can't be renamed and that a link isn't followed, not when the walk closes a
+        // handle or a directory swapped between the two opens.
+        // When changing how the walk opens or closes a directory, keep each handle open that long and keep the check.
+        foreach (string entry in Directory.GetFileSystemEntries(path))
+        {
+            // The entry is opened with a right that takes no part in sharing checks, so that another process using a
+            // file doesn't fail the walk, then opened again with the rights its kind needs.
+            using SafeFileHandle handle = Open(entry, WinAPI.FILE_READ_ATTRIBUTES, AnyShare);
+            WinAPI.BY_HANDLE_FILE_INFORMATION information = GetInformation(handle);
+
+            if ((information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+            {
+                logger.Log($"kept the security of {entry}: it is a reparse point");
+            }
+            else if ((information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0)
+            {
+                // ReOpenFile refuses a directory, so the directory is held through its path, which the directories held
+                // above pin, and compared with the entry first opened.
+                using SafeFileHandle child = Hold(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC);
+                WinAPI.BY_HANDLE_FILE_INFORMATION held = GetInformation(child);
+
+                if (!IsSameEntry(information, held) || !IsPlainDirectory(held.dwFileAttributes))
+                {
+                    throw new IOException($"{entry} changed while LOCAL SERVICE was being removed from it");
+                }
+
+                RemoveLocalService(child, entry, logger);
+                RemoveLocalServiceBelow(entry, logger);
+            }
+            else if (information.nNumberOfLinks > 1)
+            {
+                logger.Log($"kept the security of {entry}: it has {information.nNumberOfLinks} hard links");
+            }
+            else
+            {
+                using SafeFileHandle file = Reopen(handle, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC, AnyShare);
+                RemoveLocalService(file, entry, logger);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Removes each allow entry for LOCAL SERVICE from the DACL of the entry <paramref name="handle"/> holds, opened
+    /// from <paramref name="path"/>, keeping its other entries in their order and its control flags, such as its
+    /// protection and its auto-inherited mark.
+    /// </summary>
+    /// <remarks>
+    /// A DACL without such an entry isn't written.
+    /// </remarks>
+    private static void RemoveLocalService(SafeFileHandle handle, string path, ILogger logger)
+    {
+        RawSecurityDescriptor current = new(ReadDescriptor(handle, WinAPI.DACL_SECURITY_INFORMATION), 0);
+        RawAcl dacl = current.DiscretionaryAcl;
+
+        if (dacl is null || !dacl.Cast<GenericAce>().Any(AllowsLocalService))
+        {
+            return;
+        }
+
+        RawAcl remaining = new(dacl.Revision, dacl.Count);
+
+        foreach (GenericAce ace in dacl)
+        {
+            if (!AllowsLocalService(ace))
+            {
+                remaining.InsertAce(remaining.Count, ace);
+            }
+        }
+
+        RawSecurityDescriptor updated = new(current.ControlFlags, null, null, null, remaining);
+        byte[] binary = new byte[updated.BinaryLength];
+        updated.GetBinaryForm(binary, 0);
+        GCHandle pinned = GCHandle.Alloc(binary, GCHandleType.Pinned);
+
+        try
+        {
+            IntPtr pointer = pinned.AddrOfPinnedObject();
+
+            // Without this request, the file system stores the DACL without marking it auto-inherited.
+            if ((current.ControlFlags & ControlFlags.DiscretionaryAclAutoInherited) != 0
+                && !WinAPI.SetSecurityDescriptorControl(
+                    pointer, WinAPI.SE_DACL_AUTO_INHERIT_REQ, WinAPI.SE_DACL_AUTO_INHERIT_REQ))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+
+            if (!WinAPI.SetKernelObjectSecurity(handle, WinAPI.DACL_SECURITY_INFORMATION, pointer))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+        finally
+        {
+            pinned.Free();
+        }
+
+        logger.Log($"removed LOCAL SERVICE from the DACL of {path}");
+    }
+
+    /// <summary>
+    /// Whether <paramref name="ace"/> allows LOCAL SERVICE any access.
+    /// </summary>
+    private static bool AllowsLocalService(GenericAce ace) =>
+        ace is QualifiedAce qualified
+        && qualified.AceQualifier == AceQualifier.AccessAllowed
+        && qualified.SecurityIdentifier == LocalService;
+
+    /// <summary>
+    /// The parts <paramref name="information"/> names of the security descriptor of the entry <paramref name="handle"/>
+    /// holds, in self-relative form.
+    /// </summary>
+    private static byte[] ReadDescriptor(SafeFileHandle handle, uint information)
+    {
+        // The first call only reports the size the second needs.
+        WinAPI.GetKernelObjectSecurity(handle, information, null, 0, out uint size);
+        int error = Marshal.GetLastWin32Error();
+
+        if (size == 0)
+        {
+            throw new Win32Exception(error);
+        }
+
+        byte[] descriptor = new byte[size];
+
+        if (!WinAPI.GetKernelObjectSecurity(handle, information, descriptor, size, out _))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        return descriptor;
+    }
+
+    /// <summary>
     /// Opens the entry <paramref name="path"/> names, a link itself rather than its target.
     /// </summary>
     private static SafeFileHandle Open(string path, uint access, uint share)
@@ -356,15 +522,41 @@ internal static class SecureDirectory
         return handle;
     }
 
-    private static uint GetAttributes(SafeFileHandle handle)
+    /// <summary>
+    /// Opens the entry <paramref name="handle"/> holds again, a link itself rather than its target, with
+    /// <paramref name="access"/> and <paramref name="share"/>.
+    /// </summary>
+    private static SafeFileHandle Reopen(SafeFileHandle handle, uint access, uint share)
+    {
+        SafeFileHandle reopened = WinAPI.ReOpenFile(
+            handle, access, share, WinAPI.FILE_FLAG_BACKUP_SEMANTICS | WinAPI.FILE_FLAG_OPEN_REPARSE_POINT);
+
+        if (reopened.IsInvalid)
+        {
+            int error = Marshal.GetLastWin32Error();
+            reopened.Dispose();
+            throw new Win32Exception(error);
+        }
+
+        return reopened;
+    }
+
+    private static uint GetAttributes(SafeFileHandle handle) => GetInformation(handle).dwFileAttributes;
+
+    private static WinAPI.BY_HANDLE_FILE_INFORMATION GetInformation(SafeFileHandle handle)
     {
         if (!WinAPI.GetFileInformationByHandle(handle, out WinAPI.BY_HANDLE_FILE_INFORMATION information))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error());
         }
 
-        return information.dwFileAttributes;
+        return information;
     }
+
+    private static bool IsSameEntry(WinAPI.BY_HANDLE_FILE_INFORMATION a, WinAPI.BY_HANDLE_FILE_INFORMATION b) =>
+        a.dwVolumeSerialNumber == b.dwVolumeSerialNumber
+        && a.nFileIndexHigh == b.nFileIndexHigh
+        && a.nFileIndexLow == b.nFileIndexLow;
 
     private static bool IsPlainDirectory(uint attributes) =>
         (attributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0 && (attributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) == 0;
