@@ -210,6 +210,18 @@ internal class Program
 
     private static KeyValuePair<string, string> deDE => Languages.First(x => x.Key == "de-DE");
 
+    /// <summary>
+    /// The major upgrade, which removes the installed product after InstallInitialize, so before the actions that
+    /// check and reset the data folder.
+    /// </summary>
+    internal static MajorUpgrade MajorUpgrade => new()
+    {
+        AllowDowngrades = false,
+        AllowSameVersionUpgrades = true,
+        DowngradeErrorMessage = "!(loc.NewerInstalled)",
+        Schedule = UpgradeSchedule.afterInstallInitialize,
+    };
+
     static void Main()
     {
         ManagedProject project = new(Includes.PRODUCT_NAME)
@@ -231,13 +243,7 @@ internal class Program
             BackgroundImage = "Resources/WixUIDialog.jpg",
             ValidateBackgroundImage = false,
             OutFileName = PackageName,
-            MajorUpgrade = new MajorUpgrade
-            {
-                AllowDowngrades = false,
-                AllowSameVersionUpgrades = true,
-                DowngradeErrorMessage = "!(loc.NewerInstalled)",
-                Schedule = UpgradeSchedule.afterInstallInitialize,
-            },
+            MajorUpgrade = MajorUpgrade,
             Media = new List<Media>
             {
                 new()

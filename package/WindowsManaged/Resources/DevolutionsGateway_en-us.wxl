@@ -9,6 +9,11 @@
                     <!-- messages -->
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">An unexpected error occurred accessing the system certificate store: {0}</String>
                 <String Id="AuthenticationTokenIsRequired">The authentication token is required</String>
+                <String Id="DataFolderIsFile">Can't use {0} because it is a file, not a folder. Delete the file, then try again.</String>
+                <String Id="DataFolderIsLink">Can't use the folder {0} because it is a link. Delete the link, then try again.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Can't use the folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Can't use the folder {0} because {1} can replace it or what it contains. Remove that permission, then try again.</String>
+                <String Id="DataFolderSecurityUnreadable">Can't read the owner or the permissions of the folder {0}. Check them, then try again.</String>
                 <String Id="DomainIsRequiredAndMustBeValid">The domain is required and must be a valid hostname</String>
                 <String Id="Dotnet471IsRequired">The product requires Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>

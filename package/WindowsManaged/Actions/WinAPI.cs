@@ -8,29 +8,69 @@ namespace DevolutionsGateway.Actions;
 
 internal static class WinAPI
 {
+    internal const uint AUTHZ_RM_FLAG_NO_AUDIT = 0x1;
+
+    internal const int AuthzContextInfoGroupsSids = 2;
+
     internal static uint CREATE_ALWAYS = 2;
 
     internal static uint CREATE_NO_WINDOW = 0x08000000;
 
     internal const uint DACL_SECURITY_INFORMATION = 0x00000004;
 
+    internal const uint DELETE = 0x00010000;
+
     internal const int EM_SETCUEBANNER = 0x1501;
-    
+
+    internal const int ERROR_ALREADY_EXISTS = 183;
+
+    internal const int ERROR_FILE_NOT_FOUND = 2;
+
+    internal const int ERROR_PATH_NOT_FOUND = 3;
+
+    internal const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
+
     internal static uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+
+    internal const uint FILE_ATTRIBUTE_REPARSE_POINT = 0x00000400;
+
+    internal const uint FILE_DELETE_CHILD = 0x00000040;
+
+    internal const uint FILE_FLAG_BACKUP_SEMANTICS = 0x02000000;
+
+    internal const uint FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000;
+
+    internal const uint FILE_READ_ATTRIBUTES = 0x00000080;
+
+    internal const uint FILE_SHARE_DELETE = 0x00000004;
 
     internal static uint FILE_SHARE_READ = 0x00000001;
 
     internal static uint FILE_SHARE_WRITE = 0x00000002;
 
+    internal const uint FILE_TRAVERSE = 0x00000020;
+
+    internal const uint GROUP_SECURITY_INFORMATION = 0x00000002;
+
     internal const uint LOGON32_LOGON_NETWORK = 3;
 
     internal const uint LOGON32_PROVIDER_DEFAULT = 0;
 
+    internal const uint MAX_PREFERRED_LENGTH = 0xFFFFFFFF;
+
     internal static uint MOVEFILE_DELAY_UNTIL_REBOOT = 0x04;
+
+    internal const uint NERR_Success = 0;
+
+    internal const uint OPEN_EXISTING = 3;
+
+    internal const uint OWNER_SECURITY_INFORMATION = 0x00000001;
 
     internal const uint POLICY_CREATE_ACCOUNT = 0x00000010;
 
     internal const uint POLICY_LOOKUP_NAMES = 0x00000800;
+
+    internal const uint READ_CONTROL = 0x00020000;
 
     internal const uint SC_MANAGER_ALL_ACCESS = 0xF003F;
 
@@ -56,21 +96,89 @@ internal static class WinAPI
 
     internal const uint SERVICE_STOPPED = 0x00000001;
 
+    internal const ushort SE_DACL_AUTO_INHERIT_REQ = 0x0100;
+
+    internal const uint SEF_AVOID_OWNER_CHECK = 0x10;
+
+    internal const uint SEF_AVOID_PRIVILEGE_CHECK = 0x08;
+
+    internal const uint SEF_DACL_AUTO_INHERIT = 0x01;
+
     internal static uint STARTF_USESTDHANDLES = 0x00000100;
 
     internal static int STD_INPUT_HANDLE = -10;
 
     internal static uint WAIT_TIMEOUT = 0x00000102;
 
+    internal const uint WRITE_DAC = 0x00040000;
+
+    internal const uint WRITE_OWNER = 0x00080000;
+
     /* Generic access rights */
 
-    internal const uint GENERAL_ALL = 0x10000000;
+    internal const uint GENERIC_ALL = 0x10000000;
 
     internal const uint GENERIC_EXECUTE = 0x20000000;
 
     internal const uint GENERIC_WRITE = 0x40000000;
 
     internal const uint GENERIC_READ = 0x80000000;
+
+    /// <summary>
+    /// The rights each generic right maps to for a file: <c>FILE_GENERIC_READ</c>, <c>FILE_GENERIC_WRITE</c>,
+    /// <c>FILE_GENERIC_EXECUTE</c> and <c>FILE_ALL_ACCESS</c>.
+    /// </summary>
+    internal static GENERIC_MAPPING FileGenericMapping => new()
+    {
+        GenericRead = 0x00120089,
+        GenericWrite = 0x00120116,
+        GenericExecute = 0x001200A0,
+        GenericAll = 0x001F01FF,
+    };
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct BY_HANDLE_FILE_INFORMATION
+    {
+        internal uint dwFileAttributes;
+
+        internal System.Runtime.InteropServices.ComTypes.FILETIME ftCreationTime;
+
+        internal System.Runtime.InteropServices.ComTypes.FILETIME ftLastAccessTime;
+
+        internal System.Runtime.InteropServices.ComTypes.FILETIME ftLastWriteTime;
+
+        internal uint dwVolumeSerialNumber;
+
+        internal uint nFileSizeHigh;
+
+        internal uint nFileSizeLow;
+
+        internal uint nNumberOfLinks;
+
+        internal uint nFileIndexHigh;
+
+        internal uint nFileIndexLow;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GENERIC_MAPPING
+    {
+        internal uint GenericRead;
+
+        internal uint GenericWrite;
+
+        internal uint GenericExecute;
+
+        internal uint GenericAll;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct LUID
+    {
+        internal uint LowPart;
+
+        internal int HighPart;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct QUERY_SERVICE_CONFIG
@@ -203,6 +311,14 @@ internal static class WinAPI
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct SID_AND_ATTRIBUTES
+    {
+        internal IntPtr Sid;
+
+        internal uint Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct STARTUPINFO
     {
         internal uint cb;
@@ -242,6 +358,53 @@ internal static class WinAPI
         internal IntPtr hStdError;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct TOKEN_GROUPS
+    {
+        internal uint GroupCount;
+
+        // The first of GroupCount entries.
+        internal SID_AND_ATTRIBUTES Groups;
+    }
+
+    [DllImport("authz")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AuthzFreeContext(IntPtr hAuthzClientContext);
+
+    [DllImport("authz")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AuthzFreeResourceManager(IntPtr hAuthzResourceManager);
+
+    [DllImport("authz", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AuthzGetInformationFromContext(
+        IntPtr hAuthzClientContext,
+        int InfoClass,
+        uint BufferSize,
+        out uint pSizeRequired,
+        IntPtr Buffer);
+
+    [DllImport("authz", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AuthzInitializeContextFromSid(
+        uint Flags,
+        byte[] UserSid,
+        IntPtr hAuthzResourceManager,
+        IntPtr pExpirationTime,
+        LUID Identifier,
+        IntPtr DynamicGroupArgs,
+        out IntPtr phAuthzClientContext);
+
+    [DllImport("authz", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool AuthzInitializeResourceManager(
+        uint Flags,
+        IntPtr pfnDynamicAccessCheck,
+        IntPtr pfnComputeDynamicGroups,
+        IntPtr pfnFreeDynamicGroups,
+        string szResourceManagerName,
+        out IntPtr phAuthzResourceManager);
+
     [DllImport("advapi32", EntryPoint = "ChangeServiceConfigW", SetLastError = true)]
     internal static extern bool ChangeServiceConfig(
         IntPtr hService,
@@ -270,6 +433,10 @@ internal static class WinAPI
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool ControlService(IntPtr hService, uint dwControl, IntPtr lpServiceStatus);
 
+    [DllImport("kernel32", EntryPoint = "CreateDirectoryW", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool CreateDirectory(string lpPathName, ref SECURITY_ATTRIBUTES lpSecurityAttributes);
+
     [DllImport("kernel32", EntryPoint = "CreateFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern SafeFileHandle CreateFile(
         [MarshalAs(UnmanagedType.LPWStr)] string lpFileName,
@@ -294,6 +461,28 @@ internal static class WinAPI
         IntPtr lpStartupInfo,
         IntPtr lpProcessInformation);
 
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool ConvertToAutoInheritPrivateObjectSecurity(
+        byte[] ParentDescriptor,
+        byte[] CurrentSecurityDescriptor,
+        out IntPtr NewSecurityDescriptor,
+        IntPtr ObjectType,
+        [MarshalAs(UnmanagedType.U1)] bool IsDirectoryObject,
+        ref GENERIC_MAPPING GenericMapping);
+
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool CreatePrivateObjectSecurityEx(
+        byte[] ParentDescriptor,
+        byte[] CreatorDescriptor,
+        out IntPtr NewDescriptor,
+        IntPtr ObjectType,
+        [MarshalAs(UnmanagedType.Bool)] bool IsContainerObject,
+        uint AutoInheritFlags,
+        IntPtr Token,
+        ref GENERIC_MAPPING GenericMapping);
+
     [DllImport("kernel32", EntryPoint = "DeleteFileW", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool DeleteFile(
@@ -301,9 +490,19 @@ internal static class WinAPI
         string lpFileName
     );
 
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool DestroyPrivateObjectSecurity(ref IntPtr ObjectDescriptor);
+
     [DllImport("kernel32", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     internal static extern bool GetExitCodeProcess(IntPtr hProcess, out uint lpExitCode);
+
+    [DllImport("kernel32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetFileInformationByHandle(
+        SafeFileHandle hFile,
+        out BY_HANDLE_FILE_INFORMATION lpFileInformation);
 
     [DllImport("Kernel32", EntryPoint = "GetFinalPathNameByHandleW", CharSet = CharSet.Auto, SetLastError = true)]
     internal static extern uint GetFinalPathNameByHandle(
@@ -312,6 +511,18 @@ internal static class WinAPI
         StringBuilder lpszFilePath,
         uint cchFilePath,
         uint dwFlags);
+
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool GetKernelObjectSecurity(
+        SafeFileHandle Handle,
+        uint RequestedInformation,
+        byte[] pSecurityDescriptor,
+        uint nLength,
+        out uint lpnLengthNeeded);
+
+    [DllImport("advapi32")]
+    internal static extern uint GetSecurityDescriptorLength(IntPtr pSecurityDescriptor);
 
     [DllImport("kernel32", SetLastError = true)]
     internal static extern IntPtr GetStdHandle(int nStdHandle);
@@ -384,6 +595,20 @@ internal static class WinAPI
         uint dwFlags
     );
 
+    [DllImport("netapi32")]
+    internal static extern uint NetApiBufferFree(IntPtr Buffer);
+
+    [DllImport("netapi32", CharSet = CharSet.Unicode)]
+    internal static extern uint NetLocalGroupGetMembers(
+        string servername,
+        string localgroupname,
+        uint level,
+        out IntPtr bufptr,
+        uint prefmaxlen,
+        out uint entriesread,
+        out uint totalentries,
+        IntPtr resumehandle);
+
     [DllImport("advapi32", EntryPoint = "OpenSCManagerW", SetLastError = true)]
     internal static extern IntPtr OpenSCManager(IntPtr machineName, IntPtr databaseName, uint dwAccess);
 
@@ -402,6 +627,13 @@ internal static class WinAPI
     public static extern bool QueryServiceStatusEx(IntPtr serviceHandle, uint infoLevel, IntPtr buffer, uint bufferSize,
         out uint bytesNeeded);
 
+    [DllImport("kernel32", SetLastError = true)]
+    internal static extern SafeFileHandle ReOpenFile(
+        SafeFileHandle hOriginalFile,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        uint dwFlagsAndAttributes);
+
     [DllImport("user32", EntryPoint = "SendMessageW", CharSet = CharSet.Unicode)]
     internal static extern int SendMessage(
         IntPtr hWnd,
@@ -409,8 +641,19 @@ internal static class WinAPI
         int wParam,
         [MarshalAs(UnmanagedType.LPWStr)] string lParam);
 
-    [DllImport("advapi32", SetLastError = true, CharSet = CharSet.Unicode)]
-    internal static extern bool SetFileSecurityW(string lpFileName, uint SecurityInformation, IntPtr pSecurityDescriptor);
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetSecurityDescriptorControl(
+        IntPtr pSecurityDescriptor,
+        ushort ControlBitsOfInterest,
+        ushort ControlBitsToSet);
+
+    [DllImport("advapi32", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool SetKernelObjectSecurity(
+        SafeFileHandle Handle,
+        uint SecurityInformation,
+        IntPtr SecurityDescriptor);
 
     [DllImport("advapi32", EntryPoint = "StartServiceW", SetLastError = true)]
     internal static extern bool StartService(IntPtr hService, uint dwNumServiceArgs, IntPtr lpServiceArgVectors);

@@ -9,6 +9,11 @@
                     <!-- messages -->
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">Beim Zugriff auf den System-Zertifikatspeicher ist ein unerwarteter Fehler aufgetreten: {0}</String>
                 <String Id="AuthenticationTokenIsRequired">Das Authentifizierungstoken ist erforderlich</String>
+                <String Id="DataFolderIsFile">{0} kann nicht verwendet werden, da es eine Datei und kein Ordner ist. Löschen Sie die Datei und versuchen Sie es erneut.</String>
+                <String Id="DataFolderIsLink">Der Ordner {0} kann nicht verwendet werden, da er ein Link ist. Löschen Sie den Link und versuchen Sie es erneut.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Der Ordner {0} kann nicht verwendet werden, da er {1} gehört. Nur SYSTEM oder ein Administrator darf ihn besitzen. Ändern Sie den Besitzer und versuchen Sie es erneut.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Der Ordner {0} kann nicht verwendet werden, da {1} ihn oder seinen Inhalt ersetzen kann. Entfernen Sie diese Berechtigung und versuchen Sie es erneut.</String>
+                <String Id="DataFolderSecurityUnreadable">Der Besitzer oder die Berechtigungen des Ordners {0} können nicht gelesen werden. Überprüfen Sie sie und versuchen Sie es erneut.</String>
                 <String Id="DomainIsRequiredAndMustBeValid">Die Domäne ist erforderlich und muss ein gültiger Hostname sein</String>
                 <String Id="Dotnet471IsRequired">Das Produkt erfordert Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?</String>
