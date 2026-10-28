@@ -44,13 +44,7 @@ namespace Devolutions.Gateway.Client.Model
         /// Enum AiBusy for value: aiBusy
         /// </summary>
         [EnumMember(Value = "aiBusy")]
-        AiBusy = 2,
-
-        /// <summary>
-        /// Enum Storage for value: storage
-        /// </summary>
-        [EnumMember(Value = "storage")]
-        Storage = 3
+        AiBusy = 2
     }
 
     public static class AiAnalysisRecoverableErrorKindExtensions
@@ -66,8 +60,6 @@ namespace Devolutions.Gateway.Client.Model
                     return "aiUnreachable";
                 case AiAnalysisRecoverableErrorKind.AiBusy:
                     return "aiBusy";
-                case AiAnalysisRecoverableErrorKind.Storage:
-                    return "storage";
                 default:
                     throw new ArgumentOutOfRangeException(nameof(variant), $"Unexpected variant: {variant}");
             }

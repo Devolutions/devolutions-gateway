@@ -1689,7 +1689,6 @@ components:
       enum:
       - aiUnreachable
       - aiBusy
-      - storage
     AiAnalysisRequest:
       type: object
       description: Settings of an AI analysis

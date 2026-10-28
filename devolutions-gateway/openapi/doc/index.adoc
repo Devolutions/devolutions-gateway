@@ -4191,7 +4191,7 @@ A failure of an attempt that was worth another attempt
 | 
 |  <<AiAnalysisRecoverableErrorKind>>  
 | 
-|    aiUnreachable, aiBusy, storage,  
+|    aiUnreachable, aiBusy,  
 
 | status
 | 
@@ -4219,7 +4219,6 @@ Kind of a failure worth another attempt
 
 | aiUnreachable
 | aiBusy
-| storage
 
 |===
 

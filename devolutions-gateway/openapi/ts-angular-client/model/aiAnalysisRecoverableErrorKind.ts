@@ -12,11 +12,10 @@
 /**
  * Kind of a failure worth another attempt
  */
-export type AiAnalysisRecoverableErrorKind = 'aiUnreachable' | 'aiBusy' | 'storage';
+export type AiAnalysisRecoverableErrorKind = 'aiUnreachable' | 'aiBusy';
 
 export const AiAnalysisRecoverableErrorKind = {
     AiUnreachable: 'aiUnreachable' as AiAnalysisRecoverableErrorKind,
-    AiBusy: 'aiBusy' as AiAnalysisRecoverableErrorKind,
-    Storage: 'storage' as AiAnalysisRecoverableErrorKind
+    AiBusy: 'aiBusy' as AiAnalysisRecoverableErrorKind
 };
 
