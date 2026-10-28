@@ -6,12 +6,10 @@
 use core::fmt;
 
 use anyhow::Context as _;
-use devolutions_gateway_ai::recording_analysis::RecordingAnalysisError;
-use devolutions_gateway_ai::{AiClient, BuildError, Error, Provider};
+use devolutions_gateway_ai::{AiClient, BuildError, Provider};
 use secrecy::{ExposeSecret as _, SecretString};
 use url::Url;
 
-use super::{AttemptError, BadAnswer, Permanent, Recoverable};
 use crate::config::Conf;
 
 /// AI provider to ask; `openai-compatible` needs a base URL
@@ -190,98 +188,9 @@ impl AiSettings {
     }
 }
 
-/// Retries only the failures that may pass later, such as a rate limit or a network error.
-impl From<RecordingAnalysisError> for AttemptError {
-    fn from(error: RecordingAnalysisError) -> Self {
-        match error {
-            RecordingAnalysisError::Ai(error) => AttemptError::from(error),
-            RecordingAnalysisError::NoRecording => AttemptError::Permanent(Permanent::NoRecording),
-            RecordingAnalysisError::InvalidRecording { file_name, .. } => {
-                AttemptError::Permanent(Permanent::UnreadableRecording { file: file_name })
-            }
-            RecordingAnalysisError::Truncated => AttemptError::Permanent(Permanent::AiBadAnswer {
-                why: BadAnswer::Truncated,
-            }),
-            // The runner cancels an attempt only once its Task is past its deadline.
-            RecordingAnalysisError::Cancelled => AttemptError::Permanent(Permanent::DeadlinePassed),
-            _ => AttemptError::Permanent(Permanent::Internal),
-        }
-    }
-}
-
-impl From<Error> for AttemptError {
-    fn from(error: Error) -> Self {
-        let bad_answer = |why| AttemptError::Permanent(Permanent::AiBadAnswer { why });
-
-        match &error {
-            Error::Transport { .. } => AttemptError::Recoverable(Recoverable::AiUnreachable),
-            Error::Status { status, .. } if error.is_transient() => {
-                AttemptError::Recoverable(Recoverable::AiBusy { status: *status })
-            }
-            Error::Status { status, .. } => AttemptError::Permanent(Permanent::AiRejected { status: *status }),
-            Error::InvalidResponse { .. } => bad_answer(BadAnswer::Invalid),
-            Error::Truncated { .. } => bad_answer(BadAnswer::Truncated),
-            Error::Refused { .. } => bad_answer(BadAnswer::Refused),
-            Error::InvalidOutput { .. } => bad_answer(BadAnswer::NotExpectedJson),
-            _ => AttemptError::Permanent(Permanent::Internal),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
-    #[test]
-    fn transient_ai_errors_are_recoverable_and_the_others_permanent() {
-        let attempt = |error: Error| AttemptError::from(RecordingAnalysisError::Ai(error));
-        let status = |status, code: Option<&str>| Error::Status {
-            status,
-            message: "failed".to_owned(),
-            code: code.map(str::to_owned),
-            retry_after: None,
-        };
-
-        let network = Error::Transport {
-            message: "connection refused".to_owned(),
-        };
-        assert_eq!(attempt(network), AttemptError::Recoverable(Recoverable::AiUnreachable));
-
-        for code in [429, 500, 503] {
-            assert_eq!(
-                attempt(status(code, None)),
-                AttemptError::Recoverable(Recoverable::AiBusy { status: code })
-            );
-        }
-
-        for code in [400, 401, 403, 404] {
-            assert_eq!(
-                attempt(status(code, None)),
-                AttemptError::Permanent(Permanent::AiRejected { status: code })
-            );
-        }
-
-        assert_eq!(
-            attempt(status(429, Some("insufficient_quota"))),
-            AttemptError::Permanent(Permanent::AiRejected { status: 429 }),
-            "a spent quota"
-        );
-        assert_eq!(
-            AttemptError::from(RecordingAnalysisError::Truncated),
-            AttemptError::Permanent(Permanent::AiBadAnswer {
-                why: BadAnswer::Truncated
-            })
-        );
-        assert_eq!(
-            attempt(Error::Refused {
-                reason: "content filter".to_owned()
-            }),
-            AttemptError::Permanent(Permanent::AiBadAnswer {
-                why: BadAnswer::Refused
-            })
-        );
-    }
 
     // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
     #[test]

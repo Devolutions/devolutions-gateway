@@ -11,6 +11,7 @@
 //! a Task that fails removes it instead.
 //! The API key and the working files go away when the Task ends.
 
+mod failure;
 #[cfg(test)]
 mod tests;
 
@@ -30,9 +31,10 @@ use serde_json::json;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+pub use self::failure::{AnalysisError, BadAnswer, Failure, Recoverable};
+use super::Permanent;
 use super::ai::{AiAccess, AiProvider, AiSettings, AiSettingsError, ClientError};
-use super::runner::{Attempt, ProvisionerTask};
-use super::{AttemptError, Permanent, Recoverable};
+use super::runner::{AnyPermanent, Attempt, ProvisionerTask};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
@@ -345,6 +347,10 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
     type Output = Analysis;
 
+    type Failure = Failure;
+
+    type Recoverable = Recoverable;
+
     fn start_window(&self) -> time::Duration {
         START_WINDOW
     }
@@ -362,14 +368,14 @@ impl ProvisionerTask for RecordingAiAnalysis {
         })
     }
 
-    fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value {
+    fn failed_payload(&self, error: &AnyPermanent, last: &serde_json::Value) -> serde_json::Value {
         json!({ "error": error, "usage": TokenUsage::of(last) })
     }
 
-    async fn run(&self, attempt: &Attempt, params: Params) -> Result<Analysis, AttemptError> {
+    async fn run(&self, attempt: &Attempt, params: Params) -> Result<Analysis, AnalysisError> {
         let session_id = Uuid::parse_str(&attempt.target).map_err(|error| {
             warn!(task.id = %attempt.task_id, %error, "Invalid session ID");
-            AttemptError::Permanent(Permanent::InvalidTask)
+            AnalysisError::Permanent(Permanent::InvalidTask)
         })?;
 
         // UNTESTED: the key lives until the deadline, which this attempt start moved, so a retry hours after the Task was
@@ -379,7 +385,7 @@ impl ProvisionerTask for RecordingAiAnalysis {
         // Waiting for an earlier analysis of the session is no progress, so the deadline cancels it too.
         let _session = tokio::select! {
             session = lock_session(session_id) => session,
-            () = attempt.cancel.cancelled() => return Err(AttemptError::Permanent(Permanent::DeadlinePassed)),
+            () = attempt.cancel.cancelled() => return Err(AnalysisError::Permanent(Permanent::DeadlinePassed)),
         };
 
         // A new Task never resumes from what an earlier analysis left, while its retries resume from their own files.
@@ -390,30 +396,30 @@ impl ProvisionerTask for RecordingAiAnalysis {
                 .await
                 .map_err(|error| {
                     error!(task.id = %attempt.task_id, %error, "Failed to remove the earlier AI analysis working files");
-                    AttemptError::Permanent(Permanent::Internal)
+                    AnalysisError::Permanent(Permanent::Internal)
                 })?;
 
             self.end_unlisted_logs(attempt, session_id, &manifest_path)
                 .await
                 .map_err(|error| {
                     error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to end the logs earlier AI analyses left unlisted");
-                    AttemptError::Permanent(Permanent::Internal)
+                    AnalysisError::Permanent(Permanent::Internal)
                 })?;
         }
 
         let secret = self.secrets.get(SecretId(attempt.task_id)).map_err(|error| {
             error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to read the API key");
-            AttemptError::Permanent(Permanent::Internal)
+            AnalysisError::Permanent(Permanent::Internal)
         })?;
 
         let Some(secret) = secret else {
             warn!(task.id = %attempt.task_id, attempts = attempt.attempts, "AI analysis lost its API key");
-            return Err(AttemptError::Permanent(Permanent::KeyLost));
+            return Err(AnalysisError::task(Failure::KeyLost));
         };
 
         let access = AiAccess::from_secret(&secret).map_err(|error| {
             error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to read the API key");
-            AttemptError::Permanent(Permanent::Internal)
+            AnalysisError::Permanent(Permanent::Internal)
         })?;
 
         let settings = AiSettings {
@@ -428,8 +434,8 @@ impl ProvisionerTask for RecordingAiAnalysis {
     }
 
     /// The API key is kept in memory only, so no attempt can run after a restart.
-    fn restart_failure(&self) -> Option<Permanent> {
-        Some(Permanent::KeyLost)
+    fn restart_failure(&self) -> Option<Failure> {
+        Some(Failure::KeyLost)
     }
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {
@@ -461,12 +467,12 @@ impl RecordingAiAnalysis {
         settings: AiSettings,
         language: Option<Language>,
         api_key: SecretString,
-    ) -> Result<Analysis, AttemptError> {
+    ) -> Result<Analysis, AnalysisError> {
         let conf = self.conf_handle.get_conf();
 
         let client = settings.client(&conf, &api_key).map_err(|error| {
             error!(task.id = %attempt.task_id, %error, "Failed to build the AI client");
-            AttemptError::Permanent(Permanent::Internal)
+            AnalysisError::Permanent(Permanent::Internal)
         })?;
 
         let recording = self
@@ -474,16 +480,16 @@ impl RecordingAiAnalysis {
             .get_finished(session_id)
             .await
             .map_err(|error| match error {
-                FinishedRecordingError::NotFound => AttemptError::Permanent(Permanent::NoRecording),
+                FinishedRecordingError::NotFound => AnalysisError::task(Failure::NoRecording),
                 error => {
                     error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to read the recording");
-                    AttemptError::Permanent(Permanent::Internal)
+                    AnalysisError::Permanent(Permanent::Internal)
                 }
             })?;
 
         let manifest = analysis_manifest(&recording.manifest).map_err(|error| match error {
-            RecordingsError::Mixed => AttemptError::Permanent(Permanent::MixedRecording),
-            _ => AttemptError::Permanent(Permanent::NoRecording),
+            RecordingsError::Mixed => AnalysisError::task(Failure::MixedRecording),
+            _ => AnalysisError::task(Failure::NoRecording),
         })?;
         let manifest_path = recording.manifest_path();
 
@@ -541,7 +547,7 @@ impl RecordingAiAnalysis {
                 Some(_) => {}
                 None => {
                     error!(task.id = %attempt.task_id, "The AI analysis stopped unexpectedly");
-                    return Err(AttemptError::Permanent(Permanent::Panicked));
+                    return Err(AnalysisError::Permanent(Permanent::Panicked));
                 }
             }
         };
@@ -553,7 +559,7 @@ impl RecordingAiAnalysis {
             .await
             .map_err(|error| {
                 error!(task.id = %attempt.task_id, %error, "Failed to keep the AI analysis log");
-                AttemptError::Permanent(Permanent::Internal)
+                AnalysisError::Permanent(Permanent::Internal)
             })?;
 
         debug!(task.id = %attempt.task_id, actions = analysis.actions, "AI analysis log written");
@@ -610,11 +616,11 @@ impl RecordingAiAnalysis {
     }
 
     /// Waits until no recording of the session waits for its remux, since a remux replaces a video that would be read.
-    async fn wait_for_remux(&self, attempt: &Attempt, dir: &Utf8Path) -> Result<(), AttemptError> {
+    async fn wait_for_remux(&self, attempt: &Attempt, dir: &Utf8Path) -> Result<(), AnalysisError> {
         loop {
             let pending = remux_pending(dir).await.map_err(|error| {
                 warn!(task.id = %attempt.task_id, %error, %dir, "Failed to look for a pending remux");
-                AttemptError::Recoverable(Recoverable::Storage)
+                AnalysisError::Recoverable(Recoverable::Storage)
             })?;
 
             if !pending {
@@ -625,7 +631,7 @@ impl RecordingAiAnalysis {
 
             tokio::select! {
                 () = tokio::time::sleep(REMUX_POLL_INTERVAL) => {}
-                () = attempt.cancel.cancelled() => return Err(AttemptError::Permanent(Permanent::DeadlinePassed)),
+                () = attempt.cancel.cancelled() => return Err(AnalysisError::Permanent(Permanent::DeadlinePassed)),
             }
         }
     }

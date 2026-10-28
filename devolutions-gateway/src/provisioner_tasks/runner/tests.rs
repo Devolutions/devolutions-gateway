@@ -5,7 +5,6 @@ use provisioner_task::{ProvisionerTaskState, ProvisionerTaskStore};
 
 use super::*;
 use crate::job_queue::{JobMessage, JobQueueReceiver};
-use crate::provisioner_tasks::Recoverable;
 
 const KIND: &str = "test.echo";
 
@@ -15,6 +14,23 @@ const HANG: u32 = u32::MAX;
 /// A value whose attempt reports progress five times, half a second apart, then succeeds.
 const PROGRESS: u32 = u32::MAX - 1;
 
+/// Why an Echo attempt fails for good.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum EchoFailure {
+    /// What the attempt needed is gone, as a secret kept in memory is after a restart.
+    Gone,
+}
+
+/// Why an Echo attempt fails for now.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+enum EchoRecoverable {
+    Busy,
+}
+
+type EchoError = AttemptError<EchoFailure, EchoRecoverable>;
+
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct EchoParams {
     value: u32,
@@ -22,14 +38,14 @@ struct EchoParams {
 
 /// A task whose attempts return `outcome`, counting its runs and the records it ended.
 struct Echo {
-    outcome: fn(u32) -> Result<serde_json::Value, AttemptError>,
+    outcome: fn(u32) -> Result<serde_json::Value, EchoError>,
     progress_timeout: time::Duration,
     runs: Arc<AtomicUsize>,
     ended: Arc<Mutex<Vec<Uuid>>>,
     /// Ends that fail before one succeeds.
     end_failures: Arc<AtomicUsize>,
     /// Why its unfinished records fail when Gateway starts again.
-    restart_failure: Option<Permanent>,
+    restart_failure: Option<EchoFailure>,
 }
 
 #[async_trait]
@@ -39,6 +55,10 @@ impl ProvisionerTask for Echo {
     type Params = EchoParams;
 
     type Output = serde_json::Value;
+
+    type Failure = EchoFailure;
+
+    type Recoverable = EchoRecoverable;
 
     fn start_window(&self) -> time::Duration {
         time::Duration::hours(1)
@@ -52,28 +72,28 @@ impl ProvisionerTask for Echo {
         json!({ "after": last })
     }
 
-    fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value {
+    fn failed_payload(&self, error: &AnyPermanent, last: &serde_json::Value) -> serde_json::Value {
         json!({ "error": error, "last": last })
     }
 
-    fn restart_failure(&self) -> Option<Permanent> {
+    fn restart_failure(&self) -> Option<EchoFailure> {
         self.restart_failure.clone()
     }
 
-    async fn run(&self, attempt: &Attempt, params: EchoParams) -> Result<serde_json::Value, AttemptError> {
+    async fn run(&self, attempt: &Attempt, params: EchoParams) -> Result<serde_json::Value, EchoError> {
         self.runs.fetch_add(1, Ordering::SeqCst);
 
         match params.value {
             HANG => {
                 attempt.cancel.cancelled().await;
-                Err(AttemptError::Recoverable(Recoverable::Storage))
+                Err(AttemptError::Recoverable(EchoRecoverable::Busy))
             }
             PROGRESS => {
                 // 4 s of work outlasts the first deadline, 2 to 3 s away, so only the progress keeps the attempt running.
                 for step in 0..8 {
                     tokio::select! {
                         () = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
-                        () = attempt.cancel.cancelled() => return Err(AttemptError::Recoverable(Recoverable::Storage)),
+                        () = attempt.cancel.cancelled() => return Err(AttemptError::Recoverable(EchoRecoverable::Busy)),
                     }
                     attempt.report_progress(json!({ "step": step })).await;
                 }
@@ -180,21 +200,21 @@ struct Harness {
 }
 
 impl Harness {
-    async fn new(outcome: fn(u32) -> Result<serde_json::Value, AttemptError>) -> Self {
+    async fn new(outcome: fn(u32) -> Result<serde_json::Value, EchoError>) -> Self {
         Self::with_progress_timeout(outcome, time::Duration::hours(1)).await
     }
 
     async fn with_progress_timeout(
-        outcome: fn(u32) -> Result<serde_json::Value, AttemptError>,
+        outcome: fn(u32) -> Result<serde_json::Value, EchoError>,
         progress_timeout: time::Duration,
     ) -> Self {
         Self::build(outcome, progress_timeout, None).await
     }
 
     async fn build(
-        outcome: fn(u32) -> Result<serde_json::Value, AttemptError>,
+        outcome: fn(u32) -> Result<serde_json::Value, EchoError>,
         progress_timeout: time::Duration,
-        restart_failure: Option<Permanent>,
+        restart_failure: Option<EchoFailure>,
     ) -> Self {
         let conn = gateway_db::GatewayDb::open_path(":memory:")
             .await
@@ -385,7 +405,10 @@ async fn resume_gives_every_unfinished_task_a_new_job() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
     let first = harness.create(1).await;
     let second = harness.create(2).await;
-    let tokens = [harness.task(first).await.job_token, harness.task(second).await.job_token];
+    let tokens = [
+        harness.task(first).await.job_token,
+        harness.task(second).await.job_token,
+    ];
     // The jobs of the creation may be stored or lost; the runner never asks which.
     harness.queued_jobs();
 
@@ -402,7 +425,7 @@ async fn a_task_that_cannot_outlive_a_restart_fails_at_startup_and_is_ended() {
     let mut harness = Harness::build(
         |value| Ok(json!(value)),
         time::Duration::hours(1),
-        Some(Permanent::KeyLost),
+        Some(EchoFailure::Gone),
     )
     .await;
     let id = harness.create(1).await;
@@ -412,7 +435,7 @@ async fn a_task_that_cannot_outlive_a_restart_fails_at_startup_and_is_ended() {
 
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed, "it fails before any job runs");
-    assert_eq!(task.payload, json!({ "error": { "kind": "keyLost" }, "last": null }));
+    assert_eq!(task.payload, json!({ "error": { "kind": "gone" }, "last": null }));
 
     let mut ending = harness.queued_job();
     stale.run().await.expect("the stale job stops");
@@ -429,7 +452,7 @@ async fn a_task_whose_restart_failure_cannot_be_recorded_still_gets_a_new_job() 
     let mut harness = Harness::build(
         |value| Ok(json!(value)),
         time::Duration::hours(1),
-        Some(Permanent::KeyLost),
+        Some(EchoFailure::Gone),
     )
     .await;
     let id = harness.create(1).await;
@@ -448,13 +471,21 @@ async fn a_task_whose_restart_failure_cannot_be_recorded_still_gets_a_new_job() 
 // oracle: mutant resume resets the attempts of a Task, so a Task that fails at each restart is retried forever
 #[tokio::test]
 async fn resume_keeps_the_attempts_a_task_made() {
-    let mut harness = Harness::new(|_| Err(AttemptError::Recoverable(Recoverable::AiBusy { status: 429 }))).await;
+    let mut harness = Harness::new(|_| Err(AttemptError::Recoverable(EchoRecoverable::Busy))).await;
     let id = harness.create(1).await;
-    harness.queued_job().run().await.expect("the job queues the next attempt itself");
+    harness
+        .queued_job()
+        .run()
+        .await
+        .expect("the job queues the next attempt itself");
     harness.queued_jobs();
 
     harness.runner.resume().await.expect("resume");
-    harness.queued_job().run().await.expect("the job queues the next attempt itself");
+    harness
+        .queued_job()
+        .run()
+        .await
+        .expect("the job queues the next attempt itself");
 
     assert_eq!(harness.task(id).await.attempts, 2);
 }
@@ -480,7 +511,7 @@ async fn a_panicking_attempt_fails_the_task() {
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_permanent_failure_fails_the_task_at_once() {
-    let mut harness = Harness::new(|_| Err(AttemptError::Permanent(Permanent::KeyLost))).await;
+    let mut harness = Harness::new(|_| Err(AttemptError::task(EchoFailure::Gone))).await;
     let id = harness.create(1).await;
 
     harness.queued_job().run().await.expect("no retry");
@@ -488,13 +519,13 @@ async fn a_permanent_failure_fails_the_task_at_once() {
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
     assert_eq!(task.attempts, 1);
-    assert_eq!(task.payload["error"], json!({ "kind": "keyLost" }));
+    assert_eq!(task.payload["error"], json!({ "kind": "gone" }));
 }
 
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_recoverable_failure_is_retried_up_to_the_last_attempt() {
-    let mut harness = Harness::new(|_| Err(AttemptError::Recoverable(Recoverable::AiBusy { status: 429 }))).await;
+    let mut harness = Harness::new(|_| Err(AttemptError::Recoverable(EchoRecoverable::Busy))).await;
     let id = harness.create(1).await;
     let mut job = harness.queued_job();
 
@@ -521,7 +552,7 @@ async fn a_recoverable_failure_is_retried_up_to_the_last_attempt() {
     assert_eq!(task.attempts, MAX_ATTEMPTS);
     assert_eq!(
         task.payload["error"],
-        json!({ "kind": "attemptsExhausted", "last": { "kind": "aiBusy", "status": 429 } })
+        json!({ "kind": "attemptsExhausted", "last": { "kind": "busy" } })
     );
 }
 
