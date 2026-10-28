@@ -20,11 +20,12 @@ use crate::transport::Transport;
 
 mod backoff;
 mod closure;
+mod loggable;
 mod stream;
 mod transport;
 
 pub use crate::backoff::{Backoff, uniform_jitter, uniform_spread};
-pub use crate::closure::{Closure, ClosureClass, TerminalCode, TransientKind};
+pub use crate::closure::{Closure, ClosureClass, ErrorCode, TerminalCode, TransientKind};
 
 const KEEPALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const OPENING_TIMEOUT: Duration = Duration::from_secs(30);
@@ -90,8 +91,12 @@ pub enum Event {
     /// The authority answered the `Hello` with `Welcome`: the stream is authenticated.
     Authenticated,
     /// The authority asks the identity to renew; the caller acknowledges `id`.
+    ///
+    /// The authority's `reason` is escaped and truncated so that it is safe to log.
     RenewRequested { id: String, reason: String },
     /// The authority asks for a new stream, which the caller opens before dropping this channel.
+    ///
+    /// The authority's `reason` is escaped and truncated so that it is safe to log.
     Reconnect { id: String, reason: String },
     /// A newer effective config, as a JSON object; the caller acknowledges `id`.
     ConfigUpdate { id: String, config_json: String },

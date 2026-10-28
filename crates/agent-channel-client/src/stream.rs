@@ -19,7 +19,8 @@ use tower::Layer as _;
 use uuid::Uuid;
 
 use crate::backoff::BackoffState;
-use crate::closure::{Closure, ClosureClass};
+use crate::closure::{Closure, ClosureClass, ErrorCode};
+use crate::loggable::loggable;
 use crate::transport::endpoint;
 use crate::{Event, Shared, Target};
 
@@ -173,11 +174,11 @@ fn push_event(message: ServerMessage) -> Option<Event> {
     match message.payload? {
         Payload::RenewRequested(request) => Some(Event::RenewRequested {
             id: message.id,
-            reason: request.reason,
+            reason: loggable(&request.reason),
         }),
         Payload::Reconnect(request) => Some(Event::Reconnect {
             id: message.id,
-            reason: request.reason,
+            reason: loggable(&request.reason),
         }),
         Payload::ConfigUpdate(update) => Some(Event::ConfigUpdate {
             id: message.id,
@@ -295,7 +296,9 @@ async fn authenticated_stream_at(shared: &Shared, target: &Target, clock_offset:
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
 fn clock_offset(closure: &Closure, local_time: OffsetDateTime) -> Option<i64> {
-    if !(closure.grpc_code == Some(Code::Unauthenticated) && closure.error_code.as_deref() == Some("clock_skew")) {
+    if !(closure.grpc_code == Some(Code::Unauthenticated)
+        && closure.error_code.as_ref().map(ErrorCode::as_str) == Some("clock_skew"))
+    {
         return None;
     }
     let server_time = OffsetDateTime::parse(closure.server_time.as_deref()?, &Rfc3339).ok()?;
@@ -365,6 +368,7 @@ pub(crate) fn channel_proof_input(challenge: &[u8], connect_nonce: &str) -> Vec<
 
 #[cfg(test)]
 mod tests {
+    use agent_channel_proto::{Reconnect, RenewRequested};
     use rstest::rstest;
 
     use super::*;
@@ -375,7 +379,7 @@ mod tests {
         Closure {
             class: ClosureClass::Transient(TransientKind::Outage),
             grpc_code: Some(grpc_code),
-            error_code: Some("clock_skew".to_owned()),
+            error_code: Some(ErrorCode::Code("clock_skew".to_owned())),
             server_time: Some(server_time.to_owned()),
             reason: "clock skew".to_owned(),
         }
@@ -402,5 +406,22 @@ mod tests {
     fn a_clock_skew_code_with_another_status_gives_no_offset(#[case] grpc_code: Code) {
         let closure = clock_skew_refusal(grpc_code, "2026-10-21T02:00:00Z");
         assert_eq!(clock_offset(&closure, local_time()), None);
+    }
+
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
+    #[test]
+    fn escapes_the_reason_of_a_push() {
+        let push = |payload| ServerMessage {
+            id: "d6a1ed1a-6c5b-4f87-9d2a-5d1d3c1f8e10".to_owned(),
+            correlation_id: None,
+            payload: Some(payload),
+        };
+        let reason = "admin\nINFO forged".to_owned();
+        let logged = r"admin\nINFO forged".to_owned();
+
+        let renew = push_event(push(Payload::RenewRequested(RenewRequested { reason: reason.clone() })));
+        assert!(matches!(renew, Some(Event::RenewRequested { reason, .. }) if reason == logged));
+        let reconnect = push_event(push(Payload::Reconnect(Reconnect { reason })));
+        assert!(matches!(reconnect, Some(Event::Reconnect { reason, .. }) if reason == logged));
     }
 }

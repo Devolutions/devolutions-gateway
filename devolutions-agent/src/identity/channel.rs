@@ -7,7 +7,7 @@ use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use agent_channel_client::{Channel, Closure, ClosureClass, Event, TerminalCode};
+use agent_channel_client::{Channel, Closure, ClosureClass, ErrorCode, Event, TerminalCode};
 use agent_identity::client;
 use parking_lot::Mutex;
 use serde_json::Value;
@@ -587,7 +587,7 @@ impl<C: LinkChannel> Links<C> {
         if was_authenticated {
             warn!(
                 grpc_code = ?closure.grpc_code,
-                error_code = closure.error_code.as_deref(),
+                error_code = closure.error_code.as_ref().map(ErrorCode::as_str),
                 reason = %closure.reason,
                 ?reopen_after,
                 "Agent channel stream closed"
@@ -596,7 +596,7 @@ impl<C: LinkChannel> Links<C> {
         } else {
             debug!(
                 grpc_code = ?closure.grpc_code,
-                error_code = closure.error_code.as_deref(),
+                error_code = closure.error_code.as_ref().map(ErrorCode::as_str),
                 reason = %closure.reason,
                 ?reopen_after,
                 "Agent channel stream did not open"
