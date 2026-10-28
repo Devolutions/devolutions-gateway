@@ -352,6 +352,7 @@ impl ProvisionerTaskRunner {
     /// Each record gets a new `job_token`, so a job left from before finds itself superseded and stops, and the job
     /// queue is never read.
     /// A record whose task cannot outlive a restart fails first, and its new job only ends it.
+    /// A record that was waiting to retry runs at once, since retry timing is no promise to the caller.
     /// Call it at startup, before the job runner claims any job, so no job runs an attempt meanwhile.
     /// A record whose new job cannot be queued is failed, since no job is left to run it.
     pub async fn resume(&self) -> anyhow::Result<()> {
@@ -601,7 +602,14 @@ impl ProvisionerTaskRunner {
             },
             Err(AttemptError::Recoverable(error)) if attempts < MAX_ATTEMPTS => {
                 let retry_at = OffsetDateTime::now_utc() + retry_delay(attempts);
-                warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, %retry_at, "Task attempt failed; it will be retried");
+                warn!(
+                    task.id = %task_id,
+                    task.kind = %record.kind,
+                    attempts,
+                    ?error,
+                    %retry_at,
+                    "Task attempt failed; it will be retried"
+                );
                 self.enqueue(task_id, job_token, Some(retry_at))
                     .await
                     .context("queue the next attempt")?;
