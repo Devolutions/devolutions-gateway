@@ -1,4 +1,3 @@
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Output, Stdio};
 use std::time::{Duration, Instant};
@@ -7,7 +6,7 @@ use anyhow::{Context as _, ensure};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
 
-use super::{AgentCase, POLL, WAIT, new_token, reset_mocks};
+use super::{AgentCase, POLL, WAIT, enroll_cli, new_token, reset_mocks};
 use crate::Context;
 use crate::client::{Target, Token};
 use crate::dvls::IdentityQuery;
@@ -346,24 +345,17 @@ try {{\r\n\
 
     async fn submit_token(&self, token: &str) -> anyhow::Result<()> {
         let started = Instant::now();
+        let line = format!("{token}\n");
         loop {
-            let output = tokio::time::timeout(
+            let output = enroll_cli(
+                &self.request.agent_bin,
+                self.case.path(),
+                &["-"],
+                line.as_bytes(),
                 Duration::from_secs(5),
-                tokio::process::Command::new(&self.request.agent_bin)
-                    .args(["identity", "enroll", token])
-                    .env("DAGENT_CONFIG_PATH", self.case.path())
-                    .kill_on_drop(true)
-                    .output(),
             )
             .await
-            .context("identity enroll CLI timed out")?
             .context("run identity enroll CLI as administrator")?;
-            for (name, contents) in [("cli-stdout.log", &output.stdout), ("cli-stderr.log", &output.stderr)] {
-                std::fs::OpenOptions::new()
-                    .append(true)
-                    .open(self.case.path().join(name))?
-                    .write_all(contents)?;
-            }
             if output.status.success() {
                 return Ok(());
             }

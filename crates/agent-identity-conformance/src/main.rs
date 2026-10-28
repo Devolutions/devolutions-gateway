@@ -963,6 +963,7 @@ const TESTS: &[Test] = &[
     a!(a_rejected_identity_replaced).channel(),
     a!(a_cli_identity_enroll_writes_pending_file).cli_only(),
     a!(a_cli_identity_enroll_stdin).cli_only(),
+    a!(a_cli_identity_enroll_token_argument_refused).cli_only(),
     a!(a_renewal_happy_path).channel().need(Need::LongLeaves),
     a!(a_renewal_lost_response_retried, mock_only).channel(),
     a!(a_renewal_lost_confirm_response_retried, mock_only).channel(),

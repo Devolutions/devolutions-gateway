@@ -3416,15 +3416,7 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
     with_agent(ctx, None, false, async move |case| {
         let token = new_token(case, 1).await?;
         case.add_token(&token.text);
-        let output = Command::new(&case.ctx.agent_bin)
-            .args(["identity", "enroll", &token.text])
-            .env("DAGENT_CONFIG_PATH", case.path())
-            .kill_on_drop(true)
-            .output()
-            .await
-            .context("run identity enroll CLI")?;
-        std::fs::write(case.path().join("cli-stdout.log"), &output.stdout)?;
-        std::fs::write(case.path().join("cli-stderr.log"), &output.stderr)?;
+        let output = enroll_cli_from_stdin(case, format!("{}\n", token.text).as_bytes()).await?;
         ensure!(output.status.success(), "identity enroll CLI rejected a valid token");
         ensure!(
             case.pending_path().exists(),
@@ -3504,25 +3496,9 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
             ),
         ];
         for (reason, candidate) in invalid {
-            let result = tokio::time::timeout(
-                Duration::from_secs(10),
-                Command::new(&case.ctx.agent_bin)
-                    .args(["identity", "enroll", &candidate])
-                    .env("DAGENT_CONFIG_PATH", case.path())
-                    .kill_on_drop(true)
-                    .output(),
-            )
-            .await
-            .with_context(|| format!("identity enroll CLI hung for {reason}"))??;
-            use std::io::Write as _;
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(case.path().join("cli-stdout.log"))?
-                .write_all(&result.stdout)?;
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(case.path().join("cli-stderr.log"))?
-                .write_all(&result.stderr)?;
+            let result = enroll_cli_from_stdin(case, format!("{candidate}\n").as_bytes())
+                .await
+                .with_context(|| format!("identity enroll CLI for {reason}"))?;
             ensure!(!result.status.success(), "identity enroll CLI accepted {reason}");
             ensure!(
                 !case.pending_path_for(&candidate).exists() && !case.in_progress_path_for(&candidate).exists(),
@@ -3535,16 +3511,30 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
 }
 
 async fn enroll_cli_from_stdin(case: &AgentCase, input: &[u8]) -> anyhow::Result<std::process::Output> {
-    let output = tokio::time::timeout(Duration::from_secs(10), async {
-        let mut child = Command::new(&case.ctx.agent_bin)
-            .args(["identity", "enroll", "-"])
-            .env("DAGENT_CONFIG_PATH", case.path())
+    enroll_cli(&case.ctx.agent_bin, case.path(), &["-"], input, Duration::from_secs(10)).await
+}
+
+/// Runs `identity enroll` followed by `args` against the case configuration in `case_dir`, writing `input` to its standard input.
+///
+/// Appends the command's output to the case's CLI logs, which the token audit then reads.
+async fn enroll_cli(
+    agent_bin: &Path,
+    case_dir: &Path,
+    args: &[&str],
+    input: &[u8],
+    timeout: Duration,
+) -> anyhow::Result<std::process::Output> {
+    let output = tokio::time::timeout(timeout, async {
+        let mut child = Command::new(agent_bin)
+            .args(["identity", "enroll"])
+            .args(args)
+            .env("DAGENT_CONFIG_PATH", case_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .context("start identity enroll CLI with stdin")?;
+            .context("start identity enroll CLI")?;
         let mut stdin = child.stdin.take().context("identity enroll CLI has no stdin")?;
         if let Err(error) = stdin.write_all(input).await {
             ensure!(
@@ -3556,24 +3546,24 @@ async fn enroll_cli_from_stdin(case: &AgentCase, input: &[u8]) -> anyhow::Result
         child.wait_with_output().await.context("wait for identity enroll CLI")
     })
     .await
-    .context("identity enroll CLI with stdin timed out")??;
+    .context("identity enroll CLI timed out")??;
     use std::io::Write as _;
     for (name, contents) in [("cli-stdout.log", &output.stdout), ("cli-stderr.log", &output.stderr)] {
         std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(case.path().join(name))?
+            .open(case_dir.join(name))?
             .write_all(contents)?;
     }
     Ok(output)
 }
 
-fn assert_no_pending_files(case: &AgentCase) -> anyhow::Result<()> {
+fn assert_no_pending_files(case: &AgentCase, input: &str) -> anyhow::Result<()> {
     let dir = case.path().join("identity").join("pending");
     if dir.exists() {
         ensure!(
             std::fs::read_dir(dir)?.next().is_none(),
-            "identity enroll CLI created pending or in-progress state for invalid stdin"
+            "identity enroll CLI created pending or in-progress state for {input}"
         );
     }
     Ok(())
@@ -3621,8 +3611,56 @@ pub(crate) async fn a_cli_identity_enroll_stdin(ctx: Context) -> anyhow::Result<
         ] {
             let output = enroll_cli_from_stdin(case, &input).await?;
             ensure!(!output.status.success(), "identity enroll CLI accepted {name} on stdin");
-            assert_no_pending_files(case)?;
+            assert_no_pending_files(case, &format!("{name} on stdin"))?;
         }
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn a_cli_identity_enroll_token_argument_refused(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    with_agent(ctx, None, false, async move |case| {
+        let token = new_token(case, 1).await?;
+        case.add_token(&token.text);
+        let line = format!("{}\n", token.text);
+        // Each run differs from the accepting control below only in its arguments, standard input carrying the same token.
+        for (name, args) in [
+            ("the token as the argument", &[token.text.as_str()][..]),
+            ("the token after -", &["-", token.text.as_str()][..]),
+        ] {
+            let output = enroll_cli(
+                &case.ctx.agent_bin,
+                case.path(),
+                args,
+                line.as_bytes(),
+                Duration::from_secs(10),
+            )
+            .await
+            .with_context(|| format!("identity enroll CLI with {name}"))?;
+            ensure!(!output.status.success(), "identity enroll CLI accepted {name}");
+            assert_no_pending_files(case, name)?;
+            for (stream, contents) in [("stdout", &output.stdout), ("stderr", &output.stderr)] {
+                assert_no_token_fragments(
+                    contents,
+                    &token.text,
+                    Path::new(&format!("identity enroll CLI {stream} for {name}")),
+                )?;
+            }
+        }
+        // The refusals above are for the arguments alone: the same token on standard input is accepted.
+        let output = enroll_cli_from_stdin(case, line.as_bytes()).await?;
+        ensure!(
+            output.status.success(),
+            "identity enroll CLI rejected the token on stdin after refusing it as an argument"
+        );
+        let pending = case.pending_path();
+        ensure!(
+            pending.exists(),
+            "identity enroll CLI did not write the pending file for the token on stdin"
+        );
+        std::fs::remove_file(pending)?;
         Ok(())
     })
     .await
