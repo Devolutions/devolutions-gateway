@@ -1156,6 +1156,39 @@ impl AgentCase {
         Ok(false)
     }
 
+    /// Every `identity.json` the agent has stored.
+    fn stored_identities(&self) -> anyhow::Result<Vec<Value>> {
+        let authorities = self.path().join("identity").join("authorities");
+        if !authorities.exists() {
+            return Ok(Vec::new());
+        }
+        let mut states = Vec::new();
+        for entry in std::fs::read_dir(authorities)? {
+            let path = entry?.path().join("identity.json");
+            if path.exists() {
+                states.push(serde_json::from_slice(&std::fs::read(path)?)?);
+            }
+        }
+        Ok(states)
+    }
+
+    /// Whether `state` is known to belong to an authority other than `target`: its authority ID differs from `target`'s, or matches the second authority's.
+    ///
+    /// Without either ID, the suite cannot tell, and counts the identity as `target`'s.
+    fn held_for_another_authority(&self, target: &Target, state: &Value) -> bool {
+        let authority = &state["authority_id"];
+        let differs_from_target = target
+            .authority_id
+            .is_some_and(|id| *authority != id.to_string().as_str());
+        let is_second = self
+            .ctx
+            .second
+            .as_ref()
+            .and_then(|second| second.target.authority_id)
+            .is_some_and(|id| *authority == id.to_string().as_str());
+        differs_from_target || is_second
+    }
+
     fn add_token(&mut self, token: &str) {
         self.tokens.push(token.to_owned());
     }
@@ -1677,8 +1710,12 @@ async fn dropped_enrollment(case: &mut AgentCase, token: &Token) -> anyhow::Resu
                 case.pending_path().exists(),
                 "agent deleted the pending file before receiving a response"
             );
+            let enrolled_id = &listing.items.first().context("listing omitted the identity")?.id;
             ensure!(
-                !case.has_stored_identity()?,
+                case.stored_identities()?
+                    .iter()
+                    .all(|state| state["identity_id"] != enrolled_id.as_str()
+                        && case.held_for_another_authority(&target, state)),
                 "agent stored an identity before receiving a response"
             );
             ensure!(

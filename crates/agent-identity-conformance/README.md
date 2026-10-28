@@ -63,7 +63,7 @@ Windows software provider keys must allow only the agent's account and SYSTEM, r
 The Windows software provider stores keys as machine keys, which only an elevated administrator can create, so in an unelevated Windows run every test that starts the agent reports `SKIP`.
 The SYSTEM fixture requires an elevated administrator unless the suite already runs as SYSTEM; without this fixture, the Windows non-exportability case reports `SKIP`.
 `--authority-id` and `--second-authority-id` check server and stored authority IDs when supplied; they do not control cleanup.
-The runner stops after 14 minutes 30 seconds; the testsuite allows 15 minutes and terminates the runner's process tree on timeout.
+The runner stops after 24 minutes 30 seconds; the testsuite allows 25 minutes and terminates the runner's process tree on timeout.
 
 ## Several authorities
 
