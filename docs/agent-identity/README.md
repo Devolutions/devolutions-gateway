@@ -50,8 +50,7 @@ Agent Identity reads the `Identity` section of `agent.json`, in the agent's data
 ```json
 {
   "Identity": {
-    "Enabled": true,
-    "KeyBackend": "WindowsSoftwareProvider"
+    "Enabled": true
   }
 }
 ```
@@ -59,14 +58,30 @@ Agent Identity reads the `Identity` section of `agent.json`, in the agent's data
 | Setting | Values | Default |
 | --- | --- | --- |
 | `Enabled` | `true` or `false` | `true` |
-| `KeyBackend` | `WindowsSoftwareProvider` or `File` | `WindowsSoftwareProvider` on Windows, `File` elsewhere |
 
 With `Enabled` set to `false`, the service neither enrolls nor renews, and `identity enroll` still stores tokens for later.
 The service reads these settings when it starts, so restart it after a change.
 
-`WindowsSoftwareProvider` keeps device keys as machine keys in the Microsoft Software Key Storage Provider, and `File` keeps them as PKCS#8 files in the data directory.
-Choose the backend before enrolling.
-The agent looks for keys only in the configured backend and never falls back to another, so switching backends loses every enrolled identity as `key_lost`, and each needs a different token to enroll again.
+### Where keys are stored
+
+The authority's key storage policy decides where the agent creates each device key.
+The policy lists key storages in order of preference, and can require them:
+
+- `file`: a PKCS#8 file in the data directory, protected only by file permissions.
+- `windows_software_provider`: a non-exportable machine key in the Microsoft Software Key Storage Provider.
+- `tpm`: a non-exportable key held by the device's TPM 2.0.
+
+The agent uses the first listed storage the machine offers.
+When the policy isn't required and lists none the machine offers, the agent chooses its own.
+Without a policy, it uses the Windows software provider on Windows and key files elsewhere.
+
+Each key stays in the storage where it was created, and a changed policy applies from the next key.
+A policy that is required and excludes the current key's storage makes the agent renew as soon as a listed storage is available.
+
+When a policy is required and the machine offers none of its storages, the agent keeps its current key and sends no renewal, and raises system event 1100.
+Renewal resumes once the policy changes or the machine offers a listed storage.
+If neither happens before the certificate expires, the identity ends.
+See [Key storage unavailable](#key-storage-unavailable).
 
 Settings under `__debug__.identity` exist only for tests: they are unsupported, the agent logs a warning at start-up when any is set, and none belongs in production.
 The [agent's identity module intent][agent-intent] lists them.
@@ -83,10 +98,10 @@ Agent Identity keeps its state in the `identity` folder of the agent's data dire
 | --- | --- |
 | `pending/` | Tokens waiting for enrollment: DPAPI-encrypted `.dat` files on Windows, `.json` files elsewhere |
 | `rejected/` | One marker per token refused permanently, by the authority or the agent, holding no secret |
-| `authorities/<authority_id>/identity.json` | The identity held with that authority: its IDs, config, certificate chains and key names |
-| `keys/` | Device keys of the `File` backend |
+| `authorities/<authority_id>/identity.json` | The identity held with that authority: its IDs, config, certificate chains, and the name and storage of each key |
+| `keys/` | Device keys in key files |
 
-With the `WindowsSoftwareProvider` backend, device keys are machine keys named `devolutions-agent-identity_<uuid>` instead.
+Keys in the Windows software provider are machine keys named `devolutions-agent-identity_<uuid>` instead.
 On Windows, the folder grants access to SYSTEM only, except that Administrators can add files to `pending`, which `identity enroll` relies on.
 
 Leave everything in the `identity` folder to the agent; `identity enroll` and, on Windows, a full uninstall are the supported ways to change it.
@@ -159,16 +174,27 @@ The service logs Agent Identity events in the agent's log files, in its data dir
 | `The Agent Identity is rejected; it stops renewing and checking in` | The identity ended for the reason in `code`; see [When an identity ends](#when-an-identity-ends). |
 | `Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account` | The agent can't trust its state in `directory`, typically after an owner or permission change there. Restore the service account as its owner with exclusive access; the agent retries on its own. |
 | `Agent Identity is stopped until this authority directory or identity.json is a plain directory or file owned by the service account with no access for other users; the agent never repairs it` | The agent can't trust the authority directory or `identity.json` in `path`; it never repairs it, and processes no identity or pending enrollment until an administrator fixes its owner and access. Make it a plain directory or file again, owned by the service account, with access for that account only and, on Windows, no inherited permissions; the agent resumes on its own. |
-| `Agent Identity key backend is unavailable; Agent Identity is stopped` | See [Key backend unavailable](#key-backend-unavailable). |
+| `An Agent Identity key storage is unavailable; what needs it waits until it is available` | See [Key storage unavailable](#key-storage-unavailable). |
+| `Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account`, with an `error` that names a missing `key_storage` | After an upgrade from a build that recorded no `key_storage` for its keys, the agent can't use that build's state and stops all identity processing. Ownership is fine, so don't change it. On a test machine, stop the service, remove the `identity` folder and enroll again with a new token. |
 | `Agent Identity debug settings are enabled; remove __debug__.identity for production` | Remove the `__debug__.identity` section from `agent.json`. |
 
-### Key backend unavailable
+### Key storage unavailable
 
-When the configured `KeyBackend` can't exist on the platform, such as `WindowsSoftwareProvider` on Linux, or isn't available on the machine, the agent stops Agent Identity before it touches any pending file or identity.
-It logs `Agent Identity key backend is unavailable; Agent Identity is stopped` and raises system event 1100, `Agent Identity key backend unavailable`, with the backend name and the error.
+When the agent needs a key storage the machine doesn't offer, it logs `An Agent Identity key storage is unavailable; what needs it waits until it is available` and raises system event 1100, `Agent Identity key backend unavailable`, with the storage name and the error.
+It does so once per run for each storage and identity.
 On Windows, the event is in the Application log under the source `Devolutions Agent`; on Linux and macOS, it is in syslog under `devolutions-agent`.
-The rest of the agent keeps running, and Agent Identity never falls back to another backend.
-Make the backend available, or set `KeyBackend` to one that is, then restart the service; switching backends loses enrolled identities.
+
+Two cases raise the event:
+
+- An identity's key is in a storage the machine doesn't offer, such as a TPM key on a device whose TPM stopped working.
+  The agent never opens the key from another storage and never ends the identity as `key_lost`, because the key may still exist.
+  Only the identities with keys in that storage pause, and the rest continue.
+  Make the storage available again; the agent checks again on its own.
+- An identity's required policy lists no storage the machine offers when a renewal is due.
+  The event names the identity and the listed storages.
+  The identity keeps its current key until its certificate expires, and then ends.
+  Change the policy on the authority, or make a listed storage available on the machine.
+  The agent renews once either happens, without a restart.
 
 ### Proxies and TLS
 
