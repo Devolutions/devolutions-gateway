@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Devolutions.Agent.Identity.Authority;
 
 /// <summary>
@@ -9,15 +11,24 @@ internal static class BaseUrl
     /// Returns the URL in normalized absolute form without trailing slashes,
     /// so that the path the agent appends follows exactly one slash.
     /// </summary>
-    /// <param name="url">The URL text.</param>
+    /// <param name="url">The URL text, in ASCII.</param>
     /// <param name="name">What the URL is, as error messages start, such as <c>The product base URL</c>.</param>
     /// <param name="paramName">The parameter that holds the URL.</param>
     /// <exception cref="ArgumentException">
-    /// The URL is not an absolute <c>https</c> URL,
+    /// The URL is not ASCII, is not an absolute <c>https</c> URL,
     /// or has user information or any other <c>@</c>, a query or a fragment.
     /// </exception>
     public static string Normalize(string url, string name, string paramName)
     {
+        // CONTRACT.agent-identity.md §2: `u` holds only ASCII characters, since certificates carry it as an IA5String,
+        // and §5.2 reads `agent_channel_url` as text like `u`.
+        if (!Ascii.IsValid(url))
+        {
+            throw new ArgumentException(
+                $"{name} is not ASCII; write an internationalized host in its xn-- form.",
+                paramName);
+        }
+
         if (!Uri.TryCreate(url, UriKind.Absolute, out Uri? parsed))
         {
             throw new ArgumentException($"{name} is not an absolute URL.", paramName);

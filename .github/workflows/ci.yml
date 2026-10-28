@@ -259,12 +259,46 @@ jobs:
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+          # Detecting changes compares the commit with its first parent.
+          fetch-depth: 2
+
+      # Installing Pester from PSGallery fails at times, so a commit that leaves the check alone skips its tests.
+      # The steps are skipped rather than the job, because the success job requires every job to succeed.
+      - name: Detect changes to the check
+        id: changes
+        run: |
+          $Changed = 'true'
+          if (('${{ github.event_name }}' -In 'pull_request', 'push') -And -Not '${{ inputs.ref }}') {
+            $Files = git diff --name-only HEAD^1 HEAD -- ci/check-oracle-markers.ps1 ci/check-oracle-markers.Tests.ps1
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+            if (-Not $Files) {
+              $Changed = 'false'
+            }
+          }
+          echo "changed=$Changed" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
 
       - name: Install Pester
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Force
+        if: ${{ steps.changes.outputs.changed == 'true' }}
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Pester tests
+        if: ${{ steps.changes.outputs.changed == 'true' }}
         run: |
           Import-Module Pester -RequiredVersion 5.6.0
           $Result = Invoke-Pester ci/check-oracle-markers.Tests.ps1 -PassThru
@@ -344,6 +378,9 @@ jobs:
         # A root-only test run without root skips and passes, so after changing this step, check that its log has no SKIP line.
         run: |
           cargo test --locked --target ${{ matrix.target }} --config "target.${{ matrix.target }}.runner='sudo'" -p device-key --lib root_only_
+          cargo test --locked --target ${{ matrix.target }} --config "target.${{ matrix.target }}.runner='sudo'" -p testsuite --test integration_tests private_fs::unix::root_only_
+        env:
+          AWS_LC_SYS_NO_ASM: true
 
       - name: Show sccache stats
         if: ${{ needs.preflight.outputs.sccache == 'true' && !cancelled() }}
@@ -674,7 +711,19 @@ jobs:
 
       - name: Install Pester
         id: prepare
-        run: Install-Module Pester -RequiredVersion 5.6.0
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Build module
@@ -721,7 +770,19 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Install Pester for Windows PowerShell
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: powershell
 
       - name: Run service account tests in Windows PowerShell
@@ -734,7 +795,19 @@ jobs:
         shell: powershell
 
       - name: Install Pester for PowerShell 7
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Run service account tests in PowerShell 7
@@ -1394,6 +1467,21 @@ jobs:
         run: dotnet test package/AgentWindowsManaged.Tests/DevolutionsAgent.Installer.Tests.csproj
         shell: pwsh
 
+  gateway-installer-tests:
+    name: Gateway installer tests
+    runs-on: windows-2022
+    needs: [preflight]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Tests
+        run: dotnet test package/WindowsManaged.UnitTests/DevolutionsGateway.Installer.Tests.csproj
+        shell: pwsh
+
   winapi-sanitizer-tests:
     name: Windows API sanitizer tests
     runs-on: windows-2022
@@ -1655,7 +1743,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, oracle-markers, oracle-markers-tests, skill-links, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-identity-vectors, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, oracle-markers, oracle-markers-tests, skill-links, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-identity-vectors, agent-installer-event-log-tests, gateway-installer-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:

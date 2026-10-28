@@ -61,6 +61,11 @@
                     <!-- messages -->
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">Une erreur inattendue est survenue au moment d'accéder au magasin de certificats du système : {0}</String>
                 <String Id="AuthenticationTokenIsRequired">Le jeton d'authentification est requis</String>
+                <String Id="DataFolderIsFile">Impossible d'utiliser {0}, car c'est un fichier et non un dossier. Supprimez le fichier, puis réessayez.</String>
+                <String Id="DataFolderIsLink">Impossible d'utiliser le dossier {0}, car c'est un lien. Supprimez le lien, puis réessayez.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Impossible d'utiliser le dossier {0}, car il appartient à {1}. Seul SYSTEM ou un administrateur peut en être propriétaire. Changez son propriétaire, puis réessayez.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Impossible d'utiliser le dossier {0}, car {1} peut remplacer le dossier ou son contenu. Retirez cette autorisation, puis réessayez.</String>
+                <String Id="DataFolderSecurityUnreadable">Impossible de lire le propriétaire ou les autorisations du dossier {0}. Vérifiez-les, puis réessayez.</String>
                 <String Id="DomainIsRequiredAndMustBeValid">Le domaine est requis et doit être un nom d'hôte valide</String>
                 <String Id="Dotnet471IsRequired">Le produit nécessite Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>

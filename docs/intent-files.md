@@ -101,7 +101,7 @@ It should not become a second design specification.
 For example:
 
 ```md
-Read all applicable `INTENT.md` and `*.intent.md` files before modifying code.
+Read all applicable `INTENT*.md` and `*.intent*.md` files before modifying code.
 
 Do not create, modify, delete, or rename intent files.
 
@@ -179,6 +179,7 @@ service/
 Do not create intent files mechanically for every source file.
 Their presence should reflect actual human design work.
 
+Applicable files are `INTENT*.md` in the directory and its ancestors, plus `<name>.intent*.md` beside the named module.
 Applicable intent files are cumulative.
 A more specific file does not silently override broader intent.
 Contradictions require human resolution.

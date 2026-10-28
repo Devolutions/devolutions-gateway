@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fs;
 use std::io::{ErrorKind, Read as _};
 
 use anyhow::{Context as _, ensure};
@@ -181,7 +180,7 @@ impl Store {
     }
 
     /// Takes the state lock once every stored identity passes [`Store::check_stored_identities`].
-    fn lock(&self) -> anyhow::Result<fs::File> {
+    fn lock(&self) -> anyhow::Result<state_lock::StateLock> {
         let lock = state_lock::acquire(&self.data_dir, self.acl_grant_current_user)?;
         self.check_stored_identities()?;
         Ok(lock)
@@ -195,13 +194,14 @@ impl Store {
     /// Reads an identity once every stored identity has passed [`Store::check_stored_identities`].
     fn read_stored_identity(&self, authority_id: Uuid) -> anyhow::Result<Option<StoredIdentity>> {
         let path = self.identity_path(authority_id);
-        if !private_file::check_authority_directory(
+        let Some(authority) = private_file::open_authority_directory(
             path.parent().context("identity file has no parent")?,
             self.acl_grant_current_user,
-        )? {
+        )?
+        else {
             return Ok(None);
-        }
-        let Some(file) = private_file::open_identity_file(&path, self.acl_grant_current_user)? else {
+        };
+        let Some(file) = private_file::open_identity_file(&authority, &path, self.acl_grant_current_user)? else {
             return Ok(None);
         };
         ensure!(
@@ -856,6 +856,7 @@ fn config_revision(config: &Value) -> anyhow::Result<u64> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::time::{Duration, UNIX_EPOCH};
 
     use base64::Engine as _;
@@ -880,20 +881,9 @@ mod tests {
     use x509_cert::time::{Time, Validity};
 
     use super::*;
-
-    struct TestDir(Utf8PathBuf);
+    use crate::private_file::TestDir;
 
     impl TestDir {
-        fn new() -> anyhow::Result<Self> {
-            // The system temporary directory keeps the deepest state path, a deleted key's tombstone, under Windows'
-            // 260-character limit wherever the repository is checked out.
-            let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
-                .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
-                .join(format!("ai-{}", Uuid::new_v4().simple()));
-            fs::create_dir_all(&path)?;
-            Ok(Self(path))
-        }
-
         fn supports_owner_only_files(&self) -> anyhow::Result<bool> {
             #[cfg(unix)]
             {
@@ -916,12 +906,6 @@ mod tests {
                 .join("identity")
                 .join("authorities")
                 .join(authority_id.to_string())
-        }
-    }
-
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
         }
     }
 
@@ -1492,14 +1476,14 @@ mod tests {
         #[cfg(windows)]
         {
             let lock = state_lock::acquire(&directory.0, true)?;
-            crate::windows::verify_protected_directory(&lock, true, false)?;
+            lock.directory().check(&private_file::tree_rule(true))?;
         }
         #[cfg(windows)]
         drop(held);
         fs::remove_file(&path)?;
         let lock = state_lock::acquire(&directory.0, true)?;
         #[cfg(windows)]
-        crate::windows::verify_protected_directory(&lock, true, false)?;
+        lock.directory().check(&private_file::tree_rule(true))?;
         drop(lock);
         Ok(())
     }
@@ -1516,9 +1500,9 @@ mod tests {
         let identity = enroll_locally(&store, &directory.0)?;
         let path = store.identity_path(identity.authority_id);
         let authority = path.parent().context("identity has no authority directory")?;
-        crate::windows::set_test_directory_access(authority, false)?;
+        crate::windows::test::set_test_directory_access(authority, false)?;
         let result = store.reconcile();
-        crate::windows::set_test_directory_access(authority, true)?;
+        crate::windows::test::set_test_directory_access(authority, true)?;
         assert!(result.is_err(), "inaccessible authority directory was silently ignored");
         assert!(keys::open(store.key_backend(), &identity.keys.current.key_name)?.is_some());
         assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
@@ -2852,7 +2836,7 @@ mod tests {
             fs::set_permissions(path, fs::Permissions::from_mode(mode))?;
         }
         #[cfg(windows)]
-        crate::windows::grant_test_directory_access(
+        crate::windows::test::grant_test_directory_access(
             path,
             match others {
                 OtherUsers::Group => ::windows::Win32::Security::WinBuiltinUsersSid,
@@ -2873,7 +2857,7 @@ mod tests {
 
     #[cfg(windows)]
     fn protection(path: &Utf8Path) -> anyhow::Result<String> {
-        crate::windows::test_security(path)
+        crate::windows::test::test_security(path)
     }
 
     fn untrusted_path(error: &anyhow::Error) -> Option<&Utf8Path> {
@@ -2891,7 +2875,7 @@ mod tests {
             fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
         }
         #[cfg(windows)]
-        crate::windows::set_test_directory_access(path, true)?;
+        crate::windows::test::set_test_directory_access(path, true)?;
         Ok(())
     }
 
@@ -2960,7 +2944,7 @@ mod tests {
             fs::set_permissions(path, fs::Permissions::from_mode(0o640))?;
         }
         #[cfg(windows)]
-        crate::windows::set_test_file_access(path, &[::windows::Win32::Security::WinBuiltinUsersSid])?;
+        crate::windows::test::set_test_file_access(path, &[::windows::Win32::Security::WinBuiltinUsersSid])?;
         Ok(())
     }
 
@@ -2972,7 +2956,7 @@ mod tests {
             fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
         }
         #[cfg(windows)]
-        crate::windows::set_test_file_access(path, &[])?;
+        crate::windows::test::set_test_file_access(path, &[])?;
         Ok(())
     }
 
@@ -3044,7 +3028,7 @@ mod tests {
         let identity = enroll_locally(&store, &directory.0)?;
         let path = store.identity_path(identity.authority_id);
         // Without SYSTEM, no other user can access the file, but the agent provisions SYSTEM too.
-        crate::windows::set_test_file_access_for_current_user_only(&path)?;
+        crate::windows::test::set_test_file_access_for_current_user_only(&path)?;
 
         let error = store
             .read_identity(identity.authority_id)
@@ -3201,7 +3185,8 @@ mod tests {
         let directory = TestDir::new()?;
         let identity = enroll_locally(&directory.store()?, &directory.0)?;
         let authority = directory.authority(identity.authority_id);
-        if crate::windows::set_test_owner(&authority, ::windows::Win32::Security::WinBuiltinAdministratorsSid).is_err()
+        if crate::windows::test::set_test_owner(&authority, ::windows::Win32::Security::WinBuiltinAdministratorsSid)
+            .is_err()
         {
             // Only an elevated token can give the directory another owner.
             return Ok(());
@@ -3227,7 +3212,10 @@ mod tests {
         let directory = TestDir::new()?;
         drop(directory.store()?);
         let authorities = directory.0.join("identity").join("authorities");
-        crate::windows::grant_test_directory_access(&authorities, ::windows::Win32::Security::WinBuiltinUsersSid)?;
+        crate::windows::test::grant_test_directory_access(
+            &authorities,
+            ::windows::Win32::Security::WinBuiltinUsersSid,
+        )?;
         let authority = directory.authority(Uuid::new_v4());
         fs::create_dir(&authority)?;
         let inherited = protection(&authority)?;

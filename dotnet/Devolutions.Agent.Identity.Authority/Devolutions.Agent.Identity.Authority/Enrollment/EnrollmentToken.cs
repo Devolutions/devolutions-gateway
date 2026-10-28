@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 namespace Devolutions.Agent.Identity.Authority;
@@ -90,14 +89,6 @@ public sealed class EnrollmentToken
     {
         ArgumentNullException.ThrowIfNull(productBaseUrl);
         ArgumentNullException.ThrowIfNull(randomNumberGenerator);
-
-        // CONTRACT.agent-identity.md §2: `u` holds only ASCII characters, since certificates carry it as an IA5String.
-        if (!Ascii.IsValid(productBaseUrl))
-        {
-            throw new ArgumentException(
-                "The product base URL is not ASCII; write an internationalized host in its xn-- form.",
-                nameof(productBaseUrl));
-        }
 
         ArrayBufferWriter<byte> json = new();
 

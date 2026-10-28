@@ -164,7 +164,7 @@ Not intended:
   Authority-issued nonces would tolerate a skewed agent clock, but they cost a round trip after an idle period, stall a retry after a lost response, and need issuance state shared across authority nodes.
 - The authority records a nonce only after the request signature and any body digest are valid.
   Requests with an invalid signature or body digest therefore cannot consume nonce storage.
-- The authority keeps each accepted nonce until 60 s after its signature expires, the last moment the freshness window could accept the same signature again.
+- The authority keeps each accepted nonce at least until 60 s after its signature expires, the last moment the freshness window could accept the same signature again.
 - Published trust anchors help third parties validate certificate chains, but they carry no revocation information.
 
 ### Agent channel
