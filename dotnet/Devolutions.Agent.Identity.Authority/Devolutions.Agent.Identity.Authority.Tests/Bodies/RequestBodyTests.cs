@@ -128,6 +128,7 @@ public abstract class RequestBodyTests
         { "key ending in a line feed", """{"hostname\n": "host"}""" },
         { "C0 control character in a value", """{"hostname": "a\u0007b"}""" },
         { "C1 control character in a value", """{"hostname": "a\u0085b"}""" },
+        { "invisible format character in a value", """{"hostname": "a\u202Eb"}""" },
         { "value of 1025 UTF-8 bytes", $$"""{"hostname": "{{string.Concat(Enumerable.Repeat("\u00E9", 512))}}a"}""" },
     };
 
