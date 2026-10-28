@@ -530,6 +530,7 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
     let workspace = harness.workspace(session_id);
 
     harness.run(task_id).await.expect("the job queues the next attempt itself");
+    // oracle: mutant a recoverable failure is not retried
     assert!(
         harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
         "a provider outage is retried"
@@ -679,6 +680,7 @@ async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
 
     for attempt in 1..MAX_ATTEMPTS {
         harness.run(task_id).await.expect("the job queues the next attempt itself");
+        // oracle: mutant a recoverable failure is not retried
         assert!(
             harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
             "attempt {attempt} is retried"
@@ -957,15 +959,16 @@ async fn a_new_task_that_fails_keeps_the_earlier_analysis() {
     assert!(dir.join("ai-analysis-0.slog").exists());
 }
 
-// oracle: mutant an AI analysis that cannot run after a restart stays unfinished until its next attempt
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
     let harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let (settings, requests) = spawn_ai_provider(|_| 0).await;
+    // About 1 MB of transcript: three chunks, so the first attempt stops with the tokens of one.
+    let session_id = harness.write_long_session(10_000);
+    let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
     let task_id = harness.start_created(session_id, settings).await;
-    std::fs::create_dir_all(harness.workspace(session_id)).expect("working files of an attempt");
-    // As if Gateway stopped after the attempt wrote its log, before its success was recorded.
+    harness.run(task_id).await.expect("the job queues the next attempt itself");
+    // As if Gateway stopped after an attempt wrote its log, before its success was recorded.
     let dir = harness.recording_path.join(session_id.to_string());
     let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
     std::fs::write(&log, "an analysis whose success was never recorded").expect("unlisted log");
@@ -973,11 +976,17 @@ async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
     harness.state.provisioner_tasks.resume().await.expect("resume");
 
     let task = harness.task(task_id).await;
+    // oracle: mutant an AI analysis that cannot run after a restart stays unfinished until its next attempt
     assert_eq!(task.state, ProvisionerTaskState::Failed, "no job ran yet");
     assert_eq!(task.payload["error"], json!({ "kind": "keyLost" }));
+    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+    assert_eq!(
+        task.payload["usage"],
+        json!({ "inputTokens": 10, "outputTokens": 20, "unreportedRequests": 0 })
+    );
 
     harness.run(task_id).await.expect("the new job only ends the Task");
-    assert!(requests.lock().is_empty(), "the AI is never asked");
+    assert_eq!(requests.lock().len(), 2, "the AI is not asked again");
     assert!(!harness.workspace(session_id).exists(), "the working files are removed");
     assert!(!log.exists(), "the unlisted log is removed");
     assert_eq!(ai_analyses(&dir), json!([]));
