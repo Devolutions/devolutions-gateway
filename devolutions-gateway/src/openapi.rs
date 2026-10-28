@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 use crate::api::preflight::PreflightAlertStatus;
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
+use crate::provisioner_tasks::Permanent;
 use crate::provisioner_tasks::ai::AiProvider;
-use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
+use crate::provisioner_tasks::recording_ai_analysis::{BadAnswer, Failure, Recoverable};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -27,8 +28,8 @@ use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
         crate::api::jrec::pull_recording_session,
         crate::api::jrec::pull_recording_file,
         crate::api::jrec::search::search_recordings,
-        crate::api::jrec::start_ai_analysis,
-        crate::api::jrec::get_ai_analysis,
+        crate::api::tasks::recording_ai_analysis::start_ai_analysis,
+        crate::api::tasks::recording_ai_analysis::get_ai_analysis,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
         crate::api::update::get_update_products,
@@ -68,13 +69,14 @@ use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
         crate::api::jrec::search::StartTimeRange,
         crate::api::jrec::search::RecordingSearchResponse,
         crate::api::jrec::search::RecordingSearchHit,
-        crate::api::jrec::AiAnalysisRequest,
-        crate::api::jrec::AiAnalysisConflict,
-        crate::api::jrec::AiAnalysisConflictCode,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisRequest,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisConflict,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisConflictCode,
         AiProvider,
-        crate::api::tasks::TaskInfo,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisTask,
         crate::api::tasks::TaskState,
         AiAnalysisParams,
+        AiAnalysisPayload,
         AiAnalysisRunningPayload,
         AiAnalysisSucceededPayload,
         AiAnalysisUsage,
@@ -175,6 +177,16 @@ struct AiAnalysisParams {
     /// Language the AI writes in; absent when not asked, so the AI writes in English.
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
+}
+
+/// Details of the state of an AI analysis Task: `running`, `succeeded` and `failed` each have their own
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+#[expect(dead_code, reason = "it only describes the payload, which the Task keeps as JSON")]
+enum AiAnalysisPayload {
+    Running(AiAnalysisRunningPayload),
+    Succeeded(AiAnalysisSucceededPayload),
+    Failed(AiAnalysisFailedPayload),
 }
 
 /// Payload of a `running` AI analysis Task: its progress, and the tokens it used so far
@@ -302,19 +314,19 @@ enum AiAnalysisRecoverableErrorKind {
     AiUnreachable,
     /// The AI provider is busy or failing for now, such as with a rate limit (429) or a server error (5xx).
     AiBusy,
-    /// Gateway could not read its own job queue.
+    /// Gateway could not read its own storage, such as the folder of the session.
     Storage,
 }
 
 // The error kinds are written out above for their descriptions, which utoipa drops from the variants without fields, so
 // these matches stop the build until a new kind or field is written out too.
-const _: fn(&Permanent) -> AiAnalysisErrorKind = |error| match error {
-    Permanent::AiRejected { status: _ } => AiAnalysisErrorKind::AiRejected,
-    Permanent::AiBadAnswer { why: _ } => AiAnalysisErrorKind::AiBadAnswer,
-    Permanent::KeyLost => AiAnalysisErrorKind::KeyLost,
-    Permanent::NoRecording => AiAnalysisErrorKind::NoRecording,
-    Permanent::MixedRecording => AiAnalysisErrorKind::MixedRecording,
-    Permanent::UnreadableRecording { file: _ } => AiAnalysisErrorKind::UnreadableRecording,
+const _: fn(&Permanent<Failure, Recoverable>) -> AiAnalysisErrorKind = |error| match error {
+    Permanent::Kind(Failure::AiRejected { status: _ }) => AiAnalysisErrorKind::AiRejected,
+    Permanent::Kind(Failure::AiBadAnswer { why: _ }) => AiAnalysisErrorKind::AiBadAnswer,
+    Permanent::Kind(Failure::KeyLost) => AiAnalysisErrorKind::KeyLost,
+    Permanent::Kind(Failure::NoRecording) => AiAnalysisErrorKind::NoRecording,
+    Permanent::Kind(Failure::MixedRecording) => AiAnalysisErrorKind::MixedRecording,
+    Permanent::Kind(Failure::UnreadableRecording { file: _ }) => AiAnalysisErrorKind::UnreadableRecording,
     Permanent::InvalidTask => AiAnalysisErrorKind::InvalidTask,
     Permanent::Panicked => AiAnalysisErrorKind::Panicked,
     Permanent::Internal => AiAnalysisErrorKind::Internal,

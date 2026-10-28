@@ -4302,7 +4302,6 @@ dependencies = [
  "libsql",
  "serde",
  "time",
- "tokio 1.52.3",
  "tracing",
  "typed-builder",
  "ulid",

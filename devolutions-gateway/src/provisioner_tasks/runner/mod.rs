@@ -6,12 +6,13 @@
 //! retries recoverable failures, moves the deadline ahead with each progress, cancels an attempt once the deadline passes,
 //! and records how the task ended.
 //!
-//! The record is the source of truth and the job only wakes it up. Each record names the one job allowed to run it, by
-//! its token, so a stale or duplicate job stops without running anything. At startup, before any job runs,
-//! [`ProvisionerTaskRunner::resume`] hands every unfinished record to a new job, which also covers a record created just
-//! before a crash, before its job was queued.
-//! A record whose end fails is handed to a new job that ends it again later, since the runs of its job are shared with
-//! its attempts and may be used up; that job is stored, so a restart runs it too.
+//! The record is the source of truth and the job only wakes it up.
+//! Each record names the one job allowed to run it, by its token, so a stale or duplicate job stops without running
+//! anything.
+//! At startup, before any job runs, [`ProvisionerTaskRunner::resume`] hands every unfinished record to a new job, which
+//! also covers a record created just before a crash, before its job was queued.
+//! A record whose end fails is handed to a new job that ends it again later, since the job queue gives up on a job
+//! after a few failed runs; that job is stored, so a restart runs it too.
 
 #[cfg(test)]
 mod tests;
@@ -34,11 +35,18 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{AttemptError, Permanent};
-use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
-use crate::token::AccessScope;
+use crate::job_queue::JobQueueHandle;
 
 /// Time before a record whose end failed is ended again.
 const END_RETRY_DELAY: time::Duration = time::Duration::minutes(5);
+
+/// Attempts a record gets: a recoverable failure of the last one fails the record.
+pub const MAX_ATTEMPTS: u32 = 5;
+
+/// Time before the attempt that follows attempt number `attempts`: 30 seconds, doubled after each attempt.
+fn retry_delay(attempts: u32) -> time::Duration {
+    time::Duration::seconds(30) * 2i32.saturating_pow(attempts.saturating_sub(1))
+}
 
 /// Where the runner queues the jobs of its records.
 #[async_trait]
@@ -46,9 +54,6 @@ pub trait ProvisionerTaskJobQueue: Send + Sync {
     /// Queues `job` to run at `schedule_for`, or at once without it, and returns once it is stored, so a record never
     /// waits for a job that was lost.
     async fn push(&self, job: ProvisionerTaskJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()>;
-
-    /// Lists the JSON definitions of the stored jobs named `name` that may still run.
-    async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>>;
 }
 
 pub type DynProvisionerTaskJobQueue = Arc<dyn ProvisionerTaskJobQueue>;
@@ -62,11 +67,6 @@ impl ProvisionerTaskJobQueue for JobQueueHandle {
             None => self.enqueue(job).await,
         }
     }
-
-    /// The channel cannot tell what is stored: every unfinished record looks like it has no job.
-    async fn stored_jobs(&self, _name: &str) -> anyhow::Result<Vec<String>> {
-        Ok(Vec::new())
-    }
 }
 
 /// A provisioner task: the work Gateway does for one kind of request, such as `recording-ai-analysis`.
@@ -78,17 +78,17 @@ pub trait ProvisionerTask: Send + Sync + 'static {
     /// The kind written in the records of this task.
     const KIND: &'static str;
 
-    /// The scope a token needs to start this task, `gateway.tasks.<kind>.start`.
-    const START_SCOPE: AccessScope;
-
-    /// The scope a token needs to read the records of this task, `gateway.tasks.<kind>.read`.
-    const READ_SCOPE: AccessScope;
-
     /// What the record keeps as asked; never secrets, since records are kept and returned to callers.
     type Params: Serialize + DeserializeOwned + Send;
 
     /// The payload of a `succeeded` record.
     type Output: Serialize + Send;
+
+    /// Why an attempt of this task fails for good, next to the failures any task may have.
+    type Failure: Serialize + Send;
+
+    /// Why an attempt of this task fails for now, so a later attempt may succeed.
+    type Recoverable: Serialize + Send;
 
     /// Time from the creation of a record until its first attempt must start.
     fn start_window(&self) -> time::Duration;
@@ -102,13 +102,24 @@ pub trait ProvisionerTask: Send + Sync + 'static {
     fn starting_payload(&self, last: &serde_json::Value) -> serde_json::Value;
 
     /// The payload of a record that failed with `error`, from `last`, its payload until then: `null` if it never ran.
-    fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value;
+    fn failed_payload(&self, error: &AnyPermanent, last: &serde_json::Value) -> serde_json::Value;
+
+    /// Why an unfinished record fails when Gateway starts again, for a task that cannot outlive a restart, such as one
+    /// whose secrets are kept in memory only; `None` for a task that goes on.
+    ///
+    /// A record that cannot be failed at startup is still handed to a new job, so [`ProvisionerTask::run`] must fail
+    /// the same way after a restart.
+    fn restart_failure(&self) -> Option<Self::Failure>;
 
     /// Runs one attempt.
     ///
     /// The attempt should stop soon after [`Attempt::cancel`] is cancelled, which happens once the record is past its
     /// deadline.
-    async fn run(&self, attempt: &Attempt, params: Self::Params) -> Result<Self::Output, AttemptError>;
+    async fn run(
+        &self,
+        attempt: &Attempt,
+        params: Self::Params,
+    ) -> Result<Self::Output, AttemptError<Self::Failure, Self::Recoverable>>;
 
     /// Finishes what the record leaves to do once it has ended, however it ended, such as dropping what was kept only
     /// while it ran.
@@ -133,6 +144,12 @@ pub struct Attempt {
     progress_timeout: time::Duration,
     store: DynProvisionerTaskStore,
     latest: Arc<Mutex<Latest>>,
+}
+
+/// An attempt the prelude started: the task that runs it, and the record as the attempt started.
+struct Started {
+    task: Arc<dyn AnyProvisionerTask>,
+    record: ProvisionerTaskRecord,
 }
 
 /// What the runner knows of the running record: the last payload of the attempt, and the deadline it stored.
@@ -178,6 +195,35 @@ impl Attempt {
     }
 }
 
+/// [`Permanent`] with the failures of its kind of task as JSON, as the runner holds every kind together.
+pub type AnyPermanent = Permanent<serde_json::Value, serde_json::Value>;
+
+/// [`AttemptError`] with the failures of its kind of task as JSON.
+type AnyAttemptError = AttemptError<serde_json::Value, serde_json::Value>;
+
+/// `error` with the failures of its kind as JSON; one that cannot be written as JSON is an internal failure.
+fn erase_permanent<F: Serialize, R: Serialize>(error: Permanent<F, R>) -> AnyPermanent {
+    error
+        .try_map(serde_json::to_value, serde_json::to_value)
+        .unwrap_or_else(|error| {
+            error!(%error, "Failed to write a Task failure as JSON");
+            Permanent::Internal
+        })
+}
+
+fn erase_attempt_error<F: Serialize, R: Serialize>(error: AttemptError<F, R>) -> AnyAttemptError {
+    match error {
+        AttemptError::Recoverable(error) => match serde_json::to_value(error) {
+            Ok(error) => AttemptError::Recoverable(error),
+            Err(error) => {
+                error!(%error, "Failed to write a Task failure as JSON");
+                AttemptError::Permanent(Permanent::Internal)
+            }
+        },
+        AttemptError::Permanent(error) => AttemptError::Permanent(erase_permanent(error)),
+    }
+}
+
 /// [`ProvisionerTask`] with its types erased, so the runner can hold every task together.
 #[async_trait]
 trait AnyProvisionerTask: Send + Sync {
@@ -187,9 +233,11 @@ trait AnyProvisionerTask: Send + Sync {
 
     fn starting_payload(&self, last: &serde_json::Value) -> serde_json::Value;
 
-    fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value;
+    fn failed_payload(&self, error: &AnyPermanent, last: &serde_json::Value) -> serde_json::Value;
 
-    async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AttemptError>;
+    fn restart_failure(&self) -> Option<AnyPermanent>;
+
+    async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AnyAttemptError>;
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()>;
 }
@@ -208,21 +256,28 @@ impl<T: ProvisionerTask> AnyProvisionerTask for T {
         ProvisionerTask::starting_payload(self, last)
     }
 
-    fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value {
+    fn failed_payload(&self, error: &AnyPermanent, last: &serde_json::Value) -> serde_json::Value {
         ProvisionerTask::failed_payload(self, error, last)
     }
 
-    async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AttemptError> {
+    fn restart_failure(&self) -> Option<AnyPermanent> {
+        ProvisionerTask::restart_failure(self)
+            .map(|failure| erase_permanent(Permanent::<_, T::Recoverable>::Kind(failure)))
+    }
+
+    async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AnyAttemptError> {
         let params = serde_json::from_value(params).map_err(|error| {
             warn!(task.id = %attempt.task_id, %error, "Invalid Task parameters");
-            AttemptError::Permanent(Permanent::InvalidTask)
+            AnyAttemptError::Permanent(Permanent::InvalidTask)
         })?;
 
-        let output = ProvisionerTask::run(self, attempt, params).await?;
+        let output = ProvisionerTask::run(self, attempt, params)
+            .await
+            .map_err(erase_attempt_error)?;
 
         serde_json::to_value(output).map_err(|error| {
             error!(task.id = %attempt.task_id, %error, "Failed to serialize the Task result");
-            AttemptError::Permanent(Permanent::Internal)
+            AnyAttemptError::Permanent(Permanent::Internal)
         })
     }
 
@@ -340,31 +395,19 @@ impl ProvisionerTaskRunner {
         Ok(outcome)
     }
 
-    /// Hands every unfinished record that has no job left to a new job, such as a record created just before a crash.
+    /// Hands every unfinished record to a new job, since a record created just before Gateway stopped may have none.
     ///
-    /// A record whose job is still stored keeps it. Call it at startup, before the job runner claims any job, so no job
-    /// runs an attempt meanwhile. A record whose new job cannot be queued is failed, since no job is left to run it.
+    /// Each record gets a new `job_token`, so a job left from before finds itself superseded and stops, and the job
+    /// queue is never read.
+    /// A record whose task cannot outlive a restart fails first, and its new job only ends it.
+    /// A record that was waiting to retry runs at once, since retry timing is no promise to the caller.
+    /// Call it at startup, before the job runner claims any job, so no job runs an attempt meanwhile.
+    /// A record whose new job cannot be queued is failed, since no job is left to run it.
     pub async fn resume(&self) -> anyhow::Result<()> {
         let now = OffsetDateTime::now_utc();
         let records = self.inner.store.list_unfinished(now).await?;
 
-        let stored = self
-            .inner
-            .job_queue
-            .stored_jobs(ProvisionerTaskJob::NAME)
-            .await
-            .context("list the stored provisioner task jobs")?
-            .iter()
-            .filter_map(|json| serde_json::from_str::<JobDef>(json).ok())
-            .map(|def| (def.task_id, def.job_token))
-            .collect::<std::collections::HashSet<_>>();
-
         for record in records {
-            if stored.contains(&(record.id, record.job_token)) {
-                debug!(task.id = %record.id, task.kind = %record.kind, "Task still has its job");
-                continue;
-            }
-
             let job_token = Uuid::new_v4();
 
             match self.inner.store.replace_job_token(record.id, job_token, now).await {
@@ -381,6 +424,33 @@ impl ProvisionerTaskRunner {
                 }
             }
 
+            let task = self.task(&record.kind);
+
+            if let Some(task) = &task
+                && let Some(failure) = task.restart_failure()
+            {
+                match self
+                    .inner
+                    .store
+                    .fail(record.id, task.failed_payload(&failure, &record.payload), now)
+                    .await
+                {
+                    Ok(_) => info!(
+                        task.id = %record.id,
+                        task.kind = %record.kind,
+                        ?failure,
+                        "Task failed, since it cannot outlive a restart"
+                    ),
+                    // Its new job runs the attempt then, which fails the same way.
+                    Err(error) => error!(
+                        task.id = %record.id,
+                        task.kind = %record.kind,
+                        error = format!("{error:#}"),
+                        "Failed to fail the Task that cannot outlive a restart"
+                    ),
+                }
+            }
+
             match self.enqueue(record.id, job_token, None).await {
                 Ok(()) => info!(task.id = %record.id, task.kind = %record.kind, "Task queued again"),
                 Err(error) => {
@@ -390,7 +460,7 @@ impl ProvisionerTaskRunner {
                         error = format!("{error:#}"),
                         "Failed to queue the Task again"
                     );
-                    if let Some(task) = self.task(&record.kind) {
+                    if let Some(task) = &task {
                         self.fail_not_queued(task.as_ref(), record.id, job_token, &record.payload)
                             .await;
                     }
@@ -430,15 +500,33 @@ impl ProvisionerTaskRunner {
             .await
     }
 
-    /// Runs one attempt for the job holding `job_token`; returns an error only to ask the job queue for a retry.
+    /// Runs one attempt for the job holding `job_token`, in three steps.
+    ///
+    /// The prelude marks the start of the attempt on the record, the body runs the work of the task, and the completion
+    /// records how it ended, then ends the record or queues its next attempt.
+    /// The record counts its attempts, and the job queues the next one itself, so the job queue retries a job only when
+    /// what it had to record or queue could not be stored.
     async fn run_attempt(&self, task_id: Uuid, job_token: Uuid) -> anyhow::Result<()> {
+        let Some(started) = self.begin_attempt(task_id, job_token).await? else {
+            return Ok(());
+        };
+
+        let (outcome, latest) = self.execute(&started).await;
+
+        self.complete(&started, job_token, outcome, latest).await
+    }
+
+    /// The prelude: marks the start of one more attempt on the record, unless another job holds it or it has ended.
+    ///
+    /// A record that has ended is ended again instead, since its end may have been cut short.
+    async fn begin_attempt(&self, task_id: Uuid, job_token: Uuid) -> anyhow::Result<Option<Started>> {
         let store = &self.inner.store;
         let now = OffsetDateTime::now_utc();
 
         // The starting payload carries over what earlier attempts reported, so the record is read first.
         let Some(record) = store.get(task_id, now).await? else {
             debug!(task.id = %task_id, "Task is unknown, so this attempt does not run");
-            return Ok(());
+            return Ok(None);
         };
 
         let Some(task) = self.task(&record.kind) else {
@@ -446,57 +534,63 @@ impl ProvisionerTaskRunner {
                 error!(task.id = %task_id, task.kind = %record.kind, "Task of an unknown kind");
                 // Without its kind, nothing else of the payload is known, so it holds the error alone.
                 store
-                    .fail(task_id, json!({ "error": Permanent::InvalidTask }), now)
+                    .fail(task_id, json!({ "error": AnyPermanent::InvalidTask }), now)
                     .await
                     .context("record the Task failure")?;
             }
-            return Ok(());
+            return Ok(None);
         };
 
         let starting_payload = task.starting_payload(&record.payload);
         let deadline_at = deadline(now, task.progress_timeout());
 
-        let record = match store
-            .start_attempt(task_id, job_token, starting_payload.clone(), deadline_at, now)
+        match store
+            .start_attempt(task_id, job_token, starting_payload, deadline_at, now)
             .await?
         {
-            AttemptStart::Started(record) => record,
+            AttemptStart::Started(record) => Ok(Some(Started { task, record })),
             AttemptStart::Finished(record) => {
                 debug!(task.id = %task_id, "Task is over, so this attempt does not run");
-                return self.end_record(task.as_ref(), &record, job_token).await;
+                self.end_record(task.as_ref(), &record, job_token).await?;
+                Ok(None)
             }
             AttemptStart::Superseded => {
                 debug!(task.id = %task_id, "Another job runs this Task, so this one stops");
-                return Ok(());
+                Ok(None)
             }
             AttemptStart::Unknown => {
                 debug!(task.id = %task_id, "Task is unknown, so this attempt does not run");
-                return Ok(());
+                Ok(None)
             }
-        };
+        }
+    }
 
-        let attempts = record.attempts;
+    /// The body: runs the attempt of the task, and cancels it once the record is past its deadline.
+    ///
+    /// Returns how the attempt ended, with the last payload it reported and the deadline it last set.
+    async fn execute(&self, started: &Started) -> (Result<serde_json::Value, AnyAttemptError>, Latest) {
+        let Started { task, record } = started;
         let cancel = CancellationToken::new();
         let latest = Arc::new(Mutex::new(Latest {
-            payload: starting_payload.clone(),
-            deadline_at,
+            payload: record.payload.clone(),
+            deadline_at: record.deadline_at,
         }));
         let attempt = Attempt {
-            task_id,
+            task_id: record.id,
             target: record.target.clone(),
-            attempts,
-            payload: starting_payload,
+            attempts: record.attempts,
+            payload: record.payload.clone(),
             cancel: cancel.clone(),
             progress_timeout: task.progress_timeout(),
-            store: Arc::clone(store),
+            store: Arc::clone(&self.inner.store),
             latest: Arc::clone(&latest),
         };
 
-        info!(task.id = %task_id, task.kind = %record.kind, attempts, "Task attempt started");
+        info!(task.id = %record.id, task.kind = %record.kind, attempts = record.attempts, "Task attempt started");
 
         // The attempt has its own Tokio task, so a panic fails the record instead of leaving it running.
         let mut handle = tokio::spawn({
-            let task = Arc::clone(&task);
+            let task = Arc::clone(task);
             let params = record.params.clone();
             async move { task.run(&attempt, params).await }
         });
@@ -514,7 +608,12 @@ impl ProvisionerTaskRunner {
                         continue;
                     }
 
-                    warn!(task.id = %task_id, task.kind = %record.kind, attempts, "Task went past its deadline; its attempt is cancelled");
+                    warn!(
+                        task.id = %record.id,
+                        task.kind = %record.kind,
+                        attempts = record.attempts,
+                        "Task went past its deadline; its attempt is cancelled"
+                    );
                     past_deadline = true;
                     // Aborting cannot stop blocking steps, so the attempt is cancelled and awaited instead: what runs
                     // once the Task ends never runs alongside it.
@@ -531,7 +630,31 @@ impl ProvisionerTaskRunner {
             Err(_) => Err(AttemptError::Permanent(Permanent::Panicked)),
         };
 
-        let last = latest.lock().payload.clone();
+        let latest = latest.lock();
+
+        (
+            outcome,
+            Latest {
+                payload: latest.payload.clone(),
+                deadline_at: latest.deadline_at,
+            },
+        )
+    }
+
+    /// The completion: records how the attempt ended, then ends the record or queues its next attempt.
+    ///
+    /// Recording the end and dropping what the record kept are separate steps, so a failed drop never undoes the end.
+    async fn complete(
+        &self,
+        started: &Started,
+        job_token: Uuid,
+        outcome: Result<serde_json::Value, AnyAttemptError>,
+        latest: Latest,
+    ) -> anyhow::Result<()> {
+        let Started { task, record } = started;
+        let (task_id, attempts) = (record.id, record.attempts);
+        let store = &self.inner.store;
+        let last = &latest.payload;
 
         match outcome {
             Ok(output) => match store.succeed(task_id, output, OffsetDateTime::now_utc()).await {
@@ -548,9 +671,8 @@ impl ProvisionerTaskRunner {
 
                     self.end(task.as_ref(), task_id, job_token).await?;
                 }
-                // UNTESTED: a success that cannot be recorded fails the Task, which drops what the attempt made,
-                // because a retry would do the work again, such as paying for a second analysis; no error may leave
-                // this branch before the failure is recorded.
+                // A success that cannot be recorded fails the Task instead of being retried, since a retry would do
+                // the work again, such as paying for a second analysis.
                 Err(error) => {
                     error!(
                         task.id = %task_id,
@@ -558,7 +680,7 @@ impl ProvisionerTaskRunner {
                         "Failed to record the Task success; the Task fails instead"
                     );
 
-                    let payload = task.failed_payload(&Permanent::Internal, &last);
+                    let payload = task.failed_payload(&Permanent::Internal, last);
 
                     match store.fail(task_id, payload, OffsetDateTime::now_utc()).await {
                         // The job retries only when the end could not be queued again, which then only ends the Task.
@@ -567,7 +689,7 @@ impl ProvisionerTaskRunner {
                             error!(task.id = %task_id, error = format!("{error:#}"), "Failed to fail the Task; it fails at its deadline");
 
                             // The store fails the Task once its deadline passes, so a job that runs after it only ends it.
-                            let after_deadline = latest.lock().deadline_at + time::Duration::SECOND;
+                            let after_deadline = latest.deadline_at + time::Duration::SECOND;
 
                             if let Err(error) = self.enqueue(task_id, job_token, Some(after_deadline)).await {
                                 error!(task.id = %task_id, error = format!("{error:#}"), "Failed to queue the end of the Task");
@@ -577,23 +699,45 @@ impl ProvisionerTaskRunner {
                 }
             },
             Err(AttemptError::Recoverable(error)) if attempts < MAX_ATTEMPTS => {
-                warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, "Task attempt failed; it will be retried");
-                anyhow::bail!("Task attempt failed: {error:?}");
+                let retry_at = OffsetDateTime::now_utc() + retry_delay(attempts);
+                warn!(
+                    task.id = %task_id,
+                    task.kind = %record.kind,
+                    attempts,
+                    %error,
+                    %retry_at,
+                    "Task attempt failed; it will be retried"
+                );
+                self.enqueue(task_id, job_token, Some(retry_at))
+                    .await
+                    .context("queue the next attempt")?;
             }
             Err(AttemptError::Recoverable(error)) => {
-                warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, "Task failed after its last attempt");
+                warn!(
+                    task.id = %task_id,
+                    task.kind = %record.kind,
+                    attempts,
+                    %error,
+                    "Task failed after its last attempt"
+                );
                 self.fail(
                     task.as_ref(),
                     task_id,
                     job_token,
                     &Permanent::AttemptsExhausted { last: error },
-                    &last,
+                    last,
                 )
                 .await?;
             }
             Err(AttemptError::Permanent(error)) => {
-                warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, "Task failed");
-                self.fail(task.as_ref(), task_id, job_token, &error, &last).await?;
+                warn!(
+                    task.id = %task_id,
+                    task.kind = %record.kind,
+                    attempts,
+                    error = %serde_json::to_value(&error).unwrap_or_default(),
+                    "Task failed"
+                );
+                self.fail(task.as_ref(), task_id, job_token, &error, last).await?;
             }
         }
 
@@ -609,7 +753,7 @@ impl ProvisionerTaskRunner {
         task: &dyn AnyProvisionerTask,
         task_id: Uuid,
         job_token: Uuid,
-        error: &Permanent,
+        error: &AnyPermanent,
         last: &serde_json::Value,
     ) -> anyhow::Result<()> {
         self.inner
