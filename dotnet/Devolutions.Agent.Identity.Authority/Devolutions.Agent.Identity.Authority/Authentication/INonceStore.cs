@@ -16,8 +16,10 @@ public interface INonceStore
     /// <param name="keyId">The <c>keyid</c> of the signature, which is the thumbprint of its certificate.</param>
     /// <param name="nonce">The <c>nonce</c> of the signature, as its canonical base64url text.</param>
     /// <param name="retainUntil">
-    /// The last instant at which the signature could be accepted again,
-    /// until which the store keeps the pair; it may discard the pair afterwards.
+    /// The instant until which the store keeps the pair.
+    /// It falls 60 s after the last instant at which the signature could be accepted again,
+    /// a margin for the time that this call takes,
+    /// so a store whose calls complete in under 60 s may discard the pair once it has passed.
     /// </param>
     /// <param name="cancellationToken">A token that cancels the operation.</param>
     /// <returns>True when this call recorded the pair; false when the pair was already recorded.</returns>

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 namespace Devolutions.Agent.Identity.Authority.Tests;
 
 public class EnrollmentRulesTests
@@ -82,17 +84,53 @@ public class EnrollmentRulesTests
         Assert.NotEqual(first.NewIdentityId, second.NewIdentityId);
     }
 
-    // A refusal creates no identity, and a replay returns the identity that the key already belongs to.
+    // Concurrent identity creations never create more than `max_uses` identities with one token,
+    // so a decision to create one carries the count of identities it was made from, the token's own,
+    // for a host that counts the use only while the stored count still equals it.
+    // A decision carrying another count would have that update refuse every enrollment.
+    // oracle: mutant a decision to create an identity that carries another count than the token's IdentitiesCreated
     [Theory]
-    // oracle: mutant a refusal that carries a new identity ID
+    [InlineData(0)]
+    [InlineData(9)]
+    public void CreateIdentityCarriesTheCountOfIdentitiesItWasDecidedFrom(int identitiesCreated)
+    {
+        EnrollmentTokenState token = new(false, TokenUrl, Now.AddDays(1), maxUses: 10, identitiesCreated);
+
+        EnrollmentDecision decision = EnrollmentRules.Decide(token, Csr, null, Now);
+
+        Assert.Equal(identitiesCreated, decision.ExpectedIdentitiesCreated);
+    }
+
+    // Every issued public key is unique by SPKI SHA-256, the SHA-256 of the DER SubjectPublicKeyInfo,
+    // so a decision to create an identity names the key it was made for by that digest, computed here from the key.
+    // A decision naming another value would have the host index a key other than the one it certifies.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §definitions
+    [Fact]
+    public void CreateIdentityCarriesTheSpkiSha256OfTheCsrKey()
+    {
+        using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        CertificateSigningRequest csr = TestEnrollmentUrl.Csr(key, TokenUrl);
+
+        EnrollmentDecision decision = EnrollmentRules.Decide(Token(), csr, null, Now);
+
+        Assert.Equal(SHA256.HashData(key.ExportSubjectPublicKeyInfo()), decision.SubjectPublicKeyInfoSha256.ToArray());
+    }
+
+    // A refusal creates no identity, and a replay returns the identity that the key already belongs to,
+    // so neither carries what creating one takes.
+    [Theory]
+    // oracle: mutant a refusal that carries a new identity ID, a count of identities created, or a key digest
     [InlineData(EnrollmentOutcome.Reject)]
-    // oracle: mutant a replay that carries a new identity ID
+    // oracle: mutant a replay that carries a new identity ID, a count of identities created, or a key digest
     [InlineData(EnrollmentOutcome.ReturnExistingIdentity)]
-    public void CarriesNoNewIdentityIdWhenCreatingNone(EnrollmentOutcome outcome)
+    public void CarriesNoNewIdentityWhenCreatingNone(EnrollmentOutcome outcome)
     {
         EnrollmentDecision decision = DecisionsButCreateIdentity[outcome];
 
         Assert.Null(decision.NewIdentityId);
+        Assert.Null(decision.ExpectedIdentitiesCreated);
+        Assert.True(decision.SubjectPublicKeyInfoSha256.IsEmpty);
     }
 
     // When several outcomes apply, the earliest wins:

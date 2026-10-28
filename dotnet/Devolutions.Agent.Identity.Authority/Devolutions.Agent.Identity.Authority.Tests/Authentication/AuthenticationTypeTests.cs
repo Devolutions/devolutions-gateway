@@ -3,7 +3,7 @@ using System.Reflection;
 namespace Devolutions.Agent.Identity.Authority.Tests;
 
 /// <summary>
-/// The types that only request authentication, the channel handshake and the enrollment rules create.
+/// The types that only request authentication, the channel handshake, and the enrollment and renewal rules create.
 /// </summary>
 /// <remarks>
 /// INTENT.md: code that acts for an identity takes it as a type only the signature check can create,
@@ -23,6 +23,10 @@ public class AuthenticationTypeTests
         // so a decision built by a caller would certify a key for an identity that no enrollment created.
         // oracle: intent dotnet/Devolutions.Agent.Identity.Authority/INTENT.md §Authenticated identity
         typeof(EnrollmentDecision),
+        // A renewal's certificate is issued from the decision to issue it, which carries the renewing identity,
+        // so a decision built by a caller would certify a key for an identity that no renew request proved.
+        // oracle: intent dotnet/Devolutions.Agent.Identity.Authority/INTENT.md §Authenticated identity
+        typeof(RenewalDecision),
         // oracle: mutant a public AuthenticationResult constructor
         typeof(AuthenticationResult),
         // oracle: mutant a public ChannelOpeningResult constructor
@@ -55,7 +59,7 @@ public class AuthenticationTypeTests
     // The intent forbids creating an identity outside that check but not forwarding one that it created,
     // so the list of members allowed to produce one is the library's own.
     // oracle: mutant a public member that builds an AuthenticatedIdentity outside the signature check,
-    // or an EnrollmentDecision outside the enrollment rules
+    // or an EnrollmentDecision or a RenewalDecision outside the enrollment or renewal rules
     [Fact]
     public void NoOtherPublicMemberProducesTheseTypes()
     {
@@ -82,6 +86,7 @@ public class AuthenticationTypeTests
                 "ChannelOpening.VerifyHelloAsync",
                 "ChannelOpeningResult.get_Opening",
                 "EnrollmentRules.Decide",
+                "RenewalRules.Decide",
                 "RequestAuthenticator.AuthenticateAsync",
                 "RequestAuthenticator.AuthenticateChannelOpeningAsync",
             ],
