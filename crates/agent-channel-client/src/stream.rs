@@ -36,6 +36,9 @@ const MAX_ENVELOPE_LEN: usize = 65_536;
 // Waiting out the whole timeout would hold a connection that the authority has already finished with.
 // When changing `close`, keep reading until the authority's side ends.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The largest clock offset, in seconds, that a `clock_skew` refusal makes the agent sign a retry with, so that a
+/// signed opening is never dated more than a day from the agent's own clock.
+const MAX_CLOCK_SKEW_OFFSET_SECS: u64 = 86_400;
 
 pub(crate) async fn run(
     shared: Arc<Shared>,
@@ -266,7 +269,8 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
 }
 
 /// Opens and authenticates a stream, and retries once at the authority's time when it refuses the opening with
-/// `clock_skew` ([CONTRACT.agent-identity.md §6 "RFC 9421 profile"][contract]).
+/// `clock_skew` and that time is within [`MAX_CLOCK_SKEW_OFFSET_SECS`] of the local time ([CONTRACT.agent-identity.md
+/// §6 "RFC 9421 profile"][contract]).
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#6-rfc-9421-profile
 async fn authenticated_stream(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
@@ -292,7 +296,8 @@ async fn authenticated_stream_at(shared: &Shared, target: &Target, clock_offset:
 }
 
 /// Returns `server_time − local_time` in seconds for a refusal with status `UNAUTHENTICATED`, `error-code: clock_skew`
-/// and a `server-time` trailer ([CONTRACT.agent-identity.md §7.4 "Termination"][contract]).
+/// and a `server-time` trailer ([CONTRACT.agent-identity.md §7.4 "Termination"][contract]), unless its magnitude
+/// exceeds [`MAX_CLOCK_SKEW_OFFSET_SECS`].
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
 fn clock_offset(closure: &Closure, local_time: OffsetDateTime) -> Option<i64> {
@@ -303,6 +308,7 @@ fn clock_offset(closure: &Closure, local_time: OffsetDateTime) -> Option<i64> {
     }
     let server_time = OffsetDateTime::parse(closure.server_time.as_deref()?, &Rfc3339).ok()?;
     Some(server_time.unix_timestamp() - local_time.unix_timestamp())
+        .filter(|offset| offset.unsigned_abs() <= MAX_CLOCK_SKEW_OFFSET_SECS)
 }
 
 /// Sends the signed opening request, with its `created` time offset by `clock_offset` seconds, and waits for the
@@ -391,10 +397,23 @@ mod tests {
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
-    #[test]
-    fn a_clock_skew_refusal_gives_the_offset_to_the_server_time() {
-        let closure = clock_skew_refusal(Code::Unauthenticated, "2026-10-21T02:00:00Z");
-        assert_eq!(clock_offset(&closure, local_time()), Some(7200));
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
+    #[rstest]
+    #[case::one_day_ahead("2026-10-22T00:00:00Z", 86_400)]
+    #[case::one_day_behind("2026-10-20T00:00:00Z", -86_400)]
+    fn a_clock_skew_refusal_within_a_day_gives_its_offset(#[case] server_time: &str, #[case] offset: i64) {
+        let closure = clock_skew_refusal(Code::Unauthenticated, server_time);
+        assert_eq!(clock_offset(&closure, local_time()), Some(offset));
+    }
+
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
+    #[rstest]
+    #[case::past_one_day_ahead("2026-10-22T00:00:01Z")]
+    #[case::past_one_day_behind("2026-10-19T23:59:59Z")]
+    #[case::years_ahead("9999-12-31T23:59:59Z")]
+    fn a_clock_skew_refusal_past_a_day_gives_no_offset(#[case] server_time: &str) {
+        let closure = clock_skew_refusal(Code::Unauthenticated, server_time);
+        assert_eq!(clock_offset(&closure, local_time()), None);
     }
 
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
