@@ -345,6 +345,26 @@ public sealed class SecureDirectoryTests
         Assert.Equal(before, RawSddl(outside));
     }
 
+    // A name ending in a dot is listed as it is, but the Win32 path the listing gives drops the dot, so the entry can't be
+    // found by that path, as an entry deleted after the listing can't.
+    // oracle: mutant an entry that can't be opened by its listed name fails the walk
+    [Fact]
+    public void SetSecurityAndRemoveLocalServiceBelowSkipsAnEntryItCantFindByItsListedNameAndGoesOn()
+    {
+        using TempFolder folder = new();
+        string agent = CreateLegacyAgentFolder(folder.Path);
+        string unreachable = Path.Combine(agent, "name.");
+        TempFolder.CreateVerbatimDirectory(unreachable);
+        string file = CreateFile(agent, "file.txt");
+        string before = RawSddl(file);
+        Assert.Contains(unreachable, Directory.GetFileSystemEntries(agent));
+        Assert.False(Directory.Exists(unreachable));
+
+        this.SetSecurityAndRemoveLocalServiceBelow(folder.Path, AgentSddl);
+
+        Assert.Equal(WithoutLocalService(before), RawSddl(file));
+    }
+
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void SetSecurityAndRemoveLocalServiceBelowRefusesAJunctionAtTheFolderAndLeavesWhatItPointsToUnchanged()

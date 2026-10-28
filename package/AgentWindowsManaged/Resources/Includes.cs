@@ -46,8 +46,8 @@ namespace DevolutionsAgent.Resources
         ///    BUILTIN\Administrators Allow  FullControl
         ///    BUILTIN\Users Allow ReadAndExecute, Synchronize
         ///
-        /// No account but SYSTEM and administrators may change what the agent stores there.
-        /// Earlier installers gave LOCAL SERVICE write access, which the installer removes below the folder.
+        /// The DACL gives no account but SYSTEM and administrators any right to change what the agent stores there.
+        /// Earlier installers gave LOCAL SERVICE write access, which the installer removes from the DACLs below the folder.
         /// </remarks>
         internal static readonly string PROGRAM_DATA_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 

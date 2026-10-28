@@ -51,15 +51,35 @@ internal sealed class TempFolder : IDisposable
         Assert.True(CreateHardLinkW(link, target, IntPtr.Zero), $"CreateHardLink failed: {Marshal.GetLastWin32Error()}");
     }
 
+    /// <summary>
+    /// Creates the directory <paramref name="path"/> through its <c>\\?\</c> form, which keeps a name that a Win32 path
+    /// can't reach, such as one ending in a dot.
+    /// </summary>
+    public static void CreateVerbatimDirectory(string path)
+    {
+        Assert.True(
+            CreateDirectoryW(VerbatimPrefix + path, IntPtr.Zero),
+            $"CreateDirectory failed: {Marshal.GetLastWin32Error()}");
+    }
+
     [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CreateHardLinkW(string lpFileName, string lpExistingFileName, IntPtr lpSecurityAttributes);
 
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CreateDirectoryW(string lpPathName, IntPtr lpSecurityAttributes);
+
+    private const string VerbatimPrefix = @"\\?\";
+
     public void Dispose()
     {
+        // Through the \\?\ form, the paths the deletion builds reach a name ending in a dot.
+        string path = VerbatimPrefix + this.Path;
+
         // A recursive Directory.Delete fails on a junction without elevation, so junctions go first.
-        RemoveJunctions(this.Path);
-        Directory.Delete(this.Path, recursive: true);
+        RemoveJunctions(path);
+        Directory.Delete(path, recursive: true);
     }
 
     private static void RemoveJunctions(string directory)

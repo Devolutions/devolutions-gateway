@@ -121,6 +121,8 @@ internal static class SecureDirectory
     /// auto-inherited mark, and a DACL without an allow entry for LOCAL SERVICE isn't written, rather than reset to what
     /// <paramref name="sddl"/> passes on, because the agent refuses its identity directories and files unless they keep
     /// exactly the DACL it provisions.
+    /// Owners don't change, so an entry LOCAL SERVICE created below the directory while it could keeps LOCAL SERVICE as
+    /// its owner, which may still read and change its DACL.
     /// </para>
     /// <para>
     /// Each directory is held while the entries below it are opened, so no path below it can be redirected.
@@ -128,6 +130,10 @@ internal static class SecureDirectory
     /// than one hard link is skipped, because its security is shared with every other name of the file, which may be
     /// outside the tree.
     /// A directory replaced while the walk reaches it fails the walk.
+    /// An entry that can't be found by the name its directory listed it under, because it was deleted after the listing
+    /// or because a Win32 path can't reach its name, such as one ending in a dot, is skipped: a deleted entry has no DACL
+    /// left to change, and neither the installer nor the agent creates such a name, so only an account that could add
+    /// entries made it, and that account owns it.
     /// </para>
     /// </remarks>
     /// <exception cref="IOException">The directory is a reparse point or not a directory.</exception>
@@ -373,7 +379,14 @@ internal static class SecureDirectory
         {
             // The entry is opened with a right that takes no part in sharing checks, so that another process using a
             // file doesn't fail the walk, then opened again with the rights its kind needs.
-            using SafeFileHandle handle = Open(entry, WinAPI.FILE_READ_ATTRIBUTES, AnyShare);
+            using SafeFileHandle handle = OpenUnlessNotFound(
+                () => Open(entry, WinAPI.FILE_READ_ATTRIBUTES, AnyShare), entry, logger);
+
+            if (handle is null)
+            {
+                continue;
+            }
+
             WinAPI.BY_HANDLE_FILE_INFORMATION information = GetInformation(handle);
 
             if ((information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
@@ -384,7 +397,14 @@ internal static class SecureDirectory
             {
                 // ReOpenFile refuses a directory, so the directory is held through its path, which the directories held
                 // above pin, and compared with the entry first opened.
-                using SafeFileHandle child = Hold(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC);
+                using SafeFileHandle child = OpenUnlessNotFound(
+                    () => Hold(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC), entry, logger);
+
+                if (child is null)
+                {
+                    continue;
+                }
+
                 WinAPI.BY_HANDLE_FILE_INFORMATION held = GetInformation(child);
 
                 if (!IsSameEntry(information, held) || !IsPlainDirectory(held.dwFileAttributes))
@@ -404,6 +424,30 @@ internal static class SecureDirectory
                 using SafeFileHandle file = Reopen(handle, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC, AnyShare);
                 RemoveLocalService(file, entry, logger);
             }
+        }
+    }
+
+    /// <summary>
+    /// Opens the entry <paramref name="path"/> names with <paramref name="open"/>, or logs that it is skipped when it
+    /// can't be found by that name, the name its directory listed it under.
+    /// </summary>
+    /// <returns>The open entry, or <c>null</c> when it can't be found.</returns>
+    private static SafeFileHandle OpenUnlessNotFound(Func<SafeFileHandle> open, string path, ILogger logger)
+    {
+        // UNTESTED: a directory that can't be found when it is held, after its first open succeeded, is skipped, and
+        // every other failure to open an entry, such as a sharing violation or a denied access, still fails the walk, so
+        // that an entry the walk could change never keeps LOCAL SERVICE unreported.
+        // Tests check an entry that can't be found at its first open, not one deleted between the two opens, which
+        // can't be timed without a hook in the walk, nor another failure.
+        // When changing this, keep catching only the errors IsNotFound accepts.
+        try
+        {
+            return open();
+        }
+        catch (Win32Exception e) when (IsNotFound(e))
+        {
+            logger.Log($"skipped {path}: it can't be found by the name it was listed under");
+            return null;
         }
     }
 
