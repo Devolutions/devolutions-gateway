@@ -10,7 +10,9 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::{Uuid, Variant};
 
-use crate::key_storage::{KeyStorage, unavailable_key_storage};
+use crate::key_storage::{
+    KeyStorage, KeyStoragePolicy, Placement, RenewalHeld, place_new_key, renewal_held, unavailable_key_storage,
+};
 pub use crate::private_file::UntrustedStoredIdentity;
 use crate::token::Token;
 use crate::{chain, pending, private_file, rejected, state_lock};
@@ -186,15 +188,49 @@ impl Store {
         storages
     }
 
+    /// Returns whether `policy` holds every renewal of its identity back: it is required and lists no key storage
+    /// available on the machine ([CONTRACT.agent-identity.md §5.7 "Key storage"][key-storage]).
+    ///
+    /// An error means that availability couldn't be determined.
+    ///
+    /// [key-storage]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#key-storage
+    pub fn holds_renewal(&self, policy: &KeyStoragePolicy) -> anyhow::Result<bool> {
+        policy.holds_renewal(|storage| self.check_key_storage(storage))
+    }
+
+    /// Returns whether `policy` calls for a renewal of a current key in `current` without waiting for the schedule or
+    /// a request: it is required, excludes `current`, and lists a key storage available on the machine
+    /// ([CONTRACT.agent-identity.md §5.7 "Key storage"][key-storage]).
+    ///
+    /// An error means that availability couldn't be determined.
+    ///
+    /// [key-storage]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#key-storage
+    pub fn calls_for_renewal(&self, policy: &KeyStoragePolicy, current: &KeyStorage) -> anyhow::Result<bool> {
+        policy.calls_for_renewal(current, |storage| self.check_key_storage(storage))
+    }
+
     /// Chooses the key storage of a new key, given `config`, the identity's stored config, or `None` for an enrollment
     /// key.
     ///
-    /// Without a key storage policy, a new key goes to the first available key storage of [`KEY_STORAGE_RANKING`].
+    /// A new key goes to the first available key storage of the policy in `config`
+    /// ([CONTRACT.agent-identity.md §5.7 "Key storage"][key-storage]).
+    /// Without a policy, or when a policy that isn't required lists no available key storage, it goes to the first
+    /// available key storage of [`KEY_STORAGE_RANKING`].
+    /// When a required policy lists no available key storage, no key storage is chosen, and the error is one that
+    /// [`renewal_held`] finds.
     /// An error other than an unavailable key storage stops the choice, so that a passing failure never places a key in
-    /// a key storage that the ranking puts lower.
+    /// a key storage that the policy or the ranking puts lower.
+    ///
+    /// [key-storage]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#key-storage
     fn key_storage_for_new_key(&self, config: Option<&Value>) -> anyhow::Result<KeyStorage> {
-        // A key storage policy in `config` doesn't apply yet, so every new key follows the ranking.
-        let _ = config;
+        // A malformed policy counts as none, so that an authority's mistake never stops renewal; the runner warns
+        // about it.
+        let policy = config.and_then(|config| KeyStoragePolicy::from_config(config).ok().flatten());
+        match place_new_key(policy.as_ref(), |storage| self.check_key_storage(storage))? {
+            Placement::Listed(storage) => return Ok(storage),
+            Placement::Held => return Err(anyhow::Error::new(RenewalHeld)),
+            Placement::Default => {}
+        }
         let mut unavailable = None;
         for storage in self.key_storages.iter().map(|name| KeyStorage::known(name)) {
             match self.available_backend(&storage) {
@@ -838,12 +874,20 @@ impl Store {
                     // `crates/agent-identity/INTENT.md` ("Stored identities"): a missing pending key is unusable and is
                     // replaced by a fresh one, which keeps the pending slot, and with it the `confirm` barrier, until a
                     // renewal is confirmed.
-                    let previous = identity.clone();
-                    let name = keys::new_key_name(&self.key_prefix);
-                    let storage = self.key_storage_for_new_key(Some(&identity.config))?;
-                    identity.keys.pending = Some(KeyRecord::unissued(name.clone(), storage.clone()));
-                    self.write_identity_locked(Some(&previous), &identity)?;
-                    self.generate_in(&storage, &name)?;
+                    match self.key_storage_for_new_key(Some(&identity.config)) {
+                        Ok(storage) => {
+                            let previous = identity.clone();
+                            let name = keys::new_key_name(&self.key_prefix);
+                            identity.keys.pending = Some(KeyRecord::unissued(name.clone(), storage.clone()));
+                            self.write_identity_locked(Some(&previous), &identity)?;
+                            self.generate_in(&storage, &name)?;
+                        }
+                        // `CONTRACT.agent-identity.md` §5.7: a required policy that lists no available key storage
+                        // holds the replacement back; the identity's runner checks again as it does for every renewal
+                        // it holds back.
+                        Err(error) if renewal_held(&error) => {}
+                        Err(error) => return Err(error),
+                    }
                 }
             }
             // A previous key in an unavailable key storage fails to open, so its slot stays.
@@ -3547,6 +3591,112 @@ mod tests {
         assert_eq!(store.key_storage_for_new_key(None)?.as_str(), expected);
         let config = json!({"version": 1, "revision": 1});
         assert_eq!(store.key_storage_for_new_key(Some(&config))?.as_str(), expected);
+        Ok(())
+    }
+
+    /// The key storage of a new key without a policy on this machine: the first available of the Windows software
+    /// provider, then the file backend, where the Windows software provider is available only on Windows.
+    fn default_key_storage() -> &'static str {
+        if cfg!(windows) {
+            "windows_software_provider"
+        } else {
+            "file"
+        }
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // A new key goes to the first of `backends` available; `tpm`, which this agent can't create keys in yet, and a name
+    // it doesn't know count as unavailable.
+    #[test]
+    fn a_new_key_takes_the_first_available_key_storage_of_the_policy() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let store = Store::new(directory.0.clone(), "ai".into(), true)?;
+        let config = json!({
+            "version": 1,
+            "revision": 1,
+            "key_storage": { "backends": ["tpm", "future_storage", "file"], "required": true },
+        });
+        assert_eq!(store.key_storage_for_new_key(Some(&config))?.as_str(), "file");
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // oracle: intent crates/agent-identity/INTENT.md §key-storage
+    // A policy that isn't required and lists no available key storage, and a malformed policy, even one meant to be
+    // required, leave the choice to the agent's ranking.
+    #[rstest::rstest]
+    #[case::none_available_not_required(json!({ "backends": ["tpm", "future_storage"], "required": false }))]
+    #[case::malformed_required(json!({ "backends": [], "required": true }))]
+    fn a_new_key_outside_the_policy_takes_the_first_available_key_storage_of_the_ranking(
+        #[case] key_storage: Value,
+    ) -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        let store = Store::new(directory.0.clone(), "ai".into(), true)?;
+        let config = json!({ "version": 1, "revision": 1, "key_storage": key_storage });
+        assert_eq!(
+            store.key_storage_for_new_key(Some(&config))?.as_str(),
+            default_key_storage()
+        );
+        Ok(())
+    }
+
+    /// Stores a config whose key storage policy is `key_storage` for `identity`.
+    fn store_policy(store: &Store, identity: &mut StoredIdentity, key_storage: Value) -> anyhow::Result<()> {
+        let revision = config_revision(&identity.config)? + 1;
+        let config = json!({ "version": 1, "revision": revision, "key_storage": key_storage });
+        ensure!(store.update_config(identity, config)?, "the config was not stored");
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // While `required` is `true` and none of `backends` is available, no new key is created, and the identity keeps its
+    // current key.
+    #[test]
+    fn a_required_policy_without_an_available_key_storage_creates_no_renewal_key() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store_policy(
+            &store,
+            &mut identity,
+            json!({ "backends": ["tpm", "future_storage"], "required": true }),
+        )?;
+        let held = identity.clone();
+
+        let error = store
+            .create_pending_key(&mut identity)
+            .err()
+            .context("a renewal key was created outside a required policy")?;
+
+        assert!(renewal_held(&error), "{error:#}");
+        assert_eq!(identity, held);
+        assert_eq!(store.read_identity(held.authority_id)?, Some(held));
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // A missing pending key is replaced at start-up only where the policy allows a new key; a required policy without an
+    // available key storage leaves the identity as it is, and start-up still completes for the other identities.
+    #[test]
+    fn startup_leaves_a_missing_pending_key_that_a_required_policy_holds_back() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        let certified = store.create_pending_key(&mut identity)?.name().to_owned();
+        store.store_pending_chain(&mut identity, vec!["cGVuZGluZw==".into()])?;
+        store.delete_file_key(&certified)?;
+        store_policy(&store, &mut identity, json!({ "backends": ["tpm"], "required": true }))?;
+
+        store.reconcile()?;
+
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(identity));
         Ok(())
     }
 
