@@ -27,8 +27,8 @@ use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
         crate::api::jrec::pull_recording_session,
         crate::api::jrec::pull_recording_file,
         crate::api::jrec::search::search_recordings,
-        crate::api::jrec::start_ai_analysis,
-        crate::api::jrec::get_ai_analysis,
+        crate::api::tasks::recording_ai_analysis::start_ai_analysis,
+        crate::api::tasks::recording_ai_analysis::get_ai_analysis,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
         crate::api::update::get_update_products,
@@ -68,13 +68,14 @@ use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
         crate::api::jrec::search::StartTimeRange,
         crate::api::jrec::search::RecordingSearchResponse,
         crate::api::jrec::search::RecordingSearchHit,
-        crate::api::jrec::AiAnalysisRequest,
-        crate::api::jrec::AiAnalysisConflict,
-        crate::api::jrec::AiAnalysisConflictCode,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisRequest,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisConflict,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisConflictCode,
         AiProvider,
-        crate::api::tasks::TaskInfo,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisTask,
         crate::api::tasks::TaskState,
         AiAnalysisParams,
+        AiAnalysisPayload,
         AiAnalysisRunningPayload,
         AiAnalysisSucceededPayload,
         AiAnalysisUsage,
@@ -165,7 +166,7 @@ struct SessionInfo {
 /// Params of an AI analysis Task: what was asked, without the API key and the base URL
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-struct AiAnalysisParams {
+pub(crate) struct AiAnalysisParams {
     provider: AiProvider,
     /// Model identifier, passed to the provider as is.
     model: String,
@@ -175,6 +176,15 @@ struct AiAnalysisParams {
     /// Language the AI writes in; absent when not asked, so the AI writes in English.
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
+}
+
+/// Details of the state of an AI analysis Task: `running`, `succeeded` and `failed` each have their own
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(untagged)]
+pub(crate) enum AiAnalysisPayload {
+    Running(AiAnalysisRunningPayload),
+    Succeeded(AiAnalysisSucceededPayload),
+    Failed(AiAnalysisFailedPayload),
 }
 
 /// Payload of a `running` AI analysis Task: its progress, and the tokens it used so far

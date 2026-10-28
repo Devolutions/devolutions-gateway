@@ -26,6 +26,7 @@ pub fn make_router<S>(state: crate::DgwState) -> axum::Router<S> {
         .route("/jet/preflight", axum::routing::post(preflight::post_preflight))
         .nest("/jet/jrl", jrl::make_router(state.clone()))
         .nest("/jet/jrec", jrec::make_router(state.clone()))
+        .nest("/jet/tasks", tasks::make_router(state.clone()))
         .nest("/jet/config", config::make_router(state.clone()))
         .nest("/jet/session", session::make_router(state.clone()))
         .nest("/jet/sessions", sessions::make_router(state.clone()))
