@@ -2888,8 +2888,15 @@ pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: C
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
-    with_agent(ctx, None, true, async move |case| {
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+    with_agent(ctx, None, false, async move |case| {
         let target = case.ctx.target.clone();
+        // The three renewals follow one another in one run, faster than the agent's wait between renewals of one identity (`crates/agent-identity/INTENT.md`, "Schedules"), so the case removes that wait.
+        let config_path = case.path().join("agent.json");
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&config_path)?)?;
+        config["__debug__"]["identity"]["min_renewal_interval_secs"] = json!(0);
+        std::fs::write(&config_path, serde_json::to_vec_pretty(&config)?)?;
+        case.start().await?;
         let (id, initial) = case.enroll_new(&target, 1).await?;
         let authority = field(&initial, "authority_id")?.to_owned();
         case.until_identity(&target, &id, "working channel for renewal faults", |record| {
