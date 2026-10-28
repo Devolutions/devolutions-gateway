@@ -21,6 +21,7 @@
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
+                <String Id="DataFolderEntryOwnedByUntrustedAccount">Det går inte att använda filen eller mappen {0} eftersom den ägs av {1}. Endast SYSTEM eller en administratör får äga den. Byt ägare och försök igen.</String>
                 <String Id="DataFolderIsFile">Det går inte att använda {0} eftersom det är en fil, inte en mapp. Ta bort filen och försök igen.</String>
                 <String Id="DataFolderIsLink">Det går inte att använda mappen {0} eftersom den är en länk. Ta bort länken och försök igen.</String>
                 <String Id="DataFolderOwnedByUntrustedAccount">Det går inte att använda mappen {0} eftersom den ägs av {1}. Endast SYSTEM eller en administratör får äga den. Byt ägare och försök igen.</String>

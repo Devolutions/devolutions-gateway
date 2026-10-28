@@ -460,13 +460,18 @@ public sealed class SecureDirectoryTests
 
     /// <summary>
     /// Calls <see cref="SecureDirectory.SetSecurityAndRemoveLocalServiceBelow"/> on <c>Devolutions\Agent</c> under
-    /// <paramref name="root"/>, opened as the installer opens it.
+    /// <paramref name="root"/>, opened as the installer opens it, trusting every owner, and asserts it refuses nothing.
     /// </summary>
+    /// <remarks>
+    /// The entries a test creates are owned by the account running it, which may not be a trusted owner.
+    /// </remarks>
     private void SetSecurityAndRemoveLocalServiceBelow(string root, string sddl)
     {
         string agent = Path.Combine([root, .. AgentNames]);
         using SafeFileHandle handle = SecureDirectory.HoldToSetSecurity(agent);
-        SecureDirectory.SetSecurityAndRemoveLocalServiceBelow(handle, agent, sddl, this.logger);
+        DataFolderRefusal refusal = SecureDirectory.SetSecurityAndRemoveLocalServiceBelow(
+            handle, agent, sddl, (_, _) => true, this.logger);
+        Assert.Null(refusal);
     }
 
     /// <summary>
@@ -474,7 +479,7 @@ public sealed class SecureDirectoryTests
     /// it, so that the DACL is marked auto-inherited and the entries created below it hold what they inherit as inherited
     /// entries.
     /// </summary>
-    private static string CreateLegacyAgentFolder(string root)
+    internal static string CreateLegacyAgentFolder(string root)
     {
         DirectoryInfo agent = Directory.CreateDirectory(Path.Combine([root, .. AgentNames]));
         DirectorySecurity security = new();
@@ -593,7 +598,7 @@ public sealed class SecureDirectoryTests
     /// The owner and DACL of the entry <paramref name="path"/> names, a link itself rather than its target, as stored, in
     /// binary form.
     /// </summary>
-    private static byte[] RawDescriptor(string path)
+    internal static byte[] RawDescriptor(string path)
     {
         RawSecurityDescriptor security = RawSecurity(path);
         byte[] binary = new byte[security.BinaryLength];

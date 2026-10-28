@@ -110,7 +110,8 @@ internal static class SecureDirectory
     /// <summary>
     /// Sets the owner and the DACL of the directory <paramref name="directory"/> holds, opened from
     /// <paramref name="path"/> by <see cref="HoldToSetSecurity"/>, to those of <paramref name="sddl"/>, then removes each
-    /// allow entry for LOCAL SERVICE from the DACL of every file and directory below it, without following any link.
+    /// allow entry for LOCAL SERVICE from the DACL of every file and directory below it, without following any link,
+    /// unless it finds an entry whose owner <paramref name="isTrusted"/> rejects.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -121,8 +122,15 @@ internal static class SecureDirectory
     /// auto-inherited mark, and a DACL without an allow entry for LOCAL SERVICE isn't written, rather than reset to what
     /// <paramref name="sddl"/> passes on, because the agent refuses its identity directories and files unless they keep
     /// exactly the DACL it provisions.
-    /// Owners don't change, so an entry LOCAL SERVICE created below the directory while it could keeps LOCAL SERVICE as
-    /// its owner, which may still read and change its DACL.
+    /// </para>
+    /// <para>
+    /// An owner can always change its entry's DACL, so an entry another account, such as LOCAL SERVICE, created below the
+    /// directory while it could would keep that access.
+    /// The walk checks a directory's owner before it lists the directory, and an entry's owner before it changes the
+    /// entry's DACL, and stops at the first owner <paramref name="isTrusted"/> rejects; owners never change, so that a
+    /// deployment never silently takes over an entry another account created.
+    /// The entries walked before keep their changes, which is harmless, because removing LOCAL SERVICE allow entries never
+    /// widens any account's access.
     /// </para>
     /// <para>
     /// Each directory is held while the entries below it are opened, so no path below it can be redirected.
@@ -138,12 +146,17 @@ internal static class SecureDirectory
     /// entries made it, and that account owns it.
     /// </para>
     /// </remarks>
+    /// <param name="isTrusted">Whether an account may own the entry at a path.</param>
+    /// <returns>
+    /// The refusal for the first entry whose owner <paramref name="isTrusted"/> rejects, or <c>null</c>.
+    /// </returns>
     /// <exception cref="IOException">The directory is a reparse point or not a directory.</exception>
-    internal static void SetSecurityAndRemoveLocalServiceBelow(
-        SafeFileHandle directory, string path, string sddl, ILogger logger)
+    internal static DataFolderRefusal SetSecurityAndRemoveLocalServiceBelow(
+        SafeFileHandle directory, string path, string sddl, Func<string, SecurityIdentifier, bool> isTrusted,
+        ILogger logger)
     {
         SetSecurity(directory, path, sddl);
-        RemoveLocalServiceBelow(path, logger);
+        return WalkBelow(path, removeLocalService: true, isTrusted, logger);
     }
 
     /// <summary>
@@ -366,10 +379,30 @@ internal static class SecureDirectory
     }
 
     /// <summary>
-    /// Removes each allow entry for LOCAL SERVICE from the DACL of every file and directory below the directory
-    /// <paramref name="path"/>, which the caller holds, as <see cref="SetSecurityAndRemoveLocalServiceBelow"/> describes.
+    /// Checks the owner of every file and directory below the directory <paramref name="path"/>, which the caller holds,
+    /// without changing anything and without following any link.
     /// </summary>
-    private static void RemoveLocalServiceBelow(string path, ILogger logger)
+    /// <remarks>
+    /// The entries are opened and held as <see cref="SetSecurityAndRemoveLocalServiceBelow"/> opens and holds them.
+    /// </remarks>
+    /// <param name="isTrusted">Whether an account may own the entry at a path.</param>
+    /// <returns>
+    /// The refusal for the first entry whose owner <paramref name="isTrusted"/> rejects, or <c>null</c>.
+    /// </returns>
+    internal static DataFolderRefusal CheckOwnersBelow(
+        string path, Func<string, SecurityIdentifier, bool> isTrusted, ILogger logger) =>
+        WalkBelow(path, removeLocalService: false, isTrusted, logger);
+
+    /// <summary>
+    /// Checks the owner of every file and directory below the directory <paramref name="path"/>, which the caller holds,
+    /// and, when <paramref name="removeLocalService"/> is set, removes each allow entry for LOCAL SERVICE from its DACL,
+    /// as <see cref="SetSecurityAndRemoveLocalServiceBelow"/> describes.
+    /// </summary>
+    /// <returns>
+    /// The refusal for the first entry whose owner <paramref name="isTrusted"/> rejects, or <c>null</c>.
+    /// </returns>
+    private static DataFolderRefusal WalkBelow(
+        string path, bool removeLocalService, Func<string, SecurityIdentifier, bool> isTrusted, ILogger logger)
     {
         // UNTESTED: each directory handle stays open until the entries below the directory are done, and a directory is
         // walked only when the handle held is the entry first opened, so that no path below it can be redirected while
@@ -379,51 +412,60 @@ internal static class SecureDirectory
         // When changing how the walk opens or closes a directory, keep each handle open that long and keep the check.
         foreach (string entry in Directory.GetFileSystemEntries(path))
         {
-            // The entry is opened with a right that takes no part in sharing checks, so that another process using a
+            // The entry is opened with rights that take no part in sharing checks, so that another process using a
             // file doesn't fail the walk, then opened again with the rights its kind needs.
             using SafeFileHandle handle = OpenUnlessNotFound(
-                () => Open(entry, WinAPI.FILE_READ_ATTRIBUTES, AnyShare), entry, logger);
+                () => Open(entry, WinAPI.READ_CONTROL | WinAPI.FILE_READ_ATTRIBUTES, AnyShare), entry, logger);
 
             if (handle is null)
             {
                 continue;
             }
 
+            DataFolderRefusal refusal = CheckOwner(handle, entry, isTrusted, logger);
+
+            if (refusal is not null)
+            {
+                return refusal;
+            }
+
             WinAPI.BY_HANDLE_FILE_INFORMATION information = GetInformation(handle);
             bool isReparsePoint = (information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
             bool isDirectory = (information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0;
+            uint access = removeLocalService ? WinAPI.READ_CONTROL | WinAPI.WRITE_DAC : 0;
 
             if (isReparsePoint && isDirectory)
             {
-                // ReOpenFile refuses a directory, so the link is opened again through its path, itself rather than its
-                // target, and compared with the entry first opened; nothing below it is reached.
-                using SafeFileHandle link = OpenUnlessNotFound(
-                    () => Open(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.FILE_READ_ATTRIBUTES, AnyShare),
-                    entry,
-                    logger);
-
-                if (link is null)
+                if (removeLocalService)
                 {
-                    continue;
+                    // ReOpenFile refuses a directory, so the link is opened again through its path, itself rather than
+                    // its target, and compared with the entry first opened; nothing below it is reached.
+                    using SafeFileHandle link = OpenUnlessNotFound(
+                        () => Open(entry, access | WinAPI.FILE_READ_ATTRIBUTES, AnyShare), entry, logger);
+
+                    if (link is null)
+                    {
+                        continue;
+                    }
+
+                    if (!IsSameEntry(information, GetInformation(link)))
+                    {
+                        throw new IOException($"{entry} changed while LOCAL SERVICE was being removed from it");
+                    }
+
+                    RemoveLocalService(link, entry, logger);
                 }
 
-                if (!IsSameEntry(information, GetInformation(link)))
-                {
-                    throw new IOException($"{entry} changed while LOCAL SERVICE was being removed from it");
-                }
-
-                RemoveLocalService(link, entry, logger);
                 logger.Log($"did not follow {entry}: it is a reparse point");
             }
             else if (isDirectory)
             {
                 // ReOpenFile refuses a directory, so the directory is held through its path, which the directories held
                 // above pin, and compared with the entry first opened.
-                // A directory another process holds without sharing fails the hold, and so the run: during a feature
-                // change the agent keeps running and briefly holds identity that way as its state lock, so such a run
-                // fails and can be repeated.
-                using SafeFileHandle child = OpenUnlessNotFound(
-                    () => Hold(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC), entry, logger);
+                // A directory another process holds without sharing fails the hold, and so the run: the agent keeps
+                // running during a feature change, and before a major upgrade stops it, and briefly holds identity that
+                // way as its state lock, so such a run fails and can be repeated.
+                using SafeFileHandle child = OpenUnlessNotFound(() => Hold(entry, access), entry, logger);
 
                 if (child is null)
                 {
@@ -434,20 +476,32 @@ internal static class SecureDirectory
 
                 if (!IsSameEntry(information, held) || !IsPlainDirectory(held.dwFileAttributes))
                 {
-                    throw new IOException($"{entry} changed while LOCAL SERVICE was being removed from it");
+                    throw new IOException($"{entry} changed while the entries below the data folder were being walked");
                 }
 
-                RemoveLocalService(child, entry, logger);
-                RemoveLocalServiceBelow(entry, logger);
+                if (removeLocalService)
+                {
+                    RemoveLocalService(child, entry, logger);
+                }
+
+                refusal = WalkBelow(entry, removeLocalService, isTrusted, logger);
+
+                if (refusal is not null)
+                {
+                    return refusal;
+                }
             }
             else
             {
-                // UNTESTED: a file symbolic link loses LOCAL SERVICE from its own DACL, not from its target's, because
-                // the first handle opened the link itself and the reopened handle addresses the same object.
-                // Creating a file symbolic link needs elevation or developer mode, which tests don't have.
-                // When changing this, keep opening the entry with FILE_FLAG_OPEN_REPARSE_POINT before reopening it.
-                using SafeFileHandle file = Reopen(handle, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC, AnyShare);
-                RemoveLocalService(file, entry, logger);
+                if (removeLocalService)
+                {
+                    // UNTESTED: a file symbolic link loses LOCAL SERVICE from its own DACL, not from its target's,
+                    // because the first handle opened the link itself and the reopened handle addresses the same object.
+                    // Creating a file symbolic link needs elevation or developer mode, which tests don't have.
+                    // When changing this, keep opening the entry with FILE_FLAG_OPEN_REPARSE_POINT before reopening it.
+                    using SafeFileHandle file = Reopen(handle, access, AnyShare);
+                    RemoveLocalService(file, entry, logger);
+                }
 
                 if (isReparsePoint)
                 {
@@ -455,6 +509,33 @@ internal static class SecureDirectory
                 }
             }
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Refuses the entry <paramref name="handle"/> holds, opened from <paramref name="path"/> with <c>READ_CONTROL</c>,
+    /// unless <paramref name="isTrusted"/> accepts its owner, who can always change its DACL.
+    /// </summary>
+    private static DataFolderRefusal CheckOwner(
+        SafeFileHandle handle, string path, Func<string, SecurityIdentifier, bool> isTrusted, ILogger logger)
+    {
+        SecurityIdentifier owner =
+            new RawSecurityDescriptor(ReadDescriptor(handle, WinAPI.OWNER_SECURITY_INFORMATION), 0).Owner;
+
+        if (owner is null)
+        {
+            logger.Log($"refused {path}: it has no owner");
+            return new DataFolderRefusal(path, DataFolderProblem.Unreadable);
+        }
+
+        if (isTrusted(path, owner))
+        {
+            return null;
+        }
+
+        logger.Log($"refused {path}: it is owned by {owner}");
+        return new DataFolderRefusal(path, DataFolderProblem.EntryOwner, owner);
     }
 
     /// <summary>

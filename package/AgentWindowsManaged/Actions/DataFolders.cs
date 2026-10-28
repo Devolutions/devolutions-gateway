@@ -37,6 +37,11 @@ internal enum DataFolderProblem
     /// The folder's owner or DACL can't be read.
     /// </summary>
     Unreadable,
+
+    /// <summary>
+    /// The owner of a file or a folder below <c>Agent</c>, who can always change its permissions, is not trusted.
+    /// </summary>
+    EntryOwner,
 }
 
 /// <summary>
@@ -49,7 +54,8 @@ internal sealed class DataFolderRefusal(string folder, DataFolderProblem problem
     internal DataFolderProblem Problem { get; } = problem;
 
     /// <summary>
-    /// The owner of the folder for <see cref="DataFolderProblem.Owner"/>, or the account the offending entry grants for
+    /// The owner of the folder for <see cref="DataFolderProblem.Owner"/> or of the entry for
+    /// <see cref="DataFolderProblem.EntryOwner"/>, or the account the offending entry grants for
     /// <see cref="DataFolderProblem.Access"/>.
     /// </summary>
     internal SecurityIdentifier Account { get; } = account;
@@ -66,6 +72,7 @@ internal sealed class DataFolderRefusal(string folder, DataFolderProblem problem
             DataFolderProblem.Owner => Strings.DataFolderOwnedByUntrustedAccount,
             DataFolderProblem.Access => Strings.DataFolderReplaceableByUntrustedAccount,
             DataFolderProblem.Unreadable => Strings.DataFolderSecurityUnreadable,
+            DataFolderProblem.EntryOwner => Strings.DataFolderEntryOwnedByUntrustedAccount,
             _ => throw new ArgumentOutOfRangeException(nameof(this.Problem), this.Problem, null),
         };
 
@@ -100,6 +107,10 @@ internal sealed class DataFolderRefusal(string folder, DataFolderProblem problem
 /// The installer writes the agent's data there as SYSTEM, so an account that controls either folder could redirect
 /// or replace what the installer and the agent write.
 /// A folder that doesn't exist yet passes.
+/// Every file and folder below an existing <c>Agent</c> must have a trusted owner too, because an owner can always
+/// change its entry's DACL.
+/// The installer refuses an entry with an untrusted owner and never changes owners below <c>Agent</c>, so that a
+/// deployment never silently takes over an entry another account created.
 /// </remarks>
 internal static class DataFolders
 {
@@ -119,14 +130,25 @@ internal static class DataFolders
     private static readonly SecurityIdentifier OwnerRights = new("S-1-3-4");
 
     /// <summary>
-    /// Checks <c>Devolutions</c> and <c>Devolutions\Agent</c> under <paramref name="root"/> without changing anything.
+    /// Checks <c>Devolutions</c> and <c>Devolutions\Agent</c> under <paramref name="root"/>, and the owner of every
+    /// file and folder below <c>Agent</c>, without changing anything and without following any link.
     /// </summary>
-    /// <returns>The first refusal, or <c>null</c> when both folders pass.</returns>
-    internal static DataFolderRefusal Check(string root, ILogger logger)
+    /// <param name="isTrusted">
+    /// Whether an account may own or replace the entry at a path; <see cref="IsTrusted(string, SecurityIdentifier)"/>
+    /// when <c>null</c>.
+    /// </param>
+    /// <returns>The first refusal, or <c>null</c> when everything passes.</returns>
+    internal static DataFolderRefusal Check(
+        string root, ILogger logger, Func<string, SecurityIdentifier, bool> isTrusted = null)
     {
+        // UNTESTED: the installer's actions pass no trust decision, so that owners and accounts are judged by IsTrusted,
+        // here before RemoveExistingProducts and in Create.
+        // Tests pass their own, because the user running them may not be a trusted owner.
+        // When changing this, keep IsTrusted as the decision the actions use.
+        isTrusted ??= IsTrusted;
         string devolutions = Path.Combine(root, Devolutions);
         DataFolderRefusal refusal = Inspect(
-            devolutions, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: true, logger,
+            devolutions, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: true, isTrusted, logger,
             out SafeFileHandle handle);
 
         using (handle)
@@ -137,33 +159,56 @@ internal static class DataFolders
             }
 
             // UNTESTED: an existing Agent is refused when it is a link or has an untrusted owner, here and in Create.
-            // A test reaches it only below a Devolutions folder that passes, which needs an owner that a test without
-            // elevation can't set.
+            // Tests check the entries below Agent, not Agent itself.
             // When changing this, keep Agent checked in both, without the DACL rule, as the installer resets its DACL.
+            // UNTESTED: the handle on Agent holds it until the entries below are checked, so that they are the entries
+            // of the folder just checked, not of one put at that path afterwards.
+            // Tests check that a held folder can't be renamed, not how long this handle stays open.
+            // When changing this, keep opening Agent with hold set and keep the handle open until the walk returns.
+            string agentPath = Path.Combine(devolutions, Agent);
             refusal = Inspect(
-                Path.Combine(devolutions, Agent), path => SecureDirectory.OpenToRead(path, hold: false),
-                checkAccess: false, logger, out SafeFileHandle agent);
-            agent?.Dispose();
+                agentPath, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: false, isTrusted, logger,
+                out SafeFileHandle agent);
 
-            return refusal;
+            using (agent)
+            {
+                if (refusal is not null || agent is null)
+                {
+                    return refusal;
+                }
+
+                return SecureDirectory.CheckOwnersBelow(agentPath, isTrusted, logger);
+            }
         }
     }
 
     /// <summary>
     /// Creates <c>Devolutions\Agent</c> under <paramref name="root"/> with the security descriptor
     /// <paramref name="sddl"/>, after checking <c>Devolutions</c>, or checks an existing <c>Agent</c>, resets its owner
-    /// and DACL to those of <paramref name="sddl"/> and removes LOCAL SERVICE from the DACLs below it.
+    /// and DACL to those of <paramref name="sddl"/> and removes LOCAL SERVICE from the DACLs below it, refusing an entry
+    /// below it with an untrusted owner.
     /// </summary>
     /// <remarks>
     /// A missing <c>Devolutions</c> is created with the DACL it inherits, then checked like an existing one.
     /// <c>Agent</c> gets its security descriptor when it is created, so that it never exists with the DACL it would
     /// inherit from ProgramData, which lets users add entries.
+    /// Until <c>Agent</c> is reset, an earlier DACL may let LOCAL SERVICE add entries below it, so the entries are checked
+    /// again here, after <see cref="Check"/>.
     /// </remarks>
+    /// <param name="isTrusted">
+    /// Whether an account may own or replace the entry at a path; <see cref="IsTrusted(string, SecurityIdentifier)"/>
+    /// when <c>null</c>.
+    /// </param>
     /// <returns>
-    /// The first refusal, in which case nothing is created or changed below <c>Devolutions</c>, or <c>null</c>.
+    /// The first refusal, or <c>null</c>.
+    /// Nothing is created or changed below <c>Devolutions</c> before a refusal of <c>Devolutions</c> or <c>Agent</c>;
+    /// before a refusal of an entry below <c>Agent</c>, <c>Agent</c> is reset and the entries walked before lose LOCAL
+    /// SERVICE, as <see cref="SecureDirectory.SetSecurityAndRemoveLocalServiceBelow"/> describes.
     /// </returns>
-    internal static DataFolderRefusal Create(string root, string sddl, ILogger logger)
+    internal static DataFolderRefusal Create(
+        string root, string sddl, ILogger logger, Func<string, SecurityIdentifier, bool> isTrusted = null)
     {
+        isTrusted ??= IsTrusted;
         string devolutions = Path.Combine(root, Devolutions);
         string agent = Path.Combine(devolutions, Agent);
 
@@ -174,7 +219,7 @@ internal static class DataFolders
         // Tests check that a held folder can't be renamed, not how long this handle stays open.
         // When changing this, keep the handle open until Agent is done.
         DataFolderRefusal refusal = Inspect(
-            devolutions, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: true, logger,
+            devolutions, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: true, isTrusted, logger,
             out SafeFileHandle handle);
 
         using (handle)
@@ -196,7 +241,8 @@ internal static class DataFolders
             }
 
             refusal = Inspect(
-                agent, SecureDirectory.HoldToSetSecurity, checkAccess: false, logger, out SafeFileHandle existing);
+                agent, SecureDirectory.HoldToSetSecurity, checkAccess: false, isTrusted, logger,
+                out SafeFileHandle existing);
 
             using (existing)
             {
@@ -216,11 +262,16 @@ internal static class DataFolders
                 // refuses a data folder whose DACL isn't the one provisioned.
                 // UNTESTED: the handle on Agent holds it until the entries below are done, so that the walk below
                 // happens in the folder just checked and reset, not in one put at that path afterwards.
-                // Tests check SetSecurityAndRemoveLocalServiceBelow, not that an existing Agent is reset with it here,
-                // because the user running them isn't a trusted owner.
+                // Tests reach the walk through this handle, not how long it stays open.
                 // When changing this, keep opening Agent with HoldToSetSecurity and keep the handle open until the walk
                 // returns.
-                SecureDirectory.SetSecurityAndRemoveLocalServiceBelow(existing, agent, sddl, logger);
+                refusal = SecureDirectory.SetSecurityAndRemoveLocalServiceBelow(existing, agent, sddl, isTrusted, logger);
+
+                if (refusal is not null)
+                {
+                    return refusal;
+                }
+
                 logger.Log($"reset the owner and the DACL of {agent} and removed LOCAL SERVICE below it");
 
                 return null;
@@ -240,10 +291,17 @@ internal static class DataFolders
     /// Whether to refuse a DACL that lets an account other than SYSTEM, Administrators, TrustedInstaller, a member of
     /// Administrators or OWNER RIGHTS replace the folder or what it contains.
     /// </param>
+    /// <param name="isTrusted">
+    /// Whether an account may own or replace <paramref name="folder"/>;
+    /// <see cref="IsTrusted(string, SecurityIdentifier)"/> when <c>null</c>.
+    /// </param>
     /// <returns>The refusal, or <c>null</c> when the folder passes.</returns>
     internal static DataFolderRefusal Evaluate(
-        string folder, RawSecurityDescriptor security, bool isLink, bool isDirectory, bool checkAccess)
+        string folder, RawSecurityDescriptor security, bool isLink, bool isDirectory, bool checkAccess,
+        Func<string, SecurityIdentifier, bool> isTrusted = null)
     {
+        isTrusted ??= IsTrusted;
+
         if (isLink)
         {
             return new DataFolderRefusal(folder, DataFolderProblem.Link);
@@ -298,21 +356,21 @@ internal static class DataFolders
                 if ((unchecked((uint)entry.AccessMask) & ReplaceRights) != 0
                     && entry.SecurityIdentifier != OwnerRights
                     && !IsAppContainer(entry.SecurityIdentifier)
-                    && !IsTrusted(entry.SecurityIdentifier))
+                    && !isTrusted(folder, entry.SecurityIdentifier))
                 {
                     return new DataFolderRefusal(folder, DataFolderProblem.Access, entry.SecurityIdentifier);
                 }
             }
         }
 
-        return IsTrusted(security.Owner) ? null : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
+        return isTrusted(folder, security.Owner) ? null : new DataFolderRefusal(folder, DataFolderProblem.Owner, security.Owner);
     }
 
     /// <summary>
     /// Whether <paramref name="sid"/> is SYSTEM, Administrators, TrustedInstaller or a member of Administrators, the
-    /// accounts that may own the folder or rename and replace it.
+    /// accounts that may own the entry at <paramref name="path"/> or rename and replace it, whatever the entry.
     /// </summary>
-    private static bool IsTrusted(SecurityIdentifier sid)
+    private static bool IsTrusted(string path, SecurityIdentifier sid)
     {
         try
         {
@@ -332,7 +390,8 @@ internal static class DataFolders
     /// <param name="handle">The open entry, or <c>null</c> when nothing exists at <paramref name="path"/>.</param>
     /// <returns>The refusal, or <c>null</c> when the entry passes or doesn't exist.</returns>
     private static DataFolderRefusal Inspect(
-        string path, Func<string, SafeFileHandle> open, bool checkAccess, ILogger logger, out SafeFileHandle handle)
+        string path, Func<string, SafeFileHandle> open, bool checkAccess, Func<string, SecurityIdentifier, bool> isTrusted,
+        ILogger logger, out SafeFileHandle handle)
     {
         handle = null;
 
@@ -340,7 +399,7 @@ internal static class DataFolders
         {
             handle = open(path);
             (RawSecurityDescriptor security, bool isLink, bool isDirectory) = SecureDirectory.ReadSecurity(handle);
-            DataFolderRefusal refusal = Evaluate(path, security, isLink, isDirectory, checkAccess);
+            DataFolderRefusal refusal = Evaluate(path, security, isLink, isDirectory, checkAccess, isTrusted);
 
             logger.Log(refusal is null
                 ? $"checked {path}"
