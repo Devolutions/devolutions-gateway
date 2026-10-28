@@ -7787,6 +7787,105 @@ pub(crate) async fn p_identity_statuses(ctx: Context) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// CONTRACT.agent-identity.md §3.1: an authority never refuses a request because of `key_storage` or `key_storage_available`, which the agent reports without proof.
+///
+/// Each report stays within §3's limits but is one no conforming agent sends, so an authority that validates or trusts the report refuses it: an unlisted key storage with an unsorted, repeated list, a value that is no key storage name, and a key outside every listed storage.
+/// On the mock, the identities' policy requires a key storage that none of the reports names.
+pub(crate) async fn p_key_storage_metadata_never_refused(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    let reports = [
+        (
+            "unlisted, unsorted and repeated",
+            "zz_unlisted_storage",
+            "zz_b,zz_a,zz_a",
+        ),
+        ("not key storage names", "Not a key storage!", ",,"),
+        ("outside the listed storages", "file", "windows_software_provider,file"),
+    ];
+    if ctx.mock() {
+        expect_status(
+            &ctx.target
+                .control(
+                    "key-storage",
+                    &json!({ "policy": { "backends": ["tpm"], "required": true } }),
+                )
+                .await?,
+            200,
+        )?;
+    }
+    let token = token(&ctx, reports.len().try_into()?).await?;
+    for (case, storage, available) in reports {
+        let metadata =
+            json!({ "hostname": "key-storage-report", "key_storage": storage, "key_storage_available": available });
+        let key = KeyPair::generate()?;
+        let enrolled = ctx.target.enroll(&token.text, &key, &metadata).await?;
+        expect_status(&enrolled, 200).with_context(|| format!("enroll with key storage {case}"))?;
+        let identity = Identity::from_enrollment(&token.text, key, &enrolled)?;
+        expect_status(&ctx.target.check_in(&identity, &metadata).await?, 200)
+            .with_context(|| format!("check-in with key storage {case}"))?;
+        let renewed = ctx.target.renew(&identity, &KeyPair::generate()?, &metadata).await?;
+        expect_status(&renewed, 200).with_context(|| format!("renew with key storage {case}"))?;
+        let record = identity_record(&ctx.target, &identity.identity_id).await?;
+        ensure!(
+            record.metadata_value("key_storage") == Some(storage)
+                && record.metadata_value("key_storage_available") == Some(available),
+            "the authority did not store the key storage metadata {case} that it accepted"
+        );
+    }
+    Ok(())
+}
+
+/// The mock's key storage control sets `config.key_storage` in the effective config of every identity, which agent cases rely on to give the agent a policy.
+///
+/// CONTRACT.agent-identity.md §5.2 has `config.key_storage` absent while the authority sets none, and §7.3 gives every config change a higher revision.
+pub(crate) async fn p_key_storage_policy_in_effective_config(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: spec crates/agent-identity-mock/README.md §Mock control
+    let (token, identity) = issued(&ctx, "key-storage-config").await?;
+    ensure!(
+        identity.config.get("key_storage").is_none(),
+        "the enrollment config holds a key storage policy that the authority never set"
+    );
+    let enrolled_revision = count(&identity.config, "revision")?;
+    let policy = json!({ "backends": ["tpm", "windows_software_provider"], "required": true });
+    let set = ctx.target.control("key-storage", &json!({ "policy": policy })).await?;
+    expect_status(&set, 200)?;
+    ensure!(
+        set.body["updatedIdentities"] == 1,
+        "setting a policy did not report the one identity it changed"
+    );
+    let with_policy = check_in_config(&ctx.target, &identity).await?;
+    let policy_revision = count(&with_policy, "revision")?;
+    ensure!(
+        with_policy["key_storage"] == policy && enrolled_revision < policy_revision,
+        "the check-in config does not hold the new policy under a higher revision"
+    );
+    let later = ctx
+        .target
+        .enroll(
+            &token.text,
+            &KeyPair::generate()?,
+            &json!({ "hostname": "key-storage-config" }),
+        )
+        .await?;
+    expect_status(&later, 200)?;
+    ensure!(
+        later.body["config"]["key_storage"] == policy,
+        "an identity enrolled while the policy is set lacks it"
+    );
+    expect_status(
+        &ctx.target.control("key-storage", &json!({ "clear": true })).await?,
+        200,
+    )?;
+    let cleared = check_in_config(&ctx.target, &identity).await?;
+    ensure!(
+        cleared.get("key_storage").is_none() && policy_revision < count(&cleared, "revision")?,
+        "clearing the policy did not remove it under a higher revision"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use base64::engine::general_purpose::STANDARD;

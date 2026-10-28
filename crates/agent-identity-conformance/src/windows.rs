@@ -15,12 +15,12 @@ use windows::Win32::Security::Authorization::{
     GetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
 };
 use windows::Win32::Security::Cryptography::{
-    BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_PUBLIC_P256_MAGIC, CERT_KEY_SPEC, CRYPT_INTEGER_BLOB,
-    CRYPTPROTECT_LOCAL_MACHINE, CryptProtectData, CryptUnprotectData, MS_KEY_STORAGE_PROVIDER,
+    BCRYPT_ECCPUBLIC_BLOB, BCRYPT_ECDSA_P256_ALGORITHM, BCRYPT_ECDSA_PUBLIC_P256_MAGIC, CERT_KEY_SPEC,
+    CRYPT_INTEGER_BLOB, CRYPTPROTECT_LOCAL_MACHINE, CryptProtectData, CryptUnprotectData, MS_KEY_STORAGE_PROVIDER,
     NCRYPT_EXPORT_POLICY_PROPERTY, NCRYPT_FLAGS, NCRYPT_HANDLE, NCRYPT_KEY_HANDLE, NCRYPT_MACHINE_KEY_FLAG,
-    NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NCRYPT_PROV_HANDLE, NCRYPT_SECURITY_DESCR_PROPERTY, NCryptDeleteKey, NCryptEnumKeys,
-    NCryptExportKey, NCryptFreeBuffer, NCryptFreeObject, NCryptGetProperty, NCryptKeyName, NCryptOpenKey,
-    NCryptOpenStorageProvider,
+    NCRYPT_PKCS8_PRIVATE_KEY_BLOB, NCRYPT_PROV_HANDLE, NCRYPT_SECURITY_DESCR_PROPERTY, NCryptCreatePersistedKey,
+    NCryptDeleteKey, NCryptEnumKeys, NCryptExportKey, NCryptFinalizeKey, NCryptFreeBuffer, NCryptFreeObject,
+    NCryptGetProperty, NCryptKeyName, NCryptOpenKey, NCryptOpenStorageProvider,
 };
 use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, OBJECT_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
@@ -855,6 +855,41 @@ pub(crate) fn machine_public_key(name: &str) -> anyhow::Result<Vec<u8>> {
     sec1.push(4);
     sec1.extend_from_slice(&bytes[8..72]);
     Ok(sec1)
+}
+
+/// Creates a P-256 machine key named `name` in the Microsoft Software Key Storage Provider, as a key that some earlier run left behind.
+pub(crate) fn create_machine_key(name: &str) -> anyhow::Result<()> {
+    let provider = Provider::open()?;
+    let mut handle = NCRYPT_KEY_HANDLE::default();
+    let wide_name = wide(std::ffi::OsStr::new(name));
+    // SAFETY: The key name is NUL-terminated, the algorithm name is a static NUL-terminated string, and handle is writable.
+    unsafe {
+        NCryptCreatePersistedKey(
+            provider.0,
+            &mut handle,
+            BCRYPT_ECDSA_P256_ALGORITHM,
+            PCWSTR::from_raw(wide_name.as_ptr()),
+            CERT_KEY_SPEC(0),
+            NCRYPT_MACHINE_KEY_FLAG,
+        )
+    }
+    .with_context(|| format!("create machine key {name}"))?;
+    let key = Key(handle);
+    // SAFETY: The key handle was created for this provider and is not finalized yet.
+    unsafe { NCryptFinalizeKey(key.0, NCRYPT_FLAGS(0)) }.with_context(|| format!("finalize machine key {name}"))?;
+    Ok(())
+}
+
+/// Deletes the machine key `name`, which must exist.
+pub(crate) fn delete_machine_key(name: &str) -> anyhow::Result<()> {
+    let provider = Provider::open()?;
+    let key = provider
+        .key(name)?
+        .with_context(|| format!("machine key {name} does not exist"))?;
+    // SAFETY: The machine key handle was opened for this provider; on success NCryptDeleteKey frees it.
+    unsafe { NCryptDeleteKey(key.0, 0) }.with_context(|| format!("delete machine key {name}"))?;
+    std::mem::forget(key);
+    Ok(())
 }
 
 pub(crate) fn cleanup_machine_keys(prefix: &str) -> anyhow::Result<()> {
