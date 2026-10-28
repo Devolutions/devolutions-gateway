@@ -7,6 +7,8 @@
 use std::error::Error;
 use std::fmt;
 
+use tonic::Code;
+
 use crate::transport::NotGrpc;
 
 /// Why a stream closed or its opening failed ([CONTRACT.agent-identity.md §7.4 "Termination"][contract]).
@@ -16,7 +18,7 @@ use crate::transport::NotGrpc;
 pub struct Closure {
     pub class: ClosureClass,
     /// The gRPC status the authority closed the stream with, if it sent one.
-    pub grpc_code: Option<tonic::Code>,
+    pub grpc_code: Option<Code>,
     /// The `error-code` trailer.
     pub error_code: Option<String>,
     /// The `server-time` trailer.
@@ -81,8 +83,9 @@ impl Closure {
 
     /// Classifies the status a stream ended with.
     ///
-    /// A status the authority sent is classified by its `error-code` trailer; a status the client derived from a
-    /// connection failure carries the failure as its source.
+    /// A status the authority sent is classified by its gRPC code with its `error-code` trailer, as exact pairs, and
+    /// any other pair is transient; a status the client derived from a connection failure carries the failure as its
+    /// source.
     pub(crate) fn from_status(status: &tonic::Status) -> Self {
         let mut cause = status.source();
         while let Some(error) = cause {
@@ -102,10 +105,10 @@ impl Closure {
                 .map(str::to_owned)
         };
         let error_code = trailer("error-code");
-        let class = match error_code.as_deref() {
-            Some("identity_revoked") => ClosureClass::Terminal(TerminalCode::IdentityRevoked),
-            Some("identity_unknown") => ClosureClass::Terminal(TerminalCode::IdentityUnknown),
-            Some("certificate_expired") => ClosureClass::CertificateExpired,
+        let class = match (status.code(), error_code.as_deref()) {
+            (Code::PermissionDenied, Some("identity_revoked")) => ClosureClass::Terminal(TerminalCode::IdentityRevoked),
+            (Code::Unauthenticated, Some("identity_unknown")) => ClosureClass::Terminal(TerminalCode::IdentityUnknown),
+            (Code::Unauthenticated, Some("certificate_expired")) => ClosureClass::CertificateExpired,
             _ => ClosureClass::Transient(TransientKind::Outage),
         };
         Self {
@@ -128,4 +131,60 @@ pub(crate) fn error_chain(message: &str, source: &(dyn Error + 'static)) -> Stri
         cause = error.source();
     }
     chain
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+    use tonic::Status;
+    use tonic::metadata::MetadataMap;
+
+    use super::*;
+
+    /// A status as the authority sends it, with an `error-code` trailer.
+    fn status(code: Code, error_code: &str) -> Status {
+        let mut metadata = MetadataMap::new();
+        metadata.insert("error-code", error_code.parse().expect("ASCII error code"));
+        Status::with_metadata(code, "closed by the test", metadata)
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    #[rstest]
+    #[case::revoked(
+        Code::PermissionDenied,
+        "identity_revoked",
+        ClosureClass::Terminal(TerminalCode::IdentityRevoked)
+    )]
+    #[case::unknown(
+        Code::Unauthenticated,
+        "identity_unknown",
+        ClosureClass::Terminal(TerminalCode::IdentityUnknown)
+    )]
+    #[case::expired(Code::Unauthenticated, "certificate_expired", ClosureClass::CertificateExpired)]
+    fn classifies_each_status_and_error_code_pair_of_the_contract(
+        #[case] code: Code,
+        #[case] error_code: &str,
+        #[case] class: ClosureClass,
+    ) {
+        assert_eq!(Closure::from_status(&status(code, error_code)).class, class);
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
+    #[rstest]
+    #[case::revoked_unauthenticated(Code::Unauthenticated, "identity_revoked")]
+    #[case::revoked_ok(Code::Ok, "identity_revoked")]
+    #[case::revoked_unavailable(Code::Unavailable, "identity_revoked")]
+    #[case::unknown_permission_denied(Code::PermissionDenied, "identity_unknown")]
+    #[case::unknown_ok(Code::Ok, "identity_unknown")]
+    #[case::expired_permission_denied(Code::PermissionDenied, "certificate_expired")]
+    #[case::expired_ok(Code::Ok, "certificate_expired")]
+    #[case::expired_internal(Code::Internal, "certificate_expired")]
+    fn a_terminal_or_expired_code_with_another_status_is_an_outage(#[case] code: Code, #[case] error_code: &str) {
+        assert_eq!(
+            Closure::from_status(&status(code, error_code)).class,
+            ClosureClass::Transient(TransientKind::Outage)
+        );
+    }
 }

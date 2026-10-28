@@ -270,7 +270,7 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#6-rfc-9421-profile
 async fn authenticated_stream(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
     match authenticated_stream_at(shared, target, 0).await {
-        Err(closure) => match clock_offset(&closure) {
+        Err(closure) => match clock_offset(&closure, OffsetDateTime::now_utc()) {
             Some(offset) => authenticated_stream_at(shared, target, offset).await,
             None => Err(closure),
         },
@@ -290,13 +290,16 @@ async fn authenticated_stream_at(shared: &Shared, target: &Target, clock_offset:
         .unwrap_or_else(|_| Err(Closure::outage("no Welcome within the opening timeout")))
 }
 
-/// Returns `server_time − local_time` in seconds for a `clock_skew` refusal with a `server-time` trailer.
-fn clock_offset(closure: &Closure) -> Option<i64> {
-    if closure.error_code.as_deref() != Some("clock_skew") {
+/// Returns `server_time − local_time` in seconds for a refusal with status `UNAUTHENTICATED`, `error-code: clock_skew`
+/// and a `server-time` trailer ([CONTRACT.agent-identity.md §7.4 "Termination"][contract]).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
+fn clock_offset(closure: &Closure, local_time: OffsetDateTime) -> Option<i64> {
+    if !(closure.grpc_code == Some(Code::Unauthenticated) && closure.error_code.as_deref() == Some("clock_skew")) {
         return None;
     }
     let server_time = OffsetDateTime::parse(closure.server_time.as_deref()?, &Rfc3339).ok()?;
-    Some(server_time.unix_timestamp() - OffsetDateTime::now_utc().unix_timestamp())
+    Some(server_time.unix_timestamp() - local_time.unix_timestamp())
 }
 
 /// Sends the signed opening request, with its `created` time offset by `clock_offset` seconds, and waits for the
@@ -358,4 +361,46 @@ pub(crate) fn channel_proof_input(challenge: &[u8], connect_nonce: &str) -> Vec<
     input.extend_from_slice(challenge);
     input.extend_from_slice(connect_nonce.as_bytes());
     input
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+    use crate::closure::TransientKind;
+
+    /// A transient refusal with `error-code: clock_skew`, as the authority sends it at a skewed opening.
+    fn clock_skew_refusal(grpc_code: Code, server_time: &str) -> Closure {
+        Closure {
+            class: ClosureClass::Transient(TransientKind::Outage),
+            grpc_code: Some(grpc_code),
+            error_code: Some("clock_skew".to_owned()),
+            server_time: Some(server_time.to_owned()),
+            reason: "clock skew".to_owned(),
+        }
+    }
+
+    fn local_time() -> OffsetDateTime {
+        OffsetDateTime::parse("2026-10-21T00:00:00Z", &Rfc3339).expect("RFC 3339 time")
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    #[test]
+    fn a_clock_skew_refusal_gives_the_offset_to_the_server_time() {
+        let closure = clock_skew_refusal(Code::Unauthenticated, "2026-10-21T02:00:00Z");
+        assert_eq!(clock_offset(&closure, local_time()), Some(7200));
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    #[rstest]
+    #[case::permission_denied(Code::PermissionDenied)]
+    #[case::ok(Code::Ok)]
+    #[case::invalid_argument(Code::InvalidArgument)]
+    #[case::unavailable(Code::Unavailable)]
+    fn a_clock_skew_code_with_another_status_gives_no_offset(#[case] grpc_code: Code) {
+        let closure = clock_skew_refusal(grpc_code, "2026-10-21T02:00:00Z");
+        assert_eq!(clock_offset(&closure, local_time()), None);
+    }
 }
