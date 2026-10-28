@@ -1265,7 +1265,7 @@ const REMUX_MARKER_SUFFIX: &str = ".remuxing";
 const REMUX_MARKER_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
 
 /// The file that marks `recording_file` as waiting for its remux, from the time the remux is scheduled until it ends.
-fn remux_marker(recording_file: &Utf8Path) -> Utf8PathBuf {
+pub(crate) fn remux_marker(recording_file: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{recording_file}{REMUX_MARKER_SUFFIX}"))
 }
 

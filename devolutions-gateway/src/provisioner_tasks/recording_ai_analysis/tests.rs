@@ -11,9 +11,9 @@ use parking_lot::Mutex;
 use provisioner_task::{NewProvisionerTaskRecord, ProvisionerTaskState};
 
 use super::*;
-use crate::job_queue::{JobMessage, JobQueueHandle, JobQueueReceiver};
+use crate::job_queue::{JobMessage, JobQueueReceiver};
 use crate::provisioner_tasks::runner::{MAX_ATTEMPTS, ProvisionerTaskJob, ProvisionerTaskRunner};
-use crate::recording::RecordingManagerTask;
+use crate::recording::{RecordingManagerTask, remux_marker};
 use crate::{DgwState, MockHandles};
 
 const API_KEY: &str = "sk-recording-ai-analysis-test-secret";
@@ -143,9 +143,9 @@ impl Harness {
         self.job(task_id).await.run().await
     }
 
-    /// Whether a job waits to run a later attempt, as after a recoverable failure; it takes every queued job.
-    fn later_attempt_queued(&mut self) -> bool {
-        std::iter::from_fn(|| self.job_queue_rx.try_recv().ok()).any(|message| message.schedule_for.is_some())
+    /// Takes every queued job.
+    fn queued_jobs(&mut self) -> Vec<JobMessage> {
+        std::iter::from_fn(|| self.job_queue_rx.try_recv().ok()).collect()
     }
 
     /// Records a Task directly, as if it was created at `created_at`.
@@ -530,7 +530,10 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
     let workspace = harness.workspace(session_id);
 
     harness.run(task_id).await.expect("the job queues the next attempt itself");
-    assert!(harness.later_attempt_queued(), "a provider outage is retried");
+    assert!(
+        harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
+        "a provider outage is retried"
+    );
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Running);
@@ -676,12 +679,15 @@ async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
 
     for attempt in 1..MAX_ATTEMPTS {
         harness.run(task_id).await.expect("the job queues the next attempt itself");
-        assert!(harness.later_attempt_queued(), "attempt {attempt} is retried");
+        assert!(
+            harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
+            "attempt {attempt} is retried"
+        );
         assert_eq!(harness.task(task_id).await.state, ProvisionerTaskState::Running);
     }
 
     harness.run(task_id).await.expect("the last attempt is not retried");
-    assert!(!harness.later_attempt_queued(), "no attempt after the last");
+    assert!(harness.queued_jobs().is_empty(), "no attempt after the last");
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
@@ -823,14 +829,11 @@ async fn analysis_waits_for_the_remux_of_the_session() {
     let (settings, requests) = spawn_ai_provider(|_| 0).await;
     let task_id = harness.start_created(session_id, settings).await;
 
-    let marker = harness
-        .recording_path
-        .join(session_id.to_string())
-        .join("recording-1.webm.remuxing");
+    let marker = remux_marker(&harness.recording_path.join(session_id.to_string()).join("recording-1.webm"));
     std::fs::write(&marker, b"").expect("remux mark");
     let other_dir = harness.recording_path.join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&other_dir).expect("other session");
-    std::fs::write(other_dir.join("recording-0.webm.remuxing"), b"").expect("remux mark of another session");
+    std::fs::write(remux_marker(&other_dir.join("recording-0.webm")), b"").expect("remux mark of another session");
 
     let mut job = harness.job(task_id).await;
     let job = tokio::spawn(async move { job.run().await });
@@ -856,7 +859,7 @@ async fn waiting_for_a_remux_is_no_progress() {
     let task_id = harness.start_created(session_id, settings).await;
 
     let dir = harness.recording_path.join(session_id.to_string());
-    std::fs::write(dir.join("recording-1.webm.remuxing"), b"").expect("remux mark");
+    std::fs::write(remux_marker(&dir.join("recording-1.webm")), b"").expect("remux mark");
     harness.with_progress_timeout(time::Duration::seconds(2));
 
     harness.run(task_id).await.expect("no retry");
@@ -954,7 +957,7 @@ async fn a_new_task_that_fails_keeps_the_earlier_analysis() {
     assert!(dir.join("ai-analysis-0.slog").exists());
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Secrets
+// oracle: mutant an AI analysis that cannot run after a restart stays unfinished until its next attempt
 #[tokio::test]
 async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
     let harness = Harness::new().await;
@@ -962,6 +965,10 @@ async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
     let (settings, requests) = spawn_ai_provider(|_| 0).await;
     let task_id = harness.start_created(session_id, settings).await;
     std::fs::create_dir_all(harness.workspace(session_id)).expect("working files of an attempt");
+    // As if Gateway stopped after the attempt wrote its log, before its success was recorded.
+    let dir = harness.recording_path.join(session_id.to_string());
+    let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
+    std::fs::write(&log, "an analysis whose success was never recorded").expect("unlisted log");
 
     harness.state.provisioner_tasks.resume().await.expect("resume");
 
@@ -972,6 +979,8 @@ async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
     harness.run(task_id).await.expect("the new job only ends the Task");
     assert!(requests.lock().is_empty(), "the AI is never asked");
     assert!(!harness.workspace(session_id).exists(), "the working files are removed");
+    assert!(!log.exists(), "the unlisted log is removed");
+    assert_eq!(ai_analyses(&dir), json!([]));
     assert!(!harness.has_key(task_id));
 }
 
@@ -1036,8 +1045,11 @@ async fn a_success_cut_short_before_the_log_is_listed_is_finished_by_the_job() {
     manifest["artifacts"] = json!({});
     std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
 
-    // The job of the Task stays stored until it returns, so it runs again when Gateway starts.
-    harness.run(task_id).await.expect("the job ends the Task again");
+    // The job of the Task stays stored until it returns, so it runs again when Gateway starts, and it still holds the
+    // Task since a finished Task keeps its job.
+    let mut job = harness.job(task_id).await;
+    harness.state.provisioner_tasks.resume().await.expect("resume");
+    job.run().await.expect("the job ends the Task again");
 
     assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
     assert!(dir.join("ai-analysis-0.slog").exists());
