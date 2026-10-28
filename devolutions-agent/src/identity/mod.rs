@@ -256,7 +256,7 @@ enum PendingOutcome {
     Retry { retry_after: Option<Duration> },
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct RetryState {
     failures: u32,
     next_attempt: Option<Instant>,

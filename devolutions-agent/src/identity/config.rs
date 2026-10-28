@@ -49,6 +49,8 @@ pub struct IdentityDebugConf {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub renewal_after_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_renewal_interval_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub disable_jitter: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extra_trusted_root: Option<Utf8PathBuf>,
@@ -112,6 +114,7 @@ mod tests {
             "__debug__": {
                 "identity": {
                     "renewal_after_secs": 1,
+                    "min_renewal_interval_secs": 5,
                     "disable_jitter": false,
                     "extra_trusted_root": "ca.pem",
                     "backoff_max_secs": 2,
@@ -134,6 +137,7 @@ mod tests {
             .context("missing identity debug config")?;
         assert!(debug.has_settings());
         assert_eq!(debug.renewal_after_secs, Some(1));
+        assert_eq!(debug.min_renewal_interval_secs, Some(5));
         assert_eq!(debug.disable_jitter, Some(false));
         assert_eq!(debug.extra_trusted_root.as_deref(), Some(Utf8Path::new("ca.pem")));
         assert_eq!(debug.backoff_max_secs, Some(2));
