@@ -9,8 +9,11 @@
 //!
 //! The Windows executor materializes these scripts into temporary `.ps1` files before launch.
 //!
-//! Both builders bind the policy-matched request source as the PowerShell repository
-//! and pin the invariant culture so repository lookup does not depend on the host locale.
+//! Both builders bind the policy-matched request source as the PowerShell repository and
+//! pin the invariant culture so repository lookup does not depend on the host locale.
+//! Uninstall removes the local module and takes no `-Repository`. `Update-Module` takes no
+//! `-Repository` either, as it updates from the repository the module was installed from,
+//! so the PowerShell 5 update first checks that this repository is the requested source.
 //! Options that don't apply to PowerShell modules (interactive, custom install
 //! location, winget's no-upgrade / uninstall-previous) are intentionally omitted.
 
@@ -33,6 +36,10 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
 
+    if request.operation == Operation::Update {
+        append_installed_repository_check(&mut script, request)?;
+    }
+
     let verb = match request.operation {
         Operation::Install => "Install-Module",
         Operation::Update => "Update-Module",
@@ -41,7 +48,9 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     append_raw(&mut script, verb);
     append_flag_value(&mut script, "-Name", &request.package.id.0);
-    append_repository(&mut script, request)?;
+    if request.operation == Operation::Install {
+        append_repository(&mut script, request)?;
+    }
     append_raw(&mut script, "-Confirm:$false");
     append_raw(&mut script, "-Force");
 
@@ -57,7 +66,8 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
     }
 
     if matches!(request.operation, Operation::Install | Operation::Update) {
-        if request.options.skip_hash_check {
+        // `Update-Module` has no `-SkipPublisherCheck`, so updates keep the publisher check.
+        if request.options.skip_hash_check && request.operation == Operation::Install {
             append_raw(&mut script, "-SkipPublisherCheck");
         }
 
@@ -88,7 +98,9 @@ pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     append_raw(&mut script, verb);
     append_flag_value(&mut script, "-Name", &request.package.id.0);
-    append_repository(&mut script, request)?;
+    if request.operation != Operation::Uninstall {
+        append_repository(&mut script, request)?;
+    }
     append_raw(&mut script, "-Confirm:$false");
 
     match request.operation {
@@ -166,6 +178,24 @@ fn append_repository(script: &mut String, request: &PackageRequest) -> anyhow::R
         bail!("PowerShell package source name is required");
     }
     append_flag_value(script, "-Repository", repository);
+    Ok(())
+}
+
+/// Fail the script unless the installed module was installed from the requested source,
+/// which is the repository `Update-Module` updates from.
+fn append_installed_repository_check(script: &mut String, request: &PackageRequest) -> anyhow::Result<()> {
+    let repository = request.source.name.trim();
+    if repository.is_empty() {
+        bail!("PowerShell package source name is required");
+    }
+    append_raw(
+        script,
+        &format!(
+            "if (@(Get-InstalledModule -Name {} -ErrorAction Stop | Where-Object {{ $_.Repository -ne {} }}).Count -ne 0) {{ throw 'The installed module was not installed from the requested repository.' }};",
+            quote_powershell_literal(&request.package.id.0),
+            quote_powershell_literal(repository),
+        ),
+    );
     Ok(())
 }
 
@@ -279,12 +309,44 @@ mod tests {
         request.operation = Operation::Uninstall;
         let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
+        // `Uninstall-Module` has no `-Repository` parameter.
         assert!(script.starts_with(&format!(
-            "{INVARIANT_CULTURE_PREFIX} Uninstall-Module -Name 'Pester' -Repository 'PSGallery'"
+            "{INVARIANT_CULTURE_PREFIX} Uninstall-Module -Name 'Pester' -Confirm:$false -Force"
         )));
+        assert!(!script.contains("-Repository"));
         assert!(!script.contains("-Scope"));
         assert!(!script.contains("-RequiredVersion"));
         assert!(!script.contains("-SkipPublisherCheck"));
+    }
+
+    #[test]
+    fn powershell5_update_checks_installed_repository_instead_of_passing_it() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.operation = Operation::Update;
+        request.options.skip_hash_check = true;
+        let cmd = build_powershell5_command(&request).expect("build command");
+        let script = script_of(&cmd);
+        assert!(script.starts_with(&format!(
+            "{INVARIANT_CULTURE_PREFIX} if (@(Get-InstalledModule -Name 'Pester' -ErrorAction Stop | Where-Object {{ $_.Repository -ne 'PSGallery' }}).Count -ne 0) {{ throw "
+        )));
+        // `Update-Module` has neither `-Repository` nor `-SkipPublisherCheck`.
+        let update = &script[script.find("Update-Module").expect("Update-Module call")..];
+        assert!(update.starts_with("Update-Module -Name 'Pester' -Confirm:$false -Force"));
+        assert!(!update.contains("-Repository"));
+        assert!(!update.contains("-SkipPublisherCheck"));
+        assert!(update.contains("-Scope CurrentUser"));
+        assert!(update.contains("-RequiredVersion '5.6.0'"));
+    }
+
+    #[test]
+    fn powershell5_update_repository_check_escapes_literals() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.operation = Operation::Update;
+        request.package.id = PackageIdentifier::from("Vendor's.Module".to_owned());
+        let cmd = build_powershell5_command(&request).expect("build command");
+        let script = script_of(&cmd);
+        assert!(script.contains("Get-InstalledModule -Name 'Vendor''s.Module'"));
+        assert!(script.contains("Update-Module -Name 'Vendor''s.Module'"));
     }
 
     #[test]
@@ -320,9 +382,11 @@ mod tests {
         request.operation = Operation::Uninstall;
         let cmd = build_powershell7_command(&request).expect("build command");
         let script = script_of(&cmd);
+        // `Uninstall-PSResource` has no `-Repository` parameter.
         assert!(script.starts_with(&format!(
-            "{INVARIANT_CULTURE_PREFIX} Uninstall-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"
+            "{INVARIANT_CULTURE_PREFIX} Uninstall-PSResource -Name 'Pester' -Confirm:$false"
         )));
+        assert!(!script.contains("-Repository"));
         // Uninstall must not pin a version (it would remove only the matching version,
         // or fail if it does not match what is installed).
         assert!(!script.contains("-Version"));
