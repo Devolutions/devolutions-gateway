@@ -562,6 +562,9 @@ pub struct State {
     pub(crate) nonces: NonceStore,
     pub(crate) faults: Faults,
     pub(crate) settings: Settings,
+    /// The `config.key_storage` member of every identity's effective config, whatever JSON value the tester set, or
+    /// none.
+    pub(crate) key_storage: Option<Value>,
     pub(crate) requests: RequestCounts,
     /// Mock-only barrier: retries receive 503 after a dropped response or injected confirm failure.
     pub(crate) retry_barrier: Option<DropTarget>,
@@ -603,6 +606,7 @@ impl State {
             nonces: NonceStore::default(),
             faults: Faults::default(),
             settings: Settings::default(),
+            key_storage: None,
             requests: RequestCounts::default(),
             retry_barrier: None,
             barrier_triggered: None,
@@ -688,6 +692,40 @@ impl State {
         }
         self.faults.config_version = version;
         Ok(())
+    }
+
+    /// Sets, or with `None` clears, `config.key_storage` in the config of every identity, including those enrolled
+    /// afterwards, bumps the revision of each identity it changes, pushes the change to live streams, and returns how
+    /// many identities changed.
+    /// The policy is any JSON value, malformed ones included, because the tester checks that the agent ignores them.
+    /// A policy that would make an identity's config, or the config of an identity enrolled at `base_url`, too large
+    /// for its envelope changes nothing.
+    pub(crate) fn update_key_storage(&mut self, policy: Option<Value>, base_url: &str) -> Result<usize, ApiError> {
+        let mut future_config = self.enrollment_config(base_url);
+        apply_key_storage(
+            future_config.as_object_mut().expect("enrollment config is an object"),
+            policy.as_ref(),
+        );
+        if !config_fits_envelope(&future_config) {
+            return Err(ApiError::invalid_request(
+                "config would not fit a 64 KiB agent channel envelope",
+            ));
+        }
+        let configs = self
+            .identities
+            .values()
+            .filter(|identity| identity.config.get("key_storage") != policy.as_ref())
+            .map(|identity| {
+                let mut config = identity.config.clone();
+                let entries = config.as_object_mut().expect("identity config is an object");
+                apply_key_storage(entries, policy.as_ref());
+                entries.insert("revision".to_owned(), json!(identity.next_revision()));
+                (identity.id, config)
+            })
+            .collect();
+        let changed = self.replace_configs(configs)?;
+        self.key_storage = policy;
+        Ok(changed)
     }
 
     /// Applies `change` to every identity's config, bumps its revision and pushes it to live streams, unless one
@@ -993,7 +1031,8 @@ impl State {
     }
 
     /// Returns the effective config of an identity enrolled now: `version`, `revision` 1 and, while the channel is
-    /// offered, `agent_channel_url` ([CONTRACT.agent-identity.md][contract], "5.2 `POST enroll`").
+    /// offered, `agent_channel_url` ([CONTRACT.agent-identity.md][contract], "5.2 `POST enroll`"), and the key storage
+    /// policy while the tester has set one.
     /// An enrollment token adds nothing to it ([INTENT.agent-identity.md][intent], "Configuration and metadata").
     ///
     /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#52-post-enroll
@@ -1014,6 +1053,7 @@ impl State {
             };
             config.insert("agent_channel_url".to_owned(), json!(url));
         }
+        apply_key_storage(&mut config, self.key_storage.as_ref());
         Value::Object(config)
     }
 
@@ -1570,6 +1610,7 @@ impl State {
         self.nonces = NonceStore::default();
         self.faults = Faults::default();
         self.settings = Settings::default();
+        self.key_storage = None;
         self.requests = RequestCounts::default();
         self.retry_barrier = None;
         self.barrier_triggered = None;
@@ -1739,6 +1780,18 @@ impl State {
             },
         );
         (identity_id, rx)
+    }
+}
+
+/// Sets `config.key_storage` to `policy`, or removes it when there is none.
+fn apply_key_storage(config: &mut Map<String, Value>, policy: Option<&Value>) {
+    match policy {
+        Some(policy) => {
+            config.insert("key_storage".to_owned(), policy.clone());
+        }
+        None => {
+            config.remove("key_storage");
+        }
     }
 }
 
@@ -2524,6 +2577,193 @@ mod tests {
         assert_eq!(enrollment_url_values(&enrolled.certificate_chain[0]), expected);
         assert!(state.identities.contains_key(&enrolled.identity_id));
         assert_eq!(state.tokens[&token_id].used_count, 1);
+        Ok(())
+    }
+
+    /// Enrolls test key `seed` at `https://localhost/mock` with a new token and returns the identity.
+    fn enroll_identity(state: &mut State, seed: u8, now: i64) -> Uuid {
+        let (_, secret) = state.create_token("test".to_owned(), 1, nanos(now + 3600), None, now);
+        let csr = csr_naming(&key(seed), "https://localhost/mock");
+        state
+            .enroll(&secret, &csr, Map::new(), now, "https://localhost/mock")
+            .expect("enrollment succeeds")
+            .identity_id
+    }
+
+    /// Registers a live stream for `identity_id` and returns its receiver.
+    fn open_stream(state: &mut State, identity_id: Uuid) -> mpsc::UnboundedReceiver<StreamPush> {
+        let thumbprint = state.identities[&identity_id]
+            .current_cert()
+            .expect("current certificate")
+            .thumbprint
+            .clone();
+        let (tx, rx) = mpsc::unbounded_channel();
+        state.streams.insert(
+            Uuid::new_v4(),
+            StreamHandle {
+                identity_id,
+                cert_thumbprint: thumbprint,
+                tx,
+                retire_at: None,
+            },
+        );
+        rx
+    }
+
+    fn pushed_config(rx: &mut mpsc::UnboundedReceiver<StreamPush>) -> anyhow::Result<Value> {
+        let StreamPush::ConfigUpdate(config_json) = rx.try_recv()? else {
+            anyhow::bail!("expected a config update");
+        };
+        Ok(serde_json::from_str(&config_json)?)
+    }
+
+    const MOCK_URL: &str = "https://localhost/mock";
+
+    /// CONTRACT.agent-identity.md §5.2: `config.revision` "strictly increases per identity whenever the identity's
+    /// effective config changes" and `config.key_storage` is the key storage policy, "absent when the authority sets
+    /// none"; §7.3 step 7 delivers a config change as a `ConfigUpdate`.
+    /// Setting a policy and clearing it each change the effective config of an identity that is already enrolled and
+    /// connected, so each bumps its revision and pushes the whole config, and clearing removes the member instead of
+    /// leaving a `null`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[test]
+    fn key_storage_policy_set_and_cleared_reach_an_enrolled_identity() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let identity_id = enroll_identity(&mut state, 1, now);
+        let mut stream = open_stream(&mut state, identity_id);
+        let policy = json!({ "backends": ["tpm", "windows_software_provider"], "required": true });
+        let first_revision = state.identities[&identity_id].config_revision();
+
+        assert_eq!(state.update_key_storage(Some(policy.clone()), MOCK_URL).ok(), Some(1));
+        let set = pushed_config(&mut stream)?;
+        assert_eq!(
+            set,
+            json!({
+                "version": 1,
+                "revision": first_revision + 1,
+                "agent_channel_url": MOCK_URL,
+                "key_storage": policy,
+            })
+        );
+        assert_eq!(state.identities[&identity_id].config, set);
+
+        assert_eq!(state.update_key_storage(None, MOCK_URL).ok(), Some(1));
+        let cleared = pushed_config(&mut stream)?;
+        assert_eq!(
+            cleared,
+            json!({ "version": 1, "revision": first_revision + 2, "agent_channel_url": MOCK_URL })
+        );
+        assert!(stream.try_recv().is_err());
+        Ok(())
+    }
+
+    /// §5.2 bumps the revision when the effective config changes, so setting the policy it already holds, or clearing
+    /// an absent one, changes nothing and sends nothing.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    #[test]
+    fn key_storage_policy_that_changes_nothing_bumps_no_revision() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let identity_id = enroll_identity(&mut state, 1, now);
+        let mut stream = open_stream(&mut state, identity_id);
+        let revision = state.identities[&identity_id].config_revision();
+        let policy = json!({ "backends": ["file"], "required": false });
+
+        assert_eq!(state.update_key_storage(None, MOCK_URL).ok(), Some(0));
+        assert_eq!(state.update_key_storage(Some(policy.clone()), MOCK_URL).ok(), Some(1));
+        assert_eq!(state.update_key_storage(Some(policy), MOCK_URL).ok(), Some(0));
+
+        assert_eq!(state.identities[&identity_id].config_revision(), revision + 1);
+        pushed_config(&mut stream)?;
+        assert!(stream.try_recv().is_err());
+        Ok(())
+    }
+
+    /// §5.7: a policy that is not an object, lacks `backends` or `required`, or holds a value outside the rules is
+    /// treated by the agent as absent, which the tester checks by delivering it, so the mock stores and delivers each
+    /// value as given.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[rstest]
+    #[case::null(json!(null))]
+    #[case::string(json!("tpm"))]
+    #[case::array(json!(["tpm"]))]
+    #[case::empty_object(json!({}))]
+    #[case::required_missing(json!({ "backends": ["tpm"] }))]
+    #[case::backends_missing(json!({ "required": true }))]
+    #[case::empty_backends(json!({ "backends": [], "required": true }))]
+    #[case::repeated_names(json!({ "backends": ["tpm", "tpm"], "required": true }))]
+    #[case::required_not_a_boolean(json!({ "backends": ["tpm"], "required": "true" }))]
+    fn malformed_key_storage_policy_is_delivered_as_given(#[case] policy: Value) -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let identity_id = enroll_identity(&mut state, 1, now);
+        let mut stream = open_stream(&mut state, identity_id);
+
+        assert_eq!(state.update_key_storage(Some(policy.clone()), MOCK_URL).ok(), Some(1));
+
+        assert_eq!(pushed_config(&mut stream)?["key_storage"], policy);
+        Ok(())
+    }
+
+    /// §5.2 defines the config of an enrollment, and the policy is part of every identity's effective config, so an
+    /// identity enrolled after the control holds it from its first config, and clearing it removes it from those
+    /// enrolled afterwards too.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[test]
+    fn key_storage_policy_reaches_identities_enrolled_afterwards() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let policy = json!({ "backends": ["tpm"], "required": false });
+        assert_eq!(state.update_key_storage(Some(policy.clone()), MOCK_URL).ok(), Some(0));
+
+        let after_set = enroll_identity(&mut state, 1, now);
+        assert_eq!(state.identities[&after_set].config["key_storage"], policy);
+
+        assert_eq!(state.update_key_storage(None, MOCK_URL).ok(), Some(1));
+        let after_clear = enroll_identity(&mut state, 2, now);
+        assert!(state.identities[&after_clear].config.get("key_storage").is_none());
+        Ok(())
+    }
+
+    /// A mock reset returns to an authority that sets no policy.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[test]
+    fn reset_clears_the_key_storage_policy() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let policy = json!({ "backends": ["tpm"], "required": true });
+        assert!(state.update_key_storage(Some(policy), MOCK_URL).is_ok());
+
+        state.reset(now, true)?;
+
+        let identity_id = enroll_identity(&mut state, 1, now);
+        assert!(state.identities[&identity_id].config.get("key_storage").is_none());
+        Ok(())
+    }
+
+    /// §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope would exceed that limit", so
+    /// a policy that would grow a config past it is refused and changes neither the stored configs nor the policy of
+    /// later enrollments.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn key_storage_policy_past_the_envelope_limit_is_refused() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        let identity_id = enroll_identity(&mut state, 1, now);
+        let mut stream = open_stream(&mut state, identity_id);
+        let config = state.identities[&identity_id].config.clone();
+        let oversized = json!("x".repeat(ENVELOPE_LIMIT));
+
+        assert!(state.update_key_storage(Some(oversized), MOCK_URL).is_err());
+
+        assert_eq!(state.identities[&identity_id].config, config);
+        assert!(stream.try_recv().is_err());
+        assert!(state.key_storage.is_none());
         Ok(())
     }
 }

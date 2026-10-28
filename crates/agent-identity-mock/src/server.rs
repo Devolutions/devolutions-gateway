@@ -853,4 +853,88 @@ mod tests {
         assert_eq!((status, &refused["error"]), (400, &json!("invalid_request")));
         Ok(())
     }
+
+    const KEY_STORAGE: &str = "/__mock__/key-storage";
+
+    /// The control reaches the enrollment response of every identity enrolled after it, and clearing removes the member.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[tokio::test]
+    async fn key_storage_control_sets_and_clears_the_policy_of_later_enrollments() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let enroll_config = |seed: u8| {
+            let app = Arc::clone(&app);
+            async move {
+                let now = app.now();
+                let (_, secret) =
+                    app.state
+                        .lock()
+                        .await
+                        .create_token("test".to_owned(), 1, crate::app::nanos(now + 3600), None, now);
+                let authorization = format!("Bearer {}", enrollment_token(&app.base_url, &secret));
+                let headers = [(http::header::AUTHORIZATION.as_str(), authorization.as_str())];
+                let csr = STANDARD.encode(csr_naming(&key(seed), &app.base_url));
+                let body = json!({ "csr": csr, "metadata": {} }).to_string();
+                let (status, enrolled) = post_json(&app, "/api/agent-identity/v1/enroll", &headers, body).await;
+                assert_eq!(status, 200, "{enrolled}");
+                enrolled["config"].clone()
+            }
+        };
+        let policy = json!({ "backends": ["tpm"], "required": true });
+
+        let (status, set) = post_json(&app, KEY_STORAGE, &[], json!({ "policy": policy }).to_string()).await;
+        assert_eq!((status, &set["updatedIdentities"]), (200, &json!(0)));
+        assert_eq!(enroll_config(1).await["key_storage"], policy);
+
+        let (status, cleared) = post_json(&app, KEY_STORAGE, &[], json!({ "clear": true }).to_string()).await;
+        assert_eq!((status, &cleared["updatedIdentities"]), (200, &json!(1)));
+        assert!(enroll_config(2).await.get("key_storage").is_none());
+        Ok(())
+    }
+
+    /// The control takes any JSON value as the policy, `null` included, which differs from clearing.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[rstest]
+    #[case::null(json!(null))]
+    #[case::not_an_object(json!("tpm"))]
+    #[case::empty_list(json!([]))]
+    #[case::required_missing(json!({ "backends": ["tpm"] }))]
+    #[tokio::test]
+    async fn key_storage_control_takes_a_malformed_policy(#[case] policy: Value) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let (status, _) = post_json(&app, KEY_STORAGE, &[], json!({ "policy": policy }).to_string()).await;
+        assert_eq!(status, 200);
+        assert_eq!(app.state.lock().await.key_storage, Some(policy));
+        Ok(())
+    }
+
+    /// A body must say either a policy or a clear, and nothing else.
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    #[rstest]
+    #[case::empty_object(json!({}))]
+    #[case::not_an_object(json!([]))]
+    #[case::policy_and_clear(json!({ "policy": {}, "clear": true }))]
+    #[case::clear_false(json!({ "clear": false }))]
+    #[case::clear_not_a_boolean(json!({ "clear": "true" }))]
+    #[case::unknown_member(json!({ "policies": {} }))]
+    #[tokio::test]
+    async fn key_storage_control_refuses_other_bodies(#[case] body: Value) -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let (status, refused) = post_json(&app, KEY_STORAGE, &[], body.to_string()).await;
+        assert_eq!((status, &refused["error"]), (400, &json!("invalid_request")));
+        assert!(app.state.lock().await.key_storage.is_none());
+        Ok(())
+    }
+
+    /// CONTRACT.agent-identity.md §5.2: product-specific config fields never use `key_storage`, so the product-field
+    /// control refuses it and leaves it to the key storage control.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    #[tokio::test]
+    async fn config_control_refuses_the_key_storage_member() -> anyhow::Result<()> {
+        let app = App::for_test()?;
+        let body = json!({ "fields": { "key_storage": {} } }).to_string();
+        let (status, refused) = post_json(&app, "/__mock__/config", &[], body).await;
+        assert_eq!((status, &refused["error"]), (400, &json!("invalid_request")));
+        Ok(())
+    }
 }
