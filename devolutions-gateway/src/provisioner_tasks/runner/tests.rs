@@ -28,6 +28,8 @@ struct Echo {
     ended: Arc<Mutex<Vec<Uuid>>>,
     /// Ends that fail before one succeeds.
     end_failures: Arc<AtomicUsize>,
+    /// Why its unfinished records fail when Gateway starts again.
+    restart_failure: Option<Permanent>,
 }
 
 #[async_trait]
@@ -52,6 +54,10 @@ impl ProvisionerTask for Echo {
 
     fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value {
         json!({ "error": error, "last": last })
+    }
+
+    fn after_restart(&self) -> Option<Permanent> {
+        self.restart_failure.clone()
     }
 
     async fn run(&self, attempt: &Attempt, params: EchoParams) -> Result<serde_json::Value, AttemptError> {
@@ -108,6 +114,19 @@ impl Harness {
         outcome: fn(u32) -> Result<serde_json::Value, AttemptError>,
         progress_timeout: time::Duration,
     ) -> Self {
+        Self::build(outcome, progress_timeout, None).await
+    }
+
+    /// A harness whose task cannot outlive a restart, like one that keeps its secrets in memory only.
+    async fn forgetting_at_restart(outcome: fn(u32) -> Result<serde_json::Value, AttemptError>) -> Self {
+        Self::build(outcome, time::Duration::hours(1), Some(Permanent::KeyLost)).await
+    }
+
+    async fn build(
+        outcome: fn(u32) -> Result<serde_json::Value, AttemptError>,
+        progress_timeout: time::Duration,
+        restart_failure: Option<Permanent>,
+    ) -> Self {
         let conn = gateway_db::GatewayDb::open_path(":memory:")
             .await
             .expect("open gateway database")
@@ -131,6 +150,7 @@ impl Harness {
                 runs: Arc::clone(&runs),
                 ended: Arc::clone(&ended),
                 end_failures: Arc::clone(&end_failures),
+                restart_failure,
             })
             .build();
 
@@ -279,77 +299,47 @@ async fn a_task_that_cannot_be_queued_again_fails() {
     assert_eq!(*harness.ended.lock(), [id]);
 }
 
-/// A job queue that remembers the jobs it stores, as the job queue database does.
-#[derive(Default)]
-struct StoredJobs(Mutex<Vec<String>>);
-
-#[async_trait]
-impl ProvisionerTaskJobQueue for StoredJobs {
-    async fn push(&self, job: ProvisionerTaskJob, _schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
-        self.0.lock().push(job_queue::Job::write_json(&job)?);
-        Ok(())
-    }
-
-    async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>> {
-        assert_eq!(name, ProvisionerTaskJob::NAME);
-        Ok(self.0.lock().clone())
-    }
-}
-
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
-async fn resume_queues_only_the_tasks_left_without_a_job() {
-    let conn = gateway_db::GatewayDb::open_path(":memory:")
-        .await
-        .expect("open gateway database")
-        .connect()
-        .await
-        .expect("connect");
-    let store = Arc::new(
-        provisioner_task_libsql::LibSqlProvisionerTaskStore::open(conn)
-            .await
-            .expect("open task store"),
-    );
-    let queue = Arc::new(StoredJobs::default());
-    let runner = ProvisionerTaskRunner::builder(store, Arc::clone(&queue) as DynProvisionerTaskJobQueue)
-        .register(Echo {
-            outcome: |value| Ok(json!(value)),
-            progress_timeout: time::Duration::hours(1),
-            runs: Arc::default(),
-            ended: Arc::default(),
-            end_failures: Arc::default(),
-        })
-        .build();
-    let create = |id: Uuid| runner.create::<Echo>(id, format!("target-{id}"), &EchoParams { value: 1 }, |_| Ok(()));
-    let with_job = Uuid::new_v4();
-    let without_job = Uuid::new_v4();
-    create(with_job).await.expect("create");
-    create(without_job).await.expect("create");
-    let token_with_job = runner
-        .get(with_job, OffsetDateTime::now_utc())
-        .await
-        .expect("read")
-        .expect("record")
-        .job_token;
+async fn resume_gives_every_unfinished_task_a_new_job() {
+    let mut harness = Harness::new(|value| Ok(json!(value))).await;
+    let first = harness.create(1).await;
+    let second = harness.create(2).await;
+    let tokens = [harness.task(first).await.job_token, harness.task(second).await.job_token];
+    // The jobs of the creation may be stored or lost; the runner never asks which.
+    while harness.job_queue_rx.try_recv().is_ok() {}
 
-    // The job of the second record is lost, as when Gateway stops right after creating the record.
-    queue.0.lock().retain(|json| json.contains(&with_job.to_string()));
+    harness.runner.resume().await.expect("resume");
 
-    runner.resume().await.expect("resume");
-
-    let stored = queue.0.lock().clone();
-    assert_eq!(stored.len(), 2, "one new job, for the record without one: {stored:?}");
-    assert!(stored[1].contains(&without_job.to_string()));
     assert_eq!(
-        runner
-            .get(with_job, OffsetDateTime::now_utc())
-            .await
-            .expect("read")
-            .expect("record")
-            .job_token,
-        token_with_job,
-        "a record with its job keeps it"
+        std::iter::from_fn(|| harness.job_queue_rx.try_recv().ok()).count(),
+        2,
+        "one new job for each unfinished Task"
     );
+    assert_ne!(harness.task(first).await.job_token, tokens[0]);
+    assert_ne!(harness.task(second).await.job_token, tokens[1]);
+}
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Secrets
+#[tokio::test]
+async fn a_task_that_cannot_outlive_a_restart_fails_at_startup_and_is_ended() {
+    let mut harness = Harness::forgetting_at_restart(|value| Ok(json!(value))).await;
+    let id = harness.create(1).await;
+    let mut stale = harness.queued_job();
+
+    harness.runner.resume().await.expect("resume");
+
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed, "it fails before any job runs");
+    assert_eq!(task.payload, json!({ "error": { "kind": "keyLost" }, "last": null }));
+
+    let mut ending = harness.queued_job();
+    stale.run().await.expect("the stale job stops");
+    assert!(harness.ended.lock().is_empty(), "a stale job ends nothing");
+
+    ending.run().await.expect("the new job ends the Task");
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 0, "no attempt runs");
+    assert_eq!(*harness.ended.lock(), [id]);
 }
 
 // oracle: mutant a panicking attempt fails the Task as internal instead of panicked
