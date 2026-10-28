@@ -201,6 +201,7 @@ fn hit_summaries(body: &serde_json::Value) -> anyhow::Result<Vec<(String, String
 
 // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
 // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
 #[tokio::test]
 async fn searches_the_slog_files_of_every_recording_newest_first() -> anyhow::Result<()> {
     let (_recordings, config_handle, _process) = start_with_recordings().await?;
