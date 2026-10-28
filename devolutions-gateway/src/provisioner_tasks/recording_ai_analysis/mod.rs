@@ -31,12 +31,12 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use super::ai::{AiAccess, AiProvider, AiSettings, AiSettingsError, ClientError};
-use super::runner::{Attempt, DynProvisionerTaskJobQueue, ProvisionerTask};
+use super::runner::{Attempt, ProvisionerTask};
 use super::{AttemptError, Permanent, Recoverable};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
-use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender, RemuxJob, remux_pending};
+use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender, remux_pending};
 use crate::secret_store::{SecretId, SecretStore};
 use crate::token::AccessScope;
 
@@ -262,22 +262,15 @@ pub struct RecordingAiAnalysis {
     conf_handle: ConfHandle,
     recordings: RecordingMessageSender,
     secrets: SecretStore,
-    job_queue: DynProvisionerTaskJobQueue,
     progress_timeout: time::Duration,
 }
 
 impl RecordingAiAnalysis {
-    pub fn new(
-        conf_handle: ConfHandle,
-        recordings: RecordingMessageSender,
-        secrets: SecretStore,
-        job_queue: DynProvisionerTaskJobQueue,
-    ) -> Self {
+    pub fn new(conf_handle: ConfHandle, recordings: RecordingMessageSender, secrets: SecretStore) -> Self {
         Self {
             conf_handle,
             recordings,
             secrets,
-            job_queue,
             progress_timeout: PROGRESS_TIMEOUT,
         }
     }
@@ -610,15 +603,15 @@ impl RecordingAiAnalysis {
         Ok(())
     }
 
-    /// Waits until no remux job of the session is stored, since a remux replaces a video that would be read.
+    /// Waits until no recording of the session waits for its remux, since a remux replaces a video that would be read.
     async fn wait_for_remux(&self, attempt: &Attempt, dir: &Utf8Path) -> Result<(), AttemptError> {
         loop {
-            let jobs = self.job_queue.stored_jobs(RemuxJob::NAME).await.map_err(|error| {
-                warn!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to list the remux jobs");
+            let pending = remux_pending(dir).await.map_err(|error| {
+                warn!(task.id = %attempt.task_id, %error, %dir, "Failed to look for a pending remux");
                 AttemptError::Recoverable(Recoverable::Storage)
             })?;
 
-            if !remux_pending(&jobs, dir) {
+            if !pending {
                 return Ok(());
             }
 

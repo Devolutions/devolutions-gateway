@@ -312,7 +312,7 @@ enum AiAnalysisRecoverableErrorKind {
     AiUnreachable,
     /// The AI provider is busy or failing for now, such as with a rate limit (429) or a server error (5xx).
     AiBusy,
-    /// Gateway could not read its own job queue.
+    /// Gateway could not read its own storage, such as the folder of the session.
     Storage,
 }
 
