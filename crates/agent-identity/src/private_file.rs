@@ -68,6 +68,22 @@ fn untrusted_stored_identity(path: &Utf8Path, source: anyhow::Error) -> anyhow::
     })
 }
 
+/// Turns a failed open of the authority directory or `identity.json` at `path` into an [`UntrustedStoredIdentity`] when
+/// it fails the trust check, and leaves any other failure, which only kept the check from running, an ordinary error.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): only a stored identity that fails the check stops all identity
+/// processing.
+/// A failure that names no checked path, which a valid path never causes, counts as untrusted.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+fn check_failure(path: &Utf8Path, error: anyhow::Error) -> anyhow::Error {
+    if error.downcast_ref::<private_fs::Error>().is_none_or(fails_trust_check) {
+        untrusted_stored_identity(path, error)
+    } else {
+        error.context(format!("check stored identity {path}"))
+    }
+}
+
 /// Gives SYSTEM full control, and the agent's account too when `grant_current_user` is set.
 ///
 /// [`crates/agent-identity/INTENT.md`] ("Local state"): on Linux and macOS the agent's account owns what it creates and
@@ -250,7 +266,7 @@ pub(crate) fn open_authority_directory(path: &Utf8Path, grant_current_user: bool
     let (authorities, name) = match open_parent(path) {
         Ok(opened) => opened,
         Err(error) if is_not_found(&error) => return Ok(None),
-        Err(error) => return Err(untrusted_stored_identity(path, error)),
+        Err(error) => return Err(check_failure(path, error)),
     };
     open_authority(&authorities, name, path, grant_current_user)
 }
@@ -263,7 +279,7 @@ fn open_authority(
 ) -> anyhow::Result<Option<Dir>> {
     authorities
         .open_dir(name, &tree_rule(grant_current_user), Share::Shared)
-        .map_err(|error| untrusted_stored_identity(path, error.into()))
+        .map_err(|error| check_failure(path, error.into()))
 }
 
 /// Opens the `identity.json` at `path` in its checked `authority` directory, without changing it, once it passes the
@@ -298,7 +314,7 @@ fn open_identity_in(
     let name = path.file_name().context("identity path has no name")?;
     authority
         .open_file(name, &tree_rule(grant_current_user), options)
-        .map_err(|error| untrusted_stored_identity(path, error.into()))
+        .map_err(|error| check_failure(path, error.into()))
 }
 
 fn create_authority(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Dir> {
