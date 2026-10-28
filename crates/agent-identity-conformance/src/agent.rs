@@ -1051,7 +1051,12 @@ impl AgentCase {
     fn write_pending(&mut self, token: &str) -> anyhow::Result<()> {
         self.add_token(token);
         let path = self.pending_path();
-        std::fs::create_dir_all(path.parent().context("pending parent")?)?;
+        let parent = path.parent().context("pending parent")?;
+        // Some cases write a pending file before the agent's first start, and the agent refuses identity directories owned by another account.
+        #[cfg(windows)]
+        crate::windows::create_protected_dirs(parent)?;
+        #[cfg(not(windows))]
+        std::fs::create_dir_all(parent)?;
         write_pending_file(&path, &serde_json::to_vec(&json!({ "version": 1, "token": token }))?)?;
         #[cfg(windows)]
         crate::windows::pending_acl_is_protected(&path)?;
