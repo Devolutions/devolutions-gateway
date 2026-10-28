@@ -9,6 +9,7 @@ This crate is the agent's side of the channel defined in `agent-channel-proto`.
 - The backoff restarts from 1 s only after a stream has stayed authenticated for 60 s, so that a stream that authenticates and then drops at once keeps backing off.
   After such a long-lived stream closes, the first reconnect waits a delay drawn uniformly from `[0, 30 s]`, so that an authority restart doesn't bring every agent back within the same second.
 - A server message that cannot be decoded, or whose `id` is not a UUID, closes the stream as a transient failure without a reply, so the agent never echoes an unchecked `id` and never sends an envelope larger than `CONTRACT.agent-identity.md` §7.1 allows.
+- Text from the authority, a status message or the reason of a push, is logged with control characters, bidirectional overrides and backslashes escaped and is cut to 256 characters, and an `error-code` that is not a lowercase snake_case code of at most 64 bytes is logged as invalid, so that an authority cannot forge log lines or flood the log.
 
 ## Handshake
 
