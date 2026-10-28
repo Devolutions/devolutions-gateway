@@ -564,6 +564,109 @@ fn a_repair_takes_ownership_from_an_owner_the_rule_does_not_allow() -> anyhow::R
     Ok(())
 }
 
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[rstest]
+#[case::extra_account(&[(user(), FULL, INHERITED_BY_CHILDREN), (users(), FULL, INHERITED_BY_CHILDREN)])]
+#[case::nothing_for_the_owner(&[(users(), READ, 0)])]
+fn a_repair_of_access_restores_the_dacl_of_a_directory_the_current_user_owns(
+    #[case] dacl: &[AllowEntry],
+) -> anyhow::Result<()> {
+    // Catches a repair of access that refuses, rather than repairs, a directory whose owner the rule allows.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    drop(base.create_dir("child", &user_rule(), Existing::Check)?);
+    let child = test.path().join("child");
+    set_dacl(&child, dacl, InheritableAclKind::Protected)?;
+
+    drop(base.create_dir("child", &user_rule().exact(), Existing::RepairAccess)?);
+
+    assert_eq!(security(&child)?, (user(), vec![(user(), FULL, INHERITED_BY_CHILDREN)]));
+    Ok(())
+}
+
+// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: intent crates/agent-identity/INTENT.md §Local state
+#[test]
+fn a_repair_of_access_refuses_an_owner_the_rule_does_not_allow_without_changing_it() -> anyhow::Result<()> {
+    // Catches a repair of access that takes ownership, as a repair does, from an owner whose DACL lets the current
+    // user read and rewrite the owner and DACL but not open the directory for a check.
+    const READ_ATTRIBUTES: u32 = 0x80;
+    const WRITE_DAC: u32 = 0x0004_0000;
+    const WRITE_OWNER: u32 = 0x0008_0000;
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    drop(base.create_dir("child", &user_rule(), Existing::Check)?);
+    let child = test.path().join("child");
+    // The owner is given first, so that a skipped test leaves a directory it can remove.
+    if !set_owner(&child, &well_known(Security::WinLocalServiceSid))? {
+        skip(
+            "a_repair_of_access_refuses_an_owner_the_rule_does_not_allow_without_changing_it",
+            "the process token doesn't hold the restore privilege",
+        );
+        return Ok(());
+    }
+    set_dacl(
+        &child,
+        &[(user(), READ_CONTROL | WRITE_DAC | WRITE_OWNER | READ_ATTRIBUTES, 0)],
+        InheritableAclKind::Protected,
+    )?;
+    let before = security(&child)?;
+
+    let error = refusal(base.create_dir("child", &user_rule().exact(), Existing::RepairAccess));
+
+    assert!(
+        is_refused(&error, |refusal| matches!(refusal, Refusal::Owner)),
+        "{error:?}"
+    );
+    assert_eq!(security(&child)?, before);
+    // The DACL is enough for a repair to take the directory, so the refusal above is the repair of access's own.
+    drop(base.create_dir("child", &user_rule().exact(), Existing::Repair)?);
+    assert_eq!(security(&child)?.0, user());
+    Ok(())
+}
+
+// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: intent crates/agent-identity/INTENT.md §Local state
+#[test]
+fn a_repair_of_access_leaves_a_directory_whose_owner_it_cannot_read_unchanged() -> anyhow::Result<()> {
+    // Catches a repair of access that writes to a directory whose owner it couldn't check.
+    let test = TestDir::new();
+    let base = Dir::create_base(test.path(), &user_rule())?;
+    drop(base.create_dir("child", &user_rule(), Existing::Check)?);
+    let child = test.path().join("child");
+    let _give_back = GiveBack(&child);
+    let local_service = well_known(Security::WinLocalServiceSid);
+    if !set_owner(&child, &local_service)? {
+        skip(
+            "a_repair_of_access_leaves_a_directory_whose_owner_it_cannot_read_unchanged",
+            "the process token doesn't hold the restore privilege",
+        );
+        return Ok(());
+    }
+    // The current user's entry still grants it WRITE_DAC, which this DACL then takes away with every other access.
+    set_dacl(&child, &[(system(), FULL, 0)], InheritableAclKind::Protected)?;
+    let read_as_backup = || {
+        let _backup = BackupPrivilege::enable()?;
+        security(&child)
+    };
+
+    let result = base.create_dir("child", &user_rule().exact(), Existing::RepairAccess);
+
+    assert!(result.is_err());
+    assert_eq!(read_as_backup()?, (local_service, vec![(system(), FULL, 0)]));
+    return Ok(());
+
+    /// Gives the directory back to the current user however the test ends, so that the test directory can be removed.
+    struct GiveBack<'a>(&'a Utf8Path);
+
+    impl Drop for GiveBack<'_> {
+        fn drop(&mut self) {
+            let _ = set_owner(self.0, &user());
+            let _ = set_dacl(self.0, &[(user(), FULL, 0)], InheritableAclKind::Protected);
+        }
+    }
+}
+
 // oracle: intent crates/private-fs/INTENT.md §vocabulary
 #[test]
 fn administrators_as_an_owner_allow_a_member_of_the_group() -> anyhow::Result<()> {
