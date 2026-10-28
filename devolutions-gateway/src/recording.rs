@@ -1260,9 +1260,10 @@ const REMUX_MARKER_SUFFIX: &str = ".remuxing";
 /// Age past which a remux mark no longer counts.
 ///
 /// A crash between the mark and the storing of its job leaves a mark that no remux removes.
-/// The limit lets an AI analysis waiting on such a mark go on well before it fails for lack of progress, and no remux
-/// takes this long.
-const REMUX_MARKER_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
+/// The limit lets an AI analysis waiting on such a mark go on before it fails for lack of progress.
+/// The remux job marks the file again as it starts, so only the remux itself, which should take far less, counts
+/// against it.
+pub(crate) const REMUX_MARKER_STALE_AFTER: Duration = Duration::from_secs(20 * 60);
 
 /// The file that marks `recording_file` as waiting for its remux, from the time the remux is scheduled until it ends.
 pub(crate) fn remux_marker(recording_file: &Utf8Path) -> Utf8PathBuf {
@@ -1291,7 +1292,13 @@ pub(crate) async fn remux_pending(dir: &Utf8Path) -> io::Result<bool> {
             continue;
         }
 
-        let age = entry.metadata().await?.modified()?.elapsed().unwrap_or_default();
+        let metadata = match entry.metadata().await {
+            Ok(metadata) => metadata,
+            // The remux ended between the listing and this look.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        let age = metadata.modified()?.elapsed().unwrap_or_default();
 
         if age < REMUX_MARKER_STALE_AFTER {
             return Ok(true);
@@ -1314,6 +1321,12 @@ impl job_queue::Job for RemuxJob {
     async fn run(&mut self) -> anyhow::Result<()> {
         let input_path = core::mem::take(&mut self.input_path);
         let marker = remux_marker(&input_path);
+
+        // The mark ages from now, so neither the wait for this job nor a run again after a restart makes it stale.
+        if let Err(error) = fs::write(&marker, b"").await {
+            warn!(%marker, %error, "Failed to mark the recording as waiting for its remux");
+        }
+
         remux(input_path).await;
         remove_remux_marker(&marker).await;
         Ok(())
@@ -1455,7 +1468,7 @@ mod tests {
         }
     }
 
-    // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+    // oracle: mutant a fresh remux mark is ignored, so an AI analysis reads a video its remux is about to replace
     #[tokio::test]
     async fn a_recording_waits_for_its_remux_while_its_mark_is_fresh() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -1483,7 +1496,7 @@ mod tests {
         assert!(!remux_pending(dir).await.expect("stale mark"));
     }
 
-    // oracle: mutant a session folder without a mark, or without a folder yet, fails the AI analysis as storage
+    // oracle: mutant a recording file is taken for a remux mark, so every AI analysis of a video session waits
     #[tokio::test]
     async fn a_session_without_remux_marks_has_no_pending_remux() {
         let dir = tempfile::tempdir().expect("temp dir");
@@ -1491,15 +1504,15 @@ mod tests {
         std::fs::write(dir.join("recording-0.webm"), b"").expect("recording");
 
         assert!(!remux_pending(dir).await.expect("no mark"));
-        assert!(!remux_pending(&dir.join("gone")).await.expect("missing folder"));
     }
 
-    // oracle: mutant a remux mark left by a crash outlasts the progress deadline, so AI analyses of the session fail
-    #[test]
-    fn a_forgotten_remux_mark_stops_counting_before_an_ai_analysis_times_out() {
-        let progress_timeout = crate::provisioner_tasks::recording_ai_analysis::PROGRESS_TIMEOUT.unsigned_abs();
+    // oracle: mutant a session folder that does not exist fails the AI analysis as storage
+    #[tokio::test]
+    async fn a_missing_session_folder_has_no_pending_remux() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
 
-        assert!(REMUX_MARKER_STALE_AFTER < progress_timeout);
+        assert!(!remux_pending(&dir.join("gone")).await.expect("missing folder"));
     }
 
     #[tokio::test]
