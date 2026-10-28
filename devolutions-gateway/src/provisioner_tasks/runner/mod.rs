@@ -34,11 +34,18 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{AttemptError, Permanent};
-use crate::job_queue::{JobQueueHandle, MAX_ATTEMPTS};
-use crate::token::AccessScope;
+use crate::job_queue::JobQueueHandle;
 
 /// Time before a record whose end failed is ended again.
 const END_RETRY_DELAY: time::Duration = time::Duration::minutes(5);
+
+/// Attempts a record gets: a recoverable failure of the last one fails the record.
+pub const MAX_ATTEMPTS: u32 = 5;
+
+/// Time before the attempt that follows attempt number `attempts`: 30 seconds, doubled after each attempt.
+fn retry_delay(attempts: u32) -> time::Duration {
+    time::Duration::seconds(30) * (1_i32 << attempts.saturating_sub(1).min(MAX_ATTEMPTS))
+}
 
 /// Where the runner queues the jobs of its records.
 #[async_trait]
@@ -77,12 +84,6 @@ impl ProvisionerTaskJobQueue for JobQueueHandle {
 pub trait ProvisionerTask: Send + Sync + 'static {
     /// The kind written in the records of this task.
     const KIND: &'static str;
-
-    /// The scope a token needs to start this task, `gateway.tasks.<kind>.start`.
-    const START_SCOPE: AccessScope;
-
-    /// The scope a token needs to read the records of this task, `gateway.tasks.<kind>.read`.
-    const READ_SCOPE: AccessScope;
 
     /// What the record keeps as asked; never secrets, since records are kept and returned to callers.
     type Params: Serialize + DeserializeOwned + Send;
@@ -430,7 +431,10 @@ impl ProvisionerTaskRunner {
             .await
     }
 
-    /// Runs one attempt for the job holding `job_token`; returns an error only to ask the job queue for a retry.
+    /// Runs one attempt for the job holding `job_token`.
+    ///
+    /// The record counts its attempts, and the job queues the next one itself, so the job queue retries a job only when
+    /// what it had to record or queue could not be stored.
     async fn run_attempt(&self, task_id: Uuid, job_token: Uuid) -> anyhow::Result<()> {
         let store = &self.inner.store;
         let now = OffsetDateTime::now_utc();
@@ -577,8 +581,11 @@ impl ProvisionerTaskRunner {
                 }
             },
             Err(AttemptError::Recoverable(error)) if attempts < MAX_ATTEMPTS => {
-                warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, "Task attempt failed; it will be retried");
-                anyhow::bail!("Task attempt failed: {error:?}");
+                let retry_at = OffsetDateTime::now_utc() + retry_delay(attempts);
+                warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, %retry_at, "Task attempt failed; it will be retried");
+                self.enqueue(task_id, job_token, Some(retry_at))
+                    .await
+                    .context("queue the next attempt")?;
             }
             Err(AttemptError::Recoverable(error)) => {
                 warn!(task.id = %task_id, task.kind = %record.kind, attempts, ?error, "Task failed after its last attempt");

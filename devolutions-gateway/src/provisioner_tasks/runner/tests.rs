@@ -6,7 +6,6 @@ use provisioner_task::ProvisionerTaskState;
 use super::*;
 use crate::job_queue::{JobMessage, JobQueueReceiver};
 use crate::provisioner_tasks::Recoverable;
-use crate::token::AccessScope;
 
 const KIND: &str = "test.echo";
 
@@ -34,10 +33,6 @@ struct Echo {
 #[async_trait]
 impl ProvisionerTask for Echo {
     const KIND: &'static str = KIND;
-
-    const START_SCOPE: AccessScope = AccessScope::Wildcard;
-
-    const READ_SCOPE: AccessScope = AccessScope::Wildcard;
 
     type Params = EchoParams;
 
@@ -397,10 +392,20 @@ async fn a_recoverable_failure_is_retried_up_to_the_last_attempt() {
     let mut job = harness.queued_job();
 
     for attempt in 1..MAX_ATTEMPTS {
-        job.run().await.expect_err("the job queue retries");
+        let failed_at = OffsetDateTime::now_utc();
+        job.run().await.expect("the job queues the next attempt itself");
         assert_eq!(harness.task(id).await.state, ProvisionerTaskState::Running, "{attempt}");
+
+        let JobMessage {
+            job: next,
+            schedule_for,
+        } = harness.job_queue_rx.try_recv().expect("the next attempt is queued");
+        let retry_at = schedule_for.expect("the next attempt waits");
+        assert!(retry_at >= failed_at + retry_delay(attempt), "{attempt}: {retry_at}");
+        job = next;
     }
     job.run().await.expect("the last attempt");
+    assert!(harness.job_queue_rx.try_recv().is_err(), "no attempt after the last");
 
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
