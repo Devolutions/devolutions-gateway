@@ -1,8 +1,10 @@
 ## Data folder
 
 - The installer gives `%ProgramData%\Devolutions\Agent` its owner and its permissions when it creates the folder, and resets both on every install, upgrade and repair, so that only SYSTEM and administrators can rename or replace what the agent stores there.
+  Install, upgrade and repair also remove the access earlier installers gave LOCAL SERVICE from the files and folders below `%ProgramData%\Devolutions\Agent`, including files that have other names outside it.
 - An install, upgrade, repair or feature change fails before it changes anything, with an error in the installer's language naming the folder and the account at fault, when `%ProgramData%\Devolutions` or `%ProgramData%\Devolutions\Agent` is a link, can't be read, or has an owner other than SYSTEM, Administrators, TrustedInstaller or a member of Administrators, or when `%ProgramData%\Devolutions` lets another account rename or replace it or an entry of it.
   The installer refuses rather than repairs, because a folder another account controlled may hold entries that account left there, and it refuses the folders the agent refuses, so that a deployment never reports success for an agent that can't use its data folder.
+- An install, upgrade or repair also fails, with an error naming the entry and its owner, when a file or folder below `%ProgramData%\Devolutions\Agent` has an owner other than those accounts, because its owner can give itself access again; the installer never takes ownership of such an entry, so that what another account left there never passes for the agent's own.
   A full uninstall never refuses, so a machine can always be uninstalled.
 - The installer never follows a link when it sets the security of a data folder, so that a link can't make it change the security of another folder.
 

@@ -149,6 +149,24 @@ public sealed class DataFolderTests
 
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
+    public void AgentFolderSecurityLetsOnlySystemAndAdministratorsChangeWhatTheAgentStores()
+    {
+        // FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, which changes nothing.
+        const uint readAndExecute = 0x1200a9;
+
+        string[] writers = new RawSecurityDescriptor(Includes.PROGRAM_DATA_SDDL).DiscretionaryAcl
+            .Cast<CommonAce>()
+            .Where(ace => ace.AceQualifier == AceQualifier.AccessAllowed
+                && (unchecked((uint)ace.AccessMask) & ~readAndExecute) != 0)
+            .Select(ace => ace.SecurityIdentifier.Value)
+            .OrderBy(sid => sid, System.StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(["S-1-5-18", "S-1-5-32-544"], writers);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
     public void CheckRefusesAFileAtDevolutions()
     {
         using TempFolder folder = new();
@@ -257,6 +275,168 @@ public sealed class DataFolderTests
         Assert.Null(DataFolders.Check(folder.Path, this.logger));
     }
 
+    // An entry another account created below Agent while it could keeps that account as its owner, which may change the
+    // entry's DACL whatever the installer sets.
+    [Fact]
+    public void CheckRefusesAFileWithAnUntrustedOwnerTwoFoldersBelowAgentAndChangesNothing()
+    {
+        using TempFolder folder = new();
+        string deeper = folder.CreateDirectory("Devolutions", "Agent", "sub", "deeper");
+        string file = Path.Combine(deeper, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        string[] entries =
+        [
+            Path.Combine(folder.Path, "Devolutions"),
+            Path.Combine(folder.Path, "Devolutions", "Agent"),
+            Path.Combine(folder.Path, "Devolutions", "Agent", "sub"),
+            deeper,
+            file,
+        ];
+        byte[][] before = entries.Select(SecureDirectoryTests.RawDescriptor).ToArray();
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger, UntrustedAt(file));
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal((file, "EntryOwner " + SecureDirectoryTests.RawSecurity(file).Owner), (refusal?.Folder, Describe(refusal)));
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal(before, entries.Select(SecureDirectoryTests.RawDescriptor).ToArray());
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRefusesAFolderWithAnUntrustedOwnerBelowAgent()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger, UntrustedAt(sub));
+
+        Assert.Equal((sub, "EntryOwner " + SecureDirectoryTests.RawSecurity(sub).Owner), (refusal?.Folder, Describe(refusal)));
+    }
+
+    // A link's own owner can retarget it, whatever it points to.
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRefusesAJunctionWithAnUntrustedOwnerInsideAgent()
+    {
+        using TempFolder folder = new();
+        string agent = folder.CreateDirectory("Devolutions", "Agent");
+        string target = folder.CreateDirectory("target");
+        string file = Path.Combine(target, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        string link = Path.Combine(agent, "link");
+        TempFolder.CreateJunction(link, target);
+
+        DataFolderRefusal refusal = DataFolders.Check(
+            folder.Path, this.logger, UntrustedAt(link, file, Path.Combine(link, "file.txt")));
+
+        Assert.Equal((link, "EntryOwner " + SecureDirectoryTests.RawSecurity(link).Owner), (refusal?.Folder, Describe(refusal)));
+    }
+
+    // Until the installer resets Agent, its earlier DACL lets LOCAL SERVICE add entries, so one can appear after the check.
+    [Fact]
+    public void CreateRefusesAFolderWithAnUntrustedOwnerBelowAgentBeforeChangingItOrWhatItHolds()
+    {
+        using TempFolder folder = new();
+        string agent = SecureDirectoryTests.CreateLegacyAgentFolder(folder.Path);
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+        string file = Path.Combine(sub, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        string[] entries = [sub, file];
+        byte[][] before = entries.Select(SecureDirectoryTests.RawDescriptor).ToArray();
+        Assert.Equal(agent, Path.GetDirectoryName(sub));
+
+        DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger, UntrustedAt(sub));
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal((sub, "EntryOwner " + SecureDirectoryTests.RawSecurity(sub).Owner), (refusal?.Folder, Describe(refusal)));
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal(before, entries.Select(SecureDirectoryTests.RawDescriptor).ToArray());
+    }
+
+    // An earlier Agent passed LOCAL SERVICE on to the files below it, and a file another account owns keeps it.
+    [Fact]
+    public void CreateRefusesAFileWithAnUntrustedOwnerBelowAgentBeforeChangingIt()
+    {
+        using TempFolder folder = new();
+        string agent = SecureDirectoryTests.CreateLegacyAgentFolder(folder.Path);
+        string file = Path.Combine(agent, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        byte[] before = SecureDirectoryTests.RawDescriptor(file);
+        Assert.Contains(";;;LS)", SecureDirectoryTests.RawSddl(file));
+
+        DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger, UntrustedAt(file));
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal((file, "EntryOwner " + SecureDirectoryTests.RawSecurity(file).Owner), (refusal?.Folder, Describe(refusal)));
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal(before, SecureDirectoryTests.RawDescriptor(file));
+    }
+
+    // The installer log is all an administrator has to find what failed a run.
+    // oracle: mutant a failure to hold an entry below Agent doesn't name the entry
+    [Fact]
+    public void CheckFailsNamingADirectoryBelowAgentHeldWithoutSharing()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+
+        System.Exception failure;
+
+        using (TempFolder.HoldWithoutSharing(sub))
+        {
+            failure = Record.Exception(() => DataFolders.Check(folder.Path, this.logger, UntrustedAt()));
+        }
+
+        Assert.Contains(sub, failure?.Message ?? "no failure");
+    }
+
+    // Before a major upgrade stops it, the agent holds identity without sharing for a moment around each state write.
+    // oracle: mutant a directory held without sharing fails the walk at once
+    [Fact]
+    public void CheckWaitsForADirectoryBelowAgentHeldWithoutSharingForAMoment()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+        Microsoft.Win32.SafeHandles.SafeFileHandle held = TempFolder.HoldWithoutSharing(sub);
+        System.Threading.Tasks.Task release = System.Threading.Tasks.Task.Delay(200).ContinueWith(_ => held.Dispose());
+
+        try
+        {
+            Assert.Null(DataFolders.Check(folder.Path, this.logger, UntrustedAt()));
+        }
+        finally
+        {
+            release.Wait();
+        }
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckDoesNotFollowAJunctionWithATrustedOwnerInsideAgent()
+    {
+        using TempFolder folder = new();
+        string agent = folder.CreateDirectory("Devolutions", "Agent");
+        string target = folder.CreateDirectory("target");
+        string file = Path.Combine(target, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        TempFolder.CreateJunction(Path.Combine(agent, "link"), target);
+
+        Assert.Null(DataFolders.Check(folder.Path, this.logger, UntrustedAt(file, Path.Combine(agent, "link", "file.txt"))));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckPassesWhenEveryEntryBelowAgentHasATrustedOwner()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+        System.IO.File.WriteAllText(Path.Combine(sub, "file.txt"), "");
+        TempFolder.CreateJunction(Path.Combine(sub, "link"), folder.CreateDirectory("target"));
+
+        Assert.Null(DataFolders.Check(folder.Path, this.logger, UntrustedAt()));
+    }
+
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
     public void ErrorNamesTheFolderAndTheAccountOrItsSidWhenItHasNone()
@@ -272,6 +452,19 @@ public sealed class DataFolderTests
         Assert.Contains(users.Translate(typeof(NTAccount)).Value, owned);
         Assert.Contains(Folder, replaceable);
         Assert.Contains(Unnamed, replaceable);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void ErrorNamesTheEntryBelowAgentAndItsOwner()
+    {
+        const string Entry = @"C:\ProgramData\Devolutions\Agent\identity\identity.json";
+        SecurityIdentifier localService = new(WellKnownSidType.LocalServiceSid, null);
+
+        string message = new DataFolderRefusal(Entry, DataFolderProblem.EntryOwner, localService).Message("1033");
+
+        Assert.Contains(Entry, message);
+        Assert.Contains(localService.Translate(typeof(NTAccount)).Value, message);
     }
 
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
@@ -294,6 +487,7 @@ public sealed class DataFolderTests
     [InlineData(Strings.DataFolderOwnedByUntrustedAccount)]
     [InlineData(Strings.DataFolderReplaceableByUntrustedAccount)]
     [InlineData(Strings.DataFolderSecurityUnreadable)]
+    [InlineData(Strings.DataFolderEntryOwnedByUntrustedAccount)]
     public void ErrorIsTranslatedWithTheEnglishPlaceholders(string id)
     {
         string english = Program.Localize("1033", id);
@@ -381,6 +575,16 @@ public sealed class DataFolderTests
     /// </remarks>
     private static string ReplaceableByUsers(string right) =>
         $"O:{CurrentUser}D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)(A;;{right};;;BU)";
+
+    /// <summary>
+    /// A trust decision that trusts every account except for the entries <paramref name="untrusted"/> names.
+    /// </summary>
+    /// <remarks>
+    /// A test without elevation can't make another account the owner of an entry, so every entry it creates has the same
+    /// owner, and the decision tells them apart by path.
+    /// </remarks>
+    private static System.Func<string, SecurityIdentifier, bool> UntrustedAt(params string[] untrusted) =>
+        (path, _) => !untrusted.Contains(path);
 
     /// <summary>
     /// The problem and the account <paramref name="refusal"/> names, or <c>none</c>.
