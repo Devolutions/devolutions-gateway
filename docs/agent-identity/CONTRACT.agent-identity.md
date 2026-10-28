@@ -139,6 +139,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - The number of CA tiers and the rest of the root profile are each authority's choice, within the rule below.
 - Every certificate in a chain is signed with `ecdsa-with-SHA256` by a P-256 key or with `ecdsa-with-SHA384` by a P-384 key, never with RSA, and every CA certificate, the root included, carries basicConstraints with `cA` set and key usage with `keyCertSign`.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
+  The setting is at least 15 minutes, so that the agent's scheduled renewal, at two-thirds of the lifetime, is not held back by its 10-minute wait between renewals.
   The leaf carries no other extension except an authority key identifier, a subject key identifier and the enrollment URL extension; in particular it carries no basicConstraints, so a leaf can never act as a CA.
 - The enrollment URL extension, OID `1.3.6.1.4.1.32473.1.1`, non-critical, holds as an `IA5String` the `u` of the token that enrolled the identity, without trailing slashes (§2); a leaf carries it exactly once, and every certificate issued for that identity carries the same value.
   That OID sits under the enterprise number RFC 5612 reserves for documentation; it is replaced by one under Devolutions' own IANA enterprise number before the feature is released.
