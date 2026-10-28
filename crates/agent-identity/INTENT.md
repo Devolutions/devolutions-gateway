@@ -37,7 +37,8 @@
 The location and format of the files below are stable, because the conformance tester stands in for the installer and observes the agent through them.
 `<data-dir>` means the agent's configured data directory.
 
-- The agent provisions its identity directories and, at start-up, resets a wrong owner or wrong permissions on them, without changing any authority directory under them.
+- The agent provisions its identity directories and, at start-up, resets wrong permissions on them, without changing any authority directory under them.
+  An identity directory owned by another account is never repaired, and stops all identity processing until it is fixed, because the account that created it can keep a handle that still changes it after a reset.
 - Before it uses stored identities, the agent checks that every `<data-dir>/identity/authorities/<authority_id>/` directory is owned by its account and protected from other users.
   One that fails the check is never repaired, and stops all identity processing until it is fixed, because skipping it would let a local attacker hide or forge an identity, for example hide a rejected identity so that its token enrolls again.
   The running agent repeats the check before every use of its state and on each pending-directory poll, stops every identity and its streams while any directory fails it, and resumes without a restart once all pass.
