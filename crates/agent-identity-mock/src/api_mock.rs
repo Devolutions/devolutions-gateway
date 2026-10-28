@@ -24,6 +24,7 @@ pub(crate) fn router(app: Arc<App>) -> Router {
         .route("/__mock__/faults", post(faults))
         .route("/__mock__/config", post(update_config))
         .route("/__mock__/config/stale", post(stale_config))
+        .route("/__mock__/key-storage", post(key_storage))
         .route("/__mock__/reset", post(reset))
         .route("/__mock__/time/advance", post(time_advance))
         .route("/__mock__/time/freeze", post(time_freeze))
@@ -170,14 +171,40 @@ async fn update_config(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Resp
     let Some(fields) = value.get("fields").and_then(Value::as_object) else {
         return control_error(&ApiError::invalid_request("fields must be a JSON object"));
     };
-    if fields
-        .keys()
-        .any(|name| matches!(name.as_str(), "version" | "revision" | "agent_channel_url"))
-    {
+    if fields.keys().any(|name| {
+        matches!(
+            name.as_str(),
+            "version" | "revision" | "agent_channel_url" | "key_storage"
+        )
+    }) {
         return control_error(&ApiError::invalid_request("config fields cannot replace reserved keys"));
     }
     let mut state = app.state.lock().await;
     match state.merge_config_fields(fields) {
+        Ok(updated) => Json(json!({ "updatedIdentities": updated })).into_response(),
+        Err(error) => control_error(&error),
+    }
+}
+
+/// `POST key-storage` takes `{ "policy": <any JSON value> }` to set `config.key_storage` in every identity's config, or
+/// `{ "clear": true }` to remove it.
+/// The policy may be malformed, `null` included, so that tests can check the agent ignores it.
+async fn key_storage(AxumState(app): AxumState<Arc<App>>, body: Bytes) -> Response {
+    const EXPECTED: &str = "body must be { \"policy\": <JSON value> } or { \"clear\": true }";
+    let value: Value = match serde_json::from_slice(&body) {
+        Ok(value) => value,
+        Err(_) => return control_error(&ApiError::invalid_request("malformed JSON body")),
+    };
+    let policy = match value.as_object() {
+        Some(members) if members.len() == 1 => match (members.get("policy"), members.get("clear")) {
+            (Some(policy), None) => Some(policy.clone()),
+            (None, Some(Value::Bool(true))) => None,
+            _ => return control_error(&ApiError::invalid_request(EXPECTED)),
+        },
+        _ => return control_error(&ApiError::invalid_request(EXPECTED)),
+    };
+    let mut state = app.state.lock().await;
+    match state.update_key_storage(policy, &app.base_url) {
         Ok(updated) => Json(json!({ "updatedIdentities": updated })).into_response(),
         Err(error) => control_error(&error),
     }

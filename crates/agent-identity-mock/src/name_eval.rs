@@ -7,7 +7,7 @@
 use serde_json::{Map, Value};
 
 /// Known metadata keys (placeholders besides `token_name`).
-pub(crate) const KNOWN_KEYS: [&str; 8] = [
+pub(crate) const KNOWN_KEYS: [&str; 10] = [
     "hostname",
     "fqdn",
     "domain",
@@ -16,6 +16,8 @@ pub(crate) const KNOWN_KEYS: [&str; 8] = [
     "arch",
     "agent_version",
     "machine_id",
+    "key_storage",
+    "key_storage_available",
 ];
 
 pub(crate) const MAX_METADATA_KEYS: usize = 32;
@@ -179,7 +181,7 @@ mod tests {
     use rstest::rstest;
     use serde_json::{Map, Value};
 
-    use super::{render_friendly_name, validate_metadata};
+    use super::{render_friendly_name, validate_friendly_name_format, validate_metadata};
 
     /// `count` entries `k00`, `k01`… whose values are `value_len` bytes.
     fn entries(count: usize, value_len: usize) -> Map<String, Value> {
@@ -297,6 +299,23 @@ mod tests {
         assert_eq!(
             render_friendly_name("{hostname}", &metadata, "token", uuid::Uuid::nil()),
             expected
+        );
+    }
+
+    /// CONTRACT.agent-identity.md §3 lists `key_storage` and `key_storage_available` among the known keys, so a
+    /// friendly-name format may name them as placeholders, and an identity's name renders their reported values.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    #[test]
+    fn key_storage_metadata_keys_are_known_placeholders() {
+        let format = "{key_storage}/{key_storage_available}";
+        assert_eq!(validate_friendly_name_format(format), Ok(()));
+        let metadata = Map::from_iter([
+            ("key_storage".to_owned(), Value::String("tpm".to_owned())),
+            ("key_storage_available".to_owned(), Value::String("file,tpm".to_owned())),
+        ]);
+        assert_eq!(
+            render_friendly_name(format, &metadata, "token", uuid::Uuid::nil()),
+            "tpm/file,tpm"
         );
     }
 }
