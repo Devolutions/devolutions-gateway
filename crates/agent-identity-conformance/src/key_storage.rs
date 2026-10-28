@@ -28,6 +28,13 @@ pub(crate) const fn unavailable() -> &'static str {
     }
 }
 
+/// Whether [`unavailable()`] is a key storage the agent knows, as opposed to a name it doesn't.
+///
+/// The agent logs an error for a key in a known key storage that isn't available ([agent intent], "Identities"); whether it logs one for a name it doesn't know is open.
+///
+/// [agent intent]: ../../agent-identity/INTENT.md#identities
+pub(crate) const UNAVAILABLE_IS_KNOWN: bool = !cfg!(windows);
+
 /// Whether `name` matches `^[a-z][a-z0-9_]{0,63}$`, the rule of a key storage name.
 pub(crate) fn well_formed(name: &str) -> bool {
     let mut bytes = name.bytes();
