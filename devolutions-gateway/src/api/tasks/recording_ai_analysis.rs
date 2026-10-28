@@ -123,9 +123,11 @@ impl TryFrom<ProvisionerTaskRecord> for AiAnalysisTask {
 }
 
 fn task_json(task: ProvisionerTaskRecord) -> Result<Json<AiAnalysisTask>, HttpError> {
-    AiAnalysisTask::try_from(task)
-        .map(Json)
-        .map_err(HttpError::internal().with_msg("invalid session ID in the AI analysis").err())
+    AiAnalysisTask::try_from(task).map(Json).map_err(
+        HttpError::internal()
+            .with_msg("invalid session ID in the AI analysis")
+            .err(),
+    )
 }
 
 fn ai_analysis_conflict(code: AiAnalysisConflictCode, task_id: Option<Uuid>) -> Response {

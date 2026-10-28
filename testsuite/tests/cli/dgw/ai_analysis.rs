@@ -111,7 +111,8 @@ impl Gateway {
     }
 
     async fn get_analysis(&self, task_id: Uuid, scope: &str) -> (StatusCode, Value) {
-        self.get(&format!("/jet/tasks/recording-ai-analysis/{task_id}"), scope).await
+        self.get(&format!("/jet/tasks/recording-ai-analysis/{task_id}"), scope)
+            .await
     }
 
     async fn get(&self, path: &str, scope: &str) -> (StatusCode, Value) {

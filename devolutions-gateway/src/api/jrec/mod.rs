@@ -13,7 +13,7 @@ use axum::body::Body;
 use axum::extract::ws::WebSocket;
 use axum::extract::{self, ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::http::header::{CONTENT_DISPOSITION, CONTENT_TYPE, HeaderValue};
-use axum::response::{IntoResponse as _, Response};
+use axum::response::Response;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use bytes::Bytes;
