@@ -64,23 +64,29 @@ pub(crate) fn validate_metadata(metadata: &Map<String, Value>) -> Result<(), Str
 
 /// Whether `c` is an invisible format character that [CONTRACT.agent-identity.md][contract] ("3. Metadata") refuses in a metadata value.
 ///
-/// The contract lists them as code points rather than as Unicode general category `Cf`, so that the agent and every authority agree on the set whatever Unicode version their runtimes ship.
+/// The contract lists them as code points rather than through a Unicode property such as `Default_Ignorable_Code_Point` or general category `Cf`, so that the agent and every authority agree on the set whatever Unicode version their runtimes ship.
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#metadata
 fn is_invisible_format_character(c: char) -> bool {
     matches!(
         c,
         '\u{ad}'
+            | '\u{34f}'
             | '\u{61c}'
-            | '\u{180e}'
+            | '\u{115f}'..='\u{1160}'
+            | '\u{17b4}'..='\u{17b5}'
+            | '\u{180b}'..='\u{180f}'
             | '\u{200b}'..='\u{200f}'
             | '\u{202a}'..='\u{202e}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{206f}'
+            | '\u{2060}'..='\u{206f}'
+            | '\u{3164}'
+            | '\u{fe00}'..='\u{fe0f}'
             | '\u{feff}'
-            | '\u{fff9}'..='\u{fffb}'
-            | '\u{e0001}'
-            | '\u{e0020}'..='\u{e007f}'
+            | '\u{ffa0}'
+            | '\u{fff0}'..='\u{fffb}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0000}'..='\u{e0fff}'
     )
 }
 
@@ -229,16 +235,22 @@ mod tests {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     #[rstest]
     #[case::soft_hyphen('\u{ad}', '\u{ad}')]
+    #[case::combining_grapheme_joiner('\u{34f}', '\u{34f}')]
     #[case::arabic_letter_mark('\u{61c}', '\u{61c}')]
-    #[case::mongolian_vowel_separator('\u{180e}', '\u{180e}')]
+    #[case::hangul_choseong_and_jungseong_fillers('\u{115f}', '\u{1160}')]
+    #[case::khmer_inherent_vowels('\u{17b4}', '\u{17b5}')]
+    #[case::mongolian_variation_selectors_and_vowel_separator('\u{180b}', '\u{180f}')]
     #[case::zero_width_and_directional_marks('\u{200b}', '\u{200f}')]
     #[case::directional_embeddings_and_overrides('\u{202a}', '\u{202e}')]
-    #[case::word_joiner_and_invisible_operators('\u{2060}', '\u{2064}')]
-    #[case::directional_isolates_and_deprecated_formats('\u{2066}', '\u{206f}')]
+    #[case::word_joiner_through_deprecated_formats('\u{2060}', '\u{206f}')]
+    #[case::hangul_filler('\u{3164}', '\u{3164}')]
+    #[case::variation_selectors('\u{fe00}', '\u{fe0f}')]
     #[case::zero_width_no_break_space('\u{feff}', '\u{feff}')]
-    #[case::interlinear_annotations('\u{fff9}', '\u{fffb}')]
-    #[case::language_tag('\u{e0001}', '\u{e0001}')]
-    #[case::tags('\u{e0020}', '\u{e007f}')]
+    #[case::halfwidth_hangul_filler('\u{ffa0}', '\u{ffa0}')]
+    #[case::reserved_specials_and_interlinear_annotations('\u{fff0}', '\u{fffb}')]
+    #[case::shorthand_format_controls('\u{1bca0}', '\u{1bca3}')]
+    #[case::musical_symbol_beams_and_phrases('\u{1d173}', '\u{1d17a}')]
+    #[case::tags_and_variation_selectors_supplement('\u{e0000}', '\u{e0fff}')]
     fn listed_format_characters_are_refused_but_not_their_neighbors(#[case] first: char, #[case] last: char) {
         for c in first..=last {
             assert!(!accepts_value_holding(c), "U+{:04X} is accepted", u32::from(c));
@@ -261,8 +273,6 @@ mod tests {
     #[case::kaithi_number_sign('\u{110bd}', '\u{110bd}')]
     #[case::kaithi_number_sign_above('\u{110cd}', '\u{110cd}')]
     #[case::egyptian_hieroglyph_format_controls('\u{13430}', '\u{1343f}')]
-    #[case::shorthand_format_controls('\u{1bca0}', '\u{1bca3}')]
-    #[case::musical_symbol_beams_and_phrases('\u{1d173}', '\u{1d17a}')]
     fn format_characters_the_contract_leaves_out_are_accepted(#[case] first: char, #[case] last: char) {
         for c in first..=last {
             assert!(accepts_value_holding(c), "U+{:04X} is refused", u32::from(c));

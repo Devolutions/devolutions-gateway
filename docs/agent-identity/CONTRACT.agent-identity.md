@@ -105,7 +105,7 @@ Unless stated otherwise, implementations must follow these conventions.
 
 - JSON object of string → string.
 - Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
-- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes with no C0, DEL (U+007F) or C1 control characters and no invisible format character (U+00AD, U+061C, U+180E, U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+2066–U+206F, U+FEFF, U+FFF9–U+FFFB, U+E0001, U+E0020–U+E007F); whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values.
+- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes with no C0, DEL (U+007F) or C1 control characters and no invisible format character (U+00AD, U+034F, U+061C, U+115F–U+1160, U+17B4–U+17B5, U+180B–U+180F, U+200B–U+200F, U+202A–U+202E, U+2060–U+206F, U+3164, U+FE00–U+FE0F, U+FEFF, U+FFA0, U+FFF0–U+FFFB, U+1BCA0–U+1BCA3, U+1D173–U+1D17A, U+E0000–U+E0FFF); whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values.
 - Invisible format characters are excluded so that no value can reorder or hide text where an administrator reads it, such as a friendly name evaluated from metadata.
 - `metadata` is required in enroll, renew and check-in bodies and may be an empty object; an absent or non-object value → `invalid_request`.
 - Anything else (nested values, non-strings, limits exceeded) → `invalid_request`.
