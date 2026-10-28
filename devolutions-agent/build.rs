@@ -108,19 +108,12 @@ END"#,
         use std::path::PathBuf;
         use std::process::Command;
 
-        // Cargo only ever reports "release" or "debug" here: every profile inheriting the release
-        // profile (release, production, profiling) reports "release". No profile overrides
-        // `debug-assertions`, so this selects exactly the builds where the runtime uses the Windows
-        // Event Log sink (`not(debug_assertions)`), and those builds need the embedded catalog.
-        let profile = env::var("PROFILE").unwrap_or_default();
-        if profile != "release" {
-            return;
-        }
-
+        // The agent reports system events to the Event Log in every build, debug builds included, and the
+        // installer registers the agent executable as the message file, so every build embeds the catalog.
         let mc_exe = find_mc().unwrap_or_else(|| {
             panic!(
                 "mc.exe is required to embed the Devolutions Agent Event Log catalog; \
-                 use a Visual Studio developer shell or set WindowsSdkVerBinPath or WindowsSdkDir"
+                 install the Windows SDK, use a Visual Studio developer shell, or set WindowsSdkVerBinPath or WindowsSdkDir"
             )
         });
         let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
@@ -153,7 +146,12 @@ END"#,
             }
         }
 
-        let bin_dir = std::path::PathBuf::from(env::var_os("WindowsSdkDir")?).join("bin");
+        // Outside a developer shell, look in the Windows SDK's default installation directory.
+        let sdk_dir = env::var_os("WindowsSdkDir").map(std::path::PathBuf::from).or_else(|| {
+            env::var_os("ProgramFiles(x86)")
+                .map(|program_files| std::path::PathBuf::from(program_files).join("Windows Kits").join("10"))
+        })?;
+        let bin_dir = sdk_dir.join("bin");
         let direct = bin_dir.join("x64").join("mc.exe");
         if direct.is_file() {
             return Some(direct);

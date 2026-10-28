@@ -78,8 +78,8 @@ A specific helper, file layout, or internal abstraction belongs in `INTENT.md` o
 
 `INTENT.md` must remain human-owned.
 
-Agents must not generate intent files on behalf of humans.
-Otherwise, the presence of `INTENT.md` would no longer show that durable human design work took place.
+An agent does not write intent from code or a brief.
+It may interview the human and record the commitments the human states in their own words, so that the presence of `INTENT.md` still shows that a human decided.
 
 This rule does not mean that intent can never change.
 It means that changing intent is a human design action, not an implementation action delegated to an agent.
@@ -101,7 +101,7 @@ It should not become a second design specification.
 For example:
 
 ```md
-Read all applicable `INTENT.md` and `*.intent.md` files before modifying code.
+Read all applicable `INTENT*.md` and `*.intent*.md` files before modifying code.
 
 Do not create, modify, delete, or rename intent files.
 
@@ -179,9 +179,14 @@ service/
 Do not create intent files mechanically for every source file.
 Their presence should reflect actual human design work.
 
+Applicable files are `INTENT*.md` in the directory and its ancestors, plus `<name>.intent*.md` beside the named module.
 Applicable intent files are cumulative.
 A more specific file does not silently override broader intent.
 Contradictions require human resolution.
+
+Intent that several components share is a part file, `INTENT.<feature>.md` or `<name>.intent.<feature>.md`, symlinked into each directory it governs; a `<name>.intent.<feature>.md` part governs that module only.
+The copies are one text; a difference between them is a defect.
+Applicability follows directories only; a link to another file confers none.
 
 ## The resulting model
 

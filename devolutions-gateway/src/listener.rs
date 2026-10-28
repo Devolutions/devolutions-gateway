@@ -63,7 +63,15 @@ impl GatewayListener {
         let socket = if socket_addr.is_ipv4() {
             TcpSocket::new_v4().context("failed to create IPv4 TCP socket")?
         } else {
-            TcpSocket::new_v6().context("failed to created IPv6 TCP socket")?
+            let socket = TcpSocket::new_v6().context("failed to created IPv6 TCP socket")?;
+
+            // An IPv6 listener accepts IPv6 only, so the `[::]` and `0.0.0.0` listeners of a `*` host share a port.
+            // Windows already defaults to this, but Linux defaults to dual-stack, which makes the IPv4 bind fail.
+            socket2::SockRef::from(&socket)
+                .set_only_v6(true)
+                .context("failed to restrict the TCP socket to IPv6")?;
+
+            socket
         };
         socket.bind(socket_addr).context("failed to bind TCP socket")?;
 

@@ -36,6 +36,7 @@ export type ShadowPlayerError =
     };
 
 type ShadowPlayerErrorCallback = (error: ShadowPlayerError) => void;
+type ShadowPlayerLifecycleCallback = () => void;
 type TerminalOutcome = 'none' | 'end' | 'error' | 'closed';
 
 /** How far a live viewer may fall behind the newest frame before it jumps forward. */
@@ -49,7 +50,7 @@ export class ShadowPlayer extends HTMLElement {
   _videoElement: HTMLVideoElement | null = null;
   _src: string | null = null;
   onErrorCallback: ShadowPlayerErrorCallback | null = null;
-  onEndCallback: (() => void) | null = null;
+  onEndCallback: ShadowPlayerLifecycleCallback | null = null;
   debug = false;
   _container: HTMLDivElement | null = null;
   _replayButton: HTMLButtonElement | null = null;
@@ -67,6 +68,12 @@ export class ShadowPlayer extends HTMLElement {
   private muted = true;
   private volume = 1;
   private controls: PlaybackControls | null = null;
+  private controlsEnabled = true;
+  private playbackReady = false;
+  private onReadyCallback: ShadowPlayerLifecycleCallback | null = null;
+  private lastError: ShadowPlayerError | null = null;
+  private sessionGeneration = 0;
+  private pendingPlayback: { clip: PlaybackClip; request: symbol } | null = null;
   private controlLabels = defaultPlaybackControlLabels;
   private readonly segmentStartTimes = new Map<PlaybackClip, number>();
   private readonly releasedDurations = new Map<PlaybackClip, number>();
@@ -85,12 +92,31 @@ export class ShadowPlayer extends HTMLElement {
     }
   }
 
-  onError(callback: ShadowPlayerErrorCallback): void {
+  onError(callback: ShadowPlayerErrorCallback, options: { replay?: boolean } = {}): void {
     this.onErrorCallback = callback;
+    if (options.replay && this.lastError) {
+      this.notifyError(this.lastError);
+    }
   }
 
-  onEnd(callback: () => void): void {
+  onEnd(callback: ShadowPlayerLifecycleCallback, options: { replay?: boolean } = {}): void {
     this.onEndCallback = callback;
+    if (options.replay && this.terminalOutcome === 'end') {
+      this.notifyEnd();
+    }
+  }
+
+  onReady(callback: ShadowPlayerLifecycleCallback): void {
+    this.onReadyCallback = callback;
+    if (this.playbackReady) {
+      this.notifyLifecycle(callback);
+    }
+  }
+
+  setControls(enabled: boolean): void {
+    this.controlsEnabled = enabled;
+    this.toggleAttribute('controls', enabled);
+    this.updateControls();
   }
 
   setControlLabels(labels: Partial<PlaybackControlLabels>): void {
@@ -117,7 +143,12 @@ export class ShadowPlayer extends HTMLElement {
       }
       return;
     }
-    if (name === 'controls' || name === 'loop') {
+    if (name === 'controls') {
+      this.controlsEnabled = newValue !== null;
+      this.updateControls();
+      return;
+    }
+    if (name === 'loop') {
       return;
     }
     if (name === 'muted') {
@@ -167,12 +198,25 @@ export class ShadowPlayer extends HTMLElement {
       this.root.appendChild(this._container);
     }
 
+    this.updateControls();
+    this.shouldPlay = this.shouldPlay || this.hasAttribute('autoplay');
+    this.renderPlayerControls();
+  }
+
+  private updateControls(): void {
+    if (!this.controlsEnabled) {
+      this.controls?.dispose();
+      this.controls = null;
+      this._replayButton?.classList.remove('visible');
+      return;
+    }
     if (!this.controls && this._container) {
       this.controls = new PlaybackControls(this._container);
       this.controls.onAction((action) => this.handleControlsAction(action));
       this.controls.render({ type: 'labels', labels: this.controlLabels });
     }
-    this.shouldPlay = this.hasAttribute('autoplay');
+    this._replayButton?.classList.toggle('visible', this.isSequencePlaybackComplete());
+    this.renderAllSegments();
     this.renderPlayerControls();
   }
 
@@ -235,7 +279,7 @@ export class ShadowPlayer extends HTMLElement {
     this.shouldPlay = true;
     this.renderPlayerControls();
     if (this.activeClip && !this.activeClip.video.ended) {
-      void this.activeClip.video.play();
+      this.requestPlayback(this.activeClip);
       return;
     }
     if (this.activateNextClip()) {
@@ -248,6 +292,7 @@ export class ShadowPlayer extends HTMLElement {
 
   public pause(): void {
     this.shouldPlay = false;
+    this.pendingPlayback = null;
     this.activeClip?.video.pause();
     this.renderPlayerControls();
   }
@@ -271,7 +316,9 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   public srcChange(value: string): void {
+    const shouldPlay = this.shouldPlay || this.hasAttribute('autoplay');
     this.closeSession();
+    this.shouldPlay = shouldPlay;
     this._src = value;
     if (!this._container) {
       return;
@@ -280,6 +327,7 @@ export class ShadowPlayer extends HTMLElement {
     this.terminalOutcome = 'none';
     this.streamEnded = false;
     this.followingLive = true;
+    this.lastError = null;
     this._replayButton?.classList.remove('visible');
     this.renderPlayerControls();
     const websocket = new ServerWebSocket(value);
@@ -330,6 +378,12 @@ export class ShadowPlayer extends HTMLElement {
         throw new Error('Received a chunk before a segment started');
       }
       await clip.append(message.data);
+      if (this.websocket !== websocket || this.terminalOutcome !== 'none') {
+        return;
+      }
+      if (!this.playableClips.has(clip)) {
+        this.prepareBufferedStart(clip);
+      }
       this.catchUpToLiveEdge();
       this.sendRequest(websocket, 'pull');
       return;
@@ -441,6 +495,9 @@ export class ShadowPlayer extends HTMLElement {
     video.addEventListener(
       'loadeddata',
       () => {
+        if (!this.clips.includes(clip)) {
+          return;
+        }
         this.playableClips.add(clip);
         this.activateNextClip();
         this.renderAllSegments();
@@ -448,13 +505,14 @@ export class ShadowPlayer extends HTMLElement {
       { once: true },
     );
     video.addEventListener('play', () => {
-      if (this.activeClip === clip) {
+      if (this.activeClip === clip && !video.paused) {
         this.shouldPlay = true;
+        this.catchUpToLiveEdge();
         this.renderPlayerControls();
       }
     });
     video.addEventListener('pause', () => {
-      if (this.activeClip === clip && !video.ended) {
+      if (this.activeClip === clip && video.paused && !video.ended) {
         this.shouldPlay = false;
         this.followingLive = false;
         this.renderPlayerControls();
@@ -477,8 +535,26 @@ export class ShadowPlayer extends HTMLElement {
     });
     video.addEventListener('timeupdate', () => this.renderClipControls(clip));
     video.addEventListener('durationchange', () => this.renderAllSegments());
-    video.addEventListener('progress', () => this.renderClipControls(clip));
-    video.addEventListener('click', () => this.handleControlsAction({ type: 'toggle-playback' }));
+    video.addEventListener('progress', () => {
+      this.catchUpToLiveEdge();
+      this.renderClipControls(clip);
+    });
+    video.addEventListener('error', () => {
+      if (!this.clips.includes(clip) || this.releasedDurations.has(clip)) {
+        return;
+      }
+      const error = new Error(video.error?.message || 'Video playback failed');
+      if (this.websocket && this.terminalOutcome === 'none') {
+        this.handlePlayerFailure(this.websocket, error);
+      } else {
+        this.reportPlayerError(error);
+      }
+    });
+    video.addEventListener('click', () => {
+      if (this.controlsEnabled) {
+        this.handleControlsAction({ type: 'toggle-playback' });
+      }
+    });
   }
 
   private activateNextClip(): boolean {
@@ -497,7 +573,7 @@ export class ShadowPlayer extends HTMLElement {
   private activateClip(clip: PlaybackClip): void {
     if (this.activeClip === clip) {
       if (this.shouldPlay) {
-        void clip.video.play();
+        this.requestPlayback(clip);
       }
       this.renderClipControls(clip);
       this.renderPlayerControls();
@@ -511,14 +587,69 @@ export class ShadowPlayer extends HTMLElement {
     }
     this._videoElement = clip.video;
     clip.video.classList.add('active');
+    this.prepareBufferedStart(clip);
     if (this.shouldPlay) {
-      void clip.video.play();
+      this.requestPlayback(clip);
+    }
+    if (this.activeClip !== clip) {
+      return;
+    }
+    if (!this.playbackReady) {
+      this.playbackReady = true;
+      this.notifyLifecycle(this.onReadyCallback);
+    }
+    if (this.activeClip !== clip) {
+      return;
     }
     if (previous) {
       this.renderClipControls(previous);
     }
     this.renderClipControls(clip);
     this.renderPlayerControls();
+  }
+
+  private prepareBufferedStart(clip: PlaybackClip): void {
+    const buffered = clip.video.buffered;
+    for (let index = 0; index < buffered.length; index++) {
+      if (clip.video.currentTime < buffered.start(index)) {
+        clip.video.currentTime = buffered.start(index);
+        return;
+      }
+      if (clip.video.currentTime < buffered.end(index)) {
+        return;
+      }
+    }
+  }
+
+  private requestPlayback(clip: PlaybackClip): void {
+    if (this.pendingPlayback?.clip === clip) {
+      return;
+    }
+    this.prepareBufferedStart(clip);
+    const generation = this.sessionGeneration;
+    const request = Symbol();
+    this.pendingPlayback = { clip, request };
+    const failed = (error: unknown) => {
+      if (
+        generation === this.sessionGeneration &&
+        this.pendingPlayback?.request === request &&
+        this.activeClip === clip
+      ) {
+        this.pendingPlayback = null;
+        this.shouldPlay = false;
+        this.renderPlayerControls();
+        this.reportPlayerError(error);
+      }
+    };
+    try {
+      void Promise.resolve(clip.video.play()).then(() => {
+        if (this.pendingPlayback?.request === request) {
+          this.pendingPlayback = null;
+        }
+      }, failed);
+    } catch (error) {
+      failed(error);
+    }
   }
 
   private seekToClip(clip: PlaybackClip, percentage: number): void {
@@ -546,11 +677,11 @@ export class ShadowPlayer extends HTMLElement {
     if (released !== undefined) {
       return released;
     }
-    if (Number.isFinite(clip.video.duration) && clip.video.duration > 0) {
-      return clip.video.duration;
-    }
     const buffered = clip.video.buffered;
-    return buffered.length > 0 ? buffered.end(buffered.length - 1) : 0;
+    if (buffered.length > 0) {
+      return buffered.end(buffered.length - 1);
+    }
+    return Number.isFinite(clip.video.duration) && clip.video.duration > 0 ? clip.video.duration : 0;
   }
 
   private clipProgress(clip: PlaybackClip): number {
@@ -661,22 +792,14 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   private handlePlayerFailure(websocket: ServerWebSocket, value: unknown): void {
-    if (this.websocket !== websocket) {
+    if (this.websocket !== websocket || this.terminalOutcome !== 'none') {
       return;
     }
-    const error = value instanceof Error ? value : new Error(String(value));
-    if (
-      !this.reportTerminalError({
-        type: 'player',
-        inner: error,
-      })
-    ) {
-      return;
-    }
+    const error = value instanceof Error || value instanceof DOMException ? value : new Error(String(value));
     this.awaitingResponse = false;
-    websocket.close(1000, 'Player failure');
     this.websocket = null;
-    this.renderPlayerControls();
+    websocket.close(1000, 'Player failure');
+    this.reportTerminalError({ type: 'player', inner: error });
   }
 
   private completeStream(): void {
@@ -687,7 +810,26 @@ export class ShadowPlayer extends HTMLElement {
     this.streamEnded = true;
     this.renderPlayerControls();
     this.handleSequencePlaybackEnd();
-    this.onEndCallback?.();
+    this.notifyEnd();
+  }
+
+  private notifyEnd(): void {
+    this.notifyLifecycle(this.onEndCallback);
+  }
+
+  private notifyLifecycle(callback: ShadowPlayerLifecycleCallback | null): void {
+    const generation = this.sessionGeneration;
+    try {
+      void Promise.resolve(callback?.()).catch((error: unknown) => {
+        if (generation === this.sessionGeneration) {
+          this.reportPlayerError(error);
+        }
+      });
+    } catch (error) {
+      if (generation === this.sessionGeneration) {
+        this.reportPlayerError(error);
+      }
+    }
   }
 
   private reportTerminalError(error: ShadowPlayerError): boolean {
@@ -695,7 +837,7 @@ export class ShadowPlayer extends HTMLElement {
       return false;
     }
     this.terminalOutcome = 'error';
-    this.onErrorCallback?.(error);
+    this.notifyError(error);
     this.renderPlayerControls();
     return true;
   }
@@ -722,8 +864,21 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   private reportPlayerError(value: unknown): void {
-    const error = value instanceof Error ? value : new Error(String(value));
-    this.onErrorCallback?.({ type: 'player', inner: error });
+    const error = value instanceof Error || value instanceof DOMException ? value : new Error(String(value));
+    this.notifyError({ type: 'player', inner: error });
+  }
+
+  private notifyError(error: ShadowPlayerError): void {
+    this.lastError = error;
+    if (!this.onErrorCallback) {
+      console.error('Shadow playback failed:', error.type);
+      return;
+    }
+    try {
+      this.onErrorCallback(error);
+    } catch {
+      console.error('Shadow error callback failed');
+    }
   }
 
   public downloadBUfferAsFile(): void {
@@ -733,7 +888,9 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   private showReplayButton(): void {
-    this._replayButton?.classList.add('visible');
+    if (this.controlsEnabled) {
+      this._replayButton?.classList.add('visible');
+    }
     this.renderPlayerControls();
   }
 
@@ -742,6 +899,11 @@ export class ShadowPlayer extends HTMLElement {
   }
 
   private closeSession(): void {
+    ++this.sessionGeneration;
+    this.pendingPlayback = null;
+    this.playbackReady = false;
+    this.lastError = null;
+    this.shouldPlay = false;
     const websocket = this.websocket;
     this.websocket = null;
     this.awaitingResponse = false;

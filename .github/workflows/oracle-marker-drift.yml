@@ -1,0 +1,28 @@
+name: Oracle marker drift
+
+# Reports, for each test marker pinned to a commit, whether the cited section still reads the same
+# on its repository's default branch, so a person re-checks the test or bumps the pin.
+# It informs rather than gates: the pull request check already rejects a pin that does not resolve.
+
+on:
+  schedule:
+    - cron: '17 5 * * 1' # 5:17 AM UTC every Monday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Oracle marker drift
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+
+      - name: Report drift
+        env:
+          GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN || github.token }}
+        run: ./ci/check-oracle-markers.ps1 -DriftReport
+        shell: pwsh

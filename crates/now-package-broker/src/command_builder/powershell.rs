@@ -9,8 +9,11 @@
 //!
 //! The Windows executor materializes these scripts into temporary `.ps1` files before launch.
 //!
-//! Both builders bind the policy-matched request source as the PowerShell repository
-//! and pin the invariant culture so repository lookup does not depend on the host locale.
+//! Both builders bind the policy-matched request source as the PowerShell repository and
+//! pin the invariant culture so repository lookup does not depend on the host locale.
+//! Uninstall and `Update-Module` take no `-Repository`: they act on installed modules, and
+//! `Update-Module` updates from the repository a module was installed from. Those commands
+//! first check that every installed version came from the requested source instead.
 //! Options that don't apply to PowerShell modules (interactive, custom install
 //! location, winget's no-upgrade / uninstall-previous) are intentionally omitted.
 
@@ -33,6 +36,17 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
 
+    if request.operation != Operation::Install {
+        // PowerShellGet 1.x has no `-AllowPrerelease`; 2.x lists prerelease versions only with it.
+        append_raw(&mut script, "$installedModuleQuery = @{ Name =");
+        append_raw(&mut script, &quote_powershell_literal(&request.package.id.0));
+        append_raw(
+            &mut script,
+            "; AllVersions = $true; ErrorAction = 'Stop' }; if ((Get-Command Get-InstalledModule).Parameters.ContainsKey('AllowPrerelease')) { $installedModuleQuery.AllowPrerelease = $true };",
+        );
+        append_installed_repository_check(&mut script, "Get-InstalledModule @installedModuleQuery", request)?;
+    }
+
     let verb = match request.operation {
         Operation::Install => "Install-Module",
         Operation::Update => "Update-Module",
@@ -41,7 +55,9 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     append_raw(&mut script, verb);
     append_flag_value(&mut script, "-Name", &request.package.id.0);
-    append_repository(&mut script, request)?;
+    if request.operation == Operation::Install {
+        append_repository(&mut script, request)?;
+    }
     append_raw(&mut script, "-Confirm:$false");
     append_raw(&mut script, "-Force");
 
@@ -57,7 +73,8 @@ pub fn build_powershell5_command(request: &PackageRequest) -> anyhow::Result<Vec
     }
 
     if matches!(request.operation, Operation::Install | Operation::Update) {
-        if request.options.skip_hash_check {
+        // `Update-Module` has no `-SkipPublisherCheck`, so updates keep the publisher check.
+        if request.options.skip_hash_check && request.operation == Operation::Install {
             append_raw(&mut script, "-SkipPublisherCheck");
         }
 
@@ -80,6 +97,14 @@ pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     let mut script = INVARIANT_CULTURE_PREFIX.to_owned();
 
+    if request.operation == Operation::Uninstall {
+        let lookup = format!(
+            "Get-InstalledPSResource -Name {} -ErrorAction Stop",
+            quote_powershell_literal(&request.package.id.0)
+        );
+        append_installed_repository_check(&mut script, &lookup, request)?;
+    }
+
     let verb = match request.operation {
         Operation::Install => "Install-PSResource",
         Operation::Update => "Update-PSResource",
@@ -88,7 +113,9 @@ pub fn build_powershell7_command(request: &PackageRequest) -> anyhow::Result<Vec
 
     append_raw(&mut script, verb);
     append_flag_value(&mut script, "-Name", &request.package.id.0);
-    append_repository(&mut script, request)?;
+    if request.operation != Operation::Uninstall {
+        append_repository(&mut script, request)?;
+    }
     append_raw(&mut script, "-Confirm:$false");
 
     match request.operation {
@@ -169,6 +196,28 @@ fn append_repository(script: &mut String, request: &PackageRequest) -> anyhow::R
     Ok(())
 }
 
+/// Fail the script unless every installed version that `lookup` lists was installed from
+/// the requested source, so a command without `-Repository` only acts on modules from the
+/// source that policy evaluation matched.
+fn append_installed_repository_check(
+    script: &mut String,
+    lookup: &str,
+    request: &PackageRequest,
+) -> anyhow::Result<()> {
+    let repository = request.source.name.trim();
+    if repository.is_empty() {
+        bail!("PowerShell package source name is required");
+    }
+    append_raw(
+        script,
+        &format!(
+            "if (@({lookup} | Where-Object {{ $_.Repository -ne {} }}).Count -ne 0) {{ throw 'The installed module was not installed from the requested repository.' }};",
+            quote_powershell_literal(repository),
+        ),
+    );
+    Ok(())
+}
+
 fn append_raw(script: &mut String, value: &str) {
     if !script.is_empty() {
         script.push(' ');
@@ -239,6 +288,11 @@ mod tests {
         &cmd[3]
     }
 
+    /// Split a script into the statements before the `verb` call and the call itself.
+    fn split_at_call<'a>(script: &'a str, verb: &str) -> (&'a str, &'a str) {
+        script.split_at(script.find(verb).expect("package command call"))
+    }
+
     #[test]
     fn powershell5_install_matches_package_broker_client_semantics() {
         let request = make_request(ManagerName::PowerShell);
@@ -278,13 +332,102 @@ mod tests {
         let mut request = make_request(ManagerName::PowerShell);
         request.operation = Operation::Uninstall;
         let cmd = build_powershell5_command(&request).expect("build command");
+        let (_, uninstall) = split_at_call(script_of(&cmd), "Uninstall-Module");
+        // oracle: reference PowerShellGet 2.2.5 and 1.0.0.1 `Uninstall-Module`, which have no `-Repository` parameter
+        assert!(uninstall.starts_with("Uninstall-Module -Name 'Pester' -Confirm:$false -Force"));
+        assert!(!uninstall.contains("-Repository"));
+        assert!(!uninstall.contains("-Scope"));
+        assert!(!uninstall.contains("-RequiredVersion"));
+        assert!(!uninstall.contains("-SkipPublisherCheck"));
+    }
+
+    // oracle: mutant dropping the installed-repository check that binds a command without `-Repository` to the requested source
+    #[test]
+    fn powershell_commands_without_repository_check_installed_repository() {
+        for (manager, operation, verb, lookup) in [
+            (
+                ManagerName::PowerShell,
+                Operation::Update,
+                "Update-Module",
+                "Get-InstalledModule @installedModuleQuery",
+            ),
+            (
+                ManagerName::PowerShell,
+                Operation::Uninstall,
+                "Uninstall-Module",
+                "Get-InstalledModule @installedModuleQuery",
+            ),
+            (
+                ManagerName::PowerShell7,
+                Operation::Uninstall,
+                "Uninstall-PSResource",
+                "Get-InstalledPSResource -Name 'Pester' -ErrorAction Stop",
+            ),
+        ] {
+            let mut request = make_request(manager);
+            request.operation = operation;
+            let cmd = crate::command_builder::build_command(&request).expect("build command");
+            let (check, _) = split_at_call(script_of(&cmd), verb);
+            assert!(
+                check.contains(&format!(
+                    "if (@({lookup} | Where-Object {{ $_.Repository -ne 'PSGallery' }}).Count -ne 0) {{ throw "
+                )),
+                "{verb}: {check}"
+            );
+        }
+
+        for (manager, operation) in [
+            (ManagerName::PowerShell, Operation::Install),
+            (ManagerName::PowerShell7, Operation::Install),
+            (ManagerName::PowerShell7, Operation::Update),
+        ] {
+            let mut request = make_request(manager);
+            request.operation = operation;
+            let cmd = crate::command_builder::build_command(&request).expect("build command");
+            assert!(!script_of(&cmd).contains("Get-Installed"), "{manager:?} {operation:?}");
+        }
+    }
+
+    #[test]
+    fn powershell5_installed_module_lookup_lists_every_version() {
+        for operation in [Operation::Update, Operation::Uninstall] {
+            let mut request = make_request(ManagerName::PowerShell);
+            request.operation = operation;
+            let cmd = build_powershell5_command(&request).expect("build command");
+            let script = script_of(&cmd);
+            assert!(script.contains("$installedModuleQuery = @{ Name = 'Pester' ; AllVersions = $true;"));
+            // oracle: reference PowerShellGet 2.2.5 `Get-InstalledModule`, which lists prerelease versions only with `-AllowPrerelease`, a parameter PowerShellGet 1.0.0.1 lacks
+            assert!(script.contains(
+                "if ((Get-Command Get-InstalledModule).Parameters.ContainsKey('AllowPrerelease')) { $installedModuleQuery.AllowPrerelease = $true };"
+            ));
+        }
+    }
+
+    #[test]
+    fn powershell5_update_omits_unsupported_parameters() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.operation = Operation::Update;
+        request.options.skip_hash_check = true;
+        let cmd = build_powershell5_command(&request).expect("build command");
+        let (_, update) = split_at_call(script_of(&cmd), "Update-Module");
+        assert!(update.starts_with("Update-Module -Name 'Pester' -Confirm:$false -Force"));
+        // oracle: reference PowerShellGet 2.2.5 and 1.0.0.1 `Update-Module`, which have neither a `-Repository` nor a `-SkipPublisherCheck` parameter
+        assert!(!update.contains("-Repository"));
+        assert!(!update.contains("-SkipPublisherCheck"));
+        assert!(update.contains("-Scope CurrentUser"));
+        assert!(update.contains("-RequiredVersion '5.6.0'"));
+    }
+
+    // oracle: spec PowerShell about_Quoting_Rules §Single-quoted strings
+    #[test]
+    fn powershell5_update_repository_check_escapes_literals() {
+        let mut request = make_request(ManagerName::PowerShell);
+        request.operation = Operation::Update;
+        request.package.id = PackageIdentifier::from("Vendor's.Module".to_owned());
+        let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
-        assert!(script.starts_with(&format!(
-            "{INVARIANT_CULTURE_PREFIX} Uninstall-Module -Name 'Pester' -Repository 'PSGallery'"
-        )));
-        assert!(!script.contains("-Scope"));
-        assert!(!script.contains("-RequiredVersion"));
-        assert!(!script.contains("-SkipPublisherCheck"));
+        assert!(script.contains("$installedModuleQuery = @{ Name = 'Vendor''s.Module' ;"));
+        assert!(script.contains("Update-Module -Name 'Vendor''s.Module'"));
     }
 
     #[test]
@@ -319,16 +462,16 @@ mod tests {
         let mut request = make_request(ManagerName::PowerShell7);
         request.operation = Operation::Uninstall;
         let cmd = build_powershell7_command(&request).expect("build command");
-        let script = script_of(&cmd);
-        assert!(script.starts_with(&format!(
-            "{INVARIANT_CULTURE_PREFIX} Uninstall-PSResource -Name 'Pester' -Repository 'PSGallery' -Confirm:$false"
-        )));
+        let (_, uninstall) = split_at_call(script_of(&cmd), "Uninstall-PSResource");
+        // oracle: reference PSResourceGet 1.2.0 `Uninstall-PSResource`, which has no `-Repository` parameter
+        assert!(uninstall.starts_with("Uninstall-PSResource -Name 'Pester' -Confirm:$false"));
+        assert!(!uninstall.contains("-Repository"));
         // Uninstall must not pin a version (it would remove only the matching version,
         // or fail if it does not match what is installed).
-        assert!(!script.contains("-Version"));
-        assert!(!script.contains("-TrustRepository"));
-        assert!(!script.contains("-AcceptLicense"));
-        assert!(!script.contains("-Scope"));
+        assert!(!uninstall.contains("-Version"));
+        assert!(!uninstall.contains("-TrustRepository"));
+        assert!(!uninstall.contains("-AcceptLicense"));
+        assert!(!uninstall.contains("-Scope"));
     }
 
     #[test]

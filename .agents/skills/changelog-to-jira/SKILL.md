@@ -3,8 +3,6 @@ name: changelog-to-jira
 description: Creates missing DGW Jira tickets from CHANGELOG.md entries and updates the file with the new ticket links.
 ---
 
-# Changelog to Jira Skill
-
 This skill reads `CHANGELOG.md`, identifies entries that don't have a `DGW-*` Jira ticket, groups similar entries together, creates them in the DGW project, infers the assignee from the commit author, transitions them to Done, and updates `CHANGELOG.md` with the new ticket links.
 
 ## Scope
@@ -193,6 +191,7 @@ pwsh <skill-dir>/scripts/invoke-jira.ps1 -PlanFile jira-plan.json
 ```
 
 The script handles everything mechanical: creating each ticket, linking cross-project tickets, walking the DGW workflow to Done (`Backlog → To Do → Development → Reviewing → Done`), and deleting `jira-plan.json` when done.
+If a ticket is created but can't be moved to Done, the script warns with the transitions Jira offers and keeps going; report it so the user can move the ticket manually.
 
 The result JSON is written to stdout:
 

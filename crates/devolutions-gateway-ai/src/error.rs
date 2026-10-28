@@ -77,7 +77,13 @@ const SPENT_QUOTA_CODES: [&str; 6] = [
     "enforced_spend_limit_reached",
 ];
 
-pub(crate) fn transport(error: &dyn std::error::Error, api_key: &str) -> Error {
+/// Builds a transport error that names neither the API key nor the URL of the request.
+pub(crate) fn transport(error: reqwest::Error, api_key: &str) -> Error {
+    // The URL names the endpoint of the provider, which callers keep out of their logs and records.
+    redacted_transport(&error.without_url(), api_key)
+}
+
+fn redacted_transport(error: &dyn std::error::Error, api_key: &str) -> Error {
     let mut message = error.to_string();
     let mut source = error.source();
     while let Some(cause) = source {
@@ -131,7 +137,7 @@ mod tests {
     fn transport_error_redacts_api_key() {
         let error = std::io::Error::other(format!("invalid key {API_KEY} provided"));
 
-        let error = transport(&error, API_KEY);
+        let error = redacted_transport(&error, API_KEY);
 
         assert!(!error.to_string().contains(API_KEY));
         assert!(!format!("{error:?}").contains(API_KEY));

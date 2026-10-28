@@ -3,8 +3,6 @@ name: run-gateway-local
 description: Launch Devolutions Gateway from source for local coding-agent tests with loopback listeners by default; require explicit opt-in before binding to non-localhost addresses.
 ---
 
-# Run Devolutions Gateway Locally
-
 Use this skill whenever a coding agent needs to run the Gateway from the repository for local development or testing.
 
 The production configuration template intentionally uses wildcard listener hosts, so do not change

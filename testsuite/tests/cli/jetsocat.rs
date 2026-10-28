@@ -231,7 +231,7 @@ async fn jmux_proxy_read_hello_world() {
 
 #[tokio::test]
 async fn jmux_proxy_write_hello_world() {
-    use tokio::io::AsyncReadExt as _;
+    use tokio::io::AsyncBufReadExt as _;
 
     // Find 3 available ports at once to avoid conflicts.
     let ports = find_unused_ports(3);
@@ -291,6 +291,15 @@ async fn jmux_proxy_write_hello_world() {
         .assert()
         .success();
 
+    // The writer exits once the JMUX client has its bytes, possibly before they are relayed to the read server.
+    // Killing the relays at that point would drop the payload, so wait until the read server prints it.
+    let mut read_server_stdout = tokio::io::BufReader::new(read_server.stdout.take().unwrap());
+    let mut received = String::new();
+    tokio::time::timeout(Duration::from_secs(10), read_server_stdout.read_line(&mut received))
+        .await
+        .expect("read server did not receive the payload in time")
+        .unwrap();
+
     // Kill all processes.
     let _ = jmux_client.start_kill();
     let _ = jmux_server.start_kill();
@@ -299,16 +308,7 @@ async fn jmux_proxy_write_hello_world() {
     let _ = jmux_server.wait().await;
     let _ = read_server.wait().await;
 
-    // Check that the read server received the payload.
-    let mut read_server_stdout = String::new();
-    read_server
-        .stdout
-        .take()
-        .unwrap()
-        .read_to_string(&mut read_server_stdout)
-        .await
-        .unwrap();
-    assert_eq!(read_server_stdout.trim(), "hello world");
+    assert_eq!(received.trim(), "hello world");
 }
 
 #[test]

@@ -1,5 +1,3 @@
-# gateway-db
-
 This crate owns the shared `gateway.db` file and nothing else.
 Read `INTENT.md` in this directory first.
 

@@ -99,6 +99,38 @@
         {
           "id": "Dotnet48IsRequired",
           "text": "The product requires Microsoft .NET Framework 4.8. Would you like to download it now?"
+        },
+        {
+          "id": "IdentityEnrollmentTokenBothSet",
+          "text": "Set IDENTITY_ENROLLMENT_TOKEN or IDENTITY_ENROLLMENT_TOKEN_FILE, not both."
+        },
+        {
+          "id": "IdentityEnrollmentTokenFileUnreadable",
+          "text": "Can't read the enrollment token file {0}: {1}"
+        },
+        {
+          "id": "IdentityEnrollmentTokenFileEmpty",
+          "text": "The first line of the enrollment token file {0} is empty."
+        },
+        {
+          "id": "DataFolderIsLink",
+          "text": "Can't use the folder {0} because it is a link. Delete the link, then try again."
+        },
+        {
+          "id": "DataFolderIsFile",
+          "text": "Can't use {0} because it is a file, not a folder. Delete the file, then try again."
+        },
+        {
+          "id": "DataFolderOwnedByUntrustedAccount",
+          "text": "Can't use the folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again."
+        },
+        {
+          "id": "DataFolderReplaceableByUntrustedAccount",
+          "text": "Can't use the folder {0} because {1} can replace it or what it contains. Remove that permission, then try again."
+        },
+        {
+          "id": "DataFolderSecurityUnreadable",
+          "text": "Can't read the owner or the permissions of the folder {0}. Check them, then try again."
         }
       ],
       "buttons": [

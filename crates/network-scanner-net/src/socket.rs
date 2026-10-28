@@ -371,17 +371,22 @@ impl Future for ConnectFuture<'_> {
         let events = self.runtime.check_event_with_id(self.id);
         for event in events {
             trace!(?event, "Event found");
-            if event
-                .is_err() // For linux, failed connection is ERR and HUP, a sigle HUP does not indicate a failed connection
-                .expect("your platform does not support connect failed")
-            {
-                return std::task::Poll::Ready(Err(std::io::Error::other("connection failed")));
+            // For linux, failed connection is ERR and HUP, a single HUP does not indicate a failed connection.
+            // kqueue cannot report it, so a failed connection is detected below from the pending socket error.
+            // Either way, the pending socket error says why, so callers can tell a closed port from an unreachable host.
+            if event.is_err() == Some(true) {
+                self.runtime.remove_events_with_id_from_history(self.id);
+                let error = match self.socket.take_error() {
+                    Ok(Some(error)) | Err(error) => error,
+                    Ok(None) => std::io::Error::other("connection failed"),
+                };
+                return std::task::Poll::Ready(Err(error));
             }
 
             // This is a special case, this happens when using epoll to wait for a unconnected TCP socket.
             // We clearly needs to call connect function, so we break the loop and call connect.
             #[cfg(target_os = "linux")]
-            if event.is_interrupt() && !event.is_err().expect("your platform does not support connect failed") {
+            if event.is_interrupt() && event.is_err() == Some(false) {
                 trace!("out and hup");
                 self.runtime.remove_events_with_id_from_history(self.id);
                 break;
@@ -389,7 +394,11 @@ impl Future for ConnectFuture<'_> {
 
             if event.writable || event.readable {
                 self.runtime.remove_events_with_id_from_history(self.id);
-                return std::task::Poll::Ready(Ok(()));
+                let result = match self.socket.take_error() {
+                    Ok(None) => Ok(()),
+                    Ok(Some(error)) | Err(error) => Err(error),
+                };
+                return std::task::Poll::Ready(result);
             }
         }
 
@@ -400,20 +409,41 @@ impl Future for ConnectFuture<'_> {
             Err(e) => e,
         };
 
-        // code 115, EINPROGRESS, only for linux
-        // reference: https://linux.die.net/man/2/connect
-        // it is the same as WouldBlock but for connect(2) only
-        #[cfg(target_os = "linux")]
-        let in_progress = err.kind() == std::io::ErrorKind::WouldBlock || err.raw_os_error() == Some(115);
+        // A connection still in progress is reported by EINPROGRESS (WSAEWOULDBLOCK on Windows) on the first call, and by EALREADY on later ones.
+        // Any other error, such as an unreachable network, fails the connection; on Unix, that includes EAGAIN.
+        // reference: https://man7.org/linux/man-pages/man2/connect.2.html
+        // reference: https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-connect
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        let (in_progress, already_connected) = (
+            matches!(err.raw_os_error(), Some(libc::EINPROGRESS | libc::EALREADY)),
+            err.raw_os_error() == Some(libc::EISCONN),
+        );
 
-        #[cfg(not(target_os = "linux"))]
-        let in_progress = err.kind() == std::io::ErrorKind::WouldBlock;
+        #[cfg(windows)]
+        let (in_progress, already_connected) = {
+            const WSAEALREADY: i32 = 10037;
+            const WSAEISCONN: i32 = 10056;
+            (
+                err.kind() == std::io::ErrorKind::WouldBlock || err.raw_os_error() == Some(WSAEALREADY),
+                err.raw_os_error() == Some(WSAEISCONN),
+            )
+        };
+
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+        let (in_progress, already_connected) = (err.kind() == std::io::ErrorKind::WouldBlock, false);
+
+        if already_connected {
+            return std::task::Poll::Ready(Ok(()));
+        }
+
+        if !in_progress {
+            return std::task::Poll::Ready(Err(err));
+        }
 
         let events_interested = [Event::readable(self.id), Event::writable(self.id), Event::all(self.id)];
-        if in_progress
-            && let Err(e) = self
-                .runtime
-                .register_events(&self.socket, &events_interested, cx.waker().clone())
+        if let Err(e) = self
+            .runtime
+            .register_events(&self.socket, &events_interested, cx.waker().clone())
         {
             warn!(error = format!("{e:#}"), ?self.socket, ?self.addr, "Failed to register socket to poller");
             return std::task::Poll::Ready(Err(std::io::Error::other(format!(

@@ -3,6 +3,8 @@ mod cli_args;
 mod heartbeat;
 mod kdc_proxy;
 mod preflight;
+mod recording_search;
 mod subscriber;
 mod tls_anchoring;
 mod traffic_audit;
+mod wildcard_listener;

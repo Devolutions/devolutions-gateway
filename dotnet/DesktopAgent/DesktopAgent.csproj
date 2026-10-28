@@ -6,7 +6,7 @@
     <AssemblyName>DevolutionsDesktopAgent</AssemblyName>
 	<AssemblyTitle>Devolutions Agent</AssemblyTitle>
     <LangVersion>latest</LangVersion>
-    <Version>2026.3.2.0</Version>
+    <Version>2026.3.3.0</Version>
 	<Company>Devolutions</Company>
 	<Copyright>Copyright © 2025</Copyright>
 	<Product>Devolutions Agent</Product>
@@ -22,7 +22,6 @@
   <ItemGroup>
     <Reference Include="System.Net" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="System.Runtime.Remoting" />
     <Reference Include="System.ServiceProcess" />
   </ItemGroup>
   <ItemGroup>

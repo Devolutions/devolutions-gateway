@@ -3,6 +3,8 @@ export class ReactiveSourceBuffer {
   private readonly allBuffers: Blob[] = [];
   private pendingOperation = Promise.resolve();
   private debug = false;
+  private disposed = false;
+  private cancelAppend: (() => void) | null = null;
 
   constructor(mediaSource: MediaSource, codec: string) {
     this.sourceBuffer = mediaSource.addSourceBuffer(`video/webm; codecs="${codec}"`);
@@ -22,7 +24,15 @@ export class ReactiveSourceBuffer {
     return this.pendingOperation;
   }
 
+  dispose(): void {
+    this.disposed = true;
+    this.cancelAppend?.();
+  }
+
   private async append(buffer: Uint8Array): Promise<void> {
+    if (this.disposed) {
+      throw new DOMException('stream interrupted', 'AbortError');
+    }
     if (this.sourceBuffer.updating) {
       throw new Error('SourceBuffer is already updating');
     }
@@ -35,6 +45,8 @@ export class ReactiveSourceBuffer {
       const cleanup = () => {
         this.sourceBuffer.removeEventListener('updateend', onUpdateEnd);
         this.sourceBuffer.removeEventListener('error', onError);
+        this.sourceBuffer.removeEventListener('abort', onAbort);
+        this.cancelAppend = null;
       };
       const onUpdateEnd = () => {
         cleanup();
@@ -44,9 +56,15 @@ export class ReactiveSourceBuffer {
         cleanup();
         reject(new Error('SourceBuffer append failed'));
       };
+      const onAbort = () => {
+        cleanup();
+        reject(new DOMException('stream interrupted', 'AbortError'));
+      };
 
+      this.cancelAppend = onAbort;
       this.sourceBuffer.addEventListener('updateend', onUpdateEnd);
       this.sourceBuffer.addEventListener('error', onError);
+      this.sourceBuffer.addEventListener('abort', onAbort);
       try {
         this.sourceBuffer.appendBuffer(buffer);
       } catch (error) {

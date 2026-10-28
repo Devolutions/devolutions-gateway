@@ -196,6 +196,37 @@ pub fn get_session_domain_name(session_id: u32) -> anyhow::Result<String> {
     query_session_information_string(session_id, RemoteDesktop::WTSDomainName)
 }
 
+/// Checks for RDP protocol type 2, as defined by [`WTS_INFO_CLASS` "Constants"][protocol].
+///
+/// [protocol]: https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ne-wtsapi32-wts_info_class#constants
+pub fn session_uses_rdp(session_id: u32) -> anyhow::Result<bool> {
+    let mut buffer = windows::core::PWSTR::null();
+    let mut len = 0;
+
+    // SAFETY: Both output pointers are valid for the duration of the call.
+    unsafe {
+        WTSQuerySessionInformationW(
+            Some(WTS_CURRENT_SERVER_HANDLE),
+            session_id,
+            RemoteDesktop::WTSClientProtocolType,
+            &mut buffer,
+            &mut len,
+        )?;
+    }
+
+    // SAFETY: A successful query returns memory allocated by WTS, released by WtsMemory.
+    let buffer = unsafe { WtsMemory::from_raw(buffer.as_ptr()) };
+    if buffer.as_ptr().is_null() || len != 2
+    /* ClientProtocolType */
+    {
+        anyhow::bail!("WTSClientProtocolType returned an invalid buffer");
+    }
+
+    // SAFETY: WTSClientProtocolType returns one aligned USHORT, and its length was checked above.
+    let protocol = unsafe { *buffer.as_ptr() };
+    Ok(protocol == 2)
+}
+
 pub fn send_message_to_session(
     session_id: u32,
     title: &str,

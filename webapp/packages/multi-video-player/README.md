@@ -15,11 +15,11 @@ A custom web component video player built on top of video.js that specializes in
 
 ### Including the Web Component
 
-Simply include the JavaScript and CSS files in your HTML document:
+In a project using a bundler such as Vite, install the package and import the component and its stylesheet:
 
-```html
-<link rel="stylesheet" href="./dist/multi-video-player.css" />
-<script src="./dist/multi-video-player.js" type="module"></script>
+```javascript
+import '@devolutions/multi-video-player';
+import '@devolutions/multi-video-player/index.css';
 ```
 
 Then use the custom element in your HTML:
@@ -30,7 +30,7 @@ Then use the custom element in your HTML:
 
 ### Basic Implementation
 
-Complete example of using the web component:
+For example, use this `index.html` in a Vite project with the package installed:
 
 ```html
 <!DOCTYPE html>
@@ -39,14 +39,13 @@ Complete example of using the web component:
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Multi Video Player Example</title>
-    <link rel="stylesheet" href="./dist/multi-video-player.css" />
   </head>
   <body>
     <multi-video-player width="800" height="700" muted controls></multi-video-player>
     
-    <script src="./dist/multi-video-player.js" type="module"></script>
     <script type="module">
-      import { MultiVideoPlayer } from './dist/multi-video-player.js';
+      import '@devolutions/multi-video-player';
+      import '@devolutions/multi-video-player/index.css';
       
       // Define your playlist
       const playList = [
@@ -87,8 +86,29 @@ The custom element supports the following attributes:
 #### JavaScript API
 
 ```typescript
-// Play a list of videos
-player.play(playList: SourceMetadata[]);
+// Initialize a playlist; the autoplay attribute controls automatic playback.
+await player.play(playList);
+
+// Read recording-relative seconds and the zero-based active clip.
+player.currentTime;
+player.duration;
+player.currentClipIndex;
+
+// Seek without changing the paused/playing state.
+await player.seek(45);
+
+// Start playback at that position without replacing the playlist.
+await player.resume();
+
+player.addEventListener('timeupdate', (event) => {
+  console.log(event.detail.currentTime, event.detail.clipIndex);
+});
+player.addEventListener('clipchange', (event) => {
+  console.log(event.detail.clipIndex);
+});
+
+player.pause();
+await player.dispose();
 
 // SourceMetadata interface
 interface SourceMetadata {
@@ -97,6 +117,65 @@ interface SourceMetadata {
   type: string;     // MIME type of the video (e.g., 'video/mp4')
 }
 ```
+
+Times use each clip's `SourceMetadata.duration`, not its reported media duration, and clips form a back-to-back timeline.
+Playlist metadata is fixed for each `play()` initialization; call `play()` again to apply changes.
+Durations must be finite and nonnegative.
+Source URLs must be nonempty strings, not whitespace.
+Before a playlist is initialized, `currentTime` and `duration` are `0`, `currentClipIndex` is `-1`, and `seek()` and `resume()` resolve without loading a source.
+After disposal, the getters return those same empty values and `seek()` and `resume()` reject with `InvalidStateError`.
+
+`seek(seconds): Promise<void>` clamps finite times to `[0, duration]` and rejects non-finite input with `RangeError`.
+An exact clip boundary selects the next nonempty clip; the playlist endpoint selects the end of the last clip.
+The promise resolves after the offset is applied and playback matches the latest Play/Pause command.
+The clock reports the requested target during loading; await the promise before treating the seek as complete.
+Calling `pause()` or using the built-in Play/Pause controls during loading updates the pending playback state.
+Loading or playback errors reject the promise, including seeking within a clip that has already failed to load.
+An unsupported initial source rejects `play()`; seeking to an unsupported clip rejects `seek()` without replacing the current source.
+A newer seek, a replacement playlist, or disposal rejects an unfinished seek with `AbortError`.
+
+`resume(): Promise<void>` starts the current playlist at its current position without reinitializing it.
+For **Play from event**, await `seek(eventPosition)` and then await `resume()`.
+Calling `resume()` during a seek updates its pending playback intent.
+The promise resolves when the playback request succeeds; it does not wait for a pending seek's offset to be applied.
+A later Pause command, playlist replacement, or disposal rejects an unfinished resume with `AbortError`.
+Media loading and autoplay errors reject the promise.
+
+`timeupdate` is a `CustomEvent<{ currentTime: number; clipIndex: number }>` dispatched when the clock updates, including initialization and seeking.
+`clipchange` is a `CustomEvent<{ clipIndex: number }>` dispatched when a playlist is initialized or the active clip changes.
+Both events are dispatched on the custom element and do not bubble.
+Use non-capturing listeners to receive typed custom events; capturing `timeupdate` listeners can also receive native video events without `detail`.
+
+### Live recording playback
+
+`LiveRecordingStreamer` configures live playback without exposing video elements or requiring native media overrides.
+Register lifecycle callbacks in the options so they are installed before the connection starts.
+
+```typescript
+const streamer = new LiveRecordingStreamer(api);
+const player = await streamer.stream(container, {
+  controls: false,
+  onReady: () => hidePlayableLoadingIndicator(),
+  onEnd: () => transitionToSavedRecording(),
+  onError: error => showPlaybackError(error),
+});
+
+// Public commands remain available when the built-in controls are disabled.
+player.pause();
+player.play();
+streamer.disconnect();
+```
+
+`stream(container, options?: LiveRecordingStreamOptions): Promise<ShadowPlayer>` resolves after component setup, without waiting for media readiness.
+Calling `stream(container)` keeps controls enabled by default.
+Existing calls also work with ShadowPlayer versions without the new lifecycle APIs.
+Requesting `controls: false` or `onReady` requires a ShadowPlayer that supports that feature; otherwise setup rejects with an explicit compatibility error.
+`onReady` means the first clip is playable, while `onEnd` means the server finished sending the stream, not that buffered playback finished.
+The optional `onError` callback also receives session-not-found errors alongside the streamer's `onSessionNotFound()` callback.
+On the updated ShadowPlayer, late `onReady` registration receives retained readiness; late `onEnd` and `onError` registration receives past outcomes only with `{ replay: true }`.
+An asynchronous end callback failure is delivered through `onError`.
+Disconnecting or replacing a stream cancels pending setup with `AbortError` and ignores its late callbacks.
+The player handles buffered starting positions, live-edge catch-up, and autoplay failures; consumers should not override native duration or register native media listeners.
 
 ## Project Structure
 

@@ -9,6 +9,11 @@
                     <!-- messages -->
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">Beim Zugriff auf den System-Zertifikatspeicher ist ein unerwarteter Fehler aufgetreten: {0}</String>
                 <String Id="AuthenticationTokenIsRequired">Das Authentifizierungstoken ist erforderlich</String>
+                <String Id="DataFolderIsFile">{0} kann nicht verwendet werden, da es eine Datei und kein Ordner ist. Löschen Sie die Datei und versuchen Sie es erneut.</String>
+                <String Id="DataFolderIsLink">Der Ordner {0} kann nicht verwendet werden, da er ein Link ist. Löschen Sie den Link und versuchen Sie es erneut.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Der Ordner {0} kann nicht verwendet werden, da er {1} gehört. Nur SYSTEM oder ein Administrator darf ihn besitzen. Ändern Sie den Besitzer und versuchen Sie es erneut.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Der Ordner {0} kann nicht verwendet werden, da {1} ihn oder seinen Inhalt ersetzen kann. Entfernen Sie diese Berechtigung und versuchen Sie es erneut.</String>
+                <String Id="DataFolderSecurityUnreadable">Der Besitzer oder die Berechtigungen des Ordners {0} können nicht gelesen werden. Überprüfen Sie sie und versuchen Sie es erneut.</String>
                 <String Id="DomainIsRequiredAndMustBeValid">Die Domäne ist erforderlich und muss ein gültiger Hostname sein</String>
                 <String Id="Dotnet471IsRequired">Das Produkt erfordert Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 wird dringend empfohlen. Möchten Sie es jetzt herunterladen?</String>
@@ -16,7 +21,7 @@
                 <String Id="NoMatchingCertificatesFound">Keine übereinstimmenden Zertifikate gefunden</String>
                 <String Id="OS2Old">Dieses Produkt erfordert mindestens Windows 8 / Windows Server 2012 R2</String>
                 <String Id="PasswordsDoNotMatch">Die Passwörter stimmen nicht überein</String>
-                <String Id="RemoteAddressIsRequired">Die Remote-Adresse ist erforderlich</String>
+                <String Id="RemoteAddressIsRequired">Die Remote-Adresse ist für den nativen Client-Zugriff erforderlich. Wählen Sie für reinen Browserzugriff Später aus.</String>
                 <String Id="RemoteAddressMustBeInTheFormat">Die Remote-Adresse muss ein gültiger Host und Port im Format {host}:{port} sein</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">Es gibt ein Problem mit den eingegebenen Daten. Bitte korrigieren Sie das Problem und versuchen Sie es erneut.</String>
                 <String Id="TheSpecifiedFileWasInvalidOrNotAccessible">Die angegebene Datei ist ungültig oder nicht zugänglich</String>
@@ -37,12 +42,12 @@
                 <String Id="FindYourPublicKeyForXorX">Öffentlichen Schlüssel für {0} oder {1} suchen</String>
                 <String Id="NgrokAuthTokenLink">Authentifizierungstoken</String>
                 <String Id="NgrokDomainLink">Domäne</String>
+                <String Id="NgrokNativeClientsNeedAReservedX">Native Clients wie Remote Desktop Manager benötigen eine reservierte {0} (kostenpflichtig bei ngrok). Für reinen Browserzugriff nicht nötig.</String>
                 <String Id="NgrokProvideYourX">Geben Sie Ihr {0} an</String>
                 <String Id="NgrokReadMoreAtX">Weitere Informationen auf {0}</String>
                 <String Id="NgrokReadMoreLink">ngrok.com</String>
                 <String Id="NgrokTcpAddressLink">TCP-Adresse</String>
                 <String Id="NgrokXForWebClientAccess">Die {0} für den Webclient-Zugriff</String>
-                <String Id="NgroXForNativeClientAccess">Die {0} für den nativen Client-Zugriff</String>
                     <!-- buttons -->
                 <String Id="SearchButton">Suchen</String>
                 <String Id="ValidateButton">Überprüfen</String>
@@ -111,6 +116,7 @@
                 <String Id="Property_NewCertificate">Ein neues selbstsigniertes Zertifikat wird generiert</String>
                 <String Id="Property_NewKeyPair">Ein neues Schlüsselpaar wird generiert</String>
                 <String Id="Property_NgrokAuthToken">Authentifizierungstoken</String>
+                <String Id="Property_NgrokEnableTcp">Nativer Client-Zugriff</String>
                 <String Id="Property_NgrokHttpDomain">Domäne</String>
                 <String Id="Property_NgrokRemoteAddress">TCP-Adresse</String>
                 <String Id="Property_PrivateKeyFile">Datei mit privatem Schlüssel</String>

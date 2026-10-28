@@ -1,0 +1,222 @@
+use std::fmt;
+
+use anyhow::{Context as _, ensure};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use sha2::{Digest as _, Sha256};
+use url::Url;
+use zeroize::Zeroizing;
+
+#[derive(Clone)]
+pub struct Token {
+    value: Zeroizing<String>,
+    base_url: String,
+}
+
+impl Token {
+    pub fn parse(value: &str) -> anyhow::Result<Self> {
+        ensure!(value.len() <= 4096, "enrollment token exceeds length limit");
+        let mut parts = value.split('.');
+        ensure!(parts.next() == Some("dvaet1"), "unsupported enrollment token prefix");
+        let bag = parts.next().context("missing enrollment token bag")?;
+        let secret = parts.next().context("missing enrollment token secret")?;
+        ensure!(parts.next().is_none(), "invalid enrollment token format");
+        ensure!(
+            !bag.is_empty() && bag.bytes().all(is_base64url),
+            "invalid enrollment token bag"
+        );
+        ensure!(
+            secret.len() == 43 && secret.bytes().all(is_base64url),
+            "invalid enrollment token secret"
+        );
+        let decoded_secret = Zeroizing::new(
+            URL_SAFE_NO_PAD
+                .decode(secret)
+                .map_err(|_| anyhow::anyhow!("invalid enrollment token secret"))?,
+        );
+        ensure!(decoded_secret.len() == 32, "invalid enrollment token secret");
+        let decoded_bag = Zeroizing::new(
+            URL_SAFE_NO_PAD
+                .decode(bag)
+                .map_err(|_| anyhow::anyhow!("invalid enrollment token bag"))?,
+        );
+        let fields: serde_json::Value =
+            serde_json::from_slice(&decoded_bag).map_err(|_| anyhow::anyhow!("invalid enrollment token bag"))?;
+        let base_url = fields
+            .as_object()
+            .and_then(|fields| fields.get("u"))
+            .and_then(serde_json::Value::as_str)
+            // Certificates carry `u` as an `IA5String`, so it holds only ASCII characters.
+            .filter(|url| url.is_ascii() && is_base_url(url))
+            .context("invalid enrollment authority URL")?;
+        let base_url = base_url.trim_end_matches('/').to_owned();
+        Ok(Self {
+            value: Zeroizing::new(value.to_owned()),
+            base_url,
+        })
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.value
+    }
+
+    /// Returns the token's `u` as received, without its trailing slashes ([CONTRACT.agent-identity.md §2 "Enrollment
+    /// token"][contract] and `crates/agent-identity/INTENT.md`, "Stored identities").
+    ///
+    /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub fn sha256_hex(&self) -> String {
+        sha256_hex(&self.value)
+    }
+}
+
+/// Hashes the full UTF-8 token text, including when parsing rejects its format.
+pub fn sha256_hex(value: &str) -> String {
+    hex::encode(Sha256::digest(value.as_bytes()))
+}
+
+/// Returns whether `url` is an absolute `https` URL without a user name or password, a query or a fragment
+/// ([CONTRACT.agent-identity.md §2 "Enrollment token"][contract]).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
+pub(crate) fn is_base_url(url: &str) -> bool {
+    parse_base_url(url).is_some()
+}
+
+/// Parses `url` when it is an absolute `https` URL without a user name or password, a query or a fragment, the form
+/// shared by a token's `u` ([CONTRACT.agent-identity.md §2 "Enrollment token"][token]) and `agent_channel_url`
+/// ([CONTRACT.agent-identity.md §5.2 "`POST enroll`"][enroll]).
+///
+/// The URL is read as text first: it begins with `https://`, compared as written, and contains no `@`, since any `@` counts
+/// as a user name even with nothing before it.
+/// URL parsers disagree on forms such as `https://@host` or `https:host`, which the `url` crate accepts as `https`
+/// URLs without a user name, so the text decides before the parsed URL is checked.
+///
+/// [token]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enrollment-token
+/// [enroll]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#enroll
+pub(crate) fn parse_base_url(url: &str) -> Option<Url> {
+    if !url.starts_with("https://") || url.contains('@') {
+        return None;
+    }
+    Url::parse(url).ok().filter(|url| {
+        url.scheme() == "https"
+            && url.has_host()
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+    })
+}
+
+fn is_base64url(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_'
+}
+
+impl fmt::Display for Token {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("[redacted enrollment token]")
+    }
+}
+
+impl fmt::Debug for Token {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Token([redacted])")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use rstest::rstest;
+
+    use super::*;
+
+    fn token_with_bag(bag: &str) -> String {
+        format!("dvaet1.{}.{}", URL_SAFE_NO_PAD.encode(bag), "A".repeat(43))
+    }
+
+    #[test]
+    fn accepts_valid_token_and_hashes_the_entire_string() -> anyhow::Result<()> {
+        let raw = token_with_bag(r#"{"u":"https://example.test/dvls","extra":true}"#);
+        let token = Token::parse(&raw)?;
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+        assert_eq!(token.base_url(), "https://example.test/dvls");
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+        // The SHA-256 of `raw`'s UTF-8 bytes in lowercase hexadecimal, computed with Python's `hashlib`.
+        let expected = "65d386f45a2f8e2e11db4e8cc316eff1d7f59faba77130b092e006221d52c007";
+        assert_eq!(token.sha256_hex(), expected);
+        assert_eq!(sha256_hex(&raw), expected);
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
+        assert!(!format!("{token:?} {token}").contains(&raw));
+        assert!(!format!("{token:?} {token}").contains(&raw[..12]));
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    #[test]
+    fn accepts_dashes_and_underscores_in_the_bag_and_secret() -> anyhow::Result<()> {
+        // The bag is the base64url of `{"u":"https://example.test/dvls","x":"???~~~"}`.
+        let bag = "eyJ1IjoiaHR0cHM6Ly9leGFtcGxlLnRlc3QvZHZscyIsIngiOiI_Pz9-fn4ifQ";
+        // The secret is the base64url of `fb f0` followed by 30 zero bytes.
+        let secret = format!("-_{}", "A".repeat(41));
+        let raw = format!("dvaet1.{bag}.{secret}");
+        assert_eq!(Token::parse(&raw)?.base_url(), "https://example.test/dvls");
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    #[test]
+    fn rejects_every_malformed_token_locally_without_exposing_it() {
+        let valid = token_with_bag(r#"{"u":"https://example.test/dvls"}"#);
+        let invalid = [
+            valid.replacen("dvaet1", "dvaet2", 1),
+            valid.replace("dvaet1.", "dvaet1.."),
+            token_with_bag("not-json"),
+            token_with_bag(r#"["not-an-object"]"#),
+            token_with_bag(r#"{"other":"https://example.test"}"#),
+            token_with_bag(r#"{"u":"http://example.test"}"#),
+            token_with_bag(r#"{"u":"https://example.test?query=true"}"#),
+            token_with_bag(r##"{"u":"https://example.test/#fragment"}"##),
+            token_with_bag(r#"{"u":"relative/path"}"#),
+            token_with_bag(r#"{"u":"https://user@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https://user:pw@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https://:pw@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https://user:@example.test/dvls"}"#),
+            // `u` is read as text: it begins with `https://` and contains no `@`, whatever a URL parser makes of it.
+            token_with_bag(r#"{"u":"https://@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https://:@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https:@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https:example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https:/@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https:\\\\@example.test/dvls"}"#),
+            token_with_bag(r#"{"u":"https://example.test/p@x"}"#),
+            token_with_bag(r#"{"u":"HTTPS://example.test/dvls"}"#),
+            token_with_bag(r#"{"u":123}"#),
+            format!("{valid}A"),
+            valid[..valid.len() - 1].to_owned(),
+            format!("{valid}.extra"),
+            format!("dvaet1.{}.{}", "A".repeat(4096), "A".repeat(43)),
+            valid.replace(".AAAA", ".!!!!"),
+        ];
+        for raw in invalid {
+            let error = Token::parse(&raw).expect_err("malformed token was accepted");
+            // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
+            assert!(!error.to_string().contains(&raw), "{error}");
+        }
+    }
+
+    /// `u` holds only ASCII characters, since certificates carry it as an `IA5String`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+    #[rstest]
+    #[case::internationalized_host("https://exämple.test/dvls")]
+    #[case::path("https://example.test/dvlś")]
+    #[case::fullwidth_commercial_at("https://user＠example.test/dvls")]
+    fn rejects_a_base_url_with_a_non_ascii_character(#[case] u: &str) {
+        let raw = token_with_bag(&serde_json::json!({ "u": u }).to_string());
+        let error = Token::parse(&raw).expect_err("a non-ASCII base URL was accepted");
+        // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Security invariants
+        assert!(!error.to_string().contains(&raw), "{error}");
+    }
+}
