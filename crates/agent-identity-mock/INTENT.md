@@ -36,6 +36,7 @@ A separate, unauthenticated control surface under `{u}/__mock__/` lets the teste
 - make the channel unavailable, which removes `agent_channel_url` from every identity's config and pushes the change, or break it without changing any config;
 - set the rotation notification rate;
 - inject product-specific config fields into every identity's effective config, which bumps revisions and pushes the change;
+- set or clear the key storage policy in the effective config of every identity, including identities enrolled afterwards, which bumps revisions and pushes the change;
 - reset all mutable authority state, keeping management API login sessions so that the tester stays logged in;
 - read an identity's ordered channel and certificate events, each with a monotonic sequence number, so that make-before-break ordering can be checked without polling.
 

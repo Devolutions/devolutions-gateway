@@ -143,6 +143,22 @@ Not intended:
   An authority may let a token carry such assignments, chosen from the ones it recognizes rather than written as free-form config, and apply them to each identity the token enrolls as if an administrator had made them right after enrollment, so that the Gateway also receives the identity.
   This suits only a short-lived token whose uses match machines known to be online, because anyone holding the token receives those assignments.
 
+<a id="key-storage"></a>
+
+### Key storage
+
+- An authority sets a key storage policy for each identity, and the agent places each new key within it: an administrator's rule says which storage the organization wants, and only the agent can tell which ones the machine offers; the authority learns that from unverified metadata.
+  The policy is an ordered list with a flag that makes it required, so that one rule fits machines that offer different key storage.
+- The agent has no setting of its own for key storage, so that storage policy is set in one place, the authority, for a whole fleet.
+  When the policy leaves the choice to the agent, the agent uses the strongest key storage of its built-in ranking that the machine offers.
+- The policy travels in the identity's config, so that a change can reach the agent before its next key, by the same paths as every config change, and also while the agent holds a renewal back; in a renew response, it would always arrive after the key it should have placed, and never while the agent sends no renewal.
+- A required policy fails closed: when the machine offers none of its storage, the agent keeps its current key until it expires rather than create one where the administrator said keys must not be; a corrected policy must reach it before then.
+- A malformed policy counts as none, even one meant to be required, so that an authority's mistake never stops enrollment or renewal.
+- While a required policy excludes the current key's storage, the agent renews as soon as a listed storage is available, so that the requirement takes effect without waiting for the next scheduled renewal; a preference waits for that renewal.
+  An identity's first key is always the agent's choice, since it exists before any config, so a required policy that excludes it makes the agent renew right after enrollment.
+- The agent reports where each key is and which key storage the machine offers, as metadata.
+  That report carries no proof, so an authority never grants or refuses anything because of it, such as a renewal whose reported key storage is outside its policy (security invariant 6).
+
 ### Errors
 
 - The contract's error section is the only list of error codes, HTTP mappings and retry rules.
