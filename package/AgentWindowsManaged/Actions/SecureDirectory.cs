@@ -129,8 +129,8 @@ internal static class SecureDirectory
     /// A reparse point, such as a junction or a symbolic link, is never followed, and loses LOCAL SERVICE allow entries
     /// from its own DACL like any other entry, because write access on a link lets an account retarget or remove it;
     /// what it points to is unchanged.
-    /// A file with more than one hard link is skipped, because its security is shared with every other name of the
-    /// file, which may be outside the tree.
+    /// A file's security descriptor is shared by all its names, some of which may be outside the tree, which is harmless,
+    /// because removing LOCAL SERVICE allow entries never widens any account's access.
     /// A directory replaced while the walk reaches it fails the walk.
     /// An entry that can't be found by the name its directory listed it under, because it was deleted after the listing
     /// or because a Win32 path can't reach its name, such as one ending in a dot, is skipped: a deleted entry has no DACL
@@ -419,6 +419,9 @@ internal static class SecureDirectory
             {
                 // ReOpenFile refuses a directory, so the directory is held through its path, which the directories held
                 // above pin, and compared with the entry first opened.
+                // A directory another process holds without sharing fails the hold, and so the run: during a feature
+                // change the agent keeps running and briefly holds identity that way as its state lock, so such a run
+                // fails and can be repeated.
                 using SafeFileHandle child = OpenUnlessNotFound(
                     () => Hold(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC), entry, logger);
 
@@ -436,10 +439,6 @@ internal static class SecureDirectory
 
                 RemoveLocalService(child, entry, logger);
                 RemoveLocalServiceBelow(entry, logger);
-            }
-            else if (information.nNumberOfLinks > 1)
-            {
-                logger.Log($"kept the security of {entry}: it has {information.nNumberOfLinks} hard links");
             }
             else
             {

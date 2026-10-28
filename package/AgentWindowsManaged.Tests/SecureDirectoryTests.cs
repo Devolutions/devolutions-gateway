@@ -353,20 +353,24 @@ public sealed class SecureDirectoryTests
         Assert.Equal(targetBefore, new[] { RawDescriptor(outside), RawDescriptor(file) });
     }
 
+    // An account that could write a file below Agent would otherwise keep that access by adding a hard link to it.
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
-    public void SetSecurityAndRemoveLocalServiceBelowLeavesAFileWithAnotherHardLinkUnchanged()
+    public void SetSecurityAndRemoveLocalServiceBelowRemovesLocalServiceFromAFileWithAnotherHardLink()
     {
         using TempFolder folder = new();
         string agent = CreateLegacyAgentFolder(folder.Path);
         string outside = Path.Combine(CreateOutsideFolder(folder), "file.txt");
-        TempFolder.CreateHardLink(Path.Combine(agent, "link.txt"), outside);
+        string link = Path.Combine(agent, "link.txt");
+        TempFolder.CreateHardLink(link, outside);
         string before = RawSddl(outside);
         Assert.Contains(";;;LS)", before);
 
         this.SetSecurityAndRemoveLocalServiceBelow(folder.Path, AgentSddl);
 
-        Assert.Equal(before, RawSddl(outside));
+        Assert.Equal(
+            new[] { WithoutLocalService(before), WithoutLocalService(before) },
+            new[] { RawSddl(link), RawSddl(outside) });
     }
 
     // A name ending in a dot is listed as it is, but the Win32 path the listing gives drops the dot, so the entry can't be
