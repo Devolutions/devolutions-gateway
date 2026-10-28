@@ -45,12 +45,12 @@
           "text": "domaine"
         },
         {
-          "id": "NgroXForNativeClientAccess",
-          "text": "Le {0} pour accéder au client natif"
+          "id": "NgrokNativeClientsNeedAReservedX",
+          "text": "Les clients natifs comme Remote Desktop Manager exigent une {0} réservée (option payante de ngrok). Inutile pour l'accès par navigateur seul."
         },
         {
           "id": "NgrokTcpAddressLink",
-          "text": "Adresse TCP"
+          "text": "adresse TCP"
         },
         {
           "id": "FindYourPublicKeyForXorX",
@@ -281,7 +281,7 @@
         },
         {
           "id": "RemoteAddressIsRequired",
-          "text": "L'adresse à distance est requise"
+          "text": "L'adresse à distance est requise pour l'accès des clients natifs. Sélectionnez Plus tard pour un accès par navigateur uniquement."
         },
         {
           "id": "RemoteAddressMustBeInTheFormat",
@@ -450,6 +450,10 @@
         {
           "id": "Property_NgrokHttpDomain",
           "text": "Domaine"
+        },
+        {
+          "id": "Property_NgrokEnableTcp",
+          "text": "Accès pour clients natifs"
         },
         {
           "id": "Property_NgrokRemoteAddress",
