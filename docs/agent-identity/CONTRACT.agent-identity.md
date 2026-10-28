@@ -279,7 +279,8 @@ Any other `identity_unknown`, including one returned by that retry, is terminal.
 
 `certificate_expired`:
 
-- On `connect` or `check-in`: the agent renews immediately (§8), signing with the expired certificate, which renew still accepts within its grace; it retries the operation only after `confirm`.
+- On `connect` or `check-in`: the agent renews (§8), signing with the expired certificate, which renew still accepts within its grace; it retries the operation only after `confirm`.
+  It renews immediately, except that it may wait until 10 minutes after it last completed a renewal of that identity.
 - On `renew`: the certificate is beyond grace.
   It is terminal.
 - On `confirm`: see §8.
