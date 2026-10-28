@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use agent_channel_client::{Backoff, ChannelClient, uniform_jitter};
 use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
-use agent_identity::key_storage::{KeyStorage, unavailable_key_storage};
+use agent_identity::key_storage::{KeyStorage, KeyStoragePolicy, unavailable_key_storage};
 use agent_identity::pending::{self, PendingRead};
 use agent_identity::state::{
     EnrolledIdentity, EnrollmentDiscardReason, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots, PendingDiscard, Store,
@@ -183,7 +183,8 @@ fn poll_interval(settings: &IdentityDebugConf) -> Duration {
     Duration::from_millis(settings.pending_poll_interval_ms.unwrap_or(5_000).max(1))
 }
 
-/// Reports an unavailable key storage once per run for each identity or pending file that needs it.
+/// Reports an unavailable key storage once per run for each identity or pending file that needs it, and a renewal that
+/// a key storage policy holds back once per run for each identity and policy.
 ///
 /// `crates/agent-identity/INTENT.md` ("Identities"): the agent logs an error and raises a system event once per run for
 /// each backend and identity or pending file, because the device-key crate leaves reporting to its caller
@@ -191,6 +192,7 @@ fn poll_interval(settings: &IdentityDebugConf) -> Duration {
 pub(super) struct UnavailableKeyStorages {
     system_events: Arc<dyn SystemEventSink>,
     reported: parking_lot::Mutex<HashSet<(KeyStorage, String)>>,
+    held: parking_lot::Mutex<HashSet<(uuid::Uuid, KeyStoragePolicy)>>,
 }
 
 impl UnavailableKeyStorages {
@@ -198,6 +200,43 @@ impl UnavailableKeyStorages {
         Self {
             system_events,
             reported: parking_lot::Mutex::new(HashSet::new()),
+            held: parking_lot::Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Reports that `policy` holds a due renewal of an identity back, once per run for each identity and policy.
+    ///
+    /// `devolutions-agent/src/identity/INTENT.md` ("Configuration"): the event names the identity and the listed
+    /// backends, which an administrator compares with the key storage the machine offers.
+    pub(super) fn report_held(&self, identity_id: uuid::Uuid, authority_id: uuid::Uuid, policy: &KeyStoragePolicy) {
+        if !self.held.lock().insert((identity_id, policy.clone())) {
+            return;
+        }
+        let backends = policy
+            .backends
+            .iter()
+            .map(KeyStorage::as_str)
+            .collect::<Vec<_>>()
+            .join(", ");
+        error!(
+            %identity_id,
+            %authority_id,
+            backends,
+            "The required Agent Identity key storage policy lists no key storage available on this machine; renewal waits until one is available or the policy changes"
+        );
+        if let Err(emit_error) = self
+            .system_events
+            .emit(agent_sysevent_codes::identity_key_backend_unavailable(
+                &backends,
+                format!(
+                    "identity {identity_id} of authority {authority_id}: renewal held: the required key storage policy lists no available key storage among {backends}"
+                ),
+            ))
+        {
+            warn!(
+                error = %emit_error,
+                "Cannot report the held Agent Identity renewal to the system log"
+            );
         }
     }
 
@@ -886,6 +925,40 @@ mod tests {
             Some(true),
             "the pending poll did not process its pending file once the check ran again"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn a_held_renewal_is_reported_once_per_run_for_each_identity_and_policy() -> anyhow::Result<()> {
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+        // The agent raises event 1100, with the identity ID and the listed backends, once per run for each identity and
+        // policy, when its required key storage policy holds a due renewal back.
+        let events = Arc::new(RecordingSink::default());
+        let unavailable = UnavailableKeyStorages::new(Arc::clone(&events) as Arc<dyn SystemEventSink>);
+        let identity_id = uuid::Uuid::new_v4();
+        let other_identity_id = uuid::Uuid::new_v4();
+        let authority_id = uuid::Uuid::new_v4();
+        let policy = KeyStoragePolicy {
+            backends: vec![KeyStorage::parse("tpm")?, KeyStorage::parse("future_storage")?],
+            required: true,
+        };
+        let changed = KeyStoragePolicy {
+            backends: vec![KeyStorage::parse("tpm")?],
+            required: true,
+        };
+
+        unavailable.report_held(identity_id, authority_id, &policy);
+        unavailable.report_held(identity_id, authority_id, &policy);
+        unavailable.report_held(identity_id, authority_id, &changed);
+        unavailable.report_held(other_identity_id, authority_id, &policy);
+
+        let entries = events.entries();
+        assert_eq!(entries.len(), 3, "{entries:?}");
+        assert!(entries.iter().all(|(code, _)| *code == Some(1100)), "{entries:?}");
+        let (_, fields) = &entries[0];
+        let mentions = |text: &str| fields.iter().any(|(_, value)| value.contains(text));
+        assert!(mentions(&identity_id.to_string()), "{fields:?}");
+        assert!(mentions("tpm") && mentions("future_storage"), "{fields:?}");
         Ok(())
     }
 
