@@ -126,9 +126,11 @@ internal static class SecureDirectory
     /// </para>
     /// <para>
     /// Each directory is held while the entries below it are opened, so no path below it can be redirected.
-    /// A reparse point, such as a junction or a symbolic link, is neither followed nor changed, and a file with more
-    /// than one hard link is skipped, because its security is shared with every other name of the file, which may be
-    /// outside the tree.
+    /// A reparse point, such as a junction or a symbolic link, is never followed, and loses LOCAL SERVICE allow entries
+    /// from its own DACL like any other entry, because write access on a link lets an account retarget or remove it;
+    /// what it points to is unchanged.
+    /// A file with more than one hard link is skipped, because its security is shared with every other name of the
+    /// file, which may be outside the tree.
     /// A directory replaced while the walk reaches it fails the walk.
     /// An entry that can't be found by the name its directory listed it under, because it was deleted after the listing
     /// or because a Win32 path can't reach its name, such as one ending in a dot, is skipped: a deleted entry has no DACL
@@ -388,12 +390,32 @@ internal static class SecureDirectory
             }
 
             WinAPI.BY_HANDLE_FILE_INFORMATION information = GetInformation(handle);
+            bool isReparsePoint = (information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+            bool isDirectory = (information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0;
 
-            if ((information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0)
+            if (isReparsePoint && isDirectory)
             {
-                logger.Log($"kept the security of {entry}: it is a reparse point");
+                // ReOpenFile refuses a directory, so the link is opened again through its path, itself rather than its
+                // target, and compared with the entry first opened; nothing below it is reached.
+                using SafeFileHandle link = OpenUnlessNotFound(
+                    () => Open(entry, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC | WinAPI.FILE_READ_ATTRIBUTES, AnyShare),
+                    entry,
+                    logger);
+
+                if (link is null)
+                {
+                    continue;
+                }
+
+                if (!IsSameEntry(information, GetInformation(link)))
+                {
+                    throw new IOException($"{entry} changed while LOCAL SERVICE was being removed from it");
+                }
+
+                RemoveLocalService(link, entry, logger);
+                logger.Log($"did not follow {entry}: it is a reparse point");
             }
-            else if ((information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0)
+            else if (isDirectory)
             {
                 // ReOpenFile refuses a directory, so the directory is held through its path, which the directories held
                 // above pin, and compared with the entry first opened.
@@ -421,8 +443,17 @@ internal static class SecureDirectory
             }
             else
             {
+                // UNTESTED: a file symbolic link loses LOCAL SERVICE from its own DACL, not from its target's, because
+                // the first handle opened the link itself and the reopened handle addresses the same object.
+                // Creating a file symbolic link needs elevation or developer mode, which tests don't have.
+                // When changing this, keep opening the entry with FILE_FLAG_OPEN_REPARSE_POINT before reopening it.
                 using SafeFileHandle file = Reopen(handle, WinAPI.READ_CONTROL | WinAPI.WRITE_DAC, AnyShare);
                 RemoveLocalService(file, entry, logger);
+
+                if (isReparsePoint)
+                {
+                    logger.Log($"did not follow {entry}: it is a reparse point");
+                }
             }
         }
     }

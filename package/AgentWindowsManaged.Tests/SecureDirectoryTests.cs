@@ -257,6 +257,25 @@ public sealed class SecureDirectoryTests
         Assert.Equal(before.Select(WithoutLocalService).ToArray(), entries.Select(RawSddl).ToArray());
     }
 
+    // The agent may hold its files open while an install, an upgrade or a repair runs.
+    // oracle: mutant the first open asks for a right that takes part in sharing checks
+    [Fact]
+    public void SetSecurityAndRemoveLocalServiceBelowRemovesLocalServiceFromAFileOpenWithoutSharing()
+    {
+        using TempFolder folder = new();
+        CreateLegacyAgentFolder(folder.Path);
+        string file = CreateFile(folder.Path, [.. AgentNames, "file.txt"]);
+        string before = RawSddl(file);
+        Assert.Contains(";;;LS)", before);
+
+        using (new FileStream(file, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            this.SetSecurityAndRemoveLocalServiceBelow(folder.Path, AgentSddl);
+        }
+
+        Assert.Equal(WithoutLocalService(before), RawSddl(file));
+    }
+
     // A protected folder, or a file below it, holds LOCAL SERVICE as an entry of its own.
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
@@ -311,9 +330,11 @@ public sealed class SecureDirectoryTests
         Assert.Equal(before, new[] { RawDescriptor(identity), RawDescriptor(file) });
     }
 
+    // Write access on a junction lets an account retarget or remove it, which would redirect what the agent writes
+    // through it, so the junction itself loses LOCAL SERVICE, but what it points to is never reached.
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
     [Fact]
-    public void SetSecurityAndRemoveLocalServiceBelowLeavesAJunctionInsideTheFolderAndWhatItPointsToUnchanged()
+    public void SetSecurityAndRemoveLocalServiceBelowRemovesLocalServiceFromAJunctionInsideTheFolderButNotFromItsTarget()
     {
         using TempFolder folder = new();
         string agent = CreateLegacyAgentFolder(folder.Path);
@@ -321,12 +342,15 @@ public sealed class SecureDirectoryTests
         string file = Path.Combine(outside, "file.txt");
         string link = Path.Combine(agent, "link");
         TempFolder.CreateJunction(link, outside);
-        string[] before = [RawSddl(link), RawSddl(outside), RawSddl(file)];
-        Assert.All(before, sddl => Assert.Contains(";;;LS)", sddl));
+        string linkBefore = RawSddl(link);
+        byte[][] targetBefore = [RawDescriptor(outside), RawDescriptor(file)];
+        Assert.Contains(";;;LS)", linkBefore);
+        Assert.All(new[] { RawSddl(outside), RawSddl(file) }, sddl => Assert.Contains(";;;LS)", sddl));
 
         this.SetSecurityAndRemoveLocalServiceBelow(folder.Path, AgentSddl);
 
-        Assert.Equal(before, new[] { RawSddl(link), RawSddl(outside), RawSddl(file) });
+        Assert.Equal(WithoutLocalService(linkBefore), RawSddl(link));
+        Assert.Equal(targetBefore, new[] { RawDescriptor(outside), RawDescriptor(file) });
     }
 
     // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
