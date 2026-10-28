@@ -5,8 +5,6 @@ pub mod ai;
 pub mod recording_ai_analysis;
 pub mod runner;
 
-use std::sync::Arc;
-
 use provisioner_task::DynProvisionerTaskStore;
 
 use self::recording_ai_analysis::RecordingAiAnalysis;
@@ -23,8 +21,8 @@ pub fn task_runner(
     recordings: RecordingMessageSender,
     secrets: SecretStore,
 ) -> ProvisionerTaskRunner {
-    ProvisionerTaskRunner::builder(store, Arc::clone(&job_queue))
-        .register(RecordingAiAnalysis::new(conf_handle, recordings, secrets, job_queue))
+    ProvisionerTaskRunner::builder(store, job_queue)
+        .register(RecordingAiAnalysis::new(conf_handle, recordings, secrets))
         .build()
 }
 
@@ -47,7 +45,7 @@ pub enum Recoverable {
     AiUnreachable,
     /// The AI provider is busy or failing for now, such as with a rate limit (429) or a server error (5xx).
     AiBusy { status: u16 },
-    /// Gateway could not read its own job queue.
+    /// Gateway could not read its own storage, such as the folder of the session.
     Storage,
 }
 
