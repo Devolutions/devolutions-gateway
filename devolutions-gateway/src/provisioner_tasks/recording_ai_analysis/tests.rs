@@ -529,7 +529,10 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
     let task_id = harness.start_created(session_id, settings).await;
     let workspace = harness.workspace(session_id);
 
-    harness.run(task_id).await.expect("the job queues the next attempt itself");
+    harness
+        .run(task_id)
+        .await
+        .expect("the job queues the next attempt itself");
     // oracle: mutant a recoverable failure is retried at once, without the delay a busy provider asks for
     assert!(
         harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
@@ -679,7 +682,10 @@ async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
     let task_id = harness.start_created(session_id, settings).await;
 
     for attempt in 1..MAX_ATTEMPTS {
-        harness.run(task_id).await.expect("the job queues the next attempt itself");
+        harness
+            .run(task_id)
+            .await
+            .expect("the job queues the next attempt itself");
         // oracle: mutant a recoverable failure is retried at once, without the delay a busy provider asks for
         assert!(
             harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
@@ -831,7 +837,12 @@ async fn analysis_waits_for_the_remux_of_the_session() {
     let (settings, requests) = spawn_ai_provider(|_| 0).await;
     let task_id = harness.start_created(session_id, settings).await;
 
-    let marker = remux_marker(&harness.recording_path.join(session_id.to_string()).join("recording-1.webm"));
+    let marker = remux_marker(
+        &harness
+            .recording_path
+            .join(session_id.to_string())
+            .join("recording-1.webm"),
+    );
     std::fs::write(&marker, b"").expect("remux mark");
     let other_dir = harness.recording_path.join(Uuid::new_v4().to_string());
     std::fs::create_dir_all(&other_dir).expect("other session");
@@ -967,7 +978,10 @@ async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
     let session_id = harness.write_long_session(10_000);
     let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
     let task_id = harness.start_created(session_id, settings).await;
-    harness.run(task_id).await.expect("the job queues the next attempt itself");
+    harness
+        .run(task_id)
+        .await
+        .expect("the job queues the next attempt itself");
     // As if Gateway stopped after an attempt wrote its log, before its success was recorded.
     let dir = harness.recording_path.join(session_id.to_string());
     let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
@@ -1223,7 +1237,7 @@ async fn a_new_task_never_resumes_from_an_earlier_task() {
     let session_id = harness.write_long_session(10_000);
     let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
     let first = harness.start_created(session_id, settings.clone()).await;
-    assert!(harness.run(first).await.is_err(), "the outage is retried");
+    harness.run(first).await.expect("the job queues the next attempt itself");
     assert!(harness.workspace(session_id).join("chunk-0000.json").exists());
     harness
         .state
