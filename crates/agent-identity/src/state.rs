@@ -329,8 +329,10 @@ impl Store {
             bytes.len() as u64 <= MAX_IDENTITY_BYTES,
             "stored identity exceeds size limit"
         );
+        // The parse error names what is wrong, such as a missing `key_storage`, so that an administrator can fix the
+        // file it names.
         let identity: StoredIdentity =
-            serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid stored identity"))?;
+            serde_json::from_slice(&bytes).with_context(|| format!("invalid stored identity {path}"))?;
         self.validate_identity(&identity)?;
         ensure!(
             identity.authority_id == authority_id,
@@ -629,9 +631,21 @@ impl Store {
         then()
     }
 
-    pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
-        if identity.keys.previous.is_none() {
-            return Ok(());
+    /// Deletes the previous key, then removes its slot, and returns whether the identity no longer has a previous key.
+    ///
+    /// [`crates/agent-identity/INTENT.md`] ("Identities"): a key whose key storage is unavailable is left as it is,
+    /// with its slot, because it may still exist there, so this returns `false` without a change; that key storage is
+    /// never stopped on, so the caller goes on with the identity's other keys.
+    ///
+    /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+    pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<bool> {
+        let Some(previous) = &identity.keys.previous else {
+            return Ok(true);
+        };
+        match self.check_key_storage(&previous.key_storage) {
+            Ok(()) => {}
+            Err(error) if unavailable_key_storage(&error).is_some() => return Ok(false),
+            Err(error) => return Err(error),
         }
         self.update(
             identity,
@@ -640,7 +654,8 @@ impl Store {
                 Ok(())
             },
             || Ok(()),
-        )
+        )?;
+        Ok(true)
     }
 
     /// Reuses an enrollment key, or skips a token already represented by an identity or rejection marker.
@@ -2942,6 +2957,36 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/agent-identity/INTENT.md §Identities
+    // A key recorded in an unavailable key storage is left as it is, because it may still exist there, and the agent
+    // never looks for it in another key storage; one unavailable key storage never stops what doesn't need it.
+    #[test]
+    fn a_previous_key_in_an_unavailable_key_storage_is_kept_with_its_slot() -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let mut identity = enroll_locally(&store, &directory.0)?;
+        store.create_pending_key(&mut identity)?;
+        store.store_pending_chain(&mut identity, vec!["bmV3".into()])?;
+        store.promote_pending(&mut identity)?;
+        let bytes = rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+            json["keys"]["previous"]["key_storage"] = Value::from("tpm");
+        })?;
+        let mut identity = store
+            .read_identity(identity.authority_id)?
+            .context("identity disappeared")?;
+        let kept = identity.clone();
+
+        let removed = store.remove_previous_key(&mut identity)?;
+
+        assert!(!removed);
+        assert_eq!(identity, kept);
+        assert_eq!(fs::read(store.identity_path(identity.authority_id))?, bytes);
+        Ok(())
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     #[test]
     fn promotion_keeps_the_old_key_as_previous_until_it_is_deleted() -> anyhow::Result<()> {
@@ -3549,6 +3594,65 @@ mod tests {
         Ok(())
     }
 
+    // oracle: mutant the refusal drops the parse error that names the missing field, or the path of the file
+    // An administrator fixes a refused `identity.json` from the error alone, so it names the file and the missing field.
+    #[test]
+    fn an_identity_file_without_key_storage_is_refused_with_an_error_naming_the_field_and_the_file()
+    -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+            set_key_storage(&mut json["keys"]["current"], None);
+        })?;
+
+        let error = store
+            .read_identity(identity.authority_id)
+            .err()
+            .context("an identity without key_storage was read")?;
+
+        let message = format!("{error:#}");
+        assert!(message.contains("key_storage"), "{message}");
+        assert!(
+            message.contains(store.identity_path(identity.authority_id).as_str()),
+            "{message}"
+        );
+        Ok(())
+    }
+
+    // oracle: mutant the refusal drops the parse error that names the missing field, or the path of the file
+    // An administrator fixes a refused in-progress record from the error alone, so it names the file and the missing
+    // field.
+    #[test]
+    fn an_in_progress_record_without_key_storage_is_refused_with_an_error_naming_the_field_and_the_file()
+    -> anyhow::Result<()> {
+        let directory = TestDir::new()?;
+        if !directory.supports_owner_only_files()? {
+            return Ok(());
+        }
+        let store = directory.store()?;
+        let token = test_token()?;
+        let hash_hex = token.sha256_hex();
+        pending::write(&directory.0, &token, true)?;
+        store.begin_enrollment(&token)?.context("begin enrollment")?;
+        rewrite_in_progress_json(&directory, &hash_hex, |json| set_key_storage(json, None))?;
+
+        let error = pending::read_in_progress(&directory.0, &hash_hex)
+            .err()
+            .context("an in-progress record without key_storage was read")?;
+
+        let message = format!("{error:#}");
+        assert!(message.contains("key_storage"), "{message}");
+        assert!(
+            message.contains(pending::in_progress_path(&directory.0, &hash_hex)?.as_str()),
+            "{message}"
+        );
+        Ok(())
+    }
+
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     // The agent writes a key's name and key storage to its record before creating the key, in that key storage.
     #[test]
@@ -3680,7 +3784,8 @@ mod tests {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     // A missing pending key is replaced at start-up only where the policy allows a new key; a required policy without an
-    // available key storage leaves the identity as it is, and start-up still completes for the other identities.
+    // available key storage leaves the identity as it is, and start-up completes rather than fail, which would stop
+    // every identity.
     #[test]
     fn startup_leaves_a_missing_pending_key_that_a_required_policy_holds_back() -> anyhow::Result<()> {
         let directory = TestDir::new()?;

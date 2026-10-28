@@ -313,7 +313,7 @@ mod tests {
         Ok(())
     }
 
-    // oracle: intent crates/agent-identity/INTENT.md §key-storage
+    // oracle: mutant a failed availability check counts as an unavailable key storage, which places the key lower
     // A key storage whose availability can't be determined stops the choice instead of counting as unavailable, so
     // that a passing failure never places a key in a key storage the authority prefers less, or holds a renewal back.
     #[test]

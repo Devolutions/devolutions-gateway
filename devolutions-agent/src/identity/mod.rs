@@ -106,10 +106,15 @@ async fn run_identity(
                             "Agent Identity is stopped until this authority directory or identity.json is a plain directory or file owned by the service account with no access for other users; the agent never repairs it"
                         );
                     } else {
+                        // UNTESTED: this log leaves the cause to its error, which names either the directory whose
+                        // ownership or ACL is wrong or the stored file whose content the agent can't use, such as one
+                        // without `key_storage`; advice on ownership alone would mislead in the second case.
+                        // No test captures service logs; when changing this, keep the message true for both causes and
+                        // keep it in step with the troubleshooting table of `docs/agent-identity/README.md`.
                         error!(
                             error = format!("{error:#}"),
                             directory = %data_dir.join("identity"),
-                            "Agent Identity state is unavailable; fix the identity directory ownership and ACL for the service account"
+                            "Agent Identity state is unavailable; fix the cause the error names, such as the ownership and ACL of the identity directory or a stored file the agent can't use"
                         );
                     }
                 }

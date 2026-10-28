@@ -197,11 +197,13 @@ pub fn read_in_progress(data_dir: &Utf8Path, hash_hex: &str) -> anyhow::Result<O
         bytes.len() <= MAX_PENDING_BYTES,
         "pending enrollment record is too large"
     );
+    // The parse error names what is wrong, such as a missing `key_storage`, so that an administrator can fix the file
+    // it names.
     let record: InProgress =
-        serde_json::from_slice(&bytes).map_err(|_| anyhow::anyhow!("invalid pending enrollment record"))?;
+        serde_json::from_slice(&bytes).with_context(|| format!("invalid pending enrollment record {path}"))?;
     ensure!(
         record.version == 1 && record.token_sha256 == hash_hex,
-        "invalid pending enrollment record"
+        "invalid pending enrollment record {path}: unsupported version or another token's hash"
     );
     Ok(Some(record))
 }
