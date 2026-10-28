@@ -30,7 +30,7 @@ The mock implements the contract's agent-facing operations and channel independe
   N/A is reserved for a test that does not apply to the platform, or that the authority's module declares unsupported, such as an expiry test against an authority that cannot issue short-lived certificates.
 - The `testsuite` crate builds the mock and the tester, runs the mock, runs the tester against it, and requires every test to pass.
   No dependency is added to `testsuite` for this.
-- The suite must pass on Linux with the file backend, and on Windows with the Windows software provider backend.
+- The suite must pass on Linux and on Windows; on Windows it covers both the Windows software provider and the file backend.
 - Without an explicit rotation window, the rotation tests ask for a deadline at most 75 % of the leaf lifetime ahead, rounded down and capped at 60 s, so that it falls before the rotation maximum of an authority issuing short-lived leaves; a lifetime too short to leave a whole second needs an explicit window.
 
 ## Coverage
@@ -88,4 +88,14 @@ The mock implements the contract's agent-facing operations and channel independe
   - identity statuses, including `grace`;
   - every route requires its permission.
 - **Keys:** non-exportable, accessible only to the agent's account and SYSTEM (root on Linux and macOS), and matching the certificate; no key is left orphaned.
+- **Key storage:**
+  - each key opens from the backend recorded for it, so an identity keeps working when its keys are in different backends;
+  - new keys follow the key storage policy: the first available backend it lists, otherwise the agent's built-in default;
+  - while a required policy lists no available backend, no renew request reaches the authority and the current key and stream stay in use;
+  - a required policy that excludes the current key's backend makes the agent renew without a request;
+  - a malformed policy is ignored without blocking enrollment or renewal;
+  - metadata reports each key's backend and the available backends;
+  - a key recorded in an unavailable or unknown backend pauses only its identity, without `key_lost`, and restoring it resumes the identity;
+  - an identity file or in-progress record without `key_storage` stops identity processing and is left unchanged;
+  - start-up removes unrecorded keys in every available backend.
 - **Multiple authorities:** identities for two authorities coexist, including across agent restarts.

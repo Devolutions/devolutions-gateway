@@ -76,6 +76,7 @@ Later, once `picky-crypto` is published, device keys implement its private-key i
 A caller can name any backend on every platform, so it needs no platform-specific code.
 A backend is built for every platform whose API supports it, whether or not the machine running it has the technology.
 An unavailable backend returns an error that callers can tell apart from every other failure.
+A caller can ask whether a backend is available on the machine without creating, opening or deleting a key, so that it can choose among backends and report the available ones with every request without leaving a key behind.
 The crate never falls back to another backend, and never logs that error or raises a system event; reporting it is the caller's job.
 
 ### Windows software provider

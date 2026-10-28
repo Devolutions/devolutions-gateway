@@ -8,18 +8,36 @@
   A configured proxy they cannot use, such as one with an unsupported scheme, is a transient error and never a reason to connect directly.
   Windows automatic proxy configuration, a PAC script or WPAD discovery, is not evaluated yet: until it is, the agent connects directly and logs a warning once per run, because such scripts usually send internal authorities direct and refusing would block enrollment on most managed networks.
 
+<a id="identities"></a>
+
 ## Identities
 
 - The agent holds one identity per authority, keyed by the authority ID returned at enrollment.
   Enrolling with one authority never affects identities held for another.
 - Certificates and chains are stored in the agent data directory, not in a Windows certificate store.
-  Private keys stay in their device-key backend (see `device-key`).
-- When the configured device-key backend is unavailable on the machine, the identity feature fails loudly: it logs an error and a system event, and stops before it processes any pending-enrollment file or identity.
-  The rest of the agent keeps running, and the agent never falls back to another backend, because a different backend would silently weaken or change where the device's keys live.
+  Private keys stay in the device-key backend that created them, and the agent records that backend with each key and opens each key from it, because the key storage policy can change while a key lives (see `device-key`).
+- When the agent needs a device-key backend that is unavailable on the machine, to open a key recorded in it or to create a key in it, it logs an error and raises a system event once per run for each backend and identity or pending file, and never substitutes another backend, because that would silently weaken or change where the device's keys live.
+  An identity whose current or pending key is recorded in such a backend, or under a well-formed name (`CONTRACT.agent-identity.md` §5.7) that the agent doesn't know, is left as it is and not used, and the agent checks that backend again on each pending-directory poll; the identity is never recorded as `key_lost`, because the key may still exist there.
+  A pending file whose in-progress record names such a backend waits, as after a transient failure.
+  A key that can't be created in its backend is retried as after a transient failure.
+  One unavailable backend never stops identities whose keys are in another, because without a setting an unavailable backend is a fault local to the keys in it.
 - When the authority permanently rejects an identity (the terminal outcomes of the contract's error section), the agent records the rejection and never renews or reconnects for that identity again; the agent can't observe revocation any other way.
   It keeps the identity's keys and slots, so the identity file stays the record of every key it owns, until a new identity replaces it or the agent is uninstalled.
   Only an enrollment with a different token replaces a rejected identity.
-- When an identity's current key no longer exists in its key store, the agent records the identity as rejected with the code `key_lost` instead of deleting it, so the same token stays a no-op and recovery needs a different token, as after a revocation.
+- When an identity's current key no longer exists in the backend recorded for it, the agent records the identity as rejected with the code `key_lost` instead of deleting it, so the same token stays a no-op and recovery needs a different token, as after a revocation.
+
+<a id="key-storage"></a>
+
+## Key storage
+
+- Without a key storage policy, or when a policy that isn't required lists no available backend, the agent creates a key in the first available of the Windows software provider, then the file backend, because a Windows software provider key cannot be exported while a key file is protected only by permissions.
+  TPM is not in this ranking, so that a TPM key is created only where a policy asks for one, until its rank is decided with TPM-backed keys.
+  Every enrollment key is created this way, because the authority's policy is known only from the enrollment response.
+- Every other new key of an identity, created at a renewal, at pending-key recovery or to replace an unusable pending key, follows `CONTRACT.agent-identity.md` §5.7 with the policy in the identity's stored config.
+- When a renewal is due and the identity's required key storage policy lists no available backend, the agent sends nothing, keeps its current key, and checks again with the transient-failure backoff and whenever it stores a config, so that it renews once a listed backend becomes available or a new config releases it.
+- The agent renews an identity without waiting for its schedule or a request when the policy in its stored config is required, the current key's backend is not in its list, and a listed backend is available; it checks this at start-up and whenever it stores a config.
+  This renewal waits like any other for the wait between renewals (§Schedules), and first for a renewal jitter drawn uniformly from `[0, 15 min]`, so that a policy change reaching many agents at once doesn't make them all renew at the same moment.
+- The agent logs a warning when it treats a malformed policy as absent.
 
 ## Schedules
 
@@ -45,6 +63,7 @@ The location and format of the files below are stable, because the conformance t
   The running agent repeats the check before every use of its state and on each pending-directory poll, stops every identity and its streams while any directory fails it, and resumes without a restart once all pass.
   A directory passes only if it is owned by the agent's account and is, on Unix, closed to group and other, or on Windows, protected by exactly the DACL the agent provisions; a link, a reparse point, a non-directory and, on a case-insensitive file system, any case variant of its name are all checked.
 - An `identity.json` that fails the same check is treated like an untrusted authority directory: never repaired, never read as absent, and it stops all identity processing until it is fixed.
+  So is an `identity.json` or in-progress record of the agent's own whose content it can't use, such as one without a required field or with a `key_storage` that isn't a well-formed name, because reading it as absent could enroll its token again as a second identity.
 - The agent ignores a rejection marker or in-progress record that it doesn't own or that other users can access, as if it were absent, and never deletes one as cleanup; its own write of that file replaces it.
   Trusting one would let a local attacker reject a token or supply its enrollment key, while an attacker able to write one could delete it anyway, so ignoring it opens nothing new.
 - Every state change holds an exclusive lock on the identity directory: the file `<data-dir>/identity/.agent-identity.lock` on Linux and macOS, and on Windows an unshared handle on `<data-dir>/identity` itself; on Windows, a busy lock is retried for 30 s.
@@ -67,7 +86,7 @@ The location and format of the files below are stable, because the conformance t
 - The service reads the directory at start-up and polls it, by default every 5 s.
 - Each pending file is independent: its own enrollment key, in-progress record and retry backoff.
   Requests are sent one at a time, and a file in transient backoff doesn't block the others.
-- When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "<hex>", "key_name": "..." }` in `<data-dir>/identity/pending/<hex>.in-progress.json`.
+- When the agent first processes a pending file, it generates the enrollment key and records `{ "version": 1, "token_sha256": "<hex>", "key_name": "...", "key_storage": "<name>" }` in `<data-dir>/identity/pending/<hex>.in-progress.json`.
   Every retry of that file, including after a restart, uses that key, so a lost enrollment response is recovered through the authority's enrollment idempotence.
   Nothing is discarded before enrollment completes, because the authority is known only from the enrollment response.
 - Outcomes:
@@ -110,30 +129,31 @@ The location and format of the files below are stable, because the conformance t
   "token_sha256": "<hex>",
   "rejected": { "code": "identity_revoked", "at": "2026-09-24T12:00:00Z" },
   "keys": {
-    "current": { "key_name": "...", "certificate_chain": ["..."] },
-    "pending": { "key_name": "...", "certificate_chain": ["..."] },
-    "previous": { "key_name": "...", "certificate_chain": ["..."] }
+    "current": { "key_name": "...", "key_storage": "file", "certificate_chain": ["..."] },
+    "pending": { "key_name": "...", "key_storage": "file", "certificate_chain": ["..."] },
+    "previous": { "key_name": "...", "key_storage": "windows_software_provider", "certificate_chain": ["..."] }
   }
 }
 ```
 
 - `rejected` is absent until the authority rejects the identity permanently or its current key is lost; `code` is the error code that rejected it, or `key_lost`.
 - `pending` and `previous` are optional; `pending.certificate_chain` is absent until renew succeeds; `previous` exists between a successful `confirm` and the deletion of the old key, for crash safety, and during pending-key recovery, when it holds the expired pending key until the next `confirm` succeeds.
+- `key_storage`, required in each key slot and in an in-progress record, names the backend that holds the key, as `CONTRACT.agent-identity.md` §5.7 names it.
 - `config` is stored as received, including unknown fields, and replaced only by a higher `revision`.
 - `base_url` is the enrollment token's `u` as received, without its trailing slashes, and request paths are joined onto it as text, so that a path prefix reaches the authority byte for byte.
   The stored value and the joined text keep the host's case, its port and percent-encoding as received; the HTTP client may still lowercase the host and drop a default port on the wire, which RFC 9110 §4.2.3 treats as the same origin.
 - Key names are device-key names `devolutions-agent-identity_<key_uuid>`: Agent Identity owns the prefix `devolutions-agent-identity`, and `key_uuid` is a random UUID generated with each key, because the authority isn't known when the enrollment key is created.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
-- The agent writes a key's name to its record (`identity.json` or the in-progress record) before creating the key, and deletes a key before removing its name from the record.
-  A crash therefore never leaves an unrecorded key, and every existing key with the agent's prefix is recorded.
-  At start-up, a recorded pending or enrollment key that doesn't exist yet is regenerated, and a missing current key makes the identity `key_lost`.
-- One Devolutions Agent runs per machine, and it owns every device key with its prefix on the machine: at start-up it deletes each one that no `identity.json` or in-progress record names, across the whole key store.
+- The agent writes a key's name and backend to its record (`identity.json` or the in-progress record) before creating the key, and deletes a key before removing its name from the record.
+  A crash therefore never leaves an unrecorded key, and every existing key with the agent's prefix is recorded with its backend.
+  At start-up, a recorded pending or enrollment key that doesn't exist yet in its backend is regenerated there, and a missing current key makes the identity `key_lost`.
+- One Devolutions Agent runs per machine, and it owns every device key with its prefix on the machine: at start-up it deletes each one that no `identity.json` or in-progress record names with its backend, in every backend available on the machine.
 - During a renewal, the new key is recorded as `pending` before the renew request is sent, and the returned chain is stored on that slot.
   When `confirm` succeeds, `pending` becomes `current` and the old key moves to `previous` until it is deleted.
 - During pending-key recovery (contract §8.1), the expired pending key moves to `previous` and the fresh key is recorded as `pending`, so that a restart resumes the recovery from the file.
   The agent keeps the expired pending key and the current key until the fresh pending certificate is confirmed, because either may still have to sign the recovery renewal; once the next `confirm` succeeds, it deletes the expired pending key, then promotes as usual.
   If recovery must start again before a `confirm` succeeds, the newest expired pending key replaces the one in `previous` and the older one is deleted: the server holds the newest as pending or current, whichever state it reached, so it signs the next recovery renewal within grace.
-- If a pending key is unusable locally (missing from its store, refused when opened, or not matching the pending certificate's public key), the agent deletes the key and its slot before renewing with a fresh key.
+- If a pending key is unusable locally (missing from its recorded backend while that backend is available, refused when opened, or not matching the pending certificate's public key), the agent deletes the key and its slot before renewing with a fresh key.
   A failure to sign is not unusable: it is transient and retried.
 - Writes are atomic: write a temporary file, then rename it.
   An interrupted write leaves the previous file and at most a temporary named after it; start-up and reconciliation remove such temporaries, and that cleanup removes only files whose names follow the agent's own scheme for them.
