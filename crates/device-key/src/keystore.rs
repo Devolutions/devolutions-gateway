@@ -410,6 +410,11 @@ impl Drop for KeyName {
     }
 }
 
+/// Opens the provider and nothing else, so that the check leaves no key behind.
+pub(super) fn check_available() -> anyhow::Result<()> {
+    Provider::open().map(drop)
+}
+
 pub(super) fn list(prefix: &str) -> anyhow::Result<Vec<String>> {
     let provider = Provider::open()?;
     let mut state = EnumState(std::ptr::null_mut());
@@ -698,6 +703,14 @@ mod tests {
         assert!(provider_is_unavailable(NTE_PROV_DLL_NOT_FOUND));
         assert!(provider_is_unavailable(NTE_PROVIDER_DLL_FAIL));
         assert!(!provider_is_unavailable(windows::Win32::Foundation::E_ACCESSDENIED));
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Backends
+    // Every supported Windows version ships the Microsoft Software Key Storage Provider, so it is available on any
+    // machine that runs the tests, elevated or not.
+    #[test]
+    fn the_software_provider_is_available() -> anyhow::Result<()> {
+        crate::check_available(&crate::KeyBackend::WindowsSoftwareProvider)
     }
 
     fn elevated() -> anyhow::Result<bool> {

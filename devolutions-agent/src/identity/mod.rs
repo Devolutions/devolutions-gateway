@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use agent_channel_client::{Backoff, ChannelClient, uniform_jitter};
 use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
+use agent_identity::key_storage::{KeyStorage, unavailable_key_storage};
 use agent_identity::pending::{self, PendingRead};
 use agent_identity::state::{
     EnrolledIdentity, EnrollmentDiscardReason, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots, PendingDiscard, Store,
@@ -21,14 +22,13 @@ use agent_identity::{csr, metadata};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use camino::{Utf8Path, Utf8PathBuf};
-use device_key::{BackendUnavailable, KeyBackend};
 use devolutions_agent_shared::get_data_dir;
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use rand::Rng as _;
 use sysevent::SystemEventSink;
 use tokio::time::sleep;
 
-use self::config::{IdentityDebugConf, IdentityKeyBackend};
+use self::config::IdentityDebugConf;
 use self::runner::{Runners, Shared};
 use crate::config::{Conf, ConfHandle};
 
@@ -55,7 +55,7 @@ impl Task for IdentityTask {
         run_identity(
             &self.conf_handle.get_conf(),
             get_data_dir(),
-            self.system_events.as_ref(),
+            self.system_events,
             shutdown,
         )
         .await
@@ -65,22 +65,19 @@ impl Task for IdentityTask {
 async fn run_identity(
     conf: &Conf,
     data_dir: Utf8PathBuf,
-    system_events: &dyn SystemEventSink,
+    system_events: Arc<dyn SystemEventSink>,
     mut shutdown: ShutdownSignal,
 ) -> anyhow::Result<()> {
     let settings = conf.debug.identity.clone().unwrap_or_default();
-    let poll_interval = Duration::from_millis(settings.pending_poll_interval_ms.unwrap_or(5_000).max(1));
+    let poll_interval = poll_interval(&settings);
+    // Lives as long as the run, so that each report is raised once per run.
+    let unavailable = Arc::new(UnavailableKeyStorages::new(system_events));
     let mut last_store_error = None;
     let mut last_trust_error = None;
 
     loop {
-        let backend = match conf.identity.key_backend {
-            IdentityKeyBackend::File => Store::file_backend(&data_dir),
-            IdentityKeyBackend::WindowsSoftwareProvider => KeyBackend::WindowsSoftwareProvider,
-        };
         let store = Store::new(
             data_dir.clone(),
-            backend,
             settings
                 .key_name_prefix
                 .clone()
@@ -95,24 +92,6 @@ async fn run_identity(
         let store = match store {
             Ok(store) => store,
             Err(error) => {
-                if let Some(unavailable) = error
-                    .chain()
-                    .find_map(|cause| cause.downcast_ref::<BackendUnavailable>())
-                {
-                    // `crates/agent-identity/INTENT.md` ("Identities"): never retry or fall back to another backend.
-                    error!(
-                        backend = unavailable.backend,
-                        error = format!("{error:#}"),
-                        "Agent Identity key backend is unavailable; Agent Identity is stopped"
-                    );
-                    if let Err(emit_error) = system_events.emit(agent_sysevent_codes::identity_key_backend_unavailable(
-                        unavailable.backend,
-                        &error,
-                    )) {
-                        warn!(error = %emit_error, "Cannot report the Agent Identity key backend failure to the system log");
-                    }
-                    return Ok(());
-                }
                 if log_is_due(&mut last_store_error) {
                     if let Some(untrusted) = error
                         .chain()
@@ -163,6 +142,7 @@ async fn run_identity(
             client,
             channels,
             settings: settings.clone(),
+            unavailable: Arc::clone(&unavailable),
         });
         let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
         match shared.store.list_identities() {
@@ -196,6 +176,58 @@ enum Stopped {
     /// An authority directory or `identity.json` failed its check, which stops all identity processing until it is
     /// fixed.
     Untrusted,
+}
+
+/// The interval of the pending-directory poll, which also paces the checks of an unavailable key storage.
+fn poll_interval(settings: &IdentityDebugConf) -> Duration {
+    Duration::from_millis(settings.pending_poll_interval_ms.unwrap_or(5_000).max(1))
+}
+
+/// Reports an unavailable key storage once per run for each identity or pending file that needs it.
+///
+/// `crates/agent-identity/INTENT.md` ("Identities"): the agent logs an error and raises a system event once per run for
+/// each backend and identity or pending file, because the device-key crate leaves reporting to its caller
+/// (`devolutions-agent/src/identity/INTENT.md`, "Configuration").
+pub(super) struct UnavailableKeyStorages {
+    system_events: Arc<dyn SystemEventSink>,
+    reported: parking_lot::Mutex<HashSet<(KeyStorage, String)>>,
+}
+
+impl UnavailableKeyStorages {
+    fn new(system_events: Arc<dyn SystemEventSink>) -> Self {
+        Self {
+            system_events,
+            reported: parking_lot::Mutex::new(HashSet::new()),
+        }
+    }
+
+    /// Reports `error` if it is an unavailable key storage that `subject` needs, and returns whether it is one.
+    pub(super) fn report(&self, subject: &str, error: &anyhow::Error) -> bool {
+        let Some(storage) = unavailable_key_storage(error) else {
+            return false;
+        };
+        if self.reported.lock().insert((storage.clone(), subject.to_owned())) {
+            error!(
+                key_storage = %storage,
+                subject,
+                error = format!("{error:#}"),
+                "An Agent Identity key storage is unavailable; what needs it waits until it is available"
+            );
+            if let Err(emit_error) = self
+                .system_events
+                .emit(agent_sysevent_codes::identity_key_backend_unavailable(
+                    storage.as_str(),
+                    format!("{subject}: {error:#}"),
+                ))
+            {
+                warn!(
+                    error = %emit_error,
+                    "Cannot report the unavailable Agent Identity key storage to the system log"
+                );
+            }
+        }
+        true
+    }
 }
 
 fn log_is_due(last: &mut Option<Instant>) -> bool {
@@ -370,6 +402,9 @@ async fn run_pending_enrollments(
                             retries.entry(path).or_default().failed(settings, retry_after);
                         }
                         Err(error) => {
+                            // `crates/agent-identity/INTENT.md` ("Identities"): a pending file whose key storage is
+                            // unavailable waits, as after a transient failure.
+                            shared.unavailable.report(&format!("pending enrollment {path}"), &error);
                             warn!(
                                 error = format!("{error:#}"),
                                 "Cannot process Agent Identity pending enrollment"
@@ -440,7 +475,12 @@ async fn enroll_pending(
     // `u` of the token it receives (`CONTRACT.agent-identity.md` §4).
     // No agent test captures the request it sends; when changing this, keep passing `Token::base_url`.
     let csr_der = csr::create(key.as_ref(), token.base_url()).context("create enrollment CSR")?;
-    let metadata = metadata::collect(env!("CARGO_PKG_VERSION"), settings.metadata_override_path.as_deref());
+    let metadata = metadata::collect(
+        env!("CARGO_PKG_VERSION"),
+        &record.key_storage,
+        &store.available_key_storages(),
+        settings.metadata_override_path.as_deref(),
+    );
     let hash = token.sha256_hex();
     match client.enroll(token, &csr_der, &metadata, key.as_ref()).await {
         Ok(response) => {
@@ -455,6 +495,7 @@ async fn enroll_pending(
                 keys: KeySlots {
                     current: KeyRecord {
                         key_name: record.key_name,
+                        key_storage: record.key_storage,
                         certificate_chain: Some(response.certificate_chain),
                     },
                     pending: None,
@@ -519,49 +560,21 @@ async fn enroll_pending(
 mod tests {
     use super::*;
 
-    #[cfg(not(windows))]
-    #[tokio::test]
-    async fn unavailable_key_backend_stops_identity_after_one_system_event() -> anyhow::Result<()> {
-        // oracle: intent crates/agent-identity/INTENT.md §Identities
-        // An unavailable backend is reported once and stops the identity feature before it touches any state; the
-        // Windows software provider never exists on this platform.
-        let data_dir = Utf8PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("identity-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        std::fs::create_dir_all(&data_dir)?;
-        let conf = Conf::from_conf_file(&serde_json::from_value(serde_json::json!({
-            "Identity": { "KeyBackend": "WindowsSoftwareProvider" }
-        }))?)?;
-        let events = RecordingSink::default();
-        let (_shutdown_handle, shutdown) = devolutions_gateway_task::ShutdownHandle::new();
-
-        let outcome = tokio::time::timeout(
-            Duration::from_secs(10),
-            run_identity(&conf, data_dir.clone(), &events, shutdown),
-        )
-        .await;
-        let leftovers = std::fs::read_dir(&data_dir)?.count();
-        std::fs::remove_dir_all(&data_dir)?;
-
-        outcome.context("identity task kept running")??;
-        let entries = events.0.lock();
-        assert_eq!(entries.len(), 1);
-        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
-        assert_eq!(entries[0].event_code, Some(1100));
-        assert!(
-            entries[0]
-                .fields
-                .contains(&("backend".to_owned(), "WindowsSoftwareProvider".to_owned())),
-            "{:?}",
-            entries[0].fields
-        );
-        assert_eq!(leftovers, 0);
-        Ok(())
-    }
+    type RecordedEntry = (Option<u32>, Vec<(String, String)>);
 
     #[derive(Default)]
     struct RecordingSink(parking_lot::Mutex<Vec<sysevent::Entry>>);
+
+    impl RecordingSink {
+        /// Returns the event code and fields of each entry emitted so far.
+        fn entries(&self) -> Vec<RecordedEntry> {
+            self.0
+                .lock()
+                .iter()
+                .map(|entry| (entry.event_code, entry.fields.clone()))
+                .collect()
+        }
+    }
 
     impl SystemEventSink for RecordingSink {
         fn emit(&self, entry: sysevent::Entry) -> Result<(), sysevent::SysEventError> {
@@ -576,24 +589,33 @@ mod tests {
 
     /// A data directory under the system temporary directory, whose short path keeps key files under the Windows path
     /// limit wherever the repository is checked out.
-    struct TestDataDir(Utf8PathBuf);
+    ///
+    /// Its key-name prefix is its own, so that the keys of a test never collide with those of another test or of the
+    /// installed agent in a key storage they share, such as the Windows software provider.
+    struct TestDataDir(Utf8PathBuf, String);
 
     impl TestDataDir {
         fn new() -> anyhow::Result<Self> {
+            let id = uuid::Uuid::new_v4().simple().to_string();
             let path = Utf8PathBuf::from_path_buf(std::env::temp_dir())
                 .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
-                .join(format!("ai-{}", uuid::Uuid::new_v4().simple()));
+                .join(format!("ai-{id}"));
             std::fs::create_dir_all(&path)?;
-            Ok(Self(path))
+            Ok(Self(path, format!("test-{id}")))
         }
 
         fn store(&self) -> anyhow::Result<Store> {
-            Store::new(
-                self.0.clone(),
-                Store::file_backend(&self.0),
-                IDENTITY_KEY_PREFIX.to_owned(),
-                true,
-            )
+            Store::new(self.0.clone(), self.1.clone(), true)
+        }
+
+        fn conf(&self) -> anyhow::Result<Conf> {
+            Conf::from_conf_file(&serde_json::from_value(serde_json::json!({
+                "__debug__": { "identity": {
+                    "pending_poll_interval_ms": 10,
+                    "acl_grant_current_user": true,
+                    "key_name_prefix": self.1,
+                } }
+            }))?)
         }
 
         /// Creates an authority directory with default permissions, which is not the form the agent provisions: it is
@@ -610,10 +632,31 @@ mod tests {
             Ok(path)
         }
 
+        /// Stores an identity whose current key is recorded in `key_storage`, and returns it as stored.
+        fn put_identity_in_key_storage(&self, key_storage: &str) -> anyhow::Result<StoredIdentity> {
+            let path = self.put_identity()?;
+            let mut json: serde_json::Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+            json["keys"]["current"]["key_storage"] = serde_json::Value::from(key_storage);
+            // Writing the existing file keeps the owner and permissions the store gave it.
+            std::fs::write(&path, serde_json::to_vec(&json)?)?;
+            Ok(serde_json::from_value(json)?)
+        }
+
         /// Stores an identity, then gives its `identity.json` default permissions, which is not the form the agent
         /// provisions: it is open to group and other users on Unix, and its DACL is inherited rather than protected on
         /// Windows.
         fn put_untrusted_identity_file(&self) -> anyhow::Result<Utf8PathBuf> {
+            let path = self.put_identity()?;
+            let contents = std::fs::read(&path)?;
+            std::fs::remove_file(&path)?;
+            std::fs::write(&path, contents)?;
+            #[cfg(unix)]
+            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644))?;
+            Ok(path)
+        }
+
+        /// Stores an identity whose current key is a key file, and returns the path of its `identity.json`.
+        fn put_identity(&self) -> anyhow::Result<Utf8PathBuf> {
             let store = self.store()?;
             let identity = StoredIdentity {
                 version: 1,
@@ -625,7 +668,8 @@ mod tests {
                 rejected: None,
                 keys: KeySlots {
                     current: KeyRecord {
-                        key_name: device_key::new_key_name(IDENTITY_KEY_PREFIX),
+                        key_name: device_key::new_key_name(&self.1),
+                        key_storage: KeyStorage::parse(KeyStorage::FILE)?,
                         certificate_chain: Some(vec!["YWJj".to_owned()]),
                     },
                     pending: None,
@@ -633,13 +677,7 @@ mod tests {
                 },
             };
             store.store_enrolled_identity(&identity)?;
-            let path = store.identity_path(identity.authority_id);
-            let contents = std::fs::read(&path)?;
-            std::fs::remove_file(&path)?;
-            std::fs::write(&path, contents)?;
-            #[cfg(unix)]
-            std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o644))?;
-            Ok(path)
+            Ok(store.identity_path(identity.authority_id))
         }
     }
 
@@ -649,21 +687,15 @@ mod tests {
         }
     }
 
-    fn test_conf() -> anyhow::Result<Conf> {
-        Conf::from_conf_file(&serde_json::from_value(serde_json::json!({
-            "Identity": { "KeyBackend": "File" },
-            "__debug__": { "identity": { "pending_poll_interval_ms": 10, "acl_grant_current_user": true } }
-        }))?)
-    }
-
     fn test_shared(data_dir: &TestDataDir) -> anyhow::Result<Arc<Shared>> {
-        let conf = test_conf()?;
+        let conf = data_dir.conf()?;
         let settings = conf.debug.identity.clone().unwrap_or_default();
         Ok(Arc::new(Shared {
             store: data_dir.store()?,
             client: Client::new(conf.proxy.to_proxy_config(), None)?,
             channels: channel_client(&conf, &settings)?,
             settings,
+            unavailable: Arc::new(UnavailableKeyStorages::new(Arc::new(RecordingSink::default()))),
         }))
     }
 
@@ -679,6 +711,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_unavailable_key_storage_pauses_only_the_identity_whose_key_is_in_it() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Identities
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+        // An identity whose current key is in a key storage the agent has no backend for is left as it is, not
+        // `key_lost`, and its key storage is reported once per run as event 1100; it never stops the processing of a
+        // pending file, whose key goes elsewhere.
+        let data_dir = TestDataDir::new()?;
+        let held = data_dir.put_identity_in_key_storage("tpm")?;
+        let token = loopback_token()?;
+        pending::write(&data_dir.0, &token, true)?;
+        let in_progress = pending::in_progress_path(&data_dir.0, &token.sha256_hex())?;
+        let events = Arc::new(RecordingSink::default());
+        let (shutdown_handle, shutdown) = devolutions_gateway_task::ShutdownHandle::new();
+        let task = tokio::spawn({
+            let conf = data_dir.conf()?;
+            let data_dir = data_dir.0.clone();
+            let events = Arc::clone(&events);
+            async move { run_identity(&conf, data_dir, events, shutdown).await }
+        });
+
+        let enrolled = tokio::time::timeout(Duration::from_secs(10), async {
+            while !in_progress.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        // Several polls run meanwhile, each of which checks the key storage again.
+        sleep(Duration::from_millis(300)).await;
+        shutdown_handle.signal();
+        task.await??;
+
+        enrolled.context("a pending file waited for another identity's key storage")?;
+        assert_eq!(data_dir.store()?.read_identity(held.authority_id)?, Some(held));
+        let entries = events.entries();
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries[0].0, Some(1100));
+        assert!(
+            entries[0].1.contains(&("backend".to_owned(), "tpm".to_owned())),
+            "{entries:?}"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn an_untrusted_authority_directory_holds_pending_enrollment_until_it_is_fixed() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity/INTENT.md §Local state
         // An authority directory that fails the check stops all identity processing until it is fixed, so no pending
@@ -691,9 +767,9 @@ mod tests {
         let in_progress = pending::in_progress_path(&data_dir.0, &token.sha256_hex())?;
         let (shutdown_handle, shutdown) = devolutions_gateway_task::ShutdownHandle::new();
         let task = tokio::spawn({
-            let conf = test_conf()?;
+            let conf = data_dir.conf()?;
             let data_dir = data_dir.0.clone();
-            async move { run_identity(&conf, data_dir, &RecordingSink::default(), shutdown).await }
+            async move { run_identity(&conf, data_dir, Arc::new(RecordingSink::default()), shutdown).await }
         });
 
         sleep(Duration::from_millis(500)).await;
