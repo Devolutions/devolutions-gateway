@@ -954,6 +954,27 @@ async fn a_new_task_that_fails_keeps_the_earlier_analysis() {
     assert!(dir.join("ai-analysis-0.slog").exists());
 }
 
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Secrets
+#[tokio::test]
+async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
+    let harness = Harness::new().await;
+    let session_id = harness.write_session();
+    let (settings, requests) = spawn_ai_provider(|_| 0).await;
+    let task_id = harness.start_created(session_id, settings).await;
+    std::fs::create_dir_all(harness.workspace(session_id)).expect("working files of an attempt");
+
+    harness.state.provisioner_tasks.resume().await.expect("resume");
+
+    let task = harness.task(task_id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Failed, "no job ran yet");
+    assert_eq!(task.payload["error"], json!({ "kind": "keyLost" }));
+
+    harness.run(task_id).await.expect("the new job only ends the Task");
+    assert!(requests.lock().is_empty(), "the AI is never asked");
+    assert!(!harness.workspace(session_id).exists(), "the working files are removed");
+    assert!(!harness.has_key(task_id));
+}
+
 // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn a_failed_task_reports_the_tokens_it_spent() {

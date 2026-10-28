@@ -53,9 +53,6 @@ pub trait ProvisionerTaskJobQueue: Send + Sync {
     /// Queues `job` to run at `schedule_for`, or at once without it, and returns once it is stored, so a record never
     /// waits for a job that was lost.
     async fn push(&self, job: ProvisionerTaskJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()>;
-
-    /// Lists the JSON definitions of the stored jobs named `name` that may still run.
-    async fn stored_jobs(&self, name: &str) -> anyhow::Result<Vec<String>>;
 }
 
 pub type DynProvisionerTaskJobQueue = Arc<dyn ProvisionerTaskJobQueue>;
@@ -68,11 +65,6 @@ impl ProvisionerTaskJobQueue for JobQueueHandle {
             Some(schedule_for) => self.schedule(job, schedule_for).await,
             None => self.enqueue(job).await,
         }
-    }
-
-    /// The channel cannot tell what is stored: every unfinished record looks like it has no job.
-    async fn stored_jobs(&self, _name: &str) -> anyhow::Result<Vec<String>> {
-        Ok(Vec::new())
     }
 }
 
@@ -104,6 +96,12 @@ pub trait ProvisionerTask: Send + Sync + 'static {
 
     /// The payload of a record that failed with `error`, from `last`, its payload until then: `null` if it never ran.
     fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value;
+
+    /// Why an unfinished record fails when Gateway starts again, for a task that cannot outlive a restart, such as one
+    /// whose secrets were kept in memory only; `None` for a task that goes on.
+    fn after_restart(&self) -> Option<Permanent> {
+        None
+    }
 
     /// Runs one attempt.
     ///
@@ -190,6 +188,8 @@ trait AnyProvisionerTask: Send + Sync {
 
     fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value;
 
+    fn after_restart(&self) -> Option<Permanent>;
+
     async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AttemptError>;
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()>;
@@ -211,6 +211,10 @@ impl<T: ProvisionerTask> AnyProvisionerTask for T {
 
     fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value {
         ProvisionerTask::failed_payload(self, error, last)
+    }
+
+    fn after_restart(&self) -> Option<Permanent> {
+        ProvisionerTask::after_restart(self)
     }
 
     async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AttemptError> {
@@ -341,31 +345,17 @@ impl ProvisionerTaskRunner {
         Ok(outcome)
     }
 
-    /// Hands every unfinished record that has no job left to a new job, such as a record created just before a crash.
+    /// Hands every unfinished record to a new job, since a record created just before Gateway stopped may have none.
     ///
-    /// A record whose job is still stored keeps it. Call it at startup, before the job runner claims any job, so no job
-    /// runs an attempt meanwhile. A record whose new job cannot be queued is failed, since no job is left to run it.
+    /// Each record gets a new `job_token`, so a job left from before finds itself superseded and stops, and the job queue
+    /// is never read. A record whose task cannot outlive a restart fails first, and its new job only ends it. Call it at
+    /// startup, before the job runner claims any job, so no job runs an attempt meanwhile. A record whose new job cannot
+    /// be queued is failed, since no job is left to run it.
     pub async fn resume(&self) -> anyhow::Result<()> {
         let now = OffsetDateTime::now_utc();
         let records = self.inner.store.list_unfinished(now).await?;
 
-        let stored = self
-            .inner
-            .job_queue
-            .stored_jobs(ProvisionerTaskJob::NAME)
-            .await
-            .context("list the stored provisioner task jobs")?
-            .iter()
-            .filter_map(|json| serde_json::from_str::<JobDef>(json).ok())
-            .map(|def| (def.task_id, def.job_token))
-            .collect::<std::collections::HashSet<_>>();
-
         for record in records {
-            if stored.contains(&(record.id, record.job_token)) {
-                debug!(task.id = %record.id, task.kind = %record.kind, "Task still has its job");
-                continue;
-            }
-
             let job_token = Uuid::new_v4();
 
             match self.inner.store.replace_job_token(record.id, job_token, now).await {
@@ -382,6 +372,33 @@ impl ProvisionerTaskRunner {
                 }
             }
 
+            let task = self.task(&record.kind);
+
+            if let Some(task) = &task
+                && let Some(failure) = task.after_restart()
+            {
+                match self
+                    .inner
+                    .store
+                    .fail(record.id, task.failed_payload(&failure, &record.payload), now)
+                    .await
+                {
+                    Ok(_) => info!(
+                        task.id = %record.id,
+                        task.kind = %record.kind,
+                        ?failure,
+                        "Task failed, since it cannot outlive a restart"
+                    ),
+                    // Its new job runs the attempt then, which fails the same way.
+                    Err(error) => error!(
+                        task.id = %record.id,
+                        task.kind = %record.kind,
+                        error = format!("{error:#}"),
+                        "Failed to fail the Task that cannot outlive a restart"
+                    ),
+                }
+            }
+
             match self.enqueue(record.id, job_token, None).await {
                 Ok(()) => info!(task.id = %record.id, task.kind = %record.kind, "Task queued again"),
                 Err(error) => {
@@ -391,7 +408,7 @@ impl ProvisionerTaskRunner {
                         error = format!("{error:#}"),
                         "Failed to queue the Task again"
                     );
-                    if let Some(task) = self.task(&record.kind) {
+                    if let Some(task) = &task {
                         self.fail_not_queued(task.as_ref(), record.id, job_token, &record.payload)
                             .await;
                     }
