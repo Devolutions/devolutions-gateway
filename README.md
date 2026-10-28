@@ -184,8 +184,9 @@ Stable options are:
         tolerance defined as a number in seconds.
     * **Metadata** (_String_): Opaque, user-supplied string that will be returned as part of the ngrok API response to the list
         online sessions resource for all tunnels started by Devolutions Gateway service.
-    * **ServerAddr** (_URL_): This is the URL of the ngrok server to connect to. You should only set this if you are using a
-        custom ingress URL.
+    * **ServerAddr** (_String_): Address of the ngrok agent endpoint to connect to, as `host[:port]` (port 443 if omitted).
+        Defaults to ngrok's standard agent endpoint, `connect.ngrok-agent.com:443`.
+        Set it only to use another endpoint, such as a regional or custom agent ingress.
 
     * **Tunnels** (_Map_): A map of ngrok tunnels. The key is the name of the tunnel and value is a JSON object whose schema
         depends on tunnel protocol.
