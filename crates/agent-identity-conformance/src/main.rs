@@ -1008,9 +1008,12 @@ const TESTS: &[Test] = &[
     a!(a_config_unsupported_version_on_enroll_keeps_pending, mock_only),
     a!(a_multi_authority).second().channel().need(Need::LongLeaves),
     a!(a_key_storage_enrollment_key_in_builtin_default, mock_only),
-    a!(a_key_storage_policy_selects_each_new_key_storage, mock_only)
-        .channel()
-        .windows_only("needs two available key storages"),
+    a!(
+        a_key_storage_new_keys_follow_policy_and_mixed_storages_survive_restart,
+        mock_only
+    )
+    .channel()
+    .windows_only("needs two available key storages"),
     a!(a_key_storage_unavailable_preference_uses_builtin_default, mock_only).channel(),
     a!(a_key_storage_required_policy_holds_requested_renewal, mock_only).channel(),
     a!(a_key_storage_required_policy_holds_check_in_renewal, mock_only),
@@ -1018,12 +1021,17 @@ const TESTS: &[Test] = &[
     a!(a_key_storage_malformed_policy_is_ignored, mock_only)
         .channel()
         .timeout_secs(240),
-    a!(a_key_storage_required_policy_renews_into_a_listed_storage, mock_only)
-        .channel()
-        .windows_only("needs two available key storages"),
+    a!(
+        a_key_storage_required_policy_excluding_current_storage_renews_unasked,
+        mock_only
+    )
+    .channel()
+    .windows_only("needs two available key storages"),
     a!(a_key_storage_policy_applies_to_a_replacement_pending_key, mock_only)
         .channel()
         .windows_only("needs two available key storages"),
+    a!(a_missing_enrollment_key_regenerated_in_its_recorded_storage, mock_only)
+        .windows_only("needs a key storage other than the built-in default"),
     a!(a_start_deletes_unrecorded_keys_in_every_available_storage),
     a!(a_key_non_exportable)
         .windows_only("Windows software provider test")

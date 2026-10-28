@@ -7841,7 +7841,7 @@ pub(crate) async fn p_key_storage_metadata_never_refused(ctx: Context) -> anyhow
 pub(crate) async fn p_key_storage_policy_in_effective_config(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
-    // oracle: spec crates/agent-identity-mock/README.md §Mock control
+    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     let (token, identity) = issued(&ctx, "key-storage-config").await?;
     ensure!(
         identity.config.get("key_storage").is_none(),

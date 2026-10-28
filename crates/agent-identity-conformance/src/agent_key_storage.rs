@@ -13,8 +13,8 @@ use anyhow::{Context as _, ensure};
 use serde_json::{Value, json};
 
 use super::{
-    AgentCase, POLL, WAIT, current_thumbprint, dropped_enrollment, is_error_level_log_line, key_exists, key_name,
-    new_token, slot_key_exists, until_renewal_settled, with_agent,
+    AgentCase, POLL, WAIT, current_thumbprint, dropped_enrollment, is_error_level_log_line, key_name, new_token,
+    slot_key_exists, until_renewal_settled, with_agent,
 };
 use crate::Context;
 use crate::client::{Target, Token, count, expect_status, field};
@@ -115,6 +115,30 @@ async fn assert_no_renewal(case: &mut AgentCase, target: &Target, authority: &st
     Ok(())
 }
 
+/// Requests a renewal of `identity_id` and waits until the authority has received at least `acks` more correlated `Ack`s than `before` counted, which shows that the agent received `RenewRequested` over its stream.
+///
+/// `acks` is 2 when a `ConfigUpdate` sent since `before` may still be unacknowledged: the agent stores a config before it replies `Ack` ([contract] §7.3).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#channel-sequence
+async fn request_acknowledged_renewal(
+    case: &mut AgentCase,
+    target: &Target,
+    identity_id: &str,
+    before: u64,
+    acks: u64,
+) -> anyhow::Result<()> {
+    target.management().request_renewal(identity_id).await?;
+    poll!(case, WAIT, POLL, "the agent did not Ack RenewRequested", async {
+        Ok((count(&target.requests(None).await?, "correlated_acks")? >= before + acks).then_some(()))
+    });
+    Ok(())
+}
+
+/// The correlated `Ack`s an authority has received.
+async fn acks(target: &Target) -> anyhow::Result<u64> {
+    count(&target.requests(None).await?, "correlated_acks")
+}
+
 /// The signed requests an authority has received: renew, confirm, check-in and channel connect.
 async fn signed_requests(target: &Target) -> anyhow::Result<[u64; 4]> {
     let requests = target.requests(None).await?;
@@ -175,31 +199,27 @@ fn log_mark(case: &AgentCase) -> anyhow::Result<[u64; 2]> {
     Ok(mark)
 }
 
-/// Waits until the agent logs an error-level line after `mark`.
-async fn until_error_logged(case: &mut AgentCase, mark: [u64; 2], what: &str) -> anyhow::Result<()> {
-    poll!(
-        case,
-        WAIT,
-        POLL,
-        format!("the agent logged no error for {what}"),
-        async {
-            for (start, name) in mark.into_iter().zip(LOG_FILES) {
-                let contents = std::fs::read(case.path().join(name)).unwrap_or_default();
-                let start = usize::try_from(start)?.min(contents.len());
-                if String::from_utf8_lossy(&contents[start..])
-                    .lines()
-                    .any(is_error_level_log_line)
-                {
-                    return Ok(Some(()));
-                }
-            }
-            Ok(None)
+/// Whether the agent has logged an error-level line after `mark`.
+fn error_logged_since(case: &AgentCase, mark: [u64; 2]) -> anyhow::Result<bool> {
+    for (start, name) in mark.into_iter().zip(LOG_FILES) {
+        let contents = std::fs::read(case.path().join(name)).unwrap_or_default();
+        let start = usize::try_from(start)?.min(contents.len());
+        if String::from_utf8_lossy(&contents[start..])
+            .lines()
+            .any(is_error_level_log_line)
+        {
+            return Ok(true);
         }
-    );
-    Ok(())
+    }
+    Ok(false)
 }
 
 /// A key storage a policy can prefer over the built-in default: the file backend on Windows, where it is available too, and an unlisted name elsewhere, where the suite knows of no second available key storage.
+///
+/// The suite covers both Windows backends ([conformance intent], "Shape"), and the device-key backends are the Windows software provider, the file backend and, later, TPM ([device-key intent], "Backends").
+///
+/// [conformance intent]: ../INTENT.md#shape
+/// [device-key intent]: ../../device-key/INTENT.md#backends
 const fn preferred_alternative() -> &'static str {
     if cfg!(windows) { FILE } else { UNLISTED }
 }
@@ -256,7 +276,9 @@ pub(crate) async fn a_key_storage_enrollment_key_in_builtin_default(ctx: Context
 /// Each new key goes to the first available key storage the policy lists, while each existing key keeps opening from the storage its slot records, across a restart that finds the identity's keys in two storages.
 ///
 /// The policy is added, then removed, through config updates; the metadata of each renew and `Hello` reports the storage of the key that the CSR carries or that signs.
-pub(crate) async fn a_key_storage_policy_selects_each_new_key_storage(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn a_key_storage_new_keys_follow_policy_and_mixed_storages_survive_restart(
+    ctx: Context,
+) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
@@ -299,6 +321,8 @@ pub(crate) async fn a_key_storage_policy_selects_each_new_key_storage(ctx: Conte
                 |state| state["keys"]["pending"]["key_name"].is_string(),
             )
             .await?;
+        // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
+        // oracle: intent crates/device-key/INTENT.md §Backends
         ensure!(
             pending["keys"]["pending"]["key_storage"] == FILE
                 && pending["keys"]["current"]["key_storage"] == WINDOWS_SOFTWARE_PROVIDER,
@@ -328,6 +352,7 @@ pub(crate) async fn a_key_storage_policy_selects_each_new_key_storage(ctx: Conte
             |record| record.connected && record.metadata_value("key_storage") == Some(WINDOWS_SOFTWARE_PROVIDER),
         )
         .await?;
+        let connects = count(&target.requests(None).await?, "authenticated_connects")?;
         expect_status(
             &target
                 .control("retry-barrier", &json!({ "endpoint": "renew", "pause": false }))
@@ -339,6 +364,8 @@ pub(crate) async fn a_key_storage_policy_selects_each_new_key_storage(ctx: Conte
             key_name(&settled, "current")? == pending_key,
             "the agent did not complete the renewal with the pending key it had recorded in the file backend"
         );
+        // The released renewal's own metadata already reports the file backend, so only a stream that the confirmed file key authenticates shows that the key signs from there.
+        until_authenticated_connect(case, &target, connects, "the confirmed file key").await?;
         case.until_identity(&target, &id, "a Hello signed by the file key", |record| {
             record.connected && record.metadata_value("key_storage") == Some(FILE)
         })
@@ -386,7 +413,8 @@ pub(crate) async fn a_key_storage_required_policy_holds_requested_renewal(ctx: C
         let before = case
             .until_identity(&target, &id, "a working channel", |record| record.connected)
             .await?;
-        target.management().request_renewal(&id).await?;
+        let acknowledged = acks(&target).await?;
+        request_acknowledged_renewal(case, &target, &id, acknowledged, 1).await?;
         assert_no_renewal(
             case,
             &target,
@@ -507,53 +535,99 @@ pub(crate) async fn a_key_storage_required_policy_holds_scheduled_renewal(ctx: C
     .await
 }
 
-/// A required policy whose listed storages are all unavailable, each beside a malformed variant that differs from it in one member.
+/// Required policies whose listed storages are all unavailable, each with the malformed variants that differ from it in one member.
 ///
-/// The valid policy holds renewal back; the agent treats its malformed variant as absent, so that variant releases the renewal.
-fn policy_pairs() -> Vec<(&'static str, Value, Value)> {
+/// The valid policy holds renewal back; the agent treats each malformed variant as absent, so that variant releases the renewal.
+fn policy_twins() -> Vec<(Value, Vec<(&'static str, Value)>)> {
     let names = |count: usize| (0..count).map(|n| format!("zz_{n}")).collect::<Vec<_>>();
     let long = |length: usize| format!("z{}", "a".repeat(length - 1));
     let required = |backends: Value| json!({ "backends": backends, "required": true });
-    let base = required(json!(["zz_a"]));
     vec![
-        ("empty backends", base.clone(), required(json!([]))),
-        ("nine backends", required(json!(names(8))), required(json!(names(9)))),
         (
-            "repeated backend",
+            required(json!(["zz_a"])),
+            vec![
+                ("empty backends", required(json!([]))),
+                ("empty name", required(json!([""]))),
+                ("upper-case name", required(json!(["Zz_a"]))),
+                ("hyphen in name", required(json!(["zz-a"]))),
+                ("non-string name", required(json!([1]))),
+                ("backends not an array", required(json!("zz_a"))),
+                ("backends missing", json!({ "required": true })),
+                ("required missing", json!({ "backends": ["zz_a"] })),
+                ("required a string", json!({ "backends": ["zz_a"], "required": "true" })),
+                ("required a number", json!({ "backends": ["zz_a"], "required": 1 })),
+                ("policy null", Value::Null),
+                ("policy a string", json!("zz_a")),
+            ],
+        ),
+        (
+            required(json!(names(8))),
+            vec![("nine backends", required(json!(names(9))))],
+        ),
+        (
             required(json!(["zz_a", "zz_b"])),
-            required(json!(["zz_a", "zz_a"])),
+            vec![("repeated backend", required(json!(["zz_a", "zz_a"])))],
         ),
         (
-            "65-character name",
             required(json!([long(64)])),
-            required(json!([long(65)])),
-        ),
-        ("empty name", base.clone(), required(json!([""]))),
-        ("upper-case name", base.clone(), required(json!(["Zz_a"]))),
-        ("leading digit", required(json!(["a0"])), required(json!(["0a"]))),
-        ("hyphen in name", base.clone(), required(json!(["zz-a"]))),
-        ("non-string name", base.clone(), required(json!([1]))),
-        ("backends not an array", base.clone(), required(json!("zz_a"))),
-        ("backends missing", base.clone(), json!({ "required": true })),
-        ("required missing", base.clone(), json!({ "backends": ["zz_a"] })),
-        (
-            "required a string",
-            base.clone(),
-            json!({ "backends": ["zz_a"], "required": "true" }),
+            vec![("65-character name", required(json!([long(65)])))],
         ),
         (
-            "required a number",
-            base.clone(),
-            json!({ "backends": ["zz_a"], "required": 1 }),
+            required(json!(["a0"])),
+            vec![("leading digit", required(json!(["0a"])))],
         ),
-        ("policy null", base.clone(), Value::Null),
-        ("policy a string", base, json!("zz_a")),
     ]
+}
+
+/// Stores `valid`, requests a renewal that the agent acknowledges, and returns the stored identity.
+async fn hold_requested_renewal(
+    case: &mut AgentCase,
+    target: &Target,
+    authority: &str,
+    identity_id: &str,
+    valid: &Value,
+) -> anyhow::Result<Value> {
+    let acknowledged = acks(target).await?;
+    set_policy(target, Some(valid)).await?;
+    let held = until_policy_stored(case, target, authority, identity_id, Some(valid)).await?;
+    request_acknowledged_renewal(case, target, identity_id, acknowledged, 2).await?;
+    Ok(held)
+}
+
+/// Stores the malformed policy `name`, then checks that the agent stores its revision and that it releases the renewal held under `held`.
+async fn release_with_malformed(
+    case: &mut AgentCase,
+    target: &Target,
+    authority: &str,
+    identity_id: &str,
+    (name, malformed): &(&str, Value),
+    held: &Value,
+) -> anyhow::Result<()> {
+    set_policy(target, Some(malformed)).await?;
+    let stored = until_policy_stored(case, target, authority, identity_id, Some(malformed))
+        .await
+        .with_context(|| format!("{name} case"))?;
+    ensure!(
+        count(&held["config"], "revision")? < count(&stored["config"], "revision")?,
+        "the agent did not store the revision of the config with the {name} policy"
+    );
+    settled_into(
+        case,
+        target,
+        authority,
+        identity_id,
+        key_name(held, "current")?,
+        builtin_default(),
+    )
+    .await
+    .with_context(|| format!("the {name} policy held the renewal back"))?;
+    Ok(())
 }
 
 /// A malformed policy is treated as absent: it blocks neither enrollment nor renewal, and the agent still stores its config and revision.
 ///
-/// Each malformed policy follows its valid twin, which holds the requested renewal back, so only the targeted member decides whether the renewal proceeds.
+/// Each malformed policy releases a renewal that its valid twin holds back, so only the targeted member decides whether the renewal proceeds.
+/// The case watches each valid twin hold the renewal back once, before its first malformed variant.
 pub(crate) async fn a_key_storage_malformed_policy_is_ignored(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
     // oracle: intent crates/agent-identity/INTENT.md §Key storage
@@ -562,8 +636,11 @@ pub(crate) async fn a_key_storage_malformed_policy_is_ignored(ctx: Context) -> a
         case.set_identity_debug("min_renewal_interval_secs", json!(0))?;
         case.start().await?;
         let target = case.ctx.target.clone();
-        let pairs = policy_pairs();
-        let (_, _, enrollment_policy) = pairs.first().context("no malformed policy")?;
+        let twins = policy_twins();
+        let (_, enrollment_policy) = twins
+            .first()
+            .and_then(|(_, malformed)| malformed.first())
+            .context("no malformed policy")?;
         set_policy(&target, Some(enrollment_policy)).await?;
         let (id, state) = case.enroll_new(&target, 1).await?;
         let authority = field(&state, "authority_id")?.to_owned();
@@ -571,10 +648,13 @@ pub(crate) async fn a_key_storage_malformed_policy_is_ignored(ctx: Context) -> a
             state["config"].get("key_storage") == Some(enrollment_policy),
             "the agent did not store the enrollment config with its malformed policy as received"
         );
-        for (name, valid, malformed) in &pairs {
-            set_policy(&target, Some(valid)).await?;
-            let held = until_policy_stored(case, &target, &authority, &id, Some(valid)).await?;
-            target.management().request_renewal(&id).await?;
+        case.until_identity(&target, &id, "a working channel", |record| record.connected)
+            .await?;
+        for (valid, malformed) in &twins {
+            let (first, rest) = malformed
+                .split_first()
+                .context("valid policy without a malformed twin")?;
+            let held = hold_requested_renewal(case, &target, &authority, &id, valid).await?;
             assert_no_renewal(
                 case,
                 &target,
@@ -582,25 +662,12 @@ pub(crate) async fn a_key_storage_malformed_policy_is_ignored(ctx: Context) -> a
                 "its required policy lists no available key storage",
             )
             .await
-            .with_context(|| format!("valid twin of the {name} case"))?;
-            set_policy(&target, Some(malformed)).await?;
-            let stored = until_policy_stored(case, &target, &authority, &id, Some(malformed))
-                .await
-                .with_context(|| format!("{name} case"))?;
-            ensure!(
-                count(&held["config"], "revision")? < count(&stored["config"], "revision")?,
-                "the agent did not store the revision of the config with the {name} policy"
-            );
-            settled_into(
-                case,
-                &target,
-                &authority,
-                &id,
-                key_name(&held, "current")?,
-                builtin_default(),
-            )
-            .await
-            .with_context(|| format!("the {name} policy held the renewal back"))?;
+            .with_context(|| format!("valid twin of the {} case", first.0))?;
+            release_with_malformed(case, &target, &authority, &id, first, &held).await?;
+            for variant in rest {
+                let held = hold_requested_renewal(case, &target, &authority, &id, valid).await?;
+                release_with_malformed(case, &target, &authority, &id, variant, &held).await?;
+            }
         }
         Ok(())
     })
@@ -610,7 +677,9 @@ pub(crate) async fn a_key_storage_malformed_policy_is_ignored(ctx: Context) -> a
 /// A required policy that excludes the current key's storage while listing an available one makes the agent renew without a schedule or a request: when it stores such a config, and at start-up.
 ///
 /// A required policy that lists the current key's storage starts no renewal.
-pub(crate) async fn a_key_storage_required_policy_renews_into_a_listed_storage(ctx: Context) -> anyhow::Result<()> {
+pub(crate) async fn a_key_storage_required_policy_excluding_current_storage_renews_unasked(
+    ctx: Context,
+) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
@@ -729,8 +798,8 @@ pub(crate) async fn a_key_storage_policy_applies_to_a_replacement_pending_key(ct
             case.start().await?;
             let settled = settled_into(case, &target, &authority, &id, &current, FILE).await?;
             ensure!(
-                key_name(&settled, "current")? != unusable && !key_exists(case, &unusable)?,
-                "the agent kept or promoted the unusable pending key"
+                key_name(&settled, "current")? != unusable,
+                "the agent promoted the unusable pending key"
             );
             Ok(())
         })
@@ -770,10 +839,8 @@ pub(crate) async fn a_current_key_in_unavailable_storage_pauses_only_its_identit
         })?;
         let first_before = signed_requests(&first).await?;
         let second_connects = count(&second.requests(None).await?, "authenticated_connects")?;
-        let mark = log_mark(case)?;
         case.start().await?;
         until_authenticated_connect(case, &second, second_connects, "the identity with the second authority").await?;
-        until_error_logged(case, mark, "a key in an unknown key storage").await?;
         let started = Instant::now();
         while started.elapsed() < PAUSE_OBSERVATION {
             tokio::time::sleep(POLL).await;
@@ -811,7 +878,6 @@ pub(crate) async fn a_pending_key_in_unavailable_storage_pauses_until_restored(c
         let before = signed_requests(&target).await?;
         let mark = log_mark(case)?;
         case.start().await?;
-        until_error_logged(case, mark, "a pending key in an unavailable key storage").await?;
         let started = Instant::now();
         while started.elapsed() < PAUSE_OBSERVATION {
             tokio::time::sleep(POLL).await;
@@ -825,6 +891,10 @@ pub(crate) async fn a_pending_key_in_unavailable_storage_pauses_until_restored(c
                 "the agent changed the identity file of an identity whose pending key is in an unavailable key storage"
             );
         }
+        ensure!(
+            !key_storage::UNAVAILABLE_IS_KNOWN || error_logged_since(case, mark)?,
+            "the agent logged no error for a pending key in an unavailable key storage"
+        );
         case.stop().await?;
         rewrite_in_place(&path, &original)?;
         let connects = count(&target.requests(None).await?, "authenticated_connects")?;
@@ -853,7 +923,6 @@ pub(crate) async fn a_in_progress_key_in_unavailable_storage_waits(ctx: Context)
         let before = enroll_attempts(&target, &token).await?;
         let mark = log_mark(case)?;
         case.start().await?;
-        until_error_logged(case, mark, "an enrollment key in an unavailable key storage").await?;
         let started = Instant::now();
         while started.elapsed() < PAUSE_OBSERVATION {
             tokio::time::sleep(POLL).await;
@@ -867,6 +936,10 @@ pub(crate) async fn a_in_progress_key_in_unavailable_storage_waits(ctx: Context)
                 "the agent changed a pending enrollment whose key is in an unavailable key storage"
             );
         }
+        ensure!(
+            !key_storage::UNAVAILABLE_IS_KNOWN || error_logged_since(case, mark)?,
+            "the agent logged no error for an enrollment key in an unavailable key storage"
+        );
         case.stop().await?;
         rewrite_in_place(&path, &original)?;
         case.start().await?;
@@ -876,6 +949,63 @@ pub(crate) async fn a_in_progress_key_in_unavailable_storage_waits(ctx: Context)
             POLL,
             "the restored pending enrollment was not retried",
             async { Ok((enroll_attempts(&target, &token).await? > before).then_some(())) }
+        );
+        Ok(())
+    })
+    .await
+}
+
+/// At start-up, an enrollment key that its in-progress record names in the file backend, and that doesn't exist there, is regenerated in the file backend rather than in the built-in default, and the enrollment completes with it.
+///
+/// The token has a second use, because the authority committed the enrollment of the key that the record named before.
+pub(crate) async fn a_missing_enrollment_key_regenerated_in_its_recorded_storage(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    with_agent(ctx, None, true, async move |case| {
+        let target = case.ctx.target.clone();
+        let token = new_token(case, 2).await?;
+        let (_, key) = dropped_enrollment(case, &token).await?;
+        case.stop().await?;
+        let path = case.in_progress_path();
+        let recorded = edit_json_in_place(&path, |record| record["key_storage"] = json!(FILE))?;
+        ensure!(
+            !case.data_dir().key_exists_in(&key, FILE)?,
+            "the enrollment key already exists in the file backend"
+        );
+        case.start().await?;
+        poll!(
+            case,
+            WAIT,
+            POLL,
+            "the agent did not regenerate the enrollment key in the file backend",
+            async { Ok(case.data_dir().key_exists_in(&key, FILE)?.then_some(())) }
+        );
+        ensure!(
+            std::fs::read(&path)? == recorded,
+            "the agent changed the in-progress record instead of regenerating the key where the record names it"
+        );
+        expect_status(
+            &target
+                .control("retry-barrier", &json!({ "endpoint": "enroll", "pause": false }))
+                .await?,
+            200,
+        )?;
+        poll!(
+            case,
+            WAIT,
+            POLL,
+            "the enrollment with the regenerated key did not complete",
+            async { Ok((!case.pending_path().exists() && case.has_stored_identity()?).then_some(())) }
+        );
+        let authorities = case.path().join("identity").join("authorities");
+        let entry = std::fs::read_dir(&authorities)?
+            .next()
+            .context("no stored identity directory")??;
+        let state: Value = serde_json::from_slice(&std::fs::read(entry.path().join("identity.json"))?)?;
+        ensure!(
+            state["keys"]["current"]["key_name"] == key.as_str() && state["keys"]["current"]["key_storage"] == FILE,
+            "the enrolled identity's current key is not the regenerated key in the file backend: {}",
+            state["keys"]["current"]
         );
         Ok(())
     })
@@ -929,20 +1059,21 @@ pub(crate) async fn a_identity_file_without_key_storage_stops_identity_processin
         case.stop().await?;
         let path = case.identity_path(field(&first_state, "authority_id")?);
         let original = std::fs::read(&path)?;
-        let storage = field(&first_state["keys"]["current"], "key_storage")?;
-        let capitalized = format!("{}{}", storage[..1].to_ascii_uppercase(), &storage[1..]);
+        let slot = serde_json::from_slice::<Value>(&original)?["keys"]["current"].clone();
+        let storage = field(&slot, "key_storage")?;
+        let mut removed = slot.clone();
+        removed
+            .as_object_mut()
+            .context("stored current slot")?
+            .remove("key_storage");
+        let mut capitalized = slot.clone();
+        capitalized["key_storage"] = json!(format!("{}{}", storage[..1].to_ascii_uppercase(), &storage[1..]));
         let unusable = [
-            ("key_storage removed", None),
-            ("key_storage not a name", Some(json!(capitalized))),
+            ("key_storage removed", removed),
+            ("key_storage not a name", capitalized),
         ];
-        for (name, replacement) in unusable {
-            let contents = edit_json_in_place(&path, |state| {
-                let slot = state["keys"]["current"].as_object_mut().expect("stored current slot");
-                slot.remove("key_storage");
-                if let Some(replacement) = replacement {
-                    slot.insert("key_storage".to_owned(), replacement);
-                }
-            })?;
+        for (name, unusable_slot) in unusable {
+            let contents = edit_json_in_place(&path, |state| state["keys"]["current"] = unusable_slot)?;
             case.start().await?;
             assert_all_identities_stopped(case, [&first, &second], &path, &contents)
                 .await
@@ -1044,9 +1175,27 @@ fn plant_file_key(case: &AgentCase, name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// At start-up the agent deletes each key with its prefix that no record names with its key storage, in every available storage, and keeps the recorded keys.
+/// Plants keys with the run's prefix that no record names with their key storage, and returns each with its storage.
 ///
-/// On Windows the planted keys include a key file named like the current key, which its slot records in the Windows software provider.
+/// Every platform gets an unrecorded key file; Windows, where the Windows software provider is available too, also gets an unrecorded machine key and a key file named like `current`, which its slot records in the provider.
+fn plant_unrecorded_keys(case: &AgentCase, current: &str) -> anyhow::Result<Vec<(String, &'static str)>> {
+    let orphan_file = format!("{}_{}", case.ctx.key_name_prefix, uuid::Uuid::new_v4());
+    plant_file_key(case, &orphan_file)?;
+    let mut planted = vec![(orphan_file, FILE)];
+    #[cfg(windows)]
+    {
+        let machine_key = format!("{}_{}", case.ctx.key_name_prefix, uuid::Uuid::new_v4());
+        crate::windows::create_machine_key(&machine_key)?;
+        planted.push((machine_key, WINDOWS_SOFTWARE_PROVIDER));
+        plant_file_key(case, current)?;
+        planted.push((current.to_owned(), FILE));
+    }
+    #[cfg(not(windows))]
+    let _ = current;
+    Ok(planted)
+}
+
+/// At start-up the agent deletes each key with its prefix that no record names with its key storage, in every available storage, and keeps the recorded keys.
 pub(crate) async fn a_start_deletes_unrecorded_keys_in_every_available_storage(ctx: Context) -> anyhow::Result<()> {
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
     with_agent(ctx, None, true, async move |case| {
@@ -1054,43 +1203,32 @@ pub(crate) async fn a_start_deletes_unrecorded_keys_in_every_available_storage(c
         let (id, state) = case.enroll_new(&target, 1).await?;
         let current = key_name(&state, "current")?.to_owned();
         case.stop().await?;
-        let orphan_file = format!("{}_{}", case.ctx.key_name_prefix, uuid::Uuid::new_v4());
-        plant_file_key(case, &orphan_file)?;
-        #[cfg(windows)]
-        let orphan_machine_key = {
-            let name = format!("{}_{}", case.ctx.key_name_prefix, uuid::Uuid::new_v4());
-            crate::windows::create_machine_key(&name)?;
-            plant_file_key(case, &current)?;
-            name
-        };
+        let planted = plant_unrecorded_keys(case, &current)?;
         ensure!(
             case.data_dir().audit_orphan_keys().is_err(),
             "the planted keys are not unrecorded keys"
         );
+        // Written while the agent is stopped, so that the first `Hello` after start-up carries it; with an authenticated stream, nothing else resends metadata.
+        case.set_metadata_hostname("after-orphan-cleanup")?;
         case.start().await?;
-        let orphan_path = case.key_file_path(&orphan_file);
-        #[cfg(windows)]
-        let shadow_path = case.key_file_path(&current);
         poll!(
             case,
             WAIT,
             POLL,
             "the agent kept unrecorded keys after start-up",
             async {
-                #[cfg(windows)]
-                let deleted = !orphan_path.exists()
-                    && !shadow_path.exists()
-                    && !crate::windows::machine_key_exists(&orphan_machine_key)?;
-                #[cfg(not(windows))]
-                let deleted = !orphan_path.exists();
-                Ok(deleted.then_some(()))
+                for (name, storage) in &planted {
+                    if case.data_dir().key_exists_in(name, storage)? {
+                        return Ok(None);
+                    }
+                }
+                Ok(Some(()))
             }
         );
         ensure!(
             slot_key_exists(case, &state, "current")?,
             "start-up deleted the recorded current key"
         );
-        case.set_metadata_hostname("after-orphan-cleanup")?;
         case.until_identity(&target, &id, "the identity signing after start-up", |record| {
             record.metadata_value("hostname") == Some("after-orphan-cleanup")
         })

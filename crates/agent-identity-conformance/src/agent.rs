@@ -1304,12 +1304,18 @@ impl AgentCase {
                             let authority = path?;
                             let json_path = authority.path().join("identity.json");
                             if json_path.exists() {
-                                let state: Value = serde_json::from_slice(&std::fs::read(json_path)?)?;
+                                let state: Value = serde_json::from_slice(&std::fs::read(&json_path)?)?;
                                 if state["identity_id"] == id && !self.pending_path_for(&token.text).exists() {
-                                    ensure!(
-                                        slot_key_exists(self, &state, "current")?,
-                                        "settled enrollment has no current identity key in its recorded key storage"
-                                    );
+                                    if !slot_key_exists(self, &state, "current")? {
+                                        // A renewal right after enrollment can retire the current key between the read and the check, so the key fails only while the stored identity still names it; otherwise the next poll reads the renewed identity.
+                                        let latest: Value = serde_json::from_slice(&std::fs::read(&json_path)?)?;
+                                        ensure!(
+                                            latest["keys"]["current"]["key_name"]
+                                                != state["keys"]["current"]["key_name"],
+                                            "settled enrollment has no current identity key in its recorded key storage"
+                                        );
+                                        continue;
+                                    }
                                     self.observe_agent_metadata(record)?;
                                     if let Some(known) = target.authority_id {
                                         ensure!(
@@ -6561,7 +6567,7 @@ mod tests {
         // oracle: intent crates/agent-identity/INTENT.md §Stored identities
         // oracle: intent crates/device-key/INTENT.md §Operations
         // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
-        let mut case = file_backend_case().await?;
+        let mut case = unstarted_case().await?;
         let prefix = case.ctx.key_name_prefix.clone();
         let fixture_token = "dvaet1.fixturebag.fixturesecret";
         let fixture_hash = token_file_id(fixture_token);
@@ -6830,7 +6836,7 @@ mod tests {
     #[tokio::test]
     async fn settled_key_check_accepts_a_current_key_retired_after_the_snapshot() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity/INTENT.md §Stored identities
-        let case = file_backend_case().await?;
+        let case = unstarted_case().await?;
         let authority = uuid::Uuid::new_v4().to_string();
         let (retired, retired_key) = new_file_key(&case)?;
         let (renewed, renewed_key) = new_file_key(&case)?;
@@ -6851,7 +6857,7 @@ mod tests {
     #[tokio::test]
     async fn settled_key_check_still_checks_the_current_key_of_the_latest_record() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity-conformance/INTENT.md §Coverage
-        let case = file_backend_case().await?;
+        let case = unstarted_case().await?;
         let authority = uuid::Uuid::new_v4().to_string();
         let (retired, retired_key) = new_file_key(&case)?;
         let (renewed, renewed_key) = new_file_key(&case)?;
@@ -6882,7 +6888,7 @@ mod tests {
     #[tokio::test]
     async fn a_case_keeps_its_directory_only_until_it_passes() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity-conformance/INTENT.md §Shape
-        let mut failed = file_backend_case().await?;
+        let mut failed = unstarted_case().await?;
         failed.keep = true;
         let kept = failed.path().to_path_buf();
         std::fs::write(kept.join("agent-stdout.log"), b"evidence")?;
@@ -6890,7 +6896,7 @@ mod tests {
         let survived = std::fs::read(kept.join("agent-stdout.log"));
         std::fs::remove_dir_all(&kept)?;
         assert_eq!(survived?, b"evidence");
-        let passed = file_backend_case().await?;
+        let passed = unstarted_case().await?;
         let removed = passed.path().to_path_buf();
         drop(passed);
         assert!(!removed.exists(), "a passing case left {}", removed.display());
@@ -7123,7 +7129,7 @@ mod tests {
     }
 
     /// An agent case whose agent never starts.
-    async fn file_backend_case() -> anyhow::Result<AgentCase> {
+    async fn unstarted_case() -> anyhow::Result<AgentCase> {
         let work_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
