@@ -28,10 +28,10 @@ using OpenAPIDateConverter = Devolutions.Gateway.Client.Client.OpenAPIDateConver
 namespace Devolutions.Gateway.Client.Model
 {
     /// <summary>
-    /// A Task: the permanent record of one piece of work the provisioner asked Gateway to do  The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes. The shape of &#x60;params&#x60; and &#x60;payload&#x60; belongs to the kind. For &#x60;recording-ai-analysis&#x60;, &#x60;params&#x60; is an &#x60;AiAnalysisParams&#x60;, and &#x60;payload&#x60; is an &#x60;AiAnalysisRunningPayload&#x60; while &#x60;running&#x60;, an &#x60;AiAnalysisSucceededPayload&#x60; once &#x60;succeeded&#x60;, and an &#x60;AiAnalysisFailedPayload&#x60; once &#x60;failed&#x60;.
+    /// An AI analysis Task: the permanent record of one analysis the provisioner asked for  The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes.
     /// </summary>
-    [DataContract(Name = "TaskInfo")]
-    public partial class TaskInfo : IValidatableObject
+    [DataContract(Name = "AiAnalysisTask")]
+    public partial class AiAnalysisTask : IValidatableObject
     {
 
         /// <summary>
@@ -40,60 +40,39 @@ namespace Devolutions.Gateway.Client.Model
         [DataMember(Name = "state", IsRequired = true, EmitDefaultValue = true)]
         public TaskState State { get; set; }
         /// <summary>
-        /// Initializes a new instance of the <see cref="TaskInfo" /> class.
+        /// Initializes a new instance of the <see cref="AiAnalysisTask" /> class.
         /// </summary>
         [JsonConstructorAttribute]
-        protected TaskInfo() { }
+        protected AiAnalysisTask() { }
         /// <summary>
-        /// Initializes a new instance of the <see cref="TaskInfo" /> class.
+        /// Initializes a new instance of the <see cref="AiAnalysisTask" /> class.
         /// </summary>
-        /// <param name="attempts">Number of attempts started so far. (required).</param>
         /// <param name="createdAt">When the Task was created. (required).</param>
         /// <param name="deadlineAt">Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress. (required).</param>
         /// <param name="finishedAt">When it succeeded or failed..</param>
         /// <param name="id">Task ID, chosen by the provisioner. (required).</param>
-        /// <param name="kind">Kind of work, such as &#x60;recording-ai-analysis&#x60;. (required).</param>
-        /// <param name="varParams">What was asked, without secrets. (required).</param>
-        /// <param name="payload">Details of the current state; null while &#x60;queued&#x60;..</param>
+        /// <param name="varParams">varParams (required).</param>
+        /// <param name="payload">payload.</param>
+        /// <param name="sessionId">Recorded session the analysis is about. (required).</param>
         /// <param name="startedAt">When its first attempt started..</param>
         /// <param name="state">state (required).</param>
-        /// <param name="target">What the work is about, such as a session ID. (required).</param>
-        public TaskInfo(int attempts = default(int), DateTime createdAt = default(DateTime), DateTime deadlineAt = default(DateTime), DateTime? finishedAt = default(DateTime?), Guid id = default(Guid), string kind = default(string), Object varParams = default(Object), Object payload = default(Object), DateTime? startedAt = default(DateTime?), TaskState state = default(TaskState), string target = default(string))
+        public AiAnalysisTask(DateTime createdAt = default(DateTime), DateTime deadlineAt = default(DateTime), DateTime? finishedAt = default(DateTime?), Guid id = default(Guid), AiAnalysisParams varParams = default(AiAnalysisParams), AiAnalysisPayload payload = default(AiAnalysisPayload), Guid sessionId = default(Guid), DateTime? startedAt = default(DateTime?), TaskState state = default(TaskState))
         {
-            this.Attempts = attempts;
             this.CreatedAt = createdAt;
             this.DeadlineAt = deadlineAt;
             this.Id = id;
-            // to ensure "kind" is required (not null)
-            if (kind == null)
-            {
-                throw new ArgumentNullException("kind is a required property for TaskInfo and cannot be null");
-            }
-            this.Kind = kind;
             // to ensure "varParams" is required (not null)
             if (varParams == null)
             {
-                throw new ArgumentNullException("varParams is a required property for TaskInfo and cannot be null");
+                throw new ArgumentNullException("varParams is a required property for AiAnalysisTask and cannot be null");
             }
             this.Params = varParams;
+            this.SessionId = sessionId;
             this.State = state;
-            // to ensure "target" is required (not null)
-            if (target == null)
-            {
-                throw new ArgumentNullException("target is a required property for TaskInfo and cannot be null");
-            }
-            this.Target = target;
             this.FinishedAt = finishedAt;
             this.Payload = payload;
             this.StartedAt = startedAt;
         }
-
-        /// <summary>
-        /// Number of attempts started so far.
-        /// </summary>
-        /// <value>Number of attempts started so far.</value>
-        [DataMember(Name = "attempts", IsRequired = true, EmitDefaultValue = true)]
-        public int Attempts { get; set; }
 
         /// <summary>
         /// When the Task was created.
@@ -124,25 +103,23 @@ namespace Devolutions.Gateway.Client.Model
         public Guid Id { get; set; }
 
         /// <summary>
-        /// Kind of work, such as &#x60;recording-ai-analysis&#x60;.
+        /// Gets or Sets Params
         /// </summary>
-        /// <value>Kind of work, such as &#x60;recording-ai-analysis&#x60;.</value>
-        [DataMember(Name = "kind", IsRequired = true, EmitDefaultValue = true)]
-        public string Kind { get; set; }
-
-        /// <summary>
-        /// What was asked, without secrets.
-        /// </summary>
-        /// <value>What was asked, without secrets.</value>
         [DataMember(Name = "params", IsRequired = true, EmitDefaultValue = true)]
-        public Object Params { get; set; }
+        public AiAnalysisParams Params { get; set; }
 
         /// <summary>
-        /// Details of the current state; null while &#x60;queued&#x60;.
+        /// Gets or Sets Payload
         /// </summary>
-        /// <value>Details of the current state; null while &#x60;queued&#x60;.</value>
         [DataMember(Name = "payload", EmitDefaultValue = true)]
-        public Object Payload { get; set; }
+        public AiAnalysisPayload Payload { get; set; }
+
+        /// <summary>
+        /// Recorded session the analysis is about.
+        /// </summary>
+        /// <value>Recorded session the analysis is about.</value>
+        [DataMember(Name = "sessionId", IsRequired = true, EmitDefaultValue = true)]
+        public Guid SessionId { get; set; }
 
         /// <summary>
         /// When its first attempt started.
@@ -152,31 +129,22 @@ namespace Devolutions.Gateway.Client.Model
         public DateTime? StartedAt { get; set; }
 
         /// <summary>
-        /// What the work is about, such as a session ID.
-        /// </summary>
-        /// <value>What the work is about, such as a session ID.</value>
-        [DataMember(Name = "target", IsRequired = true, EmitDefaultValue = true)]
-        public string Target { get; set; }
-
-        /// <summary>
         /// Returns the string presentation of the object
         /// </summary>
         /// <returns>String presentation of the object</returns>
         public override string ToString()
         {
             StringBuilder sb = new StringBuilder();
-            sb.Append("class TaskInfo {\n");
-            sb.Append("  Attempts: ").Append(Attempts).Append("\n");
+            sb.Append("class AiAnalysisTask {\n");
             sb.Append("  CreatedAt: ").Append(CreatedAt).Append("\n");
             sb.Append("  DeadlineAt: ").Append(DeadlineAt).Append("\n");
             sb.Append("  FinishedAt: ").Append(FinishedAt).Append("\n");
             sb.Append("  Id: ").Append(Id).Append("\n");
-            sb.Append("  Kind: ").Append(Kind).Append("\n");
             sb.Append("  Params: ").Append(Params).Append("\n");
             sb.Append("  Payload: ").Append(Payload).Append("\n");
+            sb.Append("  SessionId: ").Append(SessionId).Append("\n");
             sb.Append("  StartedAt: ").Append(StartedAt).Append("\n");
             sb.Append("  State: ").Append(State).Append("\n");
-            sb.Append("  Target: ").Append(Target).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }
@@ -197,12 +165,6 @@ namespace Devolutions.Gateway.Client.Model
         /// <returns>Validation Result</returns>
         IEnumerable<ValidationResult> IValidatableObject.Validate(ValidationContext validationContext)
         {
-            // Attempts (int) minimum
-            if (this.Attempts < (int)0)
-            {
-                yield return new ValidationResult("Invalid value for Attempts, must be a value greater than or equal to 0.", new [] { "Attempts" });
-            }
-
             yield break;
         }
     }

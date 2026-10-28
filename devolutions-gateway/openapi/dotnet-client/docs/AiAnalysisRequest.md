@@ -11,7 +11,7 @@ Name | Type | Description | Notes
 **MaxOutputTokens** | **long?** | Upper bound of tokens in each AI answer. | [optional] 
 **Model** | **string** | Model identifier, passed to the provider as is. | 
 **Provider** | **AiProvider** |  | 
-**TaskId** | **Guid** | Task ID, chosen by the caller so it can send the same request again safely. | 
+**SessionId** | **Guid** | Recorded session to analyze. | 
 
 [[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
 

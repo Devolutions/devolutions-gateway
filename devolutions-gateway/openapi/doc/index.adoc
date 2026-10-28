@@ -1119,118 +1119,6 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
-[.getAiAnalysis]
-==== getAiAnalysis
-
-`GET /jet/jrec/{session_id}/ai-analysis/{task_id}`
-
-Gets an AI analysis of a recorded session
-
-===== Description
-
-Returns the Task of the analysis: its state, its progress while it runs, its result once it is over, and the tokens it used in every state but `queued`. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
-
-
-// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/\{task_id\}/GET/spec.adoc[opts=optional]
-
-
-
-===== Security
-
-[cols="2,1,1"]
-|===
-| Name | Type | Scheme
-
-| `scope_token`
-| http
-| bearer
-|===
-
-===== Parameters
-
-====== Path Parameters
-
-[cols="2,3,1,1,1"]
-|===
-|Name| Description| Required| Default| Pattern
-
-| session_id
-| Recorded session ID 
-| X
-| null
-| 
-
-| task_id
-| Task ID of the AI analysis 
-| X
-| null
-| 
-
-|===
-
-
-
-
-
-
-===== Return Type
-
-<<TaskInfo>>
-
-
-===== Content Type
-
-* application/json
-
-===== Responses
-
-.HTTP Response Codes
-[cols="2,3,1"]
-|===
-| Code | Message | Datatype
-
-
-| 200
-| The AI analysis Task
-|  <<TaskInfo>>
-
-
-| 400
-| Bad request
-|  <<>>
-
-
-| 401
-| Invalid or missing authorization token
-|  <<>>
-
-
-| 403
-| Insufficient permissions
-|  <<>>
-
-
-| 404
-| The session has no AI analysis with this Task ID
-|  <<>>
-
-
-| 500
-| Unexpected server error
-|  <<>>
-
-|===
-
-
-ifdef::internal-generation[]
-===== Implementation
-
-// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/\{task_id\}/GET/implementation.adoc[opts=optional]
-
-
-endif::internal-generation[]
-
-
 [.listRecordings]
 ==== listRecordings
 
@@ -1629,135 +1517,6 @@ ifdef::internal-generation[]
 ===== Implementation
 
 // markup not found, no include::{specDir}jet/jrec/search/POST/implementation.adoc[opts=optional]
-
-
-endif::internal-generation[]
-
-
-[.startAiAnalysis]
-==== startAiAnalysis
-
-`POST /jet/jrec/{session_id}/ai-analysis`
-
-Starts an AI analysis of a recorded session
-
-===== Description
-
-Gateway asks the AI provider what the user did in the session recording, and puts the answer in the session as its log, listed under `artifacts.ai-analysis` in its manifest. The answer is in the `language` of the request, English without one. The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`, which the `Location` header of a 202 answer names.  Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from scratch, and replaces the earlier AI analysis of the session once its success is recorded, so a session holds at most one; a Task that fails leaves the earlier analysis in place and removes everything it made. A Task fails if it does not start within 2 hours, or, once it runs, after 30 minutes without progress. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
-
-
-// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/POST/spec.adoc[opts=optional]
-
-
-
-===== Security
-
-[cols="2,1,1"]
-|===
-| Name | Type | Scheme
-
-| `scope_token`
-| http
-| bearer
-|===
-
-===== Parameters
-
-====== Path Parameters
-
-[cols="2,3,1,1,1"]
-|===
-|Name| Description| Required| Default| Pattern
-
-| session_id
-| Recorded session ID 
-| X
-| null
-| 
-
-|===
-
-====== Body Parameter
-
-[cols="2,3,1,1,1"]
-|===
-|Name| Description| Required| Default| Pattern
-
-| AiAnalysisRequest
-| AI analysis settings <<AiAnalysisRequest>>
-| X
-| 
-| 
-
-|===
-
-
-
-
-
-===== Return Type
-
-<<TaskInfo>>
-
-
-===== Content Type
-
-* application/json
-
-===== Responses
-
-.HTTP Response Codes
-[cols="2,3,1"]
-|===
-| Code | Message | Datatype
-
-
-| 200
-| The same request came in before; nothing new starts
-|  <<TaskInfo>>
-
-
-| 202
-| The AI analysis Task is created and runs in the background
-|  <<TaskInfo>>
-
-
-| 400
-| Invalid request body, AI settings or language
-|  <<>>
-
-
-| 401
-| Invalid or missing authorization token
-|  <<>>
-
-
-| 403
-| Insufficient permissions
-|  <<>>
-
-
-| 404
-| The session has no recording
-|  <<>>
-
-
-| 409
-| The AI analysis cannot start now
-|  <<AiAnalysisConflict>>
-
-
-| 500
-| Unexpected server error
-|  <<>>
-
-|===
-
-
-ifdef::internal-generation[]
-===== Implementation
-
-// markup not found, no include::{specDir}jet/jrec/\{session_id\}/ai-analysis/POST/implementation.adoc[opts=optional]
 
 
 endif::internal-generation[]
@@ -2849,6 +2608,245 @@ ifdef::internal-generation[]
 ===== Implementation
 
 // markup not found, no include::{specDir}jet/session/\{id\}/terminate/POST/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.Tasks]
+=== Tasks
+
+
+[.getAiAnalysis]
+==== getAiAnalysis
+
+`GET /jet/tasks/recording-ai-analysis/{task_id}`
+
+Gets an AI analysis of a recorded session
+
+===== Description
+
+Returns the Task of the analysis: its state, its progress while it runs, its result once it is over, and the tokens it used in every state but `queued`. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| task_id
+| Task ID of the AI analysis 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+<<AiAnalysisTask>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The AI analysis Task
+|  <<AiAnalysisTask>>
+
+
+| 400
+| Bad request
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| No AI analysis has this Task ID
+|  <<>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.startAiAnalysis]
+==== startAiAnalysis
+
+`PUT /jet/tasks/recording-ai-analysis/{task_id}`
+
+Starts an AI analysis of a recorded session
+
+===== Description
+
+Gateway asks the AI provider what the user did in the session recording, and puts the answer in the session as its log, listed under `artifacts.ai-analysis` in its manifest. The answer is in the `language` of the request, English without one. The work runs in the background as a Task; follow it with `GET /jet/tasks/recording-ai-analysis/{task_id}`.  Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from scratch, and replaces the earlier AI analysis of the session once its success is recorded, so a session holds at most one; a Task that fails leaves the earlier analysis in place and removes everything it made. A Task fails if it does not start within 2 hours, or, once it runs, after 30 minutes without progress. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/PUT/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| task_id
+| Task ID, chosen by the caller so it can send the same request again safely 
+| X
+| null
+| 
+
+|===
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| AiAnalysisRequest
+| AI analysis settings <<AiAnalysisRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<AiAnalysisTask>>
+
+
+===== Content Type
+
+* application/json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The same request came in before; nothing new starts
+|  <<AiAnalysisTask>>
+
+
+| 202
+| The AI analysis Task is created and runs in the background
+|  <<AiAnalysisTask>>
+
+
+| 400
+| Invalid request body, AI settings or language
+|  <<>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<>>
+
+
+| 403
+| Insufficient permissions
+|  <<>>
+
+
+| 404
+| The session has no recording
+|  <<>>
+
+
+| 409
+| The AI analysis cannot start now
+|  <<AiAnalysisConflict>>
+
+
+| 500
+| Unexpected server error
+|  <<>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/PUT/implementation.adoc[opts=optional]
 
 
 endif::internal-generation[]
@@ -4106,6 +4104,77 @@ Params of an AI analysis Task: what was asked, without the API key and the base 
 
 
 
+[#AiAnalysisPayload]
+=== _AiAnalysisPayload_ 
+
+Details of the state of an AI analysis Task: &#x60;running&#x60;, &#x60;succeeded&#x60; and &#x60;failed&#x60; each have their own
+
+
+[.fields-AiAnalysisPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| done
+| 
+| X
+|   Long  
+| Work done in the step: bytes read while `reading`, parts described while `describing`; absent in the other steps.
+| int64    
+
+| step
+| X
+| 
+|   String  
+| Current step: `preparing` (the attempt starts), `reading` (the recordings are read), `describing` (the AI is asked about the recording, part by part), then `writing` (the log is written).
+|     
+
+| total
+| 
+| X
+|   Long  
+| Work the step has in all, in the same unit as `done`; absent in the other steps.
+| int64    
+
+| usage
+| X
+| X
+| <<AiAnalysisUsage>>    
+| 
+|     
+
+| fileName
+| X
+| 
+|   String  
+| Name of the log in the session manifest, such as `ai-analysis-0.slog`.
+|     
+
+| model
+| X
+| 
+|   String  
+| Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+|     
+
+| promptVersion
+| X
+| 
+|   String  
+| Versions of the prompts that wrote the log, such as `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
+|     
+
+| error
+| X
+| 
+| <<AiAnalysisError>>    
+| 
+|     
+
+|===
+
+
+
 [#AiAnalysisRecoverableError]
 === _AiAnalysisRecoverableError_ 
 
@@ -4208,11 +4277,11 @@ Settings of an AI analysis
 | 
 |    openai, anthropic, mistral, gemini, openai-compatible,  
 
-| taskId
+| sessionId
 | X
 | 
 |   UUID  
-| Task ID, chosen by the caller so it can send the same request again safely.
+| Recorded session to analyze.
 | uuid    
 
 |===
@@ -4300,6 +4369,86 @@ Payload of a &#x60;succeeded&#x60; AI analysis Task: the log it put in the sessi
 | <<AiAnalysisUsage>>    
 | 
 |     
+
+|===
+
+
+
+[#AiAnalysisTask]
+=== _AiAnalysisTask_ 
+
+An AI analysis Task: the permanent record of one analysis the provisioner asked for
+
+The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes.
+
+
+[.fields-AiAnalysisTask]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| createdAt
+| X
+| 
+|   Date  
+| When the Task was created.
+| date-time    
+
+| deadlineAt
+| X
+| 
+|   Date  
+| Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress.
+| date-time    
+
+| finishedAt
+| 
+| X
+|   Date  
+| When it succeeded or failed.
+| date-time    
+
+| id
+| X
+| 
+|   UUID  
+| Task ID, chosen by the provisioner.
+| uuid    
+
+| params
+| X
+| 
+| <<AiAnalysisParams>>    
+| 
+|     
+
+| payload
+| 
+| X
+| <<AiAnalysisPayload>>    
+| 
+|     
+
+| sessionId
+| X
+| 
+|   UUID  
+| Recorded session the analysis is about.
+| uuid    
+
+| startedAt
+| 
+| X
+|   Date  
+| When its first attempt started.
+| date-time    
+
+| state
+| X
+| 
+|  <<TaskState>>  
+| 
+|    queued, running, succeeded, failed,  
 
 |===
 
@@ -6563,103 +6712,6 @@ Subscriber configuration
 | X
 |   String  
 | Kerberos KDC address for the target-side CredSSP connection.  Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
-|     
-
-|===
-
-
-
-[#TaskInfo]
-=== _TaskInfo_ 
-
-A Task: the permanent record of one piece of work the provisioner asked Gateway to do
-
-The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes.
-The shape of &#x60;params&#x60; and &#x60;payload&#x60; belongs to the kind.
-For &#x60;recording-ai-analysis&#x60;, &#x60;params&#x60; is an &#x60;AiAnalysisParams&#x60;, and &#x60;payload&#x60; is an &#x60;AiAnalysisRunningPayload&#x60; while
-&#x60;running&#x60;, an &#x60;AiAnalysisSucceededPayload&#x60; once &#x60;succeeded&#x60;, and an &#x60;AiAnalysisFailedPayload&#x60; once &#x60;failed&#x60;.
-
-
-[.fields-TaskInfo]
-[cols="2,1,1,2,4,1"]
-|===
-| Field Name| Required| Nullable | Type| Description | Format
-
-| attempts
-| X
-| 
-|   Integer  
-| Number of attempts started so far.
-| int32    
-
-| createdAt
-| X
-| 
-|   Date  
-| When the Task was created.
-| date-time    
-
-| deadlineAt
-| X
-| 
-|   Date  
-| Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress.
-| date-time    
-
-| finishedAt
-| 
-| X
-|   Date  
-| When it succeeded or failed.
-| date-time    
-
-| id
-| X
-| 
-|   UUID  
-| Task ID, chosen by the provisioner.
-| uuid    
-
-| kind
-| X
-| 
-|   String  
-| Kind of work, such as `recording-ai-analysis`.
-|     
-
-| params
-| X
-| 
-|   Object  
-| What was asked, without secrets.
-|     
-
-| payload
-| 
-| X
-|   Object  
-| Details of the current state; null while `queued`.
-|     
-
-| startedAt
-| 
-| X
-|   Date  
-| When its first attempt started.
-| date-time    
-
-| state
-| X
-| 
-|  <<TaskState>>  
-| 
-|    queued, running, succeeded, failed,  
-
-| target
-| X
-| 
-|   String  
-| What the work is about, such as a session ID.
 |     
 
 |===

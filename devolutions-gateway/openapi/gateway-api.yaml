@@ -390,123 +390,6 @@ paths:
       security:
       - scope_token:
         - gateway.recordings.search
-  /jet/jrec/{session_id}/ai-analysis:
-    post:
-      tags:
-      - Jrec
-      summary: Starts an AI analysis of a recorded session
-      description: |-
-        Gateway asks the AI provider what the user did in the session recording, and puts the answer in the session as its
-        log, listed under `artifacts.ai-analysis` in its manifest.
-        The answer is in the `language` of the request, English without one.
-        The work runs in the background as a Task; follow it with `GET /jet/jrec/{session_id}/ai-analysis/{task_id}`,
-        which the `Location` header of a 202 answer names.
-
-        Sending the same request again returns the same Task and starts nothing new.
-        A new Task for the session starts from scratch, and replaces the earlier AI analysis of the session once its success
-        is recorded, so a session holds at most one; a Task that fails leaves the earlier analysis in place and removes
-        everything it made.
-        A Task fails if it does not start within 2 hours, or, once it runs, after 30 minutes without progress.
-        The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
-        Tasks.
-      operationId: StartAiAnalysis
-      parameters:
-      - name: session_id
-        in: path
-        description: Recorded session ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      requestBody:
-        description: AI analysis settings
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/AiAnalysisRequest'
-        required: true
-      responses:
-        '200':
-          description: The same request came in before; nothing new starts
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TaskInfo'
-        '202':
-          description: The AI analysis Task is created and runs in the background
-          headers:
-            Location:
-              schema:
-                type: string
-              description: Path of the new Task, `/jet/jrec/{session_id}/ai-analysis/{task_id}`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TaskInfo'
-        '400':
-          description: Invalid request body, AI settings or language
-        '401':
-          description: Invalid or missing authorization token
-        '403':
-          description: Insufficient permissions
-        '404':
-          description: The session has no recording
-        '409':
-          description: The AI analysis cannot start now
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AiAnalysisConflict'
-        '500':
-          description: Unexpected server error
-      security:
-      - scope_token:
-        - gateway.tasks.recording-ai-analysis.start
-  /jet/jrec/{session_id}/ai-analysis/{task_id}:
-    get:
-      tags:
-      - Jrec
-      summary: Gets an AI analysis of a recorded session
-      description: |-
-        Returns the Task of the analysis: its state, its progress while it runs, its result once it is over, and the tokens
-        it used in every state but `queued`.
-        Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
-      operationId: GetAiAnalysis
-      parameters:
-      - name: session_id
-        in: path
-        description: Recorded session ID
-        required: true
-        schema:
-          type: string
-          format: uuid
-      - name: task_id
-        in: path
-        description: Task ID of the AI analysis
-        required: true
-        schema:
-          type: string
-          format: uuid
-      responses:
-        '200':
-          description: The AI analysis Task
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TaskInfo'
-        '400':
-          description: Bad request
-        '401':
-          description: Invalid or missing authorization token
-        '403':
-          description: Insufficient permissions
-        '404':
-          description: The session has no AI analysis with this Task ID
-        '500':
-          description: Unexpected server error
-      security:
-      - scope_token:
-        - gateway.tasks.recording-ai-analysis.read
   /jet/jrl:
     post:
       tags:
@@ -1060,6 +943,114 @@ paths:
       security:
       - scope_token:
         - gateway.sessions.read
+  /jet/tasks/recording-ai-analysis/{task_id}:
+    get:
+      tags:
+      - Tasks
+      summary: Gets an AI analysis of a recorded session
+      description: |-
+        Returns the Task of the analysis: its state, its progress while it runs, its result once it is over, and the tokens
+        it used in every state but `queued`.
+        Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+      operationId: GetAiAnalysis
+      parameters:
+      - name: task_id
+        in: path
+        description: Task ID of the AI analysis
+        required: true
+        schema:
+          type: string
+          format: uuid
+      responses:
+        '200':
+          description: The AI analysis Task
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAnalysisTask'
+        '400':
+          description: Bad request
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: No AI analysis has this Task ID
+        '500':
+          description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.tasks.recording-ai-analysis.read
+    put:
+      tags:
+      - Tasks
+      summary: Starts an AI analysis of a recorded session
+      description: |-
+        Gateway asks the AI provider what the user did in the session recording, and puts the answer in the session as its
+        log, listed under `artifacts.ai-analysis` in its manifest.
+        The answer is in the `language` of the request, English without one.
+        The work runs in the background as a Task; follow it with `GET /jet/tasks/recording-ai-analysis/{task_id}`.
+
+        Sending the same request again returns the same Task and starts nothing new.
+        A new Task for the session starts from scratch, and replaces the earlier AI analysis of the session once its success
+        is recorded, so a session holds at most one; a Task that fails leaves the earlier analysis in place and removes
+        everything it made.
+        A Task fails if it does not start within 2 hours, or, once it runs, after 30 minutes without progress.
+        The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished
+        Tasks.
+      operationId: StartAiAnalysis
+      parameters:
+      - name: task_id
+        in: path
+        description: Task ID, chosen by the caller so it can send the same request again safely
+        required: true
+        schema:
+          type: string
+          format: uuid
+      requestBody:
+        description: AI analysis settings
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AiAnalysisRequest'
+        required: true
+      responses:
+        '200':
+          description: The same request came in before; nothing new starts
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAnalysisTask'
+        '202':
+          description: The AI analysis Task is created and runs in the background
+          headers:
+            Location:
+              schema:
+                type: string
+              description: Path of the new Task, `/jet/tasks/recording-ai-analysis/{task_id}`
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAnalysisTask'
+        '400':
+          description: Invalid request body, AI settings or language
+        '401':
+          description: Invalid or missing authorization token
+        '403':
+          description: Insufficient permissions
+        '404':
+          description: The session has no recording
+        '409':
+          description: The AI analysis cannot start now
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiAnalysisConflict'
+        '500':
+          description: Unexpected server error
+      security:
+      - scope_token:
+        - gateway.tasks.recording-ai-analysis.start
   /jet/traffic/ack:
     post:
       tags:
@@ -1672,6 +1663,12 @@ components:
           description: Model identifier, passed to the provider as is.
         provider:
           $ref: '#/components/schemas/AiProvider'
+    AiAnalysisPayload:
+      oneOf:
+      - $ref: '#/components/schemas/AiAnalysisRunningPayload'
+      - $ref: '#/components/schemas/AiAnalysisSucceededPayload'
+      - $ref: '#/components/schemas/AiAnalysisFailedPayload'
+      description: 'Details of the state of an AI analysis Task: `running`, `succeeded` and `failed` each have their own'
     AiAnalysisRecoverableError:
       type: object
       description: A failure of an attempt that was worth another attempt
@@ -1697,7 +1694,7 @@ components:
       type: object
       description: Settings of an AI analysis
       required:
-      - taskId
+      - sessionId
       - provider
       - model
       - apiKey
@@ -1728,10 +1725,10 @@ components:
           description: Model identifier, passed to the provider as is.
         provider:
           $ref: '#/components/schemas/AiProvider'
-        taskId:
+        sessionId:
           type: string
           format: uuid
-          description: Task ID, chosen by the caller so it can send the same request again safely.
+          description: Recorded session to analyze.
     AiAnalysisRunningPayload:
       type: object
       description: 'Payload of a `running` AI analysis Task: its progress, and the tokens it used so far'
@@ -1780,6 +1777,56 @@ components:
             `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
         usage:
           $ref: '#/components/schemas/AiAnalysisUsage'
+    AiAnalysisTask:
+      type: object
+      description: |-
+        An AI analysis Task: the permanent record of one analysis the provisioner asked for
+
+        The work runs in the background; `state` and `payload` tell how it goes.
+      required:
+      - id
+      - sessionId
+      - params
+      - state
+      - createdAt
+      - deadlineAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+          description: When the Task was created.
+        deadlineAt:
+          type: string
+          format: date-time
+          description: |-
+            Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or
+            the Task makes progress.
+        finishedAt:
+          type: string
+          format: date-time
+          description: When it succeeded or failed.
+          nullable: true
+        id:
+          type: string
+          format: uuid
+          description: Task ID, chosen by the provisioner.
+        params:
+          $ref: '#/components/schemas/AiAnalysisParams'
+        payload:
+          allOf:
+          - $ref: '#/components/schemas/AiAnalysisPayload'
+          nullable: true
+        sessionId:
+          type: string
+          format: uuid
+          description: Recorded session the analysis is about.
+        startedAt:
+          type: string
+          format: date-time
+          description: When its first attempt started.
+          nullable: true
+        state:
+          $ref: '#/components/schemas/TaskState'
     AiAnalysisUsage:
       type: object
       description: Tokens the AI provider counted for an AI analysis Task, over all its attempts
@@ -2921,69 +2968,6 @@ components:
 
             Format: `<scheme>://<host>:<port>` (port is required). Supported schemes are `tcp` and `udp`.
           nullable: true
-    TaskInfo:
-      type: object
-      description: |-
-        A Task: the permanent record of one piece of work the provisioner asked Gateway to do
-
-        The work runs in the background; `state` and `payload` tell how it goes.
-        The shape of `params` and `payload` belongs to the kind.
-        For `recording-ai-analysis`, `params` is an `AiAnalysisParams`, and `payload` is an `AiAnalysisRunningPayload` while
-        `running`, an `AiAnalysisSucceededPayload` once `succeeded`, and an `AiAnalysisFailedPayload` once `failed`.
-      required:
-      - id
-      - kind
-      - target
-      - params
-      - state
-      - attempts
-      - createdAt
-      - deadlineAt
-      properties:
-        attempts:
-          type: integer
-          format: int32
-          description: Number of attempts started so far.
-          minimum: 0
-        createdAt:
-          type: string
-          format: date-time
-          description: When the Task was created.
-        deadlineAt:
-          type: string
-          format: date-time
-          description: |-
-            Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or
-            the Task makes progress.
-        finishedAt:
-          type: string
-          format: date-time
-          description: When it succeeded or failed.
-          nullable: true
-        id:
-          type: string
-          format: uuid
-          description: Task ID, chosen by the provisioner.
-        kind:
-          type: string
-          description: Kind of work, such as `recording-ai-analysis`.
-        params:
-          type: object
-          description: What was asked, without secrets.
-        payload:
-          type: object
-          description: Details of the current state; null while `queued`.
-          nullable: true
-        startedAt:
-          type: string
-          format: date-time
-          description: When its first attempt started.
-          nullable: true
-        state:
-          $ref: '#/components/schemas/TaskState'
-        target:
-          type: string
-          description: What the work is about, such as a session ID.
     TaskState:
       type: string
       enum:

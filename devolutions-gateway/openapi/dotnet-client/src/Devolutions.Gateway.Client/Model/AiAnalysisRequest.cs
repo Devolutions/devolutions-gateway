@@ -53,8 +53,8 @@ namespace Devolutions.Gateway.Client.Model
         /// <param name="maxOutputTokens">Upper bound of tokens in each AI answer..</param>
         /// <param name="model">Model identifier, passed to the provider as is. (required).</param>
         /// <param name="provider">provider (required).</param>
-        /// <param name="taskId">Task ID, chosen by the caller so it can send the same request again safely. (required).</param>
-        public AiAnalysisRequest(string apiKey = default(string), string baseUrl = default(string), string language = default(string), long? maxOutputTokens = default(long?), string model = default(string), AiProvider provider = default(AiProvider), Guid taskId = default(Guid))
+        /// <param name="sessionId">Recorded session to analyze. (required).</param>
+        public AiAnalysisRequest(string apiKey = default(string), string baseUrl = default(string), string language = default(string), long? maxOutputTokens = default(long?), string model = default(string), AiProvider provider = default(AiProvider), Guid sessionId = default(Guid))
         {
             // to ensure "apiKey" is required (not null)
             if (apiKey == null)
@@ -69,7 +69,7 @@ namespace Devolutions.Gateway.Client.Model
             }
             this.Model = model;
             this.Provider = provider;
-            this.TaskId = taskId;
+            this.SessionId = sessionId;
             this.BaseUrl = baseUrl;
             this.Language = language;
             this.MaxOutputTokens = maxOutputTokens;
@@ -111,11 +111,11 @@ namespace Devolutions.Gateway.Client.Model
         public string Model { get; set; }
 
         /// <summary>
-        /// Task ID, chosen by the caller so it can send the same request again safely.
+        /// Recorded session to analyze.
         /// </summary>
-        /// <value>Task ID, chosen by the caller so it can send the same request again safely.</value>
-        [DataMember(Name = "taskId", IsRequired = true, EmitDefaultValue = true)]
-        public Guid TaskId { get; set; }
+        /// <value>Recorded session to analyze.</value>
+        [DataMember(Name = "sessionId", IsRequired = true, EmitDefaultValue = true)]
+        public Guid SessionId { get; set; }
 
         /// <summary>
         /// Returns the string presentation of the object
@@ -131,7 +131,7 @@ namespace Devolutions.Gateway.Client.Model
             sb.Append("  MaxOutputTokens: ").Append(MaxOutputTokens).Append("\n");
             sb.Append("  Model: ").Append(Model).Append("\n");
             sb.Append("  Provider: ").Append(Provider).Append("\n");
-            sb.Append("  TaskId: ").Append(TaskId).Append("\n");
+            sb.Append("  SessionId: ").Append(SessionId).Append("\n");
             sb.Append("}\n");
             return sb.ToString();
         }

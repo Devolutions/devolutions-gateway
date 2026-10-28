@@ -36,9 +36,9 @@ export interface AiAnalysisRequest {
     model: string;
     provider: AiProvider;
     /**
-     * Task ID, chosen by the caller so it can send the same request again safely.
+     * Recorded session to analyze.
      */
-    taskId: string;
+    sessionId: string;
 }
 export namespace AiAnalysisRequest {
 }
