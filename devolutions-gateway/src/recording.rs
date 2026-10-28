@@ -943,13 +943,8 @@ impl RecordingManagerTask {
             if cadeau::xmf::is_init() {
                 debug!(%recording_file_path, "Enqueue video remuxing operation");
 
-                let marker = remux_marker(&recording_file_path);
-
-                // An AI analysis that finds no mark reads the file even while it is remuxed.
-                write_remux_marker(&marker).await;
-
                 // Schedule 60 seconds to wait for the streamers to release the file.
-                let scheduled = self
+                let _ = self
                     .job_queue_handle
                     .schedule(
                         RemuxJob {
@@ -958,10 +953,6 @@ impl RecordingManagerTask {
                         time::OffsetDateTime::now_utc() + time::Duration::seconds(60),
                     )
                     .await;
-
-                if scheduled.is_err() {
-                    remove_remux_marker(&marker).await;
-                }
             } else {
                 debug!("Video remuxing was skipped because XMF native library is not loaded");
             }
@@ -1280,66 +1271,6 @@ impl RemuxJob {
     pub const NAME: &'static str = "remux";
 }
 
-const REMUX_MARKER_SUFFIX: &str = ".remuxing";
-
-/// Age past which a remux mark no longer counts.
-///
-/// A crash between the mark and the storing of its job leaves a mark that no remux removes.
-/// The limit lets an AI analysis waiting on such a mark go on before it fails for lack of progress.
-/// The remux job marks the file again as it starts, so the limit covers the remux itself.
-/// Until then the mark ages from the scheduling, so a job that waits longer than the limit to start lets an AI analysis
-/// read the file the remux is about to replace.
-pub(crate) const REMUX_MARKER_STALE_AFTER: Duration = Duration::from_secs(20 * 60);
-
-/// The file that marks `recording_file` as waiting for its remux, from the time the remux is scheduled until it ends.
-pub(crate) fn remux_marker(recording_file: &Utf8Path) -> Utf8PathBuf {
-    Utf8PathBuf::from(format!("{recording_file}{REMUX_MARKER_SUFFIX}"))
-}
-
-async fn write_remux_marker(marker: &Utf8Path) {
-    if let Err(error) = fs::write(marker, b"").await {
-        warn!(%marker, %error, "Failed to mark the recording as waiting for its remux");
-    }
-}
-
-async fn remove_remux_marker(marker: &Utf8Path) {
-    match fs::remove_file(marker).await {
-        Err(error) if error.kind() != io::ErrorKind::NotFound => {
-            warn!(%marker, %error, "Failed to remove the remux mark");
-        }
-        _ => {}
-    }
-}
-
-/// Whether a recording file of the session folder `dir` waits for its remux, which would replace the file.
-pub(crate) async fn remux_pending(dir: &Utf8Path) -> io::Result<bool> {
-    let mut entries = match fs::read_dir(dir).await {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(error),
-    };
-
-    while let Some(entry) = entries.next_entry().await? {
-        if !entry.file_name().to_string_lossy().ends_with(REMUX_MARKER_SUFFIX) {
-            continue;
-        }
-
-        let metadata = match entry.metadata().await {
-            Ok(metadata) => metadata,
-            // The remux ended between the listing and this look.
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
-        let age = metadata.modified()?.elapsed().unwrap_or_default();
-
-        if age < REMUX_MARKER_STALE_AFTER {
-            return Ok(true);
-        }
-    }
-
-    Ok(false)
-}
-
 #[async_trait]
 impl job_queue::Job for RemuxJob {
     fn name(&self) -> &str {
@@ -1351,14 +1282,7 @@ impl job_queue::Job for RemuxJob {
     }
 
     async fn run(&mut self) -> anyhow::Result<()> {
-        let input_path = core::mem::take(&mut self.input_path);
-        let marker = remux_marker(&input_path);
-
-        // From here the mark ages with the remux itself, also when the job runs again after a restart.
-        write_remux_marker(&marker).await;
-
-        remux(input_path).await;
-        remove_remux_marker(&marker).await;
+        remux(core::mem::take(&mut self.input_path)).await;
         Ok(())
     }
 }
@@ -1499,53 +1423,6 @@ mod tests {
         fn read_file(&self, id: Uuid, file_name: &str) -> String {
             std::fs::read_to_string(self.recordings_path.join(id.to_string()).join(file_name)).expect("read file")
         }
-    }
-
-    // oracle: mutant a fresh remux mark is ignored, so an AI analysis reads a video its remux is about to replace
-    #[tokio::test]
-    async fn a_recording_waits_for_its_remux_while_its_mark_is_fresh() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
-        std::fs::write(remux_marker(&dir.join("recording-0.webm")), b"").expect("mark");
-
-        assert!(remux_pending(dir).await.expect("fresh mark"));
-    }
-
-    // oracle: mutant a mark left by a crash before its remux job was stored keeps every AI analysis waiting
-    #[tokio::test]
-    async fn a_remux_mark_older_than_any_remux_no_longer_counts() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
-        let marker = remux_marker(&dir.join("recording-0.webm"));
-        std::fs::write(&marker, b"").expect("mark");
-
-        let stale = std::time::SystemTime::now() - REMUX_MARKER_STALE_AFTER - Duration::from_secs(60);
-        std::fs::File::options()
-            .write(true)
-            .open(&marker)
-            .and_then(|file| file.set_modified(stale))
-            .expect("age the mark");
-
-        assert!(!remux_pending(dir).await.expect("stale mark"));
-    }
-
-    // oracle: mutant a recording file is taken for a remux mark, so every AI analysis of a video session waits
-    #[tokio::test]
-    async fn a_session_without_remux_marks_has_no_pending_remux() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
-        std::fs::write(dir.join("recording-0.webm"), b"").expect("recording");
-
-        assert!(!remux_pending(dir).await.expect("no mark"));
-    }
-
-    // oracle: mutant a session folder that does not exist fails the AI analysis as storage
-    #[tokio::test]
-    async fn a_missing_session_folder_has_no_pending_remux() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
-
-        assert!(!remux_pending(&dir.join("gone")).await.expect("missing folder"));
     }
 
     #[tokio::test]

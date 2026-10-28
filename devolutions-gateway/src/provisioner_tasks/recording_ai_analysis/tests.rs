@@ -13,7 +13,7 @@ use provisioner_task::{NewProvisionerTaskRecord, ProvisionerTaskState};
 use super::*;
 use crate::job_queue::{JobMessage, JobQueueReceiver};
 use crate::provisioner_tasks::runner::{MAX_ATTEMPTS, ProvisionerTaskJob, ProvisionerTaskRunner};
-use crate::recording::{RecordingManagerTask, remux_marker};
+use crate::recording::RecordingManagerTask;
 use crate::{DgwState, MockHandles};
 
 const API_KEY: &str = "sk-recording-ai-analysis-test-secret";
@@ -827,60 +827,6 @@ async fn finished_task_does_not_run_again() {
         !harness.workspace(session_id).exists(),
         "a job that finds its Task finished deletes the workspace"
     );
-}
-
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
-#[tokio::test]
-async fn analysis_waits_for_the_remux_of_the_session() {
-    let harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let (settings, requests) = spawn_ai_provider(|_| 0).await;
-    let task_id = harness.start_created(session_id, settings).await;
-
-    let marker = remux_marker(
-        &harness
-            .recording_path
-            .join(session_id.to_string())
-            .join("recording-1.webm"),
-    );
-    std::fs::write(&marker, b"").expect("remux mark");
-    let other_dir = harness.recording_path.join(Uuid::new_v4().to_string());
-    std::fs::create_dir_all(&other_dir).expect("other session");
-    std::fs::write(remux_marker(&other_dir.join("recording-0.webm")), b"").expect("remux mark of another session");
-
-    let mut job = harness.job(task_id).await;
-    let job = tokio::spawn(async move { job.run().await });
-
-    tokio::time::sleep(REMUX_POLL_INTERVAL * 2).await;
-    assert!(!job.is_finished(), "the analysis waits");
-    assert!(requests.lock().is_empty(), "the AI is not asked yet");
-
-    std::fs::remove_file(&marker).expect("remux done");
-    job.await.expect("job task").expect("no retry");
-
-    let task = harness.task(task_id).await;
-    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
-    assert!(!requests.lock().is_empty());
-}
-
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
-#[tokio::test]
-async fn waiting_for_a_remux_is_no_progress() {
-    let mut harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let (settings, requests) = spawn_ai_provider(|_| 0).await;
-    let task_id = harness.start_created(session_id, settings).await;
-
-    let dir = harness.recording_path.join(session_id.to_string());
-    std::fs::write(remux_marker(&dir.join("recording-1.webm")), b"").expect("remux mark");
-    harness.with_progress_timeout(time::Duration::seconds(2));
-
-    harness.run(task_id).await.expect("no retry");
-
-    let task = harness.task(task_id).await;
-    assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(task.payload["error"], json!({ "kind": "deadlinePassed" }));
-    assert!(requests.lock().is_empty(), "the AI is never asked");
 }
 
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis

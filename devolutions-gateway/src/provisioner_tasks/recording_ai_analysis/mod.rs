@@ -38,9 +38,7 @@ use super::runner::{AnyPermanent, Attempt, ProvisionerTask};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
-use crate::recording::{
-    FinishedRecordingError, JrecManifest, REMUX_MARKER_STALE_AFTER, RecordingMessageSender, remux_pending,
-};
+use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender};
 use crate::secret_store::{SecretId, SecretStore};
 
 pub const KIND: &str = "recording-ai-analysis";
@@ -50,13 +48,6 @@ pub const START_WINDOW: time::Duration = time::Duration::hours(2);
 
 /// Time a running AI analysis may go without progress before it fails.
 pub const PROGRESS_TIMEOUT: time::Duration = time::Duration::minutes(30);
-
-// INVARIANT: a mark that no remux will remove stops counting before an analysis waiting on it times out, since waiting
-// for a remux is no progress.
-const _: () = assert!(REMUX_MARKER_STALE_AFTER.as_secs() < PROGRESS_TIMEOUT.whole_seconds().unsigned_abs());
-
-/// Time between two checks for a remux of the session.
-const REMUX_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Tokens the AI provider counted for a Task, over all its attempts, as kept in its payloads.
 ///
@@ -493,8 +484,6 @@ impl RecordingAiAnalysis {
         })?;
         let manifest_path = recording.manifest_path();
 
-        self.wait_for_remux(attempt, &recording.dir).await?;
-
         let mut request = client
             .analyze_recording(&manifest, &manifest_path)
             .owner(attempt.task_id.to_string())
@@ -613,27 +602,6 @@ impl RecordingAiAnalysis {
         }
 
         Ok(())
-    }
-
-    /// Waits until no recording of the session waits for its remux, since a remux replaces a video that would be read.
-    async fn wait_for_remux(&self, attempt: &Attempt, dir: &Utf8Path) -> Result<(), AnalysisError> {
-        loop {
-            let pending = remux_pending(dir).await.map_err(|error| {
-                warn!(task.id = %attempt.task_id, %error, %dir, "Failed to look for a pending remux");
-                AnalysisError::Recoverable(Recoverable::Storage)
-            })?;
-
-            if !pending {
-                return Ok(());
-            }
-
-            debug!(task.id = %attempt.task_id, %dir, "Waiting for the remux of the session");
-
-            tokio::select! {
-                () = tokio::time::sleep(REMUX_POLL_INTERVAL) => {}
-                () = attempt.cancel.cancelled() => return Err(AnalysisError::Permanent(Permanent::DeadlinePassed)),
-            }
-        }
     }
 }
 
