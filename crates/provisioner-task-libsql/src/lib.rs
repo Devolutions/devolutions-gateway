@@ -19,12 +19,15 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 /// Every schema change ever made to the `provisioner_task_*` tables, oldest first. Only ever append to it.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/01_provisioner_task.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/01_provisioner_task.sql"),
+    include_str!("../migrations/02_provisioner_task_end.sql"),
+];
 
 const SCHEMA_VERSION_KEY: &str = "schema_version";
 
-const COLUMNS: &str =
-    "id, kind, target, params, state, payload, attempts, created_at, started_at, finished_at, deadline_at, job_token";
+const COLUMNS: &str = "id, kind, target, params, state, payload, attempts, created_at, started_at, finished_at, \
+                       deadline_at, job_token, ended_at";
 
 /// Tasks kept in the `provisioner_task_records` table of `gateway.db`.
 pub struct LibSqlProvisionerTaskStore {
@@ -224,6 +227,7 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         &self,
         id: Uuid,
         job_token: Uuid,
+        attempt: u32,
         payload: serde_json::Value,
         deadline_at: OffsetDateTime,
         now: OffsetDateTime,
@@ -249,6 +253,11 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         if task.state.is_finished() {
             tx.commit().await.context("commit task attempt")?;
             return Ok(AttemptStart::Finished(task));
+        }
+
+        if task.attempts.checked_add(1) != Some(attempt) {
+            tx.rollback().await.context("end task attempt")?;
+            return Ok(AttemptStart::AlreadyStarted(task));
         }
 
         tx.execute(
@@ -337,6 +346,27 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
         Ok(unfinished)
     }
 
+    async fn list_unended(&self) -> anyhow::Result<Vec<ProvisionerTaskRecord>> {
+        let conn = self.conn.lock().await;
+        let mut rows = conn
+            .query(
+                &format!(
+                    "SELECT {COLUMNS} FROM provisioner_task_records
+                     WHERE finished_at IS NOT NULL AND ended_at IS NULL ORDER BY finished_at"
+                ),
+                (),
+            )
+            .await
+            .context("query unended tasks")?;
+
+        let mut tasks = Vec::new();
+        while let Some(row) = rows.next().await.context("read unended task")? {
+            tasks.push(task_from_row(&row)?);
+        }
+
+        Ok(tasks)
+    }
+
     async fn update_running(
         &self,
         id: Uuid,
@@ -392,6 +422,22 @@ impl ProvisionerTaskStore for LibSqlProvisionerTaskStore {
             now,
         )
         .await
+    }
+
+    async fn mark_ended(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<bool> {
+        let changed = self
+            .conn
+            .lock()
+            .await
+            .execute(
+                "UPDATE provisioner_task_records SET ended_at = ?2
+                 WHERE id = ?1 AND finished_at IS NOT NULL AND ended_at IS NULL",
+                params![id.to_string(), now.unix_timestamp()],
+            )
+            .await
+            .context("mark task ended")?;
+
+        Ok(changed == 1)
     }
 }
 
@@ -453,6 +499,7 @@ fn task_from_row(row: &Row) -> anyhow::Result<ProvisionerTaskRecord> {
             .context("decode task job token")?
             .parse()
             .context("parse task job token")?,
+        ended_at: optional_timestamp(12, "end time")?,
     })
 }
 
@@ -683,6 +730,7 @@ mod tests {
             .start_attempt(
                 overdue.id,
                 overdue.job_token,
+                1,
                 serde_json::json!({ "done": 3, "total": 10, "usage": { "inputTokens": 1200 } }),
                 now() - Duration::minutes(1),
                 now() - Duration::minutes(2),
@@ -718,6 +766,7 @@ mod tests {
                 .start_attempt(
                     task.id,
                     task.job_token,
+                    1,
                     serde_json::json!({ "done": 0 }),
                     now() + Duration::hours(2),
                     now()
@@ -742,6 +791,7 @@ mod tests {
                 .start_attempt(
                     task.id,
                     task.job_token,
+                    2,
                     serde_json::json!({ "done": 1 }),
                     now() + Duration::hours(2),
                     now()
@@ -773,6 +823,7 @@ mod tests {
                 .start_attempt(
                     task.id,
                     task.job_token,
+                    3,
                     serde_json::json!({}),
                     now() + Duration::hours(2),
                     now()
@@ -803,6 +854,7 @@ mod tests {
             .start_attempt(
                 task.id,
                 task.job_token,
+                1,
                 serde_json::json!({ "done": 0 }),
                 now() + Duration::hours(2),
                 now(),
@@ -833,6 +885,7 @@ mod tests {
             .start_attempt(
                 overdue.id,
                 overdue.job_token,
+                1,
                 serde_json::json!({ "done": 3 }),
                 now() + Duration::minutes(1),
                 now(),
@@ -887,6 +940,7 @@ mod tests {
             .start_attempt(
                 task.id,
                 task.job_token,
+                1,
                 serde_json::json!({}),
                 now() + Duration::minutes(30),
                 now(),
@@ -913,6 +967,7 @@ mod tests {
             .start_attempt(
                 task.id,
                 task.job_token,
+                1,
                 serde_json::json!({}),
                 now() + Duration::minutes(30),
                 now(),
@@ -956,6 +1011,7 @@ mod tests {
                 .start_attempt(
                     overdue.id,
                     overdue.job_token,
+                    1,
                     serde_json::json!({}),
                     now() + Duration::hours(2),
                     now()
@@ -992,6 +1048,7 @@ mod tests {
                 .start_attempt(
                     task.id,
                     Uuid::new_v4(),
+                    1,
                     serde_json::json!({}),
                     now() + Duration::hours(2),
                     now()
@@ -1023,6 +1080,7 @@ mod tests {
                 .start_attempt(
                     task.id,
                     task.job_token,
+                    1,
                     serde_json::json!({}),
                     now() + Duration::hours(2),
                     now()
@@ -1033,7 +1091,7 @@ mod tests {
         );
         assert!(matches!(
             store
-                .start_attempt(task.id, new_token, serde_json::json!({}), now() + Duration::hours(2), now())
+                .start_attempt(task.id, new_token, 1, serde_json::json!({}), now() + Duration::hours(2), now())
                 .await
                 .expect("start with the new token"),
             AttemptStart::Started(started) if started.job_token == new_token && started.attempts == 1
@@ -1067,6 +1125,7 @@ mod tests {
             .start_attempt(
                 running.id,
                 running.job_token,
+                1,
                 serde_json::json!({}),
                 now() + Duration::hours(2),
                 now(),
@@ -1107,6 +1166,7 @@ mod tests {
                 .start_attempt(
                     Uuid::new_v4(),
                     Uuid::new_v4(),
+                    1,
                     serde_json::json!({}),
                     now() + Duration::hours(2),
                     now()
@@ -1130,6 +1190,102 @@ mod tests {
         ] {
             assert!(!finished.expect("update unknown task"));
         }
+    }
+
+    #[tokio::test]
+    async fn an_attempt_starts_only_once() {
+        // oracle: mutant start_attempt ignores the attempt number, so a job run again runs its attempt again
+        let store = store().await;
+        let task = new_task("session-1");
+        create(&store, task.clone()).await;
+        let start = |attempt| {
+            store.start_attempt(
+                task.id,
+                task.job_token,
+                attempt,
+                serde_json::json!({}),
+                now() + Duration::hours(2),
+                now(),
+            )
+        };
+
+        assert!(matches!(start(1).await.expect("start"), AttemptStart::Started(_)));
+        for attempt in [1, 3] {
+            assert!(
+                matches!(
+                    start(attempt).await.expect("start again"),
+                    AttemptStart::AlreadyStarted(started) if started.attempts == 1
+                ),
+                "{attempt}"
+            );
+        }
+        assert!(matches!(
+            start(2).await.expect("start the next"),
+            AttemptStart::Started(started) if started.attempts == 2
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_finished_task_is_listed_until_marked_ended() {
+        let store = store().await;
+        let unfinished = new_task("session-1");
+        let failed = new_task("session-2");
+        let ended = new_task("session-3");
+        for task in [&unfinished, &failed, &ended] {
+            create(&store, task.clone()).await;
+        }
+        for task in [&failed, &ended] {
+            store.fail(task.id, serde_json::json!({}), now()).await.expect("fail");
+        }
+
+        assert!(store.mark_ended(ended.id, now()).await.expect("mark ended"));
+        assert!(!store.mark_ended(ended.id, now()).await.expect("mark ended again"));
+        assert!(!store.mark_ended(unfinished.id, now()).await.expect("mark unfinished"));
+        assert!(!store.mark_ended(Uuid::new_v4(), now()).await.expect("mark unknown"));
+
+        let unended = store.list_unended().await.expect("list");
+        assert_eq!(unended.iter().map(|task| task.id).collect::<Vec<_>>(), [failed.id]);
+        assert_eq!(unended[0].ended_at, None);
+        assert_eq!(
+            store
+                .get(ended.id, now())
+                .await
+                .expect("get task")
+                .expect("task")
+                .ended_at,
+            Some(now())
+        );
+    }
+
+    #[tokio::test]
+    async fn tasks_finished_before_the_end_was_recorded_are_listed_unended() {
+        let conn = gateway_db::GatewayDb::open_path(":memory:")
+            .await
+            .expect("open gateway database")
+            .connect()
+            .await
+            .expect("connect");
+        conn.execute_batch(MIGRATIONS[0]).await.expect("first schema");
+        conn.execute(
+            "INSERT INTO provisioner_task_metadata (key, value) VALUES (?1, 1)",
+            params![SCHEMA_VERSION_KEY],
+        )
+        .await
+        .expect("record the first schema version");
+        let id = Uuid::new_v4();
+        conn.execute(
+            "INSERT INTO provisioner_task_records
+                 (id, kind, target, params, state, payload, created_at, finished_at, deadline_at, job_token)
+             VALUES (?1, 'recording-ai-analysis', 'session-1', '{}', 'failed', '{}', 1, 2, 3, ?2)",
+            params![id.to_string(), Uuid::new_v4().to_string()],
+        )
+        .await
+        .expect("insert a finished task");
+
+        let store = LibSqlProvisionerTaskStore::open(conn).await.expect("migrate");
+
+        let unended = store.list_unended().await.expect("list");
+        assert_eq!(unended.iter().map(|task| task.id).collect::<Vec<_>>(), [id]);
     }
 
     #[tokio::test]

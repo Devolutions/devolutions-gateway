@@ -8,7 +8,7 @@ use devolutions_gateway_ai::{Language, session_summary};
 use devolutions_gateway_task::ShutdownHandle;
 use job_queue::Job as _;
 use parking_lot::Mutex;
-use provisioner_task::{NewProvisionerTaskRecord, ProvisionerTaskState};
+use provisioner_task::{AttemptStart, NewProvisionerTaskRecord, ProvisionerTaskState};
 
 use super::*;
 use crate::job_queue::{JobMessage, JobQueueReceiver};
@@ -122,21 +122,49 @@ impl Harness {
         task_id
     }
 
-    /// The job holding the current token of the Task, as the job queue would run it.
+    /// The job holding the current token of the Task, for its next attempt, as the job queue would run it.
     async fn job(&self, task_id: Uuid) -> ProvisionerTaskJob {
         // Read as of long ago, so reading never fails the Task in place of the job.
-        let job_token = self
+        let record = self
             .state
             .provisioner_tasks
             .store()
             .get(task_id, OffsetDateTime::UNIX_EPOCH)
             .await
             .expect("read task")
-            .expect("task exists")
-            .job_token;
-        let json = json!({ "taskId": task_id, "jobToken": job_token }).to_string();
+            .expect("task exists");
+        let json = json!({
+            "taskId": task_id,
+            "jobToken": record.job_token,
+            "step": { "attempt": record.attempts + 1 },
+        })
+        .to_string();
 
         ProvisionerTaskJob::read_json(&json, self.state.provisioner_tasks.clone()).expect("valid job")
+    }
+
+    /// Records the success of the first attempt of the Task without ending it, as if Gateway stopped right after.
+    async fn record_success(&self, task_id: Uuid) {
+        let store = self.state.provisioner_tasks.store();
+        let now = OffsetDateTime::now_utc();
+        let job_token = store
+            .get(task_id, now)
+            .await
+            .expect("read task")
+            .expect("task exists")
+            .job_token;
+
+        let started = store
+            .start_attempt(task_id, job_token, 1, json!({}), now + time::Duration::hours(1), now)
+            .await
+            .expect("start the attempt");
+        assert!(matches!(started, AttemptStart::Started(_)), "{started:?}");
+        assert!(
+            store
+                .succeed(task_id, json!({}), now)
+                .await
+                .expect("record the success")
+        );
     }
 
     async fn run(&self, task_id: Uuid) -> anyhow::Result<()> {
@@ -365,7 +393,10 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
     assert_eq!(job.name(), ProvisionerTaskJob::NAME);
     assert_eq!(
         job.write_json().expect("job JSON"),
-        format!(r#"{{"taskId":"{task_id}","jobToken":"{}"}}"#, task.job_token)
+        format!(
+            r#"{{"taskId":"{task_id}","jobToken":"{}","step":{{"attempt":1}}}}"#,
+            task.job_token
+        )
     );
     assert!(schedule_for.is_none());
 }
@@ -815,18 +846,15 @@ async fn overdue_task_does_not_run() {
 async fn finished_task_does_not_run_again() {
     let harness = Harness::new().await;
     let session_id = harness.write_session();
-    let (settings, _requests) = spawn_ai_provider(|_| 401).await;
+    let (settings, requests) = spawn_ai_provider(|_| 401).await;
     let task_id = harness.start_created(session_id, settings).await;
 
     harness.run(task_id).await.expect("first run");
-    std::fs::create_dir_all(harness.workspace(session_id)).expect("workspace left behind");
+    let asked = requests.lock().len();
     harness.run(task_id).await.expect("second run");
 
     assert_eq!(harness.task(task_id).await.attempts, 1);
-    assert!(
-        !harness.workspace(session_id).exists(),
-        "a job that finds its Task finished deletes the workspace"
-    );
+    assert_eq!(requests.lock().len(), asked, "the AI is not asked again");
 }
 
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
@@ -997,28 +1025,22 @@ async fn a_task_that_fails_removes_its_unlisted_log() {
 
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
-async fn a_success_cut_short_before_the_log_is_listed_is_finished_by_the_job() {
-    let harness = Harness::new().await;
+async fn a_success_cut_short_before_the_log_is_listed_is_finished_at_startup() {
+    let mut harness = Harness::new().await;
     let session_id = harness.write_session();
-    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
-    let task_id = harness.start_created(session_id, settings).await;
-    harness.run(task_id).await.expect("analysis");
+    let task_id = harness.start_created(session_id, openai("gpt-test")).await;
+    harness.queued_jobs();
 
     // As if Gateway stopped right after recording the success, before the manifest listed the log.
     let dir = harness.recording_path.join(session_id.to_string());
     let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
-    std::fs::rename(dir.join("ai-analysis-0.slog"), &log).expect("unlist the log");
-    let manifest_path = dir.join("recording.json");
-    let mut manifest: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest")).expect("manifest JSON");
-    manifest["artifacts"] = json!({});
-    std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
+    std::fs::write(&log, "an analysis whose log was never listed").expect("unlisted log");
+    harness.record_success(task_id).await;
 
-    // The job of the Task stays stored until it returns, so it runs again when Gateway starts, and it still holds the
-    // Task since a finished Task keeps its job.
-    let mut job = harness.job(task_id).await;
     harness.state.provisioner_tasks.resume().await.expect("resume");
-    job.run().await.expect("the job ends the Task again");
+    for JobMessage { mut job, .. } in harness.queued_jobs() {
+        job.run().await.expect("the job ends the Task");
+    }
 
     assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
     assert!(dir.join("ai-analysis-0.slog").exists());
@@ -1032,18 +1054,12 @@ async fn a_late_end_of_an_earlier_task_never_lists_its_log_over_a_newer_analysis
     let session_id = harness.write_session();
     let (settings, _requests) = spawn_ai_provider(|_| 0).await;
     let first = harness.start_created(session_id, settings.clone()).await;
-    harness.run(first).await.expect("first analysis");
 
     // As if the end of the first Task failed before the manifest listed its log, so it is done again later.
     let dir = harness.recording_path.join(session_id.to_string());
     let first_log = dir.join(format!(".ai-analysis-{first}.slog"));
-    std::fs::remove_file(dir.join("ai-analysis-0.slog")).expect("unlist the log");
     std::fs::write(&first_log, "the analysis of the first Task").expect("unlisted log");
-    let manifest_path = dir.join("recording.json");
-    let mut manifest: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest")).expect("manifest JSON");
-    manifest["artifacts"] = json!({});
-    std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
+    harness.record_success(first).await;
 
     let second = harness.start_created(session_id, settings).await;
     harness.run(second).await.expect("second analysis");

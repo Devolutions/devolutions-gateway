@@ -1,5 +1,6 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use job_queue::Job as _;
 use parking_lot::Mutex;
 use provisioner_task::{ProvisionerTaskState, ProvisionerTaskStore};
 
@@ -147,11 +148,14 @@ impl ProvisionerTaskStore for FailingStore {
         &self,
         id: Uuid,
         job_token: Uuid,
+        attempt: u32,
         payload: serde_json::Value,
         deadline_at: OffsetDateTime,
         now: OffsetDateTime,
     ) -> anyhow::Result<AttemptStart> {
-        self.inner.start_attempt(id, job_token, payload, deadline_at, now).await
+        self.inner
+            .start_attempt(id, job_token, attempt, payload, deadline_at, now)
+            .await
     }
 
     async fn replace_job_token(&self, id: Uuid, job_token: Uuid, now: OffsetDateTime) -> anyhow::Result<bool> {
@@ -160,6 +164,10 @@ impl ProvisionerTaskStore for FailingStore {
 
     async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>> {
         self.inner.list_unfinished(now).await
+    }
+
+    async fn list_unended(&self) -> anyhow::Result<Vec<ProvisionerTaskRecord>> {
+        self.inner.list_unended().await
     }
 
     async fn update_running(
@@ -186,6 +194,10 @@ impl ProvisionerTaskStore for FailingStore {
         }
 
         self.inner.fail(id, payload, now).await
+    }
+
+    async fn mark_ended(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<bool> {
+        self.inner.mark_ended(id, now).await
     }
 }
 
@@ -446,6 +458,31 @@ async fn a_task_that_cannot_outlive_a_restart_fails_at_startup_and_is_ended() {
     assert_eq!(*harness.ended.lock(), [id]);
 }
 
+// oracle: mutant resume looks at unfinished Tasks only, so an end cut short by a crash is never done
+#[tokio::test]
+async fn resume_ends_a_finished_task_whose_end_was_cut_short() {
+    let mut harness = Harness::new(|value| Ok(json!(value))).await;
+    let id = harness.create(1).await;
+    harness.queued_jobs();
+    // As if Gateway stopped right after the failure was recorded, before the Task was ended.
+    harness
+        .runner
+        .store()
+        .fail(id, json!({ "error": { "kind": "gone" } }), OffsetDateTime::now_utc())
+        .await
+        .expect("fail");
+
+    harness.runner.resume().await.expect("resume");
+    let mut ending = harness.queued_job();
+    assert!(harness.job_queue_rx.try_recv().is_err(), "one job ends it");
+    ending.run().await.expect("the job ends the Task");
+
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 0, "no attempt runs");
+    assert_eq!(*harness.ended.lock(), [id]);
+    harness.runner.resume().await.expect("resume again");
+    assert!(harness.job_queue_rx.try_recv().is_err(), "an ended Task gets no job");
+}
+
 // oracle: mutant a Task whose failure at startup cannot be recorded gets no new job, so nothing ends it
 #[tokio::test]
 async fn a_task_whose_restart_failure_cannot_be_recorded_still_gets_a_new_job() {
@@ -558,63 +595,70 @@ async fn a_recoverable_failure_is_retried_up_to_the_last_attempt() {
 
 // oracle: mutant a success that cannot be recorded is retried, so the work is done and paid for twice
 #[tokio::test]
-async fn a_success_that_cannot_be_recorded_fails_the_task_and_ends_it() {
+async fn a_success_that_cannot_be_recorded_is_not_done_again_and_ends_after_the_deadline() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
     let id = harness.create(1).await;
+    let mut job = harness.queued_job();
     harness.success_failures.store(1, Ordering::SeqCst);
 
-    harness.queued_job().run().await.expect("no retry");
-
-    let task = harness.task(id).await;
-    assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(
-        task.payload,
-        json!({ "error": { "kind": "internal" }, "last": { "after": null } })
-    );
-    assert_eq!(harness.runs.load(Ordering::SeqCst), 1, "the work is not done again");
-    assert_eq!(*harness.ended.lock(), [id], "what the attempt made is dropped");
-    assert!(harness.queued_jobs().is_empty(), "no attempt follows");
-}
-
-// oracle: mutant an end that can be recorded neither as a success nor as a failure is retried, so the work is redone
-#[tokio::test]
-async fn a_task_whose_end_cannot_be_recorded_is_ended_after_its_deadline() {
-    let mut harness = Harness::new(|value| Ok(json!(value))).await;
-    let id = harness.create(1).await;
-    harness.success_failures.store(1, Ordering::SeqCst);
-    harness.failure_failures.store(1, Ordering::SeqCst);
-
-    harness.queued_job().run().await.expect("no retry");
+    job.run().await.expect_err("the job queue runs the job again");
+    job.run().await.expect("its attempt already started");
 
     let task = harness.task(id).await;
     assert_eq!(task.state, ProvisionerTaskState::Running, "nothing could be recorded");
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 1, "the work is not done again");
+    assert!(
+        harness.ended.lock().is_empty(),
+        "nothing is dropped while the Task may still run"
+    );
     let JobMessage { schedule_for, .. } = harness.job_queue_rx.try_recv().expect("a job ends it later");
     assert!(
         schedule_for.is_some_and(|at| task.deadline_at < at),
         "the job runs once the store fails the Task"
     );
-    assert_eq!(harness.runs.load(Ordering::SeqCst), 1, "the work is not done again");
-    assert!(harness.ended.lock().is_empty());
 }
 
-// oracle: mutant an end that can be neither recorded nor queued returns an error, so the job queue redoes the paid work
+// oracle: mutant a job run again after its last failure could not be recorded runs one more attempt past the limit
 #[tokio::test]
-async fn a_task_whose_end_cannot_be_recorded_or_queued_is_not_retried() {
-    let mut harness = Harness::new(|value| Ok(json!(value))).await;
+async fn a_last_attempt_whose_failure_cannot_be_recorded_is_not_run_again() {
+    let mut harness = Harness::new(|_| Err(AttemptError::Recoverable(EchoRecoverable::Busy))).await;
     let id = harness.create(1).await;
     let mut job = harness.queued_job();
-    harness.job_queue_rx.close();
-    harness.success_failures.store(1, Ordering::SeqCst);
+    for _ in 1..MAX_ATTEMPTS {
+        job.run().await.expect("the job queues the next attempt itself");
+        job = harness.queued_job();
+    }
     harness.failure_failures.store(1, Ordering::SeqCst);
 
-    job.run().await.expect("the job queue does not run the attempt again");
+    job.run().await.expect_err("the job queue runs the job again");
+    job.run().await.expect("its attempt already started");
+
+    let task = harness.task(id).await;
+    assert_eq!(task.attempts, MAX_ATTEMPTS);
+    assert_eq!(
+        harness.runs.load(Ordering::SeqCst),
+        usize::try_from(MAX_ATTEMPTS).expect("a few attempts"),
+        "no attempt past the last"
+    );
+    let JobMessage { schedule_for, .. } = harness.job_queue_rx.try_recv().expect("a job ends it later");
+    assert!(schedule_for.is_some_and(|at| task.deadline_at < at));
+}
+
+// oracle: mutant two jobs holding the same token both run the attempt
+#[tokio::test]
+async fn a_duplicate_job_does_not_run_its_attempt_again() {
+    let mut harness = Harness::new(|_| Err(AttemptError::Recoverable(EchoRecoverable::Busy))).await;
+    let id = harness.create(1).await;
+    let mut job = harness.queued_job();
+    let mut duplicate =
+        ProvisionerTaskJob::read_json(&job.write_json().expect("job JSON"), harness.runner.clone()).expect("valid job");
+
+    job.run().await.expect("the job queues the next attempt itself");
+    harness.queued_job();
+    duplicate.run().await.expect("its attempt already started");
 
     assert_eq!(harness.runs.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        harness.task(id).await.state,
-        ProvisionerTaskState::Running,
-        "the store fails it at its deadline"
-    );
+    assert_eq!(harness.task(id).await.attempts, 1);
 }
 
 // oracle: mutant a queued Task of an unknown kind is never failed
@@ -642,7 +686,7 @@ async fn invalid_parameters_and_unknown_kinds_fail_the_task() {
             .await
             .expect("create");
 
-        harness.runner.run_attempt(id, job_token).await.expect("no retry");
+        harness.runner.run_attempt(id, job_token, 1).await.expect("no retry");
 
         let task = harness.task(id).await;
         assert_eq!(task.state, ProvisionerTaskState::Failed, "{kind}");
@@ -721,5 +765,6 @@ async fn the_job_is_read_back_from_its_json() {
 
     assert_eq!(read.task_id, id);
     assert_eq!(read.job_token, harness.task(id).await.job_token);
+    assert_eq!(read.step, Step::Attempt(1));
     assert_eq!(job.name(), ProvisionerTaskJob::NAME);
 }
