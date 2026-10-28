@@ -421,8 +421,8 @@ impl ProvisionerTask for RecordingAiAnalysis {
             .await
     }
 
-    /// The API key was kept in memory only, so no attempt can run after a restart.
-    fn after_restart(&self) -> Option<Permanent> {
+    /// The API key is kept in memory only, so no attempt can run after a restart.
+    fn restart_failure(&self) -> Option<Permanent> {
         Some(Permanent::KeyLost)
     }
 

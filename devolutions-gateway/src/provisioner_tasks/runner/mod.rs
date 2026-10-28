@@ -6,12 +6,13 @@
 //! retries recoverable failures, moves the deadline ahead with each progress, cancels an attempt once the deadline passes,
 //! and records how the task ended.
 //!
-//! The record is the source of truth and the job only wakes it up. Each record names the one job allowed to run it, by
-//! its token, so a stale or duplicate job stops without running anything. At startup, before any job runs,
-//! [`ProvisionerTaskRunner::resume`] hands every unfinished record to a new job, which also covers a record created just
-//! before a crash, before its job was queued.
-//! A record whose end fails is handed to a new job that ends it again later, since the runs of its job are shared with
-//! its attempts and may be used up; that job is stored, so a restart runs it too.
+//! The record is the source of truth and the job only wakes it up.
+//! Each record names the one job allowed to run it, by its token, so a stale or duplicate job stops without running
+//! anything.
+//! At startup, before any job runs, [`ProvisionerTaskRunner::resume`] hands every unfinished record to a new job, which
+//! also covers a record created just before a crash, before its job was queued.
+//! A record whose end fails is handed to a new job that ends it again later, since the job queue gives up on a job
+//! after a few failed runs; that job is stored, so a restart runs it too.
 
 #[cfg(test)]
 mod tests;
@@ -44,7 +45,7 @@ pub const MAX_ATTEMPTS: u32 = 5;
 
 /// Time before the attempt that follows attempt number `attempts`: 30 seconds, doubled after each attempt.
 fn retry_delay(attempts: u32) -> time::Duration {
-    time::Duration::seconds(30) * (1_i32 << attempts.saturating_sub(1).min(MAX_ATTEMPTS))
+    time::Duration::seconds(30) * 2_i32.saturating_pow(attempts.saturating_sub(1))
 }
 
 /// Where the runner queues the jobs of its records.
@@ -98,10 +99,11 @@ pub trait ProvisionerTask: Send + Sync + 'static {
     fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value;
 
     /// Why an unfinished record fails when Gateway starts again, for a task that cannot outlive a restart, such as one
-    /// whose secrets were kept in memory only; `None` for a task that goes on.
-    fn after_restart(&self) -> Option<Permanent> {
-        None
-    }
+    /// whose secrets are kept in memory only; `None` for a task that goes on.
+    ///
+    /// A record that cannot be failed at startup is still handed to a new job, so [`ProvisionerTask::run`] must fail
+    /// the same way after a restart.
+    fn restart_failure(&self) -> Option<Permanent>;
 
     /// Runs one attempt.
     ///
@@ -188,7 +190,7 @@ trait AnyProvisionerTask: Send + Sync {
 
     fn failed_payload(&self, error: &Permanent, last: &serde_json::Value) -> serde_json::Value;
 
-    fn after_restart(&self) -> Option<Permanent>;
+    fn restart_failure(&self) -> Option<Permanent>;
 
     async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AttemptError>;
 
@@ -213,8 +215,8 @@ impl<T: ProvisionerTask> AnyProvisionerTask for T {
         ProvisionerTask::failed_payload(self, error, last)
     }
 
-    fn after_restart(&self) -> Option<Permanent> {
-        ProvisionerTask::after_restart(self)
+    fn restart_failure(&self) -> Option<Permanent> {
+        ProvisionerTask::restart_failure(self)
     }
 
     async fn run(&self, attempt: &Attempt, params: serde_json::Value) -> Result<serde_json::Value, AttemptError> {
@@ -347,10 +349,11 @@ impl ProvisionerTaskRunner {
 
     /// Hands every unfinished record to a new job, since a record created just before Gateway stopped may have none.
     ///
-    /// Each record gets a new `job_token`, so a job left from before finds itself superseded and stops, and the job queue
-    /// is never read. A record whose task cannot outlive a restart fails first, and its new job only ends it. Call it at
-    /// startup, before the job runner claims any job, so no job runs an attempt meanwhile. A record whose new job cannot
-    /// be queued is failed, since no job is left to run it.
+    /// Each record gets a new `job_token`, so a job left from before finds itself superseded and stops, and the job
+    /// queue is never read.
+    /// A record whose task cannot outlive a restart fails first, and its new job only ends it.
+    /// Call it at startup, before the job runner claims any job, so no job runs an attempt meanwhile.
+    /// A record whose new job cannot be queued is failed, since no job is left to run it.
     pub async fn resume(&self) -> anyhow::Result<()> {
         let now = OffsetDateTime::now_utc();
         let records = self.inner.store.list_unfinished(now).await?;
@@ -375,7 +378,7 @@ impl ProvisionerTaskRunner {
             let task = self.task(&record.kind);
 
             if let Some(task) = &task
-                && let Some(failure) = task.after_restart()
+                && let Some(failure) = task.restart_failure()
             {
                 match self
                     .inner
@@ -569,9 +572,8 @@ impl ProvisionerTaskRunner {
 
                     self.end(task.as_ref(), task_id, job_token).await?;
                 }
-                // UNTESTED: a success that cannot be recorded fails the Task, which drops what the attempt made,
-                // because a retry would do the work again, such as paying for a second analysis; no error may leave
-                // this branch before the failure is recorded.
+                // A success that cannot be recorded fails the Task instead of being retried, since a retry would do
+                // the work again, such as paying for a second analysis.
                 Err(error) => {
                     error!(
                         task.id = %task_id,
