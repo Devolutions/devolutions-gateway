@@ -87,6 +87,23 @@ pub fn delete(backend: &KeyBackend, name: &str) -> anyhow::Result<()> {
     }
 }
 
+/// Returns `Ok` when `backend` is available on this machine, without creating, opening or deleting a key.
+///
+/// An unavailable backend returns [`BackendUnavailable`]; any other error means availability couldn't be determined.
+/// The file backend is available on every machine: a key directory it can't use fails the operation on it instead.
+pub fn check_available(backend: &KeyBackend) -> anyhow::Result<()> {
+    match backend {
+        #[cfg(windows)]
+        KeyBackend::WindowsSoftwareProvider => keystore::check_available(),
+        #[cfg(not(windows))]
+        KeyBackend::WindowsSoftwareProvider => Err(BackendUnavailable {
+            backend: "WindowsSoftwareProvider",
+        }
+        .into()),
+        KeyBackend::File { .. } => Ok(()),
+    }
+}
+
 pub fn list(backend: &KeyBackend, prefix: &str) -> anyhow::Result<Vec<String>> {
     validate_prefix(prefix)?;
     match backend {
@@ -189,12 +206,28 @@ mod tests {
             list(&backend, "test")
                 .err()
                 .ok_or_else(|| anyhow::anyhow!("unexpected key list"))?,
+            check_available(&backend)
+                .err()
+                .ok_or_else(|| anyhow::anyhow!("unexpected availability"))?,
         ] {
             assert_eq!(
                 error.downcast_ref::<BackendUnavailable>().map(|error| error.backend),
                 Some("WindowsSoftwareProvider")
             );
         }
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Backends
+    // oracle: intent crates/device-key/INTENT.md §File backend
+    // The file backend is supported on every platform, and asking whether it is available creates nothing.
+    #[test]
+    fn the_file_backend_is_available_without_creating_its_directory() -> anyhow::Result<()> {
+        let dir = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+            .map_err(|_| anyhow::anyhow!("the temporary directory path is not UTF-8"))?
+            .join(format!("device-key-{}", Uuid::new_v4().simple()));
+        check_available(&KeyBackend::File { dir: dir.clone() })?;
+        assert!(!dir.exists());
         Ok(())
     }
 }

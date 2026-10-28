@@ -1,15 +1,35 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use camino::Utf8Path;
 use serde_json::Value;
 
+use crate::key_storage::KeyStorage;
+
 pub type Metadata = BTreeMap<String, String>;
 
-const REQUIRED: [&str; 5] = ["hostname", "os_name", "os_version", "arch", "agent_version"];
-const OPTIONAL: [&str; 3] = ["fqdn", "domain", "machine_id"];
+const REQUIRED: [&str; 6] = [
+    "hostname",
+    "os_name",
+    "os_version",
+    "arch",
+    "agent_version",
+    "key_storage",
+];
+const OPTIONAL: [&str; 4] = ["fqdn", "domain", "machine_id", "key_storage_available"];
 
 /// Collects fresh inventory information, applying any readable override at each call.
-pub fn collect(agent_version: &str, override_path: Option<&Utf8Path>) -> Metadata {
+///
+/// `key_storage` holds the key the request concerns: the key the CSR carries at enroll and renew, or the key that
+/// signs at check-in and in `Hello`; `available` lists the key storages available on the machine
+/// ([CONTRACT.agent-identity.md §3.1 "Metadata sent by the agent"][agent-metadata]).
+///
+/// [agent-metadata]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-metadata
+pub fn collect(
+    agent_version: &str,
+    key_storage: &KeyStorage,
+    available: &[KeyStorage],
+    override_path: Option<&Utf8Path>,
+) -> Metadata {
     let mut values = Metadata::new();
     let hostname = hostname::get()
         .ok()
@@ -29,6 +49,10 @@ pub fn collect(agent_version: &str, override_path: Option<&Utf8Path>) -> Metadat
     }
     if let Some(machine_id) = machine_id() {
         values.insert("machine_id".into(), machine_id);
+    }
+    values.insert("key_storage".into(), key_storage.as_str().into());
+    if let Some(available) = key_storage_list(available) {
+        values.insert("key_storage_available".into(), available);
     }
     if let Some(overrides) = override_path
         .and_then(|path| std::fs::read(path).ok())
@@ -97,6 +121,13 @@ fn sanitize(values: Metadata) -> Metadata {
             }
         })
         .collect()
+}
+
+/// Encodes key storage names as `key_storage_available` does: each once, in ascending byte order, joined with `,`, or
+/// `None` when there is none.
+fn key_storage_list(storages: &[KeyStorage]) -> Option<String> {
+    let names: BTreeSet<&str> = storages.iter().map(KeyStorage::as_str).collect();
+    (!names.is_empty()).then(|| names.into_iter().collect::<Vec<_>>().join(","))
 }
 
 fn host_names(raw: &str) -> (String, Option<String>, Option<String>) {
@@ -368,19 +399,19 @@ mod tests {
             &path,
             r#"{"hostname":"one","fqdn":"","agent_version":"override","unexpected":"ignored"}"#,
         )?;
-        let first = collect("version", Some(&path));
+        let first = collect_with_override("version", &path);
         assert_eq!(first["hostname"], "one");
         assert_eq!(first["agent_version"], "override");
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
         assert!(!first.contains_key("fqdn"));
         assert!(!first.contains_key("unexpected"));
         std::fs::write(&path, r#"{"hostname":"two\u007f"}"#)?;
-        let second = collect("version", Some(&path));
+        let second = collect_with_override("version", &path);
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
         assert_eq!(second["hostname"], "two");
         assert_eq!(second["agent_version"], "version");
         std::fs::remove_file(&path)?;
-        assert_ne!(collect("version", Some(&path))["hostname"], "two");
+        assert_ne!(collect_with_override("version", &path)["hostname"], "two");
         std::fs::remove_dir(dir)?;
         Ok(())
     }
@@ -402,6 +433,59 @@ mod tests {
             Some("12345678-9abc-def0-0123-456789abcdef")
         );
         assert!(smbios_uuid(&raw[..raw.len() - 1]).is_none());
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[rstest]
+    #[case::none(&[], None)]
+    #[case::one(&["file"], Some("file"))]
+    #[case::sorted_by_byte(&["windows_software_provider", "file"], Some("file,windows_software_provider"))]
+    #[case::each_once(&["tpm", "file", "tpm"], Some("file,tpm"))]
+    fn encodes_available_key_storages(#[case] names: &[&str], #[case] expected: Option<&str>) -> anyhow::Result<()> {
+        let storages = names
+            .iter()
+            .map(|name| KeyStorage::parse(name))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        assert_eq!(key_storage_list(&storages).as_deref(), expected);
+        Ok(())
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    #[test]
+    fn reports_the_key_storage_and_the_available_key_storages() -> anyhow::Result<()> {
+        let available = [
+            KeyStorage::parse("windows_software_provider")?,
+            KeyStorage::parse("file")?,
+        ];
+        let values = collect("version", &KeyStorage::parse("file")?, &available, None);
+        assert_eq!(values["key_storage"], "file");
+        assert_eq!(values["key_storage_available"], "file,windows_software_provider");
+        let values = collect("version", &KeyStorage::parse("tpm")?, &[], None);
+        assert_eq!(values["key_storage"], "tpm");
+        assert!(!values.contains_key("key_storage_available"));
+        Ok(())
+    }
+
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+    // Known metadata keys replace collected values, and `key_storage` and `key_storage_available` are known keys.
+    #[test]
+    fn overrides_the_key_storage_values() -> anyhow::Result<()> {
+        let dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join("metadata-tests")
+            .join(uuid::Uuid::new_v4().to_string());
+        std::fs::create_dir_all(&dir)?;
+        let path = dir.join("overrides.json");
+        std::fs::write(&path, r#"{"key_storage":"tpm","key_storage_available":"tpm,file"}"#)?;
+        let values = collect("version", &KeyStorage::parse("file")?, &[], Some(&path));
+        std::fs::remove_dir_all(dir)?;
+        assert_eq!(values["key_storage"], "tpm");
+        assert_eq!(values["key_storage_available"], "tpm,file");
+        Ok(())
+    }
+
+    fn collect_with_override(agent_version: &str, path: &Utf8Path) -> Metadata {
+        collect(agent_version, &KeyStorage::known(KeyStorage::FILE), &[], Some(path))
     }
 
     fn sanitized_hostname(value: String) -> String {

@@ -60,7 +60,11 @@ pub fn boot_stacktrace_written(path: &Path) -> Entry {
 
 // 1100-1199 **Agent Identity**
 
-/// The configured device-key backend is unavailable, so Agent Identity stopped for the rest of the process lifetime.
+/// A key storage that an identity or a pending enrollment needs is unavailable, so that identity or enrollment waits
+/// until the key storage is available again.
+///
+/// It is raised once per process run for each key storage and identity or pending enrollment.
+/// `backend` names the key storage, and `error_chain` names the identity or pending enrollment and the cause.
 pub const IDENTITY_KEY_BACKEND_UNAVAILABLE: u32 = 1100;
 
 pub fn identity_key_backend_unavailable(backend: impl ToString, error: impl std::fmt::Display) -> Entry {

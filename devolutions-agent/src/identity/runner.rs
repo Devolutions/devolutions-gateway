@@ -7,6 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use agent_channel_client::{ChannelClient, HelloFields, Target};
 use agent_identity::client::{self, Client, ClientError, RequestSigner, TerminalCode};
+use agent_identity::key_storage::KeyStorage;
 use agent_identity::schedule::{self, ChannelUrl};
 use agent_identity::state::{KEY_LOST, KeyRecord, KeySlots, Store, StoredIdentity};
 use agent_identity::{csr, metadata};
@@ -18,9 +19,9 @@ use serde_json::Value;
 use url::Url;
 use uuid::Uuid;
 
-use super::RetryState;
 use super::channel::{Notice, Notices, PushedConfig, Streams, Want};
 use super::config::IdentityDebugConf;
+use super::{RetryState, UnavailableKeyStorages, poll_interval};
 
 const CHECK_IN_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const CHANNEL_FAILURE_CHECK_IN_AFTER: Duration = Duration::from_secs(60 * 60);
@@ -37,6 +38,7 @@ pub(super) struct Shared {
     pub(super) client: Client,
     pub(super) channels: ChannelClient,
     pub(super) settings: IdentityDebugConf,
+    pub(super) unavailable: Arc<UnavailableKeyStorages>,
 }
 
 /// One runner per stored, non-rejected identity, keyed by authority.
@@ -175,6 +177,7 @@ impl Runner {
                 }
                 Ok(None) => return,
                 Err(error) => {
+                    self.shared.unavailable.report(&self.subject(), &error);
                     warn!(
                         authority_id = %self.authority_id,
                         error = format!("{error:#}"),
@@ -220,8 +223,23 @@ impl Runner {
             );
             return Ok(None);
         }
-        self.load_times.retain(&identity.keys);
         let now = Instant::now();
+        // `crates/agent-identity/INTENT.md` ("Identities"): an identity whose current or pending key is in an
+        // unavailable key storage is left as it is and not used, and its key storage is checked again at the pace of
+        // the pending-directory poll.
+        // UNTESTED: a paused identity resumes once its key storage is available again, and its channel streams stay
+        // closed while it is paused.
+        // No test can make a key storage available partway through a run; the tests cover only a key storage that
+        // never becomes available.
+        // When changing this, keep the pause returning a wake-up time rather than ending the runner.
+        if let Err(error) = self.check_key_storages(&identity) {
+            if !self.shared.unavailable.report(&self.subject(), &error) {
+                return Err(error);
+            }
+            self.streams.reconcile(Want::Nothing).await;
+            return Ok(Some(now + poll_interval(&self.shared.settings)));
+        }
+        self.load_times.retain(&identity.keys);
         // `crates/agent-identity/INTENT.md` ("Stored identities"): `previous` alongside `pending` holds the expired
         // pending key of a pending-key recovery; alone, it holds the old key of a confirmed renewal.
         let recovering = identity.keys.previous.is_some() && identity.keys.pending.is_some();
@@ -305,7 +323,7 @@ impl Runner {
         let store = &self.shared.store;
         let new_key = match &identity.keys.pending {
             None => store.create_pending_key(identity).context("record the renewal key")?,
-            Some(pending) => match self.open_usable(pending) {
+            Some(pending) => match self.open_usable(pending)? {
                 Some(key) => key,
                 None => store
                     .replace_pending_key(identity)
@@ -319,7 +337,7 @@ impl Runner {
                 .previous
                 .clone()
                 .context("pending-key recovery has no expired pending key")?;
-            let Some(key) = self.open_usable(&expired) else {
+            let Some(key) = self.open_usable(&expired)? else {
                 // `CONTRACT.agent-identity.md` §8.1: without a usable pending key, renew with a fresh key signed by the
                 // current certificate.
                 store.remove_previous_key(identity)?;
@@ -336,7 +354,13 @@ impl Runner {
         // (`CONTRACT.agent-identity.md` §4).
         // No agent test captures the request it sends; when changing this, keep passing the stored base URL.
         let csr = csr::create(new_key.as_ref(), &identity.base_url).context("create renewal CSR")?;
-        let metadata = self.metadata();
+        let new_key_storage = &identity
+            .keys
+            .pending
+            .as_ref()
+            .context("identity has no pending key")?
+            .key_storage;
+        let metadata = self.metadata(new_key_storage);
         let result = self
             .shared
             .client
@@ -386,7 +410,7 @@ impl Runner {
     async fn confirm(&mut self, identity: &mut StoredIdentity, recovering: bool) -> anyhow::Result<()> {
         let store = &self.shared.store;
         let pending = identity.keys.pending.clone().context("identity has no pending key")?;
-        let Some(key) = self.open_usable(&pending) else {
+        let Some(key) = self.open_usable(&pending)? else {
             // `crates/agent-identity/INTENT.md` ("Stored identities"): delete an unusable pending key and its slot
             // before renewing with a fresh key.
             store
@@ -459,7 +483,7 @@ impl Runner {
         let Some(signer) = self.current_signer(identity)? else {
             return Ok(());
         };
-        let metadata = self.metadata();
+        let metadata = self.metadata(&identity.keys.current.key_storage);
         let result = self
             .shared
             .client
@@ -583,7 +607,8 @@ impl Runner {
         if !self.streams.reconcile(want).await {
             return Ok(());
         }
-        let Some(key) = device_key::open(self.shared.store.key_backend(), &key_name)? else {
+        // An unavailable key storage is an error rather than `None`, so it never makes the identity `key_lost`.
+        let Some(key) = self.shared.store.open_key(current)? else {
             self.reject(KEY_LOST);
             return Ok(());
         };
@@ -591,7 +616,7 @@ impl Runner {
             url: url.clone(),
             key: Arc::from(key),
             leaf_certificate_der: client::leaf_certificate_der(certificate_chain(current)?)?,
-            hello: self.hello_fields(),
+            hello: self.hello_fields(current.key_storage.clone()),
         };
         let shared = Arc::clone(&self.shared);
         self.streams
@@ -599,15 +624,21 @@ impl Runner {
         Ok(())
     }
 
-    /// Returns what each `Hello` carries: the metadata collected when it is sent, and the stored config revision
-    /// (`CONTRACT.agent-identity.md` §3.1 and §7.3 step 7).
-    fn hello_fields(&self) -> Arc<dyn Fn() -> HelloFields + Send + Sync> {
+    /// Returns what each `Hello` carries: the metadata collected when it is sent, which names `key_storage` as the key
+    /// storage of the key that signs the proof, and the stored config revision (`CONTRACT.agent-identity.md` §3.1 and
+    /// §7.3 step 7).
+    fn hello_fields(&self, key_storage: KeyStorage) -> Arc<dyn Fn() -> HelloFields + Send + Sync> {
         let config_revision = Arc::clone(&self.config_revision);
-        let override_path = self.shared.settings.metadata_override_path.clone();
+        let shared = Arc::clone(&self.shared);
         Arc::new(move || HelloFields {
-            metadata: metadata::collect(env!("CARGO_PKG_VERSION"), override_path.as_deref())
-                .into_iter()
-                .collect(),
+            metadata: metadata::collect(
+                env!("CARGO_PKG_VERSION"),
+                &key_storage,
+                &shared.store.available_key_storages(),
+                shared.settings.metadata_override_path.as_deref(),
+            )
+            .into_iter()
+            .collect(),
             config_revision: config_revision.load(Ordering::Relaxed),
         })
     }
@@ -621,14 +652,15 @@ impl Runner {
 
     /// Returns a signer for the current key, or latches `key_lost` and returns `None` when the key no longer exists.
     ///
-    /// `crates/agent-identity/INTENT.md` ("Identities"): an identity whose current key no longer exists in its key store
-    /// is rejected with the code `key_lost`.
+    /// `crates/agent-identity/INTENT.md` ("Identities"): an identity whose current key no longer exists in the key
+    /// storage recorded for it is rejected with the code `key_lost`.
     fn current_signer(&mut self, identity: &StoredIdentity) -> anyhow::Result<Option<RequestSigner>> {
         let current = &identity.keys.current;
         // UNTESTED: a current key missing at run time rejects the identity as `key_lost` instead of retrying forever.
         // Start-up reconciliation has a test; this path doesn't.
-        // When changing it, keep `None` distinct from an open error, which stays a retried local failure.
-        let Some(key) = device_key::open(self.shared.store.key_backend(), &current.key_name)? else {
+        // When changing it, keep `None` distinct from an open error, which stays a retried local failure; an
+        // unavailable key storage is such an error, so it never makes the identity `key_lost`.
+        let Some(key) = self.shared.store.open_key(current)? else {
             self.reject(KEY_LOST);
             return Ok(None);
         };
@@ -638,21 +670,24 @@ impl Runner {
     /// Opens a pending key, or returns `None` when it is unusable.
     ///
     /// `crates/agent-identity/INTENT.md` ("Stored identities"): a pending key is unusable when it is missing from its
-    /// store, refused when opened, or doesn't match its certificate's public key.
-    fn open_usable(&self, record: &KeyRecord) -> Option<Box<dyn DeviceKey>> {
-        let key = match device_key::open(self.shared.store.key_backend(), &record.key_name) {
+    /// recorded key storage while that key storage is available, refused when opened, or doesn't match its
+    /// certificate's public key.
+    /// An unavailable key storage returns an error instead, so that the key is kept for when it is available again.
+    fn open_usable(&self, record: &KeyRecord) -> anyhow::Result<Option<Box<dyn DeviceKey>>> {
+        let key = match self.shared.store.open_key(record) {
             Ok(Some(key)) => key,
             Ok(None) => {
                 warn!(authority_id = %self.authority_id, "Agent Identity pending key is missing");
-                return None;
+                return Ok(None);
             }
+            Err(error) if agent_identity::key_storage::unavailable_key_storage(&error).is_some() => return Err(error),
             Err(error) => {
                 warn!(
                     authority_id = %self.authority_id,
                     error = format!("{error:#}"),
                     "Agent Identity pending key cannot be opened"
                 );
-                return None;
+                return Ok(None);
             }
         };
         if let Some(chain) = &record.certificate_chain
@@ -662,14 +697,31 @@ impl Runner {
                 authority_id = %self.authority_id,
                 "Agent Identity pending key does not match its certificate"
             );
-            return None;
+            return Ok(None);
         }
-        Some(key)
+        Ok(Some(key))
     }
 
-    fn metadata(&self) -> metadata::Metadata {
+    /// Checks that the key storages of the current and pending keys are available.
+    fn check_key_storages(&self, identity: &StoredIdentity) -> anyhow::Result<()> {
+        for record in std::iter::once(&identity.keys.current).chain(identity.keys.pending.iter()) {
+            self.shared.store.check_key_storage(&record.key_storage)?;
+        }
+        Ok(())
+    }
+
+    /// Names the identity in reports of an unavailable key storage.
+    fn subject(&self) -> String {
+        format!("identity {} of authority {}", self.identity_id, self.authority_id)
+    }
+
+    /// Collects the metadata of a request whose key, the one its CSR carries or the one that signs it, is in
+    /// `key_storage` (`CONTRACT.agent-identity.md` §3.1).
+    fn metadata(&self, key_storage: &KeyStorage) -> metadata::Metadata {
         metadata::collect(
             env!("CARGO_PKG_VERSION"),
+            key_storage,
+            &self.shared.store.available_key_storages(),
             self.shared.settings.metadata_override_path.as_deref(),
         )
     }

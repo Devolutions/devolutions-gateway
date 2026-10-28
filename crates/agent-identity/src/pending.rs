@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
+use crate::key_storage::KeyStorage;
 use crate::token::{self, Token};
 use crate::{private_file, state_lock};
 
@@ -33,6 +34,7 @@ pub struct InProgress {
     pub version: u8,
     pub token_sha256: String,
     pub key_name: String,
+    pub key_storage: KeyStorage,
 }
 
 #[derive(Serialize)]

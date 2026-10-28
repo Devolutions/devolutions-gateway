@@ -1,5 +1,6 @@
 pub mod client;
 pub mod csr;
+pub mod key_storage;
 pub mod metadata;
 pub mod pending;
 pub mod schedule;

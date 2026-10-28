@@ -6,37 +6,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::normalize_data_path;
 
-#[derive(PartialEq, Eq, Debug, Clone, Copy, Serialize, Deserialize)]
-pub enum IdentityKeyBackend {
-    WindowsSoftwareProvider,
-    File,
-}
-
-impl Default for IdentityKeyBackend {
-    fn default() -> Self {
-        if cfg!(windows) {
-            Self::WindowsSoftwareProvider
-        } else {
-            Self::File
-        }
-    }
-}
-
 #[derive(PartialEq, Eq, Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct IdentityConf {
     #[serde(default = "default_true")]
     pub enabled: bool,
-    #[serde(default)]
-    pub key_backend: IdentityKeyBackend,
 }
 
 impl Default for IdentityConf {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            key_backend: IdentityKeyBackend::default(),
-        }
+        Self { enabled: true }
     }
 }
 
@@ -110,7 +89,7 @@ mod tests {
     fn identity_config_parses_all_debug_controls_and_defaults() -> anyhow::Result<()> {
         // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
         let config: dto::ConfFile = serde_json::from_value(serde_json::json!({
-            "Identity": { "KeyBackend": "File" },
+            "Identity": {},
             "__debug__": {
                 "identity": {
                     "renewal_after_secs": 1,
@@ -129,7 +108,6 @@ mod tests {
         }))?;
         let identity = config.identity.context("missing identity config")?;
         assert!(identity.enabled);
-        assert_eq!(identity.key_backend, IdentityKeyBackend::File);
         let debug = config
             .debug
             .context("missing debug config")?
@@ -157,24 +135,16 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn identity_backend_values_are_platform_independent() -> anyhow::Result<()> {
+    #[rstest::rstest]
+    #[case::file("File")]
+    #[case::windows_software_provider("WindowsSoftwareProvider")]
+    #[case::unknown_value("KeyStore")]
+    fn a_leftover_key_backend_setting_is_ignored(#[case] backend: &str) -> anyhow::Result<()> {
         // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
-        for (backend, expected) in [
-            ("File", IdentityKeyBackend::File),
-            ("WindowsSoftwareProvider", IdentityKeyBackend::WindowsSoftwareProvider),
-        ] {
-            let file: dto::ConfFile = serde_json::from_value(serde_json::json!({"Identity": {"KeyBackend": backend}}))?;
-            assert_eq!(Conf::from_conf_file(&file)?.identity.key_backend, expected);
-        }
-        let config: IdentityConf = serde_json::from_str("{}")?;
-        let expected = if cfg!(windows) {
-            IdentityKeyBackend::WindowsSoftwareProvider
-        } else {
-            IdentityKeyBackend::File
-        };
-        assert_eq!(config.key_backend, expected);
-        assert!(serde_json::from_str::<IdentityKeyBackend>("\"KeyStore\"").is_err());
+        // No setting chooses a device-key backend, so a `KeyBackend` left in `agent.json` is an unknown key, which the
+        // configuration ignores like any other.
+        let file: dto::ConfFile = serde_json::from_value(serde_json::json!({"Identity": {"KeyBackend": backend}}))?;
+        assert_eq!(Conf::from_conf_file(&file)?.identity, IdentityConf::default());
         Ok(())
     }
 
