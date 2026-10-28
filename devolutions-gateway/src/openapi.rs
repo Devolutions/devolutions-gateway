@@ -5,8 +5,9 @@ use uuid::Uuid;
 
 use crate::api::preflight::PreflightAlertStatus;
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
+use crate::provisioner_tasks::Permanent;
 use crate::provisioner_tasks::ai::AiProvider;
-use crate::provisioner_tasks::{BadAnswer, Permanent, Recoverable};
+use crate::provisioner_tasks::recording_ai_analysis::{BadAnswer, Failure, Recoverable};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -181,6 +182,7 @@ struct AiAnalysisParams {
 /// Details of the state of an AI analysis Task: `running`, `succeeded` and `failed` each have their own
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(untagged)]
+#[expect(dead_code, reason = "it only describes the payload, which the Task keeps as JSON")]
 enum AiAnalysisPayload {
     Running(AiAnalysisRunningPayload),
     Succeeded(AiAnalysisSucceededPayload),
@@ -318,13 +320,13 @@ enum AiAnalysisRecoverableErrorKind {
 
 // The error kinds are written out above for their descriptions, which utoipa drops from the variants without fields, so
 // these matches stop the build until a new kind or field is written out too.
-const _: fn(&Permanent) -> AiAnalysisErrorKind = |error| match error {
-    Permanent::AiRejected { status: _ } => AiAnalysisErrorKind::AiRejected,
-    Permanent::AiBadAnswer { why: _ } => AiAnalysisErrorKind::AiBadAnswer,
-    Permanent::KeyLost => AiAnalysisErrorKind::KeyLost,
-    Permanent::NoRecording => AiAnalysisErrorKind::NoRecording,
-    Permanent::MixedRecording => AiAnalysisErrorKind::MixedRecording,
-    Permanent::UnreadableRecording { file: _ } => AiAnalysisErrorKind::UnreadableRecording,
+const _: fn(&Permanent<Failure, Recoverable>) -> AiAnalysisErrorKind = |error| match error {
+    Permanent::Task(Failure::AiRejected { status: _ }) => AiAnalysisErrorKind::AiRejected,
+    Permanent::Task(Failure::AiBadAnswer { why: _ }) => AiAnalysisErrorKind::AiBadAnswer,
+    Permanent::Task(Failure::KeyLost) => AiAnalysisErrorKind::KeyLost,
+    Permanent::Task(Failure::NoRecording) => AiAnalysisErrorKind::NoRecording,
+    Permanent::Task(Failure::MixedRecording) => AiAnalysisErrorKind::MixedRecording,
+    Permanent::Task(Failure::UnreadableRecording { file: _ }) => AiAnalysisErrorKind::UnreadableRecording,
     Permanent::InvalidTask => AiAnalysisErrorKind::InvalidTask,
     Permanent::Panicked => AiAnalysisErrorKind::Panicked,
     Permanent::Internal => AiAnalysisErrorKind::Internal,
