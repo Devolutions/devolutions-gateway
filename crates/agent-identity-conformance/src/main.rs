@@ -9,6 +9,7 @@ mod authority;
 mod channel;
 mod client;
 mod dvls;
+mod key_storage;
 mod protocol;
 mod signer;
 #[cfg(windows)]
@@ -50,7 +51,29 @@ struct Test {
     needs: u8,
     /// Whether the test starts the agent, which then creates device keys.
     starts_agent: bool,
+    platform: Platform,
+    /// The test's timeout, when it is not [`TEST_TIMEOUT`].
+    timeout: Option<Duration>,
     run: TestFn,
+}
+
+/// The platforms a test applies to, with the reason it is N/A on the others.
+#[derive(Clone, Copy)]
+enum Platform {
+    Any,
+    Windows(&'static str),
+    Unix(&'static str),
+}
+
+impl Platform {
+    /// Why the test is N/A on this platform, if it is.
+    const fn not_applicable(self) -> Option<&'static str> {
+        match self {
+            Self::Windows(reason) if !cfg!(windows) => Some(reason),
+            Self::Unix(reason) if !cfg!(unix) => Some(reason),
+            Self::Any | Self::Windows(_) | Self::Unix(_) => None,
+        }
+    }
 }
 
 impl Test {
@@ -62,6 +85,8 @@ impl Test {
             needs_second: false,
             needs: 0,
             starts_agent: false,
+            platform: Platform::Any,
+            timeout: None,
             run,
         }
     }
@@ -74,6 +99,8 @@ impl Test {
             needs_second: false,
             needs: 0,
             starts_agent: true,
+            platform: Platform::Any,
+            timeout: None,
             run,
         }
     }
@@ -85,6 +112,23 @@ impl Test {
 
     const fn need(mut self, need: Need) -> Self {
         self.needs |= need.bit();
+        self
+    }
+
+    /// Marks a test that applies on Windows only, N/A elsewhere for `reason`.
+    const fn windows_only(mut self, reason: &'static str) -> Self {
+        self.platform = Platform::Windows(reason);
+        self
+    }
+
+    /// Marks a test that applies on Unix only, N/A elsewhere for `reason`.
+    const fn unix_only(mut self, reason: &'static str) -> Self {
+        self.platform = Platform::Unix(reason);
+        self
+    }
+
+    const fn timeout_secs(mut self, secs: u64) -> Self {
+        self.timeout = Some(Duration::from_secs(secs));
         self
     }
 
@@ -118,21 +162,6 @@ enum TargetKind {
     Dvls,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum KeyBackend {
-    WindowsSoftwareProvider,
-    File,
-}
-
-impl KeyBackend {
-    const fn name(self) -> &'static str {
-        match self {
-            Self::WindowsSoftwareProvider => "WindowsSoftwareProvider",
-            Self::File => "File",
-        }
-    }
-}
-
 /// What one test runs with: the authority it runs on, the second one when it needs two, and the run's settings.
 #[derive(Clone)]
 struct Context {
@@ -151,7 +180,6 @@ struct Context {
     /// On DVLS, a session of an application identity without any Agent Identity permission.
     unprivileged: Option<Arc<dvls::Session>>,
     agent_bin: PathBuf,
-    key_backend: KeyBackend,
     work_dir: PathBuf,
 }
 
@@ -175,7 +203,6 @@ struct Suite {
     /// On DVLS, a session of an application identity without any Agent Identity permission on the first authority.
     unprivileged: Option<Arc<dvls::Session>>,
     agent_bin: PathBuf,
-    key_backend: KeyBackend,
     work_dir: PathBuf,
 }
 
@@ -204,7 +231,6 @@ impl Suite {
             // When changing which authority a test runs on, keep this session on the first one.
             unprivileged: if primary == 0 { self.unprivileged.clone() } else { None },
             agent_bin: self.agent_bin.clone(),
-            key_backend: self.key_backend,
             work_dir: self.work_dir.clone(),
         }
     }
@@ -227,7 +253,6 @@ struct Options {
     authorities: Vec<String>,
     unprivileged_app_key: Option<String>,
     unprivileged_app_secret: Option<String>,
-    key_backend: KeyBackend,
     work_dir: PathBuf,
     filter: String,
     list: bool,
@@ -259,11 +284,6 @@ impl Default for Options {
             authorities: Vec::new(),
             unprivileged_app_key: None,
             unprivileged_app_secret: None,
-            key_backend: if cfg!(windows) {
-                KeyBackend::WindowsSoftwareProvider
-            } else {
-                KeyBackend::File
-            },
             work_dir: PathBuf::from("target").join("agent-identity-conformance"),
             filter: String::new(),
             list: false,
@@ -347,13 +367,6 @@ impl Options {
                     ensure!(window > 0, "--dvls-rotation-window-secs must be positive");
                     options.dvls_rotation_window_secs = Some(window);
                 }
-                "--key-backend" => {
-                    options.key_backend = match value()?.as_str() {
-                        "windows-software-provider" => KeyBackend::WindowsSoftwareProvider,
-                        "file" => KeyBackend::File,
-                        _ => anyhow::bail!("unknown key backend"),
-                    };
-                }
                 "--work-dir" => options.work_dir = value()?.into(),
                 "--filter" => options.filter = value()?,
                 "--authority" => options.authorities.push(value()?),
@@ -377,8 +390,9 @@ impl Options {
         let kind = self.target.context("--target is required")?;
         let profile = self.profile();
         let key_name_prefix = format!("conformance-{}", uuid::Uuid::new_v4().simple());
+        // A key storage policy can move the agent's keys to key files on Windows too.
         #[cfg(windows)]
-        if self.key_backend == KeyBackend::File {
+        {
             use std::os::windows::ffi::OsStrExt as _;
 
             let work_dir = std::path::absolute(&self.work_dir).context("resolve --work-dir")?;
@@ -386,7 +400,7 @@ impl Options {
             let longest = longest_file_backend_work_dir(&key_name_prefix);
             ensure!(
                 length <= longest,
-                "--work-dir must be at most {longest} characters long with the file backend, so that its key paths fit the Windows path limit, but {} is {length}",
+                "--work-dir must be at most {longest} characters long, so that key file paths fit the Windows path limit, but {} is {length}",
                 work_dir.display()
             );
         }
@@ -480,7 +494,6 @@ impl Options {
             agent_version: self.agent_version,
             unprivileged: unprivileged.map(|credential| Arc::new(dvls::Session::new(credential))),
             agent_bin: self.agent_bin.context("--agent-bin is required")?,
-            key_backend: self.key_backend,
             work_dir: self.work_dir,
         })
     }
@@ -569,10 +582,9 @@ async fn run() -> anyhow::Result<()> {
         .await
         .context("conformance setup exceeded the 14-minute-30-second deadline")??;
     println!("KEY NAME PREFIX {}", suite.key_name_prefix);
-    // The Windows software provider keeps the agent's keys as machine keys, which only an elevated administrator can create.
+    // The agent's built-in key storage on Windows is the Windows software provider, whose machine keys only an elevated administrator can create.
     #[cfg(windows)]
-    let machine_keys_denied =
-        suite.key_backend == KeyBackend::WindowsSoftwareProvider && !windows::running_as_elevated_administrator()?;
+    let machine_keys_denied = !windows::running_as_elevated_administrator()?;
     #[cfg(not(windows))]
     let machine_keys_denied = false;
     let mut totals = [0u32; 4];
@@ -582,27 +594,14 @@ async fn run() -> anyhow::Result<()> {
     let mut deadline_exceeded = false;
     for test in selected {
         let test_start = Instant::now();
-        let outcome = if test.name == "a_unavailable_key_backend_stops_identity" && cfg!(windows) {
-            Outcome::NotApplicable("Windows software provider is available on Windows")
-        } else if test.name == "a_key_non_exportable" && !cfg!(windows) {
-            Outcome::NotApplicable("Windows software provider test")
-        } else if test.name == "a_file_backend_permissions" && !cfg!(unix) {
-            Outcome::NotApplicable("Unix file-backend test")
+        let outcome = if let Some(reason) = test.platform.not_applicable() {
+            Outcome::NotApplicable(reason)
         } else if let Some(reason) = dvls::unsupported(suite.target_kind, test.mock_only) {
             Outcome::NotApplicable(reason)
         } else {
             match authority::pick(&suite.authorities, &test.needs(), test.needs_second, suite.mock()) {
                 Err(reason) => Outcome::Skip(reason),
-                Ok(_)
-                    if test.name == "a_key_non_exportable"
-                        && suite.key_backend != KeyBackend::WindowsSoftwareProvider =>
-                {
-                    Outcome::Skip("requires --key-backend windows-software-provider")
-                }
-                Ok(_) if test.name == "a_file_backend_permissions" && suite.key_backend != KeyBackend::File => {
-                    Outcome::Skip("requires --key-backend file")
-                }
-                // UNTESTED: an unelevated run with the Windows software provider reports each test that starts the agent as SKIP.
+                // UNTESTED: an unelevated run on Windows reports each test that starts the agent as SKIP.
                 // The agent fails to create its machine keys there, so a FAIL would blame the agent for the runner's missing privilege.
                 // CI runs elevated, so check this by hand from an unelevated shell when changing which tests start the agent.
                 Ok(_) if test.starts_agent && machine_keys_denied => {
@@ -690,10 +689,10 @@ async fn run_test(test: &Test, context: Context, deadline: Instant) -> (Outcome,
         }
         (test.run)(context.clone()).await
     };
-    let timeout = if test.name == "p_channel_no_hello_timeout" {
+    let timeout = if let Some(timeout) = test.timeout {
+        timeout
+    } else if test.name == "p_channel_no_hello_timeout" {
         Duration::from_secs(20)
-    } else if test.name == "a_key_non_exportable" && cfg!(windows) {
-        Duration::from_secs(240)
     } else if test.name == "a_rotation_migrates_on_schedule" {
         Duration::from_secs(120)
     } else if !context.mock() && test.name.starts_with("a_rotation_") {
@@ -811,6 +810,8 @@ const TESTS: &[Test] = &[
     p!(p_renew_certificate_key_reuse_rules),
     p!(p_metadata_limits),
     p!(p_metadata_invisible_format_characters),
+    p!(p_key_storage_metadata_never_refused),
+    p!(p_key_storage_policy_in_effective_config, mock_only),
     p!(p_friendly_name_format),
     p!(p_friendly_name_white_space_and_truncation),
     p!(p_duplicate_json_members_rejected),
@@ -949,7 +950,20 @@ const TESTS: &[Test] = &[
     a!(a_pending_file_kept_on_transient_error),
     a!(a_relayed_enrollment_refused, mock_only),
     a!(a_enrollment_leaf_naming_another_url_refused, mock_only),
-    a!(a_unavailable_key_backend_stops_identity),
+    a!(a_current_key_in_unavailable_storage_pauses_only_its_identity, mock_only)
+        .second()
+        .channel(),
+    a!(a_pending_key_in_unavailable_storage_pauses_until_restored, mock_only).channel(),
+    a!(a_in_progress_key_in_unavailable_storage_waits, mock_only),
+    a!(a_identity_file_without_key_storage_stops_identity_processing, mock_only)
+        .second()
+        .channel(),
+    a!(
+        a_in_progress_record_without_key_storage_stops_identity_processing,
+        mock_only
+    )
+    .second()
+    .channel(),
     a!(a_renew_transient_failures_retry_without_state_change, mock_only).channel(),
     a!(a_check_in_transient_failures_retry_without_state_change, mock_only),
     a!(a_token_never_logged),
@@ -993,8 +1007,28 @@ const TESTS: &[Test] = &[
     a!(a_config_unsupported_version_keeps_stored_config, mock_only),
     a!(a_config_unsupported_version_on_enroll_keeps_pending, mock_only),
     a!(a_multi_authority).second().channel().need(Need::LongLeaves),
-    a!(a_key_non_exportable),
-    a!(a_file_backend_permissions),
+    a!(a_key_storage_enrollment_key_in_builtin_default, mock_only),
+    a!(a_key_storage_policy_selects_each_new_key_storage, mock_only)
+        .channel()
+        .windows_only("needs two available key storages"),
+    a!(a_key_storage_unavailable_preference_uses_builtin_default, mock_only).channel(),
+    a!(a_key_storage_required_policy_holds_requested_renewal, mock_only).channel(),
+    a!(a_key_storage_required_policy_holds_check_in_renewal, mock_only),
+    a!(a_key_storage_required_policy_holds_scheduled_renewal, mock_only).channel(),
+    a!(a_key_storage_malformed_policy_is_ignored, mock_only)
+        .channel()
+        .timeout_secs(240),
+    a!(a_key_storage_required_policy_renews_into_a_listed_storage, mock_only)
+        .channel()
+        .windows_only("needs two available key storages"),
+    a!(a_key_storage_policy_applies_to_a_replacement_pending_key, mock_only)
+        .channel()
+        .windows_only("needs two available key storages"),
+    a!(a_start_deletes_unrecorded_keys_in_every_available_storage),
+    a!(a_key_non_exportable)
+        .windows_only("Windows software provider test")
+        .timeout_secs(240),
+    a!(a_file_backend_permissions).unix_only("Unix file-backend test"),
     a!(a_rotation_migrates_connected_agent).channel().need(Need::LongLeaves),
     a!(a_rotation_migrates_through_check_in, mock_only),
     a!(a_rotation_migrates_on_schedule, mock_only),

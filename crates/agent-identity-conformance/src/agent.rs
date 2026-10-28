@@ -28,7 +28,7 @@ use crate::client::{
     unlisted_format_character_neighbors, with_bag_url, with_upper_case_scheme,
 };
 use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
-use crate::{Context, KeyBackend};
+use crate::{Context, key_storage};
 
 #[cfg(windows)]
 #[path = "system_fixture.rs"]
@@ -57,7 +57,12 @@ macro_rules! poll {
 
 const WAIT: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(100);
-const KNOWN_METADATA_KEYS: [&str; 8] = [
+
+// Declared after `poll!`, which the cases use.
+#[path = "agent_key_storage.rs"]
+mod key_storage_cases;
+pub(crate) use key_storage_cases::*;
+const KNOWN_METADATA_KEYS: [&str; 10] = [
     "hostname",
     "fqdn",
     "domain",
@@ -66,8 +71,17 @@ const KNOWN_METADATA_KEYS: [&str; 8] = [
     "arch",
     "agent_version",
     "machine_id",
+    "key_storage",
+    "key_storage_available",
 ];
-const REQUIRED_METADATA_KEYS: [&str; 5] = ["hostname", "os_name", "os_version", "arch", "agent_version"];
+const REQUIRED_METADATA_KEYS: [&str; 6] = [
+    "hostname",
+    "os_name",
+    "os_version",
+    "arch",
+    "agent_version",
+    "key_storage",
+];
 /// Each agent case's data directory, under the work directory, is this prefix and [`DATA_DIR_RANDOM_LEN`] random characters.
 pub(crate) const DATA_DIR_PREFIX: &str = "identity-agent-";
 pub(crate) const DATA_DIR_RANDOM_LEN: usize = 6;
@@ -276,7 +290,36 @@ fn validate_agent_metadata(
             "agent metadata version differs from --agent-version"
         );
     }
+    check_key_storage_metadata(metadata)?;
     check_machine_id(metadata, machine_id)
+}
+
+/// Checks the key storage metadata ([CONTRACT.agent-identity.md] §3.1) against the key storages this platform can have.
+///
+/// Every enrollment key is in the built-in default ([agent intent], "Key storage"), so that storage is available wherever the agent enrolled, and the contract's table limits the Windows software provider to Windows.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+/// [agent intent]: ../../agent-identity/INTENT.md#key-storage
+fn check_key_storage_metadata(metadata: &Value) -> anyhow::Result<()> {
+    let storage = metadata["key_storage"].as_str().unwrap_or_default();
+    ensure!(
+        key_storage::well_formed(storage),
+        "agent metadata key_storage {storage:?} is not a key storage name"
+    );
+    let available = metadata["key_storage_available"]
+        .as_str()
+        .context("agent metadata omits key_storage_available although the agent enrolled with a key")?;
+    let available = key_storage::available_names(available)?;
+    ensure!(
+        available.contains(&key_storage::builtin_default()),
+        "agent metadata key_storage_available omits {}, where the agent creates its enrollment keys",
+        key_storage::builtin_default()
+    );
+    ensure!(
+        cfg!(windows) || !available.contains(&key_storage::WINDOWS_SOFTWARE_PROVIDER),
+        "agent metadata reports the Windows software provider available off Windows"
+    );
+    Ok(())
 }
 
 /// Whether the agent removes `character` from every metadata value it sends, and the authority refuses it in one.
@@ -395,12 +438,39 @@ pub(crate) fn expected_spki(stored: &Value) -> anyhow::Result<Option<Vec<u8>>> {
         .transpose()
 }
 
+/// A key with the key storage that a record names for it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RecordedKey {
+    name: String,
+    storage: String,
+}
+
+impl RecordedKey {
+    fn new(name: &str, storage: &str) -> Self {
+        Self {
+            name: name.to_owned(),
+            storage: storage.to_owned(),
+        }
+    }
+}
+
+/// The key storage that a key slot or in-progress record names, which must be a well-formed name ([agent intent], "Stored identities").
+///
+/// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
+pub(crate) fn recorded_storage(record: &Value) -> anyhow::Result<&str> {
+    let storage = record["key_storage"].as_str().context("key_storage is missing")?;
+    ensure!(
+        key_storage::well_formed(storage),
+        "key_storage {storage:?} is not a key storage name"
+    );
+    Ok(storage)
+}
+
 /// An agent data directory, as the audits read it.
 ///
 /// The suite audits the directory of each agent it runs, and the SYSTEM probe that of the agent it runs as SYSTEM, with the same checks.
 pub(crate) struct DataDir<'a> {
     pub(crate) path: &'a Path,
-    pub(crate) key_backend: KeyBackend,
     pub(crate) key_name_prefix: &'a str,
     /// The tokens of the pending-enrollment files written to the directory.
     pub(crate) tokens: &'a [String],
@@ -451,6 +521,7 @@ impl DataDir<'_> {
             "in-progress record does not belong to its pending token"
         );
         validate_key_name(self.key_name_prefix, field(&record, "key_name")?)?;
+        recorded_storage(&record).context("in-progress record")?;
         Ok(Some(record))
     }
 
@@ -475,15 +546,13 @@ impl DataDir<'_> {
         let authorities = identity.join("authorities");
         let keys = identity.join("keys");
         let pending = identity.join("pending");
-        let recorded_keys = self.recorded_key_names()?;
-        let recorded_files = if self.key_backend == KeyBackend::File {
-            recorded_keys
-                .iter()
-                .map(|name| self.key_file_path(name))
-                .collect::<HashSet<_>>()
-        } else {
-            HashSet::new()
-        };
+        let recorded = self.recorded_keys()?;
+        let recorded_files = recorded
+            .iter()
+            .filter(|key| key.storage == key_storage::FILE)
+            .map(|key| self.key_file_path(&key.name))
+            .collect::<HashSet<_>>();
+        let recorded_keys = recorded.into_iter().map(|key| key.name).collect::<HashSet<_>>();
         let mut documented = recorded_files.clone();
         for token in self.tokens {
             documented.insert(self.pending_path_for(token));
@@ -594,7 +663,12 @@ impl DataDir<'_> {
         Ok(keys)
     }
 
-    fn recorded_key_names(&self) -> anyhow::Result<HashSet<String>> {
+    /// Every key that an `identity.json` slot or an in-progress record names, with the key storage it records.
+    ///
+    /// Each slot and record must name a well-formed key storage ([agent intent], "Stored identities").
+    ///
+    /// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
+    fn recorded_keys(&self) -> anyhow::Result<HashSet<RecordedKey>> {
         let mut recorded = HashSet::new();
         let authorities = self.path.join("identity").join("authorities");
         if authorities.exists() {
@@ -608,9 +682,12 @@ impl DataDir<'_> {
                     let state: Value = serde_json::from_slice(&std::fs::read(&path)?)
                         .with_context(|| format!("read {}", path.display()))?;
                     for slot in ["current", "pending", "previous"] {
-                        if let Some(name) = state["keys"][slot]["key_name"].as_str() {
+                        let stored = &state["keys"][slot];
+                        if let Some(name) = stored["key_name"].as_str() {
                             validate_key_name(self.key_name_prefix, name)?;
-                            recorded.insert(name.to_owned());
+                            let storage = recorded_storage(stored)
+                                .with_context(|| format!("{slot} slot of {}", path.display()))?;
+                            recorded.insert(RecordedKey::new(name, storage));
                         }
                     }
                 }
@@ -618,22 +695,41 @@ impl DataDir<'_> {
         }
         for token in self.tokens {
             if let Some(progress) = self.in_progress_for(token)? {
-                recorded.insert(field(&progress, "key_name")?.to_owned());
+                recorded.insert(RecordedKey::new(
+                    field(&progress, "key_name")?,
+                    recorded_storage(&progress)?,
+                ));
             }
         }
         Ok(recorded)
     }
 
-    pub(crate) fn audit_orphan_keys(&self) -> anyhow::Result<()> {
-        let recorded = self.recorded_key_names()?;
-        let existing = self.file_keys_with_prefix()?;
+    /// Every existing key with the run's prefix, in each key storage the suite can list.
+    fn existing_keys(&self) -> anyhow::Result<HashSet<RecordedKey>> {
+        let mut existing = self
+            .file_keys_with_prefix()?
+            .into_iter()
+            .map(|name| RecordedKey::new(&name, key_storage::FILE))
+            .collect::<HashSet<_>>();
         #[cfg(windows)]
-        let existing = {
-            let mut existing = existing;
-            existing.extend(crate::windows::machine_keys_with_prefix(self.key_name_prefix)?);
-            existing
-        };
-        let mut orphaned = existing.difference(&recorded).cloned().collect::<Vec<_>>();
+        existing.extend(
+            crate::windows::machine_keys_with_prefix(self.key_name_prefix)?
+                .into_iter()
+                .map(|name| RecordedKey::new(&name, key_storage::WINDOWS_SOFTWARE_PROVIDER)),
+        );
+        Ok(existing)
+    }
+
+    /// Fails for each key with the run's prefix that no record names with its key storage, since the agent records each key with its storage before creating it ([agent intent], "Stored identities").
+    ///
+    /// [agent intent]: ../../agent-identity/INTENT.md#stored-identities
+    pub(crate) fn audit_orphan_keys(&self) -> anyhow::Result<()> {
+        let recorded = self.recorded_keys()?;
+        let mut orphaned = self
+            .existing_keys()?
+            .difference(&recorded)
+            .map(|key| format!("{} in {}", key.name, key.storage))
+            .collect::<Vec<_>>();
         orphaned.sort_unstable();
         ensure!(
             orphaned.is_empty(),
@@ -711,31 +807,48 @@ impl DataDir<'_> {
         anyhow::bail!("settled current key changed on each of {READS} reads of the stored identity")
     }
 
-    /// Checks the key `name` that `slot` stores, and returns `false` if the key does not exist.
+    /// Checks the key `name` that `slot` stores in the key storage it records, and returns `false` if the key does not exist there.
     fn check_key_if_exists(&self, slot: &str, name: &str, stored: &Value) -> anyhow::Result<bool> {
         validate_key_name(self.key_name_prefix, name)?;
-        match self.check_key(slot, name, expected_spki(stored)?.as_deref()) {
+        let storage = recorded_storage(stored).with_context(|| format!("stored {slot} slot"))?;
+        match self.check_key(slot, name, storage, expected_spki(stored)?.as_deref()) {
             // UNTESTED: a key deleted during its checks counts as missing, not as a failed check.
             // Each check opens the key again, and a key deleted in between fails that check in a backend-specific way; the agent deletes keys during every renewal.
             // When changing the checks, keep attributing a failure to the deletion only when the key is gone afterwards.
-            Err(_) if !self.key_exists(name)? => Ok(false),
+            Err(_) if !self.key_exists_in(name, storage)? => Ok(false),
             checked => checked,
         }
     }
 
-    fn key_exists(&self, name: &str) -> anyhow::Result<bool> {
+    /// Whether the key `name` exists in `storage`; a storage that the suite cannot inspect on this platform holds none.
+    fn key_exists_in(&self, name: &str, storage: &str) -> anyhow::Result<bool> {
         validate_key_name(self.key_name_prefix, name)?;
-        #[cfg(windows)]
-        if self.key_backend == KeyBackend::WindowsSoftwareProvider {
-            return crate::windows::machine_key_exists(name);
+        match storage {
+            key_storage::FILE => Ok(self.key_file_path(name).exists()),
+            #[cfg(windows)]
+            key_storage::WINDOWS_SOFTWARE_PROVIDER => crate::windows::machine_key_exists(name),
+            _ => Ok(false),
         }
-        Ok(self.key_file_path(name).exists())
     }
 
-    /// Checks the key `name` that `slot` stores against `expected_spki`, and returns `false` if the key does not exist.
-    pub(crate) fn check_key(&self, slot: &str, name: &str, expected_spki: Option<&[u8]>) -> anyhow::Result<bool> {
+    /// Whether the key `name` exists in any key storage the suite can inspect.
+    fn key_exists_anywhere(&self, name: &str) -> anyhow::Result<bool> {
+        Ok(self.key_exists_in(name, key_storage::FILE)?
+            || self.key_exists_in(name, key_storage::WINDOWS_SOFTWARE_PROVIDER)?)
+    }
+
+    /// Checks the key `name` that `slot` stores in `storage` against `expected_spki`, and returns `false` if the key does not exist there.
+    ///
+    /// A storage that the suite cannot inspect on this platform holds no key.
+    pub(crate) fn check_key(
+        &self,
+        slot: &str,
+        name: &str,
+        storage: &str,
+        expected_spki: Option<&[u8]>,
+    ) -> anyhow::Result<bool> {
         #[cfg(windows)]
-        if self.key_backend == KeyBackend::WindowsSoftwareProvider {
+        if storage == key_storage::WINDOWS_SOFTWARE_PROVIDER {
             if !crate::windows::machine_key_exists(name)? {
                 return Ok(false);
             }
@@ -751,7 +864,7 @@ impl DataDir<'_> {
             return Ok(true);
         }
         #[cfg(any(unix, windows))]
-        if self.key_backend == KeyBackend::File {
+        if storage == key_storage::FILE {
             let path = self.key_file_path(name);
             if !path.exists() {
                 return Ok(false);
@@ -769,7 +882,7 @@ impl DataDir<'_> {
         }
         #[cfg(not(any(unix, windows)))]
         let _ = (slot, name, expected_spki);
-        Ok(true)
+        Ok(false)
     }
 
     /// Checks that no file under `root`, other than `excluded` and the pending-enrollment files, holds a fragment of a token.
@@ -859,7 +972,7 @@ impl AgentCase {
             identity_debug["acl_grant_current_user"] = json!(true);
         }
         let config = json!({
-            "Identity": { "Enabled": true, "KeyBackend": ctx.key_backend.name() },
+            "Identity": { "Enabled": true },
             "__debug__": {
                 "log_directives": "debug,h2=info,hyper=info,rustls=info",
                 "identity": identity_debug
@@ -892,7 +1005,6 @@ impl AgentCase {
     fn data_dir(&self) -> DataDir<'_> {
         DataDir {
             path: self.path(),
-            key_backend: self.ctx.key_backend,
             key_name_prefix: &self.ctx.key_name_prefix,
             tokens: &self.tokens,
             leftover_key_copies: true,
@@ -998,6 +1110,19 @@ impl AgentCase {
             .as_object_mut()
             .context("agent configuration has no identity debug settings")?
             .remove("renewal_after_secs");
+        std::fs::write(path, serde_json::to_vec_pretty(&config)?)?;
+        Ok(())
+    }
+
+    /// Sets the agent's `__debug__.identity` setting `name` to `value`, which the agent reads when it starts.
+    fn set_identity_debug(&mut self, name: &str, value: Value) -> anyhow::Result<()> {
+        ensure!(
+            self.child.is_none(),
+            "identity debug settings must be set before starting the agent"
+        );
+        let path = self.path().join("agent.json");
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        config["__debug__"]["identity"][name] = value;
         std::fs::write(path, serde_json::to_vec_pretty(&config)?)?;
         Ok(())
     }
@@ -1182,8 +1307,8 @@ impl AgentCase {
                                 let state: Value = serde_json::from_slice(&std::fs::read(json_path)?)?;
                                 if state["identity_id"] == id && !self.pending_path_for(&token.text).exists() {
                                     ensure!(
-                                        key_exists(self, key_name(&state, "current")?)?,
-                                        "settled enrollment has no current identity key"
+                                        slot_key_exists(self, &state, "current")?,
+                                        "settled enrollment has no current identity key in its recorded key storage"
                                     );
                                     self.observe_agent_metadata(record)?;
                                     if let Some(known) = target.authority_id {
@@ -1555,7 +1680,10 @@ async fn dropped_enrollment(case: &mut AgentCase, token: &Token) -> anyhow::Resu
                 "in-progress enrollment has the wrong full-token hash"
             );
             let key = field(&progress, "key_name")?.to_owned();
-            ensure!(key_exists(case, &key)?, "committed enrollment key is missing");
+            ensure!(
+                case.data_dir().key_exists_in(&key, recorded_storage(&progress)?)?,
+                "committed enrollment key is missing from its recorded key storage"
+            );
             // The enrollment can commit between the counter and listing reads, and the mock's README orders neither its counters nor the fault's consumption before the commit, so wait for both.
             let consumed = target.control("faults", &json!({})).await?.body["drop_next_response"].is_null();
             if before < attempts && consumed {
@@ -1715,9 +1843,15 @@ fn assert_stored_identity(
             .is_some_and(|chain| !chain.is_empty()),
         "stored identity has an empty current certificate chain"
     );
+    // oracle: intent crates/agent-identity/INTENT.md §Key storage
     ensure!(
-        key_exists(case, key_name(state, "current")?)?,
-        "enrolled identity's current key is missing"
+        state["keys"]["current"]["key_storage"] == key_storage::builtin_default(),
+        "identity without a key storage policy has its current key outside {}",
+        key_storage::builtin_default()
+    );
+    ensure!(
+        slot_key_exists(case, state, "current")?,
+        "enrolled identity's current key is missing from its recorded key storage"
     );
     let mut names = HashSet::new();
     for slot in ["current", "pending", "previous"] {
@@ -1810,8 +1944,16 @@ fn renew_keyids_since<'a>(requests: &'a Value, earlier: &Value) -> anyhow::Resul
         .unwrap_or_default())
 }
 
+/// Whether the key `name` exists in any key storage the suite can inspect.
 fn key_exists(case: &AgentCase, name: &str) -> anyhow::Result<bool> {
-    case.data_dir().key_exists(name)
+    case.data_dir().key_exists_anywhere(name)
+}
+
+/// Whether the key that `slot` of `state` names exists in the key storage the slot records.
+fn slot_key_exists(case: &AgentCase, state: &Value, slot: &str) -> anyhow::Result<bool> {
+    let stored = &state["keys"][slot];
+    case.data_dir()
+        .key_exists_in(field(stored, "key_name")?, recorded_storage(stored)?)
 }
 
 #[cfg(unix)]
@@ -2755,7 +2897,6 @@ pub(crate) async fn a_relayed_enrollment_refused(ctx: Context) -> anyhow::Result
 }
 
 /// Removes the ANSI escape sequences that colour the agent's console log, which it writes even when its output is a file.
-#[cfg(unix)]
 fn without_ansi_escapes(line: &str) -> String {
     let mut plain = String::with_capacity(line.len());
     let mut characters = line.chars();
@@ -2774,7 +2915,6 @@ fn without_ansi_escapes(line: &str) -> String {
     plain
 }
 
-#[cfg(unix)]
 fn is_error_level_log_line(line: &str) -> bool {
     let line = without_ansi_escapes(line);
     if let Ok(entry) = serde_json::from_str::<Value>(&line) {
@@ -2788,92 +2928,6 @@ fn is_error_level_log_line(line: &str) -> bool {
         .map(|field| field.trim_matches(&['[', ']', ':'][..]))
         .find(|field| levels.contains(field))
         == Some("ERROR")
-}
-
-pub(crate) async fn a_unavailable_key_backend_stops_identity(ctx: Context) -> anyhow::Result<()> {
-    // oracle: intent crates/agent-identity/INTENT.md §Identities
-    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
-    #[cfg(unix)]
-    {
-        let mut ctx = ctx;
-        ctx.key_backend = KeyBackend::WindowsSoftwareProvider;
-        return with_agent(ctx, None, false, async move |case| {
-            let target = case.ctx.target.clone();
-            let token = new_token(case, 1).await?;
-            let token_record = target.management().token(&token.id).await?;
-            let used_before = token_record.used_count;
-            ensure!(used_before == 0, "new enrollment token was already used");
-            let requests_before = if case.ctx.mock() {
-                Some(count(&target.requests(None).await?, "enroll_total")?)
-            } else {
-                None
-            };
-            case.write_pending(&token.text)?;
-            let pending = case.pending_path();
-            let pending_contents = std::fs::read(&pending)?;
-            case.start().await?;
-            let check_unchanged = |case: &mut AgentCase| -> anyhow::Result<()> {
-                case.check_running()?;
-                ensure!(
-                    std::fs::read(&pending)? == pending_contents,
-                    "unavailable backend changed or deleted the pending file"
-                );
-                ensure!(
-                    !case.in_progress_path().exists() && !case.rejection_path_for(&token.text).exists(),
-                    "unavailable backend processed the pending token"
-                );
-                ensure!(
-                    case.data_dir().file_keys_with_prefix()?.is_empty() && !case.has_stored_identity()?,
-                    "unavailable backend created a key or identity"
-                );
-                Ok(())
-            };
-            let started = Instant::now();
-            loop {
-                check_unchanged(case)?;
-                let mut logged_error = false;
-                for name in ["agent-stdout.log", "agent-stderr.log"] {
-                    let contents = std::fs::read_to_string(case.path().join(name))?;
-                    logged_error |= contents.lines().any(is_error_level_log_line);
-                }
-                if logged_error {
-                    break;
-                }
-                ensure!(
-                    started.elapsed() < WAIT,
-                    "unavailable backend emitted no error-level log line within 20 seconds"
-                );
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-            for _ in 0..6 {
-                tokio::time::sleep(Duration::from_millis(500)).await;
-                check_unchanged(case)?;
-            }
-            if let Some(before) = requests_before {
-                ensure!(
-                    count(&target.requests(None).await?, "enroll_total")? == before,
-                    "unavailable backend sent an enroll request"
-                );
-            }
-            ensure!(
-                target.management().identity_count(&token).await? == 0,
-                "unavailable backend created an identity"
-            );
-            let record = target.management().token(&token.id).await?;
-            ensure!(
-                record.used_count == used_before,
-                "unavailable backend consumed a token use"
-            );
-            check_unchanged(case)?;
-            Ok(())
-        })
-        .await;
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = ctx;
-        Err(crate::NotApplicable("Windows software provider is available on Windows").into())
-    }
 }
 
 async fn wait_for_injected_attempt(
@@ -5951,10 +6005,6 @@ pub(crate) async fn a_key_non_exportable(ctx: Context) -> anyhow::Result<()> {
     // oracle: intent crates/device-key/INTENT.md §Access
     #[cfg(windows)]
     {
-        ensure!(
-            ctx.key_backend == KeyBackend::WindowsSoftwareProvider,
-            "Windows non-exportability requires Windows software provider backend"
-        );
         with_agent(ctx.clone(), None, true, async move |case| {
             let target = case.ctx.target.clone();
             let (id, state) = case.enroll_new(&target, 1).await?;
@@ -6017,10 +6067,6 @@ pub(crate) async fn a_file_backend_permissions(ctx: Context) -> anyhow::Result<(
     // oracle: intent crates/device-key/INTENT.md §File backend
     #[cfg(unix)]
     {
-        ensure!(
-            ctx.key_backend == KeyBackend::File,
-            "Unix permission test requires file backend"
-        );
         return with_agent(ctx, None, true, async move |case| {
             let target = case.ctx.target.clone();
             let (_, state) = case.enroll_new(&target, 1).await?;
@@ -6381,6 +6427,8 @@ mod tests {
             "os_version": "1",
             "arch": std::env::consts::ARCH,
             "agent_version": "1",
+            "key_storage": key_storage::builtin_default(),
+            "key_storage_available": key_storage::builtin_default(),
         })
     }
 
@@ -6578,18 +6626,39 @@ mod tests {
         std::fs::create_dir_all(case.in_progress_path().parent().context("pending directory")?)?;
         std::fs::write(
             case.in_progress_path(),
-            serde_json::to_vec(&json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }))?,
+            serde_json::to_vec(
+                &json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name, "key_storage": "file" }),
+            )?,
         )?;
         case.data_dir().audit_orphan_keys()?;
         std::fs::remove_file(case.key_file_path(&foreign))?;
         std::fs::remove_file(case.key_file_path(&overlapping))?;
         case.data_dir().audit_identity_tree()?;
-        case.ctx.key_backend = KeyBackend::WindowsSoftwareProvider;
+        // A record that names the key with another key storage leaves the key file unrecorded.
+        std::fs::write(
+            case.in_progress_path(),
+            serde_json::to_vec(
+                &json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name, "key_storage": key_storage::UNLISTED }),
+            )?,
+        )?;
         ensure!(
             case.data_dir().audit_identity_tree().is_err(),
-            "Windows software provider backend accepted a file-backed key"
+            "a key file recorded in another key storage was accepted"
         );
-        case.ctx.key_backend = KeyBackend::File;
+        ensure!(
+            case.data_dir().audit_orphan_keys().is_err(),
+            "a key recorded in another key storage was accepted as recorded"
+        );
+        for record in [
+            json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }),
+            json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name, "key_storage": "File" }),
+        ] {
+            std::fs::write(case.in_progress_path(), serde_json::to_vec(&record)?)?;
+            ensure!(
+                case.data_dir().audit_orphan_keys().is_err(),
+                "an in-progress record without a well-formed key_storage was accepted: {record}"
+            );
+        }
         write_run_key(&case.key_file_path(&foreign))?;
         write_run_key(&case.key_file_path(&overlapping))?;
         std::fs::remove_file(case.in_progress_path())?;
@@ -6597,7 +6666,7 @@ mod tests {
         std::fs::create_dir_all(identity.parent().context("authority directory")?)?;
         std::fs::write(
             &identity,
-            serde_json::to_vec(&json!({ "keys": { "current": { "key_name": name } } }))?,
+            serde_json::to_vec(&json!({ "keys": { "current": { "key_name": name, "key_storage": "file" } } }))?,
         )?;
         #[cfg(unix)]
         {
@@ -6621,7 +6690,9 @@ mod tests {
         std::fs::remove_file(&identity)?;
         std::fs::write(
             case.in_progress_path(),
-            serde_json::to_vec(&json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name }))?,
+            serde_json::to_vec(
+                &json!({ "version": 1, "token_sha256": fixture_hash, "key_name": name, "key_storage": "file" }),
+            )?,
         )?;
         case.cleanup_run_keys()?;
         ensure!(!case.key_file_path(&name).exists(), "run-owned key survived cleanup");
@@ -6711,7 +6782,7 @@ mod tests {
         }
         std::fs::remove_file(case.in_progress_path())?;
         ensure!(
-            case.data_dir().recorded_key_names()?.is_empty(),
+            case.data_dir().recorded_keys()?.is_empty(),
             "the removed key is still recorded"
         );
         let untracked_pending = case
@@ -6956,7 +7027,9 @@ mod tests {
             "os_name": "Windows",
             "os_version": "11",
             "arch": std::env::consts::ARCH,
-            "agent_version": "2026.3.0"
+            "agent_version": "2026.3.0",
+            "key_storage": key_storage::builtin_default(),
+            "key_storage_available": key_storage::builtin_default()
         });
         let not_compared = ExpectedMachineId::NotCompared;
         validate_agent_metadata(&metadata, Some("2026.3.0"), &not_compared)?;
@@ -6987,7 +7060,69 @@ mod tests {
         Ok(())
     }
 
-    /// An agent case on the file backend whose agent never starts.
+    /// The agent reports where its key is and which key storages it can create keys in; a wrong report misleads the authority's choice of policy.
+    #[test]
+    fn agent_metadata_reports_key_storages_this_platform_can_have() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+        // oracle: intent crates/agent-identity/INTENT.md §Key storage
+        let not_compared = ExpectedMachineId::NotCompared;
+        let with = |key: &str, value: Option<&str>| {
+            let mut metadata = agent_metadata("host");
+            match value {
+                Some(value) => metadata[key] = json!(value),
+                None => {
+                    metadata.as_object_mut().expect("fixture metadata").remove(key);
+                }
+            }
+            metadata
+        };
+        let default = key_storage::builtin_default();
+        let both = "file,windows_software_provider";
+        let accepted = [
+            ("unlisted key storage", with("key_storage", Some(key_storage::UNLISTED))),
+            (
+                "another available storage",
+                with("key_storage_available", Some(&format!("{default},zz_unlisted_storage"))),
+            ),
+        ];
+        for (case, metadata) in accepted {
+            assert!(
+                validate_agent_metadata(&metadata, None, &not_compared).is_ok(),
+                "{case}"
+            );
+        }
+        let refused = [
+            ("key_storage missing", with("key_storage", None)),
+            ("key_storage not a name", with("key_storage", Some("File"))),
+            ("key_storage_available missing", with("key_storage_available", None)),
+            (
+                "key_storage_available descending",
+                with("key_storage_available", Some(&format!("zz_unlisted_storage,{default}"))),
+            ),
+            (
+                "key_storage_available repeated",
+                with("key_storage_available", Some(&format!("{default},{default}"))),
+            ),
+            (
+                "key_storage_available without the built-in default",
+                with("key_storage_available", Some(key_storage::UNLISTED)),
+            ),
+        ];
+        for (case, metadata) in refused {
+            assert!(
+                validate_agent_metadata(&metadata, None, &not_compared).is_err(),
+                "{case}"
+            );
+        }
+        assert_eq!(
+            validate_agent_metadata(&with("key_storage_available", Some(both)), None, &not_compared).is_ok(),
+            cfg!(windows),
+            "the Windows software provider is available only on Windows"
+        );
+    }
+
+    /// An agent case whose agent never starts.
     async fn file_backend_case() -> anyhow::Result<AgentCase> {
         let work_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
@@ -7016,7 +7151,6 @@ mod tests {
                 agent_version: None,
                 unprivileged: None,
                 agent_bin: PathBuf::new(),
-                key_backend: KeyBackend::File,
                 work_dir,
             },
             None,
@@ -7048,6 +7182,7 @@ mod tests {
         let leaf = rcgen::CertificateParams::new(Vec::<String>::new())?.self_signed(key)?;
         Ok(json!({
             "key_name": name,
+            "key_storage": key_storage::FILE,
             "certificate_chain": [base64::engine::general_purpose::STANDARD.encode(leaf.der())]
         }))
     }

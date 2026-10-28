@@ -7,8 +7,7 @@ use anyhow::{Context as _, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::KeyBackend;
-use crate::agent::{DataDir, expected_spki};
+use crate::agent::{DataDir, expected_spki, recorded_storage};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub(crate) struct Request {
@@ -45,10 +44,9 @@ fn matching_key(identity: &Value, identity_id: &str, prefix: &str) -> anyhow::Re
 fn data_dir<'a>(request: &'a Request, tokens: &'a [String]) -> DataDir<'a> {
     DataDir {
         path: &request.case_dir,
-        key_backend: KeyBackend::WindowsSoftwareProvider,
         key_name_prefix: &request.key_name_prefix,
         tokens,
-        // The SYSTEM agent stores its keys as machine keys, so a run-prefixed file under `identity/keys` is never a key store's leftover copy.
+        // Without a key storage policy the SYSTEM agent stores its keys as machine keys, so a run-prefixed file under `identity/keys` is never a key store's leftover copy.
         leftover_key_copies: false,
     }
 }
@@ -93,8 +91,9 @@ fn check_stored_keys(dir: &DataDir<'_>, identity: &Value) -> anyhow::Result<()> 
             expected.is_some() || slot != "current",
             "SYSTEM stored key has no leaf certificate"
         );
+        let storage = recorded_storage(stored).with_context(|| format!("SYSTEM stored {slot} slot"))?;
         ensure!(
-            dir.check_key(slot, name, expected.as_deref())? || slot != "current",
+            dir.check_key(slot, name, storage, expected.as_deref())? || slot != "current",
             "settled SYSTEM current machine key is missing"
         );
     }
