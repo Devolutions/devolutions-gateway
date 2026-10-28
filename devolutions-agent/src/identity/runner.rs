@@ -269,14 +269,9 @@ impl Runner {
         // `crates/agent-identity/INTENT.md` ("Stored identities"): `previous` alongside `pending` holds the expired
         // pending key of a pending-key recovery; alone, it holds the old key of a confirmed renewal.
         let recovering = identity.keys.previous.is_some() && identity.keys.pending.is_some();
-        // `crates/agent-identity/INTENT.md` ("Identities"): the old key of a confirmed renewal in an unavailable key
-        // storage keeps its slot, and the identity goes on with its streams and check-in.
-        // No new renewal starts meanwhile, because a pending slot beside it would read as a pending-key recovery.
-        // UNTESTED: a kept previous key holds new renewals back and nothing else, and its removal is retried at the
-        // pace of the pending-directory poll; the store's keeping of it is tested, this wiring isn't.
-        // When changing this, never start a renewal while the identity holds the old key of a confirmed renewal.
-        let previous_kept =
-            identity.keys.previous.is_some() && !recovering && !store.remove_previous_key(&mut identity)?;
+        if identity.keys.previous.is_some() && !recovering {
+            store.remove_previous_key(&mut identity)?;
+        }
         let confirming = identity
             .keys
             .pending
@@ -345,11 +340,6 @@ impl Runner {
         // and check-in still runs meanwhile; the hold decision is tested, this wiring isn't.
         // When changing this, keep `holds_renewal` before every `renew` of a renewal that isn't in progress, and the
         // wake-up at its next check.
-        let renewal_wake = if previous_kept {
-            renewal_wake.max(now + poll_interval(&self.shared.settings))
-        } else {
-            renewal_wake
-        };
         if renewal_wake <= now && !self.holds_renewal(&identity)? {
             self.renew(&mut identity, false).await?;
             return Ok(Some(Instant::now()));
