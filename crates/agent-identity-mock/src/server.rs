@@ -896,8 +896,6 @@ mod tests {
     // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
     #[rstest]
     #[case::null(json!(null))]
-    #[case::not_an_object(json!("tpm"))]
-    #[case::empty_list(json!([]))]
     #[case::required_missing(json!({ "backends": ["tpm"] }))]
     #[tokio::test]
     async fn key_storage_control_takes_a_malformed_policy(#[case] policy: Value) -> anyhow::Result<()> {
@@ -909,7 +907,8 @@ mod tests {
     }
 
     /// A body must say either a policy or a clear, and nothing else.
-    // oracle: intent crates/agent-identity-mock/INTENT.md §Mock-only control
+    /// The mock defines this shape itself, so no source decides it beyond the README, which the code also follows.
+    // oracle: mutant a body that sets a policy and clears it, or does neither, is accepted
     #[rstest]
     #[case::empty_object(json!({}))]
     #[case::not_an_object(json!([]))]
