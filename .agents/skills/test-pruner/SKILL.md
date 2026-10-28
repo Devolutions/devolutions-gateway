@@ -3,8 +3,6 @@ name: test-pruner
 description: Prune, strengthen, and consolidate tests in a pass of at most one hour, using oracle classification and domain mutants, with cargo-mutants or Stryker.NET where their estimated run fits that hour. Use when asked to remove redundant tests, consolidate tests into cases or properties, audit test value, clean up AI-written tests, finalize a change's tests before its pull request opens, or get a mutation-backed review of a pull request's tests. For a quick oracle-only check, use `test-oracle-reviewer` instead.
 ---
 
-# Test pruner
-
 Scope each pass to one crate, project, or module, or to one change's diff, so results stay reviewable.
 Decide from two independent measurements: whether the expected value is justified independently of the code, and which faults only this test catches.
 Mutation testing alone cannot tell a test that matches itself from a correct one, and oracle review alone cannot tell which tests are the sole guard for a fault.
@@ -23,6 +21,7 @@ A reviewer's request for more mutation evidence falls under the same budget.
 ## Measure
 
 Invoke `test-oracle-reviewer` on every test in scope and record independent, self-derived, or unknown with evidence.
+Record a test whose marker cites the code under test's own documentation, such as its rustdoc, as self-derived, so Decide flags it for removal unless an independent source decides its value or it alone catches a fault.
 The default mutant source is domain mutants written by a fresh-context sub-agent, because a few calibrated domain faults cost minutes where a generic run over the same code costs hours.
 Give it the applicable intent and contract files, the code under test, and `references/domain-mutants.md`, but not the tests, so the faults come from what the code must do rather than from what the tests already check.
 Ask for one patch per fault, each a single plausible mistake, weighted toward critical paths such as validation, cryptography, parsing, and authorization decisions, and as many as the estimate fits in the remaining budget.

@@ -133,9 +133,6 @@ public class EnrollmentTokenTests
     // White space around a URI is not part of it.
     // oracle: spec RFC 3986 §Appendix C
     [InlineData(" https://host/dvls\t", "https://host/dvls")]
-    // A non-ASCII character becomes its UTF-8 octets, percent-encoded with uppercase hexadecimal digits.
-    // oracle: spec RFC 3987 §3.1
-    [InlineData("https://host/dvls\u00E9", "https://host/dvls%C3%A9")]
     public void CreateRejectsOrNormalizesAUrlNotInTheFormOfU(string productBaseUrl, string normalized)
     {
         Creation creation = CreateFrom(productBaseUrl);
@@ -143,16 +140,12 @@ public class EnrollmentTokenTests
         Assert.Contains(creation, (Creation[])[Creation.Holding(normalized), Creation.Rejection]);
     }
 
-    // The unacceptable URLs, a URL one byte longer than the longest that fits in a token,
-    // and URLs that are not ASCII, since `u` holds only ASCII characters (CONTRACT.agent-identity.md §2):
-    // an internationalized host not in its `xn--` form, and a fullwidth commercial at (U+FF20) in the host.
+    // The unacceptable URLs, and a URL one byte longer than the longest that fits in a token.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
     public static TheoryData<string> RejectedUrlRows => new(
     [
         .. UnacceptableUrls.All,
         UrlOfLength(3026),
-        "https://bücher.example/dvls",
-        "https://admin＠host/dvls",
     ]);
 
     // oracle: spec Framework Design Guidelines §Validating Arguments

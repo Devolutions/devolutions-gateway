@@ -1,46 +1,54 @@
-use std::fs::{File, OpenOptions};
 #[cfg(unix)]
-use std::io::ErrorKind;
+use std::fs::File;
 
 use anyhow::Context as _;
-#[cfg(windows)]
-use anyhow::ensure;
 use camino::Utf8Path;
+#[cfg(windows)]
+use private_fs::Dir;
 
 use crate::private_file;
 
-pub(crate) fn acquire(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<File> {
+/// An exclusive lock on the identity state, held until dropped.
+pub(crate) struct StateLock {
     #[cfg(unix)]
-    {
-        private_file::prepare_directories(data_dir, grant_current_user)?;
-        lock_file(&data_dir.join("identity").join(".agent-identity.lock"))
-    }
+    _file: File,
     #[cfg(windows)]
-    lock_directory(data_dir, grant_current_user)
+    _directory: Dir,
 }
 
-#[cfg(unix)]
-fn lock_file(path: &Utf8Path) -> anyhow::Result<File> {
-    use std::os::fd::AsRawFd as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
-
-    match private_file::open_read(path) {
-        Ok(file) => drop(file),
-        Err(error)
-            if error
-                .downcast_ref::<std::io::Error>()
-                .is_some_and(|source| source.kind() == ErrorKind::NotFound) => {}
-        Err(error) => return Err(error),
+pub(crate) fn acquire(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<StateLock> {
+    #[cfg(unix)]
+    {
+        lock_file(data_dir, grant_current_user).map(|file| StateLock { _file: file })
     }
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)
+    #[cfg(windows)]
+    lock_directory(data_dir, grant_current_user).map(|directory| StateLock { _directory: directory })
+}
+
+/// Locks the identity state through `<data-dir>/identity/.agent-identity.lock`.
+#[cfg(unix)]
+fn lock_file(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<File> {
+    use std::io::ErrorKind;
+    use std::os::fd::AsRawFd as _;
+
+    use private_fs::FileOptions;
+
+    let data = private_file::provision_directories(data_dir, grant_current_user)?;
+    let identity = data
+        .open_dir(
+            "identity",
+            &private_file::tree_rule(grant_current_user),
+            private_fs::Share::Shared,
+        )
+        .context("open identity directory")?
+        .context("identity directory disappeared after its creation")?;
+    let file = identity
+        .open_or_create_file(
+            ".agent-identity.lock",
+            &private_file::state_file_rule(grant_current_user),
+            FileOptions::new().read(true).write(true),
+        )
         .context("open identity state lock")?;
-    private_file::verify_open_file(&file)?;
     loop {
         // SAFETY: The file descriptor stays open until the caller drops the lock guard.
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
@@ -55,75 +63,48 @@ fn lock_file(path: &Utf8Path) -> anyhow::Result<File> {
 
 /// Locks the identity state through an unshared handle on `<data-dir>/identity` itself rather than a lock file.
 ///
-/// The lock needs no object of its own: it is the directory the agent provisions and verifies before each lock, opened
+/// The lock needs no object of its own: it is the directory the agent provisions and checks before each lock, opened
 /// without following a reparse point, so no file another account created or replaced can stand in for it.
 /// Any other handle open on the directory, a backup's or an antivirus scan's for example, also fails the open with a
 /// sharing violation, so a busy lock is retried for 30 s.
 #[cfg(windows)]
-fn lock_directory(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-    use std::time::Duration;
+fn lock_directory(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Dir> {
+    use std::time::{Duration, Instant};
 
-    use windows::Win32::Foundation::ERROR_SHARING_VIOLATION;
-    use windows::Win32::Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-        READ_CONTROL,
-    };
-
-    let started = std::time::Instant::now();
-    let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .access_mode((FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | READ_CONTROL).0)
-        .share_mode(0)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0);
-    let sharing_violation = i32::try_from(ERROR_SHARING_VIOLATION.0)?;
-    loop {
-        match private_file::prepare_directories(data_dir, grant_current_user) {
-            Ok(()) => {}
-            Err(error) if is_sharing_violation(&error, sharing_violation) => {
-                ensure!(
-                    started.elapsed() < Duration::from_secs(30),
-                    "identity state lock remained busy"
-                );
-                std::thread::sleep(Duration::from_millis(25));
-                continue;
-            }
-            Err(error) => return Err(error),
+    private_file::retry_sharing_violation(
+        Instant::now(),
+        Duration::from_secs(30),
+        Duration::from_millis(25),
+        || {
+            private_file::provision_directories(data_dir, grant_current_user)?
+                .open_dir(
+                    "identity",
+                    &private_file::tree_rule(grant_current_user),
+                    private_fs::Share::Exclusive,
+                )
+                .context("open identity state lock")
+        },
+    )
+    .map_err(|error| {
+        if private_file::is_sharing_violation(&error) {
+            error.context("identity state lock remained busy")
+        } else {
+            error
         }
-        let identity = data_dir.join("identity");
-        match options.open(&identity) {
-            Ok(directory) => {
-                crate::windows::verify_protected_directory(&directory, grant_current_user, false)?;
-                let obsolete = identity.join(".agent-identity.lock");
-                if std::fs::symlink_metadata(&obsolete).is_ok() {
-                    let _ = private_file::verify_state_path(&obsolete);
-                }
-                return Ok(directory);
-            }
-            Err(error) if error.raw_os_error() == Some(sharing_violation) => {
-                ensure!(
-                    started.elapsed() < Duration::from_secs(30),
-                    "identity state lock remained busy"
-                );
-                std::thread::sleep(Duration::from_millis(25));
-            }
-            Err(error) => return Err(error).context("open identity state lock"),
-        }
-    }
+    })?
+    .context("identity directory disappeared after its creation")
 }
 
-#[cfg(windows)]
-fn is_sharing_violation(error: &anyhow::Error, code: i32) -> bool {
-    error
-        .chain()
-        .filter_map(|cause| cause.downcast_ref::<std::io::Error>())
-        .any(|error| error.raw_os_error() == Some(code))
+#[cfg(all(test, windows))]
+impl StateLock {
+    /// The unshared handle on `<data-dir>/identity` that holds the lock.
+    pub(crate) fn directory(&self) -> &Dir {
+        &self._directory
+    }
 }
 
 #[cfg(all(test, windows))]
 mod tests {
-    use std::fs;
     use std::time::Duration;
 
     use super::*;
@@ -131,31 +112,27 @@ mod tests {
     // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn trusted_lock_serializes_concurrent_writers() -> anyhow::Result<()> {
-        let data_dir = Utf8Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("lock-tests")
-            .join(uuid::Uuid::new_v4().to_string());
-        fs::create_dir_all(&data_dir)?;
-        let lock = acquire(&data_dir, true)?;
+        let directory = private_file::TestDir::new()?;
+        let lock = acquire(directory.path(), true)?;
         let (sender, receiver) = std::sync::mpsc::channel();
-        let worker_dir = data_dir.clone();
-        let worker = std::thread::spawn(move || {
-            let result = acquire(&worker_dir, true).map(|_lock| ());
-            let _ = sender.send(result);
-        });
-        std::thread::sleep(Duration::from_millis(50));
-        match receiver.try_recv() {
-            Err(std::sync::mpsc::TryRecvError::Empty) => {}
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => anyhow::bail!("identity lock worker disconnected"),
-            Ok(Ok(())) => anyhow::bail!("concurrent writer acquired the identity lock before release"),
-            Ok(Err(error)) => return Err(error).context("concurrent writer failed before release"),
-        }
-        drop(lock);
-        receiver.recv_timeout(Duration::from_secs(5))??;
-        worker
-            .join()
-            .map_err(|_| anyhow::anyhow!("identity lock worker panicked"))?;
-        fs::remove_dir_all(data_dir)?;
-        Ok(())
+        let path = directory.path();
+        std::thread::scope(|scope| {
+            let worker = scope.spawn(move || {
+                let result = acquire(path, true).map(|_lock| ());
+                let _ = sender.send(result);
+            });
+            std::thread::sleep(Duration::from_millis(50));
+            match receiver.try_recv() {
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => anyhow::bail!("identity lock worker disconnected"),
+                Ok(Ok(())) => anyhow::bail!("concurrent writer acquired the identity lock before release"),
+                Ok(Err(error)) => return Err(error).context("concurrent writer failed before release"),
+            }
+            drop(lock);
+            receiver.recv_timeout(Duration::from_secs(5))??;
+            worker
+                .join()
+                .map_err(|_| anyhow::anyhow!("identity lock worker panicked"))
+        })
     }
 }

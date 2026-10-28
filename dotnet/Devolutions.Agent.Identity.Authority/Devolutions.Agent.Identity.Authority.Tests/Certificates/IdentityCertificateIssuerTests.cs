@@ -42,10 +42,11 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     public static TheoryData<string> SerialNumberDrawNames => new(SerialNumberDraws.Keys);
 
     // A token that can create an identity.
-    // The `u` of the token that enrolls the identity, and the CSR of the enrollment, which names it.
+    // The `u` of the token that enrolls the identity, which the CSR of each enrollment names.
     private const string TokenUrl = "https://host/dvls";
 
-    private static readonly CertificateSigningRequest EnrollingCsr = TestEnrollmentUrl.Csr(TokenUrl);
+    // The CSR of another device enrolling with the same token: another key, the same URL.
+    private static readonly CertificateSigningRequest OtherKeyCsr = TestEnrollmentUrl.Csr(TokenUrl);
 
     private static EnrollmentTokenState UsableToken =>
         new(false, TokenUrl, Now.AddDays(1), maxUses: 10, identitiesCreated: 0);
@@ -56,24 +57,37 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         [EnrollmentOutcome.Reject] =
             EnrollmentRules.Decide(
                 new(false, TokenUrl, Now, maxUses: 10, identitiesCreated: 0),
-                EnrollingCsr,
+                OtherKeyCsr,
                 null,
                 Now),
         [EnrollmentOutcome.ReturnExistingIdentity] = EnrollmentRules.Decide(
             UsableToken,
-            EnrollingCsr,
+            OtherKeyCsr,
             IssuedKeyMatch.ForIdentity(Guid.Parse(IdentityIdText), true, false, CertificateStatus.Current),
             Now),
+    };
+
+    // For each renewal outcome but a new pending certificate, the issued key whose CSR gets it:
+    // the renewing identity's pending key gets that certificate again, and its current key gets invalid_request.
+    private static Dictionary<RenewalOutcome, Func<Guid, IssuedKeyMatch>> KeysButANewPendingCertificate => new()
+    {
+        [RenewalOutcome.ReturnPendingCertificate] = identityId =>
+            IssuedKeyMatch.ForIdentity(identityId, false, false, CertificateStatus.Pending),
+        [RenewalOutcome.Reject] = identityId =>
+            IssuedKeyMatch.ForIdentity(identityId, false, false, CertificateStatus.Current),
     };
 
     private readonly ECDsa _rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     private readonly ECDsa _agentKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
     private readonly RandomNumberGenerator _random = RandomNumberGenerator.Create();
     private readonly X509Certificate2 _root;
+
+    // The CSR of the agent key, which names the token's URL, and which each test issues for unless it passes another.
     private readonly CertificateSigningRequest _csr;
 
-    // The decision that creates the identity whose certificate each test issues, unless the test passes another.
-    private readonly EnrollmentDecision _creating = EnrollmentRules.Decide(UsableToken, EnrollingCsr, null, Now);
+    // The decision that creates the identity whose certificate each test issues, unless the test passes another,
+    // made for the CSR of the agent key.
+    private readonly EnrollmentDecision _creating;
 
     // The ID that the decision minted, as CONTRACT.agent-identity.md §1 writes IDs:
     // Guid.ToString("D") writes a UUID lowercase and hyphenated.
@@ -82,9 +96,8 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
     public IdentityCertificateIssuerTests()
     {
         _root = CreateRoot(Now.AddDays(-1), Now.AddYears(10));
-
-        byte[] csr = new CertificateRequest("CN=agent", _agentKey, HashAlgorithmName.SHA256).CreateSigningRequest();
-        _csr = CertificateSigningRequest.Validate(csr).Csr!;
+        _csr = TestEnrollmentUrl.Csr(_agentKey, TokenUrl);
+        _creating = EnrollmentRules.Decide(UsableToken, _csr, null, Now);
     }
 
     public void Dispose()
@@ -604,59 +617,88 @@ public sealed class IdentityCertificateIssuerTests : IDisposable
         Assert.Equal(_agentKey.ExportSubjectPublicKeyInfo(), leaf.PublicKey.ExportSubjectPublicKeyInfo());
     }
 
-    // Code that acts for an identity takes the identity that the signature check produced,
-    // and only a renew request proves the identity that a renewal acts for.
-    // An identity that proved its key for another operation never had a renew request accepted for it.
-    // oracle: intent dotnet/Devolutions.Agent.Identity.Authority/INTENT.md §Authenticated identity
+    // Every issued public key is unique by SPKI SHA-256, so a certificate is issued only for the key whose lookup
+    // decided to issue it: another key may already be issued, or be decided on by a concurrent request.
+    // A host that issues from one enrollment's decision with another request's CSR would certify a key twice.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Fact]
+    public void ThrowsForTheCsrOfAnotherKeyThanTheEnrollmentDecision()
+    {
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => Issue(csr: OtherKeyCsr));
+
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("csr", exception.ParamName);
+    }
+
+    // Every issued public key is unique by SPKI SHA-256, and a renew request whose CSR key was never issued gets a new
+    // pending certificate for that key, so a renewal decision issues for its own CSR key only.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
     // oracle: spec Framework Design Guidelines §Validating Arguments
-    [Theory]
-    [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.Confirm)]
-    [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.CheckIn)]
-    [InlineData(nameof(IdentityCertificateIssuer), AgentOperation.Connect)]
-    [InlineData(nameof(RenewalRules), AgentOperation.Confirm)]
-    [InlineData(nameof(RenewalRules), AgentOperation.CheckIn)]
-    [InlineData(nameof(RenewalRules), AgentOperation.Connect)]
-    public async Task RenewalThrowsForAnIdentityAuthenticatedForAnotherOperation(
-        string renewal,
-        AgentOperation operation)
+    [Fact]
+    public async Task RenewalThrowsForTheCsrOfAnotherKeyThanTheDecision()
     {
-        AuthenticatedIdentity identity = await TestIdentity.AuthenticateAsync(operation);
+        AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
 
-        ArgumentException exception = Assert.Throws<ArgumentException>(() => Renewals[renewal](identity));
+        ArgumentException exception =
+            Assert.Throws<ArgumentException>(() => IssueForRenewal(renewing, csr: OtherKeyCsr));
 
         // oracle: spec Framework Design Guidelines §Using Standard Exception Types
-        Assert.Equal("renewing", exception.ParamName);
+        Assert.Equal("csr", exception.ParamName);
     }
 
-    // INTENT.md: a renewal acts for the identity that a renew request proved, and null is no identity;
-    // the .NET Framework Design Guidelines throw ArgumentNullException for a null argument that is not allowed.
-    // oracle: intent dotnet/Devolutions.Agent.Identity.Authority/INTENT.md §Authenticated identity
+    // The CSR key of the identity's pending certificate gets that pending chain again, and the key of any other issued
+    // certificate gets invalid_request: neither issues a certificate, which would certify an issued key twice.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §renew
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: spec Framework Design Guidelines §Validating Arguments
     [Theory]
-    [InlineData(nameof(IdentityCertificateIssuer))]
-    [InlineData(nameof(RenewalRules))]
-    public void RenewalThrowsForANullIdentity(string renewal)
+    [InlineData(RenewalOutcome.ReturnPendingCertificate)]
+    [InlineData(RenewalOutcome.Reject)]
+    public async Task RenewalThrowsForADecisionThatIssuesNoCertificate(RenewalOutcome outcome)
     {
-        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(() => Renewals[renewal](null!));
+        AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
+        RenewalDecision decision =
+            RenewalRules.Decide(renewing, _csr, KeysButANewPendingCertificate[outcome](renewing.IdentityId));
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => IssueForRenewal(decision));
 
         // oracle: spec Framework Design Guidelines §Using Standard Exception Types
-        Assert.Equal("renewing", exception.ParamName);
+        Assert.Equal("issuing", exception.ParamName);
     }
 
-    // The two calls that act for a renewing identity, named by the class of each.
-    private Dictionary<string, Action<AuthenticatedIdentity>> Renewals => new()
+    // A null argument throws ArgumentNullException, whose ParamName names it.
+    // oracle: spec Framework Design Guidelines §Validating Arguments
+    [Fact]
+    public void RenewalThrowsForANullDecision()
     {
-        [nameof(IdentityCertificateIssuer)] = renewing => IssueForRenewal(renewing).Dispose(),
-        [nameof(RenewalRules)] = renewing => RenewalRules.Decide(renewing, null),
-    };
+        ArgumentNullException exception =
+            Assert.Throws<ArgumentNullException>(() => IssueForRenewal((RenewalDecision)null!));
 
-    private X509Certificate2 IssueForRenewal(AuthenticatedIdentity renewing, string enrollmentUrl = TokenUrl)
+        // oracle: spec Framework Design Guidelines §Using Standard Exception Types
+        Assert.Equal("issuing", exception.ParamName);
+    }
+
+    // Decides a renew request of the identity for the CSR of the agent key,
+    // then issues its pending certificate with the given CSR, by default that one.
+    private X509Certificate2 IssueForRenewal(
+        AuthenticatedIdentity renewing,
+        string enrollmentUrl = TokenUrl,
+        CertificateSigningRequest? csr = null)
+    {
+        return IssueForRenewal(RenewalRules.Decide(renewing, _csr, null), enrollmentUrl, csr);
+    }
+
+    private X509Certificate2 IssueForRenewal(
+        RenewalDecision issuing,
+        string enrollmentUrl = TokenUrl,
+        CertificateSigningRequest? csr = null)
     {
         return IdentityCertificateIssuer.Issue(
-            renewing,
+            issuing,
             enrollmentUrl,
-            _csr,
+            csr ?? _csr,
             new TestRootSigner(_root, _rootKey),
             Lifetime,
             new FixedTimeProvider(Now),

@@ -134,7 +134,8 @@ Not intended:
 ### Configuration and metadata
 
 - `last_seen_at` moves only on actions that prove current possession of the device key; an enrollment replay and a stream closure prove none.
-  Creating the identity initializes it; every accepted renew, confirm (including an already-current retry) and check-in, every authenticated `Hello`, and every later agent message on an authenticated stream sets it to the authority's current time.
+  Creating the identity initializes it; every accepted renew, confirm (including an already-current retry) and check-in, and every authenticated `Hello`, sets it to the authority's current time.
+  Later agent messages on an authenticated stream also set it, but an authority may write them at most once every 5 seconds per stream, so that a busy channel does not write for every message; `last_seen_at` then trails the latest message by at most 5 seconds and never moves back.
 - Check-in is only a fallback for configuration and renewal requests while no channel is working.
   Features that need server push require the agent channel.
 - An enrollment token gives an identity no config by default.
@@ -163,7 +164,7 @@ Not intended:
   Authority-issued nonces would tolerate a skewed agent clock, but they cost a round trip after an idle period, stall a retry after a lost response, and need issuance state shared across authority nodes.
 - The authority records a nonce only after the request signature and any body digest are valid.
   Requests with an invalid signature or body digest therefore cannot consume nonce storage.
-- The authority keeps each accepted nonce until 60 s after its signature expires, the last moment the freshness window could accept the same signature again.
+- The authority keeps each accepted nonce at least until 60 s after its signature expires, the last moment the freshness window could accept the same signature again.
 - Published trust anchors help third parties validate certificate chains, but they carry no revocation information.
 
 ### Agent channel

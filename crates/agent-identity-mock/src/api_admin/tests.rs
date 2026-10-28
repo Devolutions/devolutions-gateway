@@ -974,7 +974,7 @@ async fn token_has_no_delete_operation() -> anyhow::Result<()> {
 
 // ==== Identities ====
 
-/// The `(thumbprint, serialNumber, validFrom, validUntil)` of a DER certificate, as `AgentIdentityCertificate` defines
+/// The `(thumbprint, serialNumber, validFrom, validTo)` of a DER certificate, as `AgentIdentityCertificate` defines
 /// them: the thumbprint is the base64url of the SHA-256 of the DER encoding, and the serial number is hexadecimal.
 fn certificate_fields(der: &[u8]) -> anyhow::Result<(String, String, String, String)> {
     use der::Decode as _;
@@ -1006,10 +1006,10 @@ fn certificate_fields(der: &[u8]) -> anyhow::Result<(String, String, String, Str
 async fn get_identity_returns_the_full_view() -> anyhow::Result<()> {
     let (app, now) = frozen_app()?;
     let (id, chain) = enroll_with_chain(&app, json!({ "hostname": "host-a" })).await?;
-    let (thumbprint, serial, valid_from, valid_until) = certificate_fields(&chain[0])?;
+    let (thumbprint, serial, valid_from, valid_to) = certificate_fields(&chain[0])?;
     let (root, ..) = certificate_fields(&chain[1])?;
     // The certificate follows the default 90-day lifetime.
-    assert_eq!((&valid_from, &valid_until), (&rfc3339(now), &rfc3339(now + 90 * DAY)));
+    assert_eq!((&valid_from, &valid_to), (&rfc3339(now), &rfc3339(now + 90 * DAY)));
     let token_id = app.state.lock().await.identities[&id].token_id;
 
     let (status, view) = call(&app, Method::GET, &format!("/{id}"), None).await?;
@@ -1021,7 +1021,7 @@ async fn get_identity_returns_the_full_view() -> anyhow::Result<()> {
         "status": "Active",
         "isConnected": false,
         "lastSeenOn": rfc3339(now),
-        "certificate": { "issuerThumbprint": root, "validUntil": valid_until },
+        "certificate": { "issuerThumbprint": root, "validTo": valid_to },
         "metadata": { "hostname": "host-a" },
         "certificates": [{
             "issuerThumbprint": root,
@@ -1029,7 +1029,7 @@ async fn get_identity_returns_the_full_view() -> anyhow::Result<()> {
             "status": "Current",
             "thumbprint": thumbprint,
             "validFrom": valid_from,
-            "validUntil": valid_until,
+            "validTo": valid_to,
         }],
         "createdOn": rfc3339(now),
         "enrollmentTokenId": token_id,
@@ -1435,7 +1435,7 @@ async fn rotation_defaults_to_the_rotation_maximum() -> anyhow::Result<()> {
             json!({
                 "thumbprint": root.thumbprint,
                 "validFrom": rfc3339(root.not_before),
-                "validUntil": rfc3339(root.not_after),
+                "validTo": rfc3339(root.not_after),
             })
         };
         let new_root = state.issuing_root().thumbprint.clone();
@@ -1654,7 +1654,7 @@ async fn certificate_lifetime_applies_to_new_certificates() -> anyhow::Result<()
     assert_eq!((status, &settings["certificateLifetimeDays"]), (200, &json!(7)));
     let id = enroll(&app, json!({})).await?;
     let (_, view) = call(&app, Method::GET, &format!("/{id}"), None).await?;
-    assert_eq!(view["certificate"]["validUntil"], rfc3339(now + 7 * DAY));
+    assert_eq!(view["certificate"]["validTo"], rfc3339(now + 7 * DAY));
     Ok(())
 }
 
@@ -1666,7 +1666,7 @@ async fn leaf_lifetime_fault_overrides_the_setting() -> anyhow::Result<()> {
     app.state.lock().await.faults.leaf_lifetime_secs = Some(60);
     let id = enroll(&app, json!({})).await?;
     let (_, view) = call(&app, Method::GET, &format!("/{id}"), None).await?;
-    assert_eq!(view["certificate"]["validUntil"], rfc3339(now + 60));
+    assert_eq!(view["certificate"]["validTo"], rfc3339(now + 60));
     Ok(())
 }
 

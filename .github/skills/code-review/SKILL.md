@@ -3,8 +3,6 @@ name: code-review
 description: Review Devolutions Gateway pull requests and diffs using focused contract, intent, compression, style, test, dependency, documentation, prose, and skeptical passes. Use whenever Copilot code review is requested or a proposed change needs review.
 ---
 
-# Code review
-
 Inspect the diff, its stated goal, and repository guidance before selecting conditional reviewers:
 
 - Run `external-contract-reviewer` only when the change may affect HTTP or OpenAPI behavior, WebSocket behavior, relay or tunneling semantics, configuration schemas, or agent and platform protocols.

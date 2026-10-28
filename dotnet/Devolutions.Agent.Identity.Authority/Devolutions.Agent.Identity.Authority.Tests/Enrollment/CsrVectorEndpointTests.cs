@@ -72,7 +72,7 @@ public class CsrVectorEndpointTests
         }
 
         AuthenticatedIdentity renewing = await TestIdentity.AuthenticateAsync(AgentOperation.Renew);
-        RenewalDecision decision = RenewalRules.Decide(renewing, null);
+        RenewalDecision decision = RenewalRules.Decide(renewing, result.Csr, null);
 
         return decision.Outcome == RenewalOutcome.IssuePendingCertificate ? "ok" : decision.Error!.Code.ToWireValue();
     }

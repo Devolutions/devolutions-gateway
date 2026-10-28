@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Context, bail};
 use async_trait::async_trait;
 use devolutions_agent_shared::temp_file::{BATCH_UTF8_PREAMBLE, POWERSHELL_UTF8_ENCODING_PREAMBLE, TmpFileGuard};
-use devolutions_gateway_task::{ChildTask, Task};
+use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use now_proto_pdu::ironrdp_core::IntoOwned;
 use now_proto_pdu::{
     ComApartmentStateKind, NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelHeartbeatMsg, NowChannelMessage,
@@ -42,13 +42,21 @@ use windows::core::PCWSTR;
 use crate::dvc::channel::{WinapiSignaledSender, bounded_mpsc_channel, winapi_signaled_mpsc_channel};
 use crate::dvc::encoding::DataEncoding;
 use crate::dvc::io::{DvcInitializationProgress, run_dvc_io};
-use crate::dvc::process::{ExecError, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
+use crate::dvc::process::{ExecError, ProcessJob, ServerChannelEvent, WinApiProcess, WinApiProcessBuilder};
 use crate::dvc::rdm::RdmMessageProcessor;
 use crate::dvc::window_monitor::{WindowMonitorConfig, run_window_monitor};
 
 // One minute heartbeat interval by default
 const DEFAULT_HEARTBEAT_INTERVAL: core::time::Duration = core::time::Duration::from_secs(60);
 const HANDSHAKE_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(5);
+
+/// Delay before reopening a channel after the first failure; it doubles with each consecutive failed reopen.
+const REOPEN_DELAY_FLOOR: core::time::Duration = core::time::Duration::from_secs(1);
+const REOPEN_DELAY_CAP: core::time::Duration = core::time::Duration::from_secs(10);
+/// Number of consecutive reopened channels that may fail to negotiate before the process gives up.
+const MAX_CONSECUTIVE_FAILED_REOPENS: usize = 5;
+/// Time the IO thread of a lost channel has to release it before the process gives up.
+const IO_THREAD_STOP_TIMEOUT: core::time::Duration = core::time::Duration::from_secs(10);
 
 const GENERIC_ERROR_CODE_ENCODING: u32 = 0x00000001;
 const GENERIC_ERROR_CODE_TOO_LONG_ERROR: u32 = 0x00000002;
@@ -63,62 +71,207 @@ impl Task for DvcIoTask {
 
     const NAME: &'static str = "DVC processing";
 
-    async fn run(self, shutdown_signal: devolutions_gateway_task::ShutdownSignal) -> Self::Output {
-        let (write_tx, write_rx) = winapi_signaled_mpsc_channel()?;
-        let (read_tx, read_rx) = bounded_mpsc_channel()?;
+    async fn run(self, shutdown_signal: ShutdownSignal) -> Self::Output {
+        let channel_shutdown_signal = shutdown_signal.clone();
 
-        // WinAPI event to terminate DVC IO thread.
-        let io_thread_shutdown_event = Event::new_unnamed()?;
+        serve_dvc(move || serve_channel(channel_shutdown_signal.clone()), shutdown_signal).await
+    }
+}
 
-        let cloned_shutdown_event = io_thread_shutdown_event.clone();
+/// How serving one DVC channel ended.
+#[derive(Debug)]
+enum ChannelOutcome {
+    /// The channel was closed on purpose, by either peer or by shutdown, and must not be reopened.
+    Ended,
+    /// The channel failed before the client completed negotiation.
+    NotNegotiated(anyhow::Error),
+    /// The channel failed after the client completed negotiation.
+    Lost(anyhow::Error),
+}
 
-        let init_progress = Arc::new(DvcInitializationProgress::default());
-        let io_thread_progress = Arc::clone(&init_progress);
+impl ChannelOutcome {
+    fn new(result: anyhow::Result<()>, init_progress: &DvcInitializationProgress) -> Self {
+        match result {
+            Ok(()) => Self::Ended,
+            Err(error) if init_progress.negotiated() => Self::Lost(error),
+            Err(error) => Self::NotNegotiated(error),
+        }
+    }
+}
 
-        info!(
-            "Starting NowProto DVC v{}.{}",
-            NowProtoVersion::CURRENT.major,
-            NowProtoVersion::CURRENT.minor
-        );
+/// Serves DVC channels until one ends on purpose, reopening a channel lost after negotiation.
+///
+/// A first channel that never negotiates is not reopened: the client likely has no NOW listener, and reopening would
+/// keep a process alive that nobody can reach.
+/// Once a client has negotiated, a failed channel is reopened after a delay that grows with each consecutive reopen
+/// that fails to negotiate, until [`MAX_CONSECUTIVE_FAILED_REOPENS`] of them.
+///
+/// Errors only when a negotiated client can no longer be served, which makes the process exit with a failure code
+/// that the agent answers by relaunching it.
+async fn serve_dvc<F, Fut>(mut serve_channel: F, mut shutdown_signal: ShutdownSignal) -> anyhow::Result<()>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<ChannelOutcome>>,
+{
+    // `None` until a negotiated channel is lost.
+    let mut failed_reopens: Option<usize> = None;
 
-        // Spawning thread is relatively short operation, so it could be executed synchronously.
-        let io_thread = std::thread::spawn(move || {
-            let io_thread_result = run_dvc_io(write_rx, read_tx, cloned_shutdown_event, &io_thread_progress);
-
-            if let Err(error) = io_thread_result {
-                error!(%error, "DVC IO thread failed");
+    loop {
+        if let Some(failed_reopens) = failed_reopens {
+            select! {
+                () = tokio::time::sleep(reopen_delay(failed_reopens)) => {}
+                _ = shutdown_signal.wait() => return Ok(()),
             }
-        });
+        }
 
-        // Join thread some time in future.
-        tokio::task::spawn_blocking(move || {
-            if let Err(panic_payload) = io_thread.join() {
-                if let Some(s) = panic_payload.downcast_ref::<&dyn std::fmt::Debug>() {
-                    error!("DVC IO thread panic: {:?}", s);
+        match serve_channel().await? {
+            ChannelOutcome::Ended => return Ok(()),
+            ChannelOutcome::Lost(error) => {
+                warn!(
+                    error = format!("{error:#}"),
+                    "Lost the negotiated DVC channel; reopening it"
+                );
+                failed_reopens = Some(0);
+            }
+            ChannelOutcome::NotNegotiated(error) => {
+                let Some(previous_failures) = failed_reopens else {
+                    // Not a failure: the client likely has no NOW listener, and the agent relaunches a process that
+                    // exits with an error.
+                    warn!(
+                        error = format!("{error:#}"),
+                        "The client did not negotiate the DVC channel"
+                    );
+                    return Ok(());
+                };
+
+                let failures = previous_failures + 1;
+
+                if failures < MAX_CONSECUTIVE_FAILED_REOPENS {
+                    warn!(
+                        error = format!("{error:#}"),
+                        failures, "Failed to reopen the DVC channel"
+                    );
+                    failed_reopens = Some(failures);
                 } else {
-                    error!("DVC IO thread join failed.");
+                    return Err(error.context(format!("failed to reopen the DVC channel {failures} consecutive times")));
                 }
             }
-        });
+        }
+    }
+}
 
-        info!("Processing DVC messages...");
+fn reopen_delay(failed_reopens: usize) -> core::time::Duration {
+    let factor = u32::try_from(failed_reopens)
+        .ok()
+        .and_then(|exponent| 2u32.checked_pow(exponent))
+        .unwrap_or(u32::MAX);
 
-        let process_result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
+    REOPEN_DELAY_FLOOR.saturating_mul(factor).min(REOPEN_DELAY_CAP)
+}
 
-        // Send shutdown signal to IO thread to release WTS channel resources.
-        info!("Shutting down DVC IO thread");
-        let _ = io_thread_shutdown_event.set();
+/// Opens one DVC channel and serves it until it ends.
+///
+/// Errors only when the process cannot go on serving channels at all.
+async fn serve_channel(mut shutdown_signal: ShutdownSignal) -> anyhow::Result<ChannelOutcome> {
+    let (write_tx, write_rx) = winapi_signaled_mpsc_channel()?;
+    let (read_tx, read_rx) = bounded_mpsc_channel()?;
 
-        process_result?;
+    // WinAPI event to terminate DVC IO thread.
+    let io_thread_shutdown_event = Event::new_unnamed()?;
 
-        Ok(())
+    let cloned_shutdown_event = io_thread_shutdown_event.clone();
+
+    // Each channel gets its own progress, and therefore its own negotiation deadline.
+    let init_progress = Arc::new(DvcInitializationProgress::default());
+    let io_thread_progress = Arc::clone(&init_progress);
+    let (io_loop_ended_tx, io_loop_ended_rx) = tokio::sync::oneshot::channel();
+
+    info!(
+        "Starting NowProto DVC v{}.{}",
+        NowProtoVersion::CURRENT.major,
+        NowProtoVersion::CURRENT.minor
+    );
+
+    // Spawning thread is relatively short operation, so it could be executed synchronously.
+    let io_thread = std::thread::spawn(move || {
+        let io_thread_result = run_dvc_io(
+            write_rx,
+            read_tx,
+            cloned_shutdown_event,
+            &io_thread_progress,
+            io_loop_ended_tx,
+        );
+
+        if let Err(error) = io_thread_result {
+            error!(%error, "DVC IO thread failed");
+        }
+    });
+
+    // Joined on a plain thread rather than the blocking pool, because the runtime waits for its blocking tasks when it
+    // shuts down, so an IO thread that never stops would keep the process alive.
+    let (io_thread_stopped_tx, io_thread_stopped_rx) = tokio::sync::oneshot::channel::<()>();
+    std::thread::spawn(move || {
+        if let Err(panic_payload) = io_thread.join() {
+            if let Some(s) = panic_payload.downcast_ref::<&dyn std::fmt::Debug>() {
+                error!("DVC IO thread panic: {:?}", s);
+            } else {
+                error!("DVC IO thread join failed.");
+            }
+        }
+
+        let _ = io_thread_stopped_tx.send(());
+    });
+
+    info!("Processing DVC messages...");
+
+    let process_result = process_until_io_ends(
+        process_messages(read_rx, write_tx, shutdown_signal.clone(), &init_progress),
+        io_loop_ended_rx,
+    )
+    .await;
+
+    // Send shutdown signal to IO thread to release WTS channel resources.
+    info!("Shutting down DVC IO thread");
+    let _ = io_thread_shutdown_event.set();
+
+    let outcome = ChannelOutcome::new(process_result, &init_progress);
+
+    // UNTESTED: a failed channel may be reopened, so its IO thread must release the WTS handle before the next open,
+    // and a thread that does not stop must end the process, because the agent does not replace a process that is
+    // still running.
+    // An ended channel is never reopened, so the process exits without depending on the thread.
+    // The thread waits for its cancelled overlapped IO to finish before it stops; when changing the IO thread or its
+    // join, check that the timeout still bounds that wait and that nothing on the runtime still waits for the thread.
+    if let ChannelOutcome::Lost(error) | ChannelOutcome::NotNegotiated(error) = &outcome {
+        select! {
+            stopped = tokio::time::timeout(IO_THREAD_STOP_TIMEOUT, io_thread_stopped_rx) => {
+                if stopped.is_err() {
+                    error!(error = format!("{error:#}"), "DVC channel failed");
+                    bail!("DVC IO thread did not stop within {IO_THREAD_STOP_TIMEOUT:?}");
+                }
+            }
+            _ = shutdown_signal.wait() => return Ok(ChannelOutcome::Ended),
+        }
+    }
+
+    Ok(outcome)
+}
+
+async fn process_until_io_ends(
+    processing: impl Future<Output = anyhow::Result<()>>,
+    io_loop_ended: tokio::sync::oneshot::Receiver<()>,
+) -> anyhow::Result<()> {
+    select! {
+        biased;
+        result = processing => result,
+        _ = io_loop_ended => bail!("DVC IO loop ended"),
     }
 }
 
 async fn process_messages(
     mut read_rx: Receiver<OwnedNowMessage>,
     dvc_tx: WinapiSignaledSender<OwnedNowMessage>,
-    mut shutdown_signal: devolutions_gateway_task::ShutdownSignal,
+    mut shutdown_signal: ShutdownSignal,
     init_progress: &DvcInitializationProgress,
 ) -> anyhow::Result<()> {
     let (io_notification_tx, mut task_rx) = mpsc::channel(100);
@@ -189,6 +342,7 @@ async fn process_messages(
         reason = "the task handle is a drop guard; it is assigned, never inspected"
     )]
     let mut _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
+    init_progress.set_heartbeats_enabled(heartbeats_enabled(downgraded_caps.heartbeat_interval()));
 
     // Reply with the negotiated capset so the client sees the capabilities and heartbeat interval
     // the agent applies, not the server default that omits the interval.
@@ -201,15 +355,31 @@ async fn process_messages(
         pwsh_executable.clone(),
     );
 
+    init_progress.mark_negotiated();
     info!("DVC negotiation completed");
+
+    // Process output keeps being served while stdin waits, because the process may not read stdin until its output
+    // is drained.
+    let mut pending_stdin: Option<(u32, StdinSend)> = None;
 
     loop {
         select! {
-            read_result = read_rx.recv() => {
+            () = async {
+                match pending_stdin.as_mut() {
+                    Some((_, send)) => send.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                pending_stdin = None;
+            }
+            read_result = read_rx.recv(), if pending_stdin.is_none() => {
                 match read_result {
                     Some(message) => {
                         match processor.process_message(message).await {
                             Ok(ProcessMessageAction::Continue) => {}
+                            Ok(ProcessMessageAction::SendStdin { session_id, send }) => {
+                                pending_stdin = Some((session_id, send));
+                            }
                             Ok(ProcessMessageAction::Shutdown) => {
                                 info!("Received channel shutdown message...");
                                 return Ok(());
@@ -222,9 +392,9 @@ async fn process_messages(
                                 let server_caps = default_server_caps(pwsh_executable.is_some());
                                 let downgraded_caps = client_caps.downgrade(&server_caps);
                                 _heartbeat = spawn_heartbeat(dvc_tx.clone(), downgraded_caps.heartbeat_interval());
+                                init_progress.set_heartbeats_enabled(heartbeats_enabled(downgraded_caps.heartbeat_interval()));
 
-                                // Old exec sessions will be abandoned (IO loops will terminate
-                                // on old processor `Drop`).
+                                // Dropping the old processor ends its exec sessions and the processes they started.
                                 processor = MessageProcessor::new(
                                     downgraded_caps.clone(),
                                     dvc_tx.clone(),
@@ -271,6 +441,7 @@ async fn process_messages(
                             ServerChannelEvent::SessionExited { session_id, exit_code } => {
                                 info!(session_id, %exit_code, "Session exited");
                                 processor.remove_session(session_id);
+                                discard_pending_stdin(&mut pending_stdin, session_id);
 
                                 let message = NowExecResultMsg::new_success(session_id, exit_code);
                                 dvc_tx.send(message.into()).await?;
@@ -278,6 +449,7 @@ async fn process_messages(
                             ServerChannelEvent::SessionFailed { session_id, error } => {
                                 error!(session_id, %error, "Session error");
                                 processor.remove_session(session_id);
+                                discard_pending_stdin(&mut pending_stdin, session_id);
 
                                 handle_exec_error(&dvc_tx, session_id, error).await;
                             }
@@ -343,16 +515,22 @@ fn spawn_heartbeat(
 /// `NOW_CHANNEL_SET_HEARTBEAT`.
 /// Without a negotiated interval, [`DEFAULT_HEARTBEAT_INTERVAL`] applies.
 fn heartbeat_timer(negotiated_interval: Option<core::time::Duration>) -> Option<Interval> {
-    let period = negotiated_interval.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
-
-    if period.is_zero() {
+    if !heartbeats_enabled(negotiated_interval) {
         return None;
     }
 
+    let period = negotiated_interval.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL);
     let mut timer = tokio::time::interval_at(Instant::now() + period, period);
     timer.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
     Some(timer)
+}
+
+/// Whether the server may send heartbeats for a negotiated interval.
+///
+/// Only a zero interval disables them; without a negotiated interval, [`DEFAULT_HEARTBEAT_INTERVAL`] applies.
+fn heartbeats_enabled(negotiated_interval: Option<core::time::Duration>) -> bool {
+    !negotiated_interval.unwrap_or(DEFAULT_HEARTBEAT_INTERVAL).is_zero()
 }
 
 fn default_server_caps(pwsh_available: bool) -> NowChannelCapsetMsg {
@@ -416,10 +594,27 @@ fn find_pwsh_executable() -> Option<String> {
     String::from_utf16(&buffer[..len]).ok()
 }
 
+type StdinSend = std::pin::Pin<Box<dyn Future<Output = ()> + Send>>;
+
+/// Drops a stdin send for a session that has ended, so its input no longer holds back other messages.
+fn discard_pending_stdin(pending_stdin: &mut Option<(u32, StdinSend)>, ended_session_id: u32) {
+    if pending_stdin
+        .as_ref()
+        .is_some_and(|(session_id, _)| *session_id == ended_session_id)
+    {
+        *pending_stdin = None;
+    }
+}
+
 enum ProcessMessageAction {
     Continue,
     Shutdown,
     Restart(NowChannelCapsetMsg),
+    /// Stdin for a session; later messages wait for it so input stays ordered and a full stdin queue pushes back.
+    SendStdin {
+        session_id: u32,
+        send: StdinSend,
+    },
 }
 
 struct MessageProcessor {
@@ -427,7 +622,15 @@ struct MessageProcessor {
     io_notification_tx: Sender<ServerChannelEvent>,
     #[allow(dead_code)] // Not yet used.
     capabilities: NowChannelCapsetMsg,
+    /// Attached execution sessions of this channel.
+    ///
+    /// Ending the channel or renegotiating capabilities drops this processor, which stops their IO and kills them with
+    /// `process_job`; no later channel or negotiation could reach them, because each starts with no sessions.
     sessions: HashMap<u32, WinApiProcess>,
+    /// Job of the attached executions and the processes they start; created by the first attached execution.
+    ///
+    /// Processes left running by an attached execution that already exited are killed with it too.
+    process_job: Option<ProcessJob>,
     rdm_handler: RdmMessageProcessor,
     /// Resolved pwsh executable path; `None` when pwsh is not installed.
     pwsh_executable: Option<String>,
@@ -450,11 +653,19 @@ impl MessageProcessor {
             io_notification_tx,
             capabilities,
             sessions: HashMap::new(),
+            process_job: None,
             rdm_handler,
             pwsh_executable,
             window_monitor_shutdown_tx: None,
             window_monitor_handle: None,
         }
+    }
+
+    fn process_job(&mut self) -> Result<&ProcessJob, ExecError> {
+        Ok(match &mut self.process_job {
+            Some(job) => job,
+            slot @ None => slot.insert(ProcessJob::new()?),
+        })
     }
 
     async fn ensure_session_id_free(&self, session_id: u32) -> Result<(), ExecError> {
@@ -590,7 +801,12 @@ impl MessageProcessor {
                     }
                 };
 
-                process.send_stdin(data_msg.data().to_vec(), data_msg.is_last()).await?;
+                let send = process.send_stdin(data_msg.data().to_vec(), data_msg.is_last());
+
+                return Ok(ProcessMessageAction::SendStdin {
+                    session_id,
+                    send: Box::pin(send),
+                });
             }
             NowMessage::Session(NowSessionMessage::MsgBoxReq(request)) => {
                 let tx = self.dvc_tx.clone();
@@ -716,14 +932,16 @@ impl MessageProcessor {
 
         info!(session_id, "Executing ShellExecuteW");
 
-        // SAFETY: All buffers are valid, therefore `ShellExecuteW` is safe to call.
+        // UNTESTED: Keep the directory buffer alive through ShellExecuteW; consuming it creates a dangling pointer.
+        // Check the borrow when changing argument conversion; a successful launch cannot prove pointer validity.
+        // SAFETY: All buffers are borrowed from locals that remain alive through the call.
         let hinstance = unsafe {
             ShellExecuteW(
                 None,
                 operation.as_pcwstr(),
                 command.as_pcwstr(),
                 parameters.as_pcwstr(),
-                directory.map(|d| d.as_pcwstr()).unwrap_or(PCWSTR::null()),
+                directory.as_ref().map_or_else(PCWSTR::null, WideString::as_pcwstr),
                 // Activate and show window
                 SW_RESTORE,
             )
@@ -774,9 +992,11 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        let process = run_process
-            .with_io_redirection(exec_msg.is_with_io_redirection())
-            .run(exec_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_process.with_io_redirection(exec_msg.is_with_io_redirection()).run(
+            exec_msg.session_id(),
+            self.io_notification_tx.clone(),
+            self.process_job()?,
+        )?;
 
         self.sessions.insert(exec_msg.session_id(), process);
 
@@ -821,9 +1041,11 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        let process = run_batch
-            .with_io_redirection(batch_msg.is_with_io_redirection())
-            .run(batch_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_batch.with_io_redirection(batch_msg.is_with_io_redirection()).run(
+            batch_msg.session_id(),
+            self.io_notification_tx.clone(),
+            self.process_job()?,
+        )?;
 
         self.sessions.insert(batch_msg.session_id(), process);
 
@@ -883,7 +1105,11 @@ impl MessageProcessor {
 
         let process = run_process
             .with_io_redirection(winps_msg.is_with_io_redirection())
-            .run(winps_msg.session_id(), self.io_notification_tx.clone())?;
+            .run(
+                winps_msg.session_id(),
+                self.io_notification_tx.clone(),
+                self.process_job()?,
+            )?;
 
         self.sessions.insert(winps_msg.session_id(), process);
 
@@ -948,9 +1174,11 @@ impl MessageProcessor {
             return Ok(());
         }
 
-        let process = run_process
-            .with_io_redirection(pwsh_msg.is_with_io_redirection())
-            .run(pwsh_msg.session_id(), self.io_notification_tx.clone())?;
+        let process = run_process.with_io_redirection(pwsh_msg.is_with_io_redirection()).run(
+            pwsh_msg.session_id(),
+            self.io_notification_tx.clone(),
+            self.process_job()?,
+        )?;
 
         self.sessions.insert(pwsh_msg.session_id(), process);
 
@@ -1324,18 +1552,431 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
+    use core::task::Poll;
     use core::time::Duration;
+    use std::collections::VecDeque;
 
-    use devolutions_gateway_task::ShutdownHandle;
+    use anyhow::anyhow;
+    use devolutions_gateway_task::{ShutdownHandle, ShutdownSignal};
     use futures::poll;
     use now_proto_pdu::{
-        NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowMessage,
-        NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
+        NowChannelCapsetMsg, NowChannelCloseMsg, NowChannelMessage, NowExecCapsetFlags, NowExecMessage,
+        NowExecProcessMsg, NowExecResultMsg, NowMessage, NowSessionCapsetFlags, NowSystemCapsetFlags, OwnedNowMessage,
     };
+    use tokio::time::Instant;
+    use win_api_wrappers::process::Process;
+    use windows::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows::Win32::System::Threading::{PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
 
-    use super::{DEFAULT_HEARTBEAT_INTERVAL, heartbeat_timer, process_messages, spawn_heartbeat};
+    use super::{
+        ChannelOutcome, DEFAULT_HEARTBEAT_INTERVAL, MAX_CONSECUTIVE_FAILED_REOPENS, REOPEN_DELAY_CAP,
+        REOPEN_DELAY_FLOOR, heartbeat_timer, process_messages, process_until_io_ends, serve_dvc, spawn_heartbeat,
+    };
     use crate::dvc::channel::{bounded_mpsc_channel, winapi_signaled_mpsc_channel};
     use crate::dvc::io::DvcInitializationProgress;
+
+    // oracle: regression #2156 detached Process must leave the channel alive for subsequent execution.
+    #[tokio::test]
+    async fn detached_process_keeps_channel_available_for_execution() {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(
+                NowExecProcessMsg::new(1, "cmd.exe")
+                    .expect("valid executable")
+                    .with_parameters("/d /c exit 0")
+                    .expect("valid parameters")
+                    .with_detached()
+                    .into(),
+            )
+            .await
+            .expect("queue detached process");
+
+        let mut processing = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                tokio::select! {
+                    result = &mut processing => panic!("processing ended before fresh execution completed: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+
+                while let Ok(message) = write_rx.try_recv() {
+                    if let NowMessage::Exec(NowExecMessage::Result(result)) = message {
+                        if result.session_id() == 1 {
+                            assert_eq!(result, NowExecResultMsg::new_success(1, 0));
+                            read_tx
+                                .send(
+                                    NowExecProcessMsg::new(2, "cmd.exe")
+                                        .expect("valid executable")
+                                        .with_parameters("/d /c exit 7")
+                                        .expect("valid parameters")
+                                        .into(),
+                                )
+                                .await
+                                .expect("queue fresh execution after detached acknowledgment");
+                        } else {
+                            assert_eq!(result, NowExecResultMsg::new_success(2, 7));
+                            return;
+                        }
+                    }
+                }
+            }
+        })
+        .await
+        .expect("fresh execution completes without the detached launch killing the host");
+
+        read_tx
+            .send(NowChannelCloseMsg::default().into())
+            .await
+            .expect("queue channel close");
+        processing.await.expect("channel still accepts a normal close");
+    }
+
+    /// An attached execution and the processes it started must not outlive their channel, because no other channel
+    /// can reach them.
+    // oracle: regression #2156 attached exec children survived the loss of their channel.
+    #[tokio::test]
+    async fn attached_exec_tree_ends_with_its_channel() {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(
+                NowExecProcessMsg::new(1, "powershell.exe")
+                    .expect("valid executable")
+                    .with_parameters(
+                        "-NoProfile -NonInteractive -Command \
+                         $g = Start-Process ping.exe -ArgumentList '-n 600 127.0.0.1' -WindowStyle Hidden -PassThru; \
+                         [Console]::Out.WriteLine([string]$PID + ' ' + $g.Id); Start-Sleep 600",
+                    )
+                    .expect("valid parameters")
+                    .with_io_redirection()
+                    .into(),
+            )
+            .await
+            .expect("queue attached process");
+
+        let mut processing = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+        let mut stdout = Vec::new();
+        let tree = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                tokio::select! {
+                    result = &mut processing => panic!("processing ended before the process tree started: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+
+                while let Ok(message) = write_rx.try_recv() {
+                    if let NowMessage::Exec(NowExecMessage::Data(data)) = message {
+                        stdout.extend_from_slice(data.data());
+                    }
+                }
+
+                if let Some(line) = String::from_utf8_lossy(&stdout)
+                    .lines()
+                    .next()
+                    .filter(|_| stdout.contains(&b'\n'))
+                {
+                    // Opened right away so that the process IDs cannot be reused before the assertions.
+                    return line
+                        .split_whitespace()
+                        .map(|pid| {
+                            Process::get_by_pid(pid.parse().expect("process ID"), PROCESS_SYNCHRONIZE)
+                                .expect("open process in the tree")
+                        })
+                        .collect::<Vec<_>>();
+                }
+            }
+        })
+        .await
+        .expect("attached process reports its tree");
+        assert_eq!(tree.len(), 2, "child and grandchild");
+
+        drop(read_tx);
+        let result = processing.await;
+        assert!(result.is_err(), "channel loss ends processing with an error");
+
+        for process in &tree {
+            assert_eq!(
+                process.wait(Some(10_000)).expect("wait for process"),
+                WAIT_OBJECT_0,
+                "process in the attached tree outlived its channel"
+            );
+        }
+    }
+
+    /// A detached execution is fire-and-forget, so it must outlive the channel that started it.
+    // oracle: mutant attached-tree cleanup also kills detached launches.
+    #[tokio::test]
+    async fn detached_exec_outlives_its_channel() {
+        let pid_file = std::env::temp_dir().join(format!("now-detached-exec-{}.pid", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(
+                NowExecProcessMsg::new(1, "powershell.exe")
+                    .expect("valid executable")
+                    .with_parameters(format!(
+                        "-NoProfile -NonInteractive -Command \
+                         Set-Content -LiteralPath '{}' -Value $PID; Start-Sleep 600",
+                        pid_file.display()
+                    ))
+                    .expect("valid parameters")
+                    .with_detached()
+                    .into(),
+            )
+            .await
+            .expect("queue detached process");
+
+        let mut processing = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+        let process = tokio::time::timeout(Duration::from_secs(30), async {
+            loop {
+                tokio::select! {
+                    result = &mut processing => panic!("processing ended before the detached process started: {result:?}"),
+                    () = tokio::time::sleep(Duration::from_millis(10)) => {}
+                }
+
+                while write_rx.try_recv().is_ok() {}
+
+                let pid = std::fs::read_to_string(&pid_file).unwrap_or_default();
+                if let Ok(pid) = pid.trim().parse() {
+                    return Process::get_by_pid(pid, PROCESS_SYNCHRONIZE | PROCESS_TERMINATE)
+                        .expect("open detached process");
+                }
+            }
+        })
+        .await
+        .expect("detached process reports its ID");
+
+        drop(read_tx);
+        let result = processing.await;
+        assert!(result.is_err(), "channel loss ends processing with an error");
+
+        let outlived = process.wait(Some(1_000)).expect("wait for process") == WAIT_TIMEOUT;
+        process.terminate(1).expect("clean up detached process");
+        let _ = std::fs::remove_file(&pid_file);
+        assert!(outlived, "detached process ended with its channel");
+    }
+
+    // oracle: mutant a full stdin queue prevents a closed DVC from interrupting the processing loop.
+    #[tokio::test]
+    async fn io_loss_interrupts_processing_while_stdin_is_backpressured() {
+        let (stdin_tx, _stdin_rx) = tokio::sync::mpsc::channel(1);
+        stdin_tx.send(()).await.expect("fill stdin queue");
+        let processing = async move {
+            stdin_tx.send(()).await.expect("stdin queue remains open");
+            Ok(())
+        };
+        let (io_loop_ended_tx, io_loop_ended_rx) = tokio::sync::oneshot::channel();
+        io_loop_ended_tx.send(()).expect("publish IO loop exit");
+
+        let result = tokio::time::timeout(
+            Duration::from_secs(1),
+            process_until_io_ends(processing, io_loop_ended_rx),
+        )
+        .await
+        .expect("IO loss interrupts the blocked stdin send");
+
+        assert!(result.is_err(), "transport loss must enter channel recovery");
+    }
+
+    // oracle: mutant IO teardown changes an already-completed normal protocol close into a transport failure.
+    #[tokio::test]
+    async fn completed_protocol_close_stays_normal_when_io_also_ends() {
+        let (io_loop_ended_tx, io_loop_ended_rx) = tokio::sync::oneshot::channel();
+        io_loop_ended_tx.send(()).expect("publish IO loop exit");
+
+        process_until_io_ends(async { Ok(()) }, io_loop_ended_rx)
+            .await
+            .expect("normal protocol close remains normal");
+    }
+
+    /// A negotiated channel whose IO ends, as when the client tears the DVC down while the RDP connection stays up,
+    /// must be told apart from one that never negotiated, because only the former is reopened.
+    // oracle: mutant a channel lost after negotiation is classified as not negotiated or ended
+    #[tokio::test]
+    async fn read_channel_closing_after_negotiation_loses_the_channel() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        drop(read_tx);
+
+        let result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
+
+        let outcome = ChannelOutcome::new(result, &init_progress);
+        assert!(matches!(outcome, ChannelOutcome::Lost(_)), "{outcome:?}");
+    }
+
+    /// A channel whose IO ends before the client negotiates, as with a client that has no NOW listener, must not be
+    /// classified as lost, so it is never reopened.
+    // oracle: mutant a channel ending before negotiation is classified as lost
+    #[tokio::test]
+    async fn read_channel_closing_before_negotiation_is_not_negotiated() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        drop(read_tx);
+
+        let result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
+
+        let outcome = ChannelOutcome::new(result, &init_progress);
+        assert!(matches!(outcome, ChannelOutcome::NotNegotiated(_)), "{outcome:?}");
+    }
+
+    /// A channel the client closes on purpose must end rather than be reopened against the client's will.
+    // oracle: spec Devolutions/now-proto@7519c6ff6cfa45bb70c3a3c67df2024d482eda53:protocols/docs/NOW-spec.md §NOW_CHANNEL_CLOSE_MSG
+    #[tokio::test]
+    async fn client_channel_close_ends_the_channel() {
+        let (write_tx, _write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        read_tx
+            .send(NowChannelCapsetMsg::default().into())
+            .await
+            .expect("queue client capset");
+        read_tx
+            .send(NowChannelCloseMsg::default().into())
+            .await
+            .expect("queue channel close");
+
+        let result = process_messages(read_rx, write_tx, shutdown_signal, &init_progress).await;
+
+        let outcome = ChannelOutcome::new(result, &init_progress);
+        assert!(matches!(outcome, ChannelOutcome::Ended), "{outcome:?}");
+    }
+
+    /// A first channel that never negotiates must end the loop, so a client without a NOW listener does not keep the
+    /// process alive reopening a channel nobody serves.
+    /// It ends without an error, because the agent relaunches a process that exits with one.
+    // oracle: mutant an unnegotiated first channel is reopened or ends with an error
+    #[tokio::test(start_paused = true)]
+    async fn unnegotiated_first_channel_is_not_reopened() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+
+        let (result, _) = serve_script([not_negotiated()], shutdown_signal).await;
+
+        result.expect("a client without a NOW listener is not a failure");
+    }
+
+    // oracle: mutant an ended channel is reopened or ends with an error
+    #[tokio::test(start_paused = true)]
+    async fn ended_channel_is_not_reopened() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+
+        let (result, _) = serve_script([ChannelOutcome::Ended], shutdown_signal).await;
+
+        result.expect("an ended channel ends the loop cleanly");
+    }
+
+    // oracle: mutant a lost channel is not reopened, or is reopened before the floor delay
+    #[tokio::test(start_paused = true)]
+    async fn lost_channel_is_reopened_after_a_delay() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+
+        let (result, served_at) = serve_script([lost(), ChannelOutcome::Ended], shutdown_signal).await;
+
+        result.expect("the reopened channel ends the loop cleanly");
+        assert!(REOPEN_DELAY_FLOOR <= served_at[1] - served_at[0]);
+    }
+
+    /// A client that stopped serving NOW must not be retried forever, nor in a tight loop.
+    #[tokio::test(start_paused = true)]
+    async fn reopen_gives_up_after_consecutive_unnegotiated_channels() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let script = core::iter::once(lost())
+            .chain(core::iter::repeat_with(not_negotiated).take(MAX_CONSECUTIVE_FAILED_REOPENS));
+
+        let (result, served_at) = serve_script(script, shutdown_signal).await;
+
+        // oracle: mutant reopening never gives up, or gives up without an error
+        assert!(result.is_err());
+
+        let delays = served_at.windows(2).map(|w| w[1] - w[0]).collect::<Vec<_>>();
+        // oracle: property monotonic
+        assert!(delays.windows(2).all(|w| w[0] <= w[1]), "{delays:?}");
+        // oracle: mutant a reopen delay falls below the floor or above the cap
+        assert!(
+            delays
+                .iter()
+                .all(|delay| REOPEN_DELAY_FLOOR <= *delay && *delay <= REOPEN_DELAY_CAP),
+            "{delays:?}"
+        );
+    }
+
+    /// A reopened channel that negotiates shows the client serves NOW again, so earlier failures must not count
+    /// toward giving up.
+    // oracle: mutant a negotiated reopen keeps earlier failures in the give-up budget
+    #[tokio::test(start_paused = true)]
+    async fn negotiated_reopen_resets_the_failure_budget() {
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let failures = || core::iter::repeat_with(not_negotiated).take(MAX_CONSECUTIVE_FAILED_REOPENS - 1);
+        let script = core::iter::once(lost())
+            .chain(failures())
+            .chain(core::iter::once(lost()))
+            .chain(failures())
+            .chain(core::iter::once(ChannelOutcome::Ended));
+
+        let (result, _) = serve_script(script, shutdown_signal).await;
+
+        result.expect("failures before a negotiated reopen do not end the loop");
+    }
+
+    /// A shutdown requested while waiting to reopen must end the loop at once, without opening another channel.
+    // oracle: mutant a shutdown during the reopen delay waits it out or opens another channel
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_during_reopen_delay_stops_without_reopening() {
+        let (shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let mut served = 0;
+
+        let mut serve = Box::pin(serve_dvc(
+            || {
+                served += 1;
+                async { Ok(lost()) }
+            },
+            shutdown_signal,
+        ));
+
+        assert!(poll!(serve.as_mut()).is_pending());
+        shutdown_handle.signal();
+
+        let Poll::Ready(result) = poll!(serve.as_mut()) else {
+            panic!("the loop is still waiting after shutdown");
+        };
+        result.expect("shutdown ends the loop cleanly");
+
+        drop(serve);
+        assert_eq!(served, 1);
+    }
 
     /// The negotiation reply must be the downgraded capset, so the client sees the capabilities
     /// and heartbeat interval the agent applies rather than the server default, which carries no
@@ -1528,5 +2169,95 @@ mod tests {
             matches!(message, NowMessage::Channel(NowChannelMessage::Heartbeat(_))),
             "expected a heartbeat, got {message:?}"
         );
+    }
+
+    /// The IO thread probes a held-back channel with heartbeats only while this flag is set, so it must follow every
+    /// negotiation: on by default, off for a zero interval, and on again when renegotiated to a nonzero one.
+    // oracle: mutant the heartbeat flag ignores renegotiation or a zero interval
+    #[tokio::test(start_paused = true)]
+    async fn processing_loop_publishes_whether_heartbeats_are_enabled() {
+        let (write_tx, mut write_rx) = winapi_signaled_mpsc_channel().expect("create outbound channel");
+        let (read_tx, read_rx) = bounded_mpsc_channel().expect("create inbound channel");
+        let (_shutdown_handle, shutdown_signal) = ShutdownHandle::new();
+        let init_progress = DvcInitializationProgress::default();
+
+        let mut loop_future = Box::pin(process_messages(read_rx, write_tx, shutdown_signal, &init_progress));
+
+        let capsets = [
+            (NowChannelCapsetMsg::default(), true),
+            (capset_with_zero_heartbeat_interval(), false),
+            (
+                NowChannelCapsetMsg::default()
+                    .with_heartbeat_interval(Duration::from_secs(30))
+                    .expect("30 s is a valid heartbeat interval"),
+                true,
+            ),
+        ];
+
+        for (capset, expected) in capsets {
+            read_tx.send(capset.into()).await.expect("queue client capset");
+            assert!(poll!(loop_future.as_mut()).is_pending());
+            write_rx.try_recv().expect("negotiation reply was sent");
+
+            assert_eq!(init_progress.heartbeats_enabled(), expected);
+        }
+    }
+
+    /// A client capset that disables heartbeats.
+    ///
+    /// `with_heartbeat_interval` refuses zero, but the wire format still carries it, so it is decoded from bytes.
+    fn capset_with_zero_heartbeat_interval() -> NowChannelCapsetMsg {
+        const NOW_CHANNEL_SET_HEARTBEAT: u8 = 0x01;
+        const MSG_FLAGS_OFFSET: usize = 6;
+
+        // The default capset already encodes a zero interval; only the flag announcing it is missing.
+        let mut bytes = now_proto_pdu::ironrdp_core::encode_vec(&OwnedNowMessage::from(NowChannelCapsetMsg::default()))
+            .expect("encode a capset");
+        *bytes.get_mut(MSG_FLAGS_OFFSET).expect("the capset has a header") |= NOW_CHANNEL_SET_HEARTBEAT;
+
+        let message: NowMessage<'_> = now_proto_pdu::ironrdp_core::decode(&bytes).expect("decode the capset");
+        let NowMessage::Channel(NowChannelMessage::Capset(capset)) = message else {
+            panic!("expected a capset, got {message:?}");
+        };
+        assert_eq!(capset.heartbeat_interval(), Some(Duration::ZERO));
+
+        capset
+    }
+
+    /// Serves `outcomes` in order and returns the loop result with the instant each channel was served.
+    ///
+    /// Panics unless the loop serves every outcome and no more.
+    async fn serve_script(
+        outcomes: impl IntoIterator<Item = ChannelOutcome>,
+        shutdown_signal: ShutdownSignal,
+    ) -> (anyhow::Result<()>, Vec<Instant>) {
+        let mut outcomes = outcomes.into_iter().collect::<VecDeque<_>>();
+        let mut served_at = Vec::new();
+
+        let result = serve_dvc(
+            || {
+                served_at.push(Instant::now());
+                let outcome = outcomes.pop_front().expect("channel served more times than scripted");
+                async { Ok(outcome) }
+            },
+            shutdown_signal,
+        )
+        .await;
+
+        assert!(
+            outcomes.is_empty(),
+            "{} scripted channels were never served",
+            outcomes.len()
+        );
+
+        (result, served_at)
+    }
+
+    fn lost() -> ChannelOutcome {
+        ChannelOutcome::Lost(anyhow!("channel lost"))
+    }
+
+    fn not_negotiated() -> ChannelOutcome {
+        ChannelOutcome::NotNegotiated(anyhow!("channel not negotiated"))
     }
 }

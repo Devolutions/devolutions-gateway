@@ -436,7 +436,7 @@ pub(crate) struct CertificateRecord {
     serial_number: Option<String>,
     #[serde(rename = "validFrom", deserialize_with = "timestamp")]
     pub(crate) not_before: OffsetDateTime,
-    #[serde(rename = "validUntil", deserialize_with = "timestamp")]
+    #[serde(rename = "validTo", deserialize_with = "timestamp")]
     pub(crate) not_after: OffsetDateTime,
     /// The issuing root's thumbprint.
     #[serde(rename = "issuerThumbprint")]
@@ -447,7 +447,7 @@ pub(crate) struct CertificateRecord {
 /// The current certificate, as an identity's summary shows it.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub(crate) struct CurrentCertificate {
-    #[serde(rename = "validUntil", deserialize_with = "timestamp")]
+    #[serde(rename = "validTo", deserialize_with = "timestamp")]
     pub(crate) not_after: OffsetDateTime,
     /// The issuing root's thumbprint.
     #[serde(rename = "issuerThumbprint")]
@@ -670,7 +670,7 @@ pub(crate) struct RootSummary {
     #[serde(default, deserialize_with = "optional_timestamp")]
     valid_from: Option<OffsetDateTime>,
     #[serde(default, deserialize_with = "optional_timestamp")]
-    valid_until: Option<OffsetDateTime>,
+    valid_to: Option<OffsetDateTime>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -1209,7 +1209,7 @@ mod tests {
             "enrollmentTokenName": "test",
             "createdOn": "2026-09-25T12:00:00Z",
             "isRenewalRequested": false,
-            "certificate": { "issuerThumbprint": "root-id", "validUntil": "2026-12-24T12:00:00Z" }
+            "certificate": { "issuerThumbprint": "root-id", "validTo": "2026-12-24T12:00:00Z" }
         })
     }
 

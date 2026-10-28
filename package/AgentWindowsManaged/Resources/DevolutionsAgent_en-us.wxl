@@ -21,6 +21,11 @@
                 <String Id="VendorFullName">Devolutions Inc.</String>
                 <String Id="VendorName">Devolutions</String>
                     <!-- messages -->
+                <String Id="DataFolderIsFile">Can't use {0} because it is a file, not a folder. Delete the file, then try again.</String>
+                <String Id="DataFolderIsLink">Can't use the folder {0} because it is a link. Delete the link, then try again.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Can't use the folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Can't use the folder {0} because {1} can replace it or what it contains. Remove that permission, then try again.</String>
+                <String Id="DataFolderSecurityUnreadable">Can't read the owner or the permissions of the folder {0}. Check them, then try again.</String>
                 <String Id="Dotnet48IsRequired">The product requires Microsoft .NET Framework 4.8. Would you like to download it now?</String>
                 <String Id="IdentityEnrollmentTokenBothSet">Set IDENTITY_ENROLLMENT_TOKEN or IDENTITY_ENROLLMENT_TOKEN_FILE, not both.</String>
                 <String Id="IdentityEnrollmentTokenFileEmpty">The first line of the enrollment token file {0} is empty.</String>

@@ -52,7 +52,7 @@ The location and format of the files below are stable, because the conformance t
 - `<hex>` is the SHA-256 of the full token's UTF-8 bytes encoded as lowercase hexadecimal, and is the only encoding of a token hash the agent stores: file names and every `token_sha256` field use it.
 - One file per token, named `<hex>`:
   - Linux and macOS: `<data-dir>/identity/pending/<hex>.json`, mode `0600`, with content `{ "version": 1, "token": "<token>" }`.
-    The agent does not enforce the file's owner, and ignores and keeps a file with any group or other permission bit.
+    The file is owned by the agent's account or root; the agent ignores and keeps a file owned by any other account or with any group or other permission bit.
     The file holds the token in plaintext, protected only by its permissions, until the authority answers; that is accepted.
   - Windows: `<data-dir>\identity\pending\<hex>.dat`, whose content is DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)` of the same JSON; `.dat` because the content is an opaque blob, not JSON.
     The agent accepts exactly two forms and ignores and keeps any other file:

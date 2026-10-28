@@ -1,14 +1,15 @@
 namespace Devolutions.Agent.Identity.Authority.Tests;
 
 /// <summary>
-/// URLs that are not an absolute <c>https</c> URL without an <c>@</c>, a query or a fragment,
+/// URLs that are not an absolute <c>https</c> URL in ASCII without an <c>@</c>, a query or a fragment,
 /// the form that a token's <c>u</c> and a config's <c>agent_channel_url</c> both take.
 /// </summary>
 public static class UnacceptableUrls
 {
     // CONTRACT.agent-identity.md §2 makes `u`, and §5.2 makes `agent_channel_url`, an absolute `https` URL
     // without a user name or password, a query or a fragment, read as text:
-    // it begins with `https://` and contains no '@', since any '@' counts as a user name.
+    // it begins with `https://` and contains no '@', since any '@' counts as a user name,
+    // and holds only ASCII characters, so an internationalized host is written in its `xn--` form.
     public static string[] All { get; } =
     [
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
@@ -63,6 +64,18 @@ public static class UnacceptableUrls
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
         "https:@host/dvls",
+        // An internationalized host not in its `xn--` form.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+        "https://b\u00FCcher.example/dvls",
+        // A non-ASCII character in the path, which the IRI-to-URI mapping of RFC 3987 §3.1 would percent-encode.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+        "https://host/dvls\u00E9",
+        // A fullwidth commercial at (U+FF20), which is not the ASCII '@' but which NFKC normalization turns into one.
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enrollment-token
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+        "https://admin\uFF20host/dvls",
     ];
 
     public static TheoryData<string> Rows => new(All);
