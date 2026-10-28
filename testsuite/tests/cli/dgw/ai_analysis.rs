@@ -1,4 +1,4 @@
-//! `/jet/jrec/{sessionId}/ai-analysis` tests, against a running Gateway and a mock AI provider.
+//! `/jet/tasks/recording-ai-analysis/{taskId}` tests, against a running Gateway and a mock AI provider.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -95,9 +95,9 @@ impl Gateway {
         session_id
     }
 
-    async fn post_raw(&self, session_id: Uuid, scope: &str, body: String) -> reqwest::Response {
+    async fn put_raw(&self, task_id: Uuid, scope: &str, body: String) -> reqwest::Response {
         self.client
-            .post(self.url(&format!("/jet/jrec/{session_id}/ai-analysis")))
+            .put(self.url(&format!("/jet/tasks/recording-ai-analysis/{task_id}")))
             .header("content-type", "application/json")
             .bearer_auth(scope_token(scope))
             .body(body)
@@ -106,14 +106,14 @@ impl Gateway {
             .unwrap()
     }
 
-    async fn post(&self, session_id: Uuid, body: &Value) -> (StatusCode, Value) {
-        read(self.post_raw(session_id, START_SCOPE, body.to_string()).await).await
+    async fn put(&self, task_id: Uuid, body: &Value) -> (StatusCode, Value) {
+        read(self.put_raw(task_id, START_SCOPE, body.to_string()).await).await
     }
 
-    async fn get_analysis(&self, session_id: Uuid, task_id: Uuid, scope: &str) -> (StatusCode, Value) {
+    async fn get_analysis(&self, task_id: Uuid, scope: &str) -> (StatusCode, Value) {
         let response = self
             .client
-            .get(self.url(&format!("/jet/jrec/{session_id}/ai-analysis/{task_id}")))
+            .get(self.url(&format!("/jet/tasks/recording-ai-analysis/{task_id}")))
             .bearer_auth(scope_token(scope))
             .send()
             .await
@@ -122,11 +122,11 @@ impl Gateway {
     }
 
     /// Asks for the analysis until it has succeeded or failed.
-    async fn finished_analysis(&self, session_id: Uuid, task_id: Uuid) -> Value {
+    async fn finished_analysis(&self, task_id: Uuid) -> Value {
         let deadline = Instant::now() + Duration::from_secs(60);
 
         loop {
-            let (status, task) = self.get_analysis(session_id, task_id, READ_SCOPE).await;
+            let (status, task) = self.get_analysis(task_id, READ_SCOPE).await;
             assert_eq!(status, StatusCode::OK, "{task}");
 
             if task["state"] == "succeeded" || task["state"] == "failed" {
@@ -183,9 +183,9 @@ async fn read(response: reqwest::Response) -> (StatusCode, Value) {
     (status, body)
 }
 
-fn request(task_id: Uuid, model: &str, base_url: &str) -> Value {
+fn request(session_id: Uuid, model: &str, base_url: &str) -> Value {
     json!({
-        "taskId": task_id,
+        "sessionId": session_id,
         "provider": "openai-compatible",
         "model": model,
         "baseUrl": base_url,
@@ -286,27 +286,28 @@ async fn start_returns_202_then_200_for_the_same_request() {
     let task_id = Uuid::new_v4();
     let base_url = spawn_silent_ai_provider().await;
 
-    let (status, created) = gateway.post(session_id, &request(task_id, "gpt-test", &base_url)).await;
+    let (status, created) = gateway.put(task_id, &request(session_id, "gpt-test", &base_url)).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{created}");
     assert_eq!(created["id"], task_id.to_string());
-    assert_eq!(created["kind"], "recording-ai-analysis");
-    assert_eq!(created["target"], session_id.to_string());
+    assert_eq!(created["sessionId"], session_id.to_string());
     assert_eq!(
         created["params"],
         json!({ "provider": "openai-compatible", "model": "gpt-test", "maxOutputTokens": null })
     );
     assert_eq!(created["state"], "queued");
     assert_eq!(created["payload"], Value::Null);
-    assert_eq!(created["attempts"], 0);
     assert_rfc3339(&created["createdAt"]);
     assert_rfc3339(&created["deadlineAt"]);
     assert_eq!(created["startedAt"], Value::Null);
     assert_eq!(created["finishedAt"], Value::Null);
+    for internal in ["kind", "target", "attempts"] {
+        assert!(created.get(internal).is_none(), "{internal} is not returned");
+    }
 
-    let (status, again) = gateway.post(session_id, &request(task_id, "gpt-test", &base_url)).await;
+    let (status, again) = gateway.put(task_id, &request(session_id, "gpt-test", &base_url)).await;
     assert_eq!(status, StatusCode::OK, "{again}");
     // The job may have started meanwhile, so only the fields a run leaves alone are compared.
-    for field in ["id", "kind", "target", "params", "createdAt"] {
+    for field in ["id", "sessionId", "params", "createdAt"] {
         assert_eq!(again[field], created[field], "{field}");
     }
 }
@@ -318,16 +319,20 @@ async fn start_conflicts_return_409_with_a_code() {
     let session_id = gateway.write_session();
     let task_id = Uuid::new_v4();
     let base_url = spawn_silent_ai_provider().await;
-    gateway.post(session_id, &request(task_id, "gpt-test", &base_url)).await;
+    gateway.put(task_id, &request(session_id, "gpt-test", &base_url)).await;
 
-    let (status, body) = gateway
-        .post(session_id, &request(task_id, "gpt-other", &base_url))
-        .await;
+    let (status, body) = gateway.put(task_id, &request(session_id, "gpt-other", &base_url)).await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body, json!({ "code": "task_id_conflict" }));
 
     let (status, body) = gateway
-        .post(session_id, &request(Uuid::new_v4(), "gpt-test", &base_url))
+        .put(task_id, &request(gateway.write_session(), "gpt-test", &base_url))
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT, "the same Task ID for another session");
+    assert_eq!(body, json!({ "code": "task_id_conflict" }));
+
+    let (status, body) = gateway
+        .put(Uuid::new_v4(), &request(session_id, "gpt-test", &base_url))
         .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(body, json!({ "code": "analysis_in_progress", "taskId": task_id }));
@@ -340,7 +345,7 @@ async fn start_without_recording_returns_404() {
     let base_url = spawn_silent_ai_provider().await;
 
     let (status, _) = gateway
-        .post(Uuid::new_v4(), &request(Uuid::new_v4(), "gpt-test", &base_url))
+        .put(Uuid::new_v4(), &request(Uuid::new_v4(), "gpt-test", &base_url))
         .await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
@@ -352,10 +357,10 @@ async fn start_ignores_unknown_fields() {
     let gateway = Gateway::start().await;
     let session_id = gateway.write_session();
     let base_url = spawn_silent_ai_provider().await;
-    let mut body = request(Uuid::new_v4(), "gpt-test", &base_url);
+    let mut body = request(session_id, "gpt-test", &base_url);
     body["temperature"] = json!(0.5);
 
-    let (status, created) = gateway.post(session_id, &body).await;
+    let (status, created) = gateway.put(Uuid::new_v4(), &body).await;
 
     assert_eq!(status, StatusCode::ACCEPTED, "{created}");
 }
@@ -367,7 +372,10 @@ async fn invalid_bodies_and_settings_return_400() {
     let session_id = gateway.write_session();
     let task_id = Uuid::new_v4();
     let base_url = spawn_silent_ai_provider().await;
-    let valid = request(task_id, "gpt-test", &base_url);
+    let valid = request(session_id, "gpt-test", &base_url);
+
+    let mut no_session = valid.clone();
+    no_session.as_object_mut().unwrap().remove("sessionId");
 
     let mut no_key = valid.clone();
     no_key.as_object_mut().unwrap().remove("apiKey");
@@ -391,9 +399,10 @@ async fn invalid_bodies_and_settings_return_400() {
     empty_language["language"] = json!("");
 
     for (case, body) in [
+        ("missing session ID", no_session.to_string()),
         ("missing API key", no_key.to_string()),
         ("empty API key", empty_key.to_string()),
-        ("empty model", request(task_id, " ", &base_url).to_string()),
+        ("empty model", request(session_id, " ", &base_url).to_string()),
         ("missing base URL", no_base_url.to_string()),
         ("unsupported base URL", bad_base_url.to_string()),
         ("unknown provider", unknown_provider.to_string()),
@@ -401,11 +410,11 @@ async fn invalid_bodies_and_settings_return_400() {
         ("empty language", empty_language.to_string()),
         ("not JSON", "{".to_owned()),
     ] {
-        let response = gateway.post_raw(session_id, START_SCOPE, body).await;
+        let response = gateway.put_raw(task_id, START_SCOPE, body).await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST, "{case}");
     }
 
-    let (status, _) = gateway.get_analysis(session_id, task_id, READ_SCOPE).await;
+    let (status, _) = gateway.get_analysis(task_id, READ_SCOPE).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "no Task is recorded");
 }
 
@@ -415,55 +424,53 @@ async fn endpoints_require_their_scope() {
     let gateway = Gateway::start().await;
     let session_id = gateway.write_session();
     let base_url = spawn_silent_ai_provider().await;
-    let body = request(Uuid::new_v4(), "gpt-test", &base_url).to_string();
+    let body = request(session_id, "gpt-test", &base_url).to_string();
 
     for scope in [READ_SCOPE, "gateway.recording.delete", "gateway.recordings.read"] {
-        let response = gateway.post_raw(session_id, scope, body.clone()).await;
+        let response = gateway.put_raw(Uuid::new_v4(), scope, body.clone()).await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN, "{scope}");
     }
 
     for scope in [START_SCOPE, "gateway.sessions.read", "gateway.recordings.read"] {
-        let (status, _) = gateway.get_analysis(session_id, Uuid::new_v4(), scope).await;
+        let (status, _) = gateway.get_analysis(Uuid::new_v4(), scope).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{scope}");
     }
 
-    let response = gateway.post_raw(session_id, "*", body).await;
+    let response = gateway.put_raw(Uuid::new_v4(), "*", body).await;
     assert_eq!(
         response.status(),
         StatusCode::ACCEPTED,
         "the wildcard scope is accepted"
     );
 
-    let (status, _) = gateway.get_analysis(session_id, Uuid::new_v4(), "*").await;
+    let (status, _) = gateway.get_analysis(Uuid::new_v4(), "*").await;
     assert_eq!(status, StatusCode::NOT_FOUND, "the wildcard scope is accepted");
 }
 
 // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
-async fn an_analysis_is_found_at_its_location_only() {
+async fn an_analysis_is_found_at_its_location() {
     let gateway = Gateway::start().await;
     let session_id = gateway.write_session();
     let task_id = Uuid::new_v4();
     let base_url = spawn_silent_ai_provider().await;
 
     let response = gateway
-        .post_raw(
-            session_id,
+        .put_raw(
+            task_id,
             START_SCOPE,
-            request(task_id, "gpt-test", &base_url).to_string(),
+            request(session_id, "gpt-test", &base_url).to_string(),
         )
         .await;
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let location = response.headers()["location"].to_str().unwrap().to_owned();
-    assert_eq!(location, format!("/jet/jrec/{session_id}/ai-analysis/{task_id}"));
+    assert_eq!(location, format!("/jet/tasks/recording-ai-analysis/{task_id}"));
 
-    let (status, task) = gateway.get_analysis(session_id, task_id, READ_SCOPE).await;
+    let (status, task) = gateway.get_analysis(task_id, READ_SCOPE).await;
     assert_eq!(status, StatusCode::OK, "{task}");
     assert_eq!(task["id"], task_id.to_string());
-
-    let (status, _) = gateway.get_analysis(Uuid::new_v4(), task_id, READ_SCOPE).await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "not under another session");
+    assert_eq!(task["sessionId"], session_id.to_string());
 }
 
 // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
@@ -471,7 +478,7 @@ async fn an_analysis_is_found_at_its_location_only() {
 async fn get_analysis_returns_404_for_an_unknown_id() {
     let gateway = Gateway::start().await;
 
-    let (status, _) = gateway.get_analysis(Uuid::new_v4(), Uuid::new_v4(), READ_SCOPE).await;
+    let (status, _) = gateway.get_analysis(Uuid::new_v4(), READ_SCOPE).await;
 
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
@@ -483,15 +490,14 @@ async fn analysis_succeeds_without_leaking_the_key_or_the_base_url() {
     let session_id = gateway.write_session();
     let task_id = Uuid::new_v4();
     let base_url = spawn_ai_provider(200).await;
-    let mut body = request(task_id, "gpt-test", &base_url);
+    let mut body = request(session_id, "gpt-test", &base_url);
     body["maxOutputTokens"] = json!(1000);
 
-    let (status, created) = gateway.post(session_id, &body).await;
+    let (status, created) = gateway.put(task_id, &body).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{created}");
 
-    let task = gateway.finished_analysis(session_id, task_id).await;
+    let task = gateway.finished_analysis(task_id).await;
     assert_eq!(task["state"], "succeeded", "{task}");
-    assert_eq!(task["attempts"], 1);
     assert_eq!(task["payload"]["fileName"], "ai-analysis-0.slog");
     assert_eq!(task["payload"]["model"], "gpt-test-2026-09-30");
     // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
@@ -503,7 +509,7 @@ async fn analysis_succeeds_without_leaking_the_key_or_the_base_url() {
     assert_rfc3339(&task["startedAt"]);
     assert_rfc3339(&task["finishedAt"]);
 
-    let (status, again) = gateway.post(session_id, &body).await;
+    let (status, again) = gateway.put(task_id, &body).await;
     assert_eq!(status, StatusCode::OK, "{again}");
 
     let responses = [created, task, again].map(|body| body.to_string()).join("\n");
@@ -526,12 +532,11 @@ async fn provider_refusing_the_key_fails_the_task() {
     let task_id = Uuid::new_v4();
     let base_url = spawn_ai_provider(401).await;
 
-    let (status, _) = gateway.post(session_id, &request(task_id, "gpt-test", &base_url)).await;
+    let (status, _) = gateway.put(task_id, &request(session_id, "gpt-test", &base_url)).await;
     assert_eq!(status, StatusCode::ACCEPTED);
 
-    let task = gateway.finished_analysis(session_id, task_id).await;
+    let task = gateway.finished_analysis(task_id).await;
     assert_eq!(task["state"], "failed", "{task}");
-    assert_eq!(task["attempts"], 1);
     assert_eq!(
         task["payload"],
         json!({
@@ -541,7 +546,7 @@ async fn provider_refusing_the_key_fails_the_task() {
     );
 
     let (status, _) = gateway
-        .post(session_id, &request(Uuid::new_v4(), "gpt-test", &base_url))
+        .put(Uuid::new_v4(), &request(session_id, "gpt-test", &base_url))
         .await;
     assert_eq!(
         status,
