@@ -1123,7 +1123,7 @@ impl State {
         }
         let config = self.enrollment_config(base_url);
         if !config_fits_envelope(&config) {
-            // Only a base URL close to 64 KiB long can grow the config this far.
+            // Only a base URL or a key storage policy close to 64 KiB long can grow the config this far.
             return Err(ApiError::internal(
                 "enrollment config would not fit a 64 KiB agent channel envelope",
             ));
@@ -1934,7 +1934,8 @@ mod tests {
     /// CONTRACT.agent-identity.md §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope
     /// would exceed that limit", so an enrollment whose config would be one byte larger creates no identity, and §2.1
     /// counts a token's uses by the identities it created.
-    /// Only the channel URL can grow an enrollment config, so the base URL makes it one byte too large.
+    /// Without a key storage policy only the channel URL can grow an enrollment config, so the base URL makes it one
+    /// byte too large.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §token-rules
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
@@ -2764,6 +2765,40 @@ mod tests {
         assert_eq!(state.identities[&identity_id].config, config);
         assert!(stream.try_recv().is_err());
         assert!(state.key_storage.is_none());
+        Ok(())
+    }
+
+    /// §7.1: "An authority never holds an effective config whose `ConfigUpdate` envelope would exceed that limit", so
+    /// with no identity enrolled, only the config of a later enrollment can refuse a policy: the policy that makes it
+    /// exactly the limit is accepted, and one byte more is refused and leaves no policy for later enrollments.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-service
+    #[test]
+    fn key_storage_policy_that_overgrows_a_later_enrollment_config_is_refused() -> anyhow::Result<()> {
+        let now = 1_790_000_000;
+        let mut state = State::with_root(now)?;
+        // CONTRACT.agent-identity.md §5.2: an enrollment config holds `version`, `revision`, `agent_channel_url` and
+        // the policy, a string here.
+        let policy = |len: usize| json!("x".repeat(len));
+        let config_len = |len: usize| {
+            config_update_len(&json!({
+                "version": 1,
+                "revision": 1,
+                "agent_channel_url": MOCK_URL,
+                "key_storage": policy(len),
+            }))
+        };
+        let mut len = 0;
+        // Each round moves the size by the difference; later rounds correct the lengths' varints, which grow with it.
+        for _ in 0..3 {
+            len = len + ENVELOPE_LIMIT - config_len(len);
+        }
+        assert_eq!(config_len(len), ENVELOPE_LIMIT);
+
+        assert!(state.update_key_storage(Some(policy(len + 1)), MOCK_URL).is_err());
+        assert!(state.key_storage.is_none());
+
+        assert!(state.update_key_storage(Some(policy(len)), MOCK_URL).is_ok());
+        assert_eq!(state.key_storage, Some(policy(len)));
         Ok(())
     }
 }
