@@ -45,8 +45,10 @@ public sealed class AgentMetadata : IReadOnlyDictionary<string, string>
     /// </summary>
     /// <remarks>
     /// Valid metadata has at most 32 keys, each matching <c>^[a-z][a-z0-9_]{0,63}$</c> and appearing once.
-    /// Each value is Unicode text of at most 1024 UTF-8 bytes without C0, DEL or C1 control characters,
-    /// and the UTF-8 lengths of all keys and values add up to at most 16 KiB.
+    /// Each value is Unicode text of at most 1024 UTF-8 bytes without C0, DEL or C1 control characters
+    /// or the invisible format characters U+00AD, U+061C, U+180E, U+200B to U+200F, U+202A to U+202E,
+    /// U+2060 to U+2064, U+2066 to U+206F, U+FEFF, U+FFF9 to U+FFFB, U+E0001 and U+E0020 to U+E007F.
+    /// The UTF-8 lengths of all keys and values add up to at most 16 KiB.
     /// </remarks>
     /// <param name="entries">The metadata entries, in the order received.</param>
     /// <exception cref="ArgumentException">An entry has a null key or value.</exception>
@@ -164,6 +166,11 @@ public sealed class AgentMetadata : IReadOnlyDictionary<string, string>
                 return "holds a control character";
             }
 
+            if (IsInvisibleFormatCharacter(rune.Value))
+            {
+                return "holds an invisible format character";
+            }
+
             utf8Length += rune.Utf8SequenceLength;
             if (utf8Length > MaxValueBytes)
             {
@@ -174,5 +181,21 @@ public sealed class AgentMetadata : IReadOnlyDictionary<string, string>
         }
 
         return null;
+    }
+
+    // The invisible format characters of the protocol, which could reorder or hide text where an administrator reads it.
+    // The protocol fixes them as code points rather than as the Format category,
+    // so that the agent and every authority agree whatever Unicode version their runtimes ship.
+    private static bool IsInvisibleFormatCharacter(int codePoint)
+    {
+        return codePoint is 0x00AD or 0x061C or 0x180E
+            or (>= 0x200B and <= 0x200F)
+            or (>= 0x202A and <= 0x202E)
+            or (>= 0x2060 and <= 0x2064)
+            or (>= 0x2066 and <= 0x206F)
+            or 0xFEFF
+            or (>= 0xFFF9 and <= 0xFFFB)
+            or 0xE0001
+            or (>= 0xE0020 and <= 0xE007F);
     }
 }

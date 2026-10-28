@@ -23,6 +23,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using WixSharp;
@@ -469,16 +470,41 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
+        public static ActionResult CheckProgramDataDirectory(Session session)
+        {
+            try
+            {
+                DataFolderRefusal refusal = DataFolders.Check(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    LogDelegate.WithSession(session));
+
+                return refusal is null ? ActionResult.Success : Refuse(session, refusal);
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to check {ProgramDataDirectory}: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
         public static ActionResult CreateProgramDataDirectory(Session session)
         {
             string path = ProgramDataDirectory;
 
             try
             {
-                if (!Directory.Exists(path))
+                DataFolderRefusal refusal = DataFolders.Create(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    Includes.ProgramDataSddl(GetServiceAccountSid(session)),
+                    LogDelegate.WithSession(session));
+
+                if (refusal is not null)
                 {
-                    Directory.CreateDirectory(path);
+                    return Refuse(session, refusal);
                 }
+
+                session.Log($"created directory at {path} or already exists");
             }
             catch (Exception e)
             {
@@ -488,6 +514,34 @@ namespace DevolutionsGateway.Actions
 
             return ActionResult.Success;
         }
+
+        /// <summary>
+        /// Logs the error for <paramref name="refusal"/> in the installer's language and shows it, which a silent install
+        /// only logs.
+        /// </summary>
+        private static ActionResult Refuse(Session session, DataFolderRefusal refusal)
+        {
+            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows.
+            // No test runs the data folder actions, which read the machine's own ProgramData.
+            // When changing this, keep sending it with InstallMessage.Error, in a record built by MessageRecord so that the
+            // installer shows the text as written.
+            string message = refusal.Message(session.Property("ProductLanguage"));
+            session.Log(message);
+            using Record record = MessageRecord(message);
+            session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+            return ActionResult.Failure;
+        }
+
+        /// <summary>
+        /// A record that the installer formats to <paramref name="text"/> as written, rather than reading brackets in it
+        /// as property references.
+        /// </summary>
+        /// <remarks>
+        /// The installer replaces a property reference in a field it inserts as well as in the format string, so each
+        /// bracket is escaped instead.
+        /// </remarks>
+        internal static Record MessageRecord(string text) =>
+            new(0) { FormatString = Regex.Replace(text, @"[\[\]]", m => $"[\\{m.Value}]") };
 
         [CustomAction]
         public static ActionResult GetInstallDirFromRegistry(Session session)
@@ -902,43 +956,6 @@ namespace DevolutionsGateway.Actions
         }
 
         [CustomAction]
-        public static ActionResult SetProgramDataDirectoryPermissions(Session session)
-        {
-            try
-            {
-                SetFileSecurity(session, ProgramDataDirectory, Includes.ProgramDataSddl(GetServiceAccountSid(session)));
-
-                // Files created before the service account was granted access to the program data directory
-                // don't retroactively inherit the new ACE
-                // We fix this by removing access rule protection on the files
-                // and then reapplying the ACL
-                DirectoryInfo dir = new DirectoryInfo(ProgramDataDirectory);
-
-                foreach (FileInfo file in dir.GetFiles("*", SearchOption.AllDirectories))
-                {
-                    try
-                    {
-                        FileSecurity fileSecurity = file.GetAccessControl();
-                        fileSecurity.SetAccessRuleProtection(false, false);
-                        file.SetAccessControl(fileSecurity);
-                    }
-                    catch (Exception e)
-                    {
-                        session.Log($"failed to reset permissions on path {file.FullName}: {e}");
-                        return ActionResult.Failure;
-                    }
-                }
-
-                return ActionResult.Success;
-            }
-            catch (Exception e)
-            {
-                session.Log($"failed to set permissions: {e}");
-                return ActionResult.Failure;
-            }
-        }
-
-        [CustomAction]
         public static ActionResult SetCertificatePrivateKeyPermissions(Session session)
         {
             try
@@ -1030,13 +1047,15 @@ namespace DevolutionsGateway.Actions
         {
             try
             {
-                string path = Path.Combine(ProgramDataDirectory, DefaultUsersFile);
-                if (!File.Exists(path))
-                {
-                    session.Log("no users database; no user file permissions to update");
-                    return ActionResult.Success;
-                }
-                SetFileSecurity(session, path, Includes.UsersFileSddl(GetServiceAccountSid(session)));
+                SecureDirectory.SetFileSecurity(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Gateway", DefaultUsersFile],
+                    Includes.UsersFileSddl(GetServiceAccountSid(session)));
+                return ActionResult.Success;
+            }
+            catch (Win32Exception e) when (SecureDirectory.IsNotFound(e))
+            {
+                session.Log($"no users database; no user file permissions to update: {e.Message}");
                 return ActionResult.Success;
             }
             catch (Exception e)
@@ -1290,35 +1309,6 @@ namespace DevolutionsGateway.Actions
             return $"\"{session.Property(GatewayProperties.powerShellPath.Id)}\" -ep Bypass -Command \"& Import-Module '{session.Property(GatewayProperties.InstallDir)}PowerShell\\Modules\\DevolutionsGateway'; {command}\"";
         }
         
-        public static void SetFileSecurity(Session session, string path, string sddl)
-        {
-            const uint sdRevision = 1;
-            IntPtr pSd = new IntPtr();
-            UIntPtr pSzSd = new UIntPtr();
-           
-            try
-            {
-                if (!WinAPI.ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl, sdRevision, out pSd, out pSzSd))
-                {
-                    session.Log($"ConvertStringSecurityDescriptorToSecurityDescriptorW failed (error: {Marshal.GetLastWin32Error()})");
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                }
-
-                if (!WinAPI.SetFileSecurityW(path, WinAPI.DACL_SECURITY_INFORMATION, pSd))
-                {
-                    session.Log($"SetFileSecurityW failed (error: {Marshal.GetLastWin32Error()})");
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                }
-            }
-            finally
-            {
-                if (pSd != IntPtr.Zero)
-                {
-                    WinAPI.LocalFree(pSd);
-                }
-            }
-        }
-
         private static bool TryGetGatewayStartupType(Session session, out ServiceStartMode startMode)
         {
             startMode = ServiceStartMode.Disabled;

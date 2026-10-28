@@ -16,6 +16,7 @@ public class AgentMetadataTests
         ["key outside the pattern"] = [Entry($"{LeakedKey}\n", LeakedValue)],
         ["repeated key"] = [Entry(LeakedKey, "first"), Entry(LeakedKey, LeakedValue)],
         ["value with a control character"] = [Entry(LeakedKey, $"{LeakedValue}\u0007")],
+        ["value with an invisible format character"] = [Entry(LeakedKey, $"{LeakedValue}\u202E")],
         ["value that is not Unicode"] = [Entry(LeakedKey, $"{LeakedValue}\uD800")],
         ["value of 1025 UTF-8 bytes"] = [Entry(LeakedKey, LeakedValue + new string('a', 1025 - LeakedValue.Length))],
 
@@ -26,6 +27,38 @@ public class AgentMetadataTests
                 .Select(i => Entry($"{LeakedKey}_{i:D2}", LeakedValue + new string('a', 1000 - LeakedValue.Length))),
         ],
     };
+
+    // The invisible format characters that CONTRACT.agent-identity.md §3 lists, as inclusive ranges.
+    private static readonly (int First, int Last)[] InvisibleFormatRanges =
+    [
+        (0x00AD, 0x00AD),
+        (0x061C, 0x061C),
+        (0x180E, 0x180E),
+        (0x200B, 0x200F),
+        (0x202A, 0x202E),
+        (0x2060, 0x2064),
+        (0x2066, 0x206F),
+        (0xFEFF, 0xFEFF),
+        (0xFFF9, 0xFFFB),
+        (0xE0001, 0xE0001),
+        (0xE0020, 0xE007F),
+    ];
+
+    // The format characters (`Cf`) that the contract's list leaves out,
+    // as inclusive ranges.
+    private static readonly (int First, int Last)[] UnlistedFormatRanges =
+    [
+        (0x0600, 0x0605),
+        (0x06DD, 0x06DD),
+        (0x070F, 0x070F),
+        (0x0890, 0x0891),
+        (0x08E2, 0x08E2),
+        (0x110BD, 0x110BD),
+        (0x110CD, 0x110CD),
+        (0x13430, 0x1343F),
+        (0x1BCA0, 0x1BCA3),
+        (0x1D173, 0x1D17A),
+    ];
 
     public static TheoryData<string> FailureNames => new(Failures.Keys);
 
@@ -207,6 +240,41 @@ public class AgentMetadataTests
         AssertValid(AgentMetadata.Validate([new("hostname", $"host{(char)codePoint}name")]));
     }
 
+    // No invisible format character, including the tag characters past U+FFFF, which UTF-16 writes as a surrogate pair.
+    public static TheoryData<int> InvisibleFormatCharacters => new(CodePoints(InvisibleFormatRanges));
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    [Theory]
+    [MemberData(nameof(InvisibleFormatCharacters))]
+    public void RejectsValueWithInvisibleFormatCharacter(int codePoint)
+    {
+        AssertInvalid(AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(codePoint)}name")]));
+    }
+
+    // The neighbors of the invisible format ranges, which the list leaves out.
+    public static TheoryData<int> CharactersNextToAnInvisibleFormatRange =>
+        new(InvisibleFormatRanges.SelectMany(range => new[] { range.First - 1, range.Last + 1 }).Distinct());
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    [Theory]
+    [MemberData(nameof(CharactersNextToAnInvisibleFormatRange))]
+    public void AcceptsValueWithCharacterNextToAnInvisibleFormatRange(int codePoint)
+    {
+        AssertValid(AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(codePoint)}name")]));
+    }
+
+    // The list is closed, so a value may hold the format characters it leaves out,
+    // which a check of the runtime's Format category would refuse.
+    public static TheoryData<int> UnlistedFormatCharacters => new(CodePoints(UnlistedFormatRanges));
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    [Theory]
+    [MemberData(nameof(UnlistedFormatCharacters))]
+    public void AcceptsValueWithUnlistedFormatCharacter(int codePoint)
+    {
+        AssertValid(AgentMetadata.Validate([new("hostname", $"host{char.ConvertFromUtf32(codePoint)}name")]));
+    }
+
     // CONTRACT.agent-identity.md §3 measures a value in UTF-8 bytes.
     // A string holding an unpaired surrogate is not Unicode text, so it has no UTF-8 encoding to measure or store.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
@@ -267,19 +335,21 @@ public class AgentMetadataTests
         Assert.DoesNotContain(LeakedValue, result.FailureDetail);
     }
 
-    // The control character is part of the value, so the detail holds neither the character
+    // The refused character is part of the value, so the detail holds neither the character
     // nor its code point in a hexadecimal rendering such as U+0007, 0x07, 0x0007 or 0007.
     // oracle: intent dotnet/Devolutions.Agent.Identity.Authority/INTENT.md §Failure details
     [Theory]
     [MemberData(nameof(ControlCharacters))]
-    public void FailureDetailDoesNotNameTheControlCharacter(int codePoint)
+    [MemberData(nameof(InvisibleFormatCharacters))]
+    public void FailureDetailDoesNotNameTheRefusedCharacter(int codePoint)
     {
-        MetadataValidationResult result = AgentMetadata.Validate([Entry("hostname", $"host{(char)codePoint}name")]);
+        string character = char.ConvertFromUtf32(codePoint);
+        MetadataValidationResult result = AgentMetadata.Validate([Entry("hostname", $"host{character}name")]);
         string[] renderings = [$"U+{codePoint:X4}", $"0x{codePoint:X2}", $"0x{codePoint:X4}", $"{codePoint:X4}"];
 
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
         AssertInvalid(result);
-        Assert.DoesNotContain(((char)codePoint).ToString(), result.FailureDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain(character, result.FailureDetail, StringComparison.Ordinal);
         Assert.All(
             renderings,
             rendering => Assert.DoesNotContain(rendering, result.FailureDetail, StringComparison.OrdinalIgnoreCase));
@@ -335,5 +405,10 @@ public class AgentMetadataTests
     private static string Repeat(string unit, int count)
     {
         return string.Concat(Enumerable.Repeat(unit, count));
+    }
+
+    private static IEnumerable<int> CodePoints((int First, int Last)[] ranges)
+    {
+        return ranges.SelectMany(range => Enumerable.Range(range.First, range.Last - range.First + 1));
     }
 }

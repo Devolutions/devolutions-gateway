@@ -12,12 +12,12 @@
                 <String Id="FindYourPublicKeyForXorX">Trouvez votre clé publique pour {0} ou {1}</String>
                 <String Id="NgrokAuthTokenLink">jeton d'authentification</String>
                 <String Id="NgrokDomainLink">domaine</String>
+                <String Id="NgrokNativeClientsNeedAReservedX">Les clients natifs comme Remote Desktop Manager exigent une {0} réservée (option payante de ngrok). Inutile pour l'accès par navigateur seul.</String>
                 <String Id="NgrokProvideYourX">Entrez votre {0}</String>
                 <String Id="NgrokReadMoreAtX">Plus de détails sur {0}</String>
                 <String Id="NgrokReadMoreLink">ngrok.com</String>
-                <String Id="NgrokTcpAddressLink">Adresse TCP</String>
+                <String Id="NgrokTcpAddressLink">adresse TCP</String>
                 <String Id="NgrokXForWebClientAccess">Le {0} pour accéder au client Web</String>
-                <String Id="NgroXForNativeClientAccess">Le {0} pour accéder au client natif</String>
                     <!-- buttons -->
                 <String Id="SearchButton">Rechercher</String>
                 <String Id="ValidateButton">Valider</String>
@@ -61,6 +61,11 @@
                     <!-- messages -->
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">Une erreur inattendue est survenue au moment d'accéder au magasin de certificats du système : {0}</String>
                 <String Id="AuthenticationTokenIsRequired">Le jeton d'authentification est requis</String>
+                <String Id="DataFolderIsFile">Impossible d'utiliser {0}, car c'est un fichier et non un dossier. Supprimez le fichier, puis réessayez.</String>
+                <String Id="DataFolderIsLink">Impossible d'utiliser le dossier {0}, car c'est un lien. Supprimez le lien, puis réessayez.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Impossible d'utiliser le dossier {0}, car il appartient à {1}. Seul SYSTEM ou un administrateur peut en être propriétaire. Changez son propriétaire, puis réessayez.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Impossible d'utiliser le dossier {0}, car {1} peut remplacer le dossier ou son contenu. Retirez cette autorisation, puis réessayez.</String>
+                <String Id="DataFolderSecurityUnreadable">Impossible de lire le propriétaire ou les autorisations du dossier {0}. Vérifiez-les, puis réessayez.</String>
                 <String Id="DomainIsRequiredAndMustBeValid">Le domaine est requis et doit être un nom d'hôte valide</String>
                 <String Id="Dotnet471IsRequired">Le produit nécessite Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 est fortement conseillé. Souhaiteriez-vous le télécharger maintenant?</String>
@@ -68,7 +73,7 @@
                 <String Id="NoMatchingCertificatesFound">Aucun certificat correspondant n'a été trouvé</String>
                 <String Id="OS2Old">Ce produit requiert Windows 8 ou Windows Server 2012 R2 au minimum.</String>
                 <String Id="PasswordsDoNotMatch">Les mots de passe ne correspondent pas</String>
-                <String Id="RemoteAddressIsRequired">L'adresse à distance est requise</String>
+                <String Id="RemoteAddressIsRequired">L'adresse à distance est requise pour l'accès des clients natifs. Sélectionnez Plus tard pour un accès par navigateur uniquement.</String>
                 <String Id="RemoteAddressMustBeInTheFormat">L'adresse à distance doit être un hôte valide et un port de format {host}:{port}</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">Il y a un problème avec les informations fournies, veuillez les modifier et essayer de nouveau.</String>
                 <String Id="TheSpecifiedFileWasInvalidOrNotAccessible">Le chemin de fichier spécifié est invalide ou inaccessible</String>
@@ -111,6 +116,7 @@
                 <String Id="Property_NewCertificate">Un nouveau certificat autosigné sera généré</String>
                 <String Id="Property_NewKeyPair">Une nouvelle paire de clés sera générée</String>
                 <String Id="Property_NgrokAuthToken">Jeton d'authentification</String>
+                <String Id="Property_NgrokEnableTcp">Accès pour clients natifs</String>
                 <String Id="Property_NgrokHttpDomain">Domaine</String>
                 <String Id="Property_NgrokRemoteAddress">Adresse TCP</String>
                 <String Id="Property_PrivateKeyFile">Fichier de clé privée</String>

@@ -59,7 +59,9 @@ public partial class NgrokListenersDialog : GatewayDialog
 
         this.txtAuthToken.Text = properties.NgrokAuthToken;
         this.txtDomain.Text = properties.NgrokHttpDomain;
-        this.cmbNativeClient.SetSelected(properties.NgrokEnableTcp ? Constants.CustomizeMode.Now : Constants.CustomizeMode.Later);
+        // Without the standalone web app, offer native client access by default until the user makes a choice.
+        bool enableTcp = properties.NgrokEnableTcp || (!properties.DidChooseNgrokNativeClientAccess && !properties.ConfigureWebApp);
+        this.cmbNativeClient.SetSelected(enableTcp ? Constants.CustomizeMode.Now : Constants.CustomizeMode.Later);
         this.txtRemoteAddress.Text = properties.NgrokRemoteAddress;
 
         this.SetControlStates();
@@ -72,9 +74,9 @@ public partial class NgrokListenersDialog : GatewayDialog
             NgrokAuthToken = this.txtAuthToken.Text.Trim(),
             NgrokHttpDomain = this.txtDomain.Text.Trim(),
             NgrokRemoteAddress = this.txtRemoteAddress.Text.Trim(),
+            NgrokEnableTcp = this.cmbNativeClient.Selected<Constants.CustomizeMode>() == Constants.CustomizeMode.Now,
+            DidChooseNgrokNativeClientAccess = true,
         };
-
-        properties.NgrokEnableTcp = this.cmbNativeClient.Selected<Constants.CustomizeMode>() == Constants.CustomizeMode.Now || !properties.ConfigureWebApp;
 
         return true;
     }
@@ -85,7 +87,7 @@ public partial class NgrokListenersDialog : GatewayDialog
         
         this.lnkAuthToken.SetLink(this.MsiRuntime, Strings.NgrokProvideYourX, Strings.NgrokAuthTokenLink);
         this.lnkDomain.SetLink(this.MsiRuntime, Strings.NgrokXForWebClientAccess, Strings.NgrokDomainLink);
-        this.lnkRemoteAddr.SetLink(this.MsiRuntime, Strings.NgroXForNativeClientAccess, Strings.NgrokTcpAddressLink);
+        this.lnkRemoteAddr.SetLink(this.MsiRuntime, Strings.NgrokNativeClientsNeedAReservedX, Strings.NgrokTcpAddressLink);
 
         this.cmbNativeClient.Source<Constants.CustomizeMode>(this.MsiRuntime);
 
@@ -107,17 +109,7 @@ public partial class NgrokListenersDialog : GatewayDialog
 
     private void SetControlStates()
     {
-        if (new GatewayProperties(this.Session()).ConfigureWebApp)
-        {
-            this.cmbNativeClient.Enabled = true;
-        }
-        else
-        {
-            this.cmbNativeClient.Enabled = false;
-            this.cmbNativeClient.SetSelected(Constants.CustomizeMode.Now);
-        }
-        
-        this.lblRemoteAddress.Enabled = this.txtRemoteAddress.Enabled = this.lnkRemoteAddr.Enabled = 
+        this.lblRemoteAddress.Enabled = this.txtRemoteAddress.Enabled =
             this.cmbNativeClient.Selected<Constants.CustomizeMode>() == Constants.CustomizeMode.Now;
     }
     

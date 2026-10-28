@@ -23,8 +23,9 @@ use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
 use crate::client::{
-    Target, Token, count, decoded_certificate, expect_error, expect_status, field, token_bag, token_base_url,
-    with_bag_url, with_upper_case_scheme,
+    Target, Token, count, decoded_certificate, expect_error, expect_status, field,
+    invisible_format_character_range_ends, is_invisible_format_character, token_bag, token_base_url,
+    unlisted_format_character_neighbors, with_bag_url, with_upper_case_scheme,
 };
 use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
 use crate::{Context, KeyBackend};
@@ -233,6 +234,10 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
                 .chars()
                 .all(|character| character >= '\u{20}' && !('\u{7f}'..='\u{9f}').contains(&character)),
             "agent metadata {key} contains a C0/C1 control character"
+        );
+        ensure!(
+            !value.chars().any(is_invisible_format_character),
+            "agent metadata {key} contains an invisible format character"
         );
         total_bytes += key.len() + value.len();
     }
@@ -843,10 +848,18 @@ impl AgentCase {
     }
 
     fn set_metadata_hostname(&mut self, hostname: &str) -> anyhow::Result<()> {
-        let replacement = self.path().join("identity-metadata-override-next.json");
-        std::fs::write(&replacement, serde_json::to_vec(&json!({ "hostname": hostname }))?)?;
-        std::fs::rename(&replacement, self.metadata_override_path())?;
+        self.set_metadata_override(&json!({ "hostname": hostname }))?;
         self.metadata_hostname = hostname.to_owned();
+        Ok(())
+    }
+
+    /// Replaces the metadata override with `values`, which the agent reads before its next send.
+    ///
+    /// It leaves `metadata_hostname`, the hostname that the metadata checks expect, to the caller.
+    fn set_metadata_override(&self, values: &Value) -> anyhow::Result<()> {
+        let replacement = self.path().join("identity-metadata-override-next.json");
+        std::fs::write(&replacement, serde_json::to_vec(values)?)?;
+        std::fs::rename(&replacement, self.metadata_override_path())?;
         Ok(())
     }
 
@@ -4473,6 +4486,51 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
     .await
 }
 
+/// CONTRACT.agent-identity.md §3.1: the agent "removes [...] the invisible format characters of §3" from each value it sends, and "A required key that ends up empty gets the value `unknown`".
+///
+/// The metadata override replaces collected values before each send (the agent's intent, "Configuration"), so the values this test sets go through that removal.
+/// The hostname holds every end of a listed range before, between and after code points that the list leaves out, which the agent keeps.
+/// The OS name, a required key, and the domain, an optional one, hold only listed code points, so the agent sends `unknown` for the first and omits the second.
+pub(crate) async fn a_metadata_invisible_format_characters_removed(ctx: Context) -> anyhow::Result<()> {
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+    with_agent(ctx, None, true, async move |case| {
+        let target = case.ctx.target.clone();
+        let listed = invisible_format_character_range_ends();
+        let only_listed = listed.iter().collect::<String>();
+        let mut hostname = format!("{only_listed}host");
+        let mut expected = "host".to_owned();
+        for (separator, kept) in listed.iter().cycle().zip(unlisted_format_character_neighbors()) {
+            hostname.push(*separator);
+            hostname.push(kept);
+            expected.push(kept);
+        }
+        hostname.push_str("name");
+        hostname.push_str(&only_listed);
+        expected.push_str("name");
+        case.set_metadata_override(&json!({ "hostname": hostname, "os_name": only_listed, "domain": only_listed }))?;
+        let (id, _) = case.enroll_new(&target, 1).await?;
+        let record = case.identity_record(&target, &id).await?;
+        ensure!(
+            record.metadata_value("hostname") == Some(&*expected),
+            "agent sent hostname {:?} instead of {expected:?}",
+            record.metadata_value("hostname")
+        );
+        ensure!(
+            record.metadata_value("os_name") == Some("unknown"),
+            "agent sent os_name {:?} for a value made only of invisible format characters",
+            record.metadata_value("os_name")
+        );
+        ensure!(
+            record.metadata_value("domain").is_none(),
+            "agent sent domain {:?} for a value made only of invisible format characters",
+            record.metadata_value("domain")
+        );
+        Ok(())
+    })
+    .await
+}
+
 pub(crate) async fn a_make_before_break_on_renewal(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
@@ -6037,6 +6095,37 @@ mod tests {
     use p256::pkcs8::EncodePrivateKey as _;
 
     use super::*;
+
+    #[test]
+    fn agent_metadata_check_refuses_listed_format_characters_only() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+        let metadata = |hostname: &str| {
+            let mut metadata = json!({
+                "hostname": hostname,
+                "os_name": "os",
+                "os_version": "1",
+                "arch": std::env::consts::ARCH,
+                "agent_version": "1",
+            });
+            // The check compares `machine_id` with the host's on Linux, so the fixture carries the host's.
+            if cfg!(target_os = "linux")
+                && let Ok(machine_id) = std::fs::read_to_string("/etc/machine-id")
+            {
+                metadata["machine_id"] = machine_id.trim().into();
+            }
+            metadata
+        };
+        validate_agent_metadata(&metadata("host\u{2065}name"), None).expect("U+2065 is outside the list");
+        for character in ['\u{00AD}', '\u{E007F}'] {
+            let refused = validate_agent_metadata(&metadata(&format!("host{character}name")), None)
+                .expect_err(&format!("U+{:04X} is listed", u32::from(character)));
+            assert!(
+                refused.to_string().contains("invisible format character"),
+                "U+{:04X} was refused for another reason: {refused}",
+                u32::from(character)
+            );
+        }
+    }
 
     #[test]
     fn key_names_require_this_runs_prefix_and_a_canonical_uuid() -> anyhow::Result<()> {
