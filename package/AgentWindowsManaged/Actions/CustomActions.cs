@@ -149,14 +149,41 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
+        public static ActionResult CheckProgramDataDirectory(Session session)
+        {
+            try
+            {
+                DataFolderRefusal refusal = DataFolders.Check(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    LogDelegate.WithSession(session));
+
+                return refusal is null ? ActionResult.Success : Refuse(session, refusal);
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to check {ProgramDataDirectory}: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
         public static ActionResult CreateProgramDataDirectory(Session session)
         {
             string path = ProgramDataDirectory;
 
             try
             {
-                DirectoryInfo di = Directory.CreateDirectory(path);
-                session.Log($"created directory at {di.FullName} or already exists");
+                DataFolderRefusal refusal = DataFolders.Create(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    Includes.PROGRAM_DATA_SDDL,
+                    LogDelegate.WithSession(session));
+
+                if (refusal is not null)
+                {
+                    return Refuse(session, refusal);
+                }
+
+                session.Log($"created directory at {path} or already exists");
             }
             catch (Exception e)
             {
@@ -165,6 +192,22 @@ namespace DevolutionsAgent.Actions
             }
 
             return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Logs the error for <paramref name="refusal"/> in the installer's language and shows it, which a silent install
+        /// only logs.
+        /// </summary>
+        private static ActionResult Refuse(Session session, DataFolderRefusal refusal)
+        {
+            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows.
+            // No test runs the data folder actions, which read the machine's own ProgramData.
+            // When changing this, keep sending it with InstallMessage.Error, as ReadIdentityEnrollmentTokenFile does.
+            string message = refusal.Message(session.Property("ProductLanguage"));
+            session.Log(message);
+            using Record record = new(0) { FormatString = EscapeFormatted(message) };
+            session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+            return ActionResult.Failure;
         }
 
         [CustomAction]
@@ -805,22 +848,18 @@ namespace DevolutionsAgent.Actions
                 }
             }
 
-            string identityDirectory = Path.Combine(ProgramDataDirectory, "identity");
-
+            // The deletion never follows a link, so that a link in the data directory can't make the uninstall delete
+            // files elsewhere.
             try
             {
-                if (Directory.Exists(identityDirectory))
-                {
-                    // UNTESTED: Directory.Delete deletes a junction or symbolic link without recursing into its target.
-                    // Otherwise a link planted in the identity folder would make the uninstall delete files elsewhere.
-                    // When replacing this call, keep the deletion from following reparse points.
-                    Directory.Delete(identityDirectory, true);
-                    session.Log($"deleted {identityDirectory}");
-                }
+                SecureDirectory.DeleteTree(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent", "identity"],
+                    LogDelegate.WithSession(session));
             }
             catch (Exception e)
             {
-                session.Log($"failed to delete {identityDirectory}: {e}");
+                session.Log($"failed to delete the Agent Identity state: {e}");
             }
 
             return ActionResult.Success;
@@ -1889,7 +1928,10 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                SecureDirectory.SetSecurity(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent"],
+                    Includes.PROGRAM_DATA_SDDL);
                 return ActionResult.Success;
             }
             catch (Exception e)
@@ -1904,7 +1946,18 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, "pedm"), Includes.PROGRAM_DATA_PEDM_SDDL);
+                SecureDirectory.SetSecurity(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent", "pedm"],
+                    Includes.PROGRAM_DATA_PEDM_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Win32Exception e) when (e.NativeErrorCode == WinAPI.ERROR_FILE_NOT_FOUND)
+            {
+                // UNTESTED: a missing pedm folder doesn't fail the run, as only the PEDM feature creates it.
+                // No test runs this action, which reads the machine's own ProgramData.
+                // When changing this, keep accepting a missing pedm folder and nothing else that fails to open.
+                session.Log($"no pedm folder to set permissions on: {e.Message}");
                 return ActionResult.Success;
             }
             catch (Exception e)

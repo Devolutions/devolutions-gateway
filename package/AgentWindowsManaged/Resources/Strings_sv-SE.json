@@ -111,6 +111,26 @@
         {
           "id": "IdentityEnrollmentTokenFileEmpty",
           "text": "Första raden i registreringstokenfilen {0} är tom."
+        },
+        {
+          "id": "DataFolderIsLink",
+          "text": "Det går inte att använda mappen {0} eftersom den är en länk. Ta bort länken och försök igen."
+        },
+        {
+          "id": "DataFolderIsFile",
+          "text": "Det går inte att använda {0} eftersom det är en fil, inte en mapp. Ta bort filen och försök igen."
+        },
+        {
+          "id": "DataFolderOwnedByUntrustedAccount",
+          "text": "Det går inte att använda mappen {0} eftersom den ägs av {1}. Endast SYSTEM eller en administratör får äga den. Byt ägare och försök igen."
+        },
+        {
+          "id": "DataFolderReplaceableByUntrustedAccount",
+          "text": "Det går inte att använda mappen {0} eftersom {1} kan ersätta den eller dess innehåll. Ta bort den behörigheten och försök igen."
+        },
+        {
+          "id": "DataFolderSecurityUnreadable",
+          "text": "Det går inte att läsa ägaren eller behörigheterna för mappen {0}. Kontrollera dem och försök igen."
         }
       ],
       "buttons": [
