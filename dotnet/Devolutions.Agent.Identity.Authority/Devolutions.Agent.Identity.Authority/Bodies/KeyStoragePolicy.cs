@@ -22,9 +22,6 @@ public sealed class KeyStoragePolicy
 
     private const int MaxBackends = 8;
 
-    // UNTESTED: the policy never changes once created, since a config writes its JSON once, when it is created.
-    // Callers pass an array that nothing else references, and Backends wraps it read-only;
-    // keep both when changing how the names are stored, or a config could carry a policy that it no longer reports.
     private KeyStoragePolicy(string[] backends, bool required)
     {
         Backends = Array.AsReadOnly(backends);
@@ -78,6 +75,8 @@ public sealed class KeyStoragePolicy
     /// <see cref="Create"/> accepts, and <c>required</c>, <c>true</c> or <c>false</c>.
     /// JSON that repeats a member name, holds another member, or holds a string that is not Unicode text is refused,
     /// as CONTRACT.agent-identity.md §1 refuses such a request body, so that no other parser reads another policy.
+    /// False means that the JSON holds no policy this library can read, such as one naming a key storage it does not
+    /// know, not that the identity has no policy.
     /// </remarks>
     /// <param name="utf8Json">The UTF-8 JSON of the policy.</param>
     /// <param name="policy">The policy, when the JSON holds a valid one.</param>
