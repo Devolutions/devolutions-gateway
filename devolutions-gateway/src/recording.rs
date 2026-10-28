@@ -919,9 +919,7 @@ impl RecordingManagerTask {
                 let marker = remux_marker(&recording_file_path);
 
                 // An AI analysis that finds no mark reads the file even while it is remuxed.
-                if let Err(error) = fs::write(&marker, b"").await {
-                    warn!(%marker, %error, "Failed to mark the recording as waiting for its remux");
-                }
+                write_remux_marker(&marker).await;
 
                 // Schedule 60 seconds to wait for the streamers to release the file.
                 let scheduled = self
@@ -1261,13 +1259,20 @@ const REMUX_MARKER_SUFFIX: &str = ".remuxing";
 ///
 /// A crash between the mark and the storing of its job leaves a mark that no remux removes.
 /// The limit lets an AI analysis waiting on such a mark go on before it fails for lack of progress.
-/// The remux job marks the file again as it starts, so only the remux itself, which should take far less, counts
-/// against it.
+/// The remux job marks the file again as it starts, so the limit covers the remux itself.
+/// Until then the mark ages from the scheduling, so a job that waits longer than the limit to start lets an AI analysis
+/// read the file the remux is about to replace.
 pub(crate) const REMUX_MARKER_STALE_AFTER: Duration = Duration::from_secs(20 * 60);
 
 /// The file that marks `recording_file` as waiting for its remux, from the time the remux is scheduled until it ends.
 pub(crate) fn remux_marker(recording_file: &Utf8Path) -> Utf8PathBuf {
     Utf8PathBuf::from(format!("{recording_file}{REMUX_MARKER_SUFFIX}"))
+}
+
+async fn write_remux_marker(marker: &Utf8Path) {
+    if let Err(error) = fs::write(marker, b"").await {
+        warn!(%marker, %error, "Failed to mark the recording as waiting for its remux");
+    }
 }
 
 async fn remove_remux_marker(marker: &Utf8Path) {
@@ -1322,10 +1327,8 @@ impl job_queue::Job for RemuxJob {
         let input_path = core::mem::take(&mut self.input_path);
         let marker = remux_marker(&input_path);
 
-        // The mark ages from now, so neither the wait for this job nor a run again after a restart makes it stale.
-        if let Err(error) = fs::write(&marker, b"").await {
-            warn!(%marker, %error, "Failed to mark the recording as waiting for its remux");
-        }
+        // From here the mark ages with the remux itself, also when the job runs again after a restart.
+        write_remux_marker(&marker).await;
 
         remux(input_path).await;
         remove_remux_marker(&marker).await;

@@ -49,7 +49,8 @@ pub const START_WINDOW: time::Duration = time::Duration::hours(2);
 /// Time a running AI analysis may go without progress before it fails.
 pub const PROGRESS_TIMEOUT: time::Duration = time::Duration::minutes(30);
 
-// Waiting for a remux is no progress, so a mark that no remux will remove must stop counting before the wait times out.
+// INVARIANT: a mark that no remux will remove stops counting before an analysis waiting on it times out, since waiting
+// for a remux is no progress.
 const _: () = assert!(REMUX_MARKER_STALE_AFTER.as_secs() < PROGRESS_TIMEOUT.whole_seconds().unsigned_abs());
 
 /// Time between two checks for a remux of the session.
