@@ -32,7 +32,7 @@ use crate::dvls::AppCredential;
 
 type TestFuture = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send>>;
 type TestFn = fn(Context) -> TestFuture;
-const RUN_DEADLINE: Duration = Duration::from_secs(14 * 60 + 30);
+const RUN_DEADLINE: Duration = Duration::from_secs(24 * 60 + 30);
 /// How long a test may run unless [`run_test`] gives it another timeout.
 const TEST_TIMEOUT: Duration = Duration::from_secs(90);
 

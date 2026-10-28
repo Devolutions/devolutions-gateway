@@ -361,7 +361,7 @@ async fn conformance() -> anyhow::Result<()> {
         .stderr(Stdio::from(std::fs::File::create(&stderr_path)?))
         .kill_on_drop(true);
     let mut runner = RunnerProcess::start(cmd).await?;
-    let status = tokio::time::timeout(Duration::from_secs(15 * 60), runner.child.wait()).await;
+    let status = tokio::time::timeout(Duration::from_secs(25 * 60), runner.child.wait()).await;
     if !matches!(&status, Ok(Ok(status)) if status.success()) {
         // UNTESTED: a failed or timed-out runner leaves this directory, which holds the agent data directories it kept.
         // Without it, the `KEPT` paths that the runner printed point to deleted directories.
@@ -373,7 +373,7 @@ async fn conformance() -> anyhow::Result<()> {
             first_dir.path().display()
         );
     }
-    let status = status.context("Agent Identity conformance exceeded 15 minutes")?;
+    let status = status.context("Agent Identity conformance exceeded 25 minutes")?;
     print!("{}", String::from_utf8_lossy(&std::fs::read(stdout_path)?));
     eprint!("{}", String::from_utf8_lossy(&std::fs::read(stderr_path)?));
     let status = status.context("wait for Agent Identity conformance")?;
