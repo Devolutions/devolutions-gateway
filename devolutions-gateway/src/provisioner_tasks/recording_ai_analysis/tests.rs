@@ -530,7 +530,7 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
     let workspace = harness.workspace(session_id);
 
     harness.run(task_id).await.expect("the job queues the next attempt itself");
-    // oracle: mutant a recoverable failure is not retried
+    // oracle: mutant a recoverable failure is retried at once, without the delay a busy provider asks for
     assert!(
         harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
         "a provider outage is retried"
@@ -680,7 +680,7 @@ async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
 
     for attempt in 1..MAX_ATTEMPTS {
         harness.run(task_id).await.expect("the job queues the next attempt itself");
-        // oracle: mutant a recoverable failure is not retried
+        // oracle: mutant a recoverable failure is retried at once, without the delay a busy provider asks for
         assert!(
             harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
             "attempt {attempt} is retried"

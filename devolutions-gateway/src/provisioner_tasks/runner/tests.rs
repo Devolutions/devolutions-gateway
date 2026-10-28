@@ -566,6 +566,26 @@ async fn a_task_whose_end_cannot_be_recorded_is_ended_after_its_deadline() {
     assert!(harness.ended.lock().is_empty());
 }
 
+// oracle: mutant an end that can be neither recorded nor queued returns an error, so the job queue redoes the paid work
+#[tokio::test]
+async fn a_task_whose_end_cannot_be_recorded_or_queued_is_not_retried() {
+    let mut harness = Harness::new(|value| Ok(json!(value))).await;
+    let id = harness.create(1).await;
+    let mut job = harness.queued_job();
+    harness.job_queue_rx.close();
+    harness.success_failures.store(1, Ordering::SeqCst);
+    harness.failure_failures.store(1, Ordering::SeqCst);
+
+    job.run().await.expect("the job queue does not run the attempt again");
+
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        harness.task(id).await.state,
+        ProvisionerTaskState::Running,
+        "the store fails it at its deadline"
+    );
+}
+
 // oracle: mutant a queued Task of an unknown kind is never failed
 #[tokio::test]
 async fn invalid_parameters_and_unknown_kinds_fail_the_task() {
