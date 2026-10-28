@@ -22,7 +22,6 @@ Get-Content -Raw 'C:\Secure\enrollment-token.txt' |
 ```
 
 `identity enroll -` reads the token from the first line of standard input, so the token never appears in a process listing or an installer log.
-`identity enroll <token>` also works, but exposes the token on the command line.
 
 On Windows, run the command as SYSTEM or from an elevated administrator prompt; any other account is refused.
 
