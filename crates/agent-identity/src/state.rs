@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
+use tracing::warn;
 use uuid::{Uuid, Variant};
 
 use crate::key_storage::{
@@ -415,6 +416,17 @@ impl Store {
         previous: Option<&StoredIdentity>,
         identity: &StoredIdentity,
     ) -> anyhow::Result<()> {
+        self.write_identity_with(previous, identity, None)
+    }
+
+    /// Writes `identity` as [`Store::write_identity_locked`] does, except that `left_behind`, a key that `identity` no
+    /// longer records, is not deleted.
+    fn write_identity_with(
+        &self,
+        previous: Option<&StoredIdentity>,
+        identity: &StoredIdentity,
+        left_behind: Option<&KeyRecord>,
+    ) -> anyhow::Result<()> {
         self.validate_identity(identity)?;
         // Checked before any key is deleted, so a refused identity leaves the previous file and its keys intact.
         let bytes = serde_json::to_vec(identity).context("encode stored identity")?;
@@ -470,7 +482,7 @@ impl Store {
         }
         if let Some(old) = &existing {
             for key in old.keys.records() {
-                if !new_keys.contains_key(key.key_name.as_str()) {
+                if !new_keys.contains_key(key.key_name.as_str()) && left_behind != Some(key) {
                     self.delete_in(&key.key_storage, &key.key_name)?;
                 }
             }
@@ -631,31 +643,42 @@ impl Store {
         then()
     }
 
-    /// Deletes the previous key, then removes its slot, and returns whether the identity no longer has a previous key.
+    /// Deletes the previous key, then removes its slot.
     ///
-    /// [`crates/agent-identity/INTENT.md`] ("Identities"): a key whose key storage is unavailable is left as it is,
-    /// with its slot, because it may still exist there, so this returns `false` without a change; that key storage is
-    /// never stopped on, so the caller goes on with the identity's other keys.
+    /// When the previous key's key storage is unavailable, the key can be neither opened nor deleted, so only its slot
+    /// is removed and the key is left where it is, never looked for in another key storage.
+    /// Start-up deletes it as an unrecorded key once its key storage is available again
+    /// ([`crates/agent-identity/INTENT.md`], "Stored identities"), and the warning logged here says so.
+    /// Keeping the slot instead would leave the identity unable to record the next renewal's key, which no rule allows
+    /// for a key that is no longer used.
     ///
     /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
-    pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<bool> {
-        let Some(previous) = &identity.keys.previous else {
-            return Ok(true);
+    pub fn remove_previous_key(&self, identity: &mut StoredIdentity) -> anyhow::Result<()> {
+        let Some(previous) = identity.keys.previous.clone() else {
+            return Ok(());
         };
-        match self.check_key_storage(&previous.key_storage) {
-            Ok(()) => {}
-            Err(error) if unavailable_key_storage(&error).is_some() => return Ok(false),
+        let left_behind = match self.check_key_storage(&previous.key_storage) {
+            Ok(()) => None,
+            Err(error) if unavailable_key_storage(&error).is_some() => Some(&previous),
             Err(error) => return Err(error),
+        };
+        let mut updated = identity.clone();
+        updated.keys.previous = None;
+        {
+            let _lock = self.lock()?;
+            self.write_identity_with(Some(identity), &updated, left_behind)?;
         }
-        self.update(
-            identity,
-            |updated| {
-                updated.keys.previous = None;
-                Ok(())
-            },
-            || Ok(()),
-        )?;
-        Ok(true)
+        *identity = updated;
+        if let Some(previous) = left_behind {
+            warn!(
+                identity_id = %identity.identity_id,
+                authority_id = %identity.authority_id,
+                key_storage = %previous.key_storage,
+                key_name = %previous.key_name,
+                "The old Agent Identity key is in an unavailable key storage; its record is removed, and the agent deletes the key when it starts with that key storage available"
+            );
+        }
+        Ok(())
     }
 
     /// Reuses an enrollment key, or skips a token already represented by an identity or rejection marker.
@@ -905,7 +928,8 @@ impl Store {
                     }
                 }
             }
-            // A previous key in an unavailable key storage fails to open, so its slot stays.
+            // A previous key in an unavailable key storage fails to open, so its slot stays here; the identity's runner
+            // removes the slot and leaves the key to this cleanup at a later start.
             if let Some(previous) = &identity.keys.previous
                 && matches!(self.open_key(previous), Ok(None))
             {
@@ -2957,33 +2981,41 @@ mod tests {
         Ok(())
     }
 
-    // oracle: intent crates/agent-identity/INTENT.md §Identities
-    // A key recorded in an unavailable key storage is left as it is, because it may still exist there, and the agent
-    // never looks for it in another key storage; one unavailable key storage never stops what doesn't need it.
+    // oracle: mutant a previous key in an unavailable key storage keeps its slot, or is looked for in another key storage
+    // The old key of a confirmed renewal whose key storage is unavailable can be neither opened nor deleted, so its slot
+    // is dropped and the key is left where it is; nothing touches it in another key storage, here the key file of the
+    // same name.
     #[test]
-    fn a_previous_key_in_an_unavailable_key_storage_is_kept_with_its_slot() -> anyhow::Result<()> {
+    fn a_previous_key_in_an_unavailable_key_storage_loses_its_slot_and_is_left_in_place() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
         if !directory.supports_owner_only_files()? {
             return Ok(());
         }
         let store = directory.store()?;
         let mut identity = enroll_locally(&store, &directory.0)?;
+        let old_name = identity.keys.current.key_name.clone();
         store.create_pending_key(&mut identity)?;
         store.store_pending_chain(&mut identity, vec!["bmV3".into()])?;
         store.promote_pending(&mut identity)?;
-        let bytes = rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
+        rewrite_identity_json(&directory, &store, identity.authority_id, |json| {
             json["keys"]["previous"]["key_storage"] = Value::from("tpm");
         })?;
         let mut identity = store
             .read_identity(identity.authority_id)?
             .context("identity disappeared")?;
-        let kept = identity.clone();
+        let mut expected = identity.clone();
+        expected.keys.previous = None;
 
-        let removed = store.remove_previous_key(&mut identity)?;
+        store.remove_previous_key(&mut identity)?;
 
-        assert!(!removed);
-        assert_eq!(identity, kept);
-        assert_eq!(fs::read(store.identity_path(identity.authority_id))?, bytes);
+        assert_eq!(identity, expected);
+        assert_eq!(store.read_identity(identity.authority_id)?, Some(expected));
+        assert!(store.open_file_key(&old_name)?.is_some());
+
+        // oracle: intent crates/agent-identity/INTENT.md §Stored identities
+        // At start-up the agent deletes each key with its prefix that no record names, in every available key storage.
+        store.reconcile()?;
+        assert!(store.open_file_key(&old_name)?.is_none());
         Ok(())
     }
 
