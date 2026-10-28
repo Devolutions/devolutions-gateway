@@ -10,7 +10,8 @@ namespace Devolutions.Agent.Identity.Authority;
 /// <remarks>
 /// <para>
 /// A format is text with placeholders: <c>{hostname}</c>, <c>{fqdn}</c>, <c>{domain}</c>, <c>{os_name}</c>,
-/// <c>{os_version}</c>, <c>{arch}</c>, <c>{agent_version}</c> and <c>{machine_id}</c> for the reported metadata,
+/// <c>{os_version}</c>, <c>{arch}</c>, <c>{agent_version}</c>, <c>{machine_id}</c>, <c>{key_storage}</c> and
+/// <c>{key_storage_available}</c> for the reported metadata,
 /// and <c>{token_name}</c> for the name of the enrollment token.
 /// <c>{{</c> and <c>}}</c> write a literal brace.
 /// The name is never sent to the agent, and later metadata updates never rename the identity.
@@ -26,7 +27,10 @@ public sealed class FriendlyNameFormat
 {
     // The known metadata keys of CONTRACT.agent-identity.md §3, and the token's name.
     private static readonly string[] Placeholders =
-        ["hostname", "fqdn", "domain", "os_name", "os_version", "arch", "agent_version", "machine_id", "token_name"];
+    [
+        "hostname", "fqdn", "domain", "os_name", "os_version", "arch", "agent_version", "machine_id", "key_storage",
+        "key_storage_available", "token_name",
+    ];
 
     // Ends every parse error without repeating the format text.
     private static readonly string ErrorGuidance =

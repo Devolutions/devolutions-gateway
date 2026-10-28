@@ -21,6 +21,7 @@ public sealed class IdentityConfig
     private const string VersionMember = "version";
     private const string RevisionMember = "revision";
     private const string AgentChannelUrlMember = "agent_channel_url";
+    private const string KeyStorageMember = "key_storage";
 
     // The schema of the config; the agent treats a config of another version as a transient failure.
     private const int SchemaVersion = 1;
@@ -30,10 +31,11 @@ public sealed class IdentityConfig
 
     private readonly byte[] _utf8Json;
 
-    private IdentityConfig(ulong revision, string? agentChannelUrl, byte[] utf8Json)
+    private IdentityConfig(ulong revision, string? agentChannelUrl, KeyStoragePolicy? keyStorage, byte[] utf8Json)
     {
         Revision = revision;
         AgentChannelUrl = agentChannelUrl;
+        KeyStorage = keyStorage;
         _utf8Json = utf8Json;
     }
 
@@ -49,6 +51,12 @@ public sealed class IdentityConfig
     public string? AgentChannelUrl { get; }
 
     /// <summary>
+    /// The identity's key storage policy, or null when the authority sets none,
+    /// so that the agent creates each key in a key storage of its own choosing.
+    /// </summary>
+    public KeyStoragePolicy? KeyStorage { get; }
+
+    /// <summary>
     /// The UTF-8 JSON object that <see cref="ToUtf8Json"/> copies.
     /// </summary>
     internal ReadOnlySpan<byte> Utf8Json => _utf8Json;
@@ -61,8 +69,8 @@ public sealed class IdentityConfig
     /// since the agent appends the path of the channel service to it.
     /// Each product-specific field has a snake_case name:
     /// lowercase ASCII words of letters and digits joined by single underscores, the first starting with a letter.
-    /// No two fields have the same name, and none is named <c>version</c>, <c>revision</c> or
-    /// <c>agent_channel_url</c>.
+    /// No two fields have the same name, and none is named <c>version</c>, <c>revision</c>, <c>agent_channel_url</c>
+    /// or <c>key_storage</c>.
     /// Each value is any JSON value but <c>null</c>,
     /// since an absent field is omitted rather than written as <c>null</c>.
     /// The members of every object inside a value follow the same rules:
@@ -80,6 +88,9 @@ public sealed class IdentityConfig
     /// null when the authority does not offer the channel to the identity, so that the agent opens none.
     /// </param>
     /// <param name="productFields">The product-specific fields, if any.</param>
+    /// <param name="keyStorage">
+    /// The identity's key storage policy, written as <c>key_storage</c>; null when the authority sets none.
+    /// </param>
     /// <exception cref="ArgumentException">
     /// <paramref name="agentChannelUrl"/> is not ASCII, is not an absolute <c>https</c> URL,
     /// or has user information or any other <c>@</c>, a query or a fragment;
@@ -93,13 +104,14 @@ public sealed class IdentityConfig
     public static IdentityConfig Create(
         ulong revision,
         string? agentChannelUrl = null,
-        IEnumerable<KeyValuePair<string, JsonElement>>? productFields = null)
+        IEnumerable<KeyValuePair<string, JsonElement>>? productFields = null,
+        KeyStoragePolicy? keyStorage = null)
     {
         string? normalizedUrl = agentChannelUrl is null
             ? null
             : BaseUrl.Normalize(agentChannelUrl, "The agent channel URL", nameof(agentChannelUrl));
 
-        byte[] utf8Json = Write(revision, normalizedUrl, productFields ?? []);
+        byte[] utf8Json = Write(revision, normalizedUrl, keyStorage, productFields ?? []);
         int envelopeBytes = ConfigUpdateBytes(utf8Json);
 
         if (envelopeBytes > MaxEnvelopeBytes)
@@ -110,12 +122,13 @@ public sealed class IdentityConfig
                 nameof(productFields));
         }
 
-        return new IdentityConfig(revision, normalizedUrl, utf8Json);
+        return new IdentityConfig(revision, normalizedUrl, keyStorage, utf8Json);
     }
 
     /// <summary>
     /// Writes the config as a UTF-8 JSON object with the members <c>version</c>, <c>revision</c>,
-    /// <c>agent_channel_url</c> when the authority offers the agent channel, and the product-specific fields.
+    /// <c>agent_channel_url</c> when the authority offers the agent channel, <c>key_storage</c> when it sets a key
+    /// storage policy, and the product-specific fields.
     /// </summary>
     public byte[] ToUtf8Json()
     {
@@ -127,6 +140,7 @@ public sealed class IdentityConfig
     private static byte[] Write(
         ulong revision,
         string? agentChannelUrl,
+        KeyStoragePolicy? keyStorage,
         IEnumerable<KeyValuePair<string, JsonElement>> productFields)
     {
         ArrayBufferWriter<byte> buffer = new();
@@ -140,6 +154,12 @@ public sealed class IdentityConfig
             if (agentChannelUrl is not null)
             {
                 writer.WriteString(AgentChannelUrlMember, agentChannelUrl);
+            }
+
+            if (keyStorage is not null)
+            {
+                writer.WritePropertyName(KeyStorageMember);
+                keyStorage.WriteTo(writer);
             }
 
             WriteProductFields(writer, productFields);
@@ -187,7 +207,7 @@ public sealed class IdentityConfig
                     nameof(productFields));
             }
 
-            if (name is VersionMember or RevisionMember or AgentChannelUrlMember)
+            if (name is VersionMember or RevisionMember or AgentChannelUrlMember or KeyStorageMember)
             {
                 throw new ArgumentException(
                     $"The product field '{name}' would repeat a member of the config.",

@@ -78,7 +78,7 @@ internal static class RequestBodyReader
     // Returns why the bytes are not one JSON text that every parser reads the same way, or null.
     // A repeated member name lets two parsers read two values (CONTRACT.agent-identity.md §1),
     // and so does a string that is not Unicode text (RFC 8259 §8.2).
-    private static string? CheckJson(ReadOnlySpan<byte> utf8Json)
+    internal static string? CheckJson(ReadOnlySpan<byte> utf8Json)
     {
         // The default options reject comments, trailing commas, content after the value and nesting beyond 64 levels.
         Utf8JsonReader reader = new(utf8Json);

@@ -12,6 +12,8 @@ The contract is `docs/agent-identity/CONTRACT.agent-identity.md` in the [devolut
 - Decisions: `EnrollmentRules.Decide` decides an enrollment and `RenewalRules.Decide` a renewal, given the request's CSR and the issued certificate that holds its key.
 - Certificates: `IdentityCertificateIssuer.Issue` issues the certificate of the new identity that an enrollment decision creates, or the pending certificate that a renewal decision calls for, each for the CSR key that the decision was made for.
 - Responses: `IdentityConfig` holds an identity's config, and `ResponseBodies` writes the bodies of the `trust-anchor`, `enroll`, `renew` and `check-in` responses.
+- Key storage: `KeyStoragePolicy` holds an identity's key storage policy (CONTRACT.agent-identity.md [§5.7]), which the host stores as its `ToUtf8Json`, reloads with `TryParse` and passes to `IdentityConfig.Create`.
+  `KeyStorageNames.ParseAvailable` reads the key storages that an agent reports under `AgentMetadataKeys.KeyStorageAvailable`, which carries no proof, so it may guide the choice of a policy but never grants or refuses anything.
 - Agent channel: `ChannelOpening` verifies the handshake that authenticates a stream, and `ChannelMessages` builds the `ConfigUpdate`, `RenewRequested` and `Reconnect` messages that the authority pushes.
 - Errors: `AgentIdentityError` gives each error its code, HTTP status and message, and writes its JSON body and gRPC exception.
 - Encodings: `AgentIdentityProtocol` computes certificate thumbprints and formats timestamps.
@@ -211,6 +213,7 @@ Implement the `AgentChannel` service with that package; a feed that serves this 
 [§5.4]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#errors
 [§5.5]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#confirm
 [§5.6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#check-in
+[§5.7]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#key-storage
 [§6]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#signatures
 [§7.1]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#channel-service
 [§7.3]: https://github.com/Devolutions/devolutions-gateway/blob/master/docs/agent-identity/CONTRACT.agent-identity.md#channel-sequence

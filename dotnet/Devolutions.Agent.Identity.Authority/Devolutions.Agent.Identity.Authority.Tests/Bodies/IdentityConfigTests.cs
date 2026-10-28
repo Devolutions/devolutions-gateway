@@ -100,6 +100,24 @@ public class IdentityConfigTests
         Assert.Contains(creation, (Creation[])[Creation.Holding(withoutSlashes), Creation.Rejection]);
     }
 
+    // `config.key_storage` is the identity's key storage policy, an object with `backends` and `required`.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §key-storage
+    [Fact]
+    public void JsonHasTheKeyStoragePolicy()
+    {
+        KeyStoragePolicy policy = KeyStoragePolicy.Create(["tpm", "windows_software_provider"], required: true);
+
+        IdentityConfig config = IdentityConfig.Create(3, "https://host/dvls", keyStorage: policy);
+
+        Dictionary<string, JsonElement> members = TestJson.Members(config.ToUtf8Json());
+        Assert.Equal(["agent_channel_url", "key_storage", "revision", "version"], TestJson.Names(members));
+        Assert.True(JsonElement.DeepEquals(
+            TestJson.Parse("""{ "backends": ["tpm", "windows_software_provider"], "required": true }"""),
+            members["key_storage"]));
+        Assert.Same(policy, config.KeyStorage);
+    }
+
     // Product-specific config fields, such as a PSU channel URL, may coexist with the others.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §enroll
     [Fact]
@@ -162,6 +180,7 @@ public class IdentityConfigTests
     [InlineData("version")]
     [InlineData("revision")]
     [InlineData("agent_channel_url")]
+    [InlineData("key_storage")]
     public void CreateRejectsAProductFieldNamedAfterAContractMember(string name)
     {
         AssertRejectsProductFields([new(name, TestJson.Parse("2"))]);

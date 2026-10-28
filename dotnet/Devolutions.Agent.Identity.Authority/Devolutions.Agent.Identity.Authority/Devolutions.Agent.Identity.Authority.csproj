@@ -14,7 +14,7 @@
     <Description>Agent-facing protocol rules shared by every Devolutions Agent Identity authority</Description>
     <Copyright>© Devolutions Inc. All rights reserved.</Copyright>
     <RootNamespace>Devolutions.Agent.Identity.Authority</RootNamespace>
-    <Version>2026.10.28.1</Version>
+    <Version>2026.10.29.1</Version>
     <PackageLicenseExpression>MIT OR Apache-2.0</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/Devolutions/devolutions-gateway.git</RepositoryUrl>

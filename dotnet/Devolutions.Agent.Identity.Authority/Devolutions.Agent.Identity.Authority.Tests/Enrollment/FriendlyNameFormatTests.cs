@@ -18,7 +18,7 @@ public class FriendlyNameFormatTests
     private static readonly string[] Placeholders =
     [
         "{hostname}", "{fqdn}", "{domain}", "{os_name}", "{os_version}", "{arch}", "{agent_version}", "{machine_id}",
-        "{token_name}",
+        "{key_storage}", "{key_storage_available}", "{token_name}",
     ];
 
     // A value for each known metadata key of CONTRACT.agent-identity.md §3.
@@ -32,6 +32,8 @@ public class FriendlyNameFormatTests
         ["arch"] = "x86_64",
         ["agent_version"] = "2026.3.0",
         ["machine_id"] = "4c4c4544-0042-3510-8052-b4c04f4a4e32",
+        ["key_storage"] = "windows_software_provider",
+        ["key_storage_available"] = "file,windows_software_provider",
     });
 
     // INTENT.agent-identity.md, "Enrollment": the placeholders are `{<known metadata key>}` and `{token_name}`,
@@ -54,6 +56,10 @@ public class FriendlyNameFormatTests
     [InlineData("{agent_version}", "2026.3.0")]
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
     [InlineData("{machine_id}", "4c4c4544-0042-3510-8052-b4c04f4a4e32")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    [InlineData("{key_storage}", "windows_software_provider")]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+    [InlineData("{key_storage_available}", "file,windows_software_provider")]
     [InlineData("{token_name}", "Fleet")]
     // `{{` and `}}` escape braces, and other text is literal.
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Enrollment
