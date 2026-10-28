@@ -162,6 +162,7 @@ Not intended:
   Signing the URL, as DPoP's `htu` does, would make the authority configure its external URL and compare it exactly, and would cost about 95 bytes per request.
 - The agent supplies each request's freshness, a single-use nonce and its own timestamp within a window, and the authority issues none, so every operation takes one round trip and a lost response never stalls the agent.
   Authority-issued nonces would tolerate a skewed agent clock, but they cost a round trip after an idle period, stall a retry after a lost response, and need issuance state shared across authority nodes.
+- The agent applies an authority's `server_time` to a `clock_skew` retry only when it is within 1 day of the agent's clock; beyond that, the refusal stands as a transient error, so that a wrong or forged time cannot make the agent date a signature far from its own clock.
 - The authority records a nonce only after the request signature and any body digest are valid.
   Requests with an invalid signature or body digest therefore cannot consume nonce storage.
 - The authority keeps each accepted nonce at least until 60 s after its signature expires, the last moment the freshness window could accept the same signature again.
