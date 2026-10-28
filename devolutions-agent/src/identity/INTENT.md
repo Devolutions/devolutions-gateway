@@ -26,6 +26,7 @@ The agent's generic command-line and configuration modules only route to them, s
   - The extra trusted root and the access grant for the current user exist only for tests; they are never a production trust or custody path.
 - The knobs, which the conformance tester relies on:
   - `renewal_after_secs`: replaces the scheduled renewal time with the specified number of seconds after the certificate's anchor (`crates/agent-identity/INTENT.md`, "Schedules").
+  - `min_renewal_interval_secs`: replaces the 10-minute wait between renewals with the specified number of seconds; 0 removes the wait (`crates/agent-identity/INTENT.md`, "Schedules").
   - `disable_jitter`: disables renewal, check-in and retry jitter.
   - `backoff_max_secs`: caps identity-operation retry backoff, including `Retry-After`, at the specified number of seconds.
   - `pending_poll_interval_ms`: replaces the default 5 s pending-directory poll interval.
