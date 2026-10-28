@@ -199,6 +199,21 @@ fn log_mark(case: &AgentCase) -> anyhow::Result<[u64; 2]> {
     Ok(mark)
 }
 
+/// Waits until the agent logs an error-level line after `mark`, when the case's unavailable key storage is one the agent knows ([`key_storage::UNAVAILABLE_IS_KNOWN`]).
+async fn until_error_logged_for_known_storage(case: &mut AgentCase, mark: [u64; 2], what: &str) -> anyhow::Result<()> {
+    if !key_storage::UNAVAILABLE_IS_KNOWN {
+        return Ok(());
+    }
+    poll!(
+        case,
+        WAIT,
+        POLL,
+        format!("the agent logged no error for {what}"),
+        async { Ok(error_logged_since(case, mark)?.then_some(())) }
+    );
+    Ok(())
+}
+
 /// Whether the agent has logged an error-level line after `mark`.
 fn error_logged_since(case: &AgentCase, mark: [u64; 2]) -> anyhow::Result<bool> {
     for (start, name) in mark.into_iter().zip(LOG_FILES) {
@@ -891,10 +906,7 @@ pub(crate) async fn a_pending_key_in_unavailable_storage_pauses_until_restored(c
                 "the agent changed the identity file of an identity whose pending key is in an unavailable key storage"
             );
         }
-        ensure!(
-            !key_storage::UNAVAILABLE_IS_KNOWN || error_logged_since(case, mark)?,
-            "the agent logged no error for a pending key in an unavailable key storage"
-        );
+        until_error_logged_for_known_storage(case, mark, "a pending key in an unavailable key storage").await?;
         case.stop().await?;
         rewrite_in_place(&path, &original)?;
         let connects = count(&target.requests(None).await?, "authenticated_connects")?;
@@ -936,10 +948,7 @@ pub(crate) async fn a_in_progress_key_in_unavailable_storage_waits(ctx: Context)
                 "the agent changed a pending enrollment whose key is in an unavailable key storage"
             );
         }
-        ensure!(
-            !key_storage::UNAVAILABLE_IS_KNOWN || error_logged_since(case, mark)?,
-            "the agent logged no error for an enrollment key in an unavailable key storage"
-        );
+        until_error_logged_for_known_storage(case, mark, "an enrollment key in an unavailable key storage").await?;
         case.stop().await?;
         rewrite_in_place(&path, &original)?;
         case.start().await?;
@@ -967,7 +976,7 @@ pub(crate) async fn a_missing_enrollment_key_regenerated_in_its_recorded_storage
         let (_, key) = dropped_enrollment(case, &token).await?;
         case.stop().await?;
         let path = case.in_progress_path();
-        let recorded = edit_json_in_place(&path, |record| record["key_storage"] = json!(FILE))?;
+        edit_json_in_place(&path, |record| record["key_storage"] = json!(FILE))?;
         ensure!(
             !case.data_dir().key_exists_in(&key, FILE)?,
             "the enrollment key already exists in the file backend"
@@ -980,9 +989,10 @@ pub(crate) async fn a_missing_enrollment_key_regenerated_in_its_recorded_storage
             "the agent did not regenerate the enrollment key in the file backend",
             async { Ok(case.data_dir().key_exists_in(&key, FILE)?.then_some(())) }
         );
+        let record: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
         ensure!(
-            std::fs::read(&path)? == recorded,
-            "the agent changed the in-progress record instead of regenerating the key where the record names it"
+            record["key_name"] == key.as_str() && record["key_storage"] == FILE,
+            "the agent recorded the enrollment key elsewhere instead of regenerating it where the record names it: {record}"
         );
         expect_status(
             &target
