@@ -82,12 +82,12 @@ pub(crate) struct AiAnalysisTask {
     /// Recorded session the analysis is about.
     session_id: Uuid,
     /// What was asked, without the API key and the base URL.
-    #[cfg_attr(feature = "openapi", schema(value_type = crate::openapi::AiAnalysisParams))]
+    #[cfg_attr(feature = "openapi", schema(value_type = AiAnalysisParams))]
     params: serde_json::Value,
     state: TaskState,
     /// Details of the state: progress while `running`, the log once `succeeded`, the reason once `failed`; null while
     /// `queued`.
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<crate::openapi::AiAnalysisPayload>))]
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<AiAnalysisPayload>))]
     payload: serde_json::Value,
     /// When the Task was created.
     #[serde(with = "time::serde::rfc3339")]

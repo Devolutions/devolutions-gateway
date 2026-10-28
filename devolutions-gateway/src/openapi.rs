@@ -166,7 +166,7 @@ struct SessionInfo {
 /// Params of an AI analysis Task: what was asked, without the API key and the base URL
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AiAnalysisParams {
+struct AiAnalysisParams {
     provider: AiProvider,
     /// Model identifier, passed to the provider as is.
     model: String,
@@ -181,7 +181,7 @@ pub(crate) struct AiAnalysisParams {
 /// Details of the state of an AI analysis Task: `running`, `succeeded` and `failed` each have their own
 #[derive(Serialize, utoipa::ToSchema)]
 #[serde(untagged)]
-pub(crate) enum AiAnalysisPayload {
+enum AiAnalysisPayload {
     Running(AiAnalysisRunningPayload),
     Succeeded(AiAnalysisSucceededPayload),
     Failed(AiAnalysisFailedPayload),
