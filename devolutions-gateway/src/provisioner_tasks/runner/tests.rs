@@ -511,7 +511,7 @@ async fn a_panicking_attempt_fails_the_task() {
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn a_permanent_failure_fails_the_task_at_once() {
-    let mut harness = Harness::new(|_| Err(AttemptError::task(EchoFailure::Gone))).await;
+    let mut harness = Harness::new(|_| Err(AttemptError::of_kind(EchoFailure::Gone))).await;
     let id = harness.create(1).await;
 
     harness.queued_job().run().await.expect("no retry");

@@ -1237,7 +1237,10 @@ async fn a_new_task_never_resumes_from_an_earlier_task() {
     let session_id = harness.write_long_session(10_000);
     let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
     let first = harness.start_created(session_id, settings.clone()).await;
-    harness.run(first).await.expect("the job queues the next attempt itself");
+    harness
+        .run(first)
+        .await
+        .expect("the job queues the next attempt itself");
     assert!(harness.workspace(session_id).join("chunk-0000.json").exists());
     harness
         .state
