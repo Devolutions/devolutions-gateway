@@ -591,7 +591,7 @@ public sealed class SecureDirectoryTests
     /// The owner and DACL of the entry <paramref name="path"/> names, a link itself rather than its target, as stored,
     /// without the canonical ordering that <see cref="DirectorySecurity"/> applies when it reads them.
     /// </summary>
-    private static string RawSddl(string path) =>
+    internal static string RawSddl(string path) =>
         RawSecurity(path).GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
 
     /// <summary>
@@ -606,7 +606,7 @@ public sealed class SecureDirectoryTests
         return binary;
     }
 
-    private static RawSecurityDescriptor RawSecurity(string path)
+    internal static RawSecurityDescriptor RawSecurity(string path)
     {
         using SafeFileHandle handle = SecureDirectory.OpenToRead(path, hold: false);
         return SecureDirectory.ReadSecurity(handle).Security;

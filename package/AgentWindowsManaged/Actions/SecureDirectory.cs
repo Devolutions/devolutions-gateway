@@ -2,11 +2,13 @@ using Microsoft.Win32.SafeHandles;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Threading;
 
 namespace DevolutionsAgent.Actions;
 
@@ -36,6 +38,13 @@ internal static class SecureDirectory
     private static readonly uint HeldShare = WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE;
 
     private static readonly uint AnyShare = WinAPI.FILE_SHARE_READ | WinAPI.FILE_SHARE_WRITE | WinAPI.FILE_SHARE_DELETE;
+
+    /// <summary>
+    /// How long <see cref="Hold"/> retries a directory another process holds without sharing.
+    /// </summary>
+    private static readonly TimeSpan HoldRetry = TimeSpan.FromSeconds(2);
+
+    private static readonly TimeSpan HoldRetryStep = TimeSpan.FromMilliseconds(25);
 
     /// <summary>
     /// Creates the directory <paramref name="path"/> with the security descriptor <paramref name="sddl"/>, so that it
@@ -220,9 +229,27 @@ internal static class SecureDirectory
     /// A share mode binds only a handle with an access right that takes part in sharing checks, which
     /// <c>READ_CONTROL</c> and <c>FILE_READ_ATTRIBUTES</c> don't, so the handle also has <c>FILE_TRAVERSE</c>, the right
     /// that resolving a path below the directory needs.
+    /// A directory another process holds without sharing is retried for <see cref="HoldRetry"/>, because the agent holds
+    /// its <c>identity</c> directory that way for a moment around each state write, and keeps running until a major
+    /// upgrade stops it.
     /// </remarks>
-    internal static SafeFileHandle Hold(string path, uint access = 0) =>
-        Open(path, access | WinAPI.FILE_TRAVERSE | WinAPI.FILE_READ_ATTRIBUTES, HeldShare);
+    internal static SafeFileHandle Hold(string path, uint access = 0)
+    {
+        Stopwatch elapsed = Stopwatch.StartNew();
+
+        while (true)
+        {
+            try
+            {
+                return Open(path, access | WinAPI.FILE_TRAVERSE | WinAPI.FILE_READ_ATTRIBUTES, HeldShare);
+            }
+            catch (Win32Exception e) when (e.NativeErrorCode == WinAPI.ERROR_SHARING_VIOLATION
+                && elapsed.Elapsed < HoldRetry)
+            {
+                Thread.Sleep(HoldRetryStep);
+            }
+        }
+    }
 
     /// <summary>
     /// The owner and the DACL of the entry <paramref name="handle"/> holds, whether that entry is a reparse point, and
@@ -462,9 +489,9 @@ internal static class SecureDirectory
             {
                 // ReOpenFile refuses a directory, so the directory is held through its path, which the directories held
                 // above pin, and compared with the entry first opened.
-                // A directory another process holds without sharing fails the hold, and so the run: the agent keeps
-                // running during a feature change, and before a major upgrade stops it, and briefly holds identity that
-                // way as its state lock, so such a run fails and can be repeated.
+                // The agent keeps running during a feature change, and before a major upgrade stops it, and holds
+                // identity without sharing for a moment around each state write, which Hold waits out; a directory held
+                // longer than Hold retries fails the hold, and so the run, which can be repeated.
                 using SafeFileHandle child = OpenUnlessNotFound(() => Hold(entry, access), entry, logger);
 
                 if (child is null)
@@ -499,7 +526,13 @@ internal static class SecureDirectory
                     // because the first handle opened the link itself and the reopened handle addresses the same object.
                     // Creating a file symbolic link needs elevation or developer mode, which tests don't have.
                     // When changing this, keep opening the entry with FILE_FLAG_OPEN_REPARSE_POINT before reopening it.
-                    using SafeFileHandle file = Reopen(handle, access, AnyShare);
+                    using SafeFileHandle file = OpenUnlessNotFound(() => Reopen(handle, access, AnyShare), entry, logger);
+
+                    if (file is null)
+                    {
+                        continue;
+                    }
+
                     RemoveLocalService(file, entry, logger);
                 }
 
@@ -543,13 +576,17 @@ internal static class SecureDirectory
     /// can't be found by that name, the name its directory listed it under.
     /// </summary>
     /// <returns>The open entry, or <c>null</c> when it can't be found.</returns>
+    /// <exception cref="IOException">
+    /// The entry can't be opened for another reason, which the exception wraps, with its path, because the installer log
+    /// is all an administrator has to find it.
+    /// </exception>
     private static SafeFileHandle OpenUnlessNotFound(Func<SafeFileHandle> open, string path, ILogger logger)
     {
         // UNTESTED: a directory that can't be found when it is held, after its first open succeeded, is skipped, and
         // every other failure to open an entry, such as a sharing violation or a denied access, still fails the walk, so
         // that an entry the walk could change never keeps LOCAL SERVICE unreported.
-        // Tests check an entry that can't be found at its first open, not one deleted between the two opens, which
-        // can't be timed without a hook in the walk, nor another failure.
+        // Tests check an entry that can't be found at its first open and a directory held without sharing, not one
+        // deleted between the two opens, which can't be timed without a hook in the walk, nor a denied access.
         // When changing this, keep catching only the errors IsNotFound accepts.
         try
         {
@@ -559,6 +596,11 @@ internal static class SecureDirectory
         {
             logger.Log($"skipped {path}: it can't be found by the name it was listed under");
             return null;
+        }
+        catch (Exception e)
+        {
+            logger.Log($"failed to open {path}: {e.Message}");
+            throw new IOException($"can't open {path}: {e.Message}", e);
         }
     }
 

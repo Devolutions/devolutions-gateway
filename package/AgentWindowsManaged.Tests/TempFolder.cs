@@ -3,6 +3,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 
+using Microsoft.Win32.SafeHandles;
+
 using Xunit;
 
 namespace DevolutionsAgent.Installer.Tests;
@@ -61,6 +63,32 @@ internal sealed class TempFolder : IDisposable
             CreateDirectoryW(VerbatimPrefix + path, IntPtr.Zero),
             $"CreateDirectory failed: {Marshal.GetLastWin32Error()}");
     }
+
+    /// <summary>
+    /// Opens the directory <paramref name="path"/> without sharing, as the agent holds <c>identity</c> as its state
+    /// lock, so that no other handle that reads, writes or deletes it can be opened until this one is closed.
+    /// </summary>
+    public static SafeFileHandle HoldWithoutSharing(string path)
+    {
+        // FILE_TRAVERSE takes part in sharing checks, as the installer's own holds do.
+        const uint fileTraverse = 0x20;
+        const uint openExisting = 3;
+        const uint backupSemantics = 0x02000000;
+
+        SafeFileHandle handle = CreateFileW(path, fileTraverse, 0, IntPtr.Zero, openExisting, backupSemantics, IntPtr.Zero);
+        Assert.False(handle.IsInvalid, $"CreateFile failed: {Marshal.GetLastWin32Error()}");
+        return handle;
+    }
+
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern SafeFileHandle CreateFileW(
+        string lpFileName,
+        uint dwDesiredAccess,
+        uint dwShareMode,
+        IntPtr lpSecurityAttributes,
+        uint dwCreationDisposition,
+        uint dwFlagsAndAttributes,
+        IntPtr hTemplateFile);
 
     [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

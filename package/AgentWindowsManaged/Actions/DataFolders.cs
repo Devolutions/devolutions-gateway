@@ -45,10 +45,14 @@ internal enum DataFolderProblem
 }
 
 /// <summary>
-/// A folder of the agent's data path that the installer refuses to use.
+/// A folder of the agent's data path, or a file or a folder below <c>Agent</c>, that the installer refuses to use.
 /// </summary>
 internal sealed class DataFolderRefusal(string folder, DataFolderProblem problem, SecurityIdentifier account = null)
 {
+    /// <summary>
+    /// The full path of the refused folder, or of the refused file or folder for
+    /// <see cref="DataFolderProblem.EntryOwner"/>.
+    /// </summary>
     internal string Folder { get; } = folder;
 
     internal DataFolderProblem Problem { get; } = problem;
@@ -370,6 +374,9 @@ internal static class DataFolders
     /// Whether <paramref name="sid"/> is SYSTEM, Administrators, TrustedInstaller or a member of Administrators, the
     /// accounts that may own the entry at <paramref name="path"/> or rename and replace it, whatever the entry.
     /// </summary>
+    /// <remarks>
+    /// The decision ignores <paramref name="path"/>, which exists so that tests can trust some entries and not others.
+    /// </remarks>
     private static bool IsTrusted(string path, SecurityIdentifier sid)
     {
         try

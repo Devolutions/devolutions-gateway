@@ -27,6 +27,8 @@ internal static class WinAPI
 
     internal const int ERROR_PATH_NOT_FOUND = 3;
 
+    internal const int ERROR_SHARING_VIOLATION = 32;
+
     internal const uint FILE_ATTRIBUTE_DIRECTORY = 0x00000010;
 
     internal const uint FILE_DELETE_CHILD = 0x00000040;
