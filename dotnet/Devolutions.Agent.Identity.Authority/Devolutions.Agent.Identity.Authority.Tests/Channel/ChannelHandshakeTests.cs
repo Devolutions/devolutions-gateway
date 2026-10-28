@@ -742,7 +742,7 @@ public class ChannelHandshakeTests
         DateTimeOffset opened = VectorChannel.OpeningTime;
         DateTimeOffset answered = opened.AddSeconds(10);
         ChannelOpening opening = await VectorChannel.OpenAsync(
-            new SteppingTimeProvider(opened, opened, answered, answered.AddTicks(1)));
+            new SteppingTimeProvider(opened, opened, opened, answered, answered.AddTicks(1)));
 
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
 
@@ -752,8 +752,8 @@ public class ChannelHandshakeTests
     // Steps 1 and 2: the agent sends nothing until it receives the Challenge,
     // which the server sends once it has verified the opening request.
     // The agent can answer only once the opening is verified and its challenge sent,
-    // so the 10 s run from the end of verification, not from the earlier reading that judged the request.
-    // Here the registry and the nonce store take 5 s, and the Hello comes 10 s after them.
+    // so the 10 s run from the end of verification, not from the earlier readings that judged the request.
+    // Here the nonce store takes 5 s after the request is last judged, and the Hello comes 10 s after it.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
     [Fact]
     public async Task HelloTimeoutRunsFromTheEndOfTheOpening()
@@ -761,7 +761,7 @@ public class ChannelHandshakeTests
         DateTimeOffset judged = VectorChannel.OpeningTime;
         DateTimeOffset verified = judged.AddSeconds(5);
         ChannelOpening opening = await VectorChannel.OpenAsync(
-            new SteppingTimeProvider(judged, verified, verified.AddSeconds(10)));
+            new SteppingTimeProvider(judged, judged, verified, verified.AddSeconds(10)));
 
         ChannelHandshakeResult result = await opening.VerifyHelloAsync(VectorChannel.ValidHelloMessage(opening));
 
@@ -896,7 +896,7 @@ public class ChannelHandshakeTests
         DateTimeOffset opened = VectorChannel.OpeningTime;
         ChannelOpening opening = await VectorChannel.OpenAsync(
             authority,
-            new SteppingTimeProvider(opened, opened, scenario.HandshakeTime ?? opened));
+            new SteppingTimeProvider(opened, opened, opened, scenario.HandshakeTime ?? opened));
 
         if (scenario.CertificateRemoved)
         {
@@ -919,12 +919,13 @@ public class ChannelHandshakeTests
 
     // Opens a stream five seconds before the certificate of device-a expires, with a valid Hello signed for it,
     // so that the handshake can reach notAfter within the Hello timeout.
-    // The clock reads the opening's time to judge the request and to start the timeout, then handshakeTime.
+    // The clock reads the opening's time to judge the request, to judge its window again before recording its nonce,
+    // and to start the timeout, then handshakeTime.
     private static async Task<(ChannelOpening Opening, AgentMessage Hello)> OpenBeforeNotAfterAsync(
         DateTimeOffset handshakeTime)
     {
         DateTimeOffset opened = DeviceANotAfter.AddSeconds(-5);
-        TestAuthority authority = new(opened, clock: new SteppingTimeProvider(opened, opened, handshakeTime));
+        TestAuthority authority = new(opened, clock: new SteppingTimeProvider(opened, opened, opened, handshakeTime));
 
         ChannelOpening opening = await authority.OpenChannelAsync();
 

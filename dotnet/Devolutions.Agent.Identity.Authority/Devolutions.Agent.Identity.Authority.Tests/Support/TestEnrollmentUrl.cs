@@ -144,6 +144,14 @@ internal static class TestEnrollmentUrl
     public static CertificateSigningRequest Csr(string url)
     {
         using ECDsa key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        return Csr(key, url);
+    }
+
+    /// <summary>
+    /// The validated CSR an agent sends for a key, with the enrollment URL extension of a URL.
+    /// </summary>
+    public static CertificateSigningRequest Csr(ECDsa key, string url)
+    {
         CsrValidationResult result = CertificateSigningRequest.Validate(Request(key, url));
         Assert.True(result.Succeeded, result.FailureDetail);
         return result.Csr;

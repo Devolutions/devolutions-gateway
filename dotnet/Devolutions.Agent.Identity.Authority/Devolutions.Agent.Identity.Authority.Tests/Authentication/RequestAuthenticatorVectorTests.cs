@@ -135,13 +135,15 @@ public class RequestAuthenticatorVectorTests
         Assert.All(headers.Concat(values), value => Assert.DoesNotContain(value, outcome.FailureDetail));
     }
 
-    // CONTRACT.agent-identity.md §6 step 6 and the shared intent: the authority keeps each accepted nonce
-    // until 60 s after its signature expires, the last moment the window could accept the signature again.
+    // CONTRACT.agent-identity.md §6 step 6 accepts each (keyid, nonce) pair once, and the shared intent keeps each
+    // accepted nonce until 60 s after its signature expires, the last instant at which step 3 accepts the signature.
+    // The store call follows the last check of the window and may discard the pair once retainUntil has passed,
+    // so a copy of the signature accepted at that instant reaches the store after it, and the pair must outlive it.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
     [Theory]
     [MemberData(nameof(OkCaseNames))]
-    public async Task OkCaseRecordsItsNonceOnceUntilExpiresPlus60Seconds(string name)
+    public async Task OkCaseRecordsItsNonceOnceUntilAfterItsWindowCloses(string name)
     {
         HttpSignatureCaseVector vector = Vectors.Case(name);
         VectorAuthority authority = new();
@@ -150,11 +152,12 @@ public class RequestAuthenticatorVectorTests
 
         string signatureInput = vector.Headers.SignatureInput!;
         long expires = long.Parse(Parameter(signatureInput, "expires"), CultureInfo.InvariantCulture);
-        (string, string, DateTimeOffset) recorded = (
-            Parameter(signatureInput, "keyid"),
-            Parameter(signatureInput, "nonce"),
-            DateTimeOffset.FromUnixTimeSeconds(expires + 60));
-        Assert.Equal([recorded], authority.Nonces.Calls);
+        DateTimeOffset windowEnd = DateTimeOffset.FromUnixTimeSeconds(expires + 60);
+        (string KeyId, string Nonce, DateTimeOffset RetainUntil) call = Assert.Single(authority.Nonces.Calls);
+        Assert.Equal(Parameter(signatureInput, "keyid"), call.KeyId);
+        Assert.Equal(Parameter(signatureInput, "nonce"), call.Nonce);
+        // oracle: mutant a retainUntil whose margin past the window's end is not 60 s, such as one tick
+        Assert.Equal(windowEnd.AddSeconds(60), call.RetainUntil);
     }
 
     // Code that acts for an identity relies on these facts,

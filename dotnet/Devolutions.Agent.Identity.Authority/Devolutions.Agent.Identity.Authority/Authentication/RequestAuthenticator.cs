@@ -25,8 +25,13 @@ public sealed class RequestAuthenticator
     private const string EcPublicKeyOid = "1.2.840.10045.2.1";
 
     // CONTRACT.agent-identity.md §6 step 6, and the shared intent:
-    // a nonce is kept until 60 s after its signature expires.
+    // a nonce is kept until 60 s after its signature expires, the last instant at which step 3 accepts it.
     private static readonly TimeSpan NonceRetentionAfterExpiry = TimeSpan.FromSeconds(60);
+
+    // The window is judged a last time just before the nonce store is called, and the call takes time after that
+    // reading, so a copy of the signature accepted at the window's last instant can reach the store after that instant.
+    // The pair is kept this much longer, so that such a copy still finds it.
+    private static readonly TimeSpan NonceRetentionMargin = TimeSpan.FromSeconds(60);
 
     // RFC 5480 §2.1.1.1: the DER encoding of the namedCurve secp256r1, which is P-256.
     private static readonly byte[] P256CurveParameters = [0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07];
@@ -68,7 +73,7 @@ public sealed class RequestAuthenticator
     /// A body larger than <see cref="AgentIdentityProtocol.MaxRequestBodyBytes"/> fails first,
     /// with <see cref="AgentIdentityError.BodyTooLarge"/>.
     /// The request then goes through the steps of CONTRACT.agent-identity.md §6,
-    /// and its nonce is recorded only once every other step has passed.
+    /// and its nonce is recorded only once every other step has passed and the window of step 3 still holds.
     /// </remarks>
     /// <param name="operation">The operation of the endpoint that received the request.</param>
     /// <param name="request">The request, as received.</param>
@@ -126,7 +131,7 @@ public sealed class RequestAuthenticator
     /// </summary>
     /// <remarks>
     /// The opening request goes through the steps of CONTRACT.agent-identity.md §6 with tag <c>connect</c>,
-    /// and its nonce is recorded only once every other step has passed.
+    /// and its nonce is recorded only once every other step has passed and the window of step 3 still holds.
     /// A verified opening does not authenticate the stream:
     /// the agent must still sign <see cref="ChannelOpening.Challenge"/>,
     /// which <see cref="ChannelOpening.VerifyHelloAsync"/> checks.
@@ -169,7 +174,7 @@ public sealed class RequestAuthenticator
         byte[] challenge = new byte[ChallengeLength];
         _randomNumberGenerator.GetBytes(challenge);
 
-        // The Hello timeout runs from the end of verification rather than from the reading that judged the request,
+        // The Hello timeout runs from the end of verification rather than from the readings that judged the request,
         // so that time spent in the registry and the nonce store does not shorten the agent's time to answer.
         DateTimeOffset openedAt = _timeProvider.GetUtcNow();
 
@@ -215,6 +220,7 @@ public sealed class RequestAuthenticator
 
         // Step 3.
         // Steps 3 and 4 compare against one reading of the clock, exactly, so that they agree on what now is.
+        // The window alone is judged again before step 6.
         DateTimeOffset now = _timeProvider.GetUtcNow();
         if (!IsWithinWindow(fields.Created, fields.Expires, now))
         {
@@ -293,8 +299,25 @@ public sealed class RequestAuthenticator
                 "Step 5: the signature does not verify.");
         }
 
+        // Step 3 again, just before the nonce is recorded.
+        // The store keeps a pair only until the margin after the window closes, so a request whose window closed during
+        // the steps above could reach the store after a copy's pair was discarded, and both would be accepted.
+        // This is step 3 evaluated at a later now, so clock_skew is the earliest failing step.
+        // UNTESTED: this reading is the last clock reading and the last await before TryRecordAsync,
+        // because NonceRetentionMargin covers only the time that the store call takes after it.
+        // Work awaited between them would let a copy of the signature reach the store after its pair was discarded.
+        // Keep this check immediately before the store call, or widen the margin for whatever is added.
+        if (!IsWithinWindow(fields.Created, fields.Expires, _timeProvider.GetUtcNow()))
+        {
+            return Verification.Reject(
+                AgentIdentityErrorCode.ClockSkew,
+                "Step 3: the accepted window closed before the nonce was recorded.");
+        }
+
         // Step 6.
-        DateTimeOffset retainUntil = DateTimeOffset.FromUnixTimeSeconds(fields.Expires) + NonceRetentionAfterExpiry;
+        DateTimeOffset retainUntil = DateTimeOffset.FromUnixTimeSeconds(fields.Expires)
+            + NonceRetentionAfterExpiry
+            + NonceRetentionMargin;
         bool recorded = await _nonceStore
             .TryRecordAsync(fields.KeyId, fields.Nonce, retainUntil, cancellationToken)
             .ConfigureAwait(false);

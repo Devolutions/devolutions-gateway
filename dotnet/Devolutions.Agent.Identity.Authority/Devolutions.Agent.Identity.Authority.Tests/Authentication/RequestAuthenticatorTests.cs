@@ -262,15 +262,51 @@ public class RequestAuthenticatorTests
     // CONTRACT.agent-identity.md §6 states the window of step 3 and the certificate rule of step 4
     // against the same `now`.
     // A second reading of the clock between the window and the certificate check
-    // would judge the certificate a day later, after it expired.
+    // would judge the certificate a second later, after it expired, though the window still holds then.
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
     [Fact]
     public async Task WindowAndCertificateAreJudgedAtOneReadingOfTheClock()
     {
         DateTimeOffset first = DeviceACertificate.NotAfter;
-        TestAuthority authority = new(first, clock: new SteppingTimeProvider(first, first.AddDays(1)));
+        TestAuthority authority = new(first, clock: new SteppingTimeProvider(first, first.AddSeconds(1)));
 
         Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(AgentOperation.Confirm)));
+    }
+
+    // The shared intent keeps each accepted nonce until 60 s after its signature expires, the last instant at which
+    // step 3 accepts the signature, so a store may have discarded the pair after that instant.
+    // A request whose window closes while the registry answers would reach the store after it,
+    // where a copy of the request could find no pair and be accepted twice, so step 3 fails at that later now.
+    // The request expires 60 s after Now, so its window closes 120 s after Now; the lookup ends one tick later.
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public async Task RequestWhoseWindowClosesBeforeItsNonceIsRecordedIsClockSkew(AgentOperation operation)
+    {
+        FixedTimeProvider clock = new(Now);
+        TestAuthority authority = new(Now, clock: clock);
+        authority.Registry.OnLookup = () => clock.Now = Now.AddSeconds(120).AddTicks(1);
+
+        string outcome = await authority.OutcomeAsync(authority.Valid(operation));
+
+        Assert.Equal("clock_skew", outcome);
+        Assert.Empty(authority.Nonces.Calls);
+    }
+
+    // Step 3 accepts a signature until 60 s after it expires, that instant included,
+    // so a request still inside its window when its nonce is recorded is accepted, however long the registry took.
+    // The request expires 60 s after Now, so its window closes 120 s after Now, when the lookup ends.
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    [Theory]
+    [MemberData(nameof(Operations))]
+    public async Task RequestInsideItsWindowWhenItsNonceIsRecordedIsAccepted(AgentOperation operation)
+    {
+        FixedTimeProvider clock = new(Now);
+        TestAuthority authority = new(Now, clock: clock);
+        authority.Registry.OnLookup = () => clock.Now = Now.AddSeconds(120);
+
+        Assert.Equal("ok", await authority.OutcomeAsync(authority.Valid(operation)));
     }
 
     // Step 3: 0 < expires − created ≤ 300.
