@@ -832,6 +832,33 @@ pub(crate) fn pin_launch_executable(
     )
 }
 
+/// Pin the target of the Microsoft Store app execution alias at `path`, verifying it when it
+/// runs elevated.
+///
+/// Returns `None` when `path` is not an alias. The alias is read once, and only the target
+/// that `validate_app_exec_alias` bound to the identity expected for the alias name is
+/// pinned, so replacing the alias afterwards cannot redirect the launch. The returned guard
+/// must stay alive until the process has been created.
+pub(crate) fn pin_app_exec_alias_target(
+    opener: &dyn PathOpener,
+    path: &Path,
+    requires_elevation: bool,
+) -> anyhow::Result<Option<VerifiedExecutable>> {
+    let Some(alias) = resolve_app_exec_alias(opener, path) else {
+        return Ok(None);
+    };
+    let target = validate_app_exec_alias(path, alias, requires_elevation)?;
+    if let Some(verified) = verify_elevated_executable_security(opener, &target, requires_elevation)? {
+        return Ok(Some(verified));
+    }
+    pin_executable(
+        opener,
+        &target,
+        &format!("package-manager executable '{}'", target.display()),
+    )
+    .map(Some)
+}
+
 /// Kind of Microsoft Store app execution alias found at a path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppExecAliasKind {
@@ -1994,9 +2021,40 @@ mod tests {
             return;
         }
 
-        let guard = pin_launch_executable(&ServiceOpener, &alias_path, false).expect("pwsh alias must be launchable");
+        let guard = pin_app_exec_alias_target(&ServiceOpener, &alias_path, false)
+            .expect("pwsh alias must be launchable")
+            .expect("pwsh alias must be an alias");
         assert!(guard.path().ends_with("pwsh.exe"));
         assert_ne!(guard.path(), alias_path);
+    }
+
+    // oracle: mutant pinning a regular file or an alias of another package in place of a validated alias target
+    #[test]
+    fn alias_target_pinning_requires_a_validated_alias() {
+        let root = tempfile::tempdir().expect("create alias directory");
+        let plain = root.path().join("pwsh.exe");
+        std::fs::write(&plain, b"").expect("write plain file");
+        assert!(
+            pin_app_exec_alias_target(&ServiceOpener, &plain, false)
+                .expect("a regular file is not an alias")
+                .is_none()
+        );
+
+        let foreign = root.path().join("foreign").join("pwsh.exe");
+        std::fs::create_dir_all(foreign.parent().expect("alias parent")).expect("create alias parent");
+        create_app_exec_alias_for_tests(
+            &foreign,
+            WINGET_PACKAGE_FAMILY,
+            Path::new(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe\pwsh.exe",
+            ),
+        );
+        let error =
+            pin_app_exec_alias_target(&ServiceOpener, &foreign, false).expect_err("foreign alias must be rejected");
+        assert!(
+            error.to_string().contains("package family"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]

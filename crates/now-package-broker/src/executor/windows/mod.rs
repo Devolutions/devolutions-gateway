@@ -181,7 +181,7 @@ fn manager_is_available(manager: ManagerName, user_env: &UserEnv<'_>) -> bool {
                 && path_contains_executable(user_env, &["npm.cmd", "npm.exe"])
         }
         ManagerName::PowerShell => Path::new(&trusted_windows_powershell_executable()).is_file(),
-        ManagerName::PowerShell7 => resolve_powershell7_executable(user_env).is_ok(),
+        ManagerName::PowerShell7 => resolve_powershell7_executable(user_env, false).is_ok(),
         // Scoop is driven through the user's `scoop.ps1` shim (resolved via `Get-Command
         // -CommandType ExternalScript`) inside the trusted Windows PowerShell wrapper.
         ManagerName::Scoop => {
@@ -468,7 +468,14 @@ fn prepare_main_command_in(
     requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     if let Some((script, command_arg_index)) = powershell_inline_script(command) {
-        return prepare_powershell_script(command, command_arg_index, script, temp_dir, user_env);
+        return prepare_powershell_script(
+            command,
+            command_arg_index,
+            script,
+            temp_dir,
+            user_env,
+            requires_elevation,
+        );
     }
 
     if executable_is(command, "winget.exe") {
@@ -543,6 +550,7 @@ fn prepare_powershell_script(
     script: &str,
     temp_dir: Option<&Path>,
     user_env: Option<&UserEnv<'_>>,
+    requires_elevation: bool,
 ) -> anyhow::Result<PreparedCommand> {
     command.first().context("empty PowerShell command")?;
     let is_windows_powershell = executable_is(command, "powershell.exe");
@@ -565,21 +573,21 @@ fn prepare_powershell_script(
     }
 
     let mut prepared = command[..command_arg_index].to_vec();
+    let mut exe_guard = None;
     prepared[0] = if is_windows_powershell {
         trusted_windows_powershell_executable()
     } else {
-        user_env
-            .map_or_else(
-                || Ok(PathBuf::from(trusted_powershell7_executable())),
-                resolve_powershell7_executable,
-            )?
-            .display()
-            .to_string()
+        let (executable, guard) = user_env.map_or_else(
+            || Ok((PathBuf::from(trusted_powershell7_executable()), None)),
+            |env| resolve_powershell7_executable(env, requires_elevation),
+        )?;
+        exe_guard = guard;
+        executable.display().to_string()
     };
     prepared.push("-Command".to_owned());
     prepared.push(format!("& {}", quote_powershell_literal(&temp_script.path_string())));
 
-    Ok(PreparedCommand::with_script(prepared, temp_script))
+    Ok(PreparedCommand::with_script(prepared, temp_script).with_exe_guard(exe_guard))
 }
 
 fn powershell_script_with_utf8_preamble(script: &str) -> String {
@@ -1127,24 +1135,28 @@ fn trusted_powershell7_executable() -> String {
 ///
 /// The machine-wide MSI installation is preferred. Otherwise, the Microsoft Store
 /// installation is used through the user's `pwsh.exe` app execution alias; it is only
-/// accepted when it validates as an alias of the Microsoft PowerShell package, and the
-/// launch path substitutes the verified `WindowsApps` target for it.
-fn resolve_powershell7_executable(user_env: &UserEnv<'_>) -> anyhow::Result<PathBuf> {
+/// accepted when it validates as an alias of the Microsoft PowerShell package. The
+/// returned path is then the pinned `WindowsApps` target, and the guard keeps it pinned
+/// until the command has finished running.
+fn resolve_powershell7_executable(
+    user_env: &UserEnv<'_>,
+    requires_elevation: bool,
+) -> anyhow::Result<(PathBuf, Option<policy_security::VerifiedExecutable>)> {
     let msi = PathBuf::from(trusted_powershell7_executable());
     if msi.is_file() {
-        return Ok(msi);
+        return Ok((msi, None));
     }
 
     let alias = user_env
         .var("LOCALAPPDATA")
         .filter(|value| !value.trim().is_empty())
         .map(|local_app_data| PathBuf::from(local_app_data).join(r"Microsoft\WindowsApps\pwsh.exe"));
-    if let Some(alias) = alias
-        && policy_security::app_exec_alias_kind(user_env, &alias) == Some(policy_security::AppExecAliasKind::App)
-    {
-        policy_security::pin_launch_executable(user_env, &alias, false)
+    if let Some(alias) = alias {
+        let guard = policy_security::pin_app_exec_alias_target(user_env, &alias, requires_elevation)
             .with_context(|| format!("PowerShell 7 app execution alias is not usable: {}", alias.display()))?;
-        return Ok(alias);
+        if let Some(guard) = guard {
+            return Ok((guard.path().to_owned(), Some(guard)));
+        }
     }
 
     bail!(
