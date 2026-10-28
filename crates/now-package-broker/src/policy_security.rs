@@ -1944,6 +1944,7 @@ mod tests {
         assert!(target.ends_with("winget.exe"));
     }
 
+    // oracle: reference the `pwsh.exe` app execution alias of Microsoft Store PowerShell 7.6.9, read with `fsutil reparsepoint query`
     #[test]
     fn pwsh_alias_with_expected_identity_is_validated() {
         let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\pwsh.exe");
@@ -1957,6 +1958,7 @@ mod tests {
         assert!(target.ends_with("pwsh.exe"));
     }
 
+    // oracle: mutant accepting a `pwsh.exe` alias bound to the App Installer package or to the PowerShell Preview package
     #[test]
     fn pwsh_alias_bound_to_another_package_is_rejected() {
         let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\pwsh.exe");
@@ -1980,6 +1982,7 @@ mod tests {
         }
     }
 
+    // oracle: reference the `pwsh.exe` app execution alias Microsoft Store PowerShell 7 installs, compared live
     #[test]
     fn pwsh_app_exec_alias_resolves_to_windowsapps_target() {
         // Opportunistic: only runs where the Microsoft Store PowerShell 7 alias is installed.

@@ -309,7 +309,7 @@ mod tests {
         request.operation = Operation::Uninstall;
         let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
-        // `Uninstall-Module` has no `-Repository` parameter.
+        // oracle: reference PowerShellGet 2.2.5 and 1.0.0.1 `Uninstall-Module`, which have no `-Repository` parameter
         assert!(script.starts_with(&format!(
             "{INVARIANT_CULTURE_PREFIX} Uninstall-Module -Name 'Pester' -Confirm:$false -Force"
         )));
@@ -326,18 +326,20 @@ mod tests {
         request.options.skip_hash_check = true;
         let cmd = build_powershell5_command(&request).expect("build command");
         let script = script_of(&cmd);
+        // oracle: mutant dropping the installed-repository check that binds `Update-Module` to the requested source
         assert!(script.starts_with(&format!(
             "{INVARIANT_CULTURE_PREFIX} if (@(Get-InstalledModule -Name 'Pester' -ErrorAction Stop | Where-Object {{ $_.Repository -ne 'PSGallery' }}).Count -ne 0) {{ throw "
         )));
-        // `Update-Module` has neither `-Repository` nor `-SkipPublisherCheck`.
         let update = &script[script.find("Update-Module").expect("Update-Module call")..];
         assert!(update.starts_with("Update-Module -Name 'Pester' -Confirm:$false -Force"));
+        // oracle: reference PowerShellGet 2.2.5 and 1.0.0.1 `Update-Module`, which have neither a `-Repository` nor a `-SkipPublisherCheck` parameter
         assert!(!update.contains("-Repository"));
         assert!(!update.contains("-SkipPublisherCheck"));
         assert!(update.contains("-Scope CurrentUser"));
         assert!(update.contains("-RequiredVersion '5.6.0'"));
     }
 
+    // oracle: spec PowerShell about_Quoting_Rules §Single-quoted strings
     #[test]
     fn powershell5_update_repository_check_escapes_literals() {
         let mut request = make_request(ManagerName::PowerShell);
@@ -382,7 +384,7 @@ mod tests {
         request.operation = Operation::Uninstall;
         let cmd = build_powershell7_command(&request).expect("build command");
         let script = script_of(&cmd);
-        // `Uninstall-PSResource` has no `-Repository` parameter.
+        // oracle: reference PSResourceGet 1.2.0 `Uninstall-PSResource`, which has no `-Repository` parameter
         assert!(script.starts_with(&format!(
             "{INVARIANT_CULTURE_PREFIX} Uninstall-PSResource -Name 'Pester' -Confirm:$false"
         )));
