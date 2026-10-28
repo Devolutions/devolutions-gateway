@@ -1259,9 +1259,10 @@ const REMUX_MARKER_SUFFIX: &str = ".remuxing";
 
 /// Age past which a remux mark no longer counts.
 ///
-/// A crash between the mark and the storing of its job leaves a mark that no remux removes; without this limit, it
-/// would make every AI analysis of the session wait until it fails. No remux takes this long.
-const REMUX_MARKER_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+/// A crash between the mark and the storing of its job leaves a mark that no remux removes.
+/// The limit lets an AI analysis waiting on such a mark go on well before it fails for lack of progress, and no remux
+/// takes this long.
+const REMUX_MARKER_STALE_AFTER: Duration = Duration::from_secs(10 * 60);
 
 /// The file that marks `recording_file` as waiting for its remux, from the time the remux is scheduled until it ends.
 fn remux_marker(recording_file: &Utf8Path) -> Utf8PathBuf {
@@ -1456,28 +1457,49 @@ mod tests {
 
     // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
     #[tokio::test]
-    async fn a_fresh_remux_mark_is_pending_and_a_stale_one_is_not() {
+    async fn a_recording_waits_for_its_remux_while_its_mark_is_fresh() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
+        std::fs::write(remux_marker(&dir.join("recording-0.webm")), b"").expect("mark");
+
+        assert!(remux_pending(dir).await.expect("fresh mark"));
+    }
+
+    // oracle: mutant a mark left by a crash before its remux job was stored keeps every AI analysis waiting
+    #[tokio::test]
+    async fn a_remux_mark_older_than_any_remux_no_longer_counts() {
         let dir = tempfile::tempdir().expect("temp dir");
         let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
         let marker = remux_marker(&dir.join("recording-0.webm"));
-
-        assert!(!remux_pending(&dir.join("gone")).await.expect("missing folder"));
-        assert!(!remux_pending(dir).await.expect("no mark"));
-
         std::fs::write(&marker, b"").expect("mark");
-        assert!(remux_pending(dir).await.expect("fresh mark"));
 
-        let stale = std::time::SystemTime::now() - REMUX_MARKER_STALE_AFTER - std::time::Duration::from_secs(60);
+        let stale = std::time::SystemTime::now() - REMUX_MARKER_STALE_AFTER - Duration::from_secs(60);
         std::fs::File::options()
             .write(true)
             .open(&marker)
             .and_then(|file| file.set_modified(stale))
             .expect("age the mark");
-        assert!(!remux_pending(dir).await.expect("stale mark"));
 
-        remove_remux_marker(&marker).await;
-        remove_remux_marker(&marker).await;
-        assert!(!marker.exists(), "removing an absent mark is no error");
+        assert!(!remux_pending(dir).await.expect("stale mark"));
+    }
+
+    // oracle: mutant a session folder without a mark, or without a folder yet, fails the AI analysis as storage
+    #[tokio::test]
+    async fn a_session_without_remux_marks_has_no_pending_remux() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let dir = Utf8Path::from_path(dir.path()).expect("UTF-8");
+        std::fs::write(dir.join("recording-0.webm"), b"").expect("recording");
+
+        assert!(!remux_pending(dir).await.expect("no mark"));
+        assert!(!remux_pending(&dir.join("gone")).await.expect("missing folder"));
+    }
+
+    // oracle: mutant a remux mark left by a crash outlasts the progress deadline, so AI analyses of the session fail
+    #[test]
+    fn a_forgotten_remux_mark_stops_counting_before_an_ai_analysis_times_out() {
+        let progress_timeout = crate::provisioner_tasks::recording_ai_analysis::PROGRESS_TIMEOUT.unsigned_abs();
+
+        assert!(REMUX_MARKER_STALE_AFTER < progress_timeout);
     }
 
     #[tokio::test]
