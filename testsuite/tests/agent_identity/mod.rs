@@ -312,10 +312,21 @@ async fn conformance() -> anyhow::Result<()> {
     let agent_version = std::fs::read_to_string(project_dir.join("VERSION")).context("read workspace VERSION")?;
     let agent_version = agent_version.trim();
     ensure!(!agent_version.is_empty(), "workspace VERSION is empty");
-    let work_dir = project_dir.join("target").join("agent-identity-integration");
-    std::fs::create_dir_all(&work_dir)?;
-    let mut first_dir = tempfile::Builder::new().prefix("mock-1-").tempdir_in(&work_dir)?;
-    let second_dir = tempfile::Builder::new().prefix("mock-2-").tempdir_in(&work_dir)?;
+    // The agent refuses a data directory with a directory above it that an account other than the system account,
+    // administrators and its own can rename or replace, as a workspace `target` directory's can be. On Windows, the
+    // SYSTEM fixture's agent runs as SYSTEM, so even the user's temporary directory fails; `%ProgramData%` passes, and a
+    // directory an elevated administrator creates there is owned by Administrators.
+    #[cfg(windows)]
+    let work_parent = std::env::var_os("ProgramData")
+        .map(PathBuf::from)
+        .context("ProgramData is not set")?;
+    #[cfg(not(windows))]
+    let work_parent = std::env::temp_dir();
+    let mut work_dir = tempfile::Builder::new()
+        .prefix("agent-identity-integration-")
+        .tempdir_in(work_parent)?;
+    let mut first_dir = tempfile::Builder::new().prefix("mock-1-").tempdir_in(work_dir.path())?;
+    let second_dir = tempfile::Builder::new().prefix("mock-2-").tempdir_in(work_dir.path())?;
     let first = start_mock(first_dir.path()).await?;
     let second = start_mock(second_dir.path()).await?;
     let stdout_path = first_dir.path().join("runner-stdout.log");
@@ -356,6 +367,7 @@ async fn conformance() -> anyhow::Result<()> {
         // Without it, the `KEPT` paths that the runner printed point to deleted directories.
         // No test fails the runner on purpose, so check by hand with a failing agent test when changing this.
         first_dir.disable_cleanup(true);
+        work_dir.disable_cleanup(true);
         eprintln!(
             "Kept the Agent Identity conformance directory {}",
             first_dir.path().display()

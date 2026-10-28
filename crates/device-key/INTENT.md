@@ -87,5 +87,5 @@ The crate never falls back to another backend, and never logs that error or rais
 The file backend is a supported backend, not a test stand-in.
 Its key files are PKCS#8.
 On Unix, the directories it creates for keys are `0700`, so the access rule holds before the first key exists.
-It needs only traverse permission on the ancestors of its key directory, not read permission, so a service can keep keys under a parent it cannot list.
+It needs only two rights on the ancestors of its key directory, traversing them and reading their permissions, not listing them, so a service can keep keys under a parent it cannot list.
 Opening refuses a key file larger than 64 KiB without reading past that bound; a P-256 key file is about 140 bytes.

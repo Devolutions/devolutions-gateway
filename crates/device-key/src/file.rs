@@ -1,20 +1,20 @@
-use std::fs::{self, File, OpenOptions};
-use std::io::{ErrorKind, Read as _, Write as _};
+use std::fs::File;
+use std::io::{Read as _, Write as _};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context as _, ensure};
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use p256::ecdsa::{Signature, SigningKey, VerifyingKey};
 use p256::elliptic_curve::Generate as _;
 use p256::pkcs8::{DecodePrivateKey as _, EncodePrivateKey as _};
+use private_fs::{Access, Account, Dir, EntryKind, FileOptions, Replace, Rule, Share};
 use secure_memory::ProtectedBytes;
 use uuid::Uuid;
-#[cfg(windows)]
-use win_api_wrappers::identity::sid::Sid;
 use zeroize::Zeroizing;
 
 use crate::{DeviceKey, name_matches_prefix, validate_name};
 
+const LOCK_NAME: &str = ".device-key.lock";
 const LOCK_TIMEOUT: Duration = Duration::from_secs(5);
 const LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 /// A P-256 key file takes about 140 bytes, so a file past this bound is not a key the crate wrote.
@@ -41,22 +41,44 @@ impl DeviceKey for FileKey {
     }
 }
 
-fn key_path(dir: &Utf8Path, name: &str) -> Utf8PathBuf {
-    dir.join(format!("{name}.p8"))
+/// The rule of the directories the crate creates for keys: the caller's account owns them, and only it and SYSTEM
+/// (root on Linux and macOS) can access them.
+fn key_dir_rule() -> Rule {
+    Rule::new()
+        .owner(Account::CurrentUser)
+        .grant(Account::CurrentUser, Access::Full)
+        .grant(Account::System, Access::Full)
 }
 
-struct PendingFile(Utf8PathBuf);
+/// The rule of key files and of the lock file: only the caller's account and SYSTEM (root on Linux and macOS) can own
+/// or access them.
+///
+/// A check accepts a file that gives these accounts less access, since the access rule asks only that no other account
+/// can access a key.
+fn key_file_rule() -> Rule {
+    Rule::new()
+        .owner(Account::CurrentUser)
+        .owner(Account::System)
+        .grant(Account::CurrentUser, Access::Full)
+        .grant(Account::System, Access::Full)
+}
 
-impl Drop for PendingFile {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
+const KEY_FILE_SUFFIX: &str = ".p8";
+
+fn key_file_name(name: &str) -> String {
+    format!("{name}{KEY_FILE_SUFFIX}")
+}
+
+#[cfg(windows)]
+fn tombstone_name(name: &str) -> String {
+    format!(".{name}-{}.deleted", Uuid::new_v4())
 }
 
 pub(super) fn generate(dir: &Utf8Path, name: &str) -> anyhow::Result<Box<dyn DeviceKey>> {
-    create_key_directory(dir)?;
-    let _lock = lock_and_reconcile(dir)?;
-    let destination = key_path(dir, name);
+    // An empty path would name the current directory.
+    ensure!(!dir.as_str().is_empty(), "key directory is empty");
+    let dir = Dir::create_base(dir, &key_dir_rule()).context("create key directory")?;
+    let _lock = lock_and_reconcile(&dir)?;
     let key = SigningKey::generate_from_rng(&mut rand::rng());
     let pkcs8 = key.to_pkcs8_der().context("encode device key")?;
     let public_key = *key.verifying_key();
@@ -64,24 +86,21 @@ pub(super) fn generate(dir: &Utf8Path, name: &str) -> anyhow::Result<Box<dyn Dev
     bytes.copy_from_slice(&key.to_bytes());
     let scalar = ProtectedBytes::new(&mut bytes);
     drop(key);
-    let temporary = PendingFile(dir.join(format!(".{name}-{}.tmp", Uuid::new_v4())));
-    {
-        let mut file = create_restricted_file(&temporary.0)?;
-        #[cfg(unix)]
-        ensure_owner_only(&file.metadata()?)?;
-        #[cfg(target_os = "macos")]
-        crate::macos_acl::ensure_private_file(&file)?;
-        #[cfg(windows)]
-        ensure_private_file(&file)?;
-        file.write_all(pkcs8.as_bytes())
-            .with_context(|| format!("write key file {}", temporary.0))?;
-        drop(pkcs8);
-        file.sync_all()
-            .with_context(|| format!("sync key file {}", temporary.0))?;
+    let temporary = format!(".{name}-{}.tmp", Uuid::new_v4());
+    let file = dir
+        .create_file(&temporary, &key_file_rule(), FileOptions::new())
+        .context("create key file")?;
+    let written = (&file).write_all(pkcs8.as_bytes()).context("write key file");
+    drop(pkcs8);
+    let installed = written.and_then(|()| {
+        dir.persist(&file, &temporary, &key_file_name(name), Replace::Refuse)
+            .context("install key file")
+    });
+    if let Err(error) = installed {
+        // A temporary left behind is removed by the next operation on the key directory.
+        let _ = dir.discard(&file, &temporary);
+        return Err(error);
     }
-    rename_new(&temporary.0, &destination).with_context(|| format!("install key file {destination}"))?;
-    #[cfg(unix)]
-    sync_directory(dir)?;
     Ok(Box::new(FileKey {
         name: name.to_owned(),
         scalar,
@@ -90,43 +109,16 @@ pub(super) fn generate(dir: &Utf8Path, name: &str) -> anyhow::Result<Box<dyn Dev
 }
 
 pub(super) fn open(dir: &Utf8Path, name: &str) -> anyhow::Result<Option<Box<dyn DeviceKey>>> {
-    if !directory_exists(dir)? {
+    let Some(dir) = open_key_directory(dir)? else {
         return Ok(None);
-    }
-    let _lock = lock_and_reconcile(dir)?;
-    let path = key_path(dir, name);
-    let mut options = OpenOptions::new();
-    options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-
-        // O_NONBLOCK keeps a FIFO or device at the key's name from blocking the open.
-        // Reads from a regular file ignore it.
-        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
-    }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt as _;
-
-        use windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
-
-        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0);
-    }
-    let file = match options.open(&path) {
-        Ok(file) => file,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error).with_context(|| format!("open key file {path}")),
     };
-    let metadata = file.metadata().with_context(|| format!("inspect key file {path}"))?;
-    ensure!(metadata.file_type().is_file(), "key file is not a regular file");
-    ensure!(link_count(&file)? == 1, "key file has other hard links");
-    #[cfg(unix)]
-    ensure_owner_only(&metadata)?;
-    #[cfg(target_os = "macos")]
-    crate::macos_acl::ensure_private_file(&file)?;
-    #[cfg(windows)]
-    ensure_private_file(&file)?;
+    let _lock = lock_and_reconcile(&dir)?;
+    let Some(file) = dir
+        .open_file(&key_file_name(name), &key_file_rule(), FileOptions::new().read(true))
+        .context("open key file")?
+    else {
+        return Ok(None);
+    };
     // UNTESTED: reading stops one byte past the bound, into a buffer that never reallocates.
     // An unbounded read lets a large file exhaust memory.
     // A reallocation leaves an unzeroized copy of the key in freed memory.
@@ -134,7 +126,7 @@ pub(super) fn open(dir: &Utf8Path, name: &str) -> anyhow::Result<Option<Box<dyn 
     let mut pkcs8 = Zeroizing::new(Vec::with_capacity(usize::try_from(MAX_KEY_FILE_LEN + 1)?));
     file.take(MAX_KEY_FILE_LEN + 1)
         .read_to_end(&mut pkcs8)
-        .with_context(|| format!("read key file {path}"))?;
+        .context("read key file")?;
     ensure!(
         u64::try_from(pkcs8.len())? <= MAX_KEY_FILE_LEN,
         "key file is larger than {MAX_KEY_FILE_LEN} bytes"
@@ -154,79 +146,51 @@ pub(super) fn open(dir: &Utf8Path, name: &str) -> anyhow::Result<Option<Box<dyn 
 }
 
 pub(super) fn delete(dir: &Utf8Path, name: &str) -> anyhow::Result<()> {
-    if !directory_exists(dir)? {
+    let Some(dir) = open_key_directory(dir)? else {
+        return Ok(());
+    };
+    let _lock = lock_and_reconcile(&dir)?;
+    let file_name = key_file_name(name);
+    if !listed_with_exact_name(&dir, &file_name)? {
         return Ok(());
     }
-    let _lock = lock_and_reconcile(dir)?;
-    delete_key(dir, name)
+    let file_name = retire(&dir, &file_name, name).context("retire key file")?;
+    dir.remove_file(&file_name).context("delete key file")?;
+    Ok(())
 }
 
 pub(super) fn list(dir: &Utf8Path, prefix: &str) -> anyhow::Result<Vec<String>> {
-    if !directory_exists(dir)? {
+    let Some(dir) = open_key_directory(dir)? else {
         return Ok(Vec::new());
-    }
-    let _lock = lock_and_reconcile(dir)?;
-    let entries = fs::read_dir(dir).with_context(|| format!("list key directory {dir}"))?;
-    let mut names = Vec::new();
-    for entry in entries {
-        let entry = entry.context("read key directory entry")?;
-        if !entry.file_type().context("inspect key directory entry")?.is_file() {
-            continue;
-        }
-        let file_name = entry.file_name();
-        if let Some(name) = file_name
-            .to_str()
-            .and_then(|file_name| file_name.strip_suffix(".p8"))
-            .filter(|name| name_matches_prefix(name, prefix))
-        {
-            names.push(name.to_owned());
-        }
-    }
+    };
+    let _lock = lock_and_reconcile(&dir)?;
+    let mut names = dir
+        .entries()
+        .context("list key directory")?
+        .into_iter()
+        // `crates/device-key/INTENT.md` ("Operations"): listing never returns a link, and a file with another hard link is
+        // one, so an entry whose link count can't be read is skipped too; any other key that breaks the access rule is
+        // still listed, so the listing reads only the link count.
+        .filter(|entry| entry.kind == EntryKind::File && entry.links == Some(1))
+        .filter_map(|entry| {
+            let name = entry.name.to_str()?.strip_suffix(KEY_FILE_SUFFIX)?;
+            name_matches_prefix(name, prefix).then(|| name.to_owned())
+        })
+        .collect::<Vec<_>>();
     names.sort_unstable();
     Ok(names)
 }
 
-fn directory_exists(dir: &Utf8Path) -> anyhow::Result<bool> {
-    #[cfg(unix)]
-    let metadata = fs::symlink_metadata(dir);
-    #[cfg(not(unix))]
-    let metadata = fs::metadata(dir);
-    match metadata {
-        Ok(metadata) => {
-            ensure!(metadata.is_dir(), "key directory is not a directory");
-            Ok(true)
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(error).with_context(|| format!("inspect key directory {dir}")),
+/// Opens the key directory, or returns `None` when it doesn't exist.
+fn open_key_directory(dir: &Utf8Path) -> anyhow::Result<Option<Dir>> {
+    // An empty path would name the current directory, which holds no keys.
+    if dir.as_str().is_empty() {
+        return Ok(None);
     }
+    Dir::open_base(dir, &key_dir_rule()).context("open key directory")
 }
 
-#[cfg(unix)]
-fn create_key_directory(dir: &Utf8Path) -> anyhow::Result<()> {
-    use private_fs::DirChainError;
-
-    ensure!(!dir.as_str().is_empty(), "key directory is empty");
-    private_fs::create_dir_chain(dir).map_err(|error| match error {
-        DirChainError::NotADirectory(_) => anyhow::anyhow!("key directory is not a directory"),
-        DirChainError::Inspect(path, error) => {
-            anyhow::Error::new(error).context(format!("inspect key directory {path}"))
-        }
-        DirChainError::Create(path, error) => anyhow::Error::new(error).context(format!("create key directory {path}")),
-        DirChainError::Sync(path, error) => anyhow::Error::new(error).context(format!("sync key directory {path}")),
-    })
-}
-
-#[cfg(not(unix))]
-fn create_key_directory(dir: &Utf8Path) -> anyhow::Result<()> {
-    fs::create_dir_all(dir).with_context(|| format!("create key directory {dir}"))
-}
-
-fn lock_and_reconcile(dir: &Utf8Path) -> anyhow::Result<File> {
-    #[cfg(target_os = "macos")]
-    {
-        let directory = File::open(dir).with_context(|| format!("open key directory {dir}"))?;
-        crate::macos_acl::ensure_private_directory(&directory)?;
-    }
+fn lock_and_reconcile(dir: &Dir) -> anyhow::Result<File> {
     let lock = lock_directory(dir)?;
     cleanup_abandoned(dir)?;
     Ok(lock)
@@ -250,72 +214,60 @@ fn abandoned_name(file_name: &str) -> Option<&str> {
     .then_some(name)
 }
 
-fn cleanup_abandoned(dir: &Utf8Path) -> anyhow::Result<()> {
-    #[cfg(unix)]
-    let mut removed = false;
+fn cleanup_abandoned(dir: &Dir) -> anyhow::Result<()> {
     // A creator holds this lock until it removes its temporary, so every remaining temporary is abandoned.
-    for entry in fs::read_dir(dir).with_context(|| format!("inspect abandoned key files in {dir}"))? {
-        let entry = entry.context("read abandoned key entry")?;
-        let file_name = entry.file_name();
-        let Some(file_name) = file_name.to_str() else {
+    for entry in dir.entries().context("inspect abandoned key files")? {
+        // The crate creates only regular files, and anything else at one of its names is not its own.
+        if entry.kind != EntryKind::File {
+            continue;
+        }
+        let Some(file_name) = entry.name.to_str() else {
             continue;
         };
         let Some(name) = abandoned_name(file_name) else {
             continue;
         };
-        #[cfg(not(windows))]
-        let _ = name;
-        if entry.file_type().context("inspect abandoned key entry")?.is_dir() {
-            continue;
-        }
-        #[cfg(windows)]
-        let path = {
-            let path = dir.join(file_name);
-            if file_name.ends_with(".tmp") {
-                let tombstone = dir.join(format!(".{name}-{}.deleted", Uuid::new_v4()));
-                rename_new(&path, &tombstone).context("retire abandoned key file")?;
-                tombstone
-            } else {
-                path
-            }
+        // `crates/device-key/INTENT.md` ("Operations"): a leftover's name follows the crate's scheme, so it counts as the
+        // crate's own, and no leftover copy of a private key survives a later operation: one that can't be removed, as
+        // while another process holds it open, fails the operation, listing included.
+        let file_name = if file_name.ends_with(".tmp") {
+            retire(dir, file_name, name).context("retire abandoned key file")?
+        } else {
+            file_name.to_owned()
         };
-        #[cfg(not(windows))]
-        let path = entry.path();
-        fs::remove_file(&path).with_context(|| format!("remove abandoned key file in {dir}"))?;
-        #[cfg(unix)]
-        {
-            removed = true;
-        }
-    }
-    #[cfg(unix)]
-    if removed {
-        sync_directory(dir)?;
+        dir.remove_file(&file_name).context("remove abandoned key file")?;
     }
     Ok(())
 }
 
-#[cfg(unix)]
-fn lock_directory(dir: &Utf8Path) -> anyhow::Result<File> {
-    use std::os::fd::AsRawFd as _;
-    use std::os::unix::fs::OpenOptionsExt as _;
+/// Renames `file_name`, a file of the key `name`, to a tombstone on Windows, and returns the name to remove.
+///
+/// Where Windows can't remove a file with POSIX semantics, such as on FAT or before Windows 10 1709, a removed file keeps
+/// its name until every handle on it is closed, so it is renamed first to free its name at once.
+#[cfg(windows)]
+fn retire(dir: &Dir, file_name: &str, name: &str) -> anyhow::Result<String> {
+    let tombstone = tombstone_name(name);
+    dir.rename(file_name, &tombstone, Replace::Refuse)?;
+    Ok(tombstone)
+}
 
-    let path = dir.join(".device-key.lock");
-    let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(0o600)
-        .custom_flags(libc::O_NOFOLLOW);
-    let file = options
-        .open(&path)
-        .with_context(|| format!("open key-directory lock {path}"))?;
-    let metadata = file.metadata().context("inspect key-directory lock")?;
-    ensure!(
-        metadata.file_type().is_file(),
-        "key-directory lock is not a regular file"
-    );
-    ensure_owner_only(&metadata)?;
+#[cfg(not(windows))]
+fn retire(_: &Dir, file_name: &str, _: &str) -> anyhow::Result<String> {
+    Ok(file_name.to_owned())
+}
+
+fn lock_options() -> FileOptions {
+    FileOptions::new().read(true).write(true).share(Share::Exclusive)
+}
+
+#[cfg(unix)]
+fn lock_directory(dir: &Dir) -> anyhow::Result<File> {
+    use std::io::ErrorKind;
+    use std::os::fd::AsRawFd as _;
+
+    let file = dir
+        .open_or_create_file(LOCK_NAME, &key_file_rule(), lock_options())
+        .context("open key-directory lock")?;
     let deadline = Instant::now() + LOCK_TIMEOUT;
     loop {
         // SAFETY: The file descriptor stays open until this lock guard is dropped.
@@ -330,43 +282,25 @@ fn lock_directory(dir: &Utf8Path) -> anyhow::Result<File> {
     }
 }
 
+/// Opens the lock file with no sharing, which holds the lock until the handle is closed.
 #[cfg(windows)]
-fn lock_directory(dir: &Utf8Path) -> anyhow::Result<File> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-
+fn lock_directory(dir: &Dir) -> anyhow::Result<File> {
     use windows::Win32::Foundation::ERROR_SHARING_VIOLATION;
-    use windows::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
 
-    let path = dir.join(".device-key.lock");
-    let mut options = OpenOptions::new();
-    options
-        .read(true)
-        .write(true)
-        .share_mode(0)
-        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT.0);
     let sharing_violation = i32::try_from(ERROR_SHARING_VIOLATION.0)?;
     let deadline = Instant::now() + LOCK_TIMEOUT;
     loop {
-        match options.open(&path) {
-            Ok(file) => {
-                ensure!(
-                    file.metadata()?.file_type().is_file(),
-                    "key-directory lock is not a regular file"
-                );
-                return Ok(file);
-            }
-            Err(error) if error.kind() == ErrorKind::NotFound => match create_restricted_file(&path) {
-                Ok(file) => return Ok(file),
-                Err(create_error) if fs::symlink_metadata(&path).is_ok() => {
-                    let _ = create_error;
-                    wait_for_lock(deadline)?;
-                }
-                Err(error) => return Err(error).context("create key-directory lock"),
-            },
-            Err(error) if error.raw_os_error() == Some(sharing_violation) => {
+        match dir.open_or_create_file(LOCK_NAME, &key_file_rule(), lock_options()) {
+            Ok(file) => return Ok(file),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    private_fs::ErrorKind::Io { source, .. } if source.raw_os_error() == Some(sharing_violation)
+                ) =>
+            {
                 wait_for_lock(deadline)?;
             }
-            Err(error) => return Err(error).with_context(|| format!("open key-directory lock {path}")),
+            Err(error) => return Err(error).context("open key-directory lock"),
         }
     }
 }
@@ -381,265 +315,23 @@ fn wait_for_lock(deadline: Instant) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
-fn link_count(file: &File) -> anyhow::Result<u64> {
-    use std::os::unix::fs::MetadataExt as _;
-
-    Ok(file.metadata().context("inspect key file links")?.nlink())
-}
-
-#[cfg(windows)]
-fn link_count(file: &File) -> anyhow::Result<u64> {
-    use std::os::windows::io::AsRawHandle as _;
-
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle};
-
-    let mut information = BY_HANDLE_FILE_INFORMATION::default();
-    // SAFETY: The file handle is live and the output pointer is writable.
-    unsafe { GetFileInformationByHandle(HANDLE(file.as_raw_handle()), &mut information) }
-        .context("inspect key file links")?;
-    Ok(u64::from(information.nNumberOfLinks))
-}
-
-#[cfg(unix)]
-fn delete_key(dir: &Utf8Path, name: &str) -> anyhow::Result<()> {
-    let path = key_path(dir, name);
-    if !listed_with_exact_name(dir, &path)? {
-        return Ok(());
-    }
-    match fs::remove_file(&path) {
-        Ok(()) => sync_directory(dir),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error).with_context(|| format!("delete key file {path}")),
-    }
-}
-
-#[cfg(windows)]
-fn delete_key(dir: &Utf8Path, name: &str) -> anyhow::Result<()> {
-    let path = key_path(dir, name);
-    if !listed_with_exact_name(dir, &path)? {
-        return Ok(());
-    }
-    let tombstone = dir.join(format!(".{name}-{}.deleted", Uuid::new_v4()));
-    rename_new(&path, &tombstone).with_context(|| format!("retire key file {path}"))?;
-    fs::remove_file(&tombstone).with_context(|| format!("delete retired key file {tombstone}"))
-}
-
-/// Reports whether `dir` lists `path`'s file name spelled exactly as given.
-/// A case-insensitive file system, such as NTFS or APFS, also resolves `path` to a name that differs in case.
-fn listed_with_exact_name(dir: &Utf8Path, path: &Utf8Path) -> anyhow::Result<bool> {
-    let file_name = path.file_name().context("key path has no file name")?;
-    for entry in fs::read_dir(dir).with_context(|| format!("list key directory {dir}"))? {
-        if entry.context("read key directory entry")?.file_name() == file_name {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-#[cfg(unix)]
-fn sync_directory(dir: &Utf8Path) -> anyhow::Result<()> {
-    private_fs::sync_directory(dir).with_context(|| format!("sync key directory {dir}"))
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn rename_new(from: &Utf8Path, to: &Utf8Path) -> anyhow::Result<()> {
-    use std::ffi::CString;
-
-    let from_c = CString::new(from.as_str()).context("invalid source key path")?;
-    let to_c = CString::new(to.as_str()).context("invalid destination key path")?;
-    // The raw syscall avoids glibc's renameat2 wrapper, which requires glibc 2.28 (the release baseline is 2.27).
-    // SAFETY: Both paths are NUL-terminated and point to live buffers.
-    #[cfg(target_os = "linux")]
-    let status = unsafe {
-        libc::syscall(
-            libc::SYS_renameat2,
-            libc::AT_FDCWD,
-            from_c.as_ptr(),
-            libc::AT_FDCWD,
-            to_c.as_ptr(),
-            libc::RENAME_NOREPLACE,
-        )
-    };
-    // SAFETY: Both paths are NUL-terminated and point to live buffers.
-    #[cfg(target_os = "macos")]
-    let status = unsafe { libc::renamex_np(from_c.as_ptr(), to_c.as_ptr(), libc::RENAME_EXCL) };
-    if status == 0 {
-        return Ok(());
-    }
-    let error = std::io::Error::last_os_error();
-    if matches!(
-        error.raw_os_error(),
-        Some(libc::ENOSYS | libc::EINVAL | libc::EOPNOTSUPP)
-    ) {
-        return link_new(from, to);
-    }
-    Err(error).context("rename key without replacement")
-}
-
-#[cfg(all(unix, not(any(target_os = "linux", target_os = "macos"))))]
-fn rename_new(from: &Utf8Path, to: &Utf8Path) -> anyhow::Result<()> {
-    link_new(from, to)
-}
-
-#[cfg(unix)]
-fn link_new(from: &Utf8Path, to: &Utf8Path) -> anyhow::Result<()> {
-    fs::hard_link(from, to).context("install key without replacement")?;
-    fs::remove_file(from).context("remove installed key's temporary name")
-}
-
-#[cfg(windows)]
-fn rename_new(from: &Utf8Path, to: &Utf8Path) -> anyhow::Result<()> {
-    use windows::Win32::Storage::FileSystem::{MOVEFILE_WRITE_THROUGH, MoveFileExW};
-    use windows::core::PCWSTR;
-
-    let from = wide(from);
-    let to = wide(to);
-    // SAFETY: The two path buffers are valid NUL-terminated UTF-16 strings.
-    unsafe {
-        MoveFileExW(
-            PCWSTR::from_raw(from.as_ptr()),
-            PCWSTR::from_raw(to.as_ptr()),
-            MOVEFILE_WRITE_THROUGH,
-        )
-    }
-    .context("rename key without replacement")
-}
-
-#[cfg(windows)]
-fn wide(path: &Utf8Path) -> Vec<u16> {
-    path.as_str().encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-#[cfg(unix)]
-fn ensure_owner_only(metadata: &fs::Metadata) -> anyhow::Result<()> {
-    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
-
-    ensure!(metadata.permissions().mode() & 0o077 == 0, "key file is not owner-only");
-    let user = private_fs::effective_uid();
-    ensure!(
-        owner_is_trusted(metadata.uid(), user),
-        "key file owner is neither the process user nor root"
-    );
-    Ok(())
-}
-
-#[cfg(unix)]
-pub(crate) fn owner_is_trusted(owner: libc::uid_t, user: libc::uid_t) -> bool {
-    owner == user || owner == 0
-}
-
-#[cfg(windows)]
-fn ensure_private_file(file: &File) -> anyhow::Result<()> {
-    use std::os::windows::io::AsRawHandle as _;
-
-    use win_api_wrappers::security::descriptor::SecurityDescriptor;
-    use windows::Win32::Foundation::{HANDLE, WIN32_ERROR};
-    use windows::Win32::Security;
-    use windows::Win32::Security::Authorization::SE_FILE_OBJECT;
-    use windows::Win32::Storage::FileSystem::GetVolumeInformationByHandleW;
-
-    let handle = HANDLE(file.as_raw_handle());
-    let mut volume_flags = 0;
-    // SAFETY: The file handle is live and the volume-flags output pointer is writable.
-    unsafe { GetVolumeInformationByHandleW(handle, None, None, None, Some(&mut volume_flags), None) }
-        .context("inspect key file volume")?;
-    ensure!(
-        volume_supports_acls(volume_flags),
-        "key file volume does not enforce ACLs"
-    );
-
-    let descriptor = SecurityDescriptor::of_handle(handle, SE_FILE_OBJECT).map_err(|error| {
-        let status = WIN32_ERROR::from_error(&error).map_or_else(|| error.code().0.cast_unsigned(), |status| status.0);
-        anyhow::anyhow!("read key file ACL failed ({status})")
-    })?;
-    let owner = descriptor
-        .owner()
-        .context("read key file owner")?
-        .context("key file has no owner")?;
-    let user = win_api_wrappers::token::Token::current_process_token()
-        .sid_and_attributes()
-        .context("get process user SID")?
-        .sid;
-    let system = Sid::from_well_known(Security::WinLocalSystemSid, None).context("get SYSTEM SID")?;
-    ensure!(trusted_owner(&owner, &user, &system), "key file owner is not trusted");
-    let mut expected = vec![system.clone()];
-    if user != system {
-        expected.push(user);
-    }
-    crate::windows_acl::require_protected_dacl(descriptor.as_raw(), expected)
-}
-
-#[cfg(windows)]
-fn trusted_owner(owner: &Sid, user: &Sid, system: &Sid) -> bool {
-    owner == user || owner == system
-}
-
-#[cfg(windows)]
-fn volume_supports_acls(flags: u32) -> bool {
-    use win_api_wrappers::raw::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
-
-    flags & FILE_PERSISTENT_ACLS != 0
-}
-
-#[cfg(not(windows))]
-fn create_restricted_file(path: &Utf8Path) -> anyhow::Result<File> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt as _;
-
-        options.mode(0o600);
-    }
-    options.open(path).with_context(|| format!("create key file {path}"))
-}
-
-#[cfg(windows)]
-fn create_restricted_file(path: &Utf8Path) -> anyhow::Result<File> {
-    use win_api_wrappers::raw::Win32::Security::Authorization::GRANT_ACCESS;
-    use win_api_wrappers::raw::Win32::Security::{self};
-    use win_api_wrappers::raw::Win32::Storage::FileSystem::FILE_ALL_ACCESS;
-    use win_api_wrappers::security::acl::{Acl, ExplicitAccess, InheritableAcl, InheritableAclKind, Trustee};
-    use win_api_wrappers::security::attributes::SecurityAttributesInit;
-    use win_api_wrappers::token::Token;
-
-    let system = Sid::from_well_known(Security::WinLocalSystemSid, None).context("get SYSTEM SID")?;
-    let user = Token::current_process_token()
-        .sid_and_attributes()
-        .context("get process user SID")?
-        .sid;
-    let entry = |sid| ExplicitAccess {
-        access_permissions: FILE_ALL_ACCESS.0,
-        access_mode: GRANT_ACCESS,
-        inheritance: Security::NO_INHERITANCE,
-        trustee: Trustee::Sid(sid),
-    };
-    let mut entries = vec![entry(system.clone())];
-    if user != system {
-        entries.push(entry(user.clone()));
-    }
-    let dacl = InheritableAcl {
-        kind: InheritableAclKind::Protected,
-        acl: Acl::new()
-            .and_then(|acl| acl.set_entries(&entries))
-            .context("build key file DACL")?,
-    };
-    let attributes = SecurityAttributesInit {
-        owner: Some(user),
-        dacl: Some(dacl),
-        ..Default::default()
-    }
-    .init();
-    win_api_wrappers::fs::create_file(path.as_std_path(), Some(&attributes))
-        .with_context(|| format!("create key file {path}"))
+/// Reports whether `dir` lists `file_name` spelled exactly as given.
+/// A case-insensitive file system, such as NTFS or APFS, also resolves `file_name` to a name that differs in case.
+fn listed_with_exact_name(dir: &Dir, file_name: &str) -> anyhow::Result<bool> {
+    Ok(dir
+        .entries()
+        .context("list key directory")?
+        .iter()
+        .any(|entry| entry.name == file_name))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD;
+    use camino::Utf8PathBuf;
     use p256::ecdsa::signature::Verifier as _;
 
     use super::*;
@@ -650,17 +342,35 @@ mod tests {
     struct KeyDirectory(Utf8PathBuf);
 
     impl KeyDirectory {
+        /// Creates an empty key directory under the system's temporary directory.
+        ///
+        /// The key directory's ancestors must pass the crate's checks, which a build directory on a network or WSL
+        /// volume may not.
         fn new() -> anyhow::Result<Self> {
-            let target = std::env::var("CARGO_TARGET_DIR")
-                .map(Utf8PathBuf::from)
-                .unwrap_or_else(|_| Utf8Path::new(env!("CARGO_MANIFEST_DIR")).join("target"));
-            let dir = target.join("key-tests").join(Uuid::new_v4().to_string());
+            let temp = Utf8PathBuf::from_path_buf(std::env::temp_dir())
+                .map_err(|path| anyhow::anyhow!("temporary directory {} is not UTF-8", path.display()))?;
+            let dir = temp.join(format!("device-key-test-{}", Uuid::new_v4()));
             fs::create_dir_all(&dir)?;
             Ok(Self(dir))
         }
 
         fn backend(&self) -> KeyBackend {
             KeyBackend::File { dir: self.0.clone() }
+        }
+
+        fn open(&self) -> anyhow::Result<Dir> {
+            Dir::open_base(&self.0, &key_dir_rule())?.context("missing key directory")
+        }
+
+        /// Creates the file `file_name` in the key directory as the crate creates a key file.
+        fn create_file(&self, file_name: &str) -> anyhow::Result<File> {
+            Ok(self
+                .open()?
+                .create_file(file_name, &key_file_rule(), FileOptions::new())?)
+        }
+
+        fn key_path(&self, name: &str) -> Utf8PathBuf {
+            self.0.join(key_file_name(name))
         }
     }
 
@@ -672,12 +382,11 @@ mod tests {
 
     /// Leaves the temporary of a creator that stopped before installing its key.
     fn create_leftover(directory: &KeyDirectory) -> anyhow::Result<Utf8PathBuf> {
-        let leftover = directory
-            .0
-            .join(format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4()));
-        let mut file = create_restricted_file(&leftover)?;
-        file.write_all(b"unfinalized private key")?;
-        Ok(leftover)
+        let file_name = format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4());
+        directory
+            .create_file(&file_name)?
+            .write_all(b"unfinalized private key")?;
+        Ok(directory.0.join(file_name))
     }
 
     // oracle: intent crates/device-key/INTENT.md §Operations
@@ -710,7 +419,7 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt as _;
 
-            let mode = fs::metadata(key_path(&dir.0, &name))?.permissions().mode();
+            let mode = fs::metadata(dir.key_path(&name))?.permissions().mode();
             // oracle: intent crates/device-key/INTENT.md §Access
             assert_eq!(mode & 0o077, 0);
         }
@@ -735,8 +444,7 @@ mod tests {
             .as_str()
             .context("missing vector private key")?;
         let pkcs8 = Zeroizing::new(STANDARD.decode(encoded)?);
-        let path = key_path(&dir.0, &name);
-        let mut file = create_restricted_file(&path)?;
+        let mut file = dir.create_file(&key_file_name(&name))?;
         file.write_all(&pkcs8)?;
         file.sync_all()?;
         drop(file);
@@ -809,22 +517,22 @@ mod tests {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
-        let orphan = directory.0.join(format!(".{name}-{}.tmp", Uuid::new_v4()));
-        let mut file = create_restricted_file(&orphan)?;
+        let orphan = format!(".{name}-{}.tmp", Uuid::new_v4());
+        let mut file = directory.create_file(&orphan)?;
         file.write_all(b"unfinalized private key")?;
         file.sync_all()?;
         drop(file);
 
         let other_name = new_key_name("other");
-        let other_orphan = directory.0.join(format!(".{other_name}-{}.deleted", Uuid::new_v4()));
-        let mut file = create_restricted_file(&other_orphan)?;
+        let other_orphan = format!(".{other_name}-{}.deleted", Uuid::new_v4());
+        let mut file = directory.create_file(&other_orphan)?;
         file.write_all(b"abandoned key material")?;
         file.sync_all()?;
         drop(file);
 
         assert!(list(&backend, TEST_PREFIX)?.is_empty());
-        assert!(!orphan.exists());
-        assert!(!other_orphan.exists());
+        assert!(!directory.0.join(orphan).exists());
+        assert!(!directory.0.join(other_orphan).exists());
         Ok(())
     }
 
@@ -869,7 +577,7 @@ mod tests {
             format!("{name}-{}.tmp", uuid()),
         ];
         for file_name in &outside_files {
-            create_restricted_file(&directory.0.join(file_name))?;
+            directory.create_file(file_name)?;
         }
 
         // An operation may skip an unexpected entry or fail, so only what it leaves behind is checked.
@@ -885,6 +593,36 @@ mod tests {
 
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
+    fn a_link_at_a_leftover_name_is_skipped_by_listing() -> anyhow::Result<()> {
+        // Catches a cleanup that treats a link named like a leftover as one, which then fails every operation.
+        let directory = KeyDirectory::new()?;
+        let leftover = create_leftover(&directory)?;
+        let target = directory.0.join("target");
+        fs::create_dir(&target)?;
+        let link = directory
+            .0
+            .join(format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4()));
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link)?;
+        // A directory junction needs no privilege, unlike a symbolic link.
+        #[cfg(windows)]
+        ensure!(
+            std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J", link.as_str(), target.as_str()])
+                .output()?
+                .status
+                .success(),
+            "create junction"
+        );
+
+        assert!(list(&directory.backend(), TEST_PREFIX)?.is_empty());
+        assert!(!leftover.exists());
+        assert!(fs::symlink_metadata(&link).is_ok());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
     fn unexpected_entry_names_cause_no_panic() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         let leftover = create_leftover(&directory)?;
@@ -895,7 +633,7 @@ mod tests {
             format!("{TEST_PREFIX}.p8"),
         ];
         for stray_name in &stray_names {
-            create_restricted_file(&directory.0.join(stray_name))?;
+            directory.create_file(stray_name)?;
         }
 
         // An operation may skip an unexpected entry or fail; a panic fails this test.
@@ -952,7 +690,7 @@ mod tests {
         let other_name = new_key_name("scope-longer");
         generate(&backend, &name)?;
         generate(&backend, &other_name)?;
-        create_restricted_file(&key_path(&directory.0, "scope_INVALID"))?;
+        directory.create_file(&key_file_name("scope_INVALID"))?;
 
         assert_eq!(list(&backend, "scope")?, vec![name]);
         assert_eq!(list(&backend, "scope-longer")?, vec![other_name]);
@@ -992,11 +730,10 @@ mod tests {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
         // The test holds the lock as a creator in another process would while it writes its temporary.
-        let lock = lock_directory(&directory.0)?;
-        let temporary = directory
-            .0
-            .join(format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4()));
-        create_restricted_file(&temporary)?;
+        let lock = lock_directory(&directory.open()?)?;
+        let temporary = format!(".{}-{}.tmp", new_key_name(TEST_PREFIX), Uuid::new_v4());
+        directory.create_file(&temporary)?;
+        let temporary = directory.0.join(temporary);
         let lister = std::thread::spawn(move || list(&backend, TEST_PREFIX));
         std::thread::sleep(Duration::from_millis(500));
 
@@ -1010,7 +747,7 @@ mod tests {
     #[test]
     fn lock_wait_expires_and_a_later_operation_can_proceed() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
-        let lock = lock_directory(&directory.0)?;
+        let lock = lock_directory(&directory.open()?)?;
         let error = list(&directory.backend(), TEST_PREFIX)
             .err()
             .context("contended key-directory lock did not time out")?;
@@ -1025,12 +762,149 @@ mod tests {
     }
 
     // oracle: intent crates/device-key/INTENT.md §Operations
+    // The lock file is the crate's own entry, so it is not an unexpected entry that listing skips; failing promptly on one
+    // that breaks its rule keeps both "no leftover survives a later operation" and "fails promptly" true.
+    #[test]
+    fn a_lock_file_that_fails_its_rule_stops_every_operation_promptly() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        let lock = directory.0.join(LOCK_NAME);
+        fs::remove_file(&lock)?;
+        // Created outside the crate, the file is readable by other accounts: on Unix through its mode, and on Windows
+        // through the entries it inherits from the key directory.
+        fs::write(&lock, b"")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(&lock, fs::Permissions::from_mode(0o644))?;
+        }
+
+        let operations: [(&str, &dyn Fn() -> anyhow::Result<()>); 4] = [
+            ("list", &|| list(&backend, TEST_PREFIX).map(drop)),
+            ("open", &|| open(&backend, &name).map(drop)),
+            ("generate", &|| generate(&backend, &new_key_name(TEST_PREFIX)).map(drop)),
+            ("delete", &|| delete(&backend, &name)),
+        ];
+        for (operation, run) in operations {
+            let started = Instant::now();
+            let error = run()
+                .err()
+                .with_context(|| format!("{operation} ignored a lock file that fails its rule"))?;
+            let elapsed = started.elapsed();
+
+            assert!(elapsed < LOCK_TIMEOUT, "{operation}: {elapsed:?}");
+            // The error names the lock file and why it fails, so that an operator can fix it.
+            let refusal = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<private_fs::Error>())
+                .with_context(|| format!("{operation}: the failure is not a refusal: {error:#}"))?;
+            assert!(refusal.is_refused(), "{operation}: {error:#}");
+            // oracle: mutant an error that doesn't name the lock file, which leaves an operator unable to find it
+            assert!(format!("{error:#}").contains(LOCK_NAME), "{operation}: {error:#}");
+        }
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[cfg(windows)]
+    #[test]
+    fn a_leftover_another_process_holds_open_fails_listing_until_it_is_released() -> anyhow::Result<()> {
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        let leftover = create_leftover(&directory)?;
+        // A handle that shares nothing makes the cleanup's rename of the leftover fail at once rather than wait.
+        let held = fs::OpenOptions::new().read(true).share_mode(0).open(&leftover)?;
+
+        let started = Instant::now();
+        let listed = list(&backend, TEST_PREFIX);
+        let elapsed = started.elapsed();
+        drop(held);
+
+        assert!(listed.is_err(), "{listed:?}");
+        // Failing promptly means not waiting out a lock's time-out either.
+        assert!(elapsed < LOCK_TIMEOUT, "{elapsed:?}");
+        assert!(leftover.exists());
+        assert_eq!(list(&backend, TEST_PREFIX)?, [name]);
+        assert!(!leftover.exists());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_hard_linked_key_file_is_not_listed() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let linked = new_key_name(TEST_PREFIX);
+        let kept = new_key_name(TEST_PREFIX);
+        generate(&backend, &linked)?;
+        generate(&backend, &kept)?;
+        fs::hard_link(directory.key_path(&linked), directory.0.join("elsewhere"))?;
+
+        assert_eq!(list(&backend, TEST_PREFIX)?, [kept]);
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[cfg(unix)]
+    #[test]
+    fn a_hard_linked_key_file_the_caller_cannot_open_is_not_listed() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            writeln!(
+                std::io::stderr(),
+                "SKIP: a_hard_linked_key_file_the_caller_cannot_open_is_not_listed needs an account other than root"
+            )?;
+            return Ok(());
+        }
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let linked = new_key_name(TEST_PREFIX);
+        let kept = new_key_name(TEST_PREFIX);
+        generate(&backend, &linked)?;
+        generate(&backend, &kept)?;
+        fs::hard_link(directory.key_path(&linked), directory.0.join("elsewhere"))?;
+        fs::set_permissions(directory.key_path(&linked), fs::Permissions::from_mode(0o000))?;
+
+        assert_eq!(list(&backend, TEST_PREFIX)?, [kept]);
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
+    #[test]
+    fn a_key_file_readable_by_other_accounts_is_still_listed() -> anyhow::Result<()> {
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        // Written outside the crate, the file is readable by other accounts: on Unix through its mode, and on Windows
+        // through the entries it inherits from the key directory.
+        fs::write(directory.key_path(&name), b"key material")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            fs::set_permissions(directory.key_path(&name), fs::Permissions::from_mode(0o644))?;
+        }
+
+        assert_eq!(list(&backend, TEST_PREFIX)?, [name]);
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Operations
     #[test]
     fn lock_wait_on_an_existing_lock_file_expires() -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         // An earlier operation leaves the lock file behind, so the holder below opens it instead of creating it.
         list(&directory.backend(), TEST_PREFIX)?;
-        let _lock = lock_directory(&directory.0)?;
+        let _lock = lock_directory(&directory.open()?)?;
 
         assert!(list(&directory.backend(), TEST_PREFIX).is_err());
         Ok(())
@@ -1046,22 +920,12 @@ mod tests {
         let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
         generate(&backend, &name)?;
-        let path = key_path(&directory.0, &name);
+        let path = directory.key_path(&name);
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640))?;
         assert!(open(&backend, &name).is_err());
         fs::set_permissions(&path, fs::Permissions::from_mode(0o600))?;
         assert!(open(&backend, &name)?.is_some());
         Ok(())
-    }
-
-    // oracle: intent crates/device-key/INTENT.md §Access
-    #[cfg(unix)]
-    #[test]
-    fn only_the_caller_or_root_can_own_a_key_file() {
-        assert!(owner_is_trusted(1000, 1000));
-        assert!(owner_is_trusted(0, 1000));
-        assert!(!owner_is_trusted(1001, 1000));
-        assert!(!owner_is_trusted(1001, 0));
     }
 
     // oracle: intent crates/device-key/INTENT.md §Access
@@ -1102,7 +966,7 @@ mod tests {
         let other_name = new_key_name(TEST_PREFIX);
         generate(&backend, &name)?;
         generate(&backend, &other_name)?;
-        std::os::unix::fs::chown(key_path(&directory.0, &name), Some(nobody), None)?;
+        std::os::unix::fs::chown(directory.key_path(&name), Some(nobody), None)?;
 
         assert!(open(&backend, &name).is_err());
         // oracle: intent crates/device-key/INTENT.md §Operations
@@ -1112,34 +976,6 @@ mod tests {
         // The other key, created the same way but left with its owner, still opens.
         // oracle: intent crates/device-key/INTENT.md §Operations
         assert!(open(&backend, &other_name)?.is_some());
-        Ok(())
-    }
-
-    // oracle: intent crates/device-key/INTENT.md §Access
-    // oracle: spec MS-FSCC §2.5.1
-    #[cfg(windows)]
-    #[test]
-    fn key_files_require_persistent_volume_acls() {
-        use win_api_wrappers::raw::Win32::System::SystemServices::FILE_PERSISTENT_ACLS;
-
-        assert!(!volume_supports_acls(0));
-        assert!(!volume_supports_acls(2));
-        assert!(volume_supports_acls(FILE_PERSISTENT_ACLS));
-    }
-
-    // oracle: intent crates/device-key/INTENT.md §Access
-    #[cfg(windows)]
-    #[test]
-    fn key_file_owner_must_be_process_user_or_system() -> anyhow::Result<()> {
-        use win_api_wrappers::token::Token;
-        use windows::Win32::Security;
-
-        let system = Sid::from_well_known(Security::WinLocalSystemSid, None)?;
-        let users = Sid::from_well_known(Security::WinBuiltinUsersSid, None)?;
-        let user = Token::current_process_token().sid_and_attributes()?.sid;
-        assert!(trusted_owner(&user, &user, &system));
-        assert!(trusted_owner(&system, &user, &system));
-        assert!(!trusted_owner(&users, &user, &system));
         Ok(())
     }
 
@@ -1159,19 +995,25 @@ mod tests {
         Ok(())
     }
 
+    /// Gives a test directory whose mode it narrowed its owner's full access back when dropped, so that it can be
+    /// removed.
+    #[cfg(unix)]
+    struct RestorePermissions(Utf8PathBuf);
+
+    #[cfg(unix)]
+    impl Drop for RestorePermissions {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt as _;
+
+            let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
+        }
+    }
+
     // oracle: intent crates/device-key/INTENT.md §File backend
     #[cfg(unix)]
     #[test]
     fn existing_keys_work_under_execute_only_ancestor() -> anyhow::Result<()> {
         use std::os::unix::fs::PermissionsExt as _;
-
-        struct RestorePermissions(Utf8PathBuf);
-
-        impl Drop for RestorePermissions {
-            fn drop(&mut self) {
-                let _ = fs::set_permissions(&self.0, fs::Permissions::from_mode(0o700));
-            }
-        }
 
         let root = KeyDirectory::new()?;
         let ancestor = root.0.join("execute-only");
@@ -1186,6 +1028,49 @@ mod tests {
         Ok(())
     }
 
+    // oracle: intent crates/private-fs/INTENT.md §paths
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_key_directory_under_an_execute_only_parent_is_refused() -> anyhow::Result<()> {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        // `crates/device-key/INTENT.md` ("File backend") asks only two rights on the ancestors for keeping and using keys
+        // once the key directory exists; creating it needs its parent open, to sync the new entry so that it survives a
+        // power cut.
+
+        // SAFETY: Reading the process's effective UID has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            writeln!(
+                std::io::stderr(),
+                "SKIP: a_missing_key_directory_under_an_execute_only_parent_is_refused needs an account other than root"
+            )?;
+            return Ok(());
+        }
+        let root = KeyDirectory::new()?;
+        let parent = root.0.join("execute-only");
+        fs::create_dir(&parent)?;
+        fs::set_permissions(&parent, fs::Permissions::from_mode(0o100))?;
+        let restore = RestorePermissions(parent.clone());
+        let backend = KeyBackend::File {
+            dir: parent.join("keys"),
+        };
+
+        let generated = generate(&backend, &new_key_name(TEST_PREFIX));
+        drop(restore);
+
+        let error = generated
+            .err()
+            .context("a key directory was created under an execute-only parent")?;
+        assert!(
+            error.chain().any(|cause| cause
+                .downcast_ref::<private_fs::Error>()
+                .is_some_and(private_fs::Error::is_refused)),
+            "{error:#}"
+        );
+        assert!(!parent.join("keys").exists());
+        Ok(())
+    }
+
     // oracle: intent crates/device-key/INTENT.md §Operations
     #[cfg(windows)]
     #[test]
@@ -1194,11 +1079,13 @@ mod tests {
         let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
         generate(&backend, &name)?;
-        let retired = directory.0.join(format!(".{name}-{}.deleted", Uuid::new_v4()));
-        rename_new(&key_path(&directory.0, &name), &retired)?;
+        let retired = format!(".{name}-{}.deleted", Uuid::new_v4());
+        directory
+            .open()?
+            .rename(&key_file_name(&name), &retired, Replace::Refuse)?;
 
         assert!(open(&backend, &name)?.is_none());
-        assert!(!retired.exists());
+        assert!(!directory.0.join(retired).exists());
         Ok(())
     }
 
@@ -1210,10 +1097,10 @@ mod tests {
         let real_name = new_key_name(TEST_PREFIX);
         let alias = new_key_name(TEST_PREFIX);
         generate(&backend, &real_name)?;
-        fs::hard_link(key_path(&directory.0, &real_name), key_path(&directory.0, &alias))?;
+        fs::hard_link(directory.key_path(&real_name), directory.key_path(&alias))?;
         assert!(open(&backend, &alias).is_err());
         assert!(open(&backend, &real_name).is_err());
-        fs::remove_file(key_path(&directory.0, &alias))?;
+        fs::remove_file(directory.key_path(&alias))?;
         assert!(open(&backend, &real_name)?.is_some());
         Ok(())
     }
@@ -1228,10 +1115,10 @@ mod tests {
         let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
         generate(&backend, &name)?;
-        let _holder = OpenOptions::new()
+        let _holder = fs::OpenOptions::new()
             .read(true)
             .share_mode(0)
-            .open(key_path(&directory.0, &name))?;
+            .open(directory.key_path(&name))?;
 
         assert!(!matches!(open(&backend, &name), Ok(None)));
         Ok(())
@@ -1241,6 +1128,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn a_key_file_another_account_can_read_cannot_be_opened() -> anyhow::Result<()> {
+        use win_api_wrappers::identity::sid::Sid;
         use win_api_wrappers::raw::Win32::Security::Authorization::{GRANT_ACCESS, SE_FILE_OBJECT};
         use win_api_wrappers::raw::Win32::Security::{self, WinBuiltinUsersSid, WinLocalSystemSid};
         use win_api_wrappers::raw::Win32::Storage::FileSystem::{FILE_ALL_ACCESS, FILE_GENERIC_READ};
@@ -1269,7 +1157,7 @@ mod tests {
                 entry(Sid::from_well_known(WinBuiltinUsersSid, None)?, FILE_GENERIC_READ.0),
             ])?,
         };
-        let path = U16CString::from_str(key_path(&directory.0, &name).as_str())?;
+        let path = U16CString::from_str(directory.key_path(&name).as_str())?;
         set_named_security_info(&path, SE_FILE_OBJECT, None, None, Some(&dacl), None)?;
 
         assert!(open(&backend, &name).is_err());
@@ -1277,6 +1165,54 @@ mod tests {
         assert_eq!(list(&backend, TEST_PREFIX)?, vec![name.clone()]);
         delete(&backend, &name)?;
         assert!(list(&backend, TEST_PREFIX)?.is_empty());
+        Ok(())
+    }
+
+    // oracle: intent crates/device-key/INTENT.md §Access
+    #[cfg(windows)]
+    #[test]
+    fn elevated_only_a_key_file_owned_by_administrators_cannot_be_opened() -> anyhow::Result<()> {
+        use win_api_wrappers::identity::sid::Sid;
+        use win_api_wrappers::raw::Win32::Security::Authorization::SE_FILE_OBJECT;
+        use win_api_wrappers::raw::Win32::Security::WinBuiltinAdministratorsSid;
+        use win_api_wrappers::security::acl::set_named_security_info;
+        use win_api_wrappers::str::U16CString;
+        use win_api_wrappers::token::Token;
+
+        // Only an elevated token can make BUILTIN\Administrators the owner without the restore privilege.
+        if !Token::current_process_token().is_elevated()? {
+            // The test harness captures `eprintln!` output from a passing test, but not direct writes to stderr.
+            writeln!(
+                std::io::stderr(),
+                "SKIP: elevated_only_a_key_file_owned_by_administrators_cannot_be_opened needs elevation"
+            )?;
+            return Ok(());
+        }
+        let directory = KeyDirectory::new()?;
+        let backend = directory.backend();
+        let name = new_key_name(TEST_PREFIX);
+        let other_name = new_key_name(TEST_PREFIX);
+        generate(&backend, &name)?;
+        generate(&backend, &other_name)?;
+        // The owner of a file can change its DACL, so an owner other than the caller's account or SYSTEM breaks the
+        // access rule even when the DACL holds.
+        let administrators = Sid::from_well_known(WinBuiltinAdministratorsSid, None)?;
+        set_named_security_info(
+            &U16CString::from_str(directory.key_path(&name).as_str())?,
+            SE_FILE_OBJECT,
+            Some(&administrators),
+            None,
+            None,
+            None,
+        )?;
+
+        assert!(open(&backend, &name).is_err());
+        // oracle: intent crates/device-key/INTENT.md §Operations
+        assert_eq!(list(&backend, TEST_PREFIX)?.len(), 2);
+        delete(&backend, &name)?;
+        // oracle: intent crates/device-key/INTENT.md §Operations
+        assert_eq!(list(&backend, TEST_PREFIX)?, vec![other_name.clone()]);
+        assert!(open(&backend, &other_name)?.is_some());
         Ok(())
     }
 
@@ -1289,7 +1225,7 @@ mod tests {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
         let name = new_key_name(TEST_PREFIX);
-        let fifo = CString::new(key_path(&directory.0, &name).as_str())?;
+        let fifo = CString::new(directory.key_path(&name).as_str())?;
         // SAFETY: The path is NUL-terminated.
         let status = unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) };
         ensure!(status == 0, "create FIFO: {}", std::io::Error::last_os_error());
@@ -1324,8 +1260,8 @@ mod tests {
     fn case_alias_survives_delete_and_list(name: &str, alias: &str) -> anyhow::Result<()> {
         let directory = KeyDirectory::new()?;
         let backend = directory.backend();
+        directory.create_file(alias)?;
         let alias = directory.0.join(alias);
-        create_restricted_file(&alias)?;
 
         // An operation may skip an unexpected entry or fail, so only what it leaves behind is checked.
         let _ = delete(&backend, name);
@@ -1344,7 +1280,7 @@ mod tests {
         let pkcs8 = key.to_pkcs8_der()?;
         let at_bound = pad_pkcs8(pkcs8.as_bytes(), 64 * 1024)?;
         let name = new_key_name(TEST_PREFIX);
-        create_restricted_file(&key_path(&directory.0, &name))?.write_all(&at_bound)?;
+        directory.create_file(&key_file_name(&name))?.write_all(&at_bound)?;
         let opened = open(&backend, &name)?.context("a 64 KiB key file was refused")?;
         // oracle: property round-trip
         assert_eq!(opened.public_key(), *key.verifying_key());
@@ -1356,7 +1292,7 @@ mod tests {
             [at_bound.as_slice(), &[0]].concat(),
         ] {
             let name = new_key_name(TEST_PREFIX);
-            create_restricted_file(&key_path(&directory.0, &name))?.write_all(&past_bound)?;
+            directory.create_file(&key_file_name(&name))?.write_all(&past_bound)?;
             // An operation may skip an unexpected entry or fail, but never returns it as a key.
             assert!(!matches!(open(&backend, &name), Ok(Some(_))));
         }
@@ -1423,7 +1359,7 @@ mod tests {
         let real_name = new_key_name(TEST_PREFIX);
         let alias = new_key_name(TEST_PREFIX);
         generate(&backend, &real_name)?;
-        std::os::unix::fs::symlink(key_path(&directory.0, &real_name), key_path(&directory.0, &alias))?;
+        std::os::unix::fs::symlink(directory.key_path(&real_name), directory.key_path(&alias))?;
         assert!(open(&backend, &alias).is_err());
         assert_eq!(list(&backend, TEST_PREFIX)?, vec![real_name.clone()]);
         delete(&backend, &alias)?;

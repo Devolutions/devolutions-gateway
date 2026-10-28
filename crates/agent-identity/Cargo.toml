@@ -23,6 +23,7 @@ httpdate = "1"
 http-client-proxy = { path = "../http-client-proxy" }
 p256 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }
 p384 = { version = "=0.14.0-rc.14", features = ["ecdsa", "pkcs8"] }
+private-fs = { path = "../private-fs" }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "socks"] }
 rustls-pemfile = "2.2"
 serde = { version = "1", features = ["derive"] }
@@ -40,7 +41,6 @@ zeroize = "1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
-private-fs = { path = "../private-fs" }
 
 [target.'cfg(windows)'.dependencies]
 win-api-wrappers = { path = "../win-api-wrappers" }

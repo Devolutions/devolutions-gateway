@@ -1,8 +1,6 @@
 mod file;
 #[cfg(windows)]
 mod keystore;
-#[cfg(target_os = "macos")]
-mod macos_acl;
 #[cfg(windows)]
 mod windows_acl;
 

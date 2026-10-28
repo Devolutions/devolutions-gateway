@@ -6178,6 +6178,8 @@ version = "0.0.0"
 dependencies = [
  "camino",
  "libc",
+ "win-api-wrappers",
+ "windows 0.61.3",
 ]
 
 [[package]]
@@ -8129,12 +8131,14 @@ dependencies = [
  "hex",
  "ipnetwork",
  "jmux-proto",
+ "libc",
  "libsql",
  "mcp-proxy",
  "network-scanner",
  "network-scanner-proto",
  "nonempty",
  "picky",
+ "private-fs",
  "proxy-socks",
  "quinn",
  "rcgen",

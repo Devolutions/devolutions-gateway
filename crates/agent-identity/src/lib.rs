@@ -7,8 +7,6 @@ pub mod state;
 pub mod token;
 
 mod chain;
-#[cfg(target_os = "macos")]
-mod macos_acl;
 mod private_file;
 mod rejected;
 mod state_lock;
