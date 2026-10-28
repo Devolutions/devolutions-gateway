@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
 use futures::TryStreamExt as _;
 use ngrok::config::{HttpTunnelBuilder, TcpTunnelBuilder, TunnelBuilder as _};
-use ngrok::tunnel::UrlTunnel as _;
+use ngrok::conn::ConnInfo as _;
+use ngrok::tunnel::EndpointInfo as _;
 use tracing::Instrument as _;
 
 use crate::DgwState;
@@ -19,22 +20,36 @@ pub struct NgrokSession {
 
 impl NgrokSession {
     pub async fn connect(conf: &NgrokConf) -> anyhow::Result<Self> {
-        let mut builder = ngrok::Session::builder().authtoken(&conf.auth_token);
+        let mut builder = ngrok::Session::builder();
+
+        builder.authtoken(&conf.auth_token);
 
         if let Some(heartbeat_interval) = conf.heartbeat_interval {
-            builder = builder.heartbeat_interval(Duration::from_secs(heartbeat_interval));
+            builder
+                .heartbeat_interval(Duration::from_secs(heartbeat_interval))
+                .context("invalid Ngrok.HeartbeatInterval")?;
         }
 
         if let Some(heartbeat_tolerance) = conf.heartbeat_tolerance {
-            builder = builder.heartbeat_tolerance(Duration::from_secs(heartbeat_tolerance));
+            builder
+                .heartbeat_tolerance(Duration::from_secs(heartbeat_tolerance))
+                .context("invalid Ngrok.HeartbeatTolerance")?;
         }
 
         if let Some(metadata) = &conf.metadata {
-            builder = builder.metadata(metadata);
+            builder.metadata(metadata);
         }
 
         if let Some(server_addr) = &conf.server_addr {
-            builder = builder.server_addr(server_addr);
+            // The SDK reads `https://host` as the host `https`, which would only fail later at name resolution.
+            anyhow::ensure!(
+                !server_addr.contains("://"),
+                "invalid Ngrok.ServerAddr {server_addr}, expected host[:port] without a URL scheme"
+            );
+
+            builder
+                .server_addr(server_addr)
+                .context("invalid Ngrok.ServerAddr, expected host[:port]")?;
         }
 
         info!("Connecting to ngrok service");
@@ -53,32 +68,30 @@ impl NgrokSession {
 
         match conf {
             NgrokTunnelConf::Tcp(tcp_conf) => {
-                let mut builder = self.inner.tcp_endpoint().remote_addr(&tcp_conf.remote_addr);
+                let mut builder = self.inner.tcp_endpoint();
+
+                builder.remote_addr(&tcp_conf.remote_addr);
 
                 if let Some(metadata) = &tcp_conf.metadata {
-                    builder = builder.metadata(metadata);
+                    builder.metadata(metadata);
                 }
 
                 let before_cidrs = builder.clone();
 
-                builder = tcp_conf
-                    .allow_cidrs
-                    .iter()
-                    .fold(builder, |builder, cidr| builder.allow_cidr(cidr));
+                for cidr in &tcp_conf.allow_cidrs {
+                    builder.allow_cidr(cidr);
+                }
 
-                builder = tcp_conf
-                    .deny_cidrs
-                    .iter()
-                    .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
+                for cidr in &tcp_conf.deny_cidrs {
+                    builder.deny_cidr(cidr);
+                }
 
                 // HACK: Find the subscription plan. This uses ngrok-rs internal API, so it’s not great.
                 // Ideally, we could use the `Session` to find out about the subscription plan without dirty tricks.
-                match builder
-                    .clone()
-                    .forwards_to("Devolutions Gateway Subscription probe")
-                    .listen()
-                    .await
-                {
+                let mut probe = builder.clone();
+                probe.forwards_to("Devolutions Gateway Subscription probe");
+
+                match probe.listen().await {
                     // https://ngrok.com/docs/errors/err_ngrok_9017/
                     // "Your account is not authorized to use ip restrictions."
                     Err(ngrok::session::RpcError::Response(e))
@@ -102,44 +115,38 @@ impl NgrokSession {
                 }
             }
             NgrokTunnelConf::Http(http_conf) => {
-                let mut builder = self
-                    .inner
-                    .http_endpoint()
-                    .domain(&http_conf.domain)
-                    .scheme(Scheme::HTTPS);
+                let mut builder = self.inner.http_endpoint();
+
+                builder.domain(&http_conf.domain).scheme(Scheme::HTTPS);
 
                 if let Some(metadata) = &http_conf.metadata {
-                    builder = builder.metadata(metadata);
+                    builder.metadata(metadata);
                 }
 
                 if let Some(circuit_breaker) = http_conf.circuit_breaker {
-                    builder = builder.circuit_breaker(circuit_breaker);
+                    builder.circuit_breaker(circuit_breaker);
                 }
 
                 if matches!(http_conf.compression, Some(true)) {
-                    builder = builder.compression();
+                    builder.compression();
                 }
 
                 let before_cidrs = builder.clone();
 
-                builder = http_conf
-                    .allow_cidrs
-                    .iter()
-                    .fold(builder, |builder, cidr| builder.allow_cidr(cidr));
+                for cidr in &http_conf.allow_cidrs {
+                    builder.allow_cidr(cidr);
+                }
 
-                builder = http_conf
-                    .deny_cidrs
-                    .iter()
-                    .fold(builder, |builder, cidr| builder.deny_cidr(cidr));
+                for cidr in &http_conf.deny_cidrs {
+                    builder.deny_cidr(cidr);
+                }
 
                 // HACK: Find the subscription plan. This uses ngrok-rs internal API, so it’s not great.
                 // Ideally, we could use the `Session` to find out about the subscription plan without dirty tricks.
-                match builder
-                    .clone()
-                    .forwards_to("Devolutions Gateway Subscription probe")
-                    .listen()
-                    .await
-                {
+                let mut probe = builder.clone();
+                probe.forwards_to("Devolutions Gateway Subscription probe");
+
+                match probe.listen().await {
                     // https://ngrok.com/docs/errors/err_ngrok_9017/
                     // "Your account is not authorized to use ip restrictions."
                     Err(ngrok::session::RpcError::Response(e))
@@ -166,7 +173,6 @@ impl NgrokSession {
     }
 }
 
-// fn handle_http_tunnel(mut tunnel: impl UrlTunnel, ) ->
 pub struct NgrokTunnel {
     name: String,
     inner: NgrokTunnelInner,
@@ -188,7 +194,7 @@ impl NgrokTunnel {
         let hostname = state.conf_handle.get_conf().hostname.clone();
 
         match self.inner {
-            NgrokTunnelInner::Tcp(builder) => {
+            NgrokTunnelInner::Tcp(mut builder) => {
                 // Start tunnel with a TCP edge
                 let tunnel = builder
                     .forwards_to(hostname)
@@ -200,7 +206,7 @@ impl NgrokTunnel {
 
                 run_tcp_tunnel(tunnel, state).await;
             }
-            NgrokTunnelInner::Http(builder) => {
+            NgrokTunnelInner::Http(mut builder) => {
                 // Start tunnel with an HTTP edge
                 let tunnel = builder
                     .forwards_to(hostname)
