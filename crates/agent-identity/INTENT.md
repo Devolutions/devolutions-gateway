@@ -44,7 +44,8 @@ The location and format of the files below are stable, because the conformance t
   The running agent repeats the check before every use of its state and on each pending-directory poll, stops every identity and its streams while any directory fails it, and resumes without a restart once all pass.
   A directory passes only if it is owned by the agent's account and is, on Unix, closed to group and other, or on Windows, protected by exactly the DACL the agent provisions; a link, a reparse point, a non-directory and, on a case-insensitive file system, any case variant of its name are all checked.
 - An `identity.json` that fails the same check is treated like an untrusted authority directory: never repaired, never read as absent, and it stops all identity processing until it is fixed.
-- The agent ignores and keeps a rejection marker or in-progress record that it doesn't own or that other users can access: trusting one would let a local attacker reject a token or supply its enrollment key, while an attacker able to write one could delete it anyway, so ignoring it opens nothing new.
+- The agent ignores a rejection marker or in-progress record that it doesn't own or that other users can access, as if it were absent, and never deletes one as cleanup; its own write of that file replaces it.
+  Trusting one would let a local attacker reject a token or supply its enrollment key, while an attacker able to write one could delete it anyway, so ignoring it opens nothing new.
 - Every state change holds an exclusive lock on the identity directory: the file `<data-dir>/identity/.agent-identity.lock` on Linux and macOS, and on Windows an unshared handle on `<data-dir>/identity` itself; on Windows, a busy lock is retried for 30 s.
 - Size limits: a pending file holds at most 16 KiB of plaintext, an in-progress record 16 KiB, `identity.json` 2 MiB, and a rejection marker 1 KiB.
 
