@@ -21,7 +21,7 @@
                 <String Id="NoMatchingCertificatesFound">No matching certificates found</String>
                 <String Id="OS2Old">This product requires at least Windows 8 / Windows Server 2012 R2</String>
                 <String Id="PasswordsDoNotMatch">Passwords do not match</String>
-                <String Id="RemoteAddressIsRequired">The remote address is required</String>
+                <String Id="RemoteAddressIsRequired">The remote address is required for native client access. Select Later for browser-only access.</String>
                 <String Id="RemoteAddressMustBeInTheFormat">The remote address must be a valid host and port in the format {host}:{port}</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">There is a problem with the entered data. Please correct the issue and try again.</String>
                 <String Id="TheSpecifiedFileWasInvalidOrNotAccessible">The specified file was invalid or not accessible</String>
@@ -42,12 +42,12 @@
                 <String Id="FindYourPublicKeyForXorX">Find your public key for {0} or {1}</String>
                 <String Id="NgrokAuthTokenLink">authentication token</String>
                 <String Id="NgrokDomainLink">domain</String>
+                <String Id="NgrokNativeClientsNeedAReservedX">Native clients such as Remote Desktop Manager need a reserved {0}, which is a paid ngrok feature. Browser-only access doesn't need one.</String>
                 <String Id="NgrokProvideYourX">Provide your {0}</String>
                 <String Id="NgrokReadMoreAtX">Read more at {0}</String>
                 <String Id="NgrokReadMoreLink">ngrok.com</String>
                 <String Id="NgrokTcpAddressLink">TCP address</String>
                 <String Id="NgrokXForWebClientAccess">The {0} for web client access</String>
-                <String Id="NgroXForNativeClientAccess">The {0} for native client access</String>
                     <!-- buttons -->
                 <String Id="SearchButton">Search</String>
                 <String Id="ValidateButton">Validate</String>
@@ -116,6 +116,7 @@
                 <String Id="Property_NewCertificate">A new self-signed certificate will be generated</String>
                 <String Id="Property_NewKeyPair">A new key pair will be generated</String>
                 <String Id="Property_NgrokAuthToken">Authentication Token</String>
+                <String Id="Property_NgrokEnableTcp">Native Client Access</String>
                 <String Id="Property_NgrokHttpDomain">Domain</String>
                 <String Id="Property_NgrokRemoteAddress">TCP Address</String>
                 <String Id="Property_PrivateKeyFile">Private Key File</String>
