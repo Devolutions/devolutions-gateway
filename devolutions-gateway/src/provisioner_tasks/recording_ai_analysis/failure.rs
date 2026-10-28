@@ -36,8 +36,6 @@ pub enum Recoverable {
     AiUnreachable,
     /// The AI provider is busy or failing for now, such as with a rate limit (429) or a server error (5xx).
     AiBusy { status: u16 },
-    /// Gateway could not read its own storage, such as the folder of the session.
-    Storage,
 }
 
 /// What was wrong with an answer of the AI provider.

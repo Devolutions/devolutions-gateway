@@ -314,8 +314,6 @@ enum AiAnalysisRecoverableErrorKind {
     AiUnreachable,
     /// The AI provider is busy or failing for now, such as with a rate limit (429) or a server error (5xx).
     AiBusy,
-    /// Gateway could not read its own storage, such as the folder of the session.
-    Storage,
 }
 
 // The error kinds are written out above for their descriptions, which utoipa drops from the variants without fields, so
@@ -338,7 +336,6 @@ const _: fn(&Permanent<Failure, Recoverable>) -> AiAnalysisErrorKind = |error| m
 const _: fn(&Recoverable) -> AiAnalysisRecoverableErrorKind = |error| match error {
     Recoverable::AiUnreachable => AiAnalysisRecoverableErrorKind::AiUnreachable,
     Recoverable::AiBusy { status: _ } => AiAnalysisRecoverableErrorKind::AiBusy,
-    Recoverable::Storage => AiAnalysisRecoverableErrorKind::Storage,
 };
 
 const _: fn(&BadAnswer) -> AiAnalysisBadAnswer = |why| match why {
