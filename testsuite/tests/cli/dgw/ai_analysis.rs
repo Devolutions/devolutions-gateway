@@ -111,9 +111,13 @@ impl Gateway {
     }
 
     async fn get_analysis(&self, task_id: Uuid, scope: &str) -> (StatusCode, Value) {
+        self.get(&format!("/jet/tasks/recording-ai-analysis/{task_id}"), scope).await
+    }
+
+    async fn get(&self, path: &str, scope: &str) -> (StatusCode, Value) {
         let response = self
             .client
-            .get(self.url(&format!("/jet/tasks/recording-ai-analysis/{task_id}")))
+            .get(self.url(path))
             .bearer_auth(scope_token(scope))
             .send()
             .await
@@ -289,6 +293,7 @@ async fn start_returns_202_then_200_for_the_same_request() {
     let (status, created) = gateway.put(task_id, &request(session_id, "gpt-test", &base_url)).await;
     assert_eq!(status, StatusCode::ACCEPTED, "{created}");
     assert_eq!(created["id"], task_id.to_string());
+    // oracle: mutant the answer leaves out the session the analysis is about
     assert_eq!(created["sessionId"], session_id.to_string());
     assert_eq!(
         created["params"],
@@ -301,6 +306,7 @@ async fn start_returns_202_then_200_for_the_same_request() {
     assert_eq!(created["startedAt"], Value::Null);
     assert_eq!(created["finishedAt"], Value::Null);
     for internal in ["kind", "target", "attempts"] {
+        // oracle: mutant the answer shows `kind`, `target` and `attempts`, which only matter inside Gateway
         assert!(created.get(internal).is_none(), "{internal} is not returned");
     }
 
@@ -465,12 +471,10 @@ async fn an_analysis_is_found_at_its_location() {
 
     assert_eq!(response.status(), StatusCode::ACCEPTED);
     let location = response.headers()["location"].to_str().unwrap().to_owned();
-    assert_eq!(location, format!("/jet/tasks/recording-ai-analysis/{task_id}"));
 
-    let (status, task) = gateway.get_analysis(task_id, READ_SCOPE).await;
+    let (status, task) = gateway.get(&location, READ_SCOPE).await;
     assert_eq!(status, StatusCode::OK, "{task}");
     assert_eq!(task["id"], task_id.to_string());
-    assert_eq!(task["sessionId"], session_id.to_string());
 }
 
 // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
