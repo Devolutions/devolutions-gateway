@@ -15,12 +15,10 @@ use uuid::Uuid;
 
 use super::TaskState;
 use crate::DgwState;
-use crate::extract::{ProvisionerTaskReadScope, ProvisionerTaskStartScope};
+use crate::extract::{RecordingAiAnalysisReadScope, RecordingAiAnalysisStartScope};
 use crate::http::HttpError;
 use crate::provisioner_tasks::ai::{AiProvider, AiSettings};
-use crate::provisioner_tasks::recording_ai_analysis::{
-    self as analysis, RecordingAiAnalysis, StartError, StartOutcome, StartRequest,
-};
+use crate::provisioner_tasks::recording_ai_analysis::{self as analysis, StartError, StartOutcome, StartRequest};
 
 /// Settings of an AI analysis
 #[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
@@ -174,7 +172,7 @@ fn ai_analysis_conflict(code: AiAnalysisConflictCode, task_id: Option<Uuid>) -> 
 ))]
 pub(crate) async fn start_ai_analysis(
     State(state): State<DgwState>,
-    _scope: ProvisionerTaskStartScope<RecordingAiAnalysis>,
+    _scope: RecordingAiAnalysisStartScope,
     extract::Path(task_id): extract::Path<Uuid>,
     body: Bytes,
 ) -> Result<Response, HttpError> {
@@ -269,7 +267,7 @@ pub(crate) async fn start_ai_analysis(
 ))]
 pub(crate) async fn get_ai_analysis(
     State(DgwState { provisioner_tasks, .. }): State<DgwState>,
-    _scope: ProvisionerTaskReadScope<RecordingAiAnalysis>,
+    _scope: RecordingAiAnalysisReadScope,
     extract::Path(task_id): extract::Path<Uuid>,
 ) -> Result<Json<AiAnalysisTask>, HttpError> {
     let task = provisioner_tasks

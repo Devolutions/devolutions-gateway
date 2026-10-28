@@ -11,8 +11,8 @@ use parking_lot::Mutex;
 use provisioner_task::{NewProvisionerTaskRecord, ProvisionerTaskState};
 
 use super::*;
-use crate::job_queue::{JobMessage, JobQueueHandle, JobQueueReceiver, MAX_ATTEMPTS};
-use crate::provisioner_tasks::runner::{ProvisionerTaskJob, ProvisionerTaskRunner};
+use crate::job_queue::{JobMessage, JobQueueHandle, JobQueueReceiver};
+use crate::provisioner_tasks::runner::{MAX_ATTEMPTS, ProvisionerTaskJob, ProvisionerTaskRunner};
 use crate::recording::RecordingManagerTask;
 use crate::{DgwState, MockHandles};
 
@@ -141,6 +141,11 @@ impl Harness {
 
     async fn run(&self, task_id: Uuid) -> anyhow::Result<()> {
         self.job(task_id).await.run().await
+    }
+
+    /// Whether a job waits to run a later attempt, as after a recoverable failure; it takes every queued job.
+    fn later_attempt_queued(&mut self) -> bool {
+        std::iter::from_fn(|| self.job_queue_rx.try_recv().ok()).any(|message| message.schedule_for.is_some())
     }
 
     /// Records a Task directly, as if it was created at `created_at`.
@@ -517,14 +522,15 @@ async fn refuses_invalid_ai_settings() {
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
 #[tokio::test]
 async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
-    let harness = Harness::new().await;
+    let mut harness = Harness::new().await;
     // About 1 MB of transcript: three chunks.
     let session_id = harness.write_long_session(10_000);
     let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
     let task_id = harness.start_created(session_id, settings).await;
     let workspace = harness.workspace(session_id);
 
-    assert!(harness.run(task_id).await.is_err(), "a provider outage is retried");
+    harness.run(task_id).await.expect("the job queues the next attempt itself");
+    assert!(harness.later_attempt_queued(), "a provider outage is retried");
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Running);
@@ -663,17 +669,19 @@ async fn recording_deleted_after_start_fails() {
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
 #[tokio::test]
 async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
-    let harness = Harness::new().await;
+    let mut harness = Harness::new().await;
     let session_id = harness.write_long_session(10);
     let (settings, requests) = spawn_ai_provider(|_| 503).await;
     let task_id = harness.start_created(session_id, settings).await;
 
     for attempt in 1..MAX_ATTEMPTS {
-        assert!(harness.run(task_id).await.is_err(), "attempt {attempt} is retried");
+        harness.run(task_id).await.expect("the job queues the next attempt itself");
+        assert!(harness.later_attempt_queued(), "attempt {attempt} is retried");
         assert_eq!(harness.task(task_id).await.state, ProvisionerTaskState::Running);
     }
 
     harness.run(task_id).await.expect("the last attempt is not retried");
+    assert!(!harness.later_attempt_queued(), "no attempt after the last");
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
