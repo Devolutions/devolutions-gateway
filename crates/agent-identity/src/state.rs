@@ -10,7 +10,7 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::{Uuid, Variant};
 
-pub use crate::private_file::UntrustedStoredIdentity;
+pub use crate::private_file::{ForeignIdentityDirectory, UntrustedStoredIdentity};
 use crate::token::Token;
 use crate::{chain, pending, private_file, rejected, state_lock};
 
@@ -177,6 +177,18 @@ impl Store {
     /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
     pub fn check_stored_identities(&self) -> anyhow::Result<()> {
         private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user).map(drop)
+    }
+
+    /// Runs what every state change runs before it writes, then releases the state lock: provisioning the identity
+    /// directories, which refuses one whose owner the agent does not accept with a [`ForeignIdentityDirectory`], then
+    /// [`Store::check_stored_identities`].
+    ///
+    /// [`crates/agent-identity/INTENT.md`] ("Local state"): either refusal stops all identity processing until it is
+    /// fixed, so a running agent with no state change to make still notices one.
+    ///
+    /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+    pub fn check_state(&self) -> anyhow::Result<()> {
+        self.lock().map(drop)
     }
 
     /// Takes the state lock once every stored identity passes [`Store::check_stored_identities`].
