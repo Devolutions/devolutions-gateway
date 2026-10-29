@@ -976,6 +976,7 @@ const TESTS: &[Test] = &[
     a!(a_make_before_break_on_renewal).channel(),
     a!(a_old_key_deleted_after_confirm_without_channel, mock_only).channel(),
     a!(a_request_renewal_connected).channel().need(Need::LongLeaves),
+    a!(a_renewal_waits_between_renewals, mock_only).channel(),
     a!(a_request_renewal_while_offline).channel().need(Need::LongLeaves),
     a!(a_request_renewal_without_channel).without_channel(),
     a!(a_reconnect_make_before_break, mock_only).channel(),
