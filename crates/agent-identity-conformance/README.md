@@ -27,13 +27,14 @@ On the mock, the runner derives the keys of application identities with fewer pe
 Settings tests restore the original settings when they finish.
 The runner reaches each authority's management API only through the module for that authority: `src/dvls.rs` speaks DVLS's management API, as DVLS's OpenAPI document defines it and the mock replicates it.
 The disposable rotation checks require no other active identities on the published root; otherwise they report `SKIP` before rotating.
-`--leaf-lifetime-secs` defaults to 90 days and must match the server setting.
+`--leaf-lifetime-secs` defaults to 90 days and must match the lifetime of the leaves the authority issues: its certificate lifetime setting, or the test-only lifetime DVLS uses instead in its unsafe test mode.
 DVLS refuses a rotation deadline after the rotation maximum, which is at most one leaf lifetime ahead, so the rotation checks set their deadline `--dvls-rotation-window-secs` ahead, by default 60 seconds or 75% of `--leaf-lifetime-secs` rounded down to whole seconds, whichever is shorter.
 A one-second leaf lifetime leaves no whole second for that default, so the runner then refuses to start without `--dvls-rotation-window-secs`.
 Pass `--agent-version <version>` to require the agent's reported version to match; the testsuite reads the root `VERSION` file and passes it automatically.
 Agent cases check the five required metadata fields and their values at each send ([Agent Identity V1 contract] §3.1).
 Each generated agent config points `metadata_override_path` at a test-owned JSON file; mock-only renewal tests change its hostname between sends to verify that renew and the next Hello refresh metadata.
-The DVLS expiry-boundary test needs a configured leaf lifetime of roughly 10–30 seconds.
+The DVLS expiry-boundary test needs leaves of roughly 10–30 seconds, which DVLS issues only from its test-only lifetime in its unsafe test mode.
+The certificate lifetime setting is at least 15 minutes ([Agent Identity V1 contract] §4), so set that test-only lifetime for this test rather than lowering the setting.
 `a_renewal_happy_path`, `a_request_renewal_connected`, `a_request_renewal_while_offline`, `a_multi_authority` and `a_rotation_migrates_connected_agent` need leaves that outlast a test: at least 135 seconds, 3/2 of a test's 90-second timeout, so that the agent's schedule, which renews a leaf two thirds into its lifetime, renews none of their certificates and none expires before the test ends.
 An authority that backdates `notBefore`, or whose clock runs behind the runner's, needs longer leaves.
 On an authority with shorter leaves these tests report `SKIP`; the mock's default 90-day leaves meet the need.
@@ -76,7 +77,7 @@ $env:C_APP_SECRET = '<app-secret>'
 
 A spec is comma-separated `<key>=<value>` items, and values cannot contain commas.
 Its keys are the names, without `--`, of the flags above and of `--base-url`, `--app-key`, `--authority-id` and `--extra-trusted-root`, with the same values, plus the required `app-secret-env`, which names the environment variable that holds the application secret, to keep it off the command line.
-Each test runs on the first authority, in the order of their flags, that offers what the test needs: the agent channel or none, a disposable target, leaves of at most 30 seconds, leaves that outlast a test, leaves of the certificate lifetime setting rather than a test lifetime, or a config change.
+Each test runs on the first authority, in the order of their flags, that offers what the test needs: the agent channel or none, a disposable target, leaves of at most 30 seconds (DVLS issues them only from its test-only lifetime), leaves that outlast a test, leaves of the certificate lifetime setting rather than a test lifetime, or a config change.
 The runner reads the settings of each disposable DVLS target at the start, and counts its leaves as following the setting when its leaf lifetime equals the setting in seconds.
 DVLS's management API changes a config only by switching the agent channel off and on, so a config change needs a disposable target that offers the channel.
 A test that needs two authorities also takes the next one that offers what it needs.
