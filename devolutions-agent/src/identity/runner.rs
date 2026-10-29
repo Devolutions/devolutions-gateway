@@ -272,7 +272,8 @@ impl Runner {
             self.renewal_at(&identity, now)?
         };
         // UNTESTED: a successful `confirm` records `last_renewal`, and every new renewal, scheduled or requested, starts
-        // through `renewal_start`; `renewal_start` is tested, this wiring isn't.
+        // through `renewal_start`; `renewal_start` is tested, and the conformance suite checks the wait only for a
+        // renewal requested on the channel, not for a scheduled one.
         // When changing it, keep both on this path, so that the minimum interval holds for every renewal.
         let renewal_at = renewal_start(&self.shared.settings, due, self.last_renewal);
         let renewal_wake = later(renewal_at, self.renewal_retry.next_attempt);
