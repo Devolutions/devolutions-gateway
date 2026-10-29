@@ -320,6 +320,7 @@ async fn run_pending_enrollments(
         // accept, or an authority directory or `identity.json` that fails its check, stops all identity processing;
         // start-up reports it and waits until it is fixed.
         // The poll runs the checks a state change runs before it writes, so that it notices either without one.
+        // Like start-up, this also resets wrong permissions on the identity directories.
         // Any other error only kept the checks from running, so the poll retries them rather than stop every runner and
         // its streams.
         // UNTESTED: both outcomes are logged with the error, because stopping every identity is otherwise unexplained
@@ -761,7 +762,9 @@ mod tests {
 
     #[rstest::rstest]
     #[case::identity("identity")]
+    #[case::keys("identity/keys")]
     #[case::rejected("identity/rejected")]
+    #[case::pending("identity/pending")]
     #[tokio::test]
     async fn an_identity_directory_given_to_another_account_after_start_up_stops_identity_processing(
         #[case] name: &str,
