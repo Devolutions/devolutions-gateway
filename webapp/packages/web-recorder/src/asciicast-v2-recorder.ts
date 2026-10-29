@@ -1,3 +1,5 @@
+import { RECORDING_ENDED_CLOSE_CODE } from './close-codes';
+
 /** 'o' = terminal output, 'i' = keyboard input, 'r' = terminal resize */
 export type AsciiCastV2EventCode = 'o' | 'i' | 'r';
 
@@ -124,10 +126,10 @@ export class AsciiCastV2Recorder {
   }
 
   public stop(): void {
-    this.internalStop();
+    this.internalStop(RECORDING_ENDED_CLOSE_CODE);
   }
 
-  private internalStop(): void {
+  private internalStop(closeCode?: number): void {
     this.outputGeneration++;
     if (this.unsubscribeOutput) {
       this.unsubscribeOutput();
@@ -139,7 +141,7 @@ export class AsciiCastV2Recorder {
     // Null websocket before close() so the onClose callback ignores the event.
     const ws = this.websocket;
     this.websocket = null;
-    ws?.close();
+    ws?.close(closeCode);
   }
 
   private onEvent(eventCode: AsciiCastV2EventCode, data: string) {
@@ -195,13 +197,13 @@ class QueuedWebSocket {
     }
   }
 
-  public close() {
+  public close(code?: number) {
     this.ready = false;
     this.queue = [];
 
     // Only close if not already closing or closed
     if (this.ws.readyState !== WebSocket.CLOSING && this.ws.readyState !== WebSocket.CLOSED) {
-      this.ws.close();
+      this.ws.close(code);
     }
   }
 }
