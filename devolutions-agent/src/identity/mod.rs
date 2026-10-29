@@ -762,6 +762,7 @@ mod tests {
 
     #[rstest::rstest]
     #[case::identity("identity")]
+    #[case::authorities("identity/authorities")]
     #[case::keys("identity/keys")]
     #[case::rejected("identity/rejected")]
     #[case::pending("identity/pending")]
@@ -843,10 +844,22 @@ mod tests {
         }
         #[cfg(windows)]
         {
-            let output = std::process::Command::new("whoami").output()?;
+            // The SID, because icacls cannot map the name of an Entra ID or Microsoft account.
+            // `whoami /user /fo csv /nh` prints `"<name>","<SID>"`; the name may not be UTF-8 in the console code page.
+            let output = std::process::Command::new("whoami")
+                .args(["/user", "/fo", "csv", "/nh"])
+                .output()?;
             anyhow::ensure!(output.status.success(), "whoami failed");
-            let user = String::from_utf8(output.stdout)?.trim().to_owned();
-            anyhow::ensure!(set_owner(path, &user)?, "cannot give {path} back to {user}");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let sid = stdout
+                .trim()
+                .rsplit(',')
+                .next()
+                .map(|field| field.trim_matches('"'))
+                .filter(|sid| sid.starts_with("S-1-"))
+                .with_context(|| format!("no SID in whoami output: {stdout}"))?;
+            let owner = format!("*{sid}");
+            anyhow::ensure!(set_owner(path, &owner)?, "cannot give {path} back to {owner}");
         }
         Ok(())
     }

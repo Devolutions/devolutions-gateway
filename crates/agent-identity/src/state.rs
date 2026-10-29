@@ -179,16 +179,19 @@ impl Store {
         private_file::check_stored_identities(&self.data_dir, self.acl_grant_current_user).map(drop)
     }
 
-    /// Runs what every state change runs before it writes, then releases the state lock: provisioning the identity
-    /// directories, which refuses one whose owner the agent does not accept with a [`ForeignIdentityDirectory`], then
-    /// [`Store::check_stored_identities`].
+    /// Runs the checks every state change runs before it writes, without taking the state lock: provisioning the
+    /// identity directories, which refuses one whose owner the agent does not accept with a
+    /// [`ForeignIdentityDirectory`], then [`Store::check_stored_identities`].
     ///
     /// [`crates/agent-identity/INTENT.md`] ("Local state"): either refusal stops all identity processing until it is
     /// fixed, so a running agent with no state change to make still notices one.
+    /// The lock is left out because there is nothing to write, and waiting on it would hold this check behind a state
+    /// change in progress or, on Windows, behind any outside handle on the identity directory.
     ///
     /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
     pub fn check_state(&self) -> anyhow::Result<()> {
-        self.lock().map(drop)
+        private_file::provision_directories(&self.data_dir, self.acl_grant_current_user)?;
+        self.check_stored_identities()
     }
 
     /// Takes the state lock once every stored identity passes [`Store::check_stored_identities`].
