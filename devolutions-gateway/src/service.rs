@@ -352,13 +352,17 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     let secrets = devolutions_gateway::secret_store::SecretStore::default();
 
-    let provisioner_tasks = devolutions_gateway::provisioner_tasks::task_runner(
+    let in_memory_job_dependencies = devolutions_gateway::job_queue::InMemoryJobDependencies {
+        conf_handle: conf_handle.clone(),
+        recordings: recording_manager_handle.clone(),
+        secrets: secrets.clone(),
         task_store,
-        Arc::new(job_queue_ctx.durable()),
-        conf_handle.clone(),
-        recording_manager_handle.clone(),
-        secrets.clone(),
-    );
+        job_queue: job_queue_ctx.durable(),
+    };
+    let provisioner_tasks = devolutions_gateway::provisioner_tasks::task_manager(&in_memory_job_dependencies);
+    job_queue_ctx
+        .job_queue_handle
+        .set_in_memory_job_dependencies(in_memory_job_dependencies)?;
 
     // Before the job runner starts, so no job queued earlier runs an attempt meanwhile.
     // Unfinished Tasks still fail at their deadline, so this must not keep the other features from starting.
@@ -383,8 +387,6 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
-        provisioner_tasks: provisioner_tasks.clone(),
-        secrets: secrets.clone(),
     };
 
     for listener in &conf.listeners {
@@ -451,10 +453,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         job_queue_ctx.job_queue_handle.clone(),
     ));
 
-    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(
-        &job_queue_ctx,
-        provisioner_tasks,
-    ));
+    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(&job_queue_ctx));
     tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
 
     tasks.register(traffic_audit_task);

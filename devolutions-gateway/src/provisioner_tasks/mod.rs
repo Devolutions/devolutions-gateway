@@ -1,29 +1,27 @@
-//! Work the provisioner asks Gateway to do: each request is a Task recorded in `gateway.db`, run as a job on the job
-//! queue by the [`runner::ProvisionerTaskRunner`].
+//! Work the provisioner asks Gateway to do: each request is a Task recorded in `gateway.db`, queued as a job on the job
+//! queue by the [`runner::ProvisionerTaskManager`].
 
 pub mod ai;
 pub mod recording_ai_analysis;
 pub mod runner;
 
-use provisioner_task::DynProvisionerTaskStore;
+use std::sync::Arc;
 
 use self::recording_ai_analysis::RecordingAiAnalysis;
-use self::runner::{DynProvisionerTaskJobQueue, ProvisionerTaskRunner};
-use crate::config::ConfHandle;
-use crate::recording::RecordingMessageSender;
-use crate::secret_store::SecretStore;
+use self::runner::ProvisionerTaskManager;
+use crate::job_queue::InMemoryJobDependencies;
 
-/// The provisioner task runner, with every provisioner task Gateway knows.
-pub fn task_runner(
-    store: DynProvisionerTaskStore,
-    job_queue: DynProvisionerTaskJobQueue,
-    conf_handle: ConfHandle,
-    recordings: RecordingMessageSender,
-    secrets: SecretStore,
-) -> ProvisionerTaskRunner {
-    ProvisionerTaskRunner::builder(store, job_queue)
-        .register(RecordingAiAnalysis::new(conf_handle, recordings, secrets))
-        .build()
+/// The manager of the AI analysis Tasks.
+pub fn task_manager(dependencies: &InMemoryJobDependencies) -> ProvisionerTaskManager<RecordingAiAnalysis> {
+    ProvisionerTaskManager::new(
+        RecordingAiAnalysis::new(
+            dependencies.conf_handle.clone(),
+            dependencies.recordings.clone(),
+            dependencies.secrets.clone(),
+        ),
+        Arc::clone(&dependencies.task_store),
+        dependencies.job_queue.clone(),
+    )
 }
 
 /// Why one attempt of a Task failed, with `F` and `R` the failures of its own kind of work.
@@ -65,23 +63,4 @@ pub enum Permanent<F, R> {
     /// A failure of the Task's own kind of work, which names its own `kind`.
     #[serde(untagged)]
     Kind(F),
-}
-
-impl<F, R> Permanent<F, R> {
-    /// The same failure, with the failures of its kind converted by `kind` and `last`.
-    pub fn try_map<G, S, E>(
-        self,
-        kind: impl FnOnce(F) -> Result<G, E>,
-        last: impl FnOnce(R) -> Result<S, E>,
-    ) -> Result<Permanent<G, S>, E> {
-        Ok(match self {
-            Self::InvalidTask => Permanent::InvalidTask,
-            Self::Panicked => Permanent::Panicked,
-            Self::Internal => Permanent::Internal,
-            Self::AttemptsExhausted { last: failure } => Permanent::AttemptsExhausted { last: last(failure)? },
-            Self::DeadlinePassed => Permanent::DeadlinePassed,
-            Self::NotQueued => Permanent::NotQueued,
-            Self::Kind(failure) => Permanent::Kind(kind(failure)?),
-        })
-    }
 }

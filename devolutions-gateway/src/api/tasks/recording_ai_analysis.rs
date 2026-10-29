@@ -268,12 +268,11 @@ pub(crate) async fn start_ai_analysis(
     security(("scope_token" = ["gateway.tasks.recording-ai-analysis.read"])),
 ))]
 pub(crate) async fn get_ai_analysis(
-    State(DgwState { provisioner_tasks, .. }): State<DgwState>,
+    State(state): State<DgwState>,
     _scope: RecordingAiAnalysisReadScope,
     extract::Path(task_id): extract::Path<Uuid>,
 ) -> Result<Json<AiAnalysisTask>, HttpError> {
-    let task = provisioner_tasks
-        .get(task_id, OffsetDateTime::now_utc())
+    let task = analysis::get(&state, task_id, OffsetDateTime::now_utc())
         .await
         .map_err(HttpError::internal().with_msg("failed to read the AI analysis").err())?
         // A Task of another kind is not found under this path.
@@ -308,7 +307,7 @@ mod tests {
             "RecordingPath": dir.path().to_str().expect("UTF-8"),
             "__debug__": { "disable_token_validation": true },
         });
-        let (state, _handles) = DgwState::mock(&config.to_string()).await.expect("mock state");
+        let (state, _handles) = DgwState::mock(&config.to_string()).expect("mock state");
         let session_id = Uuid::new_v4();
         state.recordings.active_recordings.insert(session_id);
         let app = crate::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 3000))));

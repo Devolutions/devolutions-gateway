@@ -45,9 +45,6 @@ pub struct ProvisionerTaskRecord {
     pub created_at: OffsetDateTime,
     pub started_at: Option<OffsetDateTime>,
     pub finished_at: Option<OffsetDateTime>,
-    /// When what the Task left to do once finished, such as dropping what it kept while it ran, was done. `None` until
-    /// then, so Gateway still does it after a restart.
-    pub ended_at: Option<OffsetDateTime>,
     /// After this, an unfinished Task is failed, so a lost job can't block its target forever.
     ///
     /// It moves forward while the Task runs, each time an attempt starts or reports progress.
@@ -86,9 +83,6 @@ pub enum AttemptStart {
     Started(ProvisionerTaskRecord),
     /// The Task is finished, possibly just now because it is past its deadline.
     Finished(ProvisionerTaskRecord),
-    /// The attempt the job comes to start is not the next one: it already started, such as when the job runs again or
-    /// twice, so it must not run again.
-    AlreadyStarted(ProvisionerTaskRecord),
     /// Another job now runs the Task, so this one is stale or a duplicate.
     Superseded,
     /// No Task has this ID.
@@ -109,17 +103,15 @@ pub trait ProvisionerTaskStore: Send + Sync {
     /// Reads a Task, after failing it if it is past its deadline.
     async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTaskRecord>>;
 
-    /// Marks the start of attempt number `attempt`, counting from 1, by the job holding `job_token`: `running`, with one
-    /// more attempt counted and its deadline moved to `deadline_at`.
+    /// Marks the start of one more attempt by the job holding `job_token`: `running`, with one more attempt counted and
+    /// its deadline moved to `deadline_at`.
     ///
     /// Only [`AttemptStart::Started`] lets the attempt run. A job that no longer holds the token gets
-    /// [`AttemptStart::Superseded`], one whose attempt is not the next gets [`AttemptStart::AlreadyStarted`], and
-    /// nothing changes for either.
+    /// [`AttemptStart::Superseded`], and nothing changes.
     async fn start_attempt(
         &self,
         id: Uuid,
         job_token: Uuid,
-        attempt: u32,
         payload: serde_json::Value,
         deadline_at: OffsetDateTime,
         now: OffsetDateTime,
@@ -133,9 +125,6 @@ pub trait ProvisionerTaskStore: Send + Sync {
 
     /// Every unfinished Task, after failing those past their deadline.
     async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;
-
-    /// Every finished Task whose end is not recorded yet by [`ProvisionerTaskStore::mark_ended`].
-    async fn list_unended(&self) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;
 
     /// Replaces the payload of a `running` Task and moves its deadline to `deadline_at`, e.g. to report progress.
     /// Returns `false` if it is not running, such as when it was just failed for being past its deadline.
@@ -154,8 +143,4 @@ pub trait ProvisionerTaskStore: Send + Sync {
     /// Ends a `queued` or `running` Task as `failed`. Returns `false` if it was already finished, such as when it was
     /// just failed for being past its deadline.
     async fn fail(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
-
-    /// Records that what a finished Task left to do is done, so a restart no longer does it. Returns `false` if the
-    /// Task is unknown, unfinished or already ended.
-    async fn mark_ended(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<bool>;
 }

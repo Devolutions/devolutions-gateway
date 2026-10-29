@@ -11,8 +11,8 @@ use parking_lot::Mutex;
 use provisioner_task::{AttemptStart, NewProvisionerTaskRecord, ProvisionerTaskState};
 
 use super::*;
-use crate::job_queue::{JobMessage, JobQueueReceiver};
-use crate::provisioner_tasks::runner::{MAX_ATTEMPTS, ProvisionerTaskJob, ProvisionerTaskRunner};
+use crate::job_queue::{InMemoryJobDependencies, StoredJob, TestJobQueue};
+use crate::provisioner_tasks::runner::{MAX_ATTEMPTS, ProvisionerTaskManager, TaskJob};
 use crate::recording::RecordingManagerTask;
 use crate::{DgwState, MockHandles};
 
@@ -41,7 +41,9 @@ fn openai(model: &str) -> AiSettings {
 
 struct Harness {
     state: DgwState,
-    job_queue_rx: JobQueueReceiver,
+    tasks: ProvisionerTaskManager<RecordingAiAnalysis>,
+    secrets: SecretStore,
+    job_queue: Arc<TestJobQueue>,
     recording_path: Utf8PathBuf,
     _keep: Box<dyn Send>,
     _dir: tempfile::TempDir,
@@ -52,7 +54,7 @@ impl Harness {
         let dir = tempfile::tempdir().expect("temp dir");
         let recording_path = Utf8PathBuf::from_path_buf(dir.path().join("recordings")).expect("UTF-8");
 
-        let (state, handles) = DgwState::mock(&config(&recording_path)).await.expect("mock state");
+        let (state, handles) = DgwState::mock(&config(&recording_path)).expect("mock state");
         let MockHandles {
             session_manager_rx,
             recording_manager_rx,
@@ -74,12 +76,39 @@ impl Harness {
             recording_shutdown_signal,
         ));
 
+        let task_store = gateway_db::GatewayDb::open_path(":memory:")
+            .await
+            .expect("open the gateway database")
+            .connect()
+            .await
+            .expect("connect to the gateway database");
+        let task_store = provisioner_task_libsql::LibSqlProvisionerTaskStore::open(task_store)
+            .await
+            .expect("open the task store");
+        let secrets = SecretStore::default();
+        let job_queue = TestJobQueue::new().await;
+        let dependencies = InMemoryJobDependencies {
+            conf_handle: state.conf_handle.clone(),
+            recordings: state.recordings.clone(),
+            secrets: secrets.clone(),
+            task_store: Arc::new(task_store),
+            job_queue: job_queue.durable(),
+        };
+        let tasks = crate::provisioner_tasks::task_manager(&dependencies);
+        state
+            .job_queue_handle
+            .set_in_memory_job_dependencies(dependencies)
+            .expect("set the job dependencies");
+
         Self {
             state,
-            job_queue_rx,
+            tasks,
+            secrets,
+            job_queue,
             recording_path,
             _keep: Box::new((
                 session_manager_rx,
+                job_queue_rx,
                 subscriber_rx,
                 traffic_audit_rx,
                 shutdown_handle,
@@ -122,30 +151,26 @@ impl Harness {
         task_id
     }
 
-    /// The job holding the current token of the Task, for its next attempt, as the job queue would run it.
-    async fn job(&self, task_id: Uuid) -> ProvisionerTaskJob {
+    /// The job holding the current token of the Task, as the job queue would run it.
+    async fn job(&self, task_id: Uuid) -> TaskJob<RecordingAiAnalysis> {
         // Read as of long ago, so reading never fails the Task in place of the job.
         let record = self
-            .state
-            .provisioner_tasks
+            .tasks
             .store()
             .get(task_id, OffsetDateTime::UNIX_EPOCH)
             .await
             .expect("read task")
             .expect("task exists");
-        let json = json!({
-            "taskId": task_id,
-            "jobToken": record.job_token,
-            "step": { "attempt": record.attempts + 1 },
-        })
-        .to_string();
+        let json = json!({ "taskId": task_id, "jobToken": record.job_token }).to_string();
 
-        ProvisionerTaskJob::read_json(&json, self.state.provisioner_tasks.clone()).expect("valid job")
+        TaskJob::<RecordingAiAnalysis>::read_json(&json)
+            .expect("valid job")
+            .into_job(self.tasks.clone())
     }
 
     /// Records the success of the first attempt of the Task without ending it, as if Gateway stopped right after.
     async fn record_success(&self, task_id: Uuid) {
-        let store = self.state.provisioner_tasks.store();
+        let store = self.tasks.store();
         let now = OffsetDateTime::now_utc();
         let job_token = store
             .get(task_id, now)
@@ -155,7 +180,7 @@ impl Harness {
             .job_token;
 
         let started = store
-            .start_attempt(task_id, job_token, 1, json!({}), now + time::Duration::hours(1), now)
+            .start_attempt(task_id, job_token, json!({}), now + time::Duration::hours(1), now)
             .await
             .expect("start the attempt");
         assert!(matches!(started, AttemptStart::Started(_)), "{started:?}");
@@ -172,8 +197,8 @@ impl Harness {
     }
 
     /// Takes every queued job.
-    fn queued_jobs(&mut self) -> Vec<JobMessage> {
-        std::iter::from_fn(|| self.job_queue_rx.try_recv().ok()).collect()
+    fn queued_jobs(&mut self) -> Vec<StoredJob> {
+        std::iter::from_fn(|| self.job_queue.take()).collect()
     }
 
     /// Records a Task directly, as if it was created at `created_at`.
@@ -185,8 +210,7 @@ impl Harness {
         created_at: OffsetDateTime,
         deadline_at: OffsetDateTime,
     ) {
-        self.state
-            .provisioner_tasks
+        self.tasks
             .store()
             .create(
                 NewProvisionerTaskRecord {
@@ -204,8 +228,7 @@ impl Harness {
     }
 
     async fn task(&self, task_id: Uuid) -> ProvisionerTaskRecord {
-        self.state
-            .provisioner_tasks
+        self.tasks
             .get(task_id, OffsetDateTime::now_utc())
             .await
             .expect("read task")
@@ -217,15 +240,10 @@ impl Harness {
         let mut task = RecordingAiAnalysis::new(
             self.state.conf_handle.clone(),
             self.state.recordings.clone(),
-            self.state.secrets.clone(),
+            self.secrets.clone(),
         );
         task.progress_timeout = progress_timeout;
-        self.state.provisioner_tasks = ProvisionerTaskRunner::builder(
-            Arc::clone(self.state.provisioner_tasks.store()),
-            Arc::new(self.state.job_queue_handle.clone()),
-        )
-        .register(task)
-        .build();
+        self.tasks = ProvisionerTaskManager::new(task, Arc::clone(self.tasks.store()), self.job_queue.durable());
     }
 
     /// Working files of the AI analyses of session_id.
@@ -234,8 +252,7 @@ impl Harness {
     }
 
     fn access(&self, task_id: Uuid) -> Option<AiAccess> {
-        self.state
-            .secrets
+        self.secrets
             .get(SecretId(task_id))
             .expect("read the secret")
             .map(|secret| AiAccess::from_secret(&secret).expect("AI access"))
@@ -251,8 +268,7 @@ impl Harness {
             api_key: SecretString::from(API_KEY),
             base_url,
         };
-        self.state
-            .secrets
+        self.secrets
             .insert(SecretId(task_id), &access.to_secret().expect("secret"), expires_at)
             .expect("insert the secret");
     }
@@ -365,7 +381,7 @@ fn first_line(path: &Utf8Path) -> String {
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Secrets
 #[tokio::test]
 async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let task_id = Uuid::new_v4();
     let session_id = harness.write_session();
     let mut settings = openai("gpt-test");
@@ -389,14 +405,15 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
     let access = harness.access(task_id).expect("key is kept");
     assert_eq!(access.base_url.expect("base URL").as_str(), "https://ai.example/v1/");
 
-    let JobMessage { job, schedule_for } = harness.job_queue_rx.try_recv().expect("job queued");
-    assert_eq!(job.name(), ProvisionerTaskJob::NAME);
+    let StoredJob {
+        name,
+        json,
+        schedule_for,
+    } = harness.job_queue.take().expect("job queued");
+    assert_eq!(name, KIND);
     assert_eq!(
-        job.write_json().expect("job JSON"),
-        format!(
-            r#"{{"taskId":"{task_id}","jobToken":"{}","step":{{"attempt":1}}}}"#,
-            task.job_token
-        )
+        json,
+        format!(r#"{{"taskId":"{task_id}","jobToken":"{}"}}"#, task.job_token)
     );
     assert!(schedule_for.is_none());
 }
@@ -404,14 +421,14 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
 // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn asking_again_creates_nothing_new() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let task_id = Uuid::new_v4();
     let session_id = harness.write_session();
     harness
         .start(task_id, session_id, openai("gpt-test"))
         .await
         .expect("started");
-    harness.job_queue_rx.try_recv().expect("first job");
+    harness.job_queue.take().expect("first job");
 
     let same = harness
         .start(task_id, session_id, openai("gpt-test"))
@@ -439,21 +456,21 @@ async fn asking_again_creates_nothing_new() {
         }
     );
 
-    assert!(harness.job_queue_rx.try_recv().is_err(), "no other job is queued");
+    assert!(harness.job_queue.take().is_none(), "no other job is queued");
     assert!(harness.has_key(task_id), "the first key stays");
 }
 
 // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
 #[tokio::test]
 async fn asking_again_returns_the_task_even_while_the_session_records_again() {
-    let mut harness = Harness::new().await;
+    let harness = Harness::new().await;
     let task_id = Uuid::new_v4();
     let session_id = harness.write_session();
     harness
         .start(task_id, session_id, openai("gpt-test"))
         .await
         .expect("started");
-    harness.job_queue_rx.try_recv().expect("first job");
+    harness.job_queue.take().expect("first job");
     harness.state.recordings.active_recordings.insert(session_id);
 
     let same = harness
@@ -486,8 +503,7 @@ async fn refuses_a_session_without_recording() {
     assert!(matches!(error, StartError::RecordingNotFound), "{error:?}");
     assert!(
         harness
-            .state
-            .provisioner_tasks
+            .tasks
             .get(task_id, OffsetDateTime::now_utc())
             .await
             .expect("read")
@@ -512,8 +528,7 @@ async fn refuses_a_session_that_is_still_recording() {
     assert!(matches!(error, StartError::RecordingActive), "{error:?}");
     assert!(
         harness
-            .state
-            .provisioner_tasks
+            .tasks
             .get(task_id, OffsetDateTime::now_utc())
             .await
             .expect("read")
@@ -558,16 +573,17 @@ async fn retry_resumes_at_the_first_chunk_without_a_checkpoint() {
     let session_id = harness.write_long_session(10_000);
     let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
     let task_id = harness.start_created(session_id, settings).await;
+    // The job of the creation, so only a job queued by the retry is left to find.
+    harness.queued_jobs();
     let workspace = harness.workspace(session_id);
 
     harness
         .run(task_id)
         .await
-        .expect("the job queues the next attempt itself");
-    // oracle: mutant a recoverable failure is retried at once, without the delay a busy provider asks for
+        .expect_err("the job queue runs the job again");
     assert!(
-        harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
-        "a provider outage is retried"
+        harness.queued_jobs().is_empty(),
+        "the job queue runs the same job again"
     );
 
     let task = harness.task(task_id).await;
@@ -711,16 +727,17 @@ async fn transient_errors_fail_the_task_once_attempts_are_exhausted() {
     let session_id = harness.write_long_session(10);
     let (settings, requests) = spawn_ai_provider(|_| 503).await;
     let task_id = harness.start_created(session_id, settings).await;
+    // The job of the creation, so only a job queued by a retry is left to find.
+    harness.queued_jobs();
 
     for attempt in 1..MAX_ATTEMPTS {
         harness
             .run(task_id)
             .await
-            .expect("the job queues the next attempt itself");
-        // oracle: mutant a recoverable failure is retried at once, without the delay a busy provider asks for
+            .expect_err("the job queue runs the job again");
         assert!(
-            harness.queued_jobs().iter().any(|job| job.schedule_for.is_some()),
-            "attempt {attempt} is retried"
+            harness.queued_jobs().is_empty(),
+            "the job queue runs the same job again after attempt {attempt}"
         );
         assert_eq!(harness.task(task_id).await.state, ProvisionerTaskState::Running);
     }
@@ -792,7 +809,7 @@ async fn lost_key_fails_the_task() {
     std::fs::create_dir_all(harness.workspace(session_id)).expect("workspace");
 
     // A restart keeps `gateway.db` and the job queue, but not the keys held in memory.
-    harness.state.secrets.remove(SecretId(task_id));
+    harness.secrets.remove(SecretId(task_id));
 
     harness.run(task_id).await.expect("no retry");
 
@@ -933,7 +950,7 @@ async fn a_new_task_that_fails_keeps_the_earlier_analysis() {
     harness.run(first).await.expect("first analysis");
 
     let second = harness.start_created(session_id, settings).await;
-    harness.state.secrets.remove(SecretId(second));
+    harness.secrets.remove(SecretId(second));
     harness.run(second).await.expect("no retry");
 
     let task = harness.task(second).await;
@@ -955,13 +972,13 @@ async fn a_restart_fails_an_unfinished_analysis_at_once_and_ends_it() {
     harness
         .run(task_id)
         .await
-        .expect("the job queues the next attempt itself");
+        .expect_err("the job queue runs the job again");
     // As if Gateway stopped after an attempt wrote its log, before its success was recorded.
     let dir = harness.recording_path.join(session_id.to_string());
     let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
     std::fs::write(&log, "an analysis whose success was never recorded").expect("unlisted log");
 
-    harness.state.provisioner_tasks.resume().await.expect("resume");
+    harness.tasks.resume().await.expect("resume");
 
     let task = harness.task(task_id).await;
     // oracle: mutant an AI analysis that cannot run after a restart stays unfinished until its next attempt
@@ -1010,8 +1027,7 @@ async fn a_task_that_fails_removes_its_unlisted_log() {
     let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
     std::fs::write(&log, "an analysis whose success was never recorded").expect("unlisted log");
     harness
-        .state
-        .provisioner_tasks
+        .tasks
         .store()
         .fail(task_id, json!({}), OffsetDateTime::now_utc())
         .await
@@ -1029,7 +1045,6 @@ async fn a_success_cut_short_before_the_log_is_listed_is_finished_at_startup() {
     let mut harness = Harness::new().await;
     let session_id = harness.write_session();
     let task_id = harness.start_created(session_id, openai("gpt-test")).await;
-    harness.queued_jobs();
 
     // As if Gateway stopped right after recording the success, before the manifest listed the log.
     let dir = harness.recording_path.join(session_id.to_string());
@@ -1037,8 +1052,12 @@ async fn a_success_cut_short_before_the_log_is_listed_is_finished_at_startup() {
     std::fs::write(&log, "an analysis whose log was never listed").expect("unlisted log");
     harness.record_success(task_id).await;
 
-    harness.state.provisioner_tasks.resume().await.expect("resume");
-    for JobMessage { mut job, .. } in harness.queued_jobs() {
+    harness.tasks.resume().await.expect("resume");
+    // The job of its creation never returned, so it stays stored and runs again when Gateway starts.
+    for StoredJob { json, .. } in harness.queued_jobs() {
+        let mut job = TaskJob::<RecordingAiAnalysis>::read_json(&json)
+            .expect("valid job")
+            .into_job(harness.tasks.clone());
         job.run().await.expect("the job ends the Task");
     }
 
@@ -1099,7 +1118,7 @@ async fn a_new_task_that_fails_keeps_an_earlier_success_whose_log_was_not_listed
     std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
 
     let second = harness.start_created(session_id, settings).await;
-    harness.state.secrets.remove(SecretId(second));
+    harness.secrets.remove(SecretId(second));
     harness.run(second).await.expect("no retry");
     assert_eq!(harness.task(second).await.state, ProvisionerTaskState::Failed);
 
@@ -1199,14 +1218,10 @@ async fn a_new_task_never_resumes_from_an_earlier_task() {
     let session_id = harness.write_long_session(10_000);
     let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;
     let first = harness.start_created(session_id, settings.clone()).await;
-    harness
-        .run(first)
-        .await
-        .expect("the job queues the next attempt itself");
+    harness.run(first).await.expect_err("the job queue runs the job again");
     assert!(harness.workspace(session_id).join("chunk-0000.json").exists());
     harness
-        .state
-        .provisioner_tasks
+        .tasks
         .store()
         .fail(first, json!({}), OffsetDateTime::now_utc())
         .await
@@ -1248,7 +1263,7 @@ async fn an_ended_task_leaves_the_working_files_of_another_task() {
     let task = RecordingAiAnalysis::new(
         harness.state.conf_handle.clone(),
         harness.state.recordings.clone(),
-        harness.state.secrets.clone(),
+        harness.secrets.clone(),
     );
 
     task.on_end(&record).await.expect("end");

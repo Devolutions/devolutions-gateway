@@ -2,12 +2,12 @@
 //! the session as its log, in place of the earlier one.
 //!
 //! [`start`] checks the request and records the Task through the
-//! [`ProvisionerTaskRunner`](super::runner::ProvisionerTaskRunner).
+//! [`ProvisionerTaskManager`](super::runner::ProvisionerTaskManager).
 //! Each attempt runs the analysis of the AI crate,
 //! [`AiClient::analyze_recording`](devolutions_gateway_ai::AiClient::analyze_recording), which keeps its working files
 //! next to the session manifest so that a retry resumes where the last attempt stopped, then leaves the log in the
 //! session folder, unlisted, under a name of its own Task.
-//! Once the runner records the success, the end of the Task lists that log in the manifest in place of the earlier one;
+//! Once the job records the success, the end of the Task lists that log in the manifest in place of the earlier one;
 //! a Task that fails removes it instead.
 //! The API key and the working files go away when the Task ends.
 
@@ -34,10 +34,11 @@ use uuid::Uuid;
 pub use self::failure::{AnalysisError, BadAnswer, Failure, Recoverable};
 use super::Permanent;
 use super::ai::{AiAccess, AiProvider, AiSettings, AiSettingsError, ClientError};
-use super::runner::{AnyPermanent, Attempt, ProvisionerTask};
+use super::runner::{Attempt, ProvisionerTask, TaskJobUnhydrated};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
+use crate::job_queue::{InMemoryJobDependencies, UnhydratedJob};
 use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender};
 use crate::secret_store::{SecretId, SecretStore};
 
@@ -158,7 +159,7 @@ pub struct Analysis {
     prompt_version: String,
 }
 
-/// Records an AI analysis Task, whose job the [`ProvisionerTaskRunner`](super::runner::ProvisionerTaskRunner) queues.
+/// Records an AI analysis Task, whose job the [`ProvisionerTaskManager`](super::runner::ProvisionerTaskManager) queues.
 ///
 /// Only a new Task keeps the API key; asking again for a known Task changes nothing, even while its session is
 /// recording again.
@@ -193,15 +194,18 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         language,
     };
     let target = session_id.to_string();
+    let tasks = state
+        .job_queue_handle
+        .in_memory_job_dependencies()
+        .map(super::task_manager);
 
     // A repeated request gets its Task back whatever its session does now, so the ID is looked up first.
-    let known = state
-        .provisioner_tasks
-        .get(task_id, OffsetDateTime::now_utc())
-        .await
-        .map_err(StartError::Internal)?;
-
-    if let Some(record) = known {
+    if let Some(tasks) = &tasks
+        && let Some(record) = tasks
+            .get(task_id, OffsetDateTime::now_utc())
+            .await
+            .map_err(StartError::Internal)?
+    {
         let params = serde_json::to_value(&params)
             .context("serialize the AI analysis parameters")
             .map_err(StartError::Internal)?;
@@ -217,6 +221,8 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         return Err(StartError::RecordingActive);
     }
 
+    let tasks = tasks.ok_or_else(|| StartError::Internal(anyhow::anyhow!("AI analysis is not set up")))?;
+
     match state.recordings.get_finished(session_id).await {
         Ok(_) => {}
         Err(FinishedRecordingError::Recording) => return Err(StartError::RecordingActive),
@@ -231,11 +237,11 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         base_url: settings.base_url,
     };
 
-    let outcome = state
-        .provisioner_tasks
-        .create::<RecordingAiAnalysis>(task_id, target, &params, |record| {
+    let outcome = tasks
+        .create(task_id, target, &params, |record| {
             // The job may run as soon as it is queued, so the key must be in place first.
-            state
+            tasks
+                .task()
                 .secrets
                 .insert(SecretId(record.id), &access.to_secret()?, record.deadline_at)
         })
@@ -253,6 +259,27 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
             active_task_id: active.id,
         },
     })
+}
+
+/// Returns the Task with this ID, of any kind; one past its deadline is failed first.
+pub async fn get(
+    state: &DgwState,
+    task_id: Uuid,
+    now: OffsetDateTime,
+) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
+    state
+        .job_queue_handle
+        .in_memory_job_dependencies()
+        .map(super::task_manager)
+        .context("the in-memory job dependencies are not set")?
+        .get(task_id, now)
+        .await
+}
+
+impl UnhydratedJob for TaskJobUnhydrated<RecordingAiAnalysis> {
+    fn hydrate(self, dependencies: &InMemoryJobDependencies) -> job_queue::DynJob {
+        Box::new(self.into_job(super::task_manager(dependencies)))
+    }
 }
 
 /// The `recording-ai-analysis` provisioner task.
@@ -359,7 +386,7 @@ impl ProvisionerTask for RecordingAiAnalysis {
         })
     }
 
-    fn failed_payload(&self, error: &AnyPermanent, last: &serde_json::Value) -> serde_json::Value {
+    fn failed_payload(&self, error: &Permanent<Failure, Recoverable>, last: &serde_json::Value) -> serde_json::Value {
         json!({ "error": error, "usage": TokenUsage::of(last) })
     }
 
@@ -541,7 +568,7 @@ impl RecordingAiAnalysis {
             }
         };
 
-        // The log stays out of the manifest until the runner records the success, so a Task that fails never replaces
+        // The log stays out of the manifest until the job records the success, so a Task that fails never replaces
         // the earlier analysis.
         let log_path = unlisted_log_path(&manifest_path, attempt.task_id);
         tokio::fs::rename(&analysis.log_path, &log_path)

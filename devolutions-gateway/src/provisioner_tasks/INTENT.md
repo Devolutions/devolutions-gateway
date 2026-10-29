@@ -5,11 +5,11 @@ Provisioner tasks are tasks issued for Gateway to execute. Tasks's state are pes
 # Invariants
 
 ## Management
-`ProvisionerTaskRunner` MUST be the only place touches both the Task records and the job queue. It is also the only place that manages how tasks are executed in relation to the job queue.
+`ProvisionerTaskManager` MUST be the only place touches both the Task records and the job queue. It is also the only place that manages how tasks are executed in relation to the job queue.
 
-A provisioner task only defines it's work: what one attempt does, and what to drop once its task ends. The coordination belongs to the `ProvisionerTaskRunner`.
+A provisioner task only defines it's work: what one attempt does, and what to drop once its task ends. The coordination belongs to the `ProvisionerTaskManager`.
 
-The task record is the source of truth; the `ProvisionerTaskJob` only wakes it up and holds no state.
+The task record is the source of truth; the `TaskJob` only wakes it up and holds no state.
 
 One task at the same time only has one job to execute task.
 
