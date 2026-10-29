@@ -58,15 +58,15 @@ fn unsigned_jws(payload: serde_json::Value) -> anyhow::Result<String> {
     Ok(format!("{header}.{payload}.{signature}"))
 }
 
-fn make_router() -> anyhow::Result<(Router, DgwState, MockHandles)> {
-    let (state, handles) = DgwState::mock(CONFIG)?;
+async fn make_router() -> anyhow::Result<(Router, DgwState, MockHandles)> {
+    let (state, handles) = DgwState::mock(CONFIG).await?;
     let app = devolutions_gateway::make_http_service(state.clone())
         .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
     Ok((app, state, handles))
 }
 
-fn make_router_with_config(config: &str) -> anyhow::Result<(Router, DgwState, MockHandles)> {
-    let (state, handles) = DgwState::mock(config)?;
+async fn make_router_with_config(config: &str) -> anyhow::Result<(Router, DgwState, MockHandles)> {
+    let (state, handles) = DgwState::mock(config).await?;
     let app = devolutions_gateway::make_http_service(state.clone())
         .layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
     Ok((app, state, handles))
@@ -83,7 +83,7 @@ fn init_logger() -> tracing::subscriber::DefaultGuard {
 async fn test_provision_credentials_success() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, _state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router().await?;
 
     let jti = Uuid::new_v4();
     let token = unsigned_jws(json!({
@@ -124,7 +124,7 @@ async fn test_provision_credentials_success_when_unstable_disabled() -> anyhow::
     // `provision-credentials` is protocol-neutral: NTLM credential injection relies on this
     // path even when the unstable feature flag is off.
     let config = CONFIG.replace("\"enable_unstable\": true", "\"enable_unstable\": false");
-    let (app, _state, _handles) = make_router_with_config(&config)?;
+    let (app, _state, _handles) = make_router_with_config(&config).await?;
 
     let jti = Uuid::new_v4();
     let token = unsigned_jws(json!({
@@ -161,7 +161,7 @@ async fn test_provision_credentials_success_when_unstable_disabled() -> anyhow::
 async fn test_provision_credentials_rejects_alternate_targets() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, _state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router().await?;
 
     let token = unsigned_jws(json!({
         "jti": "5e3e833f-84c7-4541-b676-acc3299e39b8",
@@ -205,7 +205,7 @@ async fn test_provision_credentials_rejects_alternate_targets() -> anyhow::Resul
 async fn test_provision_credentials_rejects_missing_target_hostname() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, _state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router().await?;
 
     let token = unsigned_jws(json!({
         "jti": "5e3e833f-84c7-4541-b676-acc3299e39b8"
@@ -247,7 +247,7 @@ async fn test_provision_credentials_rejects_missing_target_hostname() -> anyhow:
 async fn test_provision_token_overwrite_alert() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, _state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router().await?;
 
     // Same JTI twice: second provision-token replaces the stored token-only entry (master behavior).
     let token = unsigned_jws(json!({
@@ -288,7 +288,7 @@ async fn test_provision_token_overwrite_alert() -> anyhow::Result<()> {
 async fn test_provision_connection_options_success() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, _state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router().await?;
 
     let jti = Uuid::new_v4();
     let token = unsigned_jws(json!({
@@ -319,7 +319,7 @@ async fn test_provision_connection_options_success() -> anyhow::Result<()> {
 async fn test_provision_credentials_and_connection_options_fold() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, _state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router().await?;
 
     let jti = Uuid::new_v4();
     let token = unsigned_jws(json!({
@@ -361,7 +361,7 @@ async fn test_provision_credentials_and_connection_options_fold() -> anyhow::Res
 async fn test_provision_invalid_params() -> anyhow::Result<()> {
     let _guard = init_logger();
 
-    let (app, _state, _handles) = make_router()?;
+    let (app, _state, _handles) = make_router().await?;
 
     let token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiI1ZTNlODMzZi04NGM3LTQ1NDEtYjY3Ni1hY2MzMjk5ZTM5YjgifQ.1qECGlrW7y9HWFArc6GPHLGTOY7PhAvzKJ5XMRBg4k4";
 

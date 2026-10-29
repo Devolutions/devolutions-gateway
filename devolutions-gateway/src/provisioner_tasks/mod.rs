@@ -1,28 +1,9 @@
-//! Work the provisioner asks Gateway to do: each request is a Task recorded in `gateway.db`, queued as a job on the job
-//! queue by the [`runner::ProvisionerTaskManager`].
+//! Work the provisioner asks Gateway to do: each request is a Task recorded in `gateway.db`, run on the job queue as a
+//! [`runner::TaskJob`].
 
 pub mod ai;
 pub mod recording_ai_analysis;
 pub mod runner;
-
-use std::sync::Arc;
-
-use self::recording_ai_analysis::RecordingAiAnalysis;
-use self::runner::ProvisionerTaskManager;
-use crate::job_queue::InMemoryJobDependencies;
-
-/// The manager of the AI analysis Tasks.
-pub fn task_manager(dependencies: &InMemoryJobDependencies) -> ProvisionerTaskManager<RecordingAiAnalysis> {
-    ProvisionerTaskManager::new(
-        RecordingAiAnalysis::new(
-            dependencies.conf_handle.clone(),
-            dependencies.recordings.clone(),
-            dependencies.secrets.clone(),
-        ),
-        Arc::clone(&dependencies.task_store),
-        dependencies.job_queue.clone(),
-    )
-}
 
 /// Why one attempt of a Task failed, with `F` and `R` the failures of its own kind of work.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,14 +33,13 @@ pub enum Permanent<F, R> {
     InvalidTask,
     /// The attempt panicked.
     Panicked,
-    /// Something went wrong inside Gateway, such as a file it could not write.
+    /// Something went wrong inside Gateway, such as a file it could not write, or a restart that cut the last attempt
+    /// short.
     Internal,
     /// Every attempt failed with a recoverable failure, the last one being `last`.
     AttemptsExhausted { last: R },
     /// The Task did not start in time, or went too long without progress.
     DeadlinePassed,
-    /// The job of the Task could not be queued.
-    NotQueued,
     /// A failure of the Task's own kind of work, which names its own `kind`.
     #[serde(untagged)]
     Kind(F),

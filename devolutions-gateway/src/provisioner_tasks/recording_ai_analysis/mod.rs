@@ -1,8 +1,7 @@
 //! AI analysis (`recording-ai-analysis`): describes what the user did in one recorded session, and puts the result in
 //! the session as its log, in place of the earlier one.
 //!
-//! [`start`] checks the request and records the Task through the
-//! [`ProvisionerTaskManager`](super::runner::ProvisionerTaskManager).
+//! [`start`] checks the request and records the Task with [`create`](super::runner::create).
 //! Each attempt runs the analysis of the AI crate,
 //! [`AiClient::analyze_recording`](devolutions_gateway_ai::AiClient::analyze_recording), which keeps its working files
 //! next to the session manifest so that a retry resumes where the last attempt stopped, then leaves the log in the
@@ -49,6 +48,9 @@ pub const START_WINDOW: time::Duration = time::Duration::hours(2);
 
 /// Time a running AI analysis may go without progress before it fails.
 pub const PROGRESS_TIMEOUT: time::Duration = time::Duration::minutes(30);
+
+/// Time to wait after the first recoverable failure, doubled after each next one.
+pub const FIRST_RETRY_DELAY: time::Duration = time::Duration::seconds(30);
 
 /// Tokens the AI provider counted for a Task, over all its attempts, as kept in its payloads.
 ///
@@ -159,7 +161,7 @@ pub struct Analysis {
     prompt_version: String,
 }
 
-/// Records an AI analysis Task, whose job the [`ProvisionerTaskManager`](super::runner::ProvisionerTaskManager) queues.
+/// Records an AI analysis Task and stores its job.
 ///
 /// Only a new Task keeps the API key; asking again for a known Task changes nothing, even while its session is
 /// recording again.
@@ -194,18 +196,15 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         language,
     };
     let target = session_id.to_string();
-    let tasks = state
-        .job_queue_handle
-        .in_memory_job_dependencies()
-        .map(super::task_manager);
 
     // A repeated request gets its Task back whatever its session does now, so the ID is looked up first.
-    if let Some(tasks) = &tasks
-        && let Some(record) = tasks
-            .get(task_id, OffsetDateTime::now_utc())
-            .await
-            .map_err(StartError::Internal)?
-    {
+    let known = state
+        .task_store
+        .get(task_id, OffsetDateTime::now_utc())
+        .await
+        .map_err(StartError::Internal)?;
+
+    if let Some(record) = known {
         let params = serde_json::to_value(&params)
             .context("serialize the AI analysis parameters")
             .map_err(StartError::Internal)?;
@@ -221,8 +220,6 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         return Err(StartError::RecordingActive);
     }
 
-    let tasks = tasks.ok_or_else(|| StartError::Internal(anyhow::anyhow!("AI analysis is not set up")))?;
-
     match state.recordings.get_finished(session_id).await {
         Ok(_) => {}
         Err(FinishedRecordingError::Recording) => return Err(StartError::RecordingActive),
@@ -237,16 +234,21 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         base_url: settings.base_url,
     };
 
-    let outcome = tasks
-        .create(task_id, target, &params, |record| {
+    let outcome = super::runner::create::<RecordingAiAnalysis>(
+        &state.task_store,
+        &state.durable_job_queue,
+        task_id,
+        target,
+        &params,
+        |record| {
             // The job may run as soon as it is queued, so the key must be in place first.
-            tasks
-                .task()
+            state
                 .secrets
                 .insert(SecretId(record.id), &access.to_secret()?, record.deadline_at)
-        })
-        .await
-        .map_err(StartError::Internal)?;
+        },
+    )
+    .await
+    .map_err(StartError::Internal)?;
 
     Ok(match outcome {
         CreateOutcome::Created(task) => {
@@ -267,18 +269,15 @@ pub async fn get(
     task_id: Uuid,
     now: OffsetDateTime,
 ) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
-    state
-        .job_queue_handle
-        .in_memory_job_dependencies()
-        .map(super::task_manager)
-        .context("the in-memory job dependencies are not set")?
-        .get(task_id, now)
-        .await
+    state.task_store.get(task_id, now).await
 }
 
 impl UnhydratedJob for TaskJobUnhydrated<RecordingAiAnalysis> {
     fn hydrate(self, dependencies: &InMemoryJobDependencies) -> job_queue::DynJob {
-        Box::new(self.into_job(super::task_manager(dependencies)))
+        Box::new(self.into_job(
+            Arc::new(RecordingAiAnalysis::from_dependencies(dependencies)),
+            Arc::clone(&dependencies.task_store),
+        ))
     }
 }
 
@@ -288,16 +287,26 @@ pub struct RecordingAiAnalysis {
     recordings: RecordingMessageSender,
     secrets: SecretStore,
     progress_timeout: time::Duration,
+    first_retry_delay: time::Duration,
 }
 
 impl RecordingAiAnalysis {
-    pub fn new(conf_handle: ConfHandle, recordings: RecordingMessageSender, secrets: SecretStore) -> Self {
+    fn new(conf_handle: ConfHandle, recordings: RecordingMessageSender, secrets: SecretStore) -> Self {
         Self {
             conf_handle,
             recordings,
             secrets,
             progress_timeout: PROGRESS_TIMEOUT,
+            first_retry_delay: FIRST_RETRY_DELAY,
         }
+    }
+
+    fn from_dependencies(dependencies: &InMemoryJobDependencies) -> Self {
+        Self::new(
+            dependencies.conf_handle.clone(),
+            dependencies.recordings.clone(),
+            dependencies.secrets.clone(),
+        )
     }
 
     fn manifest_path(&self, session_id: Uuid) -> Utf8PathBuf {
@@ -361,6 +370,8 @@ async fn remove_if_exists(path: &Utf8Path) -> std::io::Result<()> {
 impl ProvisionerTask for RecordingAiAnalysis {
     const KIND: &'static str = KIND;
 
+    const START_WINDOW: time::Duration = START_WINDOW;
+
     type Params = Params;
 
     type Output = Analysis;
@@ -369,12 +380,12 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
     type Recoverable = Recoverable;
 
-    fn start_window(&self) -> time::Duration {
-        START_WINDOW
-    }
-
     fn progress_timeout(&self) -> time::Duration {
         self.progress_timeout
+    }
+
+    fn retry_delay(&self, attempts: u32) -> time::Duration {
+        self.first_retry_delay * 2u32.pow(attempts.saturating_sub(1))
     }
 
     fn starting_payload(&self, last: &serde_json::Value) -> serde_json::Value {
@@ -449,11 +460,6 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
         self.analyze(attempt, session_id, settings, params.language, access.api_key)
             .await
-    }
-
-    /// The API key is kept in memory only, so no attempt can run after a restart.
-    fn restart_failure(&self) -> Option<Failure> {
-        Some(Failure::KeyLost)
     }
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {

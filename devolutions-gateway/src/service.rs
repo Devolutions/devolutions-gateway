@@ -3,8 +3,11 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
+use devolutions_gateway::job_queue::{InMemoryJobDependencies, JobQueueTask, JobRunnerTask};
 use devolutions_gateway::listener::{GatewayListener, ListenerUrls};
 use devolutions_gateway::log::GatewayLog;
+use devolutions_gateway::provisioner_tasks::recording_ai_analysis::RecordingAiAnalysis;
+use devolutions_gateway::provisioner_tasks::runner::{TaskJob, requeue_lost_jobs};
 use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
@@ -351,27 +354,26 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
 
     let secrets = devolutions_gateway::secret_store::SecretStore::default();
+    let durable_job_queue = job_queue_ctx.durable();
 
-    let in_memory_job_dependencies = devolutions_gateway::job_queue::InMemoryJobDependencies {
+    // Before the job runner starts, so a job that runs meanwhile is never taken for lost.
+    let requeued = async {
+        let job_defs = job_queue_ctx.job_defs(TaskJob::<RecordingAiAnalysis>::NAME).await?;
+        requeue_lost_jobs::<RecordingAiAnalysis>(&task_store, &durable_job_queue, &job_defs).await
+    };
+    if let Err(error) = requeued.await {
+        error!(
+            error = format!("{error:#}"),
+            "Failed to queue again the jobs of the provisioner tasks"
+        );
+    }
+
+    let in_memory_job_dependencies = InMemoryJobDependencies {
         conf_handle: conf_handle.clone(),
         recordings: recording_manager_handle.clone(),
         secrets: secrets.clone(),
-        task_store,
-        job_queue: job_queue_ctx.durable(),
+        task_store: Arc::clone(&task_store),
     };
-    let provisioner_tasks = devolutions_gateway::provisioner_tasks::task_manager(&in_memory_job_dependencies);
-    job_queue_ctx
-        .job_queue_handle
-        .set_in_memory_job_dependencies(in_memory_job_dependencies)?;
-
-    // Before the job runner starts, so no job queued earlier runs an attempt meanwhile.
-    // Unfinished Tasks still fail at their deadline, so this must not keep the other features from starting.
-    if let Err(error) = provisioner_tasks.resume().await {
-        error!(
-            error = format!("{error:#}"),
-            "Failed to queue the unfinished provisioner tasks again"
-        );
-    }
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -387,6 +389,9 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
+        task_store,
+        secrets: secrets.clone(),
+        durable_job_queue,
     };
 
     for listener in &conf.listeners {
@@ -453,8 +458,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         job_queue_ctx.job_queue_handle.clone(),
     ));
 
-    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(&job_queue_ctx));
-    tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
+    tasks.register(JobRunnerTask::new(&job_queue_ctx, in_memory_job_dependencies));
+    tasks.register(JobQueueTask::new(job_queue_ctx));
 
     tasks.register(traffic_audit_task);
 

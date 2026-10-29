@@ -107,7 +107,6 @@ mod tests {
             Permanent::Internal,
             Permanent::AttemptsExhausted { last: () },
             Permanent::DeadlinePassed,
-            Permanent::NotQueued,
         ]
         .map(kind);
 

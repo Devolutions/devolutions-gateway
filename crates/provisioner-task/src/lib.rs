@@ -49,8 +49,6 @@ pub struct ProvisionerTaskRecord {
     ///
     /// It moves forward while the Task runs, each time an attempt starts or reports progress.
     pub deadline_at: OffsetDateTime,
-    /// The job that may run this Task: a job with another token is stale or a duplicate, and must not run it.
-    pub job_token: Uuid,
 }
 
 /// The record of a Task about to be created.
@@ -61,8 +59,6 @@ pub struct NewProvisionerTaskRecord {
     pub target: String,
     pub params: serde_json::Value,
     pub deadline_at: OffsetDateTime,
-    /// Token of the job that will run the new Task.
-    pub job_token: Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -83,8 +79,6 @@ pub enum AttemptStart {
     Started(ProvisionerTaskRecord),
     /// The Task is finished, possibly just now because it is past its deadline.
     Finished(ProvisionerTaskRecord),
-    /// Another job now runs the Task, so this one is stale or a duplicate.
-    Superseded,
     /// No Task has this ID.
     Unknown,
 }
@@ -103,25 +97,17 @@ pub trait ProvisionerTaskStore: Send + Sync {
     /// Reads a Task, after failing it if it is past its deadline.
     async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTaskRecord>>;
 
-    /// Marks the start of one more attempt by the job holding `job_token`: `running`, with one more attempt counted and
-    /// its deadline moved to `deadline_at`.
+    /// Marks the start of one more attempt: `running`, with one more attempt counted and its deadline moved to
+    /// `deadline_at`.
     ///
-    /// Only [`AttemptStart::Started`] lets the attempt run. A job that no longer holds the token gets
-    /// [`AttemptStart::Superseded`], and nothing changes.
+    /// Only [`AttemptStart::Started`] lets the attempt run.
     async fn start_attempt(
         &self,
         id: Uuid,
-        job_token: Uuid,
         payload: serde_json::Value,
         deadline_at: OffsetDateTime,
         now: OffsetDateTime,
     ) -> anyhow::Result<AttemptStart>;
-
-    /// Hands an unfinished Task to a new job, so the job that had it stops at its next attempt.
-    ///
-    /// Only the start of an attempt checks the token, so call it only while the old job runs no attempt, such as at
-    /// startup before any job runs. Returns `false` if the Task is unknown or finished.
-    async fn replace_job_token(&self, id: Uuid, job_token: Uuid, now: OffsetDateTime) -> anyhow::Result<bool>;
 
     /// Every unfinished Task, after failing those past their deadline.
     async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;

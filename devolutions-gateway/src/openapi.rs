@@ -273,14 +273,13 @@ enum AiAnalysisErrorKind {
     InvalidTask,
     /// The attempt panicked.
     Panicked,
-    /// Something went wrong inside Gateway, such as a file it could not write.
+    /// Something went wrong inside Gateway, such as a file it could not write, or a restart that cut the last attempt
+    /// short.
     Internal,
     /// Every attempt failed with a failure worth another attempt.
     AttemptsExhausted,
     /// The Task did not start in time, or went too long without progress.
     DeadlinePassed,
-    /// The job of the Task could not be queued.
-    NotQueued,
 }
 
 /// What was wrong with an answer of the AI provider
@@ -330,7 +329,6 @@ const _: fn(&Permanent<Failure, Recoverable>) -> AiAnalysisErrorKind = |error| m
     Permanent::Internal => AiAnalysisErrorKind::Internal,
     Permanent::AttemptsExhausted { last: _ } => AiAnalysisErrorKind::AttemptsExhausted,
     Permanent::DeadlinePassed => AiAnalysisErrorKind::DeadlinePassed,
-    Permanent::NotQueued => AiAnalysisErrorKind::NotQueued,
 };
 
 const _: fn(&Recoverable) -> AiAnalysisRecoverableErrorKind = |error| match error {

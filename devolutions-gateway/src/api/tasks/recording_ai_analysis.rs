@@ -307,7 +307,7 @@ mod tests {
             "RecordingPath": dir.path().to_str().expect("UTF-8"),
             "__debug__": { "disable_token_validation": true },
         });
-        let (state, _handles) = DgwState::mock(&config.to_string()).expect("mock state");
+        let (state, _handles) = DgwState::mock(&config.to_string()).await.expect("mock state");
         let session_id = Uuid::new_v4();
         state.recordings.active_recordings.insert(session_id);
         let app = crate::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 3000))));
