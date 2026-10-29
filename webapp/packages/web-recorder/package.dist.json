@@ -1,6 +1,6 @@
 {
   "name": "@devolutions/web-recorder",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework-agnostic browser session-recording capture (WebM video + asciicast terminal) for Devolutions Gateway jrec push",
   "type": "module",
   "main": "./index.js",
