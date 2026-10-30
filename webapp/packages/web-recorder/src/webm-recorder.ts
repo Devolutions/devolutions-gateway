@@ -9,6 +9,14 @@ export type WebMRecorderTelemetryEvent = 'recording-initialized' | 'recording-st
 
 export interface WebMRecorderOptions {
   onTelemetry?: (event: WebMRecorderTelemetryEvent) => void;
+  /**
+   * Called when recording stops on its own after `start()` resolved. By then the start promise is
+   * settled, so this is the only way a consumer hears about it. The error is
+   * 'ConnectionToTheRecordingServerLost' when the push WebSocket fails or closes, and
+   * 'MediaRecorderFailed' when the browser's recorder fails. Failures before `start()` resolves
+   * reject the start promise instead.
+   */
+  onError?: (error: string) => void;
 }
 
 export class WebMRecorder {
@@ -255,6 +263,7 @@ export class WebMRecorder {
 
   private handleMediaRecorderStop(): void {
     const error = this.pendingError; // read before cleanupResources() clears it
+    const failedAfterStart = error !== null && this.rejectStart === null;
     // Only a stop() the user asked for ends the recording; a failure leaves it open for a reconnection.
     this.closeWebSocket(error ? undefined : RECORDING_ENDED_CLOSE_CODE);
     // Settle the start promise before cleanup resets isCleaningUp.
@@ -271,6 +280,8 @@ export class WebMRecorder {
     this.cleanupResources(); // resets isCleaningUp = false
     if (!error) {
       this.fireTelemetry('recording-stopped');
+    } else if (failedAfterStart) {
+      this.fireError(error);
     }
   }
 
@@ -279,7 +290,7 @@ export class WebMRecorder {
     if (this.isCleaningUp) return;
     this.isCleaningUp = true;
     this.stopKeepalive();
-    this.pendingError = 'UnableToStartRecording';
+    this.pendingError = this._isRecording ? 'MediaRecorderFailed' : 'UnableToStartRecording';
     // Explicitly stop so onstop always fires — browsers don't guarantee it after onerror.
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       this.mediaRecorder.stop();
@@ -291,6 +302,14 @@ export class WebMRecorder {
       this.options.onTelemetry?.(event);
     } catch (e) {
       console.warn('[WebMRecorder] onTelemetry hook threw:', e);
+    }
+  }
+
+  private fireError(error: string): void {
+    try {
+      this.options.onError?.(error);
+    } catch (e) {
+      console.warn('[WebMRecorder] onError hook threw:', e);
     }
   }
 
