@@ -8,11 +8,12 @@ use devolutions_gateway_ai::{Language, session_summary};
 use devolutions_gateway_task::ShutdownHandle;
 use job_queue::Job as _;
 use parking_lot::Mutex;
-use provisioner_task::{AttemptStart, DynProvisionerTaskStore, NewProvisionerTaskRecord, ProvisionerTaskState};
+use provisioner_task::{DynProvisionerTaskStore, NewProvisionerTaskRecord, ProvisionerTaskState};
+use time::OffsetDateTime;
 
 use super::*;
 use crate::job_queue::{StoredJob, TestJobQueue};
-use crate::provisioner_tasks::runner::{MAX_ATTEMPTS, TaskJob, TaskJobUnhydrated};
+use crate::provisioner_tasks::{MAX_ATTEMPTS, ProvisionerTaskService, TaskJob};
 use crate::recording::RecordingManagerTask;
 use crate::{DgwState, MockHandles};
 
@@ -41,7 +42,8 @@ fn openai(model: &str) -> AiSettings {
 
 struct Harness {
     state: DgwState,
-    task: Arc<RecordingAiAnalysis>,
+    progress_timeout: time::Duration,
+    first_retry_delay: time::Duration,
     store: DynProvisionerTaskStore,
     secrets: SecretStore,
     job_queue: Arc<TestJobQueue>,
@@ -55,13 +57,14 @@ impl Harness {
         let dir = tempfile::tempdir().expect("temp dir");
         let recording_path = Utf8PathBuf::from_path_buf(dir.path().join("recordings")).expect("UTF-8");
 
-        let (mut state, handles) = DgwState::mock(&config(&recording_path)).await.expect("mock state");
+        let (state, handles) = DgwState::mock(&config(&recording_path)).await.expect("mock state");
         let MockHandles {
             session_manager_rx,
             recording_manager_rx,
             subscriber_rx,
             job_queue_rx,
             traffic_audit_rx,
+            provisioner_task_rx,
             shutdown_handle,
         } = handles;
 
@@ -79,16 +82,30 @@ impl Harness {
 
         // `start` stores its jobs where the test can take them.
         let job_queue = TestJobQueue::new().await;
-        state.durable_job_queue = job_queue.durable();
+        let conn = gateway_db::GatewayDb::open_path(":memory:")
+            .await
+            .expect("open gateway database")
+            .connect()
+            .await
+            .expect("connect");
+        let store: DynProvisionerTaskStore = Arc::new(
+            provisioner_task_libsql::LibSqlProvisionerTaskStore::open(conn)
+                .await
+                .expect("open task store"),
+        );
+        let service = ProvisionerTaskService::new(
+            Arc::clone(&store),
+            Arc::<TestJobQueue>::clone(&job_queue),
+            provisioner_task_rx,
+        );
+        let (service_shutdown_handle, service_shutdown_signal) = ShutdownHandle::new();
+        tokio::spawn(devolutions_gateway_task::Task::run(service, service_shutdown_signal));
         let secrets = state.secrets.clone();
-        let mut task = RecordingAiAnalysis::new(state.conf_handle.clone(), state.recordings.clone(), secrets.clone());
-        task.first_retry_delay = time::Duration::ZERO;
-        let task = Arc::new(task);
-        let store = Arc::clone(&state.task_store);
 
         Self {
             state,
-            task,
+            progress_timeout: PROGRESS_TIMEOUT,
+            first_retry_delay: time::Duration::ZERO,
             store,
             secrets,
             job_queue,
@@ -100,6 +117,7 @@ impl Harness {
                 traffic_audit_rx,
                 shutdown_handle,
                 recording_shutdown_handle,
+                service_shutdown_handle,
             )),
             _dir: dir,
         }
@@ -138,35 +156,28 @@ impl Harness {
         task_id
     }
 
-    /// The job of the Task, as the job queue would run it.
-    fn job(&self, task_id: Uuid) -> TaskJob<RecordingAiAnalysis> {
-        let json = json!({ "taskId": task_id }).to_string();
-
-        TaskJobUnhydrated::<RecordingAiAnalysis>::read_json(&json)
-            .expect("valid job")
-            .into_job(Arc::clone(&self.task), Arc::clone(&self.store))
+    /// The task every job of this harness runs, with its timings.
+    fn analysis(&self) -> RecordingAiAnalysis {
+        RecordingAiAnalysis {
+            progress_timeout: self.progress_timeout,
+            first_retry_delay: self.first_retry_delay,
+            ..RecordingAiAnalysis::new(
+                self.state.conf_handle.clone(),
+                self.state.recordings.clone(),
+                self.secrets.clone(),
+            )
+        }
     }
 
-    /// Records the success of the first attempt of the Task without ending it, as if Gateway stopped right after.
-    async fn record_success(&self, task_id: Uuid) {
-        let store = &self.store;
-        let now = OffsetDateTime::now_utc();
+    /// The job of the Task, as the job queue would run it.
+    async fn job(&self, task_id: Uuid) -> TaskJob<RecordingAiAnalysis> {
+        let json = json!({ "taskId": task_id, "jobToken": self.task(task_id).await.job_token }).to_string();
 
-        let started = store
-            .start_attempt(task_id, json!({}), now + time::Duration::hours(1), now)
-            .await
-            .expect("start the attempt");
-        assert!(matches!(started, AttemptStart::Started(_)), "{started:?}");
-        assert!(
-            store
-                .succeed(task_id, json!({}), now)
-                .await
-                .expect("record the success")
-        );
+        TaskJob::read_json(&json, self.analysis(), Arc::clone(&self.store)).expect("valid job")
     }
 
     async fn run(&self, task_id: Uuid) -> anyhow::Result<()> {
-        self.job(task_id).run().await
+        self.job(task_id).await.run().await
     }
 
     /// Takes every queued job.
@@ -191,8 +202,10 @@ impl Harness {
                     target: session_id.to_string(),
                     params: json!({ "provider": provider, "model": "gpt-test", "maxOutputTokens": null }),
                     deadline_at,
+                    job_token: Uuid::new_v4(),
                 },
                 created_at,
+                Box::pin(async { Ok(()) }),
             )
             .await
             .expect("create");
@@ -208,14 +221,7 @@ impl Harness {
 
     /// Runs the Tasks with an AI analysis that fails after `progress_timeout` without progress.
     fn with_progress_timeout(&mut self, progress_timeout: time::Duration) {
-        let mut task = RecordingAiAnalysis::new(
-            self.state.conf_handle.clone(),
-            self.state.recordings.clone(),
-            self.secrets.clone(),
-        );
-        task.progress_timeout = progress_timeout;
-        task.first_retry_delay = time::Duration::ZERO;
-        self.task = Arc::new(task);
+        self.progress_timeout = progress_timeout;
     }
 
     /// Working files of the AI analyses of session_id.
@@ -370,10 +376,14 @@ async fn start_records_the_task_keeps_the_key_and_queues_a_job() {
 
     let StoredJob { name, json } = harness.job_queue.take().expect("job queued");
     assert_eq!(name, KIND);
-    assert_eq!(json, format!(r#"{{"taskId":"{task_id}"}}"#));
+    assert_eq!(
+        json,
+        format!(r#"{{"taskId":"{task_id}","jobToken":"{}"}}"#, task.job_token),
+        "the job is stored with the token of the record"
+    );
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn asking_again_creates_nothing_new() {
     let harness = Harness::new().await;
@@ -415,7 +425,7 @@ async fn asking_again_creates_nothing_new() {
     assert!(harness.has_key(task_id), "the first key stays");
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn asking_again_returns_the_task_even_while_the_session_records_again() {
     let harness = Harness::new().await;
@@ -444,7 +454,7 @@ async fn asking_again_returns_the_task_even_while_the_session_records_again() {
     assert!(matches!(new_task, Err(StartError::RecordingActive)), "{new_task:?}");
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn refuses_a_session_without_recording() {
     let harness = Harness::new().await;
@@ -491,7 +501,7 @@ async fn refuses_a_session_that_is_still_recording() {
     );
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn refuses_invalid_ai_settings() {
     let harness = Harness::new().await;
@@ -700,7 +710,7 @@ async fn an_analysis_without_progress_fails_at_its_deadline() {
 
     let task = harness.task(task_id).await;
     assert_eq!(task.state, ProvisionerTaskState::Failed);
-    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
     assert_eq!(
         task.payload,
         json!({
@@ -874,7 +884,7 @@ async fn a_new_task_that_fails_keeps_the_earlier_analysis() {
     assert!(dir.join("ai-analysis-0.slog").exists());
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn a_failed_task_reports_the_tokens_it_spent() {
     let harness = Harness::new().await;
@@ -893,109 +903,6 @@ async fn a_failed_task_reports_the_tokens_it_spent() {
     );
 }
 
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
-#[tokio::test]
-async fn a_task_that_fails_removes_its_unlisted_log() {
-    let harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let task_id = harness.start_created(session_id, openai("gpt-test")).await;
-    let dir = harness.recording_path.join(session_id.to_string());
-    let log = dir.join(format!(".ai-analysis-{task_id}.slog"));
-    std::fs::write(&log, "an analysis whose success was never recorded").expect("unlisted log");
-    harness
-        .store
-        .fail(task_id, json!({}), OffsetDateTime::now_utc())
-        .await
-        .expect("fail the Task");
-
-    harness.run(task_id).await.expect("the job ends the Task");
-
-    assert!(!log.exists());
-    assert_eq!(ai_analyses(&dir), json!([]));
-}
-
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
-#[tokio::test]
-async fn a_late_end_of_an_earlier_task_never_lists_its_log_over_a_newer_analysis() {
-    let harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
-    let first = harness.start_created(session_id, settings.clone()).await;
-
-    // As if the end of the first Task failed before the manifest listed its log, so it is done again later.
-    let dir = harness.recording_path.join(session_id.to_string());
-    let first_log = dir.join(format!(".ai-analysis-{first}.slog"));
-    std::fs::write(&first_log, "the analysis of the first Task").expect("unlisted log");
-    harness.record_success(first).await;
-
-    let second = harness.start_created(session_id, settings).await;
-    harness.run(second).await.expect("second analysis");
-    let newer = std::fs::read_to_string(dir.join("ai-analysis-0.slog")).expect("newer analysis");
-
-    harness.run(first).await.expect("the late end of the first Task");
-
-    assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
-    assert_eq!(
-        std::fs::read_to_string(dir.join("ai-analysis-0.slog")).expect("analysis"),
-        newer
-    );
-    assert!(!first_log.exists());
-}
-
-// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
-#[tokio::test]
-async fn a_new_task_that_fails_keeps_an_earlier_success_whose_log_was_not_listed_yet() {
-    let harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let (settings, _requests) = spawn_ai_provider(|_| 0).await;
-    let first = harness.start_created(session_id, settings.clone()).await;
-    harness.run(first).await.expect("first analysis");
-
-    // As if the end of the first Task failed before the manifest listed its log, so it is done again later.
-    let dir = harness.recording_path.join(session_id.to_string());
-    std::fs::remove_file(dir.join("ai-analysis-0.slog")).expect("unlist the log");
-    std::fs::write(
-        dir.join(format!(".ai-analysis-{first}.slog")),
-        "the analysis of the first Task",
-    )
-    .expect("unlisted log");
-    let manifest_path = dir.join("recording.json");
-    let mut manifest: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&manifest_path).expect("manifest")).expect("manifest JSON");
-    manifest["artifacts"] = json!({});
-    std::fs::write(&manifest_path, manifest.to_string()).expect("manifest");
-
-    let second = harness.start_created(session_id, settings).await;
-    harness.secrets.remove(SecretId(second));
-    harness.run(second).await.expect("no retry");
-    assert_eq!(harness.task(second).await.state, ProvisionerTaskState::Failed);
-
-    harness.run(first).await.expect("the late end of the first Task");
-
-    assert_eq!(ai_analyses(&dir), json!([{ "fileName": "ai-analysis-0.slog" }]));
-    assert_eq!(
-        std::fs::read_to_string(dir.join("ai-analysis-0.slog")).expect("analysis"),
-        "the analysis of the first Task"
-    );
-}
-
-// oracle: mutant the log left unlisted by a Task that has no record is kept
-#[tokio::test]
-async fn a_new_task_removes_a_log_left_unlisted_by_an_unknown_task() {
-    let harness = Harness::new().await;
-    let session_id = harness.write_session();
-    let dir = harness.recording_path.join(session_id.to_string());
-    let unknown_log = dir.join(format!(".ai-analysis-{}.slog", Uuid::new_v4()));
-    std::fs::write(&unknown_log, "an analysis whose success was never recorded").expect("unlisted log");
-    let (settings, _requests) = spawn_ai_provider(|_| 401).await;
-    let task_id = harness.start_created(session_id, settings).await;
-
-    harness.run(task_id).await.expect("no retry");
-
-    assert!(!unknown_log.exists());
-    assert_eq!(ai_analyses(&dir), json!([]));
-}
-
 /// The AI analyses the manifest in `dir` lists.
 fn ai_analyses(dir: &Utf8Path) -> serde_json::Value {
     let manifest: serde_json::Value =
@@ -1006,7 +913,7 @@ fn ai_analyses(dir: &Utf8Path) -> serde_json::Value {
         .unwrap_or_else(|| json!([]))
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn the_analysis_is_in_the_language_of_the_request() {
     let harness = Harness::new().await;
@@ -1062,14 +969,7 @@ async fn the_analysis_is_in_english_without_a_language() {
 #[tokio::test]
 async fn a_new_task_never_resumes_from_an_earlier_task() {
     let mut harness = Harness::new().await;
-    harness.task = Arc::new(RecordingAiAnalysis {
-        first_retry_delay: time::Duration::hours(1),
-        ..RecordingAiAnalysis::new(
-            harness.state.conf_handle.clone(),
-            harness.state.recordings.clone(),
-            harness.secrets.clone(),
-        )
-    });
+    harness.first_retry_delay = time::Duration::hours(1);
     // About 1 MB of transcript: three chunks.
     let session_id = harness.write_long_session(10_000);
     let (settings, requests) = spawn_ai_provider(|index| if index == 1 { 503 } else { 0 }).await;

@@ -1,5 +1,5 @@
 # Background
-Provisioner Tasks are work that a provisioner (DVLS, Hub) assigns to Gateway.
+Provisioner Tasks (hereafter "Tasks") are work that a provisioner (DVLS, Hub) assigns to Gateway.
 
 # Invariants
 The provisioner chooses each Task's ID, so it can ask again without knowing whether its first request went through.
@@ -21,4 +21,4 @@ An unfinished Task past its deadline is failed, so a lost job can't block its ta
 
 # Tasks and jobs
 A Task is not a job.
-A Task keeps what was asked, how it went and how it ended, and stays for auditing after its job is gone; the job queue only schedules and retries the work.
+A Task keeps what was asked, how it went and how it ended, and stays for auditing after its job is gone; the job queue only delivers the job, and the job runs and retries the attempts itself.

@@ -283,7 +283,7 @@ fn assert_rfc3339(value: &Value) {
     OffsetDateTime::parse(text, &Rfc3339).unwrap_or_else(|error| panic!("{text}: {error}"));
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn start_returns_202_then_200_for_the_same_request() {
     let gateway = Gateway::start().await;
@@ -319,7 +319,7 @@ async fn start_returns_202_then_200_for_the_same_request() {
     }
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn start_conflicts_return_409_with_a_code() {
     let gateway = Gateway::start().await;
@@ -345,7 +345,7 @@ async fn start_conflicts_return_409_with_a_code() {
     assert_eq!(body, json!({ "code": "analysis_in_progress", "taskId": task_id }));
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn start_without_recording_returns_404() {
     let gateway = Gateway::start().await;
@@ -358,7 +358,7 @@ async fn start_without_recording_returns_404() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn start_ignores_unknown_fields() {
     let gateway = Gateway::start().await;
@@ -372,7 +372,7 @@ async fn start_ignores_unknown_fields() {
     assert_eq!(status, StatusCode::ACCEPTED, "{created}");
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn invalid_bodies_and_settings_return_400() {
     let gateway = Gateway::start().await;
@@ -425,7 +425,7 @@ async fn invalid_bodies_and_settings_return_400() {
     assert_eq!(status, StatusCode::NOT_FOUND, "no Task is recorded");
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn endpoints_require_their_scope() {
     let gateway = Gateway::start().await;
@@ -454,7 +454,7 @@ async fn endpoints_require_their_scope() {
     assert_eq!(status, StatusCode::NOT_FOUND, "the wildcard scope is accepted");
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn an_analysis_is_found_at_its_location() {
     let gateway = Gateway::start().await;
@@ -478,7 +478,7 @@ async fn an_analysis_is_found_at_its_location() {
     assert_eq!(task["id"], task_id.to_string());
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn get_analysis_returns_404_for_an_unknown_id() {
     let gateway = Gateway::start().await;
@@ -505,7 +505,7 @@ async fn analysis_succeeds_without_leaking_the_key_or_the_base_url() {
     assert_eq!(task["state"], "succeeded", "{task}");
     assert_eq!(task["payload"]["fileName"], "ai-analysis-0.slog");
     assert_eq!(task["payload"]["model"], "gpt-test-2026-09-30");
-    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
     assert_eq!(
         task["payload"]["usage"],
         json!({ "inputTokens": 20, "outputTokens": 40, "unreportedRequests": 0 }),

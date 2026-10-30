@@ -70,9 +70,8 @@ pub struct DgwState {
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
-    pub task_store: provisioner_task::DynProvisionerTaskStore,
+    pub provisioner_tasks: provisioner_tasks::ProvisionerTaskHandle,
     pub secrets: secret_store::SecretStore,
-    pub durable_job_queue: job_queue::DurableJobQueue,
 }
 
 #[doc(hidden)]
@@ -82,6 +81,7 @@ pub struct MockHandles {
     pub subscriber_rx: subscriber::SubscriberReceiver,
     pub job_queue_rx: job_queue::JobQueueReceiver,
     pub traffic_audit_rx: traffic_audit::TrafficAuditReceiver,
+    pub provisioner_task_rx: provisioner_tasks::ProvisionerTaskReceiver,
     pub shutdown_handle: devolutions_gateway_task::ShutdownHandle,
 }
 
@@ -100,9 +100,7 @@ impl DgwState {
         let provisioning = provisioning::ProvisioningStore::new();
         let synthetic_kdc_registry = credential_injection::SyntheticKdcRegistry::new();
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
-        let task_store_conn = gateway_db::GatewayDb::open_path(":memory:").await?.connect().await?;
-        let task_store = Arc::new(provisioner_task_libsql::LibSqlProvisionerTaskStore::open(task_store_conn).await?);
-        let durable_job_queue = job_queue::DurableJobQueue::mock().await?;
+        let (provisioner_tasks, provisioner_task_rx) = provisioner_tasks::provisioner_task_channel();
 
         let state = Self {
             conf_handle,
@@ -118,9 +116,8 @@ impl DgwState {
             synthetic_kdc_registry,
             monitoring_state,
             agent_tunnel_handle: None,
-            task_store,
+            provisioner_tasks,
             secrets: secret_store::SecretStore::default(),
-            durable_job_queue,
         };
 
         let handles = MockHandles {
@@ -129,6 +126,7 @@ impl DgwState {
             subscriber_rx,
             job_queue_rx,
             traffic_audit_rx,
+            provisioner_task_rx,
             shutdown_handle,
         };
 

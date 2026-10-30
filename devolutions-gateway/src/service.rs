@@ -6,8 +6,7 @@ use devolutions_gateway::config::{Conf, ConfHandle};
 use devolutions_gateway::job_queue::{InMemoryJobDependencies, JobQueueTask, JobRunnerTask};
 use devolutions_gateway::listener::{GatewayListener, ListenerUrls};
 use devolutions_gateway::log::GatewayLog;
-use devolutions_gateway::provisioner_tasks::recording_ai_analysis::RecordingAiAnalysis;
-use devolutions_gateway::provisioner_tasks::runner::{TaskJob, requeue_lost_jobs};
+use devolutions_gateway::provisioner_tasks::{ProvisionerTaskService, provisioner_task_channel};
 use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
@@ -354,25 +353,15 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
 
     let secrets = devolutions_gateway::secret_store::SecretStore::default();
-    let durable_job_queue = job_queue_ctx.durable();
-
-    // Before the job runner starts, so a job that runs meanwhile is never taken for lost.
-    let requeued = async {
-        let job_defs = job_queue_ctx.job_defs(TaskJob::<RecordingAiAnalysis>::NAME).await?;
-        requeue_lost_jobs::<RecordingAiAnalysis>(&task_store, &durable_job_queue, &job_defs).await
-    };
-    if let Err(error) = requeued.await {
-        error!(
-            error = format!("{error:#}"),
-            "Failed to queue again the jobs of the provisioner tasks"
-        );
-    }
+    let (provisioner_tasks, provisioner_task_rx) = provisioner_task_channel();
+    let provisioner_task_service =
+        ProvisionerTaskService::new(Arc::clone(&task_store), job_queue_ctx.queue(), provisioner_task_rx);
 
     let in_memory_job_dependencies = InMemoryJobDependencies {
         conf_handle: conf_handle.clone(),
         recordings: recording_manager_handle.clone(),
         secrets: secrets.clone(),
-        task_store: Arc::clone(&task_store),
+        task_store,
     };
 
     let state = DgwState {
@@ -389,9 +378,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
-        task_store,
+        provisioner_tasks,
         secrets: secrets.clone(),
-        durable_job_queue,
     };
 
     for listener in &conf.listeners {
@@ -426,6 +414,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     tasks.register(devolutions_gateway::provisioning::CleanupTask { handle: provisioning });
 
     tasks.register(devolutions_gateway::secret_store::CleanupTask { handle: secrets });
+
+    tasks.register(provisioner_task_service);
 
     tasks.register(devolutions_gateway::credential_injection::CleanupTask {
         handle: synthetic_kdc_registry,

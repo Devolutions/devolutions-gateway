@@ -577,8 +577,8 @@ impl RecordingMessageSender {
     ///
     /// `file` must be in the session folder, so that a reader finds the earlier artifact or the new one, never none or a
     /// partial one.
-    /// Calling it again after it was cut short finishes the work, a `file` already gone lists nothing new, and a session
-    /// whose recording was deleted meanwhile only loses `file`.
+    /// A `file` that is gone is an error, since only its maker moves it, and so is a session whose recording was deleted
+    /// meanwhile, which only loses `file`.
     pub(crate) async fn replace_artifacts(&self, id: Uuid, kind: ArtifactKind, file: &Utf8Path) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.channel
@@ -999,7 +999,7 @@ impl RecordingManagerTask {
                 Err(error) if error.kind() != io::ErrorKind::NotFound => {
                     return Err(anyhow::Error::new(error).context(format!("remove {file}")));
                 }
-                _ => return Ok(()),
+                _ => anyhow::bail!("recording {id} was deleted"),
             }
         }
 
@@ -1009,17 +1009,9 @@ impl RecordingManagerTask {
         let artifact_path = recording_path.join(&file_name);
 
         // The rename swaps the file in at once and the manifest follows, so it never lists a missing or partial file.
-        match fs::rename(file, &artifact_path).await {
-            Ok(()) => {}
-            // Already moved, by an earlier call cut short before the manifest was written, or by a newer Task that listed
-            // it for the Task that made it; what is in place is listed.
-            Err(error) if error.kind() == io::ErrorKind::NotFound && artifact_path.exists() => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                warn!(%file, "The artifact to list is gone");
-                return Ok(());
-            }
-            Err(error) => return Err(anyhow::Error::new(error).context(format!("move {file} to {artifact_path}"))),
-        }
+        fs::rename(file, &artifact_path)
+            .await
+            .with_context(|| format!("move {file} to {artifact_path}"))?;
 
         let earlier = core::mem::replace(
             manifest.artifacts.of_kind_mut(kind),

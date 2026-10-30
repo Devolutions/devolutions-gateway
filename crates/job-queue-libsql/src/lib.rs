@@ -3,7 +3,7 @@ extern crate tracing;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use job_queue::{JobCtx, JobQueue, JobReader, RunnerWaker};
+use job_queue::{DynJob, JobCtx, JobQueue, JobReader, RunnerWaker};
 use libsql::Connection;
 use time::OffsetDateTime;
 use ulid::Ulid;
@@ -199,7 +199,7 @@ impl JobQueue for LibSqlJobQueue {
         Ok(())
     }
 
-    async fn push_job(&self, name: &str, def: &str, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
+    async fn push_job(&self, job: &DynJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
         let sql_query = "INSERT INTO job_queue
             (id, scheduled_for, failed_attempts, status, name, def)
             VALUES (:id, :scheduled_for, :failed_attempts, :status, :name, jsonb(:def))";
@@ -216,8 +216,8 @@ impl JobQueue for LibSqlJobQueue {
             (":scheduled_for", schedule_for.unix_timestamp()),
             (":failed_attempts", 0),
             (":status", JobStatus::Queued as u32),
-            (":name", name),
-            (":def", def),
+            (":name", job.name()),
+            (":def", job.write_json()?),
         );
 
         trace!(%sql_query, ?params, "Pushing a new job");
@@ -401,27 +401,6 @@ impl JobQueue for LibSqlJobQueue {
             OffsetDateTime::from_unix_timestamp(scheduled_for).context("invalid UNIX timestamp for scheduled_for")?;
 
         Ok(Some(scheduled_for))
-    }
-
-    async fn job_defs(&self, name: &str) -> anyhow::Result<Vec<String>> {
-        let sql_query = "SELECT json(def) FROM job_queue WHERE name = $1";
-
-        let params = [name];
-
-        trace!(%sql_query, ?params, "Fetching the jobs stored under a name");
-
-        let mut rows = self
-            .conn
-            .query(sql_query, params)
-            .await
-            .context("failed to execute SQL query")?;
-
-        let mut defs = Vec::new();
-        while let Some(row) = rows.next().await.context("failed to read the row")? {
-            defs.push(row.get::<String>(0).context("failed to read def value")?);
-        }
-
-        Ok(defs)
     }
 }
 

@@ -44,7 +44,7 @@ pub trait JobQueue: Send + Sync {
     /// Pushes a new job into the queue
     ///
     /// This function should ideally call `RunnerWaker::wake()` once the job is enqueued.
-    async fn push_job(&self, name: &str, def: &str, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()>;
+    async fn push_job(&self, job: &DynJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()>;
 
     /// Fetches at most `number_of_jobs` from the queue
     async fn claim_jobs(&self, reader: &dyn JobReader, number_of_jobs: usize) -> anyhow::Result<Vec<JobCtx>>;
@@ -62,9 +62,6 @@ pub trait JobQueue: Send + Sync {
 
     /// Retrieves the closest future scheduled date
     async fn next_scheduled_date(&self) -> anyhow::Result<Option<OffsetDateTime>>;
-
-    /// Returns the JSON of every job stored under `name`
-    async fn job_defs(&self, name: &str) -> anyhow::Result<Vec<String>>;
 }
 
 pub struct JobCtx {

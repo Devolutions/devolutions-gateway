@@ -1,5 +1,6 @@
 //! `/jet/tasks/recording-ai-analysis/{task_id}`: start and read the AI analysis of a recorded session.
 
+use anyhow::Context as _;
 use axum::Json;
 use axum::body::Bytes;
 use axum::extract::{self, State};
@@ -82,13 +83,11 @@ pub(crate) struct AiAnalysisTask {
     /// Recorded session the analysis is about.
     session_id: Uuid,
     /// What was asked, without the API key and the base URL.
-    #[cfg_attr(feature = "openapi", schema(value_type = AiAnalysisParams))]
-    params: serde_json::Value,
+    params: AiAnalysisParams,
     state: TaskState,
     /// Details of the state: progress while `running`, the log once `succeeded`, the reason once `failed`; null while
     /// `queued`.
-    #[cfg_attr(feature = "openapi", schema(value_type = Option<AiAnalysisPayload>))]
-    payload: serde_json::Value,
+    payload: Option<AiAnalysisPayload>,
     /// When the Task was created.
     #[serde(with = "time::serde::rfc3339")]
     created_at: OffsetDateTime,
@@ -104,16 +103,201 @@ pub(crate) struct AiAnalysisTask {
     deadline_at: OffsetDateTime,
 }
 
-impl TryFrom<ProvisionerTaskRecord> for AiAnalysisTask {
-    type Error = uuid::Error;
+/// Params of an AI analysis Task: what was asked, without the API key and the base URL
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiAnalysisParams {
+    provider: AiProvider,
+    /// Model identifier, passed to the provider as is.
+    model: String,
+    /// Upper bound of tokens in each AI answer; null when not asked.
+    #[cfg_attr(feature = "openapi", schema(value_type = Option<i64>, minimum = 0, maximum = 4_294_967_295_u64))]
+    max_output_tokens: Option<u32>,
+    /// Language the AI writes in; absent when not asked, so the AI writes in English.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
+}
 
+/// Details of the state of an AI analysis Task: `running`, `succeeded` and `failed` each have their own
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub(crate) enum AiAnalysisPayload {
+    Running(AiAnalysisRunningPayload),
+    Succeeded(AiAnalysisSucceededPayload),
+    Failed(AiAnalysisFailedPayload),
+}
+
+/// Payload of a `running` AI analysis Task: its progress, and the tokens it used so far
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiAnalysisRunningPayload {
+    /// Current step: `preparing` (the attempt starts), `reading` (the recordings are read), `describing` (the AI is
+    /// asked about the recording, part by part), then `writing` (the log is written).
+    step: String,
+    /// Work done in the step: bytes read while `reading`, parts described while `describing`; absent in the other steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    done: Option<u64>,
+    /// Work the step has in all, in the same unit as `done`; absent in the other steps.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    total: Option<u64>,
+    usage: AiAnalysisUsage,
+}
+
+/// Payload of a `succeeded` AI analysis Task: the log it put in the session
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiAnalysisSucceededPayload {
+    /// Name of the log in the session manifest, such as `ai-analysis-0.slog`.
+    file_name: String,
+    /// Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+    model: String,
+    usage: AiAnalysisUsage,
+    /// Versions of the prompts that wrote the log, such as
+    /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
+    prompt_version: String,
+}
+
+/// Tokens the AI provider counted for an AI analysis Task, over all its attempts
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiAnalysisUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    /// Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one
+    /// still waiting for it; while it is not 0, `inputTokens` and `outputTokens` are short of what the provider billed.
+    unreported_requests: u64,
+}
+
+/// Payload of a `failed` AI analysis Task: why it failed, and the tokens it used
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiAnalysisFailedPayload {
+    error: AiAnalysisError,
+    /// Absent only for a Task that never ran before its deadline passed, since it used no token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    usage: Option<AiAnalysisUsage>,
+}
+
+/// Why an AI analysis Task failed: a kind, with the fields of that kind; there is no text for people, so the caller
+/// words it
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiAnalysisError {
+    kind: AiAnalysisErrorKind,
+    /// HTTP status the AI provider answered, for `aiRejected`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
+    /// What was wrong with the answer, for `aiBadAnswer`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    why: Option<AiAnalysisBadAnswer>,
+    /// Recording file that cannot be read, for `unreadableRecording`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<String>,
+    /// Failure of the last attempt, for `attemptsExhausted`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last: Option<AiAnalysisRecoverableError>,
+}
+
+/// Kind of failure of an AI analysis Task
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AiAnalysisErrorKind {
+    /// The AI provider refused the request for good, such as for a wrong API key (401) or a spent quota.
+    AiRejected,
+    /// The AI provider answered, but not with something usable.
+    AiBadAnswer,
+    /// The API key is gone, such as after a Gateway restart.
+    KeyLost,
+    /// The session has no recording, or it was deleted.
+    NoRecording,
+    /// The session mixes terminal and video recordings.
+    MixedRecording,
+    /// A recording file of the session cannot be read.
+    UnreadableRecording,
+    /// The Task itself is not valid, such as with parameters this Gateway cannot read.
+    InvalidTask,
+    /// The attempt panicked.
+    Panicked,
+    /// Something went wrong inside Gateway, such as a file it could not write, or a restart that cut the last attempt
+    /// short.
+    Internal,
+    /// Every attempt failed with a failure worth another attempt.
+    AttemptsExhausted,
+    /// The Task did not start in time, or went too long without progress.
+    DeadlinePassed,
+}
+
+/// What was wrong with an answer of the AI provider
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AiAnalysisBadAnswer {
+    /// The answer is not in the format of the provider API.
+    Invalid,
+    /// The answer was cut short by the output token limit or the context window.
+    Truncated,
+    /// The provider refused to answer, such as when its content filter blocked the request.
+    Refused,
+    /// The model did not answer in the format it was asked for.
+    NotExpectedJson,
+}
+
+/// A failure of an attempt that was worth another attempt
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AiAnalysisRecoverableError {
+    kind: AiAnalysisRecoverableErrorKind,
+    /// HTTP status the AI provider answered, for `aiBusy`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    status: Option<u16>,
+}
+
+/// Kind of a failure worth another attempt
+#[cfg_attr(feature = "openapi", derive(utoipa::ToSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum AiAnalysisRecoverableErrorKind {
+    /// The AI provider could not be reached, or did not answer in time.
+    AiUnreachable,
+    /// The AI provider is busy or failing for now, such as with a rate limit (429) or a server error (5xx).
+    AiBusy,
+}
+
+impl TryFrom<ProvisionerTaskRecord> for AiAnalysisTask {
+    type Error = anyhow::Error;
+
+    /// The record as the API shows it; a record whose params or payload are not of this shape is an error, so a
+    /// Gateway that stored something else never passes it on.
     fn try_from(task: ProvisionerTaskRecord) -> Result<Self, Self::Error> {
+        let state = TaskState::from(task.state);
+        let payload = match state {
+            TaskState::Queued => None,
+            TaskState::Running => Some(AiAnalysisPayload::Running(
+                serde_json::from_value(task.payload).context("running payload")?,
+            )),
+            TaskState::Succeeded => Some(AiAnalysisPayload::Succeeded(
+                serde_json::from_value(task.payload).context("succeeded payload")?,
+            )),
+            TaskState::Failed => Some(AiAnalysisPayload::Failed(
+                serde_json::from_value(task.payload).context("failed payload")?,
+            )),
+        };
+
         Ok(Self {
             id: task.id,
-            session_id: Uuid::parse_str(&task.target)?,
-            params: task.params,
-            state: TaskState::from(task.state),
-            payload: task.payload,
+            session_id: Uuid::parse_str(&task.target).context("session ID")?,
+            params: serde_json::from_value(task.params).context("params")?,
+            state,
+            payload,
             created_at: task.created_at,
             started_at: task.started_at,
             finished_at: task.finished_at,
@@ -125,7 +309,7 @@ impl TryFrom<ProvisionerTaskRecord> for AiAnalysisTask {
 fn task_json(task: ProvisionerTaskRecord) -> Result<Json<AiAnalysisTask>, HttpError> {
     AiAnalysisTask::try_from(task).map(Json).map_err(
         HttpError::internal()
-            .with_msg("invalid session ID in the AI analysis")
+            .with_msg("the AI analysis Task is not of the expected shape")
             .err(),
     )
 }
@@ -272,7 +456,7 @@ pub(crate) async fn get_ai_analysis(
     _scope: RecordingAiAnalysisReadScope,
     extract::Path(task_id): extract::Path<Uuid>,
 ) -> Result<Json<AiAnalysisTask>, HttpError> {
-    let task = analysis::get(&state, task_id, OffsetDateTime::now_utc())
+    let task = analysis::get(&state, task_id)
         .await
         .map_err(HttpError::internal().with_msg("failed to read the AI analysis").err())?
         // A Task of another kind is not found under this path.
@@ -291,7 +475,52 @@ mod tests {
 
     use super::*;
 
-    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+    fn record(state: provisioner_task::ProvisionerTaskState, payload: serde_json::Value) -> ProvisionerTaskRecord {
+        let now = OffsetDateTime::now_utc();
+        ProvisionerTaskRecord {
+            id: Uuid::new_v4(),
+            kind: analysis::KIND.to_owned(),
+            target: Uuid::new_v4().to_string(),
+            params: serde_json::json!({ "provider": "openai", "model": "gpt-test", "maxOutputTokens": null }),
+            state,
+            payload,
+            attempts: 0,
+            created_at: now,
+            started_at: None,
+            finished_at: None,
+            deadline_at: now,
+            job_token: Uuid::new_v4(),
+        }
+    }
+
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
+    #[test]
+    fn a_task_failed_before_it_ran_is_shown_without_usage() {
+        let record = record(
+            provisioner_task::ProvisionerTaskState::Failed,
+            serde_json::json!({ "error": { "kind": "deadlinePassed" } }),
+        );
+
+        let task = AiAnalysisTask::try_from(record).expect("a failed Task without usage");
+
+        let payload = serde_json::to_value(task.payload).expect("JSON");
+        assert_eq!(payload, serde_json::json!({ "error": { "kind": "deadlinePassed" } }));
+    }
+
+    // oracle: mutant a payload of another shape is passed on to the caller as it is
+    #[test]
+    fn a_task_of_another_shape_is_refused() {
+        let record = record(
+            provisioner_task::ProvisionerTaskState::Succeeded,
+            serde_json::json!({ "error": { "kind": "internal" } }),
+        );
+
+        let error = AiAnalysisTask::try_from(record).expect_err("a succeeded Task with a failed payload");
+
+        assert!(error.to_string().contains("succeeded payload"), "{error:#}");
+    }
+
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
     #[tokio::test]
     async fn ai_analysis_of_a_session_still_recording_is_a_conflict() {
         use axum::extract::connect_info::MockConnectInfo;
@@ -307,7 +536,24 @@ mod tests {
             "RecordingPath": dir.path().to_str().expect("UTF-8"),
             "__debug__": { "disable_token_validation": true },
         });
-        let (state, _handles) = DgwState::mock(&config.to_string()).await.expect("mock state");
+        let (state, handles) = DgwState::mock(&config.to_string()).await.expect("mock state");
+        // `start` asks the provisioner task service whether it knows the Task before it looks at the session.
+        let conn = gateway_db::GatewayDb::open_path(":memory:")
+            .await
+            .expect("open gateway database")
+            .connect()
+            .await
+            .expect("connect");
+        let store = provisioner_task_libsql::LibSqlProvisionerTaskStore::open(conn)
+            .await
+            .expect("open task store");
+        let service = crate::provisioner_tasks::ProvisionerTaskService::new(
+            std::sync::Arc::new(store),
+            crate::job_queue::TestJobQueue::new().await,
+            handles.provisioner_task_rx,
+        );
+        let (_service_shutdown, service_shutdown_signal) = devolutions_gateway_task::ShutdownHandle::new();
+        tokio::spawn(devolutions_gateway_task::Task::run(service, service_shutdown_signal));
         let session_id = Uuid::new_v4();
         state.recordings.active_recordings.insert(session_id);
         let app = crate::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([127, 0, 0, 1], 3000))));

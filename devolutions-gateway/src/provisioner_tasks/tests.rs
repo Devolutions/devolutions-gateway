@@ -1,9 +1,12 @@
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use job_queue::{Job as _, JobQueue as _};
+use devolutions_gateway_task::ShutdownHandle;
+use job_queue::Job as _;
 use parking_lot::Mutex;
-use provisioner_task::ProvisionerTaskState;
+use provisioner_task::{CreateOutcome, DynProvisionerTaskStore, NewProvisionerTaskRecord, ProvisionerTaskState};
 use serde_json::json;
+use uuid::Uuid;
 
 use super::*;
 use crate::job_queue::{StoredJob, TestJobQueue};
@@ -46,6 +49,10 @@ struct Echo {
     ended: Arc<Mutex<Vec<Uuid>>>,
     /// Ends that fail before one succeeds.
     end_failures: Arc<AtomicUsize>,
+    /// Publications that fail before one succeeds.
+    publish_failures: Arc<AtomicUsize>,
+    /// The records whose output was published.
+    published: Arc<Mutex<Vec<Uuid>>>,
 }
 
 #[async_trait]
@@ -105,6 +112,19 @@ impl ProvisionerTask for Echo {
         }
     }
 
+    async fn publish(&self, record: &ProvisionerTaskRecord, _: &serde_json::Value) -> anyhow::Result<()> {
+        if self
+            .publish_failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
+            .is_ok()
+        {
+            anyhow::bail!("the publication failed");
+        }
+
+        self.published.lock().push(record.id);
+        Ok(())
+    }
+
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {
         if self
             .end_failures
@@ -120,12 +140,18 @@ impl ProvisionerTask for Echo {
 }
 
 struct Harness {
-    task: Arc<Echo>,
+    outcome: fn(u32) -> Result<serde_json::Value, EchoError>,
+    progress_timeout: time::Duration,
     store: DynProvisionerTaskStore,
     job_queue: Arc<TestJobQueue>,
+    tasks: ProvisionerTaskHandle,
+    /// Keeps the provisioner task service running.
+    _service_shutdown: ShutdownHandle,
     runs: Arc<AtomicUsize>,
     ended: Arc<Mutex<Vec<Uuid>>>,
     end_failures: Arc<AtomicUsize>,
+    publish_failures: Arc<AtomicUsize>,
+    published: Arc<Mutex<Vec<Uuid>>>,
 }
 
 impl Harness {
@@ -149,25 +175,41 @@ impl Harness {
                 .expect("open task store"),
         );
         let job_queue = TestJobQueue::new().await;
+        let (tasks, rx) = provisioner_task_channel();
+        let (service_shutdown, shutdown_signal) = ShutdownHandle::new();
+        let service = ProvisionerTaskService::new(Arc::clone(&store), Arc::<TestJobQueue>::clone(&job_queue), rx);
+        tokio::spawn(devolutions_gateway_task::Task::run(service, shutdown_signal));
         let runs = Arc::new(AtomicUsize::new(0));
         let ended = Arc::new(Mutex::new(Vec::new()));
         let end_failures = Arc::new(AtomicUsize::new(0));
-
-        let task = Arc::new(Echo {
-            outcome,
-            progress_timeout,
-            runs: Arc::clone(&runs),
-            ended: Arc::clone(&ended),
-            end_failures: Arc::clone(&end_failures),
-        });
+        let publish_failures = Arc::new(AtomicUsize::new(0));
+        let published = Arc::new(Mutex::new(Vec::new()));
 
         Self {
-            task,
+            outcome,
+            progress_timeout,
             store,
             job_queue,
+            tasks,
+            _service_shutdown: service_shutdown,
             runs,
             ended,
             end_failures,
+            publish_failures,
+            published,
+        }
+    }
+
+    /// The task of this harness: every one shares its counters.
+    fn echo(&self) -> Echo {
+        Echo {
+            outcome: self.outcome,
+            progress_timeout: self.progress_timeout,
+            runs: Arc::clone(&self.runs),
+            ended: Arc::clone(&self.ended),
+            end_failures: Arc::clone(&self.end_failures),
+            publish_failures: Arc::clone(&self.publish_failures),
+            published: Arc::clone(&self.published),
         }
     }
 
@@ -186,20 +228,42 @@ impl Harness {
         id: Uuid,
         target: String,
         params: &EchoParams,
-        on_created: impl FnOnce(&ProvisionerTaskRecord) -> anyhow::Result<()> + Send,
+        on_created: impl FnOnce(&NewProvisionerTaskRecord) -> anyhow::Result<()> + Send + 'static,
     ) -> anyhow::Result<CreateOutcome> {
-        create::<Echo>(&self.store, &self.job_queue.durable(), id, target, params, on_created).await
+        self.tasks.create(self.echo(), id, target, params, on_created).await
+    }
+
+    /// Records a Task directly, with the job token `job_token` and no job.
+    async fn record_task(&self, id: Uuid, params: serde_json::Value, job_token: Uuid) {
+        let now = OffsetDateTime::now_utc();
+        self.store
+            .create(
+                NewProvisionerTaskRecord {
+                    id,
+                    kind: KIND.to_owned(),
+                    target: id.to_string(),
+                    params,
+                    deadline_at: now + time::Duration::hours(1),
+                    job_token,
+                },
+                now,
+                Box::pin(async { Ok(()) }),
+            )
+            .await
+            .expect("create");
+    }
+
+    /// The job of Task `id` with the job token `job_token`, as the job runner reads it.
+    fn job(&self, id: Uuid, job_token: Uuid) -> TaskJob<Echo> {
+        let json = json!({ "taskId": id, "jobToken": job_token }).to_string();
+        TaskJob::read_json(&json, self.echo(), Arc::clone(&self.store)).expect("valid job")
     }
 
     /// Takes the oldest queued job, read back as the job runner reads it.
     fn queued_job(&mut self) -> Box<dyn job_queue::Job> {
         let StoredJob { name, json, .. } = self.job_queue.take().expect("a queued job");
         assert_eq!(name, KIND);
-        Box::new(
-            TaskJobUnhydrated::<Echo>::read_json(&json)
-                .expect("valid job")
-                .into_job(Arc::clone(&self.task), Arc::clone(&self.store)),
-        )
+        Box::new(TaskJob::read_json(&json, self.echo(), Arc::clone(&self.store)).expect("valid job"))
     }
 
     async fn task(&self, id: Uuid) -> ProvisionerTaskRecord {
@@ -216,9 +280,10 @@ impl Harness {
 async fn only_a_new_task_runs_on_created_and_gets_a_job() {
     let mut harness = Harness::new(|value| Ok(json!(value))).await;
     let id = Uuid::new_v4();
-    let created = AtomicUsize::new(0);
+    let created = Arc::new(AtomicUsize::new(0));
     let create = || {
-        harness.create_task(id, "target".to_owned(), &EchoParams { value: 1 }, |_| {
+        let created = Arc::clone(&created);
+        harness.create_task(id, "target".to_owned(), &EchoParams { value: 1 }, move |_| {
             created.fetch_add(1, Ordering::SeqCst);
             Ok(())
         })
@@ -246,24 +311,49 @@ async fn a_task_that_cannot_be_prepared_gets_no_job() {
         .expect_err("preparing fails");
 
     assert!(harness.job_queue.take().is_none(), "no job is queued");
+    assert!(
+        harness
+            .store
+            .get(id, OffsetDateTime::now_utc())
+            .await
+            .expect("read task")
+            .is_none(),
+        "no Task is recorded"
+    );
 }
 
-// oracle: mutant a panicking attempt fails the Task as internal instead of panicked
+// oracle: mutant a job claimed before its Task is committed is dropped as done, and the Task never runs
 #[tokio::test]
-async fn a_panicking_attempt_fails_the_task() {
-    let mut harness = Harness::new(|_| panic!("the attempt panics")).await;
+async fn a_job_whose_task_is_not_recorded_yet_is_run_again_later() {
+    let harness = Harness::new(|value| Ok(json!(value))).await;
+    let id = Uuid::new_v4();
+    let job_token = Uuid::new_v4();
+    let mut job = harness.job(id, job_token);
+
+    job.run().await.expect_err("the job queue runs the job again");
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 0);
+
+    harness.record_task(id, json!({ "value": 1 }), job_token).await;
+    job.run().await.expect("the Task is recorded now");
+
+    assert_eq!(harness.task(id).await.state, ProvisionerTaskState::Succeeded);
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 1);
+}
+
+// oracle: mutant the job stored for a Task that was never committed runs the Task recorded since under the same ID
+#[tokio::test]
+async fn only_the_job_recorded_with_the_task_runs_it() {
+    let mut harness = Harness::new(|value| Ok(json!(value))).await;
     let id = harness.create(1).await;
+    let mut other_job = harness.job(id, Uuid::new_v4());
 
-    harness.queued_job().run().await.expect("no retry");
+    other_job.run().await.expect("the other job is done for good");
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 0);
+    assert_eq!(harness.task(id).await.state, ProvisionerTaskState::Queued);
 
-    let task = harness.task(id).await;
-    assert_eq!(task.state, ProvisionerTaskState::Failed);
-    assert_eq!(
-        task.payload,
-        json!({ "error": { "kind": "panicked" }, "last": { "after": null } }),
-        "the failure keeps what the attempt started with"
-    );
-    assert_eq!(*harness.ended.lock(), [id]);
+    harness.queued_job().run().await.expect("the job of the Task runs it");
+    assert_eq!(harness.task(id).await.state, ProvisionerTaskState::Succeeded);
+    assert_eq!(harness.runs.load(Ordering::SeqCst), 1);
 }
 
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §Management
@@ -328,67 +418,16 @@ async fn a_job_delivered_again_after_the_last_attempt_fails_the_task() {
     assert_eq!(*harness.ended.lock(), [id]);
 }
 
-// oracle: mutant a queued Task whose job was never stored stays queued until its deadline after a restart
-#[tokio::test]
-async fn a_queued_task_without_a_job_gets_one_at_startup() {
-    let mut harness = Harness::new(|value| Ok(json!(value))).await;
-    harness.create(1).await;
-    // The job stays in the job queue; only the copy handed to the test is taken.
-    harness.queued_job();
-    let id = Uuid::new_v4();
-    let now = OffsetDateTime::now_utc();
-    harness
-        .store
-        .create(
-            NewProvisionerTaskRecord {
-                id,
-                kind: KIND.to_owned(),
-                target: id.to_string(),
-                params: json!({ "value": 2 }),
-                deadline_at: now + time::Duration::hours(1),
-            },
-            now,
-        )
-        .await
-        .expect("create");
-
-    let job_defs = harness.job_queue.job_defs(KIND).await.expect("stored jobs");
-    requeue_lost_jobs::<Echo>(&harness.store, &harness.job_queue.durable(), &job_defs)
-        .await
-        .expect("requeue");
-
-    harness.queued_job().run().await.expect("the job runs the Task");
-    assert!(
-        harness.job_queue.take().is_none(),
-        "the Task that has a job gets no other"
-    );
-    assert_eq!(harness.task(id).await.state, ProvisionerTaskState::Succeeded);
-}
-
 // oracle: mutant a Task whose parameters cannot be read runs its attempt, or stays unfinished
 #[tokio::test]
 async fn invalid_parameters_fail_the_task() {
     let harness = Harness::new(|value| Ok(json!(value))).await;
     let id = Uuid::new_v4();
-    let now = OffsetDateTime::now_utc();
+    let job_token = Uuid::new_v4();
     harness
-        .store
-        .create(
-            NewProvisionerTaskRecord {
-                id,
-                kind: KIND.to_owned(),
-                target: id.to_string(),
-                params: json!({ "value": "not a number" }),
-                deadline_at: now + time::Duration::hours(1),
-            },
-            now,
-        )
-        .await
-        .expect("create");
-    let json = json!({ "taskId": id }).to_string();
-    let mut job = TaskJobUnhydrated::<Echo>::read_json(&json)
-        .expect("valid job")
-        .into_job(Arc::clone(&harness.task), Arc::clone(&harness.store));
+        .record_task(id, json!({ "value": "not a number" }), job_token)
+        .await;
+    let mut job = harness.job(id, job_token);
 
     job.run().await.expect("no retry");
 
@@ -396,6 +435,30 @@ async fn invalid_parameters_fail_the_task() {
     assert_eq!(task.state, ProvisionerTaskState::Failed);
     assert_eq!(task.payload["error"], json!({ "kind": "invalidTask" }));
     assert_eq!(harness.runs.load(Ordering::SeqCst), 0);
+}
+
+// oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+#[tokio::test]
+async fn a_success_is_recorded_only_once_its_output_is_published() {
+    let mut harness = Harness::new(|value| Ok(json!(value))).await;
+    let id = harness.create(1).await;
+    let mut job = harness.queued_job();
+    harness.publish_failures.store(1, Ordering::SeqCst);
+
+    job.run().await.expect_err("the job queue runs the job again");
+
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Running, "{:?}", task.payload);
+    assert!(harness.published.lock().is_empty());
+    assert!(harness.ended.lock().is_empty());
+
+    job.run().await.expect("the publication succeeds");
+
+    let task = harness.task(id).await;
+    assert_eq!(task.state, ProvisionerTaskState::Succeeded, "{:?}", task.payload);
+    assert_eq!(task.attempts, 2, "the output comes from a new attempt");
+    assert_eq!(*harness.published.lock(), [id]);
+    assert_eq!(*harness.ended.lock(), [id]);
 }
 
 // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
@@ -454,9 +517,7 @@ async fn the_job_is_read_back_from_its_json() {
     let job = harness.queued_job();
 
     let json = job.write_json().expect("job JSON");
-    let read = TaskJobUnhydrated::<Echo>::read_json(&json)
-        .expect("valid job")
-        .into_job(Arc::clone(&harness.task), Arc::clone(&harness.store));
+    let read = TaskJob::read_json(&json, harness.echo(), Arc::clone(&harness.store)).expect("valid job");
 
     assert_eq!(read.task_id, id);
     assert_eq!(job.name(), KIND);

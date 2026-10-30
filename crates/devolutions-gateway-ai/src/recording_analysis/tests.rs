@@ -266,7 +266,7 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     };
     assert_eq!(total_bytes, recording_size);
     assert!(read_bytes <= total_bytes);
-    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
     assert_eq!(
         progress
             .iter()
@@ -340,7 +340,7 @@ async fn analysing_again_only_asks_about_the_chunks_left() {
     );
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn requests_without_a_token_count_are_counted_apart() {
     let session = Session::new(10);
@@ -359,7 +359,7 @@ async fn requests_without_a_token_count_are_counted_apart() {
     );
 }
 
-// oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
 #[tokio::test]
 async fn a_failed_analysis_reports_the_tokens_it_spent() {
     // About 1 MB of transcript: three chunks.
