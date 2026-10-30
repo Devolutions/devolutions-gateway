@@ -64,7 +64,7 @@ impl From<RecordingAnalysisError> for AnalysisError {
             RecordingAnalysisError::Truncated => Self::of_kind(Failure::AiBadAnswer {
                 why: BadAnswer::Truncated,
             }),
-            // The runner cancels an attempt only once its Task is past its deadline.
+            // The job cancels an attempt only once its Task is past its deadline.
             RecordingAnalysisError::Cancelled => Self::Permanent(Permanent::DeadlinePassed),
             _ => Self::Permanent(Permanent::Internal),
         }
@@ -107,7 +107,6 @@ mod tests {
             Permanent::Internal,
             Permanent::AttemptsExhausted { last: () },
             Permanent::DeadlinePassed,
-            Permanent::NotQueued,
         ]
         .map(kind);
 

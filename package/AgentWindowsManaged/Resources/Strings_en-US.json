@@ -131,6 +131,10 @@
         {
           "id": "DataFolderSecurityUnreadable",
           "text": "Can't read the owner or the permissions of the folder {0}. Check them, then try again."
+        },
+        {
+          "id": "DataFolderEntryOwnedByUntrustedAccount",
+          "text": "Can't use the file or folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again."
         }
       ],
       "buttons": [

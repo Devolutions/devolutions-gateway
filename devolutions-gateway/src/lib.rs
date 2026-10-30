@@ -70,7 +70,7 @@ pub struct DgwState {
     pub monitoring_state: Arc<network_monitor::State>,
     pub traffic_audit_handle: traffic_audit::TrafficAuditHandle,
     pub agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
-    pub provisioner_tasks: provisioner_tasks::runner::ProvisionerTaskRunner,
+    pub provisioner_tasks: provisioner_tasks::ProvisionerTaskHandle,
     pub secrets: secret_store::SecretStore,
 }
 
@@ -81,6 +81,7 @@ pub struct MockHandles {
     pub subscriber_rx: subscriber::SubscriberReceiver,
     pub job_queue_rx: job_queue::JobQueueReceiver,
     pub traffic_audit_rx: traffic_audit::TrafficAuditReceiver,
+    pub provisioner_task_rx: provisioner_tasks::ProvisionerTaskReceiver,
     pub shutdown_handle: devolutions_gateway_task::ShutdownHandle,
 }
 
@@ -99,16 +100,7 @@ impl DgwState {
         let provisioning = provisioning::ProvisioningStore::new();
         let synthetic_kdc_registry = credential_injection::SyntheticKdcRegistry::new();
         let monitoring_state = Arc::new(network_monitor::State::new(Arc::new(MockMonitorsCache))?);
-        let secrets = secret_store::SecretStore::default();
-        let task_store = gateway_db::GatewayDb::open_path(":memory:").await?.connect().await?;
-        let task_store = Arc::new(provisioner_task_libsql::LibSqlProvisionerTaskStore::open(task_store).await?);
-        let provisioner_tasks = provisioner_tasks::task_runner(
-            task_store,
-            Arc::new(job_queue_handle.clone()),
-            conf_handle.clone(),
-            recording_manager_handle.clone(),
-            secrets.clone(),
-        );
+        let (provisioner_tasks, provisioner_task_rx) = provisioner_tasks::provisioner_task_channel();
 
         let state = Self {
             conf_handle,
@@ -125,7 +117,7 @@ impl DgwState {
             monitoring_state,
             agent_tunnel_handle: None,
             provisioner_tasks,
-            secrets,
+            secrets: secret_store::SecretStore::default(),
         };
 
         let handles = MockHandles {
@@ -134,6 +126,7 @@ impl DgwState {
             subscriber_rx,
             job_queue_rx,
             traffic_audit_rx,
+            provisioner_task_rx,
             shutdown_handle,
         };
 

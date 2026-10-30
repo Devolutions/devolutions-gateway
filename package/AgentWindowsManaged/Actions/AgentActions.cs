@@ -111,7 +111,8 @@ internal static class AgentActions
 
     /// <summary>
     /// Fail the run, with an error naming the folder, when %ProgramData%\Devolutions or %ProgramData%\Devolutions\Agent
-    /// is a link or is controlled by an account that is not an administrator
+    /// is a link or is controlled by an account that is not an administrator, or, naming the entry, when a file or a
+    /// folder below Agent is owned by such an account
     /// </summary>
     /// <remarks>
     /// The major upgrade removes the installed product at RemoveExistingProducts, right after InstallInitialize, so

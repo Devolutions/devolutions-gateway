@@ -107,6 +107,10 @@
         {
           "id": "DataFolderSecurityUnreadable",
           "text": "Impossible de lire le propriétaire ou les autorisations du dossier {0}. Vérifiez-les, puis réessayez."
+        },
+        {
+          "id": "DataFolderEntryOwnedByUntrustedAccount",
+          "text": "Impossible d'utiliser le fichier ou le dossier {0}, car il appartient à {1}. Seul SYSTEM ou un administrateur peut en être propriétaire. Changez son propriétaire, puis réessayez."
         }
       ],
       "buttons": [

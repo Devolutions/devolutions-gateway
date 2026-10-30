@@ -3,8 +3,10 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use devolutions_gateway::config::{Conf, ConfHandle};
+use devolutions_gateway::job_queue::{InMemoryJobDependencies, JobQueueTask, JobRunnerTask};
 use devolutions_gateway::listener::{GatewayListener, ListenerUrls};
 use devolutions_gateway::log::GatewayLog;
+use devolutions_gateway::provisioner_tasks::{ProvisionerTaskService, provisioner_task_channel};
 use devolutions_gateway::recording::recording_message_channel;
 use devolutions_gateway::session::session_manager_channel;
 use devolutions_gateway::subscriber::subscriber_channel;
@@ -351,23 +353,16 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
     );
 
     let secrets = devolutions_gateway::secret_store::SecretStore::default();
+    let (provisioner_tasks, provisioner_task_rx) = provisioner_task_channel();
+    let provisioner_task_service =
+        ProvisionerTaskService::new(Arc::clone(&task_store), job_queue_ctx.queue(), provisioner_task_rx);
 
-    let provisioner_tasks = devolutions_gateway::provisioner_tasks::task_runner(
+    let in_memory_job_dependencies = InMemoryJobDependencies {
+        conf_handle: conf_handle.clone(),
+        recordings: recording_manager_handle.clone(),
+        secrets: secrets.clone(),
         task_store,
-        Arc::new(job_queue_ctx.durable()),
-        conf_handle.clone(),
-        recording_manager_handle.clone(),
-        secrets.clone(),
-    );
-
-    // Before the job runner starts, so no job queued earlier runs an attempt meanwhile.
-    // Unfinished Tasks still fail at their deadline, so this must not keep the other features from starting.
-    if let Err(error) = provisioner_tasks.resume().await {
-        error!(
-            error = format!("{error:#}"),
-            "Failed to queue the unfinished provisioner tasks again"
-        );
-    }
+    };
 
     let state = DgwState {
         conf_handle: conf_handle.clone(),
@@ -383,7 +378,7 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         monitoring_state,
         traffic_audit_handle: traffic_audit_task.handle(),
         agent_tunnel_handle,
-        provisioner_tasks: provisioner_tasks.clone(),
+        provisioner_tasks,
         secrets: secrets.clone(),
     };
 
@@ -420,6 +415,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
 
     tasks.register(devolutions_gateway::secret_store::CleanupTask { handle: secrets });
 
+    tasks.register(provisioner_task_service);
+
     tasks.register(devolutions_gateway::credential_injection::CleanupTask {
         handle: synthetic_kdc_registry,
     });
@@ -451,11 +448,8 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<Tasks> {
         job_queue_ctx.job_queue_handle.clone(),
     ));
 
-    tasks.register(devolutions_gateway::job_queue::JobRunnerTask::new(
-        &job_queue_ctx,
-        provisioner_tasks,
-    ));
-    tasks.register(devolutions_gateway::job_queue::JobQueueTask::new(job_queue_ctx));
+    tasks.register(JobRunnerTask::new(&job_queue_ctx, in_memory_job_dependencies));
+    tasks.register(JobQueueTask::new(job_queue_ctx));
 
     tasks.register(traffic_audit_task);
 

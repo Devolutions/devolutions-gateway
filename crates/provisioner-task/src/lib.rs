@@ -3,6 +3,8 @@
 //! A Task remembers what was asked, how it is going and how it ended, and it stays around for auditing. The work
 //! itself runs as a job on the job queue; that job is gone once it finishes, but its Task is not.
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -49,7 +51,8 @@ pub struct ProvisionerTaskRecord {
     ///
     /// It moves forward while the Task runs, each time an attempt starts or reports progress.
     pub deadline_at: OffsetDateTime,
-    /// The job that may run this Task: a job with another token is stale or a duplicate, and must not run it.
+    /// The job that runs this Task: a job with another token was stored for a Task that was never recorded, and must
+    /// not run this one.
     pub job_token: Uuid,
 }
 
@@ -64,6 +67,10 @@ pub struct NewProvisionerTaskRecord {
     /// Token of the job that will run the new Task.
     pub job_token: Uuid,
 }
+
+/// Work the store does inside the transaction of a write, before it commits; an error rolls the write back and is
+/// returned. See [`ProvisionerTaskStore::create`] and [`ProvisionerTaskStore::succeed`].
+pub type BeforeCommit<'a> = Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum CreateOutcome {
@@ -83,8 +90,6 @@ pub enum AttemptStart {
     Started(ProvisionerTaskRecord),
     /// The Task is finished, possibly just now because it is past its deadline.
     Finished(ProvisionerTaskRecord),
-    /// Another job now runs the Task, so this one is stale or a duplicate.
-    Superseded,
     /// No Task has this ID.
     Unknown,
 }
@@ -97,31 +102,31 @@ pub enum AttemptStart {
 pub trait ProvisionerTaskStore: Send + Sync {
     /// Records a new `queued` Task, unless the ID is known or its target is busy.
     ///
+    /// `store_job` runs once the record is written and before it is committed, so a Task is recorded only with its
+    /// job: if it fails, nothing is recorded and its error is returned.
+    ///
     /// Like every method that takes `now`, it first fails the Tasks it looks at that are past their deadline.
-    async fn create(&self, task: NewProvisionerTaskRecord, now: OffsetDateTime) -> anyhow::Result<CreateOutcome>;
+    async fn create(
+        &self,
+        task: NewProvisionerTaskRecord,
+        now: OffsetDateTime,
+        store_job: BeforeCommit<'_>,
+    ) -> anyhow::Result<CreateOutcome>;
 
     /// Reads a Task, after failing it if it is past its deadline.
     async fn get(&self, id: Uuid, now: OffsetDateTime) -> anyhow::Result<Option<ProvisionerTaskRecord>>;
 
-    /// Marks the start of one more attempt by the job holding `job_token`: `running`, with one more attempt counted and
-    /// its deadline moved to `deadline_at`.
+    /// Marks the start of one more attempt: `running`, with one more attempt counted and its deadline moved to
+    /// `deadline_at`.
     ///
-    /// Only [`AttemptStart::Started`] lets the attempt run. A job that no longer holds the token gets
-    /// [`AttemptStart::Superseded`], and nothing changes.
+    /// Only [`AttemptStart::Started`] lets the attempt run.
     async fn start_attempt(
         &self,
         id: Uuid,
-        job_token: Uuid,
         payload: serde_json::Value,
         deadline_at: OffsetDateTime,
         now: OffsetDateTime,
     ) -> anyhow::Result<AttemptStart>;
-
-    /// Hands an unfinished Task to a new job, so the job that had it stops at its next attempt.
-    ///
-    /// Only the start of an attempt checks the token, so call it only while the old job runs no attempt, such as at
-    /// startup before any job runs. Returns `false` if the Task is unknown or finished.
-    async fn replace_job_token(&self, id: Uuid, job_token: Uuid, now: OffsetDateTime) -> anyhow::Result<bool>;
 
     /// Every unfinished Task, after failing those past their deadline.
     async fn list_unfinished(&self, now: OffsetDateTime) -> anyhow::Result<Vec<ProvisionerTaskRecord>>;
@@ -138,7 +143,16 @@ pub trait ProvisionerTaskStore: Send + Sync {
 
     /// Ends a `running` Task as `succeeded`. Returns `false` if it is not running, such as when it was just failed for
     /// being past its deadline.
-    async fn succeed(&self, id: Uuid, payload: serde_json::Value, now: OffsetDateTime) -> anyhow::Result<bool>;
+    ///
+    /// `publish` runs once the Task is found running and before its success is written, so a succeeded Task always
+    /// has what `publish` does: if it fails, the Task stays running and its error is returned.
+    async fn succeed(
+        &self,
+        id: Uuid,
+        payload: serde_json::Value,
+        now: OffsetDateTime,
+        publish: BeforeCommit<'_>,
+    ) -> anyhow::Result<bool>;
 
     /// Ends a `queued` or `running` Task as `failed`. Returns `false` if it was already finished, such as when it was
     /// just failed for being past its deadline.

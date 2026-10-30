@@ -137,6 +137,10 @@ namespace DevolutionsAgent.Resources
 		/// </summary>
 		public const string DataFolderSecurityUnreadable = "DataFolderSecurityUnreadable";		
 		/// <summary>
+		/// Can't use the file or folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again.
+		/// </summary>
+		public const string DataFolderEntryOwnedByUntrustedAccount = "DataFolderEntryOwnedByUntrustedAccount";		
+		/// <summary>
 		/// View
 		/// </summary>
 		public const string ViewButton = "ViewButton";		

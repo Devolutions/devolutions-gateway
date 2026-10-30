@@ -192,7 +192,7 @@ impl AiSettings {
 mod tests {
     use super::*;
 
-    // oracle: intent devolutions-gateway/src/api/jrec.intent.md §AI analysis
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
     #[test]
     fn providers_keep_their_wire_names() {
         for (provider, name) in [

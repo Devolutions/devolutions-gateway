@@ -1,14 +1,13 @@
 //! AI analysis (`recording-ai-analysis`): describes what the user did in one recorded session, and puts the result in
 //! the session as its log, in place of the earlier one.
 //!
-//! [`start`] checks the request and records the Task through the
-//! [`ProvisionerTaskRunner`](super::runner::ProvisionerTaskRunner).
+//! [`start`] checks the request and records the Task with [`create`](super::create).
 //! Each attempt runs the analysis of the AI crate,
 //! [`AiClient::analyze_recording`](devolutions_gateway_ai::AiClient::analyze_recording), which keeps its working files
 //! next to the session manifest so that a retry resumes where the last attempt stopped, then leaves the log in the
-//! session folder, unlisted, under a name of its own Task.
-//! Once the runner records the success, the end of the Task lists that log in the manifest in place of the earlier one;
-//! a Task that fails removes it instead.
+//! session folder.
+//! The step that records the success lists that log in the manifest in place of the earlier one, so a succeeded Task
+//! always has its log listed; a Task that fails removes it instead.
 //! The API key and the working files go away when the Task ends.
 
 mod failure;
@@ -20,24 +19,23 @@ use std::sync::{Arc, LazyLock, Weak};
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use devolutions_gateway_ai::Language;
 use devolutions_gateway_ai::recording_analysis::{
     self, Progress, RecordingAnalysisEvent, RecordingFile, RecordingManifest, Recordings, RecordingsError, UsageSoFar,
 };
-use provisioner_task::{CreateOutcome, ProvisionerTaskRecord, ProvisionerTaskState};
+use provisioner_task::{CreateOutcome, ProvisionerTaskRecord};
 use secrecy::SecretString;
 use serde_json::json;
-use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub use self::failure::{AnalysisError, BadAnswer, Failure, Recoverable};
-use super::Permanent;
 use super::ai::{AiAccess, AiProvider, AiSettings, AiSettingsError, ClientError};
-use super::runner::{AnyPermanent, Attempt, ProvisionerTask};
+use super::{Attempt, Permanent, ProvisionerTask};
 use crate::DgwState;
 use crate::artifacts::ArtifactKind;
 use crate::config::ConfHandle;
+use crate::job_queue::InMemoryJobDependencies;
 use crate::recording::{FinishedRecordingError, JrecManifest, RecordingMessageSender};
 use crate::secret_store::{SecretId, SecretStore};
 
@@ -48,6 +46,9 @@ pub const START_WINDOW: time::Duration = time::Duration::hours(2);
 
 /// Time a running AI analysis may go without progress before it fails.
 pub const PROGRESS_TIMEOUT: time::Duration = time::Duration::minutes(30);
+
+/// Time to wait after the first recoverable failure, doubled after each next one.
+pub const FIRST_RETRY_DELAY: time::Duration = time::Duration::seconds(30);
 
 /// Tokens the AI provider counted for a Task, over all its attempts, as kept in its payloads.
 ///
@@ -156,9 +157,12 @@ pub struct Analysis {
     /// Versions of the prompts that wrote the log, such as
     /// `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
     prompt_version: String,
+    /// Where the analysis left the log, until the success lists it under `file_name`.
+    #[serde(skip)]
+    log_path: Utf8PathBuf,
 }
 
-/// Records an AI analysis Task, whose job the [`ProvisionerTaskRunner`](super::runner::ProvisionerTaskRunner) queues.
+/// Records an AI analysis Task and stores its job.
 ///
 /// Only a new Task keeps the API key; asking again for a known Task changes nothing, even while its session is
 /// recording again.
@@ -197,7 +201,7 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
     // A repeated request gets its Task back whatever its session does now, so the ID is looked up first.
     let known = state
         .provisioner_tasks
-        .get(task_id, OffsetDateTime::now_utc())
+        .get(task_id)
         .await
         .map_err(StartError::Internal)?;
 
@@ -231,14 +235,23 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
         base_url: settings.base_url,
     };
 
+    let secrets = state.secrets.clone();
     let outcome = state
         .provisioner_tasks
-        .create::<RecordingAiAnalysis>(task_id, target, &params, |record| {
-            // The job may run as soon as it is queued, so the key must be in place first.
-            state
-                .secrets
-                .insert(SecretId(record.id), &access.to_secret()?, record.deadline_at)
-        })
+        .create(
+            RecordingAiAnalysis::new(
+                state.conf_handle.clone(),
+                state.recordings.clone(),
+                state.secrets.clone(),
+            ),
+            task_id,
+            target,
+            &params,
+            move |record| {
+                // The job may run as soon as the Task is recorded, so the key must be in place first.
+                secrets.insert(SecretId(record.id), &access.to_secret()?, record.deadline_at)
+            },
+        )
         .await
         .map_err(StartError::Internal)?;
 
@@ -255,22 +268,37 @@ pub async fn start(state: &DgwState, request: StartRequest) -> Result<StartOutco
     })
 }
 
+/// Returns the Task with this ID, of any kind; one past its deadline is failed first.
+pub async fn get(state: &DgwState, task_id: Uuid) -> anyhow::Result<Option<ProvisionerTaskRecord>> {
+    state.provisioner_tasks.get(task_id).await
+}
+
 /// The `recording-ai-analysis` provisioner task.
 pub struct RecordingAiAnalysis {
     conf_handle: ConfHandle,
     recordings: RecordingMessageSender,
     secrets: SecretStore,
     progress_timeout: time::Duration,
+    first_retry_delay: time::Duration,
 }
 
 impl RecordingAiAnalysis {
-    pub fn new(conf_handle: ConfHandle, recordings: RecordingMessageSender, secrets: SecretStore) -> Self {
+    fn new(conf_handle: ConfHandle, recordings: RecordingMessageSender, secrets: SecretStore) -> Self {
         Self {
             conf_handle,
             recordings,
             secrets,
             progress_timeout: PROGRESS_TIMEOUT,
+            first_retry_delay: FIRST_RETRY_DELAY,
         }
+    }
+
+    pub(crate) fn from_dependencies(dependencies: &InMemoryJobDependencies) -> Self {
+        Self::new(
+            dependencies.conf_handle.clone(),
+            dependencies.recordings.clone(),
+            dependencies.secrets.clone(),
+        )
     }
 
     fn manifest_path(&self, session_id: Uuid) -> Utf8PathBuf {
@@ -282,57 +310,11 @@ impl RecordingAiAnalysis {
     }
 }
 
-const UNLISTED_LOG_PREFIX: &str = ".ai-analysis-";
-
-const UNLISTED_LOG_SUFFIX: &str = ".slog";
-
-/// Where a Task leaves its log until its success is recorded: in the session folder, but not in the manifest, under a
-/// name of its own, so the end of another Task leaves it alone.
-fn unlisted_log_path(manifest_path: &Utf8Path, task_id: Uuid) -> Utf8PathBuf {
-    manifest_path.with_file_name(format!("{UNLISTED_LOG_PREFIX}{task_id}{UNLISTED_LOG_SUFFIX}"))
-}
-
-/// The logs that Tasks of the session left unlisted, each with the ID of its Task.
-async fn unlisted_logs(manifest_path: &Utf8Path) -> std::io::Result<Vec<(Uuid, Utf8PathBuf)>> {
-    let Some(dir) = manifest_path.parent() else {
-        return Ok(Vec::new());
-    };
-    let mut entries = match tokio::fs::read_dir(dir).await {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut logs = Vec::new();
-
-    while let Some(entry) = entries.next_entry().await? {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else {
-            continue;
-        };
-        let task_id = name
-            .strip_prefix(UNLISTED_LOG_PREFIX)
-            .and_then(|name| name.strip_suffix(UNLISTED_LOG_SUFFIX))
-            .and_then(|task_id| Uuid::parse_str(task_id).ok());
-
-        if let Some(task_id) = task_id {
-            logs.push((task_id, dir.join(name)));
-        }
-    }
-
-    Ok(logs)
-}
-
-/// Removes `path`, unless it is already gone.
-async fn remove_if_exists(path: &Utf8Path) -> std::io::Result<()> {
-    match tokio::fs::remove_file(path).await {
-        Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
-        _ => Ok(()),
-    }
-}
-
 #[async_trait]
 impl ProvisionerTask for RecordingAiAnalysis {
     const KIND: &'static str = KIND;
+
+    const START_WINDOW: time::Duration = START_WINDOW;
 
     type Params = Params;
 
@@ -342,12 +324,12 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
     type Recoverable = Recoverable;
 
-    fn start_window(&self) -> time::Duration {
-        START_WINDOW
-    }
-
     fn progress_timeout(&self) -> time::Duration {
         self.progress_timeout
+    }
+
+    fn retry_delay(&self, attempts: u32) -> time::Duration {
+        self.first_retry_delay * 2u32.pow(attempts.saturating_sub(1))
     }
 
     fn starting_payload(&self, last: &serde_json::Value) -> serde_json::Value {
@@ -359,7 +341,7 @@ impl ProvisionerTask for RecordingAiAnalysis {
         })
     }
 
-    fn failed_payload(&self, error: &AnyPermanent, last: &serde_json::Value) -> serde_json::Value {
+    fn failed_payload(&self, error: &Permanent<Failure, Recoverable>, last: &serde_json::Value) -> serde_json::Value {
         json!({ "error": error, "usage": TokenUsage::of(last) })
     }
 
@@ -381,19 +363,10 @@ impl ProvisionerTask for RecordingAiAnalysis {
 
         // A new Task never resumes from what an earlier analysis left, while its retries resume from their own files.
         if attempt.attempts == 1 {
-            let manifest_path = self.manifest_path(session_id);
-
-            recording_analysis::discard(&manifest_path, None)
+            recording_analysis::discard(&self.manifest_path(session_id), None)
                 .await
                 .map_err(|error| {
                     error!(task.id = %attempt.task_id, %error, "Failed to remove the earlier AI analysis working files");
-                    AnalysisError::Permanent(Permanent::Internal)
-                })?;
-
-            self.end_unlisted_logs(attempt, session_id, &manifest_path)
-                .await
-                .map_err(|error| {
-                    error!(task.id = %attempt.task_id, error = format!("{error:#}"), "Failed to end the logs earlier AI analyses left unlisted");
                     AnalysisError::Permanent(Permanent::Internal)
                 })?;
         }
@@ -424,9 +397,14 @@ impl ProvisionerTask for RecordingAiAnalysis {
             .await
     }
 
-    /// The API key is kept in memory only, so no attempt can run after a restart.
-    fn restart_failure(&self) -> Option<Failure> {
-        Some(Failure::KeyLost)
+    async fn publish(&self, record: &ProvisionerTaskRecord, output: &Analysis) -> anyhow::Result<()> {
+        let session_id = Uuid::parse_str(&record.target).context("parse the session ID")?;
+
+        // Nothing else runs on the session meanwhile: a newer Task of the session cannot start before this one ends.
+        self.recordings
+            .replace_artifacts(session_id, ArtifactKind::AiAnalysis, &output.log_path)
+            .await
+            .with_context(|| format!("list {}", output.log_path))
     }
 
     async fn on_end(&self, record: &ProvisionerTaskRecord) -> anyhow::Result<()> {
@@ -436,14 +414,9 @@ impl ProvisionerTask for RecordingAiAnalysis {
             return Ok(());
         };
 
-        let manifest_path = self.manifest_path(session_id);
-        let log_path = unlisted_log_path(&manifest_path, record.id);
         let _session = lock_session(session_id).await;
 
-        self.end_log(session_id, &log_path, record.state == ProvisionerTaskState::Succeeded)
-            .await?;
-
-        recording_analysis::discard(&manifest_path, Some(&record.id.to_string()))
+        recording_analysis::discard(&self.manifest_path(session_id), Some(&record.id.to_string()))
             .await
             .context("remove the AI analysis working files")
     }
@@ -541,16 +514,6 @@ impl RecordingAiAnalysis {
             }
         };
 
-        // The log stays out of the manifest until the runner records the success, so a Task that fails never replaces
-        // the earlier analysis.
-        let log_path = unlisted_log_path(&manifest_path, attempt.task_id);
-        tokio::fs::rename(&analysis.log_path, &log_path)
-            .await
-            .map_err(|error| {
-                error!(task.id = %attempt.task_id, %error, "Failed to keep the AI analysis log");
-                AnalysisError::Permanent(Permanent::Internal)
-            })?;
-
         debug!(task.id = %attempt.task_id, actions = analysis.actions, "AI analysis log written");
 
         Ok(Analysis {
@@ -558,50 +521,8 @@ impl RecordingAiAnalysis {
             model: analysis.model,
             usage: earlier.with(analysis.usage),
             prompt_version: analysis.prompt_version,
+            log_path: analysis.log_path,
         })
-    }
-}
-
-impl RecordingAiAnalysis {
-    /// What the end of a Task does to the log it left unlisted: the log of a Task whose success is recorded takes the
-    /// place of the earlier analysis, and any other log is removed.
-    async fn end_log(&self, session_id: Uuid, log_path: &Utf8Path, succeeded: bool) -> anyhow::Result<()> {
-        if succeeded {
-            self.recordings
-                .replace_artifacts(session_id, ArtifactKind::AiAnalysis, log_path)
-                .await
-                .with_context(|| format!("list {log_path}"))
-        } else {
-            remove_if_exists(log_path)
-                .await
-                .with_context(|| format!("remove {log_path}"))
-        }
-    }
-
-    /// Does what the end of an earlier Task does to the log it left unlisted, since that end may still be due, so a
-    /// newer Task never loses an analysis whose success is recorded: the log of a succeeded Task is listed, so it stays
-    /// until a newer analysis succeeds, and the log of a failed or unknown one is removed.
-    async fn end_unlisted_logs(
-        &self,
-        attempt: &Attempt,
-        session_id: Uuid,
-        manifest_path: &Utf8Path,
-    ) -> anyhow::Result<()> {
-        for (task_id, log_path) in unlisted_logs(manifest_path).await.context("list the unlisted logs")? {
-            match attempt
-                .state_of(task_id)
-                .await
-                .context("read the Task of an unlisted log")?
-            {
-                Some(ProvisionerTaskState::Queued | ProvisionerTaskState::Running) => {}
-                state => {
-                    self.end_log(session_id, &log_path, state == Some(ProvisionerTaskState::Succeeded))
-                        .await?
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 

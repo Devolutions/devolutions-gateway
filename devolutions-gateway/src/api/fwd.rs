@@ -139,7 +139,9 @@ async fn handle_fwd(
     with_tls: bool,
     agent_tunnel_handle: Option<Arc<agent_tunnel::AgentTunnelHandle>>,
 ) {
-    let (stream, close_handle) = crate::ws::handle(
+    let crate::ws::HandledWebSocket {
+        stream, close_handle, ..
+    } = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         Duration::from_secs(conf.debug.ws_keep_alive_interval),
@@ -452,7 +454,11 @@ async fn fwd_http(
         let subscriber_tx = state.subscriber_tx;
 
         client_ws.on_upgrade(move |client_ws| {
-            let (client_stream, client_close_handle) = crate::ws::handle(
+            let crate::ws::HandledWebSocket {
+                stream: client_stream,
+                close_handle: client_close_handle,
+                ..
+            } = crate::ws::handle(
                 client_ws,
                 crate::ws::KeepAliveShutdownSignal(shutdown_signal),
                 Duration::from_secs(conf.debug.ws_keep_alive_interval),

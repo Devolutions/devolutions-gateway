@@ -13,3 +13,8 @@ All of this is best effort, as if someone has root access and we still try our b
 ## Replacement
 
 Storing a secret under an ID that already has one replaces the old one.
+
+<a id="sharing"></a>
+## Sharing
+
+Gateway has one secret store, shared by the handlers and the background services, so a secret a handler stores is found by the background service that uses it, such as the API key of an AI analysis.

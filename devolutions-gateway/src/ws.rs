@@ -1,4 +1,5 @@
 use core::{future, time};
+use std::sync::{Arc, OnceLock};
 
 use axum::extract::ws::{self, CloseFrame, WebSocket};
 use bytes::Bytes;
@@ -15,18 +16,40 @@ impl transport::KeepAliveShutdown for KeepAliveShutdownSignal {
     }
 }
 
+/// A WebSocket wrapped by [`handle`].
+pub struct HandledWebSocket<S> {
+    /// The WebSocket as a byte stream.
+    pub stream: S,
+    pub close_handle: transport::CloseWebSocketHandle,
+    /// The close code the client sends, known once `stream` has returned end of file for its close frame.
+    pub received_close: ReceivedClose,
+}
+
 /// Spawns a keep-alive task and wraps the WebSocket into a type implementing AsyncRead and AsyncWrite.
 pub fn handle(
     ws: WebSocket,
     shutdown_signal: impl transport::KeepAliveShutdown,
     keep_alive_interval: time::Duration,
-) -> (
-    impl AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    transport::CloseWebSocketHandle,
-) {
+) -> HandledWebSocket<impl AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     let (ws, close_handle) = with_sentinel(ws, shutdown_signal, keep_alive_interval);
+    let received_close = ReceivedClose::default();
 
-    (websocket_compat(ws), close_handle)
+    HandledWebSocket {
+        stream: websocket_compat(ws, received_close.clone()),
+        close_handle,
+        received_close,
+    }
+}
+
+/// The close code a client sent when it closed the WebSocket.
+#[derive(Clone, Default)]
+pub struct ReceivedClose(Arc<OnceLock<u16>>);
+
+impl ReceivedClose {
+    /// The code of the close frame the client sent, if it sent one with a code.
+    pub fn code(&self) -> Option<u16> {
+        self.0.get().copied()
+    }
 }
 
 pub fn handle_messages(
@@ -121,14 +144,22 @@ fn with_sentinel(
     (ws, close_handle)
 }
 
-fn websocket_compat(ws: transport::Shared<WebSocket>) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
+fn websocket_compat(
+    ws: transport::Shared<WebSocket>,
+    received_close: ReceivedClose,
+) -> impl AsyncRead + AsyncWrite + Unpin + Send + 'static {
     let ws_compat = ws
-        .filter_map(|item| {
+        .filter_map(move |item| {
             item.map(|msg| match msg {
                 ws::Message::Text(s) => Some(transport::WsReadMsg::Payload(Bytes::from(s))),
                 ws::Message::Binary(data) => Some(transport::WsReadMsg::Payload(data)),
                 ws::Message::Ping(_) | ws::Message::Pong(_) => None,
-                ws::Message::Close(_) => Some(transport::WsReadMsg::Close),
+                ws::Message::Close(frame) => {
+                    if let Some(frame) = frame {
+                        let _ = received_close.0.set(frame.code);
+                    }
+                    Some(transport::WsReadMsg::Close)
+                }
             })
             .transpose()
             .pipe(future::ready)
