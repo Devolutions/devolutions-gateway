@@ -145,7 +145,7 @@ The location and format of the files below are stable, because the conformance t
 - Key names are device-key names `devolutions-agent-identity_<key_uuid>`: Agent Identity owns the prefix `devolutions-agent-identity`, and `key_uuid` is a random UUID generated with each key, because the authority isn't known when the enrollment key is created.
   The file backend stores `<data-dir>/identity/keys/<key_name>.p8`.
 - The agent writes a key's name and backend to its record (`identity.json` or the in-progress record) before creating the key, and deletes a key before removing its name from the record.
-  A crash therefore never leaves an unrecorded key, and every existing key with the agent's prefix is recorded with its backend.
+  A crash therefore never leaves an unrecorded key, and every existing key with the agent's prefix is recorded with its backend, except the old key of a confirmed renewal whose backend is unavailable: the agent drops its record without opening the key, because keeping the record would hold every later renewal back, and start-up deletes the key once its backend is available again.
   At start-up, a recorded pending or enrollment key that doesn't exist yet in its backend is regenerated there, and a missing current key makes the identity `key_lost`.
 - One Devolutions Agent runs per machine, and it owns every device key with its prefix on the machine: at start-up it deletes each one that no `identity.json` or in-progress record names with its backend, in every backend available on the machine.
 - During a renewal, the new key is recorded as `pending` before the renew request is sent, and the returned chain is stored on that slot.
