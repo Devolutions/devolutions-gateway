@@ -2317,6 +2317,7 @@ mod tests {
 
     #[test]
     fn vcpkg_elevated_execution_is_rejected() {
+        // oracle: mutant Running an elevated vcpkg plan or rejecting its demoted user-scope plan.
         let mut ctx = ExecutionContext {
             kill_processes: Vec::new(),
             pre_command: None,
@@ -2355,6 +2356,7 @@ mod tests {
 
     #[test]
     fn kill_command_is_scoped_to_the_requester_session() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4192110409
         let taskkill = trusted_system32_executable("taskkill.exe");
 
         assert_eq!(
@@ -2378,6 +2380,7 @@ mod tests {
 
     #[test]
     fn account_display_name_uses_domain_and_name() {
+        // oracle: mutant Omitting the domain separator from the taskkill account filter.
         let system = Sid::from_well_known(windows::Win32::Security::WinLocalSystemSid, None).expect("SYSTEM SID");
         let name = account_display_name(&system).expect("look up SYSTEM");
         assert!(name.ends_with(r"\SYSTEM"), "{name}");
@@ -2385,6 +2388,7 @@ mod tests {
 
     #[tokio::test]
     async fn elevated_pre_post_commands_are_rejected_by_executor() {
+        // oracle: regression Devolutions/devolutions-gateway#1903
         let ctx = ExecutionContext {
             kill_processes: Vec::new(),
             pre_command: Some("echo before".to_owned()),
@@ -2412,6 +2416,7 @@ mod tests {
 
     #[test]
     fn non_system_mode_rejects_client_user_different_from_broker_user() {
+        // oracle: regression Devolutions/devolutions-gateway#1892
         let ctx = ExecutionContext {
             kill_processes: Vec::new(),
             pre_command: None,
@@ -2518,6 +2523,7 @@ mod tests {
 
     #[test]
     fn non_system_mode_rejects_client_session_different_from_broker_session() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4192110409
         let token = Process::current_process()
             .token(windows::Win32::Security::TOKEN_QUERY)
             .expect("open current process token");
@@ -2551,6 +2557,7 @@ mod tests {
 
     #[test]
     fn elevated_tokens_are_rejected_for_standard_plans() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4192110367
         let mut ctx = ExecutionContext {
             kill_processes: vec!["notepad.exe".to_owned()],
             pre_command: None,
@@ -2590,6 +2597,7 @@ mod tests {
 
     #[test]
     fn session_zero_is_never_used_for_execution() {
+        // oracle: mutant Using the service process token for a session-zero request.
         let sid = Sid::from_well_known(WinWorldSid, None).expect("well-known Everyone SID");
         let error = super::user_session_token(0, &sid).expect_err("session 0 must be rejected");
         assert!(error.to_string().contains("session 0"), "{error:#}");

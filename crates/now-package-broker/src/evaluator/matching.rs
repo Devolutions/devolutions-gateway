@@ -425,6 +425,7 @@ mod tests {
 
     #[test]
     fn elevated_user_scope_request_uses_standard_execution_privilege() {
+        // oracle: mutant Matching elevated policy rules for typed user-scope requests.
         let mut request = request();
         request.client.requested_elevation = api::Elevation::Elevated;
         request.options.scope = Some(api::Scope::User);
