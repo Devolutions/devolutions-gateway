@@ -247,7 +247,7 @@ export class WebMRecorder {
   private handleMediaRecorderDataAvailable(event: BlobEvent): void {
     if (!event.data || event.data.size === 0) return;
 
-    if (!this._isRecording) {
+    if (!this._isRecording && this.pendingError === null) {
       this.isStarting = false;
       this._isRecording = true;
       // Resolve the start promise — first data confirms recording is active.
