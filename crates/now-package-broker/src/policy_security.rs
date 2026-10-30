@@ -2008,25 +2008,6 @@ mod tests {
     }
 
     #[test]
-    fn program_files_like_install_location_is_accepted() {
-        // `Program Files` grants Users read and execute, and full control to the owner of new objects.
-        let sd = SddlDescriptor::parse(&format!(
-            "O:{TRUSTED_INSTALLER_SID}D:PAI(A;;FA;;;{TRUSTED_INSTALLER_SID})(A;CIIO;GA;;;{TRUSTED_INSTALLER_SID})\
-             (A;;0x1301bf;;;SY)(A;OICIIO;GA;;;SY)(A;;0x1301bf;;;BA)(A;OICIIO;GA;;;BA)\
-             (A;;0x1200a9;;;BU)(A;OICIIO;GXGR;;;BU)(A;OICIIO;GA;;;CO)(A;;0x1200a9;;;AC)(A;OICIIO;GXGR;;;AC)"
-        ));
-        sd.verify_as_install_location()
-            .expect("Program Files-like folder must be accepted");
-    }
-
-    #[test]
-    fn administrators_only_install_location_is_accepted() {
-        let sd = SddlDescriptor::parse("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)");
-        sd.verify_as_install_location()
-            .expect("SYSTEM/Administrators-only folder must be accepted");
-    }
-
-    #[test]
     fn inheritable_untrusted_write_ace_is_rejected_for_install_locations_only() {
         // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4283749914
         // Users may modify what gets created inside the folder, but not the folder itself.

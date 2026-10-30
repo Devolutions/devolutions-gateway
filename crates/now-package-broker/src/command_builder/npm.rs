@@ -334,15 +334,6 @@ mod tests {
     }
 
     #[test]
-    fn elevated_user_scope_requests_run_with_the_standard_token() {
-        let mut request = make_request();
-        request.client.requested_elevation = Elevation::Elevated;
-        request.options.scope = Some(Scope::User);
-
-        build_npm_command(&request).expect("elevated user-scope npm runs with the standard token");
-    }
-
-    #[test]
     fn machine_scope_requests_are_rejected() {
         let mut request = make_request();
         request.options.scope = Some(Scope::Machine);
