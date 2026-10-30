@@ -11,6 +11,12 @@ const ModeTooltips: Record<ArdControlMode, string> = {
   absolute: "Only you can use the mouse and keyboard. The Mac's own mouse and keyboard are ignored.",
 };
 
+const ModeIcons: Record<ArdControlMode, string> = {
+  observe: 'dvl-icon dvl-icon-watching',
+  shared: 'dvl-icon dvl-icon-cursor',
+  absolute: 'dvl-icon dvl-icon-user-locked',
+};
+
 const ModeNotAvailableTooltip = 'Not allowed by the remote computer or user';
 const CurtainOnTooltip = 'Hide the curtain to change the control mode';
 
@@ -19,16 +25,19 @@ export function buildArdModeToggle(state: ArdControlState, pending: ArdControlPe
     ariaLabel: 'Control mode',
     options: ArdControlModes.map((mode) => {
       const available = state.availableModes.includes(mode);
-      let tooltip = ModeTooltips[mode];
+      const label = ArdControlModeLabels[mode];
+      let description = ModeTooltips[mode];
       if (state.curtainOn) {
-        tooltip = CurtainOnTooltip;
+        description = CurtainOnTooltip;
       } else if (!available) {
-        tooltip = ModeNotAvailableTooltip;
+        description = ModeNotAvailableTooltip;
       }
       return {
         id: mode,
-        label: ArdControlModeLabels[mode],
-        tooltip,
+        label,
+        icon: ModeIcons[mode],
+        // The button is icon-only, so the tooltip leads with the mode name.
+        tooltip: `${label}: ${description}`,
         active: state.mode === mode,
         enabled: available && !state.curtainOn && !pending,
       };
@@ -38,5 +47,16 @@ export function buildArdModeToggle(state: ArdControlState, pending: ArdControlPe
 
 // No badge for Observe: the mode toggle already marks it active.
 export function buildArdStatusBadges(state: ArdControlState): ToolbarStatusBadge[] {
-  return state.curtainOn ? [{ id: 'ard-curtain-on', label: 'Curtain on', tone: 'danger' }] : [];
+  return state.curtainOn
+    ? [
+        {
+          id: 'ard-curtain-on',
+          label: 'Curtain on',
+          icon: 'dvl-icon dvl-icon-wayk-session-off',
+          tooltip:
+            'Curtain on: the person at the Mac sees your message instead of their screen. To remove it, choose Hide curtain in the ⋮ menu.',
+          tone: 'danger',
+        },
+      ]
+    : [];
 }

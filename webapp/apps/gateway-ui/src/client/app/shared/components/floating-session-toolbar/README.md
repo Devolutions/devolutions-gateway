@@ -100,8 +100,8 @@ container without consuming layout space.
 | `wheelSpeedControl` | `WheelSpeedControl \| null` | `null` | Slider config (min/max/step/label). |
 | `clipboardActionButtons` | `ClipboardActionButton[]` | `[]` | Action buttons rendered in the dropdown Clipboard section. |
 | `sessionActions` | `ToolbarAction[]` | `[]` | Action buttons rendered in the dropdown above Clipboard, grouped by `section` (heading defaults to **Session**). |
-| `modeToggle` | `ToolbarModeToggle \| null` | `null` | Text toggle rendered after the screen-mode group. |
-| `statusBadges` | `ToolbarStatusBadge[]` | `[]` | Read-only status pills rendered after the drag handle. |
+| `modeToggle` | `ToolbarModeToggle \| null` | `null` | Icon toggle rendered after the screen-mode group. |
+| `statusBadges` | `ToolbarStatusBadge[]` | `[]` | Read-only icon indicators rendered after the mode toggle. |
 | `sessionInfo` | `ToolbarSessionInfo \| null` | `null` | Data source for the Session info popover default renderer. |
 | `sessionInfoTemplate` | `TemplateRef<ToolbarSessionInfoTemplateContext> \| null` | `null` | Optional custom popover template. When omitted, the default key/value renderer is used. |
 | `iconColorActive` | `string` | `'#0068C3'` | Active fill color for the dropdown dock-position SVG buttons. |

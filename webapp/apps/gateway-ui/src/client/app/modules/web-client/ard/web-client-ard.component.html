@@ -30,7 +30,8 @@
     </div>
   }
 
-  <p-dialog header="Show curtain" [modal]="true" [(visible)]="curtainDialogVisible" [style]="{ width: '420px' }" appendTo="body">
+  <!-- Appended to the element that goes fullscreen: the browser draws nothing outside it while fullscreen. -->
+  <p-dialog header="Show curtain" [modal]="true" [(visible)]="curtainDialogVisible" [style]="{ width: '420px' }" [breakpoints]="{ '480px': '90vw' }" [appendTo]="sessionsContainerElement.nativeElement">
     <form class="ard-curtain-form" (ngSubmit)="submitCurtain()">
       <label for="ardCurtainMessage">Message shown on the Mac</label>
       <input pInputText
@@ -38,7 +39,8 @@
              name="curtainMessage"
              type="text"
              autocomplete="off"
-             [(ngModel)]="curtainMessage"
+             [ngModel]="curtainMessage"
+             (ngModelChange)="onCurtainMessageChange($event)"
              [attr.aria-invalid]="curtainMessageTooLong"/>
       @if (curtainMessageTooLong) {
         <span class="form-helper-text" role="alert">The message must be at most {{ maxCurtainMessageBytes }} bytes.</span>

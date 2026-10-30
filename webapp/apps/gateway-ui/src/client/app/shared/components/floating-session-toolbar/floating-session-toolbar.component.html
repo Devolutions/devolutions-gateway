@@ -20,12 +20,6 @@
     <i class="dvl-icon dvl-icon-move" aria-hidden="true"></i>
   </button>
 
-  @for (badge of statusBadges; track badge.id) {
-    <span class="toolbar-status-badge"
-      [class.toolbar-status-badge-danger]="badge.tone === 'danger'"
-      role="status">{{ badge.label }}</span>
-  }
-
   @if (features.windowsKey) {
     <button type="button" class="toolbar-button"
       aria-label="Windows key" title="Send Windows key"
@@ -94,21 +88,32 @@
 
   @if (modeToggle) {
     <div class="toolbar-divider" aria-hidden="true"></div>
-    <div class="toolbar-btn-section toolbar-btn-section-text" role="radiogroup" [attr.aria-label]="modeToggle.ariaLabel">
+    <div class="toolbar-btn-section" role="radiogroup" [attr.aria-label]="modeToggle.ariaLabel">
       @for (option of modeToggle.options; track option.id) {
         <button
           type="button"
           role="radio"
-          class="toolbar-button toolbar-button-text"
-          [class.toolbar-button-active]="option.active"
+          class="toolbar-button"
+          [class.toolbar-button-selected]="option.active"
           [attr.aria-checked]="option.active"
+          [attr.aria-label]="option.label"
           [disabled]="!option.enabled"
           [title]="option.tooltip"
           (click)="selectModeToggleOption(option)">
-          <span>{{ option.label }}</span>
+          <i [class]="option.icon" aria-hidden="true"></i>
         </button>
       }
     </div>
+  }
+
+  @for (badge of statusBadges; track badge.id) {
+    <span class="toolbar-status-badge"
+      [class.toolbar-status-badge-danger]="badge.tone === 'danger'"
+      role="status"
+      [attr.aria-label]="badge.label"
+      [title]="badge.tooltip">
+      <i [class]="badge.icon" aria-hidden="true"></i>
+    </span>
   }
 
   <button

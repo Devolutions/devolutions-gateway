@@ -81,32 +81,31 @@
   &:hover { background: var(--toolbar-btn-active-hover-bg); }
 }
 
-// Text buttons (Ctrl+Alt+Del pill, mode-toggle options) — natural width
+// Selected mode-toggle option — solid background, accent icon
+.toolbar-button-selected,
+.toolbar-button-selected:hover {
+  background: var(--toolbar-btn-selected-bg);
+  color: var(--toolbar-btn-selected-color);
+}
+
+// Ctrl+Alt+Del pill — natural width, inset border
 // height comes from .toolbar-button (always co-applied); only width/padding differ
-.toolbar-button-cad,
-.toolbar-button-text {
+.toolbar-button-cad {
   width: auto;
   padding: 0 10px;
-}
-
-// Shared by text buttons and status badges
-.toolbar-button-cad span,
-.toolbar-button-text span,
-.toolbar-status-badge {
-  font-family: var(--toolbar-font-family);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1;
-  color: var(--toolbar-cad-text-color);
-  white-space: nowrap;
-}
-
-// Ctrl+Alt+Del pill — inset border
-.toolbar-button-cad {
   background: var(--toolbar-cad-bg);
   box-shadow: inset 0 0 0 1px var(--toolbar-cad-border-color);
 
   &:hover { background: var(--toolbar-cad-hover-bg); }
+
+  span {
+    font-family: var(--toolbar-font-family);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1;
+    color: var(--toolbar-cad-text-color);
+    white-space: nowrap;
+  }
 }
 
 // Grouped section container (Minimize / Fullscreen / Fit)
@@ -120,18 +119,23 @@
   flex-shrink: 0;
 }
 
-// Mode toggle: vertical docks pin .toolbar-btn-section to 36px, which text labels don't fit.
-// Three classes outrank the dock rules without extending the shared vertical placeholder, which would emit this rule once per vertical dock.
-.floating-session-toolbar .toolbar-btn-section.toolbar-btn-section-text {
-  width: auto;
-}
-
-// Read-only status pill (e.g. "Curtain on")
+// Read-only status indicator (e.g. "Curtain on") — same footprint as an icon button
 .toolbar-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  padding: 4px 8px;
+  width: 36px;
+  height: 28px;
   border-radius: 8px;
+  color: var(--toolbar-icon-color);
   background: var(--toolbar-btn-group-bg);
+
+  i {
+    display: block;
+    font-size: 18px;
+    line-height: 1;
+  }
 }
 
 // Close button and danger badge — solid danger background

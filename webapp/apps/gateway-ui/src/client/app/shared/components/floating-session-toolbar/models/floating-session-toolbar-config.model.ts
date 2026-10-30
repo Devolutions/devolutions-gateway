@@ -43,22 +43,29 @@ export interface WheelSpeedControl {
 /** One option of the mode toggle. */
 export interface ToolbarModeOption {
   id: string;
+  /** Accessible name; the button shows only the icon. */
   label: string;
+  /** Icon classes, e.g. 'dvl-icon dvl-icon-cursor'. */
+  icon: string;
   tooltip: string;
   active: boolean;
   enabled: boolean;
 }
 
-/** Optional text toggle rendered next to the screen-mode group, e.g. a protocol's control mode. */
+/** Optional icon toggle rendered next to the screen-mode group, e.g. a protocol's control mode. */
 export interface ToolbarModeToggle {
   ariaLabel: string;
   options: ToolbarModeOption[];
 }
 
-/** Read-only status pill rendered after the drag handle. */
+/** Read-only icon indicator rendered after the mode toggle. */
 export interface ToolbarStatusBadge {
   id: string;
+  /** Accessible name; the indicator shows only the icon. */
   label: string;
+  /** Icon classes, e.g. 'dvl-icon dvl-icon-wayk-session-off'. */
+  icon: string;
+  tooltip: string;
   tone?: 'danger';
 }
 

@@ -40,7 +40,7 @@ import {
   ToolbarStatusBadge,
   WheelSpeedControl,
 } from '@shared/components/floating-session-toolbar/models/floating-session-toolbar-config.model';
-import { ArdControlMode, DefaultArdStartMode } from '@shared/interfaces/ard-control.interfaces';
+import { ArdControlMode, ArdControlModes, DefaultArdStartMode } from '@shared/interfaces/ard-control.interfaces';
 import { ExtractedHostnamePort } from '@shared/services/utils/string.service';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -50,11 +50,14 @@ const ModeNotAllowedMessage = "That mode isn't allowed";
 const ControlRevokedMessage = 'The remote user no longer allows control';
 const ControlGrantedMessage = 'Control is available again';
 const ArdControlRequestFailedMessage = 'The control request failed';
+const ArdControlTimedOutMessage = "The Mac didn't respond";
 
 // Re-enables the controls if the session never settles a mode or hide-curtain request.
 // Showing the curtain has no timeout: a mode request would cancel it, and the session settles every curtain request
 // it sends on the Mac's next screen report.
 const ArdPendingTimeoutMs = 10_000;
+
+const Utf8Encoder = new TextEncoder();
 
 const CurtainFailureMessages: Record<ArdCurtainFailure, string> = {
   'login-window': "Can't show the curtain while the Mac is at the login window",
@@ -106,6 +109,8 @@ export class WebClientArdComponent
 
   curtainDialogVisible = false;
   curtainMessage = '';
+  // Set only by onCurtainMessageChange().
+  curtainMessageTooLong = false;
   // The session ends on a longer message.
   readonly maxCurtainMessageBytes = 512;
   // ──
@@ -179,16 +184,21 @@ export class WebClientArdComponent
 
   // ── ARD control handlers ──────────────────────────────────────────────────
   onArdModeChange(mode: string): void {
-    this.ardRequestedMode = mode as ArdControlMode;
-    this.invokeArdControl('mode', ardControlMode(this.ardRequestedMode));
+    const requested = ArdControlModes.find((known) => known === mode);
+    if (!requested) {
+      return;
+    }
+    this.ardRequestedMode = requested;
+    this.invokeArdControl('mode', ardControlMode(requested));
   }
 
-  get curtainMessageTooLong(): boolean {
-    return new TextEncoder().encode(this.curtainMessage).length > this.maxCurtainMessageBytes;
+  onCurtainMessageChange(message: string): void {
+    this.curtainMessage = message;
+    this.curtainMessageTooLong = Utf8Encoder.encode(message).length > this.maxCurtainMessageBytes;
   }
 
   openCurtainDialog(): void {
-    this.curtainMessage = '';
+    this.onCurtainMessageChange('');
     this.curtainDialogVisible = true;
   }
 
@@ -217,9 +227,14 @@ export class WebClientArdComponent
     this.ardPending = pending;
     this.ardPendingTimeout =
       pending && pending !== 'show-curtain'
-        ? setTimeout(() => this.setArdPending(undefined), ArdPendingTimeoutMs)
+        ? setTimeout(() => this.onArdPendingTimeout(), ArdPendingTimeoutMs)
         : undefined;
     this.refreshArdToolbar();
+  }
+
+  private onArdPendingTimeout(): void {
+    this.setArdPending(undefined);
+    this.webClientWarning(ArdControlTimedOutMessage);
   }
 
   private refreshArdToolbar(): void {
@@ -242,7 +257,7 @@ export class WebClientArdComponent
         tooltip: curtainOn
           ? 'Remove the curtain from the Mac and return to the previous control mode.'
           : "Take exclusive control and cover the Mac's screen with a curtain for the person at the Mac.",
-        icon: curtainOn ? 'dvl-icon dvl-icon-unlock' : 'dvl-icon dvl-icon-lock',
+        icon: curtainOn ? 'dvl-icon dvl-icon-wayk-session-on' : 'dvl-icon dvl-icon-wayk-session-off',
         section: 'Screen',
         action: curtainOn
           ? () => this.invokeArdControl('hide-curtain', ardHideCurtain())
