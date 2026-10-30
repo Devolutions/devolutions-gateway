@@ -90,6 +90,7 @@ mod tests {
 
     #[test]
     fn plain_executable_names_are_acceptable_kill_targets() {
+        // oracle: mutant Rejecting plain executable names in the kill-target validator.
         for name in ["Code.exe", "notepad.EXE", "My App.exe", "app-1.2.exe"] {
             assert!(is_acceptable_kill_process_name(name), "{name}");
         }
@@ -97,6 +98,7 @@ mod tests {
 
     #[test]
     fn wildcard_path_and_malformed_kill_targets_are_rejected() {
+        // oracle: mutant Allowing wildcard executable names in kill targets.
         for name in [
             "",
             ".exe",
@@ -124,6 +126,7 @@ mod tests {
 
     #[test]
     fn names_without_an_extension_get_exe_appended() {
+        // oracle: mutant Leaving extensionless kill targets unnormalized.
         assert_eq!(normalize_kill_process_name("chrome"), "chrome.exe");
         assert_eq!(normalize_kill_process_name("Chrome.EXE"), "Chrome.EXE");
         assert_eq!(normalize_kill_process_name("chrome.bat"), "chrome.bat");

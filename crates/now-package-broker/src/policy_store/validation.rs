@@ -716,6 +716,7 @@ mod tests {
 
     #[test]
     fn audit_mode_warns_that_elevated_requests_run_without_a_prompt() {
+        // oracle: mutant Omitting the audit-mode warning about elevated execution without UAC.
         let uac_warnings = |raw: &serde_json::Value| {
             validate_draft(raw)
                 .findings

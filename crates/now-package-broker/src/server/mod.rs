@@ -1683,6 +1683,7 @@ mod tests {
 
     #[test]
     fn elevated_user_scope_pre_post_commands_are_accepted() {
+        // oracle: mutant Rejecting standard user-scope pre/post commands based on requested elevation.
         // Explicit user scope runs with the standard token even when elevation is requested.
         let mut request = request();
         request.client.requested_elevation = Elevation::Elevated;
@@ -1698,6 +1699,7 @@ mod tests {
 
     #[test]
     fn unacceptable_kill_process_names_are_rejected_even_under_permissive_policy() {
+        // oracle: mutant Allowing wildcard kill targets under a permissive policy.
         for name in [
             "*",
             "Code*.exe",
@@ -1729,6 +1731,7 @@ mod tests {
 
     #[tokio::test]
     async fn kill_process_names_without_an_extension_execute_with_exe_appended() {
+        // oracle: mutant Failing to normalize extensionless kill targets before execution.
         let executor = Arc::new(CapturingExecutor::default());
         let state = state_with_executor(Arc::clone(&executor) as Arc<dyn CommandExecutor>);
         let mut request = request();
@@ -1755,6 +1758,7 @@ mod tests {
 
     #[test]
     fn agent_uninstall_is_rejected_even_under_permissive_policy() {
+        // oracle: mutant Allowing named Agent removal under a permissive policy.
         let mut request = request();
         request.operation = api::Operation::Uninstall;
         request.package.id = api::PackageIdentifier("Devolutions.Agent".to_owned());
@@ -2014,6 +2018,7 @@ mod tests {
 
     #[tokio::test]
     async fn elevated_user_scope_request_executes_with_the_standard_token() {
+        // oracle: mutant Keeping elevated execution for an explicitly user-scoped request.
         let executor = Arc::new(CapturingExecutor::default());
         let state = state_with_executor(Arc::clone(&executor) as Arc<dyn CommandExecutor>);
         let mut request = request();

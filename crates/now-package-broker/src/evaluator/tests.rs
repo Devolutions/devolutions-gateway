@@ -772,6 +772,7 @@ fn implicit_user_scope_matches_standard_elevation_policy() {
 
 #[test]
 fn unacceptable_kill_process_names_are_denied_before_rules() {
+    // oracle: mutant Accepting wildcard kill targets before policy evaluation.
     let policy = make_policy(Decision::Allow, Vec::new());
 
     for name in ["*", "Code*.exe", r"C:\Tools\Code.exe", "Code.bat"] {
@@ -792,6 +793,7 @@ fn unacceptable_kill_process_names_are_denied_before_rules() {
 
 #[test]
 fn agent_uninstall_is_denied_before_rules() {
+    // oracle: mutant Disabling protection for named Agent packages.
     let policy = make_policy(Decision::Allow, Vec::new());
 
     let request = make_request(api::Operation::Uninstall, "devolutions.agent");
@@ -825,6 +827,7 @@ fn agent_uninstall_is_denied_before_rules() {
 
 #[test]
 fn custom_parameter_user_scope_lowers_execution_elevation() {
+    // oracle: mutant Ignoring custom user scope or promoting elevation for custom machine scope.
     let custom = |values: &[&str]| {
         values
             .iter()
@@ -854,6 +857,7 @@ fn custom_parameter_user_scope_lowers_execution_elevation() {
 
 #[test]
 fn supplied_install_location_is_kept_for_security_checks_when_installer_arguments_are_present() {
+    // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4192245600
     let mut request = make_request(api::Operation::Install, "Contoso.Tool");
     request.options.custom_install_location = Some(r"c:\Users\alice\Downloads\App".to_owned());
     request.options.custom_parameters = vec![api::CustomParameterString("--custom=/quiet".to_owned())];
@@ -877,6 +881,7 @@ fn supplied_install_location_is_kept_for_security_checks_when_installer_argument
 
 #[test]
 fn agent_uninstall_by_installed_product_code_is_detected() {
+    // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4192380021
     let product_code = uuid::uuid!("{0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D}");
     let protects = |request: &PackageRequest| super::uninstalls_protected_package(request, Some(product_code));
 

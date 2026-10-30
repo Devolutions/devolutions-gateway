@@ -2028,6 +2028,7 @@ mod tests {
 
     #[test]
     fn inheritable_untrusted_write_ace_is_rejected_for_install_locations_only() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4283749914
         // Users may modify what gets created inside the folder, but not the folder itself.
         let sd = SddlDescriptor::parse("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICIIO;0x1301bf;;;BU)");
         sd.verify_as_executable()
@@ -2038,6 +2039,7 @@ mod tests {
 
     #[test]
     fn untrusted_create_rights_are_rejected_for_install_locations() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4283609524
         // Drive roots let Authenticated Users create subfolders.
         for ace in [
             "(A;;0x4;;;AU)",
@@ -2052,12 +2054,14 @@ mod tests {
 
     #[test]
     fn untrusted_owner_is_rejected_for_install_locations() {
+        // oracle: mutant Accepting an untrusted owner for an install location.
         let sd = SddlDescriptor::parse("O:BUD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)");
         assert!(sd.verify_as_install_location().is_err());
     }
 
     #[test]
     fn install_location_with_inheritable_users_write_ace_is_rejected() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4283749914
         let temp = tempfile::tempdir().unwrap();
         let folder = temp.path().join("Contoso");
         std::fs::create_dir(&folder).unwrap();
@@ -2094,6 +2098,7 @@ mod tests {
 
     #[test]
     fn install_location_under_program_files_is_accepted() {
+        // oracle: mutant Rejecting an install path with more than one missing ancestor under Program Files.
         let program_files = std::env::var("ProgramFiles").unwrap_or_else(|_| r"C:\Program Files".to_owned());
         let location = Path::new(&program_files).join(format!("now-package-broker-test-{}", uuid::Uuid::new_v4()));
 
@@ -2103,6 +2108,7 @@ mod tests {
 
     #[test]
     fn pinned_install_location_accepts_installer_writes_but_not_root_rename() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4192245640
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("App");
         std::fs::create_dir(&root).unwrap();
@@ -2127,6 +2133,7 @@ mod tests {
 
     #[test]
     fn existing_install_root_requires_a_parent_that_passes_the_install_location_check() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4283609524 discussion_r4283749914
         let admins = Sid::from_well_known(WinBuiltinAdministratorsSid, None).unwrap();
         let system = Sid::from_well_known(WinLocalSystemSid, None).unwrap();
         let users = Sid::from_well_known(windows::Win32::Security::WinBuiltinUsersSid, None).unwrap();
@@ -2186,6 +2193,7 @@ mod tests {
 
     #[test]
     fn install_location_through_a_reparse_point_is_rejected() {
+        // oracle: mutant Accepting a reparse point in an install path.
         let temp = tempfile::tempdir().unwrap();
         let base = canonical_dir(temp.path());
         let target = base.join("target");
