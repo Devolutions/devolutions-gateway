@@ -14,13 +14,6 @@ use uuid::Uuid;
 
 use super::{ProvisionerTask, TaskJob, deadline};
 
-/// How far ahead the job of a new Task is scheduled, so the job queue claims it after the record is committed.
-///
-/// The job is stored before the record is committed, and storing it wakes the job queue; without the delay, the job
-/// would be claimed first and come back only after the job queue's retry delay. The job queue keeps schedules in
-/// whole seconds, so a one-second delay could be over at once.
-const JOB_DELAY: time::Duration = time::Duration::seconds(2);
-
 /// What is done for a new Task once its record is written and before it is committed, such as keeping its secrets.
 type OnCreated = Box<dyn FnOnce(&NewProvisionerTaskRecord) -> anyhow::Result<()> + Send>;
 
@@ -127,7 +120,7 @@ impl ProvisionerTaskService {
 
         let store_job = async {
             on_created(&record).context("prepare the Task")?;
-            self.job_queue.push_job(&job, Some(now + JOB_DELAY)).await
+            self.job_queue.push_job(&job, None).await
         };
         let outcome = self.store.create(record.clone(), now, Box::pin(store_job)).await?;
 
