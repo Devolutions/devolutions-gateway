@@ -25,6 +25,7 @@ docs/AiAnalysisSucceededPayload.md
 docs/AiAnalysisTask.md
 docs/AiAnalysisUsage.md
 docs/AiProvider.md
+docs/ApiError.md
 docs/AppCredential.md
 docs/AppCredentialKind.md
 docs/AppTokenContentType.md
@@ -40,6 +41,7 @@ docs/DeleteManyResult.md
 docs/DiagnosticsApi.md
 docs/EnrollRequest.md
 docs/EnrollResponse.md
+docs/ErrorCode.md
 docs/EventOutcomeResponse.md
 docs/GetUpdateProductsResponse.md
 docs/GetUpdateScheduleResponse.md
@@ -157,6 +159,7 @@ src/Devolutions.Gateway.Client/Model/AiAnalysisSucceededPayload.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisTask.cs
 src/Devolutions.Gateway.Client/Model/AiAnalysisUsage.cs
 src/Devolutions.Gateway.Client/Model/AiProvider.cs
+src/Devolutions.Gateway.Client/Model/ApiError.cs
 src/Devolutions.Gateway.Client/Model/AppCredential.cs
 src/Devolutions.Gateway.Client/Model/AppCredentialKind.cs
 src/Devolutions.Gateway.Client/Model/AppTokenContentType.cs
@@ -170,6 +173,7 @@ src/Devolutions.Gateway.Client/Model/DataEncoding.cs
 src/Devolutions.Gateway.Client/Model/DeleteManyResult.cs
 src/Devolutions.Gateway.Client/Model/EnrollRequest.cs
 src/Devolutions.Gateway.Client/Model/EnrollResponse.cs
+src/Devolutions.Gateway.Client/Model/ErrorCode.cs
 src/Devolutions.Gateway.Client/Model/EventOutcomeResponse.cs
 src/Devolutions.Gateway.Client/Model/GetUpdateProductsResponse.cs
 src/Devolutions.Gateway.Client/Model/GetUpdateScheduleResponse.cs

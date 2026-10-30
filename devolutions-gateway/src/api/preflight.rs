@@ -193,9 +193,9 @@ impl Outputs {
     request_body = [PreflightOperation],
     responses(
         (status = 200, description = "Preflight outputs", body = [PreflightOutput]),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.preflight"])),
 ))]

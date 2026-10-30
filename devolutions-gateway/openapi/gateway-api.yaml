@@ -7,7 +7,7 @@ info:
     email: infos@devolutions.net
   license:
     name: MIT/Apache-2.0
-  version: 2026.2.4
+  version: 2026.3.3
 paths:
   /jet/config:
     patch:
@@ -27,12 +27,28 @@ paths:
           description: Configuration has been patched with success
         '400':
           description: Bad patch request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Failed to patch configuration
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.config.write
@@ -76,10 +92,22 @@ paths:
                 $ref: '#/components/schemas/ConfigDiagnostic'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.diagnostics.read
@@ -137,10 +165,22 @@ paths:
                 $ref: '#/components/schemas/Heartbeat'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.heartbeat.read
@@ -182,14 +222,34 @@ paths:
                 $ref: '#/components/schemas/DeleteManyResult'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
           description: A recording is still ongoing and can't be deleted yet (nothing is deleted)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '413':
           description: Request payload is too large
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.recording.delete
@@ -212,14 +272,34 @@ paths:
           description: Recording matching the ID in the path has been deleted
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The specified recording was not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
           description: The recording is still ongoing and can't be deleted yet
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.recording.delete
@@ -248,10 +328,22 @@ paths:
                   format: uuid
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.recordings.read
@@ -337,12 +429,28 @@ paths:
                 format: binary
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: File not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - jrec_token:
         - pull
@@ -350,7 +458,7 @@ paths:
     post:
       tags:
       - Jrec
-      summary: Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+      summary: Searches the `.slog` files of recordings stored on this instance, such as Active Directory Console logs
       description: |-
         The query is a case-insensitive substring, and an empty query matches every line.
         In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read
@@ -358,7 +466,7 @@ paths:
         Any other line, such as one still being written, is matched as raw text.
         A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually
         matched as raw text.
-        Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched.
+        Only the files listed in `recording.json` with the `slog` type are searched, under `files` and under `artifacts`.
         Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.
 
         Results come in pages.
@@ -383,10 +491,22 @@ paths:
                 $ref: '#/components/schemas/RecordingSearchResponse'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.recordings.search
@@ -401,12 +521,28 @@ paths:
           description: JRL updated successfully
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Failed to update the JRL
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - jrl_token: []
   /jet/jrl/info:
@@ -424,12 +560,28 @@ paths:
                 $ref: '#/components/schemas/JrlInfo'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Failed to update the JRL
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.jrl.read
@@ -454,12 +606,28 @@ paths:
                       $ref: '#/components/schemas/InterfaceInfo'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - netscan_token: []
   /jet/net/interfaces:
@@ -477,12 +645,28 @@ paths:
                 $ref: '#/components/schemas/NetworkInterfacesResponse'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - netscan_token: []
   /jet/net/monitor/config:
@@ -516,12 +700,28 @@ paths:
                 $ref: '#/components/schemas/SetConfigResponse'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error while starting monitors
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.net.monitor.config
@@ -541,12 +741,28 @@ paths:
                 $ref: '#/components/schemas/MonitoringLogResponse'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.net.monitor.drain
@@ -849,10 +1065,22 @@ paths:
           description: Invalid query, mixed target/range, oversized range, or selected interface error
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - netscan_token: []
   /jet/preflight:
@@ -880,10 +1108,22 @@ paths:
                   $ref: '#/components/schemas/PreflightOutput'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.preflight
@@ -906,14 +1146,34 @@ paths:
           description: Session terminated successfully
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: No running session found with provided ID
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.session.terminate
@@ -934,12 +1194,28 @@ paths:
                   $ref: '#/components/schemas/SessionInfo'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.sessions.read
@@ -970,14 +1246,34 @@ paths:
                 $ref: '#/components/schemas/AiAnalysisTask'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: No AI analysis has this Task ID
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.tasks.recording-ai-analysis.read
@@ -1034,12 +1330,28 @@ paths:
                 $ref: '#/components/schemas/AiAnalysisTask'
         '400':
           description: Invalid request body, AI settings or language
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: The session has no recording
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
           description: The AI analysis cannot start now
           content:
@@ -1048,6 +1360,10 @@ paths:
                 $ref: '#/components/schemas/AiAnalysisConflict'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.tasks.recording-ai-analysis.start
@@ -1073,14 +1389,34 @@ paths:
                 $ref: '#/components/schemas/AckResponse'
         '400':
           description: Invalid request body (empty ids array)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '413':
           description: Payload too large (more than 10,000 IDs)
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.traffic.ack
@@ -1117,12 +1453,28 @@ paths:
                   $ref: '#/components/schemas/ClaimedTrafficEvent'
         '400':
           description: Invalid query parameters
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Internal server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.traffic.claim
@@ -1143,10 +1495,22 @@ paths:
                   $ref: '#/components/schemas/AgentInfo'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.agent.read
@@ -1173,12 +1537,28 @@ paths:
                 $ref: '#/components/schemas/AgentInfo'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: Agent not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.agent.read
@@ -1200,12 +1580,28 @@ paths:
           description: Agent deleted
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '404':
           description: Agent not found
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.agent.delete
@@ -1237,12 +1633,28 @@ paths:
                 $ref: '#/components/schemas/EnrollResponse'
         '400':
           description: Invalid agent name, request body, or certificate signing request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing enrollment token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '409':
           description: Agent ID or name already registered, agent key previously deleted, or enrollment token already used
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Unexpected server error
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - enrollment_token: []
   /jet/update:
@@ -1265,12 +1677,28 @@ paths:
                 $ref: '#/components/schemas/GetUpdateProductsResponse'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Failed to read agent status file
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: Agent updater service is unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.update.read
@@ -1317,14 +1745,34 @@ paths:
                 $ref: '#/components/schemas/UpdateResponse'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Failed to write update manifest
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: Agent updater service is unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.update
@@ -1346,12 +1794,28 @@ paths:
                 $ref: '#/components/schemas/GetUpdateScheduleResponse'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Failed to read agent status file
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: Agent updater service is unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.update.read
@@ -1382,14 +1846,34 @@ paths:
                 $ref: '#/components/schemas/SetUpdateScheduleResponse'
         '400':
           description: Bad request
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '401':
           description: Invalid or missing authorization token
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '403':
           description: Insufficient permissions
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '500':
           description: Failed to write update manifest
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '503':
           description: Agent updater service is unavailable
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
       security:
       - scope_token:
         - gateway.update
@@ -1857,6 +2341,40 @@ components:
       - mistral
       - gemini
       - openai-compatible
+    ApiError:
+      type: object
+      description: |-
+        Body of an API error response, as defined by RFC 9457 (problem details for HTTP APIs).
+
+        The Gateway logs the details of the error, along with its code.
+      required:
+      - type
+      - title
+      - status
+      - error
+      properties:
+        error:
+          type: string
+          description: |-
+            Machine-readable error code; the `ErrorCode` schema lists the known values.
+
+            New codes can be added: treat unknown values as generic failures.
+        status:
+          type: integer
+          format: int32
+          description: HTTP status code.
+          minimum: 0
+        title:
+          type: string
+          description: Reason phrase of the HTTP status.
+        type:
+          type: string
+          description: 'Problem type, always `about:blank`: the HTTP status and the error code describe the problem.'
+      example:
+        error: gateway_id_mismatch
+        status: 401
+        title: Unauthorized
+        type: about:blank
     AppCredential:
       type: object
       required:
@@ -2042,6 +2560,62 @@ components:
           description: |-
             SHA-256 hash of the server certificate's SPKI (hex-encoded).
             Used by the agent to pin the server's public key.
+    ErrorCode:
+      type: string
+      description: |-
+        Machine-readable reason for a rejected request.
+
+        New codes can be added, but existing codes are never renamed or removed. Clients must treat unknown codes as generic failures.
+
+        - `bad_request`: The request is invalid.
+        - `unauthorized`: The request is not authenticated.
+        - `forbidden`: The request is not allowed.
+        - `not_found`: The resource doesn't exist.
+        - `request_timeout`: The request took too long to complete.
+        - `conflict`: The request conflicts with the current state of the resource.
+        - `payload_too_large`: The request is too large.
+        - `internal_error`: The Gateway failed to process the request.
+        - `bad_gateway`: The Gateway received an invalid response from an upstream server.
+        - `service_unavailable`: The service is temporarily unavailable.
+        - `gateway_timeout`: An upstream server didn't respond in time.
+        - `insufficient_storage`: The Gateway is out of storage space.
+        - `missing_token`: No token was found in the `Authorization` header or in the `token` query parameter.
+        - `malformed_token`: The token can't be decoded or decrypted, or its claims don't match the schema expected for its type.
+        - `bad_signature`: The token signature doesn't match the provisioner key of the Gateway.
+        - `unknown_subkey`: The token refers to a key ID (`kid`) that doesn't match the sub provisioner key of the Gateway.
+        - `expired`: The token has expired (`exp` claim); the clocks of the token issuer and of the Gateway may be out of sync.
+        - `not_yet_valid`: The token is not valid yet (`nbf` claim); the clocks of the token issuer and of the Gateway may be out of sync.
+        - `gateway_id_mismatch`: The token is restricted to another Gateway ID (`jet_gw_id` claim).
+        - `revoked`: The token contains a value revoked by the JSON Revocation List (JRL) of the Gateway.
+        - `unexpected_replay`: The token was already used, and can't be used again in this context.
+        - `invalid_token`: The token is rejected for a reason not covered by another code.
+        - `wrong_token_type`: The type of the token is not accepted by this route.
+        - `insufficient_scope`: The scope of the token doesn't grant access to this route.
+      enum:
+      - bad_request
+      - unauthorized
+      - forbidden
+      - not_found
+      - request_timeout
+      - conflict
+      - payload_too_large
+      - internal_error
+      - bad_gateway
+      - service_unavailable
+      - gateway_timeout
+      - insufficient_storage
+      - missing_token
+      - malformed_token
+      - bad_signature
+      - unknown_subkey
+      - expired
+      - not_yet_valid
+      - gateway_id_mismatch
+      - revoked
+      - unexpected_replay
+      - invalid_token
+      - wrong_token_type
+      - insufficient_scope
     EventOutcomeResponse:
       type: string
       enum:
@@ -2664,7 +3238,7 @@ components:
       properties:
         fileName:
           type: string
-          description: Name of the `.slog` artifact holding the line, as listed in `recording.json`.
+          description: Name of the `.slog` file holding the line, as listed in `recording.json`.
         line:
           type: string
           description: The line's text without its line break; bytes that are not UTF-8 read as U+FFFD.
@@ -2681,7 +3255,7 @@ components:
         recordingId:
           type: string
           format: uuid
-          description: The recording whose artifact holds the line.
+          description: The recording whose log holds the line.
         truncated:
           type: boolean
           description: The line is longer than 256 KiB, so `line` holds only its start, and the file holds the rest.

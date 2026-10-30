@@ -104,9 +104,9 @@ impl NoDiskState {
     path = "/jet/heartbeat",
     responses(
         (status = 200, description = "Heartbeat for this Gateway", body = Heartbeat),
-        (status = 400, description = "Bad request"),
-        (status = 401, description = "Invalid or missing authorization token"),
-        (status = 403, description = "Insufficient permissions"),
+        (status = 400, description = "Bad request", body = ApiError, content_type = "application/problem+json"),
+        (status = 401, description = "Invalid or missing authorization token", body = ApiError, content_type = "application/problem+json"),
+        (status = 403, description = "Insufficient permissions", body = ApiError, content_type = "application/problem+json"),
     ),
     security(("scope_token" = ["gateway.heartbeat.read"])),
 ))]
