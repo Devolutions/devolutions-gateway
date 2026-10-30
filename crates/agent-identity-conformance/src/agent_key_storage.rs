@@ -291,6 +291,9 @@ pub(crate) async fn a_key_storage_enrollment_key_in_builtin_default(ctx: Context
 /// Each new key goes to the first available key storage the policy lists, while each existing key keeps opening from the storage its slot records, across a restart that finds the identity's keys in two storages.
 ///
 /// The policy is added, then removed, through config updates; the metadata of each renew and `Hello` reports the storage of the key that the CSR carries or that signs.
+/// After the restart, the case requires no stream or check-in before the renewal confirms: with a pending slot, the agent can't tell whether an earlier `confirm` retired its current key, and while that is unknown it sends no other signed request ([contract] §8.1).
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#agent-renewal
 pub(crate) async fn a_key_storage_new_keys_follow_policy_and_mixed_storages_survive_restart(
     ctx: Context,
 ) -> anyhow::Result<()> {
@@ -360,14 +363,16 @@ pub(crate) async fn a_key_storage_new_keys_follow_policy_and_mixed_storages_surv
 
         case.stop().await?;
         case.start().await?;
-        case.until_identity(
-            &target,
-            &id,
-            "a Hello signed by the current key after restart",
-            |record| record.connected && record.metadata_value("key_storage") == Some(WINDOWS_SOFTWARE_PROVIDER),
-        )
-        .await?;
-        let connects = count(&target.requests(None).await?, "authenticated_connects")?;
+        let restarted = case.state(&authority)?;
+        ensure!(
+            ["current", "pending"].iter().all(|slot| {
+                let (now, before) = (&restarted["keys"][slot], &pending["keys"][slot]);
+                now["key_name"] == before["key_name"] && now["key_storage"] == before["key_storage"]
+            }) && slot_key_exists(case, &restarted, "current")?
+                && slot_key_exists(case, &restarted, "pending")?,
+            "the restart changed the identity's keys in their two storages: {}",
+            restarted["keys"]
+        );
         expect_status(
             &target
                 .control("retry-barrier", &json!({ "endpoint": "renew", "pause": false }))
@@ -379,8 +384,22 @@ pub(crate) async fn a_key_storage_new_keys_follow_policy_and_mixed_storages_surv
             key_name(&settled, "current")? == pending_key,
             "the agent did not complete the renewal with the pending key it had recorded in the file backend"
         );
-        // The released renewal's own metadata already reports the file backend, so only a stream that the confirmed file key authenticates shows that the key signs from there.
-        until_authenticated_connect(case, &target, connects, "the confirmed file key").await?;
+        // The renew request that the barrier released is signed by the current key in the Windows software provider, and confirm by the pending key in the file backend, both opened after the restart.
+        // The renewal's own metadata already reports the file backend, so only a stream authenticated with the confirmed certificate shows that the file key signs on the channel.
+        let confirmed = case.identity_record(&target, &id).await?;
+        let confirmed = current_thumbprint(&confirmed)?.to_owned();
+        poll!(
+            case,
+            WAIT,
+            POLL,
+            "no stream authenticated with the certificate of the file key",
+            async {
+                let authenticated = target.events(&id).await?.iter().any(|event| {
+                    event["type"] == "stream_authenticated" && event["cert_thumbprint"] == confirmed.as_str()
+                });
+                Ok(authenticated.then_some(()))
+            }
+        );
         case.until_identity(&target, &id, "a Hello signed by the file key", |record| {
             record.connected && record.metadata_value("key_storage") == Some(FILE)
         })
@@ -1191,17 +1210,22 @@ fn plant_file_key(case: &AgentCase, name: &str) -> anyhow::Result<()> {
 fn plant_unrecorded_keys(case: &AgentCase, current: &str) -> anyhow::Result<Vec<(String, &'static str)>> {
     let orphan_file = format!("{}_{}", case.ctx.key_name_prefix, uuid::Uuid::new_v4());
     plant_file_key(case, &orphan_file)?;
-    let mut planted = vec![(orphan_file, FILE)];
     #[cfg(windows)]
-    {
+    let planted = {
         let machine_key = format!("{}_{}", case.ctx.key_name_prefix, uuid::Uuid::new_v4());
         crate::windows::create_machine_key(&machine_key)?;
-        planted.push((machine_key, WINDOWS_SOFTWARE_PROVIDER));
         plant_file_key(case, current)?;
-        planted.push((current.to_owned(), FILE));
-    }
+        vec![
+            (orphan_file, FILE),
+            (machine_key, WINDOWS_SOFTWARE_PROVIDER),
+            (current.to_owned(), FILE),
+        ]
+    };
     #[cfg(not(windows))]
-    let _ = current;
+    let planted = {
+        let _ = current;
+        vec![(orphan_file, FILE)]
+    };
     Ok(planted)
 }
 
