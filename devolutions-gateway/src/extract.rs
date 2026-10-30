@@ -352,6 +352,48 @@ where
     }
 }
 
+/// A scope token allowed to start an AI analysis: `*`, or `gateway.tasks.recording-ai-analysis.start`.
+#[derive(Clone, Copy)]
+pub struct RecordingAiAnalysisStartScope;
+
+impl<S> FromRequestParts<S> for RecordingAiAnalysisStartScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::Wildcard => Ok(Self),
+            AccessScope::RecordingAiAnalysisStart => Ok(Self),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
+        }
+    }
+}
+
+/// A scope token allowed to read AI analyses: `*`, or `gateway.tasks.recording-ai-analysis.read`.
+#[derive(Clone, Copy)]
+pub struct RecordingAiAnalysisReadScope;
+
+impl<S> FromRequestParts<S> for RecordingAiAnalysisReadScope
+where
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        match ScopeToken::from_request_parts(parts, state).await?.0.scope {
+            AccessScope::Wildcard => Ok(Self),
+            AccessScope::RecordingAiAnalysisRead => Ok(Self),
+            _ => Err(HttpError::forbidden()
+                .with_error_code(ErrorCode::InsufficientScope)
+                .msg("invalid scope for route")),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct RecordingsSearchScope;
 

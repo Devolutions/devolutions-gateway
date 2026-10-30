@@ -26,6 +26,10 @@ const CHECK_IN_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const CHANNEL_FAILURE_CHECK_IN_AFTER: Duration = Duration::from_secs(60 * 60);
 /// Bounds every wait, so that a wall-clock change delays a scheduled action by at most this long.
 const MAX_WAIT: Duration = Duration::from_secs(60);
+/// The least time from a completed renewal to the start of the next, so that the agent never renews in a tight loop.
+///
+/// `__debug__.identity.min_renewal_interval_secs` replaces it.
+const MIN_RENEWAL_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// The state and services every runner shares with pending enrollment.
 pub(super) struct Shared {
@@ -83,10 +87,14 @@ struct Runner {
     /// Backoff after a local failure, such as a busy state lock.
     local_retry: RetryState,
     renewal_requested: bool,
+    /// When the last renewal of this run was confirmed.
+    last_renewal: Option<Instant>,
     /// A terminal outcome the authority returned, recorded before any other action.
     terminal: Option<&'static str>,
     /// Whether pending-key recovery signs with the current key after the expired pending key drew `identity_unknown`.
     recovery_signs_with_current: bool,
+    /// The pending-key recoveries started since the last confirmed renewal of this run.
+    recoveries: Recoveries,
     /// When this run stored or loaded each certificate, which anchors its renewal schedule.
     load_times: LoadTimes,
     /// The renewal jitter sample of the current key, drawn once for each key.
@@ -118,8 +126,10 @@ impl Runner {
             check_in_retry: RetryState::default(),
             local_retry: RetryState::default(),
             renewal_requested: false,
+            last_renewal: None,
             terminal: None,
             recovery_signs_with_current: false,
+            recoveries: Recoveries::default(),
             load_times: LoadTimes::default(),
             renewal_jitter: None,
             next_check_in: None,
@@ -256,11 +266,16 @@ impl Runner {
             return Ok(Some(Instant::now()));
         }
 
-        let renewal_at = if self.renewal_requested {
+        let due = if self.renewal_requested {
             now
         } else {
             self.renewal_at(&identity, now)?
         };
+        // UNTESTED: a successful `confirm` records `last_renewal`, and every new renewal, scheduled or requested, starts
+        // through `renewal_start`; `renewal_start` is tested, and the conformance suite checks the wait only for a
+        // renewal requested on the channel, not for a scheduled one.
+        // When changing it, keep both on this path, so that the minimum interval holds for every renewal.
+        let renewal_at = renewal_start(&self.shared.settings, due, self.last_renewal);
         let renewal_wake = later(renewal_at, self.renewal_retry.next_attempt);
         if renewal_wake <= now {
             self.renew(&mut identity, false).await?;
@@ -397,7 +412,9 @@ impl Runner {
                 }
                 store.promote_pending(identity)?;
                 self.renewal_retry.succeeded();
+                self.recoveries.confirmed();
                 self.renewal_requested = false;
+                self.last_renewal = Some(Instant::now());
                 self.confirm_unknown = false;
                 self.channel_after_confirm = false;
                 if std::mem::take(&mut self.check_in_after_confirm) {
@@ -421,7 +438,12 @@ impl Runner {
                     "Agent Identity pending certificate expired before confirmation; recovering"
                 );
                 store.begin_recovery(identity)?;
-                self.renewal_retry.succeeded();
+                // UNTESTED: each recovery waits the backoff of `recoveries`, which only a successful `confirm` resets
+                // and a successful renew leaves alone; `Recoveries` is tested, this wiring isn't.
+                // An authority whose every pending certificate is already expired at `confirm` would otherwise keep
+                // the agent renewing in a tight loop, generating a key each time.
+                // When changing this, start every recovery through `recoveries` and reset it on `confirm` only.
+                self.renewal_retry = self.recoveries.start(&self.shared.settings);
                 self.recovery_signs_with_current = false;
             }
             Err(ClientError::Terminal(code)) => self.reject(code.as_str()),
@@ -459,7 +481,8 @@ impl Runner {
                 self.next_check_in = Some(Instant::now() + self.check_in_interval());
             }
             Err(ClientError::CertificateExpired) => {
-                // `CONTRACT.agent-identity.md` §5.4: renew at once, and check in again only after `confirm`.
+                // `CONTRACT.agent-identity.md` §5.4: renew, no sooner than the minimum renewal interval after the
+                // previous renewal, and check in again only after `confirm`.
                 self.renewal_requested = true;
                 self.check_in_after_confirm = true;
                 self.next_check_in = None;
@@ -490,8 +513,9 @@ impl Runner {
                 Notice::Terminal(code) => self.reject(code.as_str()),
                 Notice::CertificateExpired { key_name } => {
                     if key_name == identity.keys.current.key_name {
-                        // `CONTRACT.agent-identity.md` §5.4: renew at once, signing with the expired certificate, and
-                        // connect again only after `confirm`.
+                        // `CONTRACT.agent-identity.md` §5.4: renew, no sooner than the minimum renewal interval after
+                        // the previous renewal, signing with the expired certificate, and connect again only after
+                        // `confirm`.
                         warn!(
                             authority_id = %self.authority_id,
                             "Agent Identity certificate expired; renewing before the agent channel reconnects"
@@ -750,6 +774,46 @@ impl LoadTimes {
     }
 }
 
+/// The backoff of the pending-key recoveries started since the last confirmed renewal, `None` before the first.
+///
+/// `CONTRACT.agent-identity.md` §8.1: `confirm` is retried with backoff, and a renew that succeeds during recovery
+/// doesn't end that backoff, so that an authority cannot keep the agent renewing in a tight loop
+/// (`crates/agent-identity/INTENT.md`, "Schedules").
+#[derive(Default)]
+struct Recoveries(Option<RetryState>);
+
+impl Recoveries {
+    /// Returns the renewal retry state of a recovery that starts now.
+    ///
+    /// The first recovery starts at once, because the expired pending certificate stays within its renewal grace only
+    /// for its own lifetime; each later one waits a backoff that grows with every recovery.
+    /// That backoff stops at `MIN_RENEWAL_INTERVAL`, or at `backoff_max_secs` when lower, so that a repeated recovery
+    /// still renews within the grace of a leaf of the shortest lifetime the authority may set, 15 minutes
+    /// (`CONTRACT.agent-identity.md` §4), while a loop of recoveries at the cap starts one per `MIN_RENEWAL_INTERVAL`.
+    fn start(&mut self, settings: &IdentityDebugConf) -> RetryState {
+        let Some(retry) = &mut self.0 else {
+            self.0 = Some(RetryState::default());
+            return RetryState::default();
+        };
+        let capped = IdentityDebugConf {
+            backoff_max_secs: Some(
+                settings
+                    .backoff_max_secs
+                    .unwrap_or(u64::MAX)
+                    .min(MIN_RENEWAL_INTERVAL.as_secs()),
+            ),
+            ..settings.clone()
+        };
+        retry.failed(&capped, None);
+        retry.clone()
+    }
+
+    /// Records a confirmed renewal, after which a recovery starts at once again.
+    fn confirmed(&mut self) {
+        self.0 = None;
+    }
+}
+
 fn certificate_chain(record: &KeyRecord) -> anyhow::Result<&[String]> {
     record
         .certificate_chain
@@ -760,6 +824,29 @@ fn certificate_chain(record: &KeyRecord) -> anyhow::Result<&[String]> {
 /// Returns the revision of a config, which the store and the config validation require.
 pub(super) fn config_revision(config: &Value) -> u64 {
     config.get("revision").and_then(Value::as_u64).unwrap_or_default()
+}
+
+/// Returns when a new renewal due at `due` starts, given when the last renewal of this run was confirmed.
+///
+/// `crates/agent-identity/INTENT.md` ("Schedules"): a renewal starts no sooner than `MIN_RENEWAL_INTERVAL` after the
+/// previous one completed, except under `renewal_after_secs`.
+/// `devolutions-agent/src/identity/INTENT.md` ("Configuration"): `min_renewal_interval_secs` replaces that interval.
+fn renewal_start(settings: &IdentityDebugConf, due: Instant, last_renewal: Option<Instant>) -> Instant {
+    let Some(last_renewal) = last_renewal else {
+        return due;
+    };
+    if settings.renewal_after_secs.is_some() {
+        return due;
+    }
+    let min_interval = settings
+        .min_renewal_interval_secs
+        .map_or(MIN_RENEWAL_INTERVAL, Duration::from_secs);
+    // An interval too long for `Instant` to represent is halved until it fits, so that a huge value still holds the
+    // renewal back for the rest of the run; halving ends at zero, which always fits.
+    let floor = std::iter::successors(Some(min_interval), |interval| Some(*interval / 2))
+        .find_map(|interval| last_renewal.checked_add(interval))
+        .unwrap_or(last_renewal);
+    due.max(floor)
 }
 
 fn later(at: Instant, retry_at: Option<Instant>) -> Instant {
@@ -779,6 +866,8 @@ fn instant_at(at: SystemTime, now: Instant) -> Instant {
 #[cfg(test)]
 mod tests {
     use std::time::UNIX_EPOCH;
+
+    use rstest::rstest;
 
     use super::*;
 
@@ -802,5 +891,133 @@ mod tests {
             loads.loaded_at("renewed", stored_at + Duration::from_secs(6)),
             stored_at
         );
+    }
+
+    #[test]
+    fn a_renewal_due_right_after_another_waits_ten_minutes() {
+        // oracle: intent crates/agent-identity/INTENT.md §Schedules
+        // A renewal starts no sooner than 10 minutes after the previous renewal of the run completed, whether the
+        // schedule or the authority asks for it.
+        let completed = Instant::now();
+        let due = completed + Duration::from_secs(1);
+        assert_eq!(
+            renewal_start(&IdentityDebugConf::default(), due, Some(completed)),
+            completed + Duration::from_secs(10 * 60)
+        );
+    }
+
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+    #[rstest]
+    #[case::shorter_interval(5, 5)]
+    #[case::no_interval(0, 1)]
+    fn min_renewal_interval_secs_replaces_the_floor(#[case] min_interval_secs: u64, #[case] start_after_secs: u64) {
+        // A renewal due 1 s after the previous one starts `min_renewal_interval_secs` after it, or at once for `0`.
+        let settings = IdentityDebugConf {
+            min_renewal_interval_secs: Some(min_interval_secs),
+            ..IdentityDebugConf::default()
+        };
+        let completed = Instant::now();
+        let due = completed + Duration::from_secs(1);
+        assert_eq!(
+            renewal_start(&settings, due, Some(completed)),
+            completed + Duration::from_secs(start_after_secs)
+        );
+    }
+
+    #[test]
+    fn a_min_renewal_interval_too_long_for_an_instant_holds_renewal_for_the_run() {
+        // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+        // `min_renewal_interval_secs` replaces the 10-minute wait, so a value past what an `Instant` can hold still
+        // keeps the next renewal beyond any run, taken here as a century, rather than falling back to 10 minutes.
+        let settings = IdentityDebugConf {
+            min_renewal_interval_secs: Some(u64::MAX),
+            ..IdentityDebugConf::default()
+        };
+        let completed = Instant::now();
+        let due = completed + Duration::from_secs(1);
+        let century = Duration::from_secs(100 * 365 * 24 * 60 * 60);
+        assert!(renewal_start(&settings, due, Some(completed)) > completed + century);
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
+    #[rstest]
+    #[case::due_after_the_floor(true, None, 11 * 60)]
+    #[case::first_renewal_of_the_run(false, None, 1)]
+    #[case::renewal_after_secs_set(true, Some(1), 1)]
+    fn a_renewal_starts_when_it_is_due(
+        #[case] renewed_before: bool,
+        #[case] renewal_after_secs: Option<u64>,
+        #[case] due_after_secs: u64,
+    ) {
+        // The floor holds a renewal back only until 10 minutes after the previous one, never before the first renewal
+        // of the run, and never under `renewal_after_secs`.
+        let settings = IdentityDebugConf {
+            renewal_after_secs,
+            ..IdentityDebugConf::default()
+        };
+        let completed = Instant::now();
+        let due = completed + Duration::from_secs(due_after_secs);
+        assert_eq!(renewal_start(&settings, due, renewed_before.then_some(completed)), due);
+    }
+
+    #[test]
+    fn a_first_recovery_starts_at_once() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
+        // The agent renews when `confirm` answers `certificate_expired`, and the expired pending certificate stays
+        // within its renewal grace only for its own lifetime, so the first recovery after a confirmed renewal, or in a
+        // run, adds no wait.
+        let retry = Recoveries::default().start(&no_jitter());
+        assert_eq!(retry.next_attempt, None);
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
+    #[rstest]
+    #[case::second(2, 2)]
+    #[case::third(3, 4)]
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §certificates
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
+    // The backoff stops at the 10-minute wait between renewals, so a recovery still renews within the grace of a leaf of
+    // the shortest lifetime the authority may set, 15 minutes, and `backoff_max_secs` unset doesn't lift that cap.
+    #[case::capped_at_ten_minutes(20, 10 * 60)]
+    fn a_recovery_before_a_confirmed_renewal_waits_a_growing_backoff(#[case] recovery: u32, #[case] wait_secs: u64) {
+        // `confirm` retries with backoff, so a recovery that starts again before a `confirm` succeeds waits `2^n` s
+        // for the `n`-th consecutive repeat, without jitter, up to 10 minutes.
+        let settings = no_jitter();
+        let mut recoveries = Recoveries::default();
+        for _ in 1..recovery {
+            recoveries.start(&settings);
+        }
+        let before = Instant::now();
+        let retry = recoveries.start(&settings);
+        let wait = retry
+            .next_attempt
+            .expect("a repeated recovery waits")
+            .saturating_duration_since(before);
+        let expected = Duration::from_secs(wait_secs);
+        assert!(
+            expected <= wait && wait < expected + Duration::from_secs(1),
+            "waits {wait:?}"
+        );
+    }
+
+    #[test]
+    fn a_confirmed_renewal_lets_the_next_recovery_start_at_once() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+        // A successful `confirm` ends the retries of the renewal it confirms.
+        let settings = no_jitter();
+        let mut recoveries = Recoveries::default();
+        recoveries.start(&settings);
+        recoveries.start(&settings);
+        recoveries.confirmed();
+        assert_eq!(recoveries.start(&settings).next_attempt, None);
+    }
+
+    fn no_jitter() -> IdentityDebugConf {
+        IdentityDebugConf {
+            disable_jitter: Some(true),
+            ..IdentityDebugConf::default()
+        }
     }
 }

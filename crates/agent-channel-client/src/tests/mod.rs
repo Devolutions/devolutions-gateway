@@ -562,7 +562,7 @@ async fn reports_a_refused_opening_with_its_status_trailers_and_class(
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, class);
     assert_eq!(closure.grpc_code, Some(code));
-    assert_eq!(closure.error_code.as_deref(), Some(error_code));
+    assert_eq!(closure.error_code.as_ref().map(ErrorCode::as_str), Some(error_code));
     assert_eq!(closure.server_time.as_deref(), Some(SERVER_TIME));
     Ok(())
 }
@@ -596,7 +596,7 @@ async fn reports_the_closure_of_an_authenticated_stream(
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, class);
     assert_eq!(closure.grpc_code, Some(code));
-    assert_eq!(closure.error_code.as_deref(), error_code);
+    assert_eq!(closure.error_code.as_ref().map(ErrorCode::as_str), error_code);
     Ok(())
 }
 
@@ -947,7 +947,7 @@ async fn a_second_clock_skew_refusal_is_transient() -> anyhow::Result<()> {
 
     let (closure, _) = next_closure(&mut channel).await;
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
-    assert_eq!(closure.error_code.as_deref(), Some("clock_skew"));
+    assert_eq!(closure.error_code.as_ref().map(ErrorCode::as_str), Some("clock_skew"));
     Ok(())
 }
 
@@ -1545,7 +1545,7 @@ async fn drops_an_acknowledgement_of_a_closed_stream() -> anyhow::Result<()> {
 fn assert_ok_closure_with_trailers(closure: &Closure) {
     assert_eq!(closure.class, ClosureClass::Transient(TransientKind::Outage));
     assert_eq!(closure.grpc_code, Some(Code::Ok));
-    assert_eq!(closure.error_code.as_deref(), Some("future_code"));
+    assert_eq!(closure.error_code.as_ref().map(ErrorCode::as_str), Some("future_code"));
     assert_eq!(closure.server_time.as_deref(), Some(SERVER_TIME));
 }
 

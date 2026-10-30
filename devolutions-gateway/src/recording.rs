@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 use async_trait::async_trait;
-use camino::Utf8PathBuf;
+use camino::{Utf8Path, Utf8PathBuf};
 use devolutions_gateway_task::{ShutdownSignal, Task};
 use futures::future::Either;
 use parking_lot::Mutex;
@@ -26,19 +26,31 @@ use crate::streaming::{RecordingStreamState, StreamLifecycle};
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_EXTRA_LEEWAY: Duration = Duration::from_secs(10);
+
 const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JrecFile {
+pub(crate) struct JrecFile {
     file_name: String,
     start_time: i64,
     duration: i64,
 }
 
+impl JrecFile {
+    pub(crate) fn file_name(&self) -> &str {
+        &self.file_name
+    }
+
+    /// Unix seconds.
+    pub(crate) fn start_time(&self) -> i64 {
+        self.start_time
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct JrecManifest {
+pub(crate) struct JrecManifest {
     session_id: Uuid,
     start_time: i64,
     duration: i64,
@@ -48,15 +60,48 @@ struct JrecManifest {
 }
 
 impl JrecManifest {
+    /// Unix seconds.
+    pub(crate) fn start_time(&self) -> i64 {
+        self.start_time
+    }
+
+    /// Seconds.
+    pub(crate) fn duration(&self) -> i64 {
+        self.duration
+    }
+
+    pub(crate) fn files(&self) -> &[JrecFile] {
+        &self.files
+    }
+
     fn read_from_file(path: impl AsRef<Path>) -> anyhow::Result<Self> {
         let json = std::fs::read(path)?;
         let manifest = serde_json::from_slice(&json)?;
         Ok(manifest)
     }
 
+    /// Writes the manifest to a file of its own first, then renames it over `path`, so that neither a reader nor a crash
+    /// ever finds half of it.
     fn save_to_file(&self, path: impl AsRef<Path>) -> anyhow::Result<()> {
+        use std::io::Write as _;
+
+        let path = path.as_ref();
+        // jrec never serves a name that starts with a dot, so a file a crash left behind is never downloaded.
+        let mut partial_name = std::ffi::OsString::from(".");
+        partial_name.push(path.file_name().context("manifest path without a file name")?);
+        partial_name.push(".partial");
+        let partial = path.with_file_name(partial_name);
         let json = serde_json::to_string_pretty(&self)?;
-        std::fs::write(path, json)?;
+
+        let mut file = std::fs::File::create(&partial)?;
+        file.write_all(json.as_bytes())?;
+        // UNTESTED: a crash leaves the old manifest or the new one, never half of it, only while the file is synced
+        // before the rename.
+        file.sync_all()?;
+        drop(file);
+
+        std::fs::rename(&partial, path)?;
+
         Ok(())
     }
 }
@@ -74,19 +119,31 @@ pub enum PushOutcome {
     StorageFull,
 }
 
+/// How a producer ended its push stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushEnd {
+    /// The recording is over: it ends at once, so live viewers see the end right after the last bytes.
+    RecordingEnded,
+    /// The producer may come back, for example with a new clip after a resize: the recording waits for its reconnection window.
+    MayReconnect,
+}
+
 #[derive(TypedBuilder)]
-pub struct ClientPush<S> {
+pub struct ClientPush<S, E> {
     recordings: RecordingMessageSender,
     claims: JrecTokenClaims,
     client_stream: S,
     file_type: RecordingFileType,
     session_id: Uuid,
     shutdown_signal: ShutdownSignal,
+    /// Tells how the producer ended the push, once `client_stream` is over.
+    push_end: E,
 }
 
-impl<S> ClientPush<S>
+impl<S, E> ClientPush<S, E>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    E: FnOnce() -> PushEnd,
 {
     pub async fn run(self) -> anyhow::Result<PushOutcome> {
         let Self {
@@ -96,6 +153,7 @@ where
             file_type,
             session_id,
             mut shutdown_signal,
+            push_end,
         } = self;
 
         if session_id != claims.jet_aid {
@@ -196,9 +254,14 @@ where
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
 
-        info!(?res, "Recording finished");
+        // UNTESTED: a recording its producer ended ends at once, even when writing its last bytes failed.
+        // The producer is not coming back, and no test makes writing the recording file fail.
+        // When changing this, keep calling `push_end` whatever `res` holds.
+        let end = push_end();
 
-        recordings.disconnect(session_id).await.context("disconnect")?;
+        info!(?res, ?end, "Recording finished");
+
+        recordings.disconnect(session_id, end).await.context("disconnect")?;
 
         res
     }
@@ -316,7 +379,7 @@ impl ActiveRecordings {
         self.0.lock().clone()
     }
 
-    fn insert(&self, id: Uuid) -> usize {
+    pub(crate) fn insert(&self, id: Uuid) -> usize {
         let mut guard = self.0.lock();
         guard.insert(id);
         guard.len()
@@ -357,8 +420,19 @@ enum RecordingManagerMessage {
         kind: ArtifactKind,
         channel: oneshot::Sender<anyhow::Result<Utf8PathBuf>>,
     },
+    ReplaceArtifacts {
+        id: Uuid,
+        kind: ArtifactKind,
+        file: Utf8PathBuf,
+        channel: oneshot::Sender<anyhow::Result<()>>,
+    },
+    GetFinished {
+        id: Uuid,
+        channel: oneshot::Sender<Result<Utf8PathBuf, FinishedRecordingError>>,
+    },
     Disconnect {
         id: Uuid,
+        end: PushEnd,
     },
     GetState {
         id: Uuid,
@@ -375,6 +449,29 @@ enum RecordingManagerMessage {
         id: Uuid,
         channel: oneshot::Sender<Option<watch::Receiver<RecordingStreamState>>>,
     },
+}
+
+/// A session that is not recording anymore and has at least one Recording.
+#[derive(Debug)]
+pub(crate) struct FinishedRecording {
+    pub(crate) dir: Utf8PathBuf,
+    pub(crate) manifest: JrecManifest,
+}
+
+impl FinishedRecording {
+    pub(crate) fn manifest_path(&self) -> Utf8PathBuf {
+        self.dir.join("recording.json")
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum FinishedRecordingError {
+    #[error("session has no recording")]
+    NotFound,
+    #[error("session is still recording")]
+    Recording,
+    #[error(transparent)]
+    Other(anyhow::Error),
 }
 
 impl fmt::Debug for RecordingManagerMessage {
@@ -396,7 +493,23 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("kind", kind)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::ReplaceArtifacts {
+                id,
+                kind,
+                file,
+                channel: _,
+            } => f
+                .debug_struct("ReplaceArtifacts")
+                .field("id", id)
+                .field("kind", kind)
+                .field("file", file)
+                .finish_non_exhaustive(),
+            RecordingManagerMessage::GetFinished { id, channel: _ } => {
+                f.debug_struct("GetFinished").field("id", id).finish_non_exhaustive()
+            }
+            RecordingManagerMessage::Disconnect { id, end } => {
+                f.debug_struct("Disconnect").field("id", id).field("end", end).finish()
+            }
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -459,9 +572,61 @@ impl RecordingMessageSender {
         rx.await.context("couldn't receive AddArtifact result")?
     }
 
-    async fn disconnect(&self, id: Uuid) -> anyhow::Result<()> {
+    /// Moves `file` into the session as its only artifact of `kind`, named `kind.file_name(0)`, in place of the earlier
+    /// ones.
+    ///
+    /// `file` must be in the session folder, so that a reader finds the earlier artifact or the new one, never none or a
+    /// partial one.
+    /// A `file` that is gone is an error, since only its maker moves it, and so is a session whose recording was deleted
+    /// meanwhile, which only loses `file`.
+    pub(crate) async fn replace_artifacts(&self, id: Uuid, kind: ArtifactKind, file: &Utf8Path) -> anyhow::Result<()> {
+        let (tx, rx) = oneshot::channel();
         self.channel
-            .send(RecordingManagerMessage::Disconnect { id })
+            .send(RecordingManagerMessage::ReplaceArtifacts {
+                id,
+                kind,
+                file: file.to_owned(),
+                channel: tx,
+            })
+            .await
+            .ok()
+            .context("couldn't send ReplaceArtifacts message")?;
+        rx.await.context("couldn't receive ReplaceArtifacts result")?
+    }
+
+    pub(crate) async fn get_finished(&self, id: Uuid) -> Result<FinishedRecording, FinishedRecordingError> {
+        let (tx, rx) = oneshot::channel();
+        self.channel
+            .send(RecordingManagerMessage::GetFinished { id, channel: tx })
+            .await
+            .ok()
+            .context("couldn't send GetFinished message")
+            .map_err(FinishedRecordingError::Other)?;
+        let dir = rx
+            .await
+            .context("couldn't receive GetFinished result")
+            .map_err(FinishedRecordingError::Other)??;
+
+        // The manifest is read here, so the recording manager task never waits on the disk for it.
+        let manifest = match fs::read(dir.join("recording.json")).await {
+            Ok(manifest) => manifest,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Err(FinishedRecordingError::NotFound),
+            Err(error) => {
+                return Err(FinishedRecordingError::Other(
+                    anyhow::Error::new(error).context("read manifest from disk"),
+                ));
+            }
+        };
+        let manifest = serde_json::from_slice(&manifest)
+            .context("parse manifest")
+            .map_err(FinishedRecordingError::Other)?;
+
+        Ok(FinishedRecording { dir, manifest })
+    }
+
+    async fn disconnect(&self, id: Uuid, end: PushEnd) -> anyhow::Result<()> {
+        self.channel
+            .send(RecordingManagerMessage::Disconnect { id, end })
             .await
             .ok()
             .context("couldn't send Remove message")
@@ -728,7 +893,7 @@ impl RecordingManagerTask {
         Ok((recording_file, ClipProgress(stream_state)))
     }
 
-    async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
+    async fn handle_disconnect(&mut self, id: Uuid, end: PushEnd) -> anyhow::Result<()> {
         let Some(ongoing) = self.ongoing_recordings.get_mut(&id) else {
             return Err(anyhow::anyhow!("unknown recording for ID {id}"));
         };
@@ -740,7 +905,12 @@ impl RecordingManagerTask {
         let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
         // Viewers and the recording share this deadline, so a stream never ends while its recording continues.
-        let reconnect_deadline = tokio::time::Instant::now() + ongoing.disconnected_ttl;
+        // An ended recording waits for no reconnection, as if its token disallowed reuse.
+        let disconnected_ttl = match end {
+            PushEnd::RecordingEnded => Duration::ZERO,
+            PushEnd::MayReconnect => ongoing.disconnected_ttl,
+        };
+        let reconnect_deadline = tokio::time::Instant::now() + disconnected_ttl;
         ongoing.state = OnGoingRecordingState::LastSeen { reconnect_deadline };
 
         // Re-read from disk: an artifact may have been added since this recording connected.
@@ -817,6 +987,63 @@ impl RecordingManagerTask {
             .context("write manifest to disk")?;
 
         Ok(artifact_path)
+    }
+
+    async fn handle_replace_artifacts(&self, id: Uuid, kind: ArtifactKind, file: &Utf8Path) -> anyhow::Result<()> {
+        let recording_path = self.recordings_path.join(id.to_string());
+        let manifest_path = recording_path.join("recording.json");
+
+        // A recording deleted while its artifact was being generated must stay deleted.
+        if !manifest_path.exists() {
+            match fs::remove_file(file).await {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                    return Err(anyhow::Error::new(error).context(format!("remove {file}")));
+                }
+                _ => anyhow::bail!("recording {id} was deleted"),
+            }
+        }
+
+        let mut manifest = JrecManifest::read_from_file(&manifest_path).context("read manifest from disk")?;
+
+        let file_name = kind.file_name(0);
+        let artifact_path = recording_path.join(&file_name);
+
+        // The rename swaps the file in at once and the manifest follows, so it never lists a missing or partial file.
+        fs::rename(file, &artifact_path)
+            .await
+            .with_context(|| format!("move {file} to {artifact_path}"))?;
+
+        let earlier = core::mem::replace(
+            manifest.artifacts.of_kind_mut(kind),
+            vec![JrecArtifact {
+                file_name: file_name.clone(),
+            }],
+        );
+
+        manifest
+            .save_to_file(&manifest_path)
+            .context("write manifest to disk")?;
+
+        for artifact in earlier.into_iter().filter(|artifact| artifact.file_name != file_name) {
+            let artifact_path = recording_path.join(&artifact.file_name);
+            match fs::remove_file(&artifact_path).await {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => {
+                    warn!(%error, %artifact_path, "Failed to remove an earlier artifact");
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    fn handle_get_finished(&self, id: Uuid) -> Result<Utf8PathBuf, FinishedRecordingError> {
+        // The transcript is built from the whole recording, so one still being pushed is not ready.
+        if self.ongoing_recordings.contains_key(&id) {
+            return Err(FinishedRecordingError::Recording);
+        }
+
+        Ok(self.recordings_path.join(id.to_string()))
     }
 
     fn handle_remove(&mut self, id: Uuid) {
@@ -937,8 +1164,14 @@ async fn recording_manager_task(
                     RecordingManagerMessage::AddArtifact { id, kind, channel } => {
                         let _ = channel.send(manager.handle_add_artifact(id, kind).await);
                     },
-                    RecordingManagerMessage::Disconnect { id } => {
-                        if let Err(e) = manager.handle_disconnect(id).await {
+                    RecordingManagerMessage::ReplaceArtifacts { id, kind, file, channel } => {
+                        let _ = channel.send(manager.handle_replace_artifacts(id, kind, &file).await);
+                    },
+                    RecordingManagerMessage::GetFinished { id, channel } => {
+                        let _ = channel.send(manager.handle_get_finished(id));
+                    }
+                    RecordingManagerMessage::Disconnect { id, end } => {
+                        if let Err(e) = manager.handle_disconnect(id, end).await {
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
@@ -1008,8 +1241,8 @@ async fn recording_manager_task(
         };
 
         debug!(?msg, "Received message");
-        if let RecordingManagerMessage::Disconnect { id } = msg {
-            if let Err(e) = manager.handle_disconnect(id).await {
+        if let RecordingManagerMessage::Disconnect { id, end } = msg {
+            if let Err(e) = manager.handle_disconnect(id, end).await {
                 error!(error = format!("{e:#}"), "handle_disconnect");
             }
             manager.ongoing_recordings.remove(&id);
@@ -1159,7 +1392,10 @@ mod tests {
         }
 
         async fn disconnect(&self, id: Uuid) {
-            self.sender.disconnect(id).await.expect("disconnect");
+            self.sender
+                .disconnect(id, PushEnd::MayReconnect)
+                .await
+                .expect("disconnect");
             // Messages are processed in order, so this waits for the disconnect to be handled.
             self.sender.get_count().await.expect("sync with manager");
         }
@@ -1346,6 +1582,42 @@ mod tests {
         assert_eq!(state.borrow().lifecycle, StreamLifecycle::Ended);
     }
 
+    // oracle: intent devolutions-gateway/src/recording.intent.md §Ending a recording
+    #[tokio::test]
+    async fn a_recording_its_producer_ended_ends_without_waiting_for_a_reconnection() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        harness
+            .sender
+            .connect(id, WEBM, Duration::from_secs(3600))
+            .await
+            .expect("connect");
+        let mut stream = harness
+            .sender
+            .subscribe_to_stream(id)
+            .await
+            .expect("subscribe")
+            .expect("ongoing recording");
+
+        harness
+            .sender
+            .disconnect(id, PushEnd::RecordingEnded)
+            .await
+            .expect("disconnect");
+
+        // Far less than the one-hour reconnection window the token allows.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            stream.wait_for(|state| state.lifecycle == StreamLifecycle::Ended),
+        )
+        .await
+        .expect("stream ended without waiting for a reconnection")
+        .expect("stream state alive");
+        // oracle: mutant the manager holding an ended recording for the token's reconnection window
+        assert!(harness.sender.get_state(id).await.expect("get state").is_none());
+        assert!(!harness.sender.active_recordings.cloned().contains(&id));
+    }
+
     #[tokio::test]
     async fn viewers_and_the_recording_share_the_reconnect_deadline() {
         let harness = Harness::start();
@@ -1419,6 +1691,26 @@ mod tests {
         ));
         assert!(harness.sender.active_recordings.contains(recorded));
         assert_eq!(harness.sender.get_count().await.expect("count"), 1);
+    }
+
+    // oracle: intent devolutions-gateway/src/provisioner_tasks/INTENT.md §AI analysis
+    #[tokio::test]
+    async fn finished_recordings_are_read_through_the_manager() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        harness.write_manifest(id, MASTER_MANIFEST);
+
+        let finished = harness.sender.get_finished(id).await.expect("finished");
+        assert_eq!(finished.dir, harness.recordings_path.join(id.to_string()));
+        assert_eq!(finished.manifest.files()[0].file_name(), "recording-0.webm");
+
+        let ongoing = Uuid::new_v4();
+        harness.connect(ongoing, WEBM).await;
+        let result = harness.sender.get_finished(ongoing).await;
+        assert!(matches!(result, Err(FinishedRecordingError::Recording)), "{result:?}");
+
+        let missing = harness.sender.get_finished(Uuid::new_v4()).await;
+        assert!(matches!(missing, Err(FinishedRecordingError::NotFound)), "{missing:?}");
     }
 
     #[test]

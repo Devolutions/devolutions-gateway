@@ -4,7 +4,13 @@ use utoipa::{Modify, OpenApi};
 use uuid::Uuid;
 
 use crate::api::preflight::PreflightAlertStatus;
+use crate::api::tasks::recording_ai_analysis::{
+    AiAnalysisBadAnswer, AiAnalysisErrorKind, AiAnalysisRecoverableErrorKind,
+};
 use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
+use crate::provisioner_tasks::Permanent;
+use crate::provisioner_tasks::ai::AiProvider;
+use crate::provisioner_tasks::recording_ai_analysis::{BadAnswer, Failure, Recoverable};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -25,6 +31,8 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::pull_recording_session,
         crate::api::jrec::pull_recording_file,
         crate::api::jrec::search::search_recordings,
+        crate::api::tasks::recording_ai_analysis::start_ai_analysis,
+        crate::api::tasks::recording_ai_analysis::get_ai_analysis,
         crate::api::webapp::sign_app_token,
         crate::api::webapp::sign_session_token,
         crate::api::update::get_update_products,
@@ -64,6 +72,23 @@ use crate::config::dto::{DataEncoding, PubKeyFormat, Subscriber};
         crate::api::jrec::search::StartTimeRange,
         crate::api::jrec::search::RecordingSearchResponse,
         crate::api::jrec::search::RecordingSearchHit,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisRequest,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisConflict,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisConflictCode,
+        AiProvider,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisTask,
+        crate::api::tasks::TaskState,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisParams,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisPayload,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisRunningPayload,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisSucceededPayload,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisUsage,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisFailedPayload,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisError,
+        AiAnalysisErrorKind,
+        AiAnalysisBadAnswer,
+        crate::api::tasks::recording_ai_analysis::AiAnalysisRecoverableError,
+        AiAnalysisRecoverableErrorKind,
         crate::token::AccessScope,
         crate::api::webapp::AppTokenSignRequest,
         crate::api::webapp::AppTokenContentType,
@@ -143,6 +168,34 @@ struct SessionInfo {
     /// Destination Host
     destination_host: Option<String>,
 }
+
+// The API writes the error kinds out as its own enums, so these matches stop the build until a new kind or field of
+// the Task is written out there too.
+const _: fn(&Permanent<Failure, Recoverable>) -> AiAnalysisErrorKind = |error| match error {
+    Permanent::Kind(Failure::AiRejected { status: _ }) => AiAnalysisErrorKind::AiRejected,
+    Permanent::Kind(Failure::AiBadAnswer { why: _ }) => AiAnalysisErrorKind::AiBadAnswer,
+    Permanent::Kind(Failure::KeyLost) => AiAnalysisErrorKind::KeyLost,
+    Permanent::Kind(Failure::NoRecording) => AiAnalysisErrorKind::NoRecording,
+    Permanent::Kind(Failure::MixedRecording) => AiAnalysisErrorKind::MixedRecording,
+    Permanent::Kind(Failure::UnreadableRecording { file: _ }) => AiAnalysisErrorKind::UnreadableRecording,
+    Permanent::InvalidTask => AiAnalysisErrorKind::InvalidTask,
+    Permanent::Panicked => AiAnalysisErrorKind::Panicked,
+    Permanent::Internal => AiAnalysisErrorKind::Internal,
+    Permanent::AttemptsExhausted { last: _ } => AiAnalysisErrorKind::AttemptsExhausted,
+    Permanent::DeadlinePassed => AiAnalysisErrorKind::DeadlinePassed,
+};
+
+const _: fn(&Recoverable) -> AiAnalysisRecoverableErrorKind = |error| match error {
+    Recoverable::AiUnreachable => AiAnalysisRecoverableErrorKind::AiUnreachable,
+    Recoverable::AiBusy { status: _ } => AiAnalysisRecoverableErrorKind::AiBusy,
+};
+
+const _: fn(&BadAnswer) -> AiAnalysisBadAnswer = |why| match why {
+    BadAnswer::Invalid => AiAnalysisBadAnswer::Invalid,
+    BadAnswer::Truncated => AiAnalysisBadAnswer::Truncated,
+    BadAnswer::Refused => AiAnalysisBadAnswer::Refused,
+    BadAnswer::NotExpectedJson => AiAnalysisBadAnswer::NotExpectedJson,
+};
 
 #[allow(unused)]
 #[derive(Serialize, utoipa::ToSchema)]

@@ -105,7 +105,7 @@ Unless stated otherwise, implementations must follow these conventions.
 
 - JSON object of string → string.
 - Known keys: `hostname`, `fqdn`, `domain`, `os_name`, `os_version`, `arch`, `agent_version`, `machine_id`.
-- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes with no C0, DEL (U+007F) or C1 control characters and no invisible format character (U+00AD, U+061C, U+180E, U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+2066–U+206F, U+FEFF, U+FFF9–U+FFFB, U+E0001, U+E0020–U+E007F); whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values.
+- Limits: ≤ 32 keys; key matches `^[a-z][a-z0-9_]{0,63}$`; value ≤ 1024 UTF-8 bytes with no C0, DEL (U+007F) or C1 control characters and no invisible format character (U+00AD, U+034F, U+061C, U+115F–U+1160, U+17B4–U+17B5, U+180B–U+180F, U+200B–U+200F, U+202A–U+202E, U+2060–U+206F, U+3164, U+FE00–U+FE0F, U+FEFF, U+FFA0, U+FFF0–U+FFFB, U+1BCA0–U+1BCA3, U+1D173–U+1D17A, U+E0000–U+E0FFF); whole object ≤ 16 KiB, measured as the sum of the UTF-8 byte lengths of all keys and values.
 - Invisible format characters are excluded so that no value can reorder or hide text where an administrator reads it, such as a friendly name evaluated from metadata.
 - `metadata` is required in enroll, renew and check-in bodies and may be an empty object; an absent or non-object value → `invalid_request`.
 - Anything else (nested values, non-strings, limits exceeded) → `invalid_request`.
@@ -139,6 +139,7 @@ Unless stated otherwise, implementations must follow these conventions.
 - The number of CA tiers and the rest of the root profile are each authority's choice, within the rule below.
 - Every certificate in a chain is signed with `ecdsa-with-SHA256` by a P-256 key or with `ecdsa-with-SHA384` by a P-384 key, never with RSA, and every CA certificate, the root included, carries basicConstraints with `cA` set and key usage with `keyCertSign`.
 - Leaf: P-256, `CN=<identity_id>`, SAN URI `urn:uuid:<identity_id>`, EKU clientAuth, KeyUsage digitalSignature; its lifetime is a server setting with a default of 90 days, capped at the issuing root's `notAfter`.
+  The setting is at least 15 minutes, so that the agent's scheduled renewal, at two-thirds of the lifetime, is not held back by its 10-minute wait between renewals.
   The leaf carries no other extension except an authority key identifier, a subject key identifier and the enrollment URL extension; in particular it carries no basicConstraints, so a leaf can never act as a CA.
 - The enrollment URL extension, OID `1.3.6.1.4.1.32473.1.1`, non-critical, holds as an `IA5String` the `u` of the token that enrolled the identity, without trailing slashes (§2); a leaf carries it exactly once, and every certificate issued for that identity carries the same value.
   That OID sits under the enterprise number RFC 5612 reserves for documentation; it is replaced by one under Devolutions' own IANA enterprise number before the feature is released.
@@ -279,7 +280,8 @@ Any other `identity_unknown`, including one returned by that retry, is terminal.
 
 `certificate_expired`:
 
-- On `connect` or `check-in`: the agent renews immediately (§8), signing with the expired certificate, which renew still accepts within its grace; it retries the operation only after `confirm`.
+- On `connect` or `check-in`: the agent renews (§8), signing with the expired certificate, which renew still accepts within its grace; it retries the operation only after `confirm`.
+  It renews immediately, except that it may wait until 10 minutes after it last completed a renewal of that identity.
 - On `renew`: the certificate is beyond grace.
   It is terminal.
 - On `confirm`: see §8.

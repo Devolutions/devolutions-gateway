@@ -3151,6 +3151,38 @@ mod tests {
     }
 
     // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[cfg(windows)]
+    #[test]
+    fn an_authority_directory_another_process_holds_is_not_untrusted() -> anyhow::Result<()> {
+        // Only an authority directory that fails the check stops all identity processing.
+        // A directory that another process, such as a backup or an antivirus scan, holds without sharing keeps the check
+        // from running, but passes the check once released.
+        use std::os::windows::fs::OpenOptionsExt as _;
+
+        use windows::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+
+        let directory = TestDir::new()?;
+        let store = directory.store()?;
+        let identity = enroll_locally(&store, &directory.0)?;
+        let held = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(directory.authority(identity.authority_id))?;
+
+        let while_held = store.check_stored_identities();
+        drop(held);
+        let released = store.check_stored_identities();
+
+        let while_held = while_held
+            .err()
+            .context("the check passed while the directory was held")?;
+        assert_eq!(untrusted_path(&while_held), None, "{while_held:#}");
+        released?;
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn start_up_stops_on_an_authority_directory_open_to_other_users_and_leaves_it_unchanged() -> anyhow::Result<()> {
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory that is not protected from other

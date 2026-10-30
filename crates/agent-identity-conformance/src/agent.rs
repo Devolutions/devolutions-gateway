@@ -23,8 +23,8 @@ use tokio::process::{Child, Command};
 use x509_cert::Certificate;
 
 use crate::client::{
-    Target, Token, count, decoded_certificate, expect_error, expect_status, field,
-    invisible_format_character_range_ends, is_invisible_format_character, token_bag, token_base_url,
+    INTERIOR_INVISIBLE_FORMAT_CHARACTERS, Target, Token, count, decoded_certificate, expect_error, expect_status,
+    field, invisible_format_character_range_ends, is_invisible_format_character, token_bag, token_base_url,
     unlisted_format_character_neighbors, with_bag_url, with_upper_case_scheme,
 };
 use crate::dvls::{CertificateStatus, IdentityQuery, IdentityRecord, IdentityStatus, RotationDeadline};
@@ -41,13 +41,15 @@ mod system_fixture;
 macro_rules! poll {
     ($case:expr, $wait:expr, $step:expr, $timeout:expr, async $attempt:block $(,)?) => {{
         let start = Instant::now();
+        // Evaluated once, so that a wait computed from the clock does not shrink on every attempt.
+        let wait: Duration = $wait;
         loop {
             let attempt: anyhow::Result<Option<_>> = async $attempt.await;
             if let Some(value) = attempt? {
                 break value;
             }
             $case.check_running()?;
-            ensure!(start.elapsed() < $wait, "{}", $timeout);
+            ensure!(start.elapsed() < wait, "{}", $timeout);
             tokio::time::sleep($step).await;
         }
     }};
@@ -216,7 +218,26 @@ fn is_record_temporary(path: &Path) -> bool {
             .is_some_and(|hash| temporary_name(name, &format!("{hash}.in-progress.json")))
 }
 
-fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> anyhow::Result<()> {
+/// What the metadata check requires of the agent's `machine_id`.
+///
+/// [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent" has the agent send a value only when the OS provides one, and the check can read the Linux value from the host alone.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ExpectedMachineId {
+    /// The host's value is not available to the check, so whatever the agent sent is accepted.
+    NotCompared,
+    /// The host provides no value, so the agent must omit the key.
+    Absent,
+    /// The host provides this value, so the agent must send exactly it.
+    Value(String),
+}
+
+fn validate_agent_metadata(
+    metadata: &Value,
+    agent_version: Option<&str>,
+    machine_id: &ExpectedMachineId,
+) -> anyhow::Result<()> {
     let values = metadata.as_object().context("agent metadata is not an object")?;
     let mut total_bytes = 0;
     for (key, value) in values {
@@ -230,14 +251,8 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
         ensure!(!value.is_empty(), "agent metadata {key} is empty");
         ensure!(value.len() <= 1024, "agent metadata {key} exceeds 1024 UTF-8 bytes");
         ensure!(
-            value
-                .chars()
-                .all(|character| character >= '\u{20}' && !('\u{7f}'..='\u{9f}').contains(&character)),
-            "agent metadata {key} contains a C0/C1 control character"
-        );
-        ensure!(
-            !value.chars().any(is_invisible_format_character),
-            "agent metadata {key} contains an invisible format character"
+            !value.chars().any(removed_from_metadata),
+            "agent metadata {key} contains a control character or an invisible format character"
         );
         total_bytes += key.len() + value.len();
     }
@@ -261,13 +276,81 @@ fn validate_agent_metadata(metadata: &Value, agent_version: Option<&str>) -> any
             "agent metadata version differs from --agent-version"
         );
     }
-    #[cfg(target_os = "linux")]
-    if Path::new("/etc/machine-id").exists() {
-        let expected = std::fs::read_to_string("/etc/machine-id").context("read Linux machine ID")?;
-        ensure!(
-            metadata["machine_id"] == expected.trim(),
-            "agent metadata machine_id differs from /etc/machine-id"
-        );
+    check_machine_id(metadata, machine_id)
+}
+
+/// Whether the agent removes `character` from every metadata value it sends, and the authority refuses it in one.
+///
+/// [CONTRACT.agent-identity.md] §3 "Metadata" excludes the C0, DEL, C1 and invisible format characters, and §3.1 "Metadata sent by the agent" has the agent remove them.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+fn removed_from_metadata(character: char) -> bool {
+    character < '\u{20}' || ('\u{7f}'..='\u{9f}').contains(&character) || is_invisible_format_character(character)
+}
+
+/// The `machine_id` check's expectation on this host: the Linux `/etc/machine-id` as the agent must report it, and nothing elsewhere.
+///
+/// Windows and macOS values are not compared, because the suite has no independent reading of the SMBIOS UUID or `IOPlatformUUID`.
+fn host_machine_id() -> ExpectedMachineId {
+    if !cfg!(target_os = "linux") {
+        return ExpectedMachineId::NotCompared;
+    }
+    machine_id_expectation(std::fs::read_to_string("/etc/machine-id"))
+}
+
+/// The expectation from reading the Linux `/etc/machine-id`.
+///
+/// A missing file means the OS provides no value, so the agent must omit the key.
+/// Any other failure, such as a permission denial, a directory at that path, or contents that are not UTF-8, leaves the suite unable to know what the host provides, so the value is not compared rather than the whole run aborted.
+fn machine_id_expectation(read: std::io::Result<String>) -> ExpectedMachineId {
+    match read {
+        Ok(contents) => expected_machine_id(Some(&contents)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => expected_machine_id(None),
+        Err(error) => {
+            eprintln!("WARN cannot read the Linux machine ID, so the agent's machine_id is not compared: {error}");
+            ExpectedMachineId::NotCompared
+        }
+    }
+}
+
+/// The `machine_id` an agent must report on a Linux host whose `/etc/machine-id` holds `host_contents`, which is `None` when the host has no such file.
+///
+/// The agent sends the file as-is ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent") after the removal every value goes through, so the expectation is what that leaves, without trimming.
+/// An optional key left empty is omitted, so a missing or empty file expects no `machine_id` at all.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+fn expected_machine_id(host_contents: Option<&str>) -> ExpectedMachineId {
+    let mut sanitised = String::new();
+    for character in host_contents
+        .unwrap_or_default()
+        .chars()
+        .filter(|character| !removed_from_metadata(*character))
+    {
+        if sanitised.len() + character.len_utf8() <= 1024 {
+            sanitised.push(character);
+        } else {
+            break;
+        }
+    }
+    if sanitised.is_empty() {
+        ExpectedMachineId::Absent
+    } else {
+        ExpectedMachineId::Value(sanitised)
+    }
+}
+
+fn check_machine_id(metadata: &Value, expected: &ExpectedMachineId) -> anyhow::Result<()> {
+    let sent = metadata.get("machine_id");
+    match expected {
+        ExpectedMachineId::NotCompared => {}
+        ExpectedMachineId::Absent => ensure!(
+            sent.is_none(),
+            "agent metadata carries machine_id {sent:?} although the host provides none"
+        ),
+        ExpectedMachineId::Value(expected) => ensure!(
+            sent == Some(&Value::String(expected.clone())),
+            "agent metadata machine_id is {sent:?} instead of the host's {expected:?}"
+        ),
     }
     Ok(())
 }
@@ -890,6 +973,19 @@ impl AgentCase {
         Ok(())
     }
 
+    /// Replaces the agent's 10-minute wait between renewals of one identity with `secs` seconds, 0 removing it (`devolutions-agent/src/identity/INTENT.md`, "Configuration").
+    fn set_min_renewal_interval_secs(&mut self, secs: u64) -> anyhow::Result<()> {
+        ensure!(
+            self.child.is_none(),
+            "the wait between renewals must be set before starting the agent"
+        );
+        let path = self.path().join("agent.json");
+        let mut config: Value = serde_json::from_slice(&std::fs::read(&path)?)?;
+        config["__debug__"]["identity"]["min_renewal_interval_secs"] = json!(secs);
+        std::fs::write(path, serde_json::to_vec_pretty(&config)?)?;
+        Ok(())
+    }
+
     /// Removes the renewal schedule override, so the agent renews at its scheduled time again.
     fn clear_renewal_after_secs(&mut self) -> anyhow::Result<()> {
         ensure!(
@@ -943,6 +1039,7 @@ impl AgentCase {
         validate_agent_metadata(
             &serde_json::to_value(&record.metadata)?,
             self.ctx.agent_version.as_deref(),
+            &host_machine_id(),
         )
     }
 
@@ -969,7 +1066,12 @@ impl AgentCase {
     fn write_pending(&mut self, token: &str) -> anyhow::Result<()> {
         self.add_token(token);
         let path = self.pending_path();
-        std::fs::create_dir_all(path.parent().context("pending parent")?)?;
+        let parent = path.parent().context("pending parent")?;
+        // Some cases write a pending file before the agent's first start, and the agent refuses identity directories owned by another account.
+        #[cfg(windows)]
+        crate::windows::create_protected_dirs(parent)?;
+        #[cfg(not(windows))]
+        std::fs::create_dir_all(parent)?;
         write_pending_file(&path, &serde_json::to_vec(&json!({ "version": 1, "token": token }))?)?;
         #[cfg(windows)]
         crate::windows::pending_acl_is_protected(&path)?;
@@ -2806,8 +2908,12 @@ pub(crate) async fn a_renew_transient_failures_retry_without_state_change(ctx: C
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §errors
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
     // oracle: intent crates/agent-identity/INTENT.md §Stored identities
-    with_agent(ctx, None, true, async move |case| {
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+    with_agent(ctx, None, false, async move |case| {
         let target = case.ctx.target.clone();
+        // The three renewals follow one another in one run, faster than the agent's wait between renewals of one identity (`crates/agent-identity/INTENT.md`, "Schedules"), so the case removes that wait.
+        case.set_min_renewal_interval_secs(0)?;
+        case.start().await?;
         let (id, initial) = case.enroll_new(&target, 1).await?;
         let authority = field(&initial, "authority_id")?.to_owned();
         case.until_identity(&target, &id, "working channel for renewal faults", |record| {
@@ -3334,15 +3440,7 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
     with_agent(ctx, None, false, async move |case| {
         let token = new_token(case, 1).await?;
         case.add_token(&token.text);
-        let output = Command::new(&case.ctx.agent_bin)
-            .args(["identity", "enroll", &token.text])
-            .env("DAGENT_CONFIG_PATH", case.path())
-            .kill_on_drop(true)
-            .output()
-            .await
-            .context("run identity enroll CLI")?;
-        std::fs::write(case.path().join("cli-stdout.log"), &output.stdout)?;
-        std::fs::write(case.path().join("cli-stderr.log"), &output.stderr)?;
+        let output = enroll_cli_from_stdin(case, format!("{}\n", token.text).as_bytes()).await?;
         ensure!(output.status.success(), "identity enroll CLI rejected a valid token");
         ensure!(
             case.pending_path().exists(),
@@ -3422,25 +3520,9 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
             ),
         ];
         for (reason, candidate) in invalid {
-            let result = tokio::time::timeout(
-                Duration::from_secs(10),
-                Command::new(&case.ctx.agent_bin)
-                    .args(["identity", "enroll", &candidate])
-                    .env("DAGENT_CONFIG_PATH", case.path())
-                    .kill_on_drop(true)
-                    .output(),
-            )
-            .await
-            .with_context(|| format!("identity enroll CLI hung for {reason}"))??;
-            use std::io::Write as _;
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(case.path().join("cli-stdout.log"))?
-                .write_all(&result.stdout)?;
-            std::fs::OpenOptions::new()
-                .append(true)
-                .open(case.path().join("cli-stderr.log"))?
-                .write_all(&result.stderr)?;
+            let result = enroll_cli_from_stdin(case, format!("{candidate}\n").as_bytes())
+                .await
+                .with_context(|| format!("identity enroll CLI for {reason}"))?;
             ensure!(!result.status.success(), "identity enroll CLI accepted {reason}");
             ensure!(
                 !case.pending_path_for(&candidate).exists() && !case.in_progress_path_for(&candidate).exists(),
@@ -3453,16 +3535,30 @@ pub(crate) async fn a_cli_identity_enroll_writes_pending_file(ctx: Context) -> a
 }
 
 async fn enroll_cli_from_stdin(case: &AgentCase, input: &[u8]) -> anyhow::Result<std::process::Output> {
-    let output = tokio::time::timeout(Duration::from_secs(10), async {
-        let mut child = Command::new(&case.ctx.agent_bin)
-            .args(["identity", "enroll", "-"])
-            .env("DAGENT_CONFIG_PATH", case.path())
+    enroll_cli(&case.ctx.agent_bin, case.path(), &["-"], input, Duration::from_secs(10)).await
+}
+
+/// Runs `identity enroll` followed by `args` against the case configuration in `case_dir`, writing `input` to its standard input.
+///
+/// Appends the command's output to the case's CLI logs, which the token audit then reads.
+async fn enroll_cli(
+    agent_bin: &Path,
+    case_dir: &Path,
+    args: &[&str],
+    input: &[u8],
+    timeout: Duration,
+) -> anyhow::Result<std::process::Output> {
+    let output = tokio::time::timeout(timeout, async {
+        let mut child = Command::new(agent_bin)
+            .args(["identity", "enroll"])
+            .args(args)
+            .env("DAGENT_CONFIG_PATH", case_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .context("start identity enroll CLI with stdin")?;
+            .context("start identity enroll CLI")?;
         let mut stdin = child.stdin.take().context("identity enroll CLI has no stdin")?;
         if let Err(error) = stdin.write_all(input).await {
             ensure!(
@@ -3474,24 +3570,24 @@ async fn enroll_cli_from_stdin(case: &AgentCase, input: &[u8]) -> anyhow::Result
         child.wait_with_output().await.context("wait for identity enroll CLI")
     })
     .await
-    .context("identity enroll CLI with stdin timed out")??;
+    .context("identity enroll CLI timed out")??;
     use std::io::Write as _;
     for (name, contents) in [("cli-stdout.log", &output.stdout), ("cli-stderr.log", &output.stderr)] {
         std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(case.path().join(name))?
+            .open(case_dir.join(name))?
             .write_all(contents)?;
     }
     Ok(output)
 }
 
-fn assert_no_pending_files(case: &AgentCase) -> anyhow::Result<()> {
+fn assert_no_pending_files(case: &AgentCase, input: &str) -> anyhow::Result<()> {
     let dir = case.path().join("identity").join("pending");
     if dir.exists() {
         ensure!(
             std::fs::read_dir(dir)?.next().is_none(),
-            "identity enroll CLI created pending or in-progress state for invalid stdin"
+            "identity enroll CLI created pending or in-progress state for {input}"
         );
     }
     Ok(())
@@ -3539,8 +3635,56 @@ pub(crate) async fn a_cli_identity_enroll_stdin(ctx: Context) -> anyhow::Result<
         ] {
             let output = enroll_cli_from_stdin(case, &input).await?;
             ensure!(!output.status.success(), "identity enroll CLI accepted {name} on stdin");
-            assert_no_pending_files(case)?;
+            assert_no_pending_files(case, &format!("{name} on stdin"))?;
         }
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn a_cli_identity_enroll_token_argument_refused(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §CLI
+    // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+    with_agent(ctx, None, false, async move |case| {
+        let token = new_token(case, 1).await?;
+        case.add_token(&token.text);
+        let line = format!("{}\n", token.text);
+        // Each run differs from the accepting control below only in its arguments, standard input carrying the same token.
+        for (name, args) in [
+            ("the token as the argument", &[token.text.as_str()][..]),
+            ("the token after -", &["-", token.text.as_str()][..]),
+        ] {
+            let output = enroll_cli(
+                &case.ctx.agent_bin,
+                case.path(),
+                args,
+                line.as_bytes(),
+                Duration::from_secs(10),
+            )
+            .await
+            .with_context(|| format!("identity enroll CLI with {name}"))?;
+            ensure!(!output.status.success(), "identity enroll CLI accepted {name}");
+            assert_no_pending_files(case, name)?;
+            for (stream, contents) in [("stdout", &output.stdout), ("stderr", &output.stderr)] {
+                assert_no_token_fragments(
+                    contents,
+                    &token.text,
+                    Path::new(&format!("identity enroll CLI {stream} for {name}")),
+                )?;
+            }
+        }
+        // The refusals above are for the arguments alone: the same token on standard input is accepted.
+        let output = enroll_cli_from_stdin(case, line.as_bytes()).await?;
+        ensure!(
+            output.status.success(),
+            "identity enroll CLI rejected the token on stdin after refusing it as an argument"
+        );
+        let pending = case.pending_path();
+        ensure!(
+            pending.exists(),
+            "identity enroll CLI did not write the pending file for the token on stdin"
+        );
+        std::fs::remove_file(pending)?;
         Ok(())
     })
     .await
@@ -4486,17 +4630,22 @@ pub(crate) async fn a_channel_connected_and_metadata(ctx: Context) -> anyhow::Re
     .await
 }
 
-/// CONTRACT.agent-identity.md §3.1: the agent "removes [...] the invisible format characters of §3" from each value it sends, and "A required key that ends up empty gets the value `unknown`".
+/// [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent": the agent "removes [...] the invisible format characters of §3" from each value it sends, and "A required key that ends up empty gets the value `unknown`".
 ///
 /// The metadata override replaces collected values before each send (the agent's intent, "Configuration"), so the values this test sets go through that removal.
-/// The hostname holds every end of a listed range before, between and after code points that the list leaves out, which the agent keeps.
+/// The hostname holds every end of a listed range, and code points inside the ranges that a list kept in pieces would miss, before, between and after code points that the list leaves out, which the agent keeps.
 /// The OS name, a required key, and the domain, an optional one, hold only listed code points, so the agent sends `unknown` for the first and omits the second.
+///
+/// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 pub(crate) async fn a_metadata_invisible_format_characters_removed(ctx: Context) -> anyhow::Result<()> {
     // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
     // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
     with_agent(ctx, None, true, async move |case| {
         let target = case.ctx.target.clone();
-        let listed = invisible_format_character_range_ends();
+        let listed = invisible_format_character_range_ends()
+            .into_iter()
+            .chain(INTERIOR_INVISIBLE_FORMAT_CHARACTERS)
+            .collect::<Vec<_>>();
         let only_listed = listed.iter().collect::<String>();
         let mut hostname = format!("{only_listed}host");
         let mut expected = "host".to_owned();
@@ -4736,6 +4885,132 @@ pub(crate) async fn a_request_renewal_connected(ctx: Context) -> anyhow::Result<
             key_name(&state, "current")?,
         )
         .await?;
+        Ok(())
+    })
+    .await
+}
+
+pub(crate) async fn a_renewal_waits_between_renewals(ctx: Context) -> anyhow::Result<()> {
+    // oracle: intent crates/agent-identity/INTENT.md §Schedules
+    // oracle: intent devolutions-agent/src/identity/INTENT.md §Configuration
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-renewal
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-sequence
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §check-in
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §server-certificate-state
+    with_agent(ctx, None, false, async move |case| {
+        let target = case.ctx.target.clone();
+        // The test-only setting shortens the 10-minute wait, and `renewal_after_secs`, which is exempt from it, stays unset.
+        let wait = Duration::from_secs(15);
+        // The second request reaches the authority at least this long before the wait ends.
+        // An agent that renews at once then passes the lower bound below only if its renew takes longer than this to show in the mock's requests.
+        let margin = Duration::from_secs(4);
+        // How late after the wait ends the deferred renewal may still arrive: it covers a new key and the renew request itself.
+        let slack = Duration::from_secs(10);
+        // How long the agent must hold one connected stream before the second request, so that no reconnect still under way lands after it.
+        let stable = Duration::from_millis(1_500);
+        case.set_min_renewal_interval_secs(wait.as_secs())?;
+        case.start().await?;
+        let (id, state) = case.enroll_new(&target, 1).await?;
+        let authority = field(&state, "authority_id")?.to_owned();
+        case.until_identity(&target, &id, "connected channel", |record| record.connected)
+            .await?;
+        let before_first = target.requests(None).await?;
+        // Every confirm, the one answered 204 included, arrives after this moment, taken before the request below, and after the start of the last poll that recorded none.
+        // The agent completes the renewal only once its confirm is answered (§8.1 step 4), so the later of the two is a lower bound on the completion.
+        let mut completed_after = Instant::now();
+        target.management().request_renewal(&id).await?;
+        poll!(case, WAIT, POLL, "agent did not confirm the first requested renewal", async {
+            let polled_at = Instant::now();
+            let requests = target.requests(None).await?;
+            let steps = renew_and_confirm_steps_since(&requests, &before_first)?;
+            if steps.contains(&"confirm_204") {
+                return Ok(Some(()));
+            }
+            if !steps.contains(&"confirm") {
+                completed_after = polled_at;
+            }
+            Ok(None)
+        });
+        let settled = until_renewal_settled(case, &target, &authority, &id, key_name(&state, "current")?).await?;
+        // The agent opens its new stream before closing the old one after `confirm` (§8.1 step 4), and may reconnect again on the authority's `Reconnect` to the retired stream (§7.4).
+        // Wait until it has held one connected stream, with no further authenticated connect, for `stable`, so that the push below reaches the one stream that stays open.
+        let connects_before_first = count(&before_first, "authenticated_connects")?;
+        let mut held_since: Option<(Instant, u64)> = None;
+        let before_second = poll!(case, WAIT, POLL, "agent did not settle on one connected stream after renewing", async {
+            let connected = case.identity_record(&target, &id).await?.connected;
+            let requests = target.requests(None).await?;
+            let connects = count(&requests, "authenticated_connects")?;
+            if !(connected && connects_before_first < connects && count(&requests, "active_streams")? == 1) {
+                held_since = None;
+                return Ok(None);
+            }
+            match held_since {
+                Some((since, held)) if held == connects => Ok((stable <= since.elapsed()).then_some(requests)),
+                _ => {
+                    held_since = Some((Instant::now(), connects));
+                    Ok(None)
+                }
+            }
+        });
+        let events_before_second = target
+            .events(&id)
+            .await?
+            .iter()
+            .filter_map(|event| event["seq"].as_u64())
+            .max()
+            .unwrap_or(0);
+        // The authority may ask for a renewal again at once: an administrator's request sets the request-renewal flag (§8.2), and the mock pushes `RenewRequested` to live streams when it does (mock README, `request-renewal`).
+        target.management().request_renewal(&id).await?;
+        let requested_by = Instant::now();
+        ensure!(
+            requested_by + margin < completed_after + wait,
+            "the second renewal request came {:?} after the last poll before the first confirm, too late to tell a {wait:?} wait between renewals from none",
+            requested_by.duration_since(completed_after)
+        );
+        let renewed_within = (requested_by + wait + slack).saturating_duration_since(Instant::now());
+        poll!(
+            case,
+            renewed_within,
+            POLL,
+            format!("agent did not renew within {slack:?} after the {wait:?} wait between renewals ended"),
+            async {
+                let requests = target.requests(None).await?;
+                Ok(renew_and_confirm_steps_since(&requests, &before_second)?
+                    .contains(&"renew")
+                    .then_some(()))
+            },
+        );
+        // The renew arrived before this moment, so the time since `completed_after` is at least the time between the agent's completion and its next renew.
+        let since_completion = completed_after.elapsed();
+        ensure!(
+            wait <= since_completion,
+            "agent renewed within {since_completion:?} of the last poll before its previous renewal's confirm, before the {wait:?} wait between renewals ended"
+        );
+        // A renewal request reaches the agent through the push on a live stream, a `RenewRequested` after a new stream's `Welcome` (§7.3 step 5), or check-in (§5.6), and the test's leaves outlast it, so no schedule asks for one.
+        // With no stream opened and no check-in between the second request and the renew, in the mock's event order, the pushed request is what the agent deferred.
+        let events = target.events(&id).await?;
+        let since_second = events
+            .iter()
+            .filter(|event| event["seq"].as_u64().is_some_and(|seq| events_before_second < seq))
+            .collect::<Vec<_>>();
+        let renew_at = since_second
+            .iter()
+            .position(|event| event["type"] == "renew_received")
+            .context("mock recorded no renew_received event after the second renewal request")?;
+        ensure!(
+            !since_second[..renew_at].iter().any(|event| matches!(
+                event["type"].as_str(),
+                Some("stream_opened" | "stream_authenticated" | "check_in_received")
+            )),
+            "agent opened a stream or checked in before renewing, so the deferred renewal did not come from the request pushed during the wait"
+        );
+        until_renewal_settled(case, &target, &authority, &id, key_name(&settled, "current")?).await?;
+        // The agent replies `Ack` to `RenewRequested` (§7.3 step 5), which sets no deadline for it, so the case looks for the `Ack` only once the renewal it asked for has settled, within the suite's usual wait, not before the wait between renewals ends.
+        // The renewal clears the request-renewal flag (§8.2), so no later stream receives the request again.
+        let acks_before = count(&before_second, "correlated_acks")?;
+        poll!(case, WAIT, POLL, "agent did not Ack the renewal request pushed during the wait between renewals", async {
+            Ok((acks_before < count(&target.requests(None).await?, "correlated_acks")?).then_some(()))
+        });
         Ok(())
     })
     .await
@@ -6096,32 +6371,66 @@ mod tests {
 
     use super::*;
 
+    /// Agent metadata that conforms to [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent", apart from the `machine_id` that each caller decides.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    fn agent_metadata(hostname: &str) -> Value {
+        json!({
+            "hostname": hostname,
+            "os_name": "os",
+            "os_version": "1",
+            "arch": std::env::consts::ARCH,
+            "agent_version": "1",
+        })
+    }
+
     #[test]
     fn agent_metadata_check_refuses_listed_format_characters_only() {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-        let metadata = |hostname: &str| {
-            let mut metadata = json!({
-                "hostname": hostname,
-                "os_name": "os",
-                "os_version": "1",
-                "arch": std::env::consts::ARCH,
-                "agent_version": "1",
-            });
-            // The check compares `machine_id` with the host's on Linux, so the fixture carries the host's.
-            if cfg!(target_os = "linux")
-                && let Ok(machine_id) = std::fs::read_to_string("/etc/machine-id")
-            {
-                metadata["machine_id"] = machine_id.trim().into();
-            }
-            metadata
-        };
-        validate_agent_metadata(&metadata("host\u{2065}name"), None).expect("U+2065 is outside the list");
-        for character in ['\u{00AD}', '\u{E007F}'] {
-            let refused = validate_agent_metadata(&metadata(&format!("host{character}name")), None)
-                .expect_err(&format!("U+{:04X} is listed", u32::from(character)));
+        validate_agent_metadata(
+            &agent_metadata("host\u{2070}name"),
+            None,
+            &ExpectedMachineId::NotCompared,
+        )
+        .expect("U+2070 is outside the list");
+        let listed = invisible_format_character_range_ends()
+            .into_iter()
+            .chain(INTERIOR_INVISIBLE_FORMAT_CHARACTERS);
+        for character in listed {
+            let refused = validate_agent_metadata(
+                &agent_metadata(&format!("host{character}name")),
+                None,
+                &ExpectedMachineId::NotCompared,
+            )
+            .expect_err(&format!("U+{:04X} is listed", u32::from(character)));
             assert!(
                 refused.to_string().contains("invisible format character"),
                 "U+{:04X} was refused for another reason: {refused}",
+                u32::from(character)
+            );
+        }
+    }
+
+    #[test]
+    fn agent_metadata_check_refuses_c0_del_and_c1_characters_only() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+        for character in ['\u{0}', '\u{1F}', '\u{7F}', '\u{80}', '\u{9F}'] {
+            validate_agent_metadata(
+                &agent_metadata(&format!("host{character}name")),
+                None,
+                &ExpectedMachineId::NotCompared,
+            )
+            .expect_err(&format!("U+{:04X} is a control character", u32::from(character)));
+        }
+        for character in [' ', '~', '\u{A0}'] {
+            let accepted = validate_agent_metadata(
+                &agent_metadata(&format!("host{character}name")),
+                None,
+                &ExpectedMachineId::NotCompared,
+            );
+            assert!(
+                accepted.is_ok(),
+                "U+{:04X} is not a control character, yet was refused: {accepted:?}",
                 u32::from(character)
             );
         }
@@ -6517,6 +6826,128 @@ mod tests {
         Ok(())
     }
 
+    /// A host without a `machine_id` provides none for the agent to send, so the agent must omit the key, because [CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent" has it sent "when the OS provides a value".
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn machine_id_is_refused_when_the_host_provides_none() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        for host_contents in [None, Some(""), Some("\n"), Some("\u{200B}\n")] {
+            let expected = expected_machine_id(host_contents);
+            assert_eq!(
+                expected,
+                ExpectedMachineId::Absent,
+                "host contents {host_contents:?} leave nothing for the agent to send"
+            );
+            validate_agent_metadata(&agent_metadata("host"), None, &expected).unwrap_or_else(|error| {
+                panic!("an agent that omits machine_id on a host with contents {host_contents:?} was refused: {error}")
+            });
+            let mut invented = agent_metadata("host");
+            invented["machine_id"] = json!("invented");
+            validate_agent_metadata(&invented, None, &expected).expect_err(&format!(
+                "a machine_id the host does not provide, with host contents {host_contents:?}"
+            ));
+        }
+    }
+
+    /// A host with a `machine_id` has the agent send exactly that value ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent"), so a different value and a missing key both fail.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn machine_id_must_equal_the_host_value() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        let expected = ExpectedMachineId::Value("0123abcd".to_owned());
+        let mut sent = agent_metadata("host");
+        sent["machine_id"] = json!("0123abcd");
+        validate_agent_metadata(&sent, None, &expected).expect("the host's value, sent as-is");
+        sent["machine_id"] = json!("4567ef01");
+        let mismatch = validate_agent_metadata(&sent, None, &expected)
+            .expect_err("machine_id 4567ef01 against the host's 0123abcd")
+            .to_string();
+        assert!(
+            mismatch.contains("4567ef01") && mismatch.contains("0123abcd"),
+            "the mismatch message names neither the sent nor the expected value: {mismatch}"
+        );
+        sent["machine_id"] = json!(" 0123abcd ");
+        validate_agent_metadata(&sent, None, &expected).expect_err("machine_id padded with spaces against 0123abcd");
+        sent.as_object_mut().expect("fixture is an object").remove("machine_id");
+        validate_agent_metadata(&sent, None, &expected).expect_err("a missing machine_id against the host's 0123abcd");
+    }
+
+    /// Where the check cannot read the host's value, the agent's `machine_id` is accepted whether it is present or not.
+    #[test]
+    fn machine_id_is_not_compared_when_the_host_value_is_unavailable() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        let mut sent = agent_metadata("host");
+        validate_agent_metadata(&sent, None, &ExpectedMachineId::NotCompared).expect("a missing machine_id");
+        sent["machine_id"] = json!("any-value");
+        validate_agent_metadata(&sent, None, &ExpectedMachineId::NotCompared).expect("machine_id any-value");
+    }
+
+    /// The agent sends `/etc/machine-id` "as-is" ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent") after the removal every value goes through, which drops control characters and trims nothing.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn expected_machine_id_removes_control_characters_and_trims_nothing() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        for (host_contents, expected) in [
+            ("0123abcd\n", "0123abcd"),
+            (" 0123abcd \u{7f}\n", " 0123abcd "),
+            ("0123\u{80}abcd\u{9f}", "0123abcd"),
+            ("0123\u{ad}abcd", "0123abcd"),
+        ] {
+            assert_eq!(
+                expected_machine_id(Some(host_contents)),
+                ExpectedMachineId::Value(expected.to_owned()),
+                "host contents {host_contents:?}"
+            );
+        }
+    }
+
+    /// A missing `/etc/machine-id` means the OS provides no value, so the agent must omit the key ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent"), while a file the suite cannot read tells it nothing about what the host provides.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn machine_id_expectation_follows_how_the_host_file_read_ended() {
+        use std::io::{Error, ErrorKind};
+
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        assert_eq!(
+            machine_id_expectation(Ok(String::from("0123abcd\n"))),
+            ExpectedMachineId::Value("0123abcd".to_owned())
+        );
+        assert_eq!(
+            machine_id_expectation(Err(Error::from(ErrorKind::NotFound))),
+            ExpectedMachineId::Absent
+        );
+        // oracle: mutant an unreadable file aborting the run, or being read as a file that is absent
+        for kind in [
+            ErrorKind::PermissionDenied,
+            ErrorKind::InvalidData,
+            ErrorKind::IsADirectory,
+        ] {
+            assert_eq!(
+                machine_id_expectation(Err(Error::from(kind))),
+                ExpectedMachineId::NotCompared,
+                "read error {kind:?}"
+            );
+        }
+    }
+
+    /// The agent truncates a value to 1024 UTF-8 bytes on a character boundary ([CONTRACT.agent-identity.md] §3.1 "Metadata sent by the agent"), so the expectation does too.
+    ///
+    /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
+    #[test]
+    fn expected_machine_id_is_truncated_on_a_character_boundary() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
+        let host = format!("{}\u{e9}", "a".repeat(1023));
+        assert_eq!(
+            expected_machine_id(Some(&host)),
+            ExpectedMachineId::Value("a".repeat(1023)),
+            "1023 bytes, then a two-byte character that does not fit"
+        );
+    }
+
     #[test]
     fn agent_metadata_requires_c14_fields_and_stable_platform_values() -> anyhow::Result<()> {
         // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §agent-metadata
@@ -6527,33 +6958,30 @@ mod tests {
             "arch": std::env::consts::ARCH,
             "agent_version": "2026.3.0"
         });
-        #[cfg(target_os = "linux")]
-        if Path::new("/etc/machine-id").exists() {
-            metadata["machine_id"] = json!(std::fs::read_to_string("/etc/machine-id")?.trim());
-        }
-        validate_agent_metadata(&metadata, Some("2026.3.0"))?;
+        let not_compared = ExpectedMachineId::NotCompared;
+        validate_agent_metadata(&metadata, Some("2026.3.0"), &not_compared)?;
         for key in REQUIRED_METADATA_KEYS {
             let mut missing = metadata.clone();
             missing.as_object_mut().context("fixture metadata")?.remove(key);
             ensure!(
-                validate_agent_metadata(&missing, Some("2026.3.0")).is_err(),
+                validate_agent_metadata(&missing, Some("2026.3.0"), &not_compared).is_err(),
                 "missing {key} was accepted"
             );
         }
         let mut unknown = metadata.clone();
         unknown["custom"] = json!("value");
         ensure!(
-            validate_agent_metadata(&unknown, None).is_err(),
+            validate_agent_metadata(&unknown, None, &not_compared).is_err(),
             "unknown metadata key was accepted"
         );
         metadata["arch"] = json!("wrong-platform");
         ensure!(
-            validate_agent_metadata(&metadata, None).is_err(),
+            validate_agent_metadata(&metadata, None, &not_compared).is_err(),
             "wrong architecture was accepted"
         );
         metadata["arch"] = json!(std::env::consts::ARCH);
         ensure!(
-            validate_agent_metadata(&metadata, Some("different-version")).is_err(),
+            validate_agent_metadata(&metadata, Some("different-version"), &not_compared).is_err(),
             "wrong agent version was accepted"
         );
         Ok(())

@@ -131,6 +131,10 @@
         {
           "id": "DataFolderSecurityUnreadable",
           "text": "Det går inte att läsa ägaren eller behörigheterna för mappen {0}. Kontrollera dem och försök igen."
+        },
+        {
+          "id": "DataFolderEntryOwnedByUntrustedAccount",
+          "text": "Det går inte att använda filen eller mappen {0} eftersom den ägs av {1}. Endast SYSTEM eller en administratör får äga den. Byt ägare och försök igen."
         }
       ],
       "buttons": [

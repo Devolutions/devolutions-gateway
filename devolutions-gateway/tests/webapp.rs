@@ -60,7 +60,7 @@ fn initialize_conf() {
 async fn custom_authentication_flow() -> anyhow::Result<()> {
     let (cov, _guard) = init_cov_mark();
     initialize_conf();
-    let (state, _handle) = devolutions_gateway::DgwState::mock(CONFIG)?;
+    let (state, _handle) = devolutions_gateway::DgwState::mock(CONFIG).await?;
 
     let mut app =
         devolutions_gateway::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
@@ -191,7 +191,7 @@ async fn static_assets_are_served(#[case] subdir: &str, #[case] uri_prefix: &str
     config["WebApp"]["StaticRootPath"] = json!(static_root);
     let config = config.to_string();
 
-    let (state, _handle) = devolutions_gateway::DgwState::mock(&config)?;
+    let (state, _handle) = devolutions_gateway::DgwState::mock(&config).await?;
 
     let mut app =
         devolutions_gateway::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
@@ -229,7 +229,7 @@ async fn static_assets_are_served(#[case] subdir: &str, #[case] uri_prefix: &str
 async fn sign_app_token_bad_password() -> anyhow::Result<()> {
     let (cov, _guard) = init_cov_mark();
     initialize_conf();
-    let (state, _handle) = devolutions_gateway::DgwState::mock(CONFIG)?;
+    let (state, _handle) = devolutions_gateway::DgwState::mock(CONFIG).await?;
 
     let app =
         devolutions_gateway::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));
@@ -267,7 +267,7 @@ async fn sign_app_token_bad_password() -> anyhow::Result<()> {
 async fn sign_app_token_username_mismatch() -> anyhow::Result<()> {
     let (cov, _guard) = init_cov_mark();
     initialize_conf();
-    let (state, _handles) = devolutions_gateway::DgwState::mock(CONFIG)?;
+    let (state, _handles) = devolutions_gateway::DgwState::mock(CONFIG).await?;
 
     let app =
         devolutions_gateway::make_http_service(state).layer(MockConnectInfo(SocketAddr::from(([0, 0, 0, 0], 3000))));

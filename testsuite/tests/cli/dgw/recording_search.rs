@@ -60,8 +60,9 @@ fn write_analysis_recording(root: &Path, id: Uuid, start_time: i64, log: &str) -
 }
 
 /// Two recordings whose AI analysis logs hold the searched text.
-/// The older one also holds it in a recorded `.slog`, in its video, and in a log outside the recording folder that
-/// its manifest points to, to show that only the `.slog` artifacts of a recording are searched.
+/// The older one also holds it in its recorded `.slog`, in its video, and in a log outside the recording folder that
+/// its manifest lists under both `files` and `artifacts`, to show that every `.slog` of a recording is searched, and
+/// nothing else.
 /// Its manifest also lists a log that is gone, and a third recording folder has no manifest, to show that neither
 /// fails the search.
 fn write_recordings(root: &Path) -> anyhow::Result<()> {
@@ -81,6 +82,7 @@ fn write_recordings(root: &Path) -> anyhow::Result<()> {
             "files": [
                 { "fileName": "recording-0.slog", "startTime": 100, "duration": 10 },
                 { "fileName": "recording-1.webm", "startTime": 100, "duration": 10 },
+                { "fileName": "../outside.slog", "startTime": 100, "duration": 10 },
             ],
             "artifacts": {
                 "ai-analysis": [
@@ -199,8 +201,9 @@ fn hit_summaries(body: &serde_json::Value) -> anyhow::Result<Vec<(String, String
 
 // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
 // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
 #[tokio::test]
-async fn searches_the_slog_artifacts_of_every_recording_newest_first() -> anyhow::Result<()> {
+async fn searches_the_slog_files_of_every_recording_newest_first() -> anyhow::Result<()> {
     let (_recordings, config_handle, _process) = start_with_recordings().await?;
 
     let response = search(
@@ -216,6 +219,7 @@ async fn searches_the_slog_artifacts_of_every_recording_newest_first() -> anyhow
         hit_summaries(&body)?,
         [
             (NEWER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 1),
+            (OLDER_RECORDING.to_string(), "recording-0.slog".to_owned(), 1),
             (OLDER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 2),
         ]
     );
@@ -224,6 +228,7 @@ async fn searches_the_slog_artifacts_of_every_recording_newest_first() -> anyhow
     Ok(())
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
 // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
 #[tokio::test]
 async fn searches_each_listed_recording_once() -> anyhow::Result<()> {
@@ -243,7 +248,10 @@ async fn searches_each_listed_recording_once() -> anyhow::Result<()> {
     let body: serde_json::Value = response.json().await?;
     assert_eq!(
         hit_summaries(&body)?,
-        [(OLDER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 2)]
+        [
+            (OLDER_RECORDING.to_string(), "recording-0.slog".to_owned(), 1),
+            (OLDER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 2),
+        ]
     );
 
     Ok(())
@@ -336,6 +344,7 @@ async fn pages_through_recordings_that_start_together_highest_id_first() -> anyh
     Ok(())
 }
 
+// oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §What is searched
 // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Request
 // oracle: intent devolutions-gateway/src/api/jrec/search.intent.md §Pages
 #[tokio::test]
@@ -352,10 +361,11 @@ async fn pages_through_listed_recordings_in_their_order() -> anyhow::Result<()> 
     )
     .await?;
 
-    assert_eq!(pages.len(), 2);
+    assert_eq!(pages.len(), 3);
     assert_eq!(
         hit_summaries_of(&pages)?,
         [
+            (OLDER_RECORDING.to_string(), "recording-0.slog".to_owned(), 1),
             (OLDER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 2),
             (NEWER_RECORDING.to_string(), "ai-analysis-0.slog".to_owned(), 1),
         ]

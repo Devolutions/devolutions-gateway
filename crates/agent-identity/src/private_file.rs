@@ -56,6 +56,35 @@ pub(crate) fn is_untrusted(error: &anyhow::Error) -> bool {
     error.is::<UntrustedStateFile>()
 }
 
+/// An identity directory whose owner the agent does not accept, such as another account, which provisioning never
+/// repairs.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): such a directory stops all identity processing until it is
+/// fixed, because the account that created it can keep a handle that still changes it after a reset.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+#[derive(Debug)]
+struct ForeignIdentityDirectory {
+    path: Utf8PathBuf,
+    source: private_fs::Error,
+}
+
+impl fmt::Display for ForeignIdentityDirectory {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "identity directory {} has an owner the agent does not accept; the agent never repairs it",
+            self.path
+        )
+    }
+}
+
+impl Error for ForeignIdentityDirectory {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.source)
+    }
+}
+
 fn untrusted() -> anyhow::Error {
     warn!("Ignore untrusted identity state file");
     anyhow::Error::new(UntrustedStateFile)
@@ -66,6 +95,22 @@ fn untrusted_stored_identity(path: &Utf8Path, source: anyhow::Error) -> anyhow::
         path: path.to_owned(),
         source,
     })
+}
+
+/// Turns a failed open of the authority directory or `identity.json` at `path` into an [`UntrustedStoredIdentity`] when
+/// it fails the trust check, and leaves any other failure, which only kept the check from running, an ordinary error.
+///
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): only a stored identity that fails the check stops all identity
+/// processing.
+/// A failure that names no checked path, which a valid path never causes, counts as untrusted.
+///
+/// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
+fn check_failure(path: &Utf8Path, error: anyhow::Error) -> anyhow::Error {
+    if error.downcast_ref::<private_fs::Error>().is_none_or(fails_trust_check) {
+        untrusted_stored_identity(path, error)
+    } else {
+        error.context(format!("check stored identity {path}"))
+    }
 }
 
 /// Gives SYSTEM full control, and the agent's account too when `grant_current_user` is set.
@@ -177,8 +222,8 @@ fn open_parent(path: &Utf8Path) -> anyhow::Result<(Dir, &str)> {
 /// that no directory created on the way can be replaced or redirected by another account.
 /// The installer and the configuration create `<data-dir>` in production, so this applies only where they didn't.
 ///
-/// [`crates/agent-identity/INTENT.md`] ("Local state"): an identity directory with a wrong owner or wrong permissions is
-/// reset, without changing anything below it.
+/// [`crates/agent-identity/INTENT.md`] ("Local state"): an identity directory with wrong permissions is reset, without
+/// changing anything below it, and one owned by another account is refused unchanged.
 ///
 /// [`crates/agent-identity/INTENT.md`]: ../INTENT.md
 pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Dir> {
@@ -203,9 +248,19 @@ pub(crate) fn provision_directories(data_dir: &Utf8Path, grant_current_user: boo
     fn provision(parent: &Dir, name: &str, rule: &Rule) -> anyhow::Result<Dir> {
         // A repair changes nothing on a directory that already follows its rule, and also covers one whose access
         // denies the agent or whose mode is narrower than the rule's.
+        // The owner is checked through the handle that the repair then writes through, so that the directory refused or
+        // repaired is the one checked.
         parent
-            .create_dir(name, rule, Existing::Repair)
-            .context("provision identity directory")
+            .create_dir(name, rule, Existing::RepairAccess)
+            .map_err(|error| match error.kind() {
+                private_fs::ErrorKind::Refused(private_fs::Refusal::Owner) => {
+                    anyhow::Error::new(ForeignIdentityDirectory {
+                        path: error.path().to_owned(),
+                        source: error,
+                    })
+                }
+                _ => anyhow::Error::new(error).context("provision identity directory"),
+            })
     }
 }
 
@@ -250,7 +305,7 @@ pub(crate) fn open_authority_directory(path: &Utf8Path, grant_current_user: bool
     let (authorities, name) = match open_parent(path) {
         Ok(opened) => opened,
         Err(error) if is_not_found(&error) => return Ok(None),
-        Err(error) => return Err(untrusted_stored_identity(path, error)),
+        Err(error) => return Err(check_failure(path, error)),
     };
     open_authority(&authorities, name, path, grant_current_user)
 }
@@ -263,7 +318,7 @@ fn open_authority(
 ) -> anyhow::Result<Option<Dir>> {
     authorities
         .open_dir(name, &tree_rule(grant_current_user), Share::Shared)
-        .map_err(|error| untrusted_stored_identity(path, error.into()))
+        .map_err(|error| check_failure(path, error.into()))
 }
 
 /// Opens the `identity.json` at `path` in its checked `authority` directory, without changing it, once it passes the
@@ -298,7 +353,7 @@ fn open_identity_in(
     let name = path.file_name().context("identity path has no name")?;
     authority
         .open_file(name, &tree_rule(grant_current_user), options)
-        .map_err(|error| untrusted_stored_identity(path, error.into()))
+        .map_err(|error| check_failure(path, error.into()))
 }
 
 fn create_authority(path: &Utf8Path, grant_current_user: bool) -> anyhow::Result<Dir> {
@@ -748,7 +803,7 @@ mod tests {
 mod unix_tests {
     use std::fs;
     use std::io::Write as _;
-    use std::os::unix::fs::PermissionsExt as _;
+    use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 
     use super::*;
 
@@ -819,6 +874,46 @@ mod unix_tests {
 
         provisioned?;
         assert_eq!(mode?, 0o700);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[test]
+    fn provisioning_resets_a_child_directory_open_to_group_and_other() -> anyhow::Result<()> {
+        let directory = TestDir::provisioned()?;
+        let authorities = directory.0.join("identity").join("authorities");
+        fs::set_permissions(&authorities, fs::Permissions::from_mode(0o755))?;
+
+        prepare_directories(&directory.0, true)?;
+
+        assert_eq!(fs::metadata(&authorities)?.permissions().mode() & 0o777, 0o700);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[rstest::rstest]
+    #[case::identity("identity")]
+    #[case::authorities("identity/authorities")]
+    fn provisioning_refuses_an_identity_directory_owned_by_another_account(#[case] name: &str) -> anyhow::Result<()> {
+        let directory = TestDir::provisioned()?;
+        let path = directory.0.join(name);
+        // Wrong access as well, so that a repair would show in the mode even if it kept the owner.
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755))?;
+        if !give_to_another_account(&path)? {
+            return Ok(());
+        }
+        let ownership = |path: &Utf8Path| {
+            fs::symlink_metadata(path).map(|metadata| (metadata.uid(), metadata.gid(), metadata.mode()))
+        };
+        let before = ownership(&path)?;
+
+        let error = prepare_directories(&directory.0, true).expect_err("provisioning accepted a foreign directory");
+
+        let foreign = error
+            .downcast_ref::<ForeignIdentityDirectory>()
+            .with_context(|| format!("the failure is not a foreign identity directory: {error:#}"))?;
+        assert_eq!(foreign.path, path);
+        assert_eq!(ownership(&path)?, before);
         Ok(())
     }
 
@@ -929,8 +1024,8 @@ mod windows_tests {
         }
     }
 
-    /// The rules of a drop box that the current user provisioned under `__debug__.identity.acl_grant_current_user`, as a
-    /// test session without SYSTEM can.
+    /// The rules of a drop box that the current user provisioned under the access grant for the current user, as a test
+    /// session without SYSTEM can.
     fn provisioned_by_current_user() -> DropBox {
         DropBox::provisioned_by(Account::CurrentUser, true)
     }
@@ -1066,6 +1161,44 @@ mod windows_tests {
     }
 
     // oracle: intent crates/agent-identity/INTENT.md §Local state
+    #[rstest::rstest]
+    #[case::identity("identity")]
+    #[case::authorities("identity/authorities")]
+    fn provisioning_refuses_an_identity_directory_owned_by_another_account(#[case] name: &str) -> anyhow::Result<()> {
+        let directory = TestDir::provisioned()?;
+        let path = directory.0.join(name);
+        // Wrong access as well, so that a repair would show in the DACL even if it kept the owner.
+        let users = Sid::from_well_known(WinBuiltinUsersSid, None)?;
+        acl::set_dacl(
+            &path,
+            &[
+                full(&acl::system_sid()?, INHERITED),
+                full(&acl::user_sid()?, INHERITED),
+                full(&users, INHERITED),
+            ],
+        )?;
+        let administrators = Sid::from_well_known(WinBuiltinAdministratorsSid, None)?;
+        if acl::set_owner(&path, &administrators).is_err() {
+            writeln!(
+                io::stderr(),
+                "SKIP: provisioning_refuses_an_identity_directory_owned_by_another_account needs an elevated token to \
+                 give a directory another owner"
+            )?;
+            return Ok(());
+        }
+        let before = acl::test_security(&path)?;
+
+        let error = prepare_directories(&directory.0, true).expect_err("provisioning accepted a foreign directory");
+
+        let foreign = error
+            .downcast_ref::<ForeignIdentityDirectory>()
+            .with_context(|| format!("the failure is not a foreign identity directory: {error:#}"))?;
+        assert_eq!(foreign.path, path);
+        assert_eq!(acl::test_security(&path)?, before);
+        Ok(())
+    }
+
+    // oracle: intent crates/agent-identity/INTENT.md §Local state
     #[test]
     fn repairs_a_directory_with_an_extra_allow_principal() -> anyhow::Result<()> {
         let directory = TestDir::new()?;
@@ -1073,6 +1206,9 @@ mod windows_tests {
         fs::create_dir(&identity)?;
         let user = acl::user_sid()?;
         let system = acl::system_sid()?;
+        // An elevated token makes BUILTIN\Administrators the owner of what it creates, so the agent's ownership is set
+        // explicitly on every directory the test creates.
+        acl::set_owner(&identity, &user)?;
         let users = Sid::from_well_known(WinBuiltinUsersSid, None)?;
         acl::set_dacl(
             &identity,
@@ -1084,21 +1220,21 @@ mod windows_tests {
         )?;
         // `crates/agent-identity/INTENT.md` ("Local state"): start-up resets the directory's permissions, so the
         // identities and keys stored beneath it must survive the repair.
+        let authorities = identity.join("authorities");
+        let authority = authorities.join(Uuid::new_v4().to_string());
+        let keys = identity.join("keys");
+        for path in [&authorities, &authority, &keys] {
+            fs::create_dir(path)?;
+            acl::set_owner(path, &user)?;
+        }
         let state = [
+            (authority.join("identity.json"), br#"{"version":1}"#.as_slice()),
             (
-                identity
-                    .join("authorities")
-                    .join(Uuid::new_v4().to_string())
-                    .join("identity.json"),
-                br#"{"version":1}"#.as_slice(),
-            ),
-            (
-                identity.join("keys").join("devolutions-agent-identity_test.p8"),
+                keys.join("devolutions-agent-identity_test.p8"),
                 b"device key".as_slice(),
             ),
         ];
         for (path, contents) in &state {
-            fs::create_dir_all(path.parent().context("test state file has no parent")?)?;
             fs::write(path, contents)?;
         }
 
@@ -1115,8 +1251,8 @@ mod windows_tests {
         Ok(())
     }
 
-    /// Writes a pending file the current user owns, with the DACL the agent gives it under
-    /// `__debug__.identity.acl_grant_current_user` plus `extra`.
+    /// Writes a pending file the current user owns, with the DACL the agent gives it under the access grant for the
+    /// current user, plus `extra`.
     fn pending_file_owned_by_the_agent(directory: &TestDir, extra: Option<Ace>) -> anyhow::Result<Utf8PathBuf> {
         let path = directory.pending_file('a');
         write_atomic(&directory.0, &path, b"blob", true)?;

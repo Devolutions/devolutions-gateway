@@ -61,7 +61,9 @@ async fn handle_socket(
     source_addr: SocketAddr,
     keep_alive_interval: Duration,
 ) {
-    let (stream, close_handle) = crate::ws::handle(
+    let crate::ws::HandledWebSocket {
+        stream, close_handle, ..
+    } = crate::ws::handle(
         ws,
         crate::ws::KeepAliveShutdownSignal(shutdown_signal),
         keep_alive_interval,

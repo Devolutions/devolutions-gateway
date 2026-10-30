@@ -469,18 +469,37 @@ pub(crate) fn decoded_certificate(certificate: &str) -> anyhow::Result<Vec<u8>> 
 ///
 /// [CONTRACT.agent-identity.md]: ../../../docs/agent-identity/CONTRACT.agent-identity.md
 // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
-const INVISIBLE_FORMAT_CHARACTERS: [RangeInclusive<char>; 11] = [
+const INVISIBLE_FORMAT_CHARACTERS: [RangeInclusive<char>; 17] = [
     '\u{00AD}'..='\u{00AD}',
+    '\u{034F}'..='\u{034F}',
     '\u{061C}'..='\u{061C}',
-    '\u{180E}'..='\u{180E}',
+    '\u{115F}'..='\u{1160}',
+    '\u{17B4}'..='\u{17B5}',
+    '\u{180B}'..='\u{180F}',
     '\u{200B}'..='\u{200F}',
     '\u{202A}'..='\u{202E}',
-    '\u{2060}'..='\u{2064}',
-    '\u{2066}'..='\u{206F}',
+    '\u{2060}'..='\u{206F}',
+    '\u{3164}'..='\u{3164}',
+    '\u{FE00}'..='\u{FE0F}',
     '\u{FEFF}'..='\u{FEFF}',
-    '\u{FFF9}'..='\u{FFFB}',
-    '\u{E0001}'..='\u{E0001}',
-    '\u{E0020}'..='\u{E007F}',
+    '\u{FFA0}'..='\u{FFA0}',
+    '\u{FFF0}'..='\u{FFFB}',
+    '\u{1BCA0}'..='\u{1BCA3}',
+    '\u{1D173}'..='\u{1D17A}',
+    '\u{E0000}'..='\u{E0FFF}',
+];
+
+/// A code point strictly inside a listed range, so that no range end stands for it.
+///
+/// A list kept in pieces, with gaps where a range runs on, passes every range end, so these are sent as well:
+/// U+2065 inside U+2060–U+206F, U+180D inside U+180B–U+180F, U+FFF8 inside U+FFF0–U+FFFB, and U+E0002, U+E001F and U+E0080 inside U+E0000–U+E0FFF.
+pub(crate) const INTERIOR_INVISIBLE_FORMAT_CHARACTERS: [char; 6] = [
+    '\u{2065}',
+    '\u{180D}',
+    '\u{FFF8}',
+    '\u{E0002}',
+    '\u{E001F}',
+    '\u{E0080}',
 ];
 
 pub(crate) fn is_invisible_format_character(character: char) -> bool {
@@ -513,11 +532,12 @@ pub(crate) fn unlisted_format_character_neighbors() -> Vec<char> {
         .filter_map(char::from_u32)
         .filter(|character| !is_invisible_format_character(*character))
         .collect::<Vec<_>>();
-    // U+2065 is just outside both U+2060–U+2064 and U+2066–U+206F.
-    neighbors.dedup();
+    // U+DFFFF, just below U+E0000, is a noncharacter (`Noncharacter_Code_Point` in PropList.txt).
+    // That is deliberate: noncharacters are valid Unicode scalar values (Unicode Corrigendum #9), so a value holding one is accepted, and a failure at U+DFFFF means the implementation refuses a valid scalar value.
+    // oracle: spec Unicode 15.0.0 PropList.txt §Noncharacter_Code_Point
     // oracle: spec Unicode 15.0.0 UnicodeData.txt §General_Category
-    // U+0600 ARABIC NUMBER SIGN, U+110BD KAITHI NUMBER SIGN and U+1D173 MUSICAL SYMBOL BEGIN BEAM are each `Cf`.
-    neighbors.extend(['\u{0600}', '\u{110BD}', '\u{1D173}']);
+    // U+0600 ARABIC NUMBER SIGN, U+110BD KAITHI NUMBER SIGN and U+13430 EGYPTIAN HIEROGLYPH VERTICAL JOINER are each `Cf`.
+    neighbors.extend(['\u{0600}', '\u{110BD}', '\u{13430}']);
     neighbors
 }
 
@@ -532,22 +552,33 @@ mod tests {
             invisible_format_character_range_ends(),
             [
                 '\u{00AD}',
+                '\u{034F}',
                 '\u{061C}',
-                '\u{180E}',
+                '\u{115F}',
+                '\u{1160}',
+                '\u{17B4}',
+                '\u{17B5}',
+                '\u{180B}',
+                '\u{180F}',
                 '\u{200B}',
                 '\u{200F}',
                 '\u{202A}',
                 '\u{202E}',
                 '\u{2060}',
-                '\u{2064}',
-                '\u{2066}',
                 '\u{206F}',
+                '\u{3164}',
+                '\u{FE00}',
+                '\u{FE0F}',
                 '\u{FEFF}',
-                '\u{FFF9}',
+                '\u{FFA0}',
+                '\u{FFF0}',
                 '\u{FFFB}',
-                '\u{E0001}',
-                '\u{E0020}',
-                '\u{E007F}',
+                '\u{1BCA0}',
+                '\u{1BCA3}',
+                '\u{1D173}',
+                '\u{1D17A}',
+                '\u{E0000}',
+                '\u{E0FFF}',
             ]
         );
         let neighbors = unlisted_format_character_neighbors();
@@ -556,31 +587,62 @@ mod tests {
             [
                 '\u{00AC}',
                 '\u{00AE}',
+                '\u{034E}',
+                '\u{0350}',
                 '\u{061B}',
                 '\u{061D}',
-                '\u{180D}',
-                '\u{180F}',
+                '\u{115E}',
+                '\u{1161}',
+                '\u{17B3}',
+                '\u{17B6}',
+                '\u{180A}',
+                '\u{1810}',
                 '\u{200A}',
                 '\u{2010}',
                 '\u{2029}',
                 '\u{202F}',
                 '\u{205F}',
-                '\u{2065}',
                 '\u{2070}',
+                '\u{3163}',
+                '\u{3165}',
+                '\u{FDFF}',
+                '\u{FE10}',
                 '\u{FEFE}',
                 '\u{FF00}',
-                '\u{FFF8}',
+                '\u{FF9F}',
+                '\u{FFA1}',
+                '\u{FFEF}',
                 '\u{FFFC}',
-                '\u{E0000}',
-                '\u{E0002}',
-                '\u{E001F}',
-                '\u{E0080}',
+                '\u{1BC9F}',
+                '\u{1BCA4}',
+                '\u{1D172}',
+                '\u{1D17B}',
+                '\u{DFFFF}',
+                '\u{E1000}',
                 '\u{0600}',
                 '\u{110BD}',
-                '\u{1D173}',
+                '\u{13430}',
             ]
         );
         assert!(!neighbors.into_iter().any(is_invisible_format_character));
+    }
+
+    #[test]
+    fn interior_samples_are_listed_and_are_not_range_ends() {
+        // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §metadata
+        let ends = invisible_format_character_range_ends();
+        for character in INTERIOR_INVISIBLE_FORMAT_CHARACTERS {
+            assert!(
+                is_invisible_format_character(character),
+                "U+{:04X} is not in a listed range",
+                u32::from(character)
+            );
+            assert!(
+                !ends.contains(&character),
+                "U+{:04X} is the end of a range, which the range ends already send",
+                u32::from(character)
+            );
+        }
     }
 
     #[test]

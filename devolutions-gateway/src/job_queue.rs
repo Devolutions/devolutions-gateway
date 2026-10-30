@@ -6,10 +6,17 @@ use std::time::Duration;
 use anyhow::Context as _;
 use async_trait::async_trait;
 use devolutions_gateway_task::{ChildTask, ShutdownSignal, Task};
-use job_queue::{DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
+use job_queue::{DynJob, DynJobQueue, Job, JobCtx, JobQueue, JobReader, JobRunner, RunnerWaker};
 use job_queue_libsql::libsql;
+use provisioner_task::DynProvisionerTaskStore;
 use time::OffsetDateTime;
 use tokio::sync::{Notify, mpsc};
+
+use crate::config::ConfHandle;
+use crate::provisioner_tasks::TaskJob;
+use crate::provisioner_tasks::recording_ai_analysis::RecordingAiAnalysis;
+use crate::recording::RecordingMessageSender;
+use crate::secret_store::SecretStore;
 
 pub struct JobQueueCtx {
     notify_runner: Arc<Notify>,
@@ -29,6 +36,16 @@ pub struct JobQueueHandle(mpsc::Sender<JobMessage>);
 
 pub type JobQueueReceiver = mpsc::Receiver<JobMessage>;
 
+/// What jobs need to run beyond their stored JSON, kept in memory only, such as the secrets of a Task.
+///
+/// Only the job runner holds it, to hydrate the jobs it reads back.
+pub struct InMemoryJobDependencies {
+    pub conf_handle: ConfHandle,
+    pub recordings: RecordingMessageSender,
+    pub secrets: SecretStore,
+    pub task_store: DynProvisionerTaskStore,
+}
+
 pub struct JobQueueTask {
     queue: DynJobQueue,
     job_queue_rx: JobQueueReceiver,
@@ -38,6 +55,7 @@ pub struct JobRunnerTask {
     notify_runner: Arc<Notify>,
     runner_waker: RunnerWaker,
     queue: DynJobQueue,
+    in_memory_job_dependencies: InMemoryJobDependencies,
 }
 
 impl JobQueueCtx {
@@ -81,6 +99,11 @@ impl JobQueueCtx {
             job_queue_rx: rx,
             job_queue_handle: handle,
         })
+    }
+
+    /// The queue itself, for the one service whose callers must know their job is stored.
+    pub fn queue(&self) -> DynJobQueue {
+        Arc::clone(&self.queue)
     }
 }
 
@@ -197,11 +220,13 @@ async fn job_queue_task(ctx: JobQueueTask, mut shutdown_signal: ShutdownSignal) 
 }
 
 impl JobRunnerTask {
-    pub fn new(ctx: &JobQueueCtx) -> Self {
+    /// The job runner, which hydrates each job it reads back with `in_memory_job_dependencies`.
+    pub fn new(ctx: &JobQueueCtx, in_memory_job_dependencies: InMemoryJobDependencies) -> Self {
         Self {
             notify_runner: Arc::clone(&ctx.notify_runner),
             runner_waker: RunnerWaker::clone(&ctx.runner_waker),
             queue: Arc::clone(&ctx.queue),
+            in_memory_job_dependencies,
         }
     }
 }
@@ -225,9 +250,12 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
         notify_runner,
         runner_waker,
         queue,
+        in_memory_job_dependencies,
     } = ctx;
 
-    let reader = DgwJobReader;
+    let reader = DgwJobReader {
+        in_memory_job_dependencies,
+    };
 
     let spawn = |mut ctx: JobCtx, callback: job_queue::SpawnCallback| {
         tokio::spawn(async move {
@@ -279,10 +307,12 @@ async fn job_runner_task(ctx: JobRunnerTask, mut shutdown_signal: ShutdownSignal
     Ok(())
 }
 
-struct DgwJobReader;
+struct DgwJobReader {
+    in_memory_job_dependencies: InMemoryJobDependencies,
+}
 
 impl JobReader for DgwJobReader {
-    fn read_json(&self, name: &str, json: &str) -> anyhow::Result<job_queue::DynJob> {
+    fn read_json(&self, name: &str, json: &str) -> anyhow::Result<DynJob> {
         use crate::api::jrec::DeleteRecordingsJob;
         use crate::recording::RemuxJob;
 
@@ -296,7 +326,98 @@ impl JobReader for DgwJobReader {
                     serde_json::from_str(json).context("failed to deserialize DeleteRecordingsJob")?;
                 Ok(Box::new(job))
             }
+            TaskJob::<RecordingAiAnalysis>::NAME => {
+                let dependencies = &self.in_memory_job_dependencies;
+                let job = TaskJob::read_json(
+                    json,
+                    RecordingAiAnalysis::from_dependencies(dependencies),
+                    Arc::clone(&dependencies.task_store),
+                )?;
+                Ok(Box::new(job))
+            }
             _ => anyhow::bail!("unknown job name: {name}"),
         }
+    }
+}
+
+/// A job the job queue of tests stored, as the job runner reads it back.
+#[cfg(test)]
+pub(crate) struct StoredJob {
+    pub(crate) name: String,
+    pub(crate) json: String,
+}
+
+/// The job queue of tests: the queue Gateway runs, in memory, which also hands each job it stores to the test.
+#[cfg(test)]
+pub(crate) struct TestJobQueue {
+    inner: job_queue_libsql::LibSqlJobQueue,
+    stored: parking_lot::Mutex<std::collections::VecDeque<StoredJob>>,
+}
+
+#[cfg(test)]
+impl TestJobQueue {
+    pub(crate) async fn new() -> Arc<Self> {
+        let conn = libsql::Builder::new_local(":memory:")
+            .build()
+            .await
+            .expect("build database")
+            .connect()
+            .expect("open database connection");
+        let inner = job_queue_libsql::LibSqlJobQueue::builder()
+            .runner_waker(RunnerWaker::new(|| {}))
+            .conn(conn)
+            .build();
+        inner.setup().await.expect("queue setup");
+
+        Arc::new(Self {
+            inner,
+            stored: parking_lot::Mutex::default(),
+        })
+    }
+
+    /// Takes the oldest job stored and not taken yet.
+    pub(crate) fn take(&self) -> Option<StoredJob> {
+        self.stored.lock().pop_front()
+    }
+}
+
+#[cfg(test)]
+#[async_trait]
+impl JobQueue for TestJobQueue {
+    async fn setup(&self) -> anyhow::Result<()> {
+        self.inner.setup().await
+    }
+
+    async fn reset_claimed_jobs(&self) -> anyhow::Result<()> {
+        self.inner.reset_claimed_jobs().await
+    }
+
+    async fn push_job(&self, job: &DynJob, schedule_for: Option<OffsetDateTime>) -> anyhow::Result<()> {
+        self.inner.push_job(job, schedule_for).await?;
+        self.stored.lock().push_back(StoredJob {
+            name: job.name().to_owned(),
+            json: job.write_json()?,
+        });
+        Ok(())
+    }
+
+    async fn claim_jobs(&self, reader: &dyn JobReader, number_of_jobs: usize) -> anyhow::Result<Vec<JobCtx>> {
+        self.inner.claim_jobs(reader, number_of_jobs).await
+    }
+
+    async fn delete_job(&self, job_id: uuid::Uuid) -> anyhow::Result<()> {
+        self.inner.delete_job(job_id).await
+    }
+
+    async fn fail_job(&self, job_id: uuid::Uuid, schedule_for: OffsetDateTime) -> anyhow::Result<()> {
+        self.inner.fail_job(job_id, schedule_for).await
+    }
+
+    async fn clear_failed(&self) -> anyhow::Result<()> {
+        self.inner.clear_failed().await
+    }
+
+    async fn next_scheduled_date(&self) -> anyhow::Result<Option<OffsetDateTime>> {
+        self.inner.next_scheduled_date().await
     }
 }

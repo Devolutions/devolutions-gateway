@@ -3,10 +3,10 @@ The agent's generic command-line and configuration modules only route to them, s
 
 ## CLI
 
-- The only command added is `identity enroll`, with the token as its argument or `-`.
+- The only command added is `identity enroll -`, which reads the token from the first line of standard input; a token kept in a file is passed by redirecting standard input from it.
   It validates the token format, writes a pending-enrollment file, which the service then consumes, prints the file's path and exits with status 0.
   For an invalid token or a write failure, it does not report success and exits with a nonzero status.
-- `identity enroll -` reads the token from the first line of standard input, so that the token never appears in a process listing or an installer log.
+- The command never takes the token as an argument, so that a token never appears in a process listing, shell history or an installer log; any other argument is refused without being echoed.
 - On Windows, an elevated administrator submits through the service's drop box; until the service has provisioned it, the command fails with an error asking to start the service once, and never creates the directory itself.
 - The existing `enroll` command belongs to Agent Tunnel and does not change.
 - The CLI does not grow beyond what an end user reasonably needs.
@@ -26,6 +26,7 @@ The agent's generic command-line and configuration modules only route to them, s
   - The extra trusted root and the access grant for the current user exist only for tests; they are never a production trust or custody path.
 - The knobs, which the conformance tester relies on:
   - `renewal_after_secs`: replaces the scheduled renewal time with the specified number of seconds after the certificate's anchor (`crates/agent-identity/INTENT.md`, "Schedules").
+  - `min_renewal_interval_secs`: replaces the 10-minute wait between renewals with the specified number of seconds; 0 removes the wait (`crates/agent-identity/INTENT.md`, "Schedules").
   - `disable_jitter`: disables renewal, check-in and retry jitter.
   - `backoff_max_secs`: caps identity-operation retry backoff, including `Retry-After`, at the specified number of seconds.
   - `pending_poll_interval_ms`: replaces the default 5 s pending-directory poll interval.

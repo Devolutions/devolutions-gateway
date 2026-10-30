@@ -256,7 +256,7 @@ enum PendingOutcome {
     Retry { retry_after: Option<Duration> },
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct RetryState {
     failures: u32,
     next_attempt: Option<Instant>,
@@ -313,12 +313,38 @@ async fn run_pending_enrollments(
         ..
     } = shared;
     let mut retries: HashMap<Utf8PathBuf, RetryState> = HashMap::new();
+    let mut last_check_error = None;
     let mut last_list_error = None;
     loop {
         // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory or `identity.json` that fails its
         // check stops all identity processing; start-up reports it and waits until it is fixed.
-        if store.check_stored_identities().is_err() {
-            return Stopped::Untrusted;
+        // Any other error only kept the check from running, so the poll retries it rather than stop every runner and its
+        // streams.
+        // UNTESTED: both outcomes are logged with the error, because stopping every identity is otherwise unexplained
+        // and a check that keeps failing otherwise holds pending enrollment silently.
+        // No test captures service logs; when changing this, keep the error in both logs.
+        if let Err(error) = store.check_stored_identities() {
+            if let Some(untrusted) = error
+                .chain()
+                .find_map(|cause| cause.downcast_ref::<UntrustedStoredIdentity>())
+            {
+                warn!(
+                    error = format!("{error:#}"),
+                    path = %untrusted.path,
+                    "Stopping every Agent Identity because a stored identity failed its check"
+                );
+                return Stopped::Untrusted;
+            }
+            if log_is_due(&mut last_check_error) {
+                warn!(
+                    error = format!("{error:#}"),
+                    "Cannot check the stored Agent Identities; retrying at the next poll"
+                );
+            }
+            if wait_or_stop(shutdown, poll_interval).await {
+                return Stopped::Shutdown;
+            }
+            continue;
         }
         match pending::list(data_dir) {
             Ok(paths) => {
@@ -630,22 +656,37 @@ mod tests {
         }))?)
     }
 
+    fn test_shared(data_dir: &TestDataDir) -> anyhow::Result<Arc<Shared>> {
+        let conf = test_conf()?;
+        let settings = conf.debug.identity.clone().unwrap_or_default();
+        Ok(Arc::new(Shared {
+            store: data_dir.store()?,
+            client: Client::new(conf.proxy.to_proxy_config(), None)?,
+            channels: channel_client(&conf, &settings)?,
+            settings,
+        }))
+    }
+
+    /// Returns a token for a loopback authority that refuses connections, which keeps an enrollment local.
+    fn loopback_token() -> anyhow::Result<Token> {
+        use base64::Engine as _;
+
+        Token::parse(&format!(
+            "dvaet1.{}.{}",
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"u":"https://127.0.0.1:9"}"#),
+            "A".repeat(43)
+        ))
+    }
+
     #[tokio::test]
     async fn an_untrusted_authority_directory_holds_pending_enrollment_until_it_is_fixed() -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity/INTENT.md §Local state
         // An authority directory that fails the check stops all identity processing until it is fixed, so no pending
         // file is processed meanwhile, and processing resumes without a restart.
-        use base64::Engine as _;
-
         let data_dir = TestDataDir::new()?;
         drop(data_dir.store()?);
         let untrusted = data_dir.put_untrusted_authority_directory()?;
-        // A loopback authority that refuses connections keeps the enrollment local.
-        let token = Token::parse(&format!(
-            "dvaet1.{}.{}",
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(r#"{"u":"https://127.0.0.1:9"}"#),
-            "A".repeat(43)
-        ))?;
+        let token = loopback_token()?;
         pending::write(&data_dir.0, &token, true)?;
         let in_progress = pending::in_progress_path(&data_dir.0, &token.sha256_hex())?;
         let (shutdown_handle, shutdown) = devolutions_gateway_task::ShutdownHandle::new();
@@ -686,14 +727,7 @@ mod tests {
         // A stored identity that fails the check after start-up stops all identity processing too; the caller then
         // stops every runner and its streams.
         let data_dir = TestDataDir::new()?;
-        let conf = test_conf()?;
-        let settings = conf.debug.identity.clone().unwrap_or_default();
-        let shared = Arc::new(Shared {
-            store: data_dir.store()?,
-            client: Client::new(conf.proxy.to_proxy_config(), None)?,
-            channels: channel_client(&conf, &settings)?,
-            settings,
-        });
+        let shared = test_shared(&data_dir)?;
         let (_shutdown_handle, mut shutdown) = devolutions_gateway_task::ShutdownHandle::new();
         let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
         put_untrusted(&data_dir)?;
@@ -712,6 +746,70 @@ mod tests {
         .context("pending poll kept running")?;
 
         assert!(matches!(stopped, Stopped::Untrusted));
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_check_that_cannot_run_neither_stops_the_pending_poll_nor_holds_enrollment_once_it_runs_again()
+    -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        // Only an authority directory or `identity.json` that fails the check stops all identity processing.
+        // An error that keeps the check from running, here listing the authority directories, is not such a failure,
+        // so the poll keeps running, which keeps its caller from stopping every runner and its streams, and processes
+        // pending files again once the check runs.
+        let data_dir = TestDataDir::new()?;
+        let shared = test_shared(&data_dir)?;
+        let (_shutdown_handle, mut shutdown) = devolutions_gateway_task::ShutdownHandle::new();
+        let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
+        let token = loopback_token()?;
+        pending::write(&data_dir.0, &token, true)?;
+        let in_progress = pending::in_progress_path(&data_dir.0, &token.sha256_hex())?;
+        let authorities = data_dir.0.join("identity").join("authorities");
+        std::fs::remove_dir(&authorities)?;
+        std::fs::write(&authorities, b"")?;
+        let check = shared.store.check_stored_identities();
+        assert!(
+            check
+                .as_ref()
+                .is_err_and(|error| !error.chain().any(|cause| cause.is::<UntrustedStoredIdentity>())),
+            "listing a file as the authority directories must fail without an untrusted identity: {check:?}"
+        );
+
+        let poll = run_pending_enrollments(
+            &shared,
+            &mut runners,
+            &data_dir.0,
+            Duration::from_millis(10),
+            &mut shutdown,
+        );
+        tokio::pin!(poll);
+        let stopped_while_failing = tokio::select! {
+            _ = &mut poll => true,
+            _ = sleep(Duration::from_millis(500)) => false,
+        };
+        // A poll that returned cannot be polled again, so this is checked before the check runs again.
+        assert!(
+            !stopped_while_failing,
+            "the pending poll stopped while the check could not run"
+        );
+        std::fs::remove_file(&authorities)?;
+        let resumed = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::select! {
+                _ = &mut poll => false,
+                _ = async {
+                    while !in_progress.exists() {
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                } => true,
+            }
+        })
+        .await;
+
+        assert_eq!(
+            resumed.ok(),
+            Some(true),
+            "the pending poll did not process its pending file once the check ran again"
+        );
         Ok(())
     }
 

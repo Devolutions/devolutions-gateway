@@ -669,6 +669,51 @@ fn root_only_an_item_owned_by_another_account_is_refused_until_repaired() {
     assert_eq!(fs::metadata(scratch.path.join("dir")).unwrap().uid(), 0);
 }
 
+// Catches a repair of access that refuses, rather than repairs, a directory the current user owns.
+// oracle: intent crates/private-fs/INTENT.md §paths
+#[rstest]
+#[case::open_to_others(0o755)]
+#[case::closed_to_its_owner(0o000)]
+fn a_repair_of_access_restores_the_mode_of_a_directory_the_current_user_owns(#[case] wrong: u32) {
+    let scratch = Scratch::new();
+    let base = scratch.base();
+    drop(base.create_dir("dir", &rule(), Existing::Check).unwrap());
+    let dir = scratch.path.join("dir");
+    set_mode(&dir, wrong);
+
+    base.create_dir("dir", &rule().exact(), Existing::RepairAccess).unwrap();
+
+    assert_eq!(mode(&dir), 0o700);
+}
+
+// Root can access everything, so only root can give the test a directory that another account owns.
+// oracle: intent crates/private-fs/INTENT.md §paths
+// oracle: intent crates/agent-identity/INTENT.md §Local state
+#[test]
+fn root_only_a_repair_of_access_refuses_an_owner_the_rule_does_not_allow_without_changing_it() {
+    let scratch = Scratch::new();
+    if !scratch.as_root() {
+        skip(
+            "root_only_a_repair_of_access_refuses_an_owner_the_rule_does_not_allow_without_changing_it",
+            "needs root",
+        );
+        return;
+    }
+    let other = 12345;
+    let base = scratch.base();
+    drop(base.create_dir("dir", &rule(), Existing::Check).unwrap());
+    let dir = scratch.path.join("dir");
+    // Wrong access as well, so that a repair would show in the mode even if it kept the owner.
+    set_mode(&dir, 0o755);
+    std::os::unix::fs::chown(&dir, Some(other), None).unwrap();
+
+    let error = base.create_dir("dir", &rule(), Existing::RepairAccess).unwrap_err();
+
+    assert!(matches!(refusal(&error), Some(Refusal::Owner)), "{error:?}");
+    let metadata = fs::symlink_metadata(&dir).unwrap();
+    assert_eq!((metadata.uid(), metadata.mode() & 0o7777), (other, 0o755));
+}
+
 // private-fs never chooses a broader access than the rule: an owner other than root can always change the mode.
 // oracle: intent crates/private-fs/INTENT.md §rules
 #[test]

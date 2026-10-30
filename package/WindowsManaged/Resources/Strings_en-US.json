@@ -66,7 +66,7 @@
         },
         {
           "id": "RemoteAddressIsRequired",
-          "text": "The remote address is required"
+          "text": "The remote address is required for native client access. Select Later for browser-only access."
         },
         {
           "id": "RemoteAddressMustBeInTheFormat",
@@ -175,8 +175,8 @@
           "text": "domain"
         },
         {
-          "id": "NgroXForNativeClientAccess",
-          "text": "The {0} for native client access"
+          "id": "NgrokNativeClientsNeedAReservedX",
+          "text": "Native clients such as Remote Desktop Manager need a reserved {0}, which is a paid ngrok feature. Browser-only access doesn't need one."
         },
         {
           "id": "NgrokTcpAddressLink",
@@ -437,6 +437,10 @@
         {
           "id": "Property_NgrokHttpDomain",
           "text": "Domain"
+        },
+        {
+          "id": "Property_NgrokEnableTcp",
+          "text": "Native Client Access"
         },
         {
           "id": "Property_NgrokRemoteAddress",

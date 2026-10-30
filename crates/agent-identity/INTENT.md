@@ -1,7 +1,7 @@
 ## Trust and transport
 
 - TLS server authentication uses the OS trust store, with no additional pinning.
-  The test-only `__debug__.identity.extra_trusted_root` adds roots for the conformance mock and is never a production trust path.
+  A test-only extra trusted root adds roots for the conformance mock and is never a production trust path.
   An authority whose TLS server certificate doesn't validate against the OS trust store is not supported.
   Identity roots are trusted as received over that TLS connection, except as the rule on enrollments for a known authority ID at another base URL requires.
 - Identity HTTP requests go through the agent's configured proxy, like the agent's other outbound HTTP, so that a device that reaches its authority only through a proxy can enroll.
@@ -26,6 +26,7 @@
 - An identity renews `2/3 × lifetime` after its certificate's anchor, plus a jitter drawn uniformly from `[0, lifetime / 12]`, or as soon as the authority requests a renewal.
   The lifetime is `notAfter − notBefore`; the anchor is the earlier of `notBefore` and the moment the agent stored or loaded the certificate in its current run, so that an authority clock ahead of the agent's doesn't delay renewal.
   That moment is not persisted, so after a restart the anchor uses the load time; it still never passes `notBefore`, and the agent keeps no extra state for a clock skew that only matters until `notBefore` arrives.
+  A renewal starts no sooner than 10 minutes after the identity's previous renewal completed in the current run, whether the schedule, the authority or a `certificate_expired` refusal asks for it, so that an authority cannot keep the agent renewing in a tight loop, for example with a certificate whose lifetime is zero; a test-only override of the scheduled renewal time is exempt, and a test-only setting shortens the wait.
 - A transient failure is retried after `2^n` seconds for the `n`-th consecutive failure, multiplied by a jitter drawn uniformly from `[0.5, 1.5]`, waiting at least a `Retry-After` delay when the authority sends one, and never longer than 1 h.
   Retry state lives in memory, so a restart retries at once.
 - Check-in runs only while the identity has no authenticated stream:
@@ -37,13 +38,15 @@
 The location and format of the files below are stable, because the conformance tester stands in for the installer and observes the agent through them.
 `<data-dir>` means the agent's configured data directory.
 
-- The agent provisions its identity directories and, at start-up, resets a wrong owner or wrong permissions on them, without changing any authority directory under them.
+- The agent provisions its identity directories and, at start-up, resets wrong permissions on them, without changing any authority directory under them.
+  An identity directory owned by another account is never repaired, and stops all identity processing until it is fixed, because the account that created it can keep a handle that still changes it after a reset.
 - Before it uses stored identities, the agent checks that every `<data-dir>/identity/authorities/<authority_id>/` directory is owned by its account and protected from other users.
   One that fails the check is never repaired, and stops all identity processing until it is fixed, because skipping it would let a local attacker hide or forge an identity, for example hide a rejected identity so that its token enrolls again.
   The running agent repeats the check before every use of its state and on each pending-directory poll, stops every identity and its streams while any directory fails it, and resumes without a restart once all pass.
   A directory passes only if it is owned by the agent's account and is, on Unix, closed to group and other, or on Windows, protected by exactly the DACL the agent provisions; a link, a reparse point, a non-directory and, on a case-insensitive file system, any case variant of its name are all checked.
 - An `identity.json` that fails the same check is treated like an untrusted authority directory: never repaired, never read as absent, and it stops all identity processing until it is fixed.
-- The agent ignores and keeps a rejection marker or in-progress record that it doesn't own or that other users can access: trusting one would let a local attacker reject a token or supply its enrollment key, while an attacker able to write one could delete it anyway, so ignoring it opens nothing new.
+- The agent ignores a rejection marker or in-progress record that it doesn't own or that other users can access, as if it were absent, and never deletes one as cleanup; its own write of that file replaces it.
+  Trusting one would let a local attacker reject a token or supply its enrollment key, while an attacker able to write one could delete it anyway, so ignoring it opens nothing new.
 - Every state change holds an exclusive lock on the identity directory: the file `<data-dir>/identity/.agent-identity.lock` on Linux and macOS, and on Windows an unshared handle on `<data-dir>/identity` itself; on Windows, a busy lock is retried for 30 s.
 - Size limits: a pending file holds at most 16 KiB of plaintext, an in-progress record 16 KiB, `identity.json` 2 MiB, and a rejection marker 1 KiB.
 
@@ -56,7 +59,7 @@ The location and format of the files below are stable, because the conformance t
     The file holds the token in plaintext, protected only by its permissions, until the authority answers; that is accepted.
   - Windows: `<data-dir>\identity\pending\<hex>.dat`, whose content is DPAPI `CryptProtectData(json, entropy = "Devolutions.Agent.PendingEnrollment.v1", CRYPTPROTECT_LOCAL_MACHINE)` of the same JSON; `.dat` because the content is an opaque blob, not JSON.
     The agent accepts exactly two forms and ignores and keeps any other file:
-    - owned by SYSTEM or by the agent's user, with a protected DACL granting full control to SYSTEM only, plus the agent's user under `__debug__.identity.acl_grant_current_user`;
+    - owned by SYSTEM or by the agent's user, with a protected DACL granting full control to SYSTEM only, plus the current user under a test-only access grant;
     - owned by a member of Administrators, with the same DACL plus a zero-access OWNER RIGHTS entry, which removes the owner's implicit right to read the file or rewrite its DACL.
   - The Windows `identity\pending` directory is a drop box: protected, SYSTEM full control, and Administrators add-file only, with no list or read access, so an elevated `identity enroll` can submit a token but never read one.
     The service provisions it at start-up.

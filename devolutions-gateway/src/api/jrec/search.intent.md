@@ -1,14 +1,15 @@
 ## What is searched
 
-Search reads only the files listed under `artifacts` in `recording.json` whose type is `slog`.
-Recording files listed under `files` are not searched, a `.slog` recording included.
+Search covers the `.slog` files listed in `recording.json`, under `files` as well as under `artifacts`.
+`files` is searched so that Active Directory Console logs, which are pushed as recordings, are searchable, the ones already stored included, with no change to how they are pushed.
+Within a recording, the `.slog` files listed under `files` are searched first, then those listed under `artifacts`, by convention, in the order `recording.json` lists them and a recording pull zips them.
 Each log is searched once, even when the request repeats its recording ID or the manifest lists it twice.
 Search finds a recording and its logs where a recording pull does: in the folder named by the hyphenated recording ID, and only under a file name the pull accepts, so a log listed as `../outside.slog` is not searched.
 A log that is missing or cannot be read is skipped and the search goes on, as `rg` and `grep` go on past a file they cannot open.
 
 The query is matched literally, as `rg -F` and `grep -F` do, so its spaces are part of it and an empty query matches every line.
 A line holding a JSON object is matched case-insensitively against the object's string values, at any depth and once unescaped; field names, numbers, booleans and null never match.
-Any other line is matched case-insensitively against its raw text, so that any kind of artifact, present or future, can be searched.
+Any other line is matched case-insensitively against its raw text, so that any kind of log, present or future, can be searched.
 A line cut at 256 KiB follows the same rule: what was read is matched by its string values when it parses as a JSON object, and as raw text otherwise.
 
 Values are matched rather than raw text because users search the text they see: raw matching would make a field name such as `description` match every line, and would miss text that JSON escapes, such as `DOMAIN\user` stored as `DOMAIN\\user`.
@@ -57,4 +58,4 @@ A log replaced while paging, as an AI analysis rerun does, is read from the curs
 ## Later
 
 Regular expressions or wildcards, a total hit count, and combining words are wanted later, and the request shape must not preclude them.
-Choosing which artifact kinds to search, or searching other sources such as the `.slog` recordings under `files`, is wanted later; the request shape must not preclude it either.
+Choosing which file types to search, such as `.cast` besides `.slog`, is wanted later; the request shape must not preclude it either.

@@ -69,7 +69,7 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string DomainIsRequiredAndMustBeValid = "DomainIsRequiredAndMustBeValid";		
 		/// <summary>
-		/// The remote address is required
+		/// The remote address is required for native client access. Select Later for browser-only access.
 		/// </summary>
 		public const string RemoteAddressIsRequired = "RemoteAddressIsRequired";		
 		/// <summary>
@@ -177,9 +177,9 @@ namespace DevolutionsGateway.Resources
 		/// </summary>
 		public const string NgrokDomainLink = "NgrokDomainLink";		
 		/// <summary>
-		/// The {0} for native client access
+		/// Native clients such as Remote Desktop Manager need a reserved {0}, which is a paid ngrok feature. Browser-only access doesn't need one.
 		/// </summary>
-		public const string NgroXForNativeClientAccess = "NgroXForNativeClientAccess";		
+		public const string NgrokNativeClientsNeedAReservedX = "NgrokNativeClientsNeedAReservedX";		
 		/// <summary>
 		/// TCP address
 		/// </summary>
@@ -432,6 +432,10 @@ namespace DevolutionsGateway.Resources
 		/// Domain
 		/// </summary>
 		public const string Property_NgrokHttpDomain = "Property_NgrokHttpDomain";		
+		/// <summary>
+		/// Native Client Access
+		/// </summary>
+		public const string Property_NgrokEnableTcp = "Property_NgrokEnableTcp";		
 		/// <summary>
 		/// TCP Address
 		/// </summary>

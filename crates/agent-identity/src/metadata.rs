@@ -67,16 +67,22 @@ fn sanitize(values: Metadata) -> Metadata {
                             | '\u{7F}'..='\u{9F}'
                             // Invisible format characters.
                             | '\u{AD}'
+                            | '\u{34F}'
                             | '\u{61C}'
-                            | '\u{180E}'
+                            | '\u{115F}'..='\u{1160}'
+                            | '\u{17B4}'..='\u{17B5}'
+                            | '\u{180B}'..='\u{180F}'
                             | '\u{200B}'..='\u{200F}'
                             | '\u{202A}'..='\u{202E}'
-                            | '\u{2060}'..='\u{2064}'
-                            | '\u{2066}'..='\u{206F}'
+                            | '\u{2060}'..='\u{206F}'
+                            | '\u{3164}'
+                            | '\u{FE00}'..='\u{FE0F}'
                             | '\u{FEFF}'
-                            | '\u{FFF9}'..='\u{FFFB}'
-                            | '\u{E0001}'
-                            | '\u{E0020}'..='\u{E007F}'
+                            | '\u{FFA0}'
+                            | '\u{FFF0}'..='\u{FFFB}'
+                            | '\u{1BCA0}'..='\u{1BCA3}'
+                            | '\u{1D173}'..='\u{1D17A}'
+                            | '\u{E0000}'..='\u{E0FFF}'
                     )
                 })
                 .scan(0, |length, ch| {
@@ -140,9 +146,10 @@ fn windows_host_name(format: windows::Win32::System::SystemInformation::COMPUTER
 
 #[cfg(target_os = "linux")]
 fn machine_id() -> Option<String> {
-    std::fs::read_to_string("/etc/machine-id")
-        .ok()
-        .map(|value| value.trim().to_owned())
+    // UNTESTED: The agent sends the file as-is (CONTRACT.agent-identity.md §3.1), so this must not trim.
+    // `sanitize` already removes the trailing newline and any other control character, and surrounding spaces must reach the authority unchanged.
+    // The conformance suite notices a trim only on a host whose file has such spaces.
+    std::fs::read_to_string("/etc/machine-id").ok()
 }
 
 #[cfg(target_os = "macos")]
@@ -228,16 +235,22 @@ mod tests {
     #[case::c0('\u{0}', '\u{1F}')]
     #[case::del_and_c1('\u{7F}', '\u{9F}')]
     #[case::soft_hyphen('\u{AD}', '\u{AD}')]
+    #[case::combining_grapheme_joiner('\u{34F}', '\u{34F}')]
     #[case::arabic_letter_mark('\u{61C}', '\u{61C}')]
-    #[case::mongolian_vowel_separator('\u{180E}', '\u{180E}')]
+    #[case::hangul_jamo_fillers('\u{115F}', '\u{1160}')]
+    #[case::khmer_inherent_vowels('\u{17B4}', '\u{17B5}')]
+    #[case::mongolian_variation_selectors_and_vowel_separator('\u{180B}', '\u{180F}')]
     #[case::zero_width_and_directional_marks('\u{200B}', '\u{200F}')]
     #[case::directional_embeddings_and_overrides('\u{202A}', '\u{202E}')]
-    #[case::word_joiner_and_invisible_operators('\u{2060}', '\u{2064}')]
-    #[case::directional_isolates_and_deprecated_controls('\u{2066}', '\u{206F}')]
+    #[case::invisible_operators_isolates_and_deprecated_controls('\u{2060}', '\u{206F}')]
+    #[case::hangul_filler('\u{3164}', '\u{3164}')]
+    #[case::variation_selectors('\u{FE00}', '\u{FE0F}')]
     #[case::byte_order_mark('\u{FEFF}', '\u{FEFF}')]
-    #[case::interlinear_annotations('\u{FFF9}', '\u{FFFB}')]
-    #[case::language_tag('\u{E0001}', '\u{E0001}')]
-    #[case::tags('\u{E0020}', '\u{E007F}')]
+    #[case::halfwidth_hangul_filler('\u{FFA0}', '\u{FFA0}')]
+    #[case::specials_and_interlinear_annotations('\u{FFF0}', '\u{FFFB}')]
+    #[case::shorthand_format_controls('\u{1BCA0}', '\u{1BCA3}')]
+    #[case::musical_symbol_format_controls('\u{1D173}', '\u{1D17A}')]
+    #[case::tags_and_variation_selectors_supplement('\u{E0000}', '\u{E0FFF}')]
     fn removes_each_forbidden_code_point(#[case] first: char, #[case] last: char) {
         for ch in first..=last {
             let code = u32::from(ch);
@@ -252,17 +265,23 @@ mod tests {
     #[rstest]
     #[case::after_c0('\u{20}', '\u{7E}')]
     #[case::after_c1('\u{A0}', '\u{AC}')]
-    #[case::after_soft_hyphen('\u{AE}', '\u{61B}')]
-    #[case::after_arabic_letter_mark('\u{61D}', '\u{180D}')]
-    #[case::after_mongolian_vowel_separator('\u{180F}', '\u{200A}')]
+    #[case::after_soft_hyphen('\u{AE}', '\u{34E}')]
+    #[case::after_combining_grapheme_joiner('\u{350}', '\u{61B}')]
+    #[case::after_arabic_letter_mark('\u{61D}', '\u{115E}')]
+    #[case::after_hangul_jamo_fillers('\u{1161}', '\u{17B3}')]
+    #[case::after_khmer_inherent_vowels('\u{17B6}', '\u{180A}')]
+    #[case::after_mongolian_variation_selectors_and_vowel_separator('\u{1810}', '\u{200A}')]
     #[case::after_directional_marks('\u{2010}', '\u{2029}')]
     #[case::after_directional_overrides('\u{202F}', '\u{205F}')]
-    #[case::after_invisible_operators('\u{2065}', '\u{2065}')]
-    #[case::after_deprecated_controls('\u{2070}', '\u{FEFE}')]
-    #[case::after_byte_order_mark('\u{FF00}', '\u{FFF8}')]
-    #[case::after_interlinear_annotations('\u{FFFC}', '\u{E0000}')]
-    #[case::after_language_tag('\u{E0002}', '\u{E001F}')]
-    #[case::after_tags('\u{E0080}', '\u{10FFFF}')]
+    #[case::after_deprecated_controls('\u{2070}', '\u{3163}')]
+    #[case::after_hangul_filler('\u{3165}', '\u{FDFF}')]
+    #[case::after_variation_selectors('\u{FE10}', '\u{FEFE}')]
+    #[case::after_byte_order_mark('\u{FF00}', '\u{FF9F}')]
+    #[case::after_halfwidth_hangul_filler('\u{FFA1}', '\u{FFEF}')]
+    #[case::after_interlinear_annotations('\u{FFFC}', '\u{1BC9F}')]
+    #[case::after_shorthand_format_controls('\u{1BCA4}', '\u{1D172}')]
+    #[case::after_musical_symbol_format_controls('\u{1D17B}', '\u{DFFFF}')]
+    #[case::after_variation_selectors_supplement('\u{E1000}', '\u{10FFFF}')]
     fn keeps_code_points_just_outside_forbidden_ranges(#[case] first: char, #[case] last: char) {
         for ch in [first, last] {
             let code = u32::from(ch);
@@ -282,8 +301,6 @@ mod tests {
     #[case::kaithi_number_sign('\u{110BD}', '\u{110BD}')]
     #[case::kaithi_number_sign_above('\u{110CD}', '\u{110CD}')]
     #[case::egyptian_hieroglyph_format_controls('\u{13430}', '\u{1343F}')]
-    #[case::shorthand_format_controls('\u{1BCA0}', '\u{1BCA3}')]
-    #[case::musical_symbol_format_controls('\u{1D173}', '\u{1D17A}')]
     fn keeps_format_characters_the_contract_leaves_out(#[case] first: char, #[case] last: char) {
         for ch in first..=last {
             let code = u32::from(ch);

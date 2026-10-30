@@ -26,7 +26,9 @@ use windows::Win32::Security::{
     DACL_SECURITY_INFORMATION, GetSecurityDescriptorControl, OBJECT_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
     SE_DACL_PROTECTED, SECURITY_ATTRIBUTES,
 };
-use windows::Win32::Storage::FileSystem::{CREATE_ALWAYS, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE};
+use windows::Win32::Storage::FileSystem::{
+    CREATE_ALWAYS, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_MODE,
+};
 use windows::Win32::System::JobObjects::{
     AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation, SetInformationJobObject,
@@ -225,12 +227,15 @@ pub(crate) fn write_pending(path: &Path, contents: &[u8]) -> anyhow::Result<()> 
     write_protected_file(path, &encrypted)
 }
 
-pub(crate) fn write_protected_file(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+/// The security descriptor of the files and directories the suite protects: owned by the current user, with a protected DACL granting full control to SYSTEM and the current user only.
+///
+/// `ace_flags` are the SDDL inheritance flags of every entry.
+fn protected_descriptor(ace_flags: &str) -> anyhow::Result<SecurityDescriptor> {
     let current_user = current_user_sid()?;
     let sddl = if current_user == "S-1-5-18" {
-        "O:SYD:P(A;;FA;;;SY)".to_owned()
+        format!("O:SYD:P(A;{ace_flags};FA;;;SY)")
     } else {
-        format!("O:{current_user}D:P(A;;FA;;;SY)(A;;FA;;;{current_user})")
+        format!("O:{current_user}D:P(A;{ace_flags};FA;;;SY)(A;{ace_flags};FA;;;{current_user})")
     };
     let sddl = wide(std::ffi::OsStr::new(&sddl));
     let mut raw = PSECURITY_DESCRIPTOR::default();
@@ -243,12 +248,54 @@ pub(crate) fn write_protected_file(path: &Path, contents: &[u8]) -> anyhow::Resu
             None,
         )?
     };
-    let descriptor = SecurityDescriptor(raw);
-    let attributes = SECURITY_ATTRIBUTES {
+    Ok(SecurityDescriptor(raw))
+}
+
+fn security_attributes(descriptor: &SecurityDescriptor) -> anyhow::Result<SECURITY_ATTRIBUTES> {
+    Ok(SECURITY_ATTRIBUTES {
         nLength: u32::try_from(size_of::<SECURITY_ATTRIBUTES>())?,
         lpSecurityDescriptor: descriptor.0.0,
         bInheritHandle: BOOL(0),
-    };
+    })
+}
+
+/// Creates each missing directory of `path`, owned by the current user, with the pending files' protected DACL.
+///
+/// Under UAC elevation a new directory's default owner is Administrators, and the agent refuses an identity directory owned by another account.
+/// Existing directories are left as they are, so a directory the agent provisioned keeps its owner and DACL.
+/// Every entry is inherited by files and subdirectories, so a file created inside without its own descriptor gets no access beyond them.
+pub(crate) fn create_protected_dirs(path: &Path) -> anyhow::Result<()> {
+    let missing = path
+        .ancestors()
+        .take_while(|dir| {
+            !dir.as_os_str().is_empty()
+                && std::fs::symlink_metadata(dir).is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+        })
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let descriptor = protected_descriptor("OICI")?;
+    let attributes = security_attributes(&descriptor)?;
+    for dir in missing.into_iter().rev() {
+        let wide_dir = wide(dir.as_os_str());
+        // SAFETY: Both the NUL-terminated path and security descriptor remain live until CreateDirectoryW returns.
+        let created = unsafe { CreateDirectoryW(PCWSTR::from_raw(wide_dir.as_ptr()), Some(&attributes)) };
+        // UNTESTED: A directory created concurrently since the check above, such as by the agent provisioning at start-up, is left as it is.
+        // Changing its owner or DACL would alter a directory the agent owns, which it may then refuse or have to reset.
+        // When changing this, keep accepting an existing directory here without setting its security descriptor.
+        if let Err(error) = created
+            && !std::fs::metadata(dir).is_ok_and(|metadata| metadata.is_dir())
+        {
+            return Err(anyhow::Error::from(error).context(format!("create directory {}", dir.display())));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn write_protected_file(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+    let descriptor = protected_descriptor("")?;
+    let attributes = security_attributes(&descriptor)?;
     let path = wide(path.as_os_str());
     // SAFETY: Both the NUL-terminated path and security descriptor remain live until CreateFileW returns.
     let handle = unsafe {
@@ -953,6 +1000,102 @@ mod tests {
             "DPAPI pending file did not round-trip"
         );
         assert!(assert_machine_scope(&protect(json, false, false)?).is_err());
+        Ok(())
+    }
+
+    /// The SDDL of the parts of `path`'s security descriptor that `info` selects.
+    fn path_sddl(path: &Path, info: OBJECT_SECURITY_INFORMATION) -> anyhow::Result<String> {
+        let path = wide(path.as_os_str());
+        let mut raw = PSECURITY_DESCRIPTOR::default();
+        // SAFETY: path is NUL-terminated and raw receives an allocated security descriptor.
+        let result = unsafe {
+            GetNamedSecurityInfoW(
+                PCWSTR::from_raw(path.as_ptr()),
+                SE_FILE_OBJECT,
+                info,
+                None,
+                None,
+                None,
+                None,
+                &mut raw,
+            )
+        };
+        ensure!(result.0 == 0, "could not read security descriptor ({})", result.0);
+        let descriptor = SecurityDescriptor(raw);
+        let mut sddl = PWSTR::null();
+        // SAFETY: The descriptor is valid and the output string is owned until freed with LocalFree.
+        unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor.0, SDDL_REVISION_1, info, &mut sddl, None)?
+        };
+        // SAFETY: The conversion returned a NUL-terminated string allocated for the caller.
+        let text = unsafe { sddl.to_string() };
+        // SAFETY: LocalFree releases the SDDL string allocated by the conversion.
+        unsafe { LocalFree(Some(HLOCAL(sddl.0.cast()))) };
+        text.map_err(Into::into)
+    }
+
+    /// The DACL control flags and sorted ACEs of a DACL SDDL.
+    fn dacl_parts(dacl: &str) -> anyhow::Result<(String, Vec<String>)> {
+        let (control, aces) = dacl
+            .strip_prefix("D:")
+            .and_then(|rest| rest.split_once('('))
+            .with_context(|| format!("DACL has no entries: {dacl}"))?;
+        let mut aces = aces
+            .trim_end_matches(')')
+            .split(")(")
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>();
+        aces.sort_unstable();
+        Ok((control.to_owned(), aces))
+    }
+
+    /// The sorted ACEs that grant full control to SYSTEM and, unless it is SYSTEM, to `user`, with `flags`.
+    fn full_control_aces(flags: &str, user: &str) -> Vec<String> {
+        let mut aces = vec![format!("A;{flags};FA;;;SY")];
+        if user != "SY" {
+            aces.push(format!("A;{flags};FA;;;{user}"));
+        }
+        aces.sort_unstable();
+        aces
+    }
+
+    #[test]
+    fn protected_dirs_are_owned_by_the_current_user_and_leave_existing_dirs_unchanged() -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        // oracle: intent crates/agent-identity/INTENT.md §Pending-enrollment files
+        let scratch = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("target")
+            .join("agent-identity-windows-tests");
+        std::fs::create_dir_all(&scratch)?;
+        let dir = tempfile::Builder::new().prefix("protected-dirs-").tempdir_in(scratch)?;
+        let existing = dir.path().join("identity");
+        std::fs::create_dir(&existing)?;
+        let existing_before = path_sddl(&existing, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION)?;
+        let pending = existing.join("pending").join("nested");
+
+        create_protected_dirs(&pending)?;
+
+        ensure!(
+            path_sddl(&existing, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION)? == existing_before,
+            "an existing directory's owner or DACL changed"
+        );
+        let user = canonical_sddl_sid(&current_user_sid()?)?;
+        for created in [existing.join("pending"), pending.clone()] {
+            assert_eq!(path_sddl(&created, OWNER_SECURITY_INFORMATION)?, format!("O:{user}"));
+            let (control, aces) = dacl_parts(&path_sddl(&created, DACL_SECURITY_INFORMATION)?)?;
+            ensure!(
+                control.contains('P'),
+                "created directory DACL is not protected: D:{control}"
+            );
+            assert_eq!(aces, full_control_aces("OICI", &user));
+        }
+        // A file created inside without its own descriptor inherits no access beyond SYSTEM and the current user.
+        let file = pending.join("inherited.txt");
+        std::fs::write(&file, b"")?;
+        let (_, aces) = dacl_parts(&path_sddl(&file, DACL_SECURITY_INFORMATION)?)?;
+        assert_eq!(aces, full_control_aces("ID", &user));
         Ok(())
     }
 

@@ -35,6 +35,10 @@ use crate::token::Token;
 
 const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 
+/// The largest clock offset, in seconds, that a `clock_skew` answer makes the agent sign a retry with, so that a
+/// signed request is never dated more than a day from the agent's own clock.
+const MAX_CLOCK_SKEW_OFFSET_SECS: u64 = 86_400;
+
 pub type ClientResult<T> = Result<T, ClientError>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -372,11 +376,16 @@ impl Client {
         let first = self
             .send_signed(&url, tag, signer, body, clock_offset_secs.unwrap_or_default())
             .await;
-        if let Err(ClientError::ClockSkew { server_time }) = first {
-            let offset = server_time.unix_timestamp() - OffsetDateTime::now_utc().unix_timestamp();
-            self.send_signed(&url, tag, signer, body, offset).await
-        } else {
-            first
+        let retry_offset = match &first {
+            Err(ClientError::ClockSkew { server_time }) => {
+                Some(server_time.unix_timestamp() - OffsetDateTime::now_utc().unix_timestamp())
+                    .filter(|offset| offset.unsigned_abs() <= MAX_CLOCK_SKEW_OFFSET_SECS)
+            }
+            _ => None,
+        };
+        match retry_offset {
+            Some(offset) => self.send_signed(&url, tag, signer, body, offset).await,
+            None => first,
         }
     }
 
@@ -1219,6 +1228,50 @@ mod tests {
         Ok(())
     }
 
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
+    #[rstest]
+    #[case::ahead_one_hour(3_600)]
+    #[case::behind_one_hour(-3_600)]
+    #[case::ahead_almost_a_day(86_400 - 60)]
+    #[case::behind_almost_a_day(-(86_400 - 60))]
+    #[tokio::test]
+    async fn a_clock_skew_within_a_day_is_retried_once_with_the_server_time_offset(
+        #[case] skew_secs: i64,
+    ) -> anyhow::Result<()> {
+        let authority = SkewedAuthority::start(skew_secs)?;
+
+        let error = Request::CheckIn
+            .send_to(ProxyConfig::Off, &authority.base_url())
+            .await?;
+
+        assert!(matches!(error, Some(ClientError::ClockSkew { .. })), "{error:?}");
+        let created = authority.created();
+        assert_eq!(created.len(), 2, "{created:?}");
+        // The retry is dated `server_time − local_time` from the local clock, give or take the seconds the test takes.
+        let expected = OffsetDateTime::now_utc().unix_timestamp() + skew_secs;
+        assert!((created[1] - expected).abs() <= 5, "{created:?}, expected {expected}");
+        Ok(())
+    }
+
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
+    #[rstest]
+    #[case::ahead_a_day_and_a_minute(86_400 + 60)]
+    #[case::behind_a_day_and_a_minute(-(86_400 + 60))]
+    #[case::ahead_a_year(365 * 86_400)]
+    #[tokio::test]
+    async fn a_clock_skew_beyond_a_day_is_returned_without_a_retry(#[case] skew_secs: i64) -> anyhow::Result<()> {
+        let authority = SkewedAuthority::start(skew_secs)?;
+
+        let error = Request::CheckIn
+            .send_to(ProxyConfig::Off, &authority.base_url())
+            .await?;
+
+        assert!(matches!(error, Some(ClientError::ClockSkew { .. })), "{error:?}");
+        assert_eq!(authority.created().len(), 1);
+        Ok(())
+    }
+
     #[derive(Clone, Copy, Debug)]
     enum Request {
         Enroll,
@@ -1233,19 +1286,26 @@ mod tests {
 
         /// Sends this request to `authority` with `client`, and returns its error.
         async fn send_with(self, client: Client, authority: &CountingListener) -> anyhow::Result<Option<ClientError>> {
+            self.send_with_to(client, &authority.base_url()).await
+        }
+
+        /// Sends this request to `base_url` through `proxy`, and returns its error.
+        async fn send_to(self, proxy: ProxyConfig, base_url: &str) -> anyhow::Result<Option<ClientError>> {
+            self.send_with_to(Client::new(proxy, None)?, base_url).await
+        }
+
+        /// Sends this request to `base_url` with `client`, and returns its error.
+        async fn send_with_to(self, client: Client, base_url: &str) -> anyhow::Result<Option<ClientError>> {
             let key = TestKey(SigningKey::from_slice(&[7u8; 32])?);
             let error = match self {
                 Self::Enroll => {
-                    let bag = URL_SAFE_NO_PAD.encode(format!(r#"{{"u":"{}"}}"#, authority.base_url()));
+                    let bag = URL_SAFE_NO_PAD.encode(format!(r#"{{"u":"{base_url}"}}"#));
                     let token = Token::parse(&format!("dvaet1.{bag}.{}", "A".repeat(43)))?;
                     client.enroll(&token, "csr", &Metadata::new(), &key).await.err()
                 }
                 Self::CheckIn => {
                     let signer = RequestSigner::new(Arc::new(key), b"leaf certificate");
-                    client
-                        .check_in(&authority.base_url(), &signer, &Metadata::new(), None)
-                        .await
-                        .err()
+                    client.check_in(base_url, &signer, &Metadata::new(), None).await.err()
                 }
             };
             Ok(error)
@@ -1297,6 +1357,95 @@ mod tests {
         fn connections(&self) -> usize {
             self.connections.load(Ordering::SeqCst)
         }
+    }
+
+    /// A loopback authority that answers every request with `clock_skew`, giving a `server_time` `skew_secs` seconds
+    /// from the local clock, and records the `created` signature parameter of each request.
+    ///
+    /// It speaks plain HTTP, which the client sends to an `http` base URL, because the dates of a signed request don't
+    /// depend on TLS.
+    struct SkewedAuthority {
+        port: u16,
+        created: Arc<Mutex<Vec<i64>>>,
+    }
+
+    impl SkewedAuthority {
+        fn start(skew_secs: i64) -> anyhow::Result<Self> {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+            let port = listener.local_addr()?.port();
+            let created = Arc::new(Mutex::new(Vec::new()));
+            let recorded = Arc::clone(&created);
+            std::thread::spawn(move || {
+                for stream in listener.incoming() {
+                    let Ok(mut stream) = stream else {
+                        return;
+                    };
+                    let Some(head) = read_request_head(&mut stream) else {
+                        continue;
+                    };
+                    if let Some(value) = signature_created(&head) {
+                        recorded.lock().expect("created list not poisoned").push(value);
+                    }
+                    let server_time =
+                        OffsetDateTime::from_unix_timestamp(OffsetDateTime::now_utc().unix_timestamp() + skew_secs)
+                            .expect("valid server time")
+                            .format(&Rfc3339)
+                            .expect("formattable server time");
+                    let body = format!(r#"{{"error":"clock_skew","message":"skewed","server_time":"{server_time}"}}"#);
+                    let response = format!(
+                        "HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = std::io::Write::write_all(&mut stream, response.as_bytes());
+                }
+            });
+            Ok(Self { port, created })
+        }
+
+        fn base_url(&self) -> String {
+            format!("http://127.0.0.1:{}", self.port)
+        }
+
+        fn created(&self) -> Vec<i64> {
+            self.created.lock().expect("created list not poisoned").clone()
+        }
+    }
+
+    /// Reads a request's head and consumes its body, so that closing the connection doesn't reset it before the client
+    /// reads the response.
+    fn read_request_head(stream: &mut std::net::TcpStream) -> Option<String> {
+        let mut received = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let head_end = loop {
+            if let Some(position) = received.windows(4).position(|window| window == b"\r\n\r\n") {
+                break position + 4;
+            }
+            let read = std::io::Read::read(stream, &mut chunk).ok().filter(|read| *read != 0)?;
+            received.extend_from_slice(&chunk[..read]);
+        };
+        let head = String::from_utf8(received[..head_end].to_vec()).ok()?;
+        let content_length = head
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            .unwrap_or(0);
+        while received.len() < head_end + content_length {
+            let read = std::io::Read::read(stream, &mut chunk).ok().filter(|read| *read != 0)?;
+            received.extend_from_slice(&chunk[..read]);
+        }
+        Some(head)
+    }
+
+    /// Returns the `created` parameter of a request head's `signature-input` field.
+    fn signature_created(head: &str) -> Option<i64> {
+        let (_, value) = head
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.eq_ignore_ascii_case("signature-input"))?;
+        let (_, after) = value.split_once(";created=")?;
+        let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+        digits.parse().ok()
     }
 
     fn manual_proxy(proxy: &str, exclude: &[&str]) -> anyhow::Result<ProxyConfig> {

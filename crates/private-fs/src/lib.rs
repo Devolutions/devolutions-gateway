@@ -50,6 +50,8 @@ pub enum Existing {
     Check,
     /// The directory is brought into line with the rule.
     Repair,
+    /// The directory's access is brought into line with the rule, and an owner the rule doesn't allow is refused first.
+    RepairAccess,
 }
 
 /// Whether a rename may replace an existing entry.
