@@ -129,14 +129,14 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
         let open = || open_at(parent, path, name, libc::O_RDONLY | libc::O_DIRECTORY, Kind::Directory);
         match open() {
             Err(error) if restore && is_permission_denied(&error) => {
-                restore_owner_access(parent, &c_name, rule, error)?;
+                restore_owner_access(parent, &c_name, rule, existing, error)?;
                 open()
             }
             opened => opened,
         }
     };
     // A directory that exists is checked or repaired, so only one that must be created can inherit the parent's ACL.
-    let (file, created) = match open(existing == Existing::Repair)? {
+    let (file, created) = match open(existing != Existing::Check)? {
         Some(file) => (file, false),
         None => {
             os::refuse_inheritable_acl(&parent.file, parent_path(path))?;
@@ -152,7 +152,7 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
             // search bit, because the open restores the owner's access first.
             // The umask is process-wide, so a test can't set one without racing every other test.
             // When changing this, keep restoring the access of a directory created here before giving up on its open.
-            let file = open(created || existing == Existing::Repair)?
+            let file = open(created || existing != Existing::Check)?
                 .ok_or_else(|| Error::io(path, "open directory", io::ErrorKind::NotFound.into()))?;
             (file, created)
         }
@@ -167,6 +167,7 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
         match existing {
             Existing::Check => check_dir(&dir, path, rule)?,
             Existing::Repair => repair_dir(&dir, path, rule)?,
+            Existing::RepairAccess => repair_item(&dir.file, path, rule, Kind::Directory, OwnerChange::Refuse)?,
         }
     }
     // UNTESTED: the new directory and its parent are synced before the directory is returned.
@@ -184,18 +185,30 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
 }
 
 /// Gives the current user back access to the directory `name` of `parent`, which it owns but couldn't open, so that it
-/// can be repaired or checked; fails with `denied` when `name` is not such a directory.
+/// can be repaired or checked; fails with `denied` when `name` is not such a directory, or with an owner refusal under
+/// [`Existing::RepairAccess`] when it is a directory owned by an account `rule` doesn't allow.
 ///
 /// The change happens before the volume check that the repair or check makes once the directory is open.
 /// It is harmless there: mode 0700 gives no account but the owner any access, and the owner could change the mode
 /// itself.
-fn restore_owner_access(parent: &Dir, name: &CStr, rule: &Rule, denied: Error) -> Result<()> {
+fn restore_owner_access(parent: &Dir, name: &CStr, rule: &Rule, existing: Existing, denied: Error) -> Result<()> {
     let euid = effective_uid();
     match stat_at(&parent.file, name) {
         Ok(stat)
             if entry_kind(stat.st_mode) == EntryKind::Directory
                 && stat.st_uid == euid
                 && owner_allowed(rule, euid, euid) => {}
+        // UNTESTED: a repair of access only reports a directory it can't open, owned by an account the rule doesn't
+        // allow, as an owner refusal.
+        // Only root can give a test directory another owner, and root opens every directory, so no test reaches this.
+        // When changing this, keep it ahead of any change, so that such a directory is refused as it is.
+        Ok(stat)
+            if existing == Existing::RepairAccess
+                && entry_kind(stat.st_mode) == EntryKind::Directory
+                && !owner_allowed(rule, stat.st_uid, euid) =>
+        {
+            return Err(Error::refused(denied.path(), Refusal::Owner));
+        }
         _ => return Err(denied),
     }
     check_rule(denied.path(), rule, euid, euid, Kind::Directory)?;
@@ -416,15 +429,24 @@ pub(crate) fn check_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
 }
 
 pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
-    repair_item(&dir.file, path, rule, Kind::Directory)
+    repair_item(&dir.file, path, rule, Kind::Directory, OwnerChange::Allow)
 }
 
 pub(crate) fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
-    repair_item(file, path, rule, Kind::File)
+    repair_item(file, path, rule, Kind::File, OwnerChange::Allow)
+}
+
+/// Whether a repair may give an item whose owner its rule doesn't allow to the current user.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OwnerChange {
+    Allow,
+    Refuse,
 }
 
 /// Brings the owner, mode and ACLs of the open directory or file `file` into line with `rule`, then checks it.
-fn repair_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<()> {
+///
+/// Under [`OwnerChange::Refuse`], an owner the rule doesn't allow is refused before anything changes.
+fn repair_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind, owner_change: OwnerChange) -> Result<()> {
     let euid = effective_uid();
     let metadata = file
         .metadata()
@@ -440,8 +462,10 @@ fn repair_item(file: &File, path: &Utf8Path, rule: &Rule, kind: Kind) -> Result<
     os::check_volume(file, path)?;
     let owner = if owner_allowed(rule, metadata.uid(), euid) {
         metadata.uid()
-    } else {
+    } else if owner_change == OwnerChange::Allow {
         euid
+    } else {
+        return Err(Error::refused(path, Refusal::Owner));
     };
     check_rule(path, rule, owner, euid, kind)?;
     let has_extended_acl = match os::check_no_extended_acl(file, path, kind == Kind::Directory) {

@@ -19,7 +19,8 @@ use tower::Layer as _;
 use uuid::Uuid;
 
 use crate::backoff::BackoffState;
-use crate::closure::{Closure, ClosureClass};
+use crate::closure::{Closure, ClosureClass, ErrorCode};
+use crate::loggable::loggable;
 use crate::transport::endpoint;
 use crate::{Event, Shared, Target};
 
@@ -35,6 +36,9 @@ const MAX_ENVELOPE_LEN: usize = 65_536;
 // Waiting out the whole timeout would hold a connection that the authority has already finished with.
 // When changing `close`, keep reading until the authority's side ends.
 const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The largest clock offset, in seconds, that a `clock_skew` refusal makes the agent sign a retry with, so that a
+/// signed opening is never dated more than a day from the agent's own clock.
+const MAX_CLOCK_SKEW_OFFSET_SECS: u64 = 86_400;
 
 pub(crate) async fn run(
     shared: Arc<Shared>,
@@ -173,11 +177,11 @@ fn push_event(message: ServerMessage) -> Option<Event> {
     match message.payload? {
         Payload::RenewRequested(request) => Some(Event::RenewRequested {
             id: message.id,
-            reason: request.reason,
+            reason: loggable(&request.reason),
         }),
         Payload::Reconnect(request) => Some(Event::Reconnect {
             id: message.id,
-            reason: request.reason,
+            reason: loggable(&request.reason),
         }),
         Payload::ConfigUpdate(update) => Some(Event::ConfigUpdate {
             id: message.id,
@@ -265,12 +269,13 @@ fn hello(target: &Target, challenge_id: &str, challenge: &[u8], nonce: &str) -> 
 }
 
 /// Opens and authenticates a stream, and retries once at the authority's time when it refuses the opening with
-/// `clock_skew` ([CONTRACT.agent-identity.md §6 "RFC 9421 profile"][contract]).
+/// `clock_skew` and that time is within [`MAX_CLOCK_SKEW_OFFSET_SECS`] of the local time ([CONTRACT.agent-identity.md
+/// §6 "RFC 9421 profile"][contract]).
 ///
 /// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#6-rfc-9421-profile
 async fn authenticated_stream(shared: &Shared, target: &Target) -> Result<Opened, Closure> {
     match authenticated_stream_at(shared, target, 0).await {
-        Err(closure) => match clock_offset(&closure) {
+        Err(closure) => match clock_offset(&closure, OffsetDateTime::now_utc()) {
             Some(offset) => authenticated_stream_at(shared, target, offset).await,
             None => Err(closure),
         },
@@ -290,13 +295,20 @@ async fn authenticated_stream_at(shared: &Shared, target: &Target, clock_offset:
         .unwrap_or_else(|_| Err(Closure::outage("no Welcome within the opening timeout")))
 }
 
-/// Returns `server_time − local_time` in seconds for a `clock_skew` refusal with a `server-time` trailer.
-fn clock_offset(closure: &Closure) -> Option<i64> {
-    if closure.error_code.as_deref() != Some("clock_skew") {
+/// Returns `server_time − local_time` in seconds for a refusal with status `UNAUTHENTICATED`, `error-code: clock_skew`
+/// and a `server-time` trailer ([CONTRACT.agent-identity.md §7.4 "Termination"][contract]), unless its magnitude
+/// exceeds [`MAX_CLOCK_SKEW_OFFSET_SECS`].
+///
+/// [contract]: ../../../docs/agent-identity/CONTRACT.agent-identity.md#74-termination
+fn clock_offset(closure: &Closure, local_time: OffsetDateTime) -> Option<i64> {
+    if !(closure.grpc_code == Some(Code::Unauthenticated)
+        && closure.error_code.as_ref().map(ErrorCode::as_str) == Some("clock_skew"))
+    {
         return None;
     }
     let server_time = OffsetDateTime::parse(closure.server_time.as_deref()?, &Rfc3339).ok()?;
-    Some(server_time.unix_timestamp() - OffsetDateTime::now_utc().unix_timestamp())
+    Some(server_time.unix_timestamp() - local_time.unix_timestamp())
+        .filter(|offset| offset.unsigned_abs() <= MAX_CLOCK_SKEW_OFFSET_SECS)
 }
 
 /// Sends the signed opening request, with its `created` time offset by `clock_offset` seconds, and waits for the
@@ -358,4 +370,77 @@ pub(crate) fn channel_proof_input(challenge: &[u8], connect_nonce: &str) -> Vec<
     input.extend_from_slice(challenge);
     input.extend_from_slice(connect_nonce.as_bytes());
     input
+}
+
+#[cfg(test)]
+mod tests {
+    use agent_channel_proto::{Reconnect, RenewRequested};
+    use rstest::rstest;
+
+    use super::*;
+    use crate::closure::TransientKind;
+
+    /// A transient refusal with `error-code: clock_skew`, as the authority sends it at a skewed opening.
+    fn clock_skew_refusal(grpc_code: Code, server_time: &str) -> Closure {
+        Closure {
+            class: ClosureClass::Transient(TransientKind::Outage),
+            grpc_code: Some(grpc_code),
+            error_code: Some(ErrorCode::Code("clock_skew".to_owned())),
+            server_time: Some(server_time.to_owned()),
+            reason: "clock skew".to_owned(),
+        }
+    }
+
+    fn local_time() -> OffsetDateTime {
+        OffsetDateTime::parse("2026-10-21T00:00:00Z", &Rfc3339).expect("RFC 3339 time")
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §signatures
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
+    #[rstest]
+    #[case::one_day_ahead("2026-10-22T00:00:00Z", 86_400)]
+    #[case::one_day_behind("2026-10-20T00:00:00Z", -86_400)]
+    fn a_clock_skew_refusal_within_a_day_gives_its_offset(#[case] server_time: &str, #[case] offset: i64) {
+        let closure = clock_skew_refusal(Code::Unauthenticated, server_time);
+        assert_eq!(clock_offset(&closure, local_time()), Some(offset));
+    }
+
+    // oracle: intent docs/agent-identity/INTENT.agent-identity.md §Request authentication
+    #[rstest]
+    #[case::past_one_day_ahead("2026-10-22T00:00:01Z")]
+    #[case::past_one_day_behind("2026-10-19T23:59:59Z")]
+    #[case::years_ahead("9999-12-31T23:59:59Z")]
+    fn a_clock_skew_refusal_past_a_day_gives_no_offset(#[case] server_time: &str) {
+        let closure = clock_skew_refusal(Code::Unauthenticated, server_time);
+        assert_eq!(clock_offset(&closure, local_time()), None);
+    }
+
+    // oracle: contract docs/agent-identity/CONTRACT.agent-identity.md §channel-termination
+    #[rstest]
+    #[case::permission_denied(Code::PermissionDenied)]
+    #[case::ok(Code::Ok)]
+    #[case::invalid_argument(Code::InvalidArgument)]
+    #[case::unavailable(Code::Unavailable)]
+    fn a_clock_skew_code_with_another_status_gives_no_offset(#[case] grpc_code: Code) {
+        let closure = clock_skew_refusal(grpc_code, "2026-10-21T02:00:00Z");
+        assert_eq!(clock_offset(&closure, local_time()), None);
+    }
+
+    // oracle: intent crates/agent-channel-client/INTENT.md §Connection
+    #[test]
+    fn escapes_the_reason_of_a_push() {
+        let push = |payload| ServerMessage {
+            id: "d6a1ed1a-6c5b-4f87-9d2a-5d1d3c1f8e10".to_owned(),
+            correlation_id: None,
+            payload: Some(payload),
+        };
+        let reason = "admin\nINFO forged".to_owned();
+        let logged = r"admin\nINFO forged".to_owned();
+
+        let renew = push_event(push(Payload::RenewRequested(RenewRequested { reason: reason.clone() })));
+        assert!(matches!(renew, Some(Event::RenewRequested { reason, .. }) if reason == logged));
+        let reconnect = push_event(push(Payload::Reconnect(Reconnect { reason })));
+        assert!(matches!(reconnect, Some(Event::Reconnect { reason, .. }) if reason == logged));
+    }
 }

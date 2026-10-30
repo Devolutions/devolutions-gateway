@@ -184,7 +184,7 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
                 check_dir(&dir, path, rule)?;
                 Ok(dir)
             }
-            Existing::Repair => {
+            Existing::Repair | Existing::RepairAccess => {
                 // A directory whose DACL no longer grants the current user anything is still repairable by its owner,
                 // so it is opened with what reading its owner and DACL needs, within the owner's implicit access, and
                 // opened normally once repaired; the repair itself asks for WRITE_DAC only when it writes.
@@ -199,7 +199,12 @@ pub(crate) fn create_dir(parent: &Dir, path: &Utf8Path, name: &str, rule: &Rule,
                 let repairing = nt::create(parent.handle(), name, &request)
                     .map_err(|error| Error::io(path, "open directory for repair", error))?;
                 let policy = Policy::new(rule, Kind::Directory, path)?;
-                repair(repairing.as_handle(), path, Kind::Directory, &policy)?;
+                let owner_change = if existing == Existing::Repair {
+                    OwnerChange::Allow
+                } else {
+                    OwnerChange::Refuse
+                };
+                repair(repairing.as_handle(), path, Kind::Directory, &policy, owner_change)?;
                 let handle = reopen(repairing.as_handle(), DIRECTORY_ACCESS)
                     .map_err(|error| Error::io(path, "open directory", error))?;
                 check_item(handle.as_handle(), path, Kind::Directory, &policy.exact())?;
@@ -481,20 +486,35 @@ pub(crate) fn check_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
 
 pub(crate) fn repair_dir(dir: &Dir, path: &Utf8Path, rule: &Rule) -> Result<()> {
     let policy = Policy::new(rule, Kind::Directory, path)?;
-    repair(dir.handle(), path, Kind::Directory, &policy)?;
+    repair(dir.handle(), path, Kind::Directory, &policy, OwnerChange::Allow)?;
     check_item(dir.handle(), path, Kind::Directory, &policy.exact())
 }
 
 /// Brings an open file's owner and DACL into line with `rule`, then checks it exactly.
 pub(crate) fn repair_file(file: &File, path: &Utf8Path, rule: &Rule) -> Result<()> {
     let policy = Policy::new(rule, Kind::File, path)?;
-    repair(file.as_handle(), path, Kind::File, &policy)?;
+    repair(file.as_handle(), path, Kind::File, &policy, OwnerChange::Allow)?;
     check_item(file.as_handle(), path, Kind::File, &policy.exact())
+}
+
+/// Whether a repair may give an item whose owner its rule doesn't allow to the current user.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OwnerChange {
+    Allow,
+    Refuse,
 }
 
 /// Brings the owner and DACL of the item `handle` refers to into line with `policy`, through a handle opened again
 /// with the repair's access only, without checking the result.
-fn repair(handle: BorrowedHandle<'_>, path: &Utf8Path, kind: Kind, policy: &Policy) -> Result<()> {
+///
+/// Under [`OwnerChange::Refuse`], an owner the rule doesn't allow, or a missing one, is refused before anything changes.
+fn repair(
+    handle: BorrowedHandle<'_>,
+    path: &Utf8Path,
+    kind: Kind,
+    policy: &Policy,
+    owner_change: OwnerChange,
+) -> Result<()> {
     classify(handle, path, kind)?;
     let security =
         OwnerAndDacl::of_handle(handle).map_err(|error| Error::io(path, "read access control list", error))?;
@@ -511,7 +531,7 @@ fn repair(handle: BorrowedHandle<'_>, path: &Utf8Path, kind: Kind, policy: &Poli
     let owner = match current_owner {
         Some(owner) if owner_allowed => owner.clone(),
         // The repair would make the current user the owner, which the rule must then allow.
-        _ if policy.allows_user_owner() => policy.accounts.user.clone(),
+        _ if owner_change == OwnerChange::Allow && policy.allows_user_owner() => policy.accounts.user.clone(),
         _ => return Err(Error::refused(path, Refusal::Owner)),
     };
     let descriptor = Descriptor::new(&owner, &policy.dacl(&owner))
