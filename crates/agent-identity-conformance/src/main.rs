@@ -580,7 +580,7 @@ async fn run() -> anyhow::Result<()> {
     let deadline = start + RUN_DEADLINE;
     let suite = tokio::time::timeout(RUN_DEADLINE, options.suite())
         .await
-        .context("conformance setup exceeded the 14-minute-30-second deadline")??;
+        .context("conformance setup exceeded the 24-minute-30-second deadline")??;
     println!("KEY NAME PREFIX {}", suite.key_name_prefix);
     // The agent's built-in key storage on Windows is the Windows software provider, whose machine keys only an elevated administrator can create.
     #[cfg(windows)]
@@ -717,7 +717,7 @@ async fn run_test(test: &Test, context: Context, deadline: Instant) -> (Outcome,
             (outcome, false)
         }
         Err(_) if allowed == remaining => (
-            Outcome::Fail("global 14-minute-30-second deadline exceeded".to_owned()),
+            Outcome::Fail("global 24-minute-30-second deadline exceeded".to_owned()),
             true,
         ),
         Err(_) => (Outcome::Fail("timed out".to_owned()), false),
