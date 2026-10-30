@@ -34,6 +34,37 @@ The installer neither installs nor changes that policy.
 An upgrade without `ADDLOCAL` or `REMOVE` keeps the previous feature selection.
 When upgrading from a release without the UniGetUI Package Broker option, setup selects `F.PackageBroker` if `agent.json` already enables the broker.
 
+## Agent Identity
+
+To enroll the device with Agent Identity during an install or a major upgrade, put the enrollment token on the first line of a file and set `IDENTITY_ENROLLMENT_TOKEN_FILE` to the file's path:
+
+```powershell
+msiexec /i DevolutionsAgent.msi /qn IDENTITY_ENROLLMENT_TOKEN_FILE=enrollment-token.txt
+```
+
+A relative path resolves against the folder of the `.msi`, so a deployment tool such as Intune can ship the file beside the installer.
+The file keeps the token off msiexec's command line, which security tools and process auditing record and Intune shows in the app's install command.
+The installer never deletes the file, so protect it like the token.
+An upgrade whose command sets the property again reads the file again, so keep the file or leave the property out of that command.
+The install fails if the file is missing or its first line holds no token.
+
+You can instead set `IDENTITY_ENROLLMENT_TOKEN` to the token itself, but not both properties:
+
+```powershell
+$Token = (Get-Content -Raw 'C:\Secure\enrollment-token.txt').Trim()
+msiexec /i DevolutionsAgent.msi /qn "IDENTITY_ENROLLMENT_TOKEN=$Token"
+```
+
+Take the token from a protected file or a secure channel, such as your deployment tool's secret store, never from a literal in a shared script or command line.
+msiexec's command line then holds the token while the install runs, so run it elevated or from your deployment tool, where only administrators can read it.
+
+Either way, the installer keeps the token out of its log and passes it to the agent through standard input.
+The install fails if the agent rejects the token's format or can't store it.
+The agent then enrolls in the background once its service starts, and re-running the command later with the same token enrolls nothing new.
+
+A full uninstall deletes the device's Agent Identity state and keys without contacting the authority, so a later install enrolls the device as new and uses up a token use.
+A major upgrade, a repair or a maintenance run keeps them.
+
 ## Build
 
 ### MSBuild

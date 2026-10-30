@@ -68,6 +68,10 @@ model/preflightOperationKind.ts
 model/preflightOutput.ts
 model/preflightOutputKind.ts
 model/pubKeyFormat.ts
+model/recordingSearchHit.ts
+model/recordingSearchRequest.ts
+model/recordingSearchResponse.ts
+model/recordingSelection.ts
 model/scanOriginDto.ts
 model/scanResultSourceDto.ts
 model/sessionInfo.ts
@@ -75,6 +79,7 @@ model/sessionTokenContentType.ts
 model/sessionTokenSignRequest.ts
 model/setConfigResponse.ts
 model/setUpdateScheduleRequest.ts
+model/startTimeRange.ts
 model/subProvisionerKey.ts
 model/subscriber.ts
 model/targetConnectionOptions.ts

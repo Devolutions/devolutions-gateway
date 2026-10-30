@@ -339,6 +339,13 @@ fn agent_events() -> Vec<(u32, Entry)> {
             agent_sysevent_codes::boot_stacktrace_written(path),
         ),
         (
+            agent_sysevent_codes::IDENTITY_KEY_BACKEND_UNAVAILABLE,
+            agent_sysevent_codes::identity_key_backend_unavailable(
+                "WindowsSoftwareProvider",
+                "backend WindowsSoftwareProvider is unavailable",
+            ),
+        ),
+        (
             agent_sysevent_codes::USER_SESSION_PROCESS_STARTED,
             agent_sysevent_codes::user_session_process_started(1, "console", "DevolutionsSession.exe"),
         ),

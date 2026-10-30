@@ -9,10 +9,8 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Remoting;
-using System.Runtime.Remoting.Channels;
-using System.Runtime.Remoting.Channels.Ipc;
 using System.Security.Principal;
+using Devolutions.Agent.Desktop.SingleInstance;
 using System.Threading;
 using System.Windows.Forms;
 using Application = System.Windows.Forms.Application;
@@ -27,8 +25,6 @@ namespace Devolutions.Agent.Desktop
 
         private static string[] Args { get; set; }
 
-        private static EventWaitHandle ExitEvent = new(false, EventResetMode.ManualReset, $"{MutexId}_{Process.GetCurrentProcess().Id}");
-
         internal static AppContext AppContext { get; private set; }
 
         internal static Logger Log = new(new FileLogger());
@@ -40,8 +36,18 @@ namespace Devolutions.Agent.Desktop
 
             Args = args;
 
+            ProcessIdentity identity = null;
+
+            try
+            {
+                identity = ProcessIdentity.Current();
+            }
+            catch (Exception e)
+            {
+                Log.Error($"Failed to query process identity: {e}");
+            }
+
             using Mutex mutex = new(false, MutexName);
-            const string serviceUri = "RemotingServer";
 
             if (!mutex.WaitOne(0))
             {
@@ -49,11 +55,10 @@ namespace Devolutions.Agent.Desktop
 
                 try
                 {
-                    IpcChannel clientChannel = new();
-                    ChannelServices.RegisterChannel(clientChannel, false);
-                    SingleInstance app = (SingleInstance)Activator.GetObject(typeof(SingleInstance),
-                        $"ipc://{MutexName}/{serviceUri}");
-                    app.Execute(args);
+                    if (identity is not null)
+                    {
+                        SingleInstancePipe.Forward(identity, args, Log);
+                    }
                 }
                 catch (Exception e)
                 {
@@ -63,27 +68,21 @@ namespace Devolutions.Agent.Desktop
                 return;
             }
 
-            Log.Debug("Starting IPC server");
+            using EventWaitHandle exitEvent = CreateExitEvent();
 
-            try
+            if (exitEvent is not null)
             {
-                IpcChannel serverChannel = new(MutexName);
-                ChannelServices.RegisterChannel(serverChannel, false);
-                RemotingConfiguration.RegisterWellKnownServiceType(typeof(SingleInstance),
-                    serviceUri, WellKnownObjectMode.Singleton);
+                Thread exitMonitor = new Thread(() =>
+                {
+                    exitEvent.WaitOne();
+                    Application.Exit();
+                })
+                {
+                    IsBackground = true,
+                };
+
+                exitMonitor.Start();
             }
-            catch (Exception e)
-            {
-                Log.Error(e.ToString());
-            }
-
-            Thread exitMonitor = new Thread(() =>
-            {
-                ExitEvent.WaitOne();
-                Application.Exit();
-            });
-
-            exitMonitor.Start();
 
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
@@ -91,9 +90,38 @@ namespace Devolutions.Agent.Desktop
 
             AppContext = new AppContext();
 
-            Application.Run(AppContext);
+            using SingleInstanceServer server = identity is null ? null : SingleInstanceServer.TryStart(identity, AppContext.Dispatch, Log);
 
-            ExitEvent.Set();
+            Application.Run(AppContext);
+        }
+
+        /// <summary>
+        /// Creates the event the installer signals to close this instance.
+        /// </summary>
+        /// <returns>The event, or null if it could not be created by this process.</returns>
+        private static EventWaitHandle CreateExitEvent()
+        {
+            string name = $"{MutexId}_{Process.GetCurrentProcess().Id}";
+
+            try
+            {
+                EventWaitHandle exitEvent = new(false, EventResetMode.ManualReset, name, out bool createdNew);
+
+                if (createdNew)
+                {
+                    return exitEvent;
+                }
+
+                // Do not use an event that already existed before this process created it.
+                exitEvent.Dispose();
+                Log.Warn($"Exit event {name} already exists; ignoring it");
+            }
+            catch (Exception e)
+            {
+                Log.Warn($"Failed to create exit event {name}: {e.Message}");
+            }
+
+            return null;
         }
 
         private static void Application_OnIdle(object sender, EventArgs e)
@@ -311,14 +339,6 @@ namespace Devolutions.Agent.Desktop
         }
     }
 
-    public class SingleInstance : MarshalByRefObject
-    {
-        public void Execute(string[] args)
-        {
-            Program.AppContext.Dispatch(args);
-        }
-    }
-
     internal interface ILogger
     {
         void Log(string message, string level);
@@ -343,6 +363,11 @@ namespace Devolutions.Agent.Desktop
             this.logger.Log(message, "INFO");
         }
 
+        public void Warn(string message)
+        {
+            this.logger.Log(message, "WARN");
+        }
+
         public void Error(string message)
         {
             this.logger.Log(message, "ERROR");
@@ -359,6 +384,8 @@ namespace Devolutions.Agent.Desktop
 
     internal sealed class FileLogger : ILogger, IDisposable
     {
+        private readonly object sync = new();
+
         private readonly FileStream fs;
 
         private readonly TextWriter writer;
@@ -381,8 +408,11 @@ namespace Devolutions.Agent.Desktop
 
         public void Log(string message, string level)
         {
-            this.writer?.WriteLine($"{DateTime.Now:O} [{level}] {message}");
-            this.writer?.Flush();
+            lock (this.sync)
+            {
+                this.writer?.WriteLine($"{DateTime.Now:O} [{level}] {message}");
+                this.writer?.Flush();
+            }
         }
 
         public void Dispose()

@@ -7,6 +7,7 @@
 //! ## Security properties
 //!
 //! - Passwords encrypted at rest in regular heap memory.
+//! - Encrypted passwords zeroized on drop.
 //! - Decryption on-demand into short-lived zeroized buffers.
 //! - ChaCha20-Poly1305 provides authenticated encryption.
 //! - Random 96-bit nonces prevent nonce reuse.
@@ -23,6 +24,7 @@ use chacha20poly1305::{ChaCha20Poly1305, Nonce};
 use parking_lot::Mutex;
 use secrecy::SecretString;
 use secure_memory::{ProtectedBytes, ProtectionLevel};
+use zeroize::Zeroize as _;
 
 /// Global master key for credential encryption.
 ///
@@ -139,6 +141,7 @@ impl MasterKeyManager {
 ///
 /// Contains the nonce and ciphertext (including the Poly1305 authentication
 /// tag).  Safe to store in regular memory because it is encrypted.
+/// It is zeroed on drop.
 #[derive(Clone)]
 pub struct EncryptedPassword {
     /// 96-bit nonce (12 bytes) for ChaCha20-Poly1305.
@@ -153,6 +156,13 @@ impl fmt::Debug for EncryptedPassword {
         f.debug_struct("EncryptedPassword")
             .field("ciphertext_len", &self.ciphertext.len())
             .finish_non_exhaustive()
+    }
+}
+
+impl Drop for EncryptedPassword {
+    fn drop(&mut self) {
+        self.nonce.as_mut_slice().zeroize();
+        self.ciphertext.zeroize();
     }
 }
 

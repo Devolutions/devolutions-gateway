@@ -3,6 +3,7 @@ use std::time::Duration;
 use anyhow::Context;
 use devolutions_agent::AgentServiceEvent;
 use devolutions_agent::config::ConfHandle;
+use devolutions_agent::identity::IdentityTask;
 use devolutions_agent::log::AgentLog;
 use devolutions_agent::psu_agent::PsuAgentTask;
 use devolutions_agent::remote_desktop::RemoteDesktopTask;
@@ -71,6 +72,7 @@ impl AgentService {
                 "**DEBUG OPTIONS ARE ENABLED, PLEASE DO NOT USE IN PRODUCTION**",
             );
         }
+        devolutions_agent::identity::config::warn_about_debug_settings(conf.debug.identity.as_ref());
 
         Ok(AgentService {
             conf_handle,
@@ -208,6 +210,10 @@ async fn spawn_tasks(conf_handle: ConfHandle) -> anyhow::Result<TasksCtx> {
     let mut tasks = Tasks::new();
 
     tasks.register(LogDeleterTask::<AgentLog>::new(conf.log_file.clone()));
+
+    if conf.identity.enabled {
+        tasks.register(IdentityTask::new(conf_handle.clone()));
+    }
 
     #[cfg(windows)]
     let service_event_tx = {

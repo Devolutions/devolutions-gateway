@@ -3,8 +3,6 @@ name: toolbox-changelog
 description: Generates user-facing changelogs for Devolutions Gateway and Devolutions Agent in Devolutions ToolBox format from CHANGELOG.md.
 ---
 
-# ToolBox Changelog Generator
-
 Read `CHANGELOG.md` from the project root and produce two user-facing changelogs — one for **Devolutions Gateway** and one for **Devolutions Agent** — ready to paste into the Devolutions ToolBox change history.
 
 ## Step 1: Determine the target version

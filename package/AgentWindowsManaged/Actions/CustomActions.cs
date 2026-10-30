@@ -16,6 +16,7 @@ using System.Runtime.InteropServices;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using WixSharp;
@@ -148,14 +149,41 @@ namespace DevolutionsAgent.Actions
         }
 
         [CustomAction]
+        public static ActionResult CheckProgramDataDirectory(Session session)
+        {
+            try
+            {
+                DataFolderRefusal refusal = DataFolders.Check(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    LogDelegate.WithSession(session));
+
+                return refusal is null ? ActionResult.Success : Refuse(session, refusal);
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to check {ProgramDataDirectory}: {e}");
+                return ActionResult.Failure;
+            }
+        }
+
+        [CustomAction]
         public static ActionResult CreateProgramDataDirectory(Session session)
         {
             string path = ProgramDataDirectory;
 
             try
             {
-                DirectoryInfo di = Directory.CreateDirectory(path);
-                session.Log($"created directory at {di.FullName} or already exists");
+                DataFolderRefusal refusal = DataFolders.Create(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    Includes.PROGRAM_DATA_SDDL,
+                    LogDelegate.WithSession(session));
+
+                if (refusal is not null)
+                {
+                    return Refuse(session, refusal);
+                }
+
+                session.Log($"created directory at {path} or already exists");
             }
             catch (Exception e)
             {
@@ -164,6 +192,22 @@ namespace DevolutionsAgent.Actions
             }
 
             return ActionResult.Success;
+        }
+
+        /// <summary>
+        /// Logs the error for <paramref name="refusal"/> in the installer's language and shows it, which a silent install
+        /// only logs.
+        /// </summary>
+        private static ActionResult Refuse(Session session, DataFolderRefusal refusal)
+        {
+            // UNTESTED: a refusal is sent as an error message, which a silent install logs and an interactive one shows.
+            // No test runs the data folder actions, which read the machine's own ProgramData.
+            // When changing this, keep sending it with InstallMessage.Error, as ReadIdentityEnrollmentTokenFile does.
+            string message = refusal.Message(session.Property("ProductLanguage"));
+            session.Log(message);
+            using Record record = new(0) { FormatString = EscapeFormatted(message) };
+            session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+            return ActionResult.Failure;
         }
 
         [CustomAction]
@@ -674,6 +718,153 @@ namespace DevolutionsAgent.Actions
             }
         }
 
+        [CustomAction]
+        public static ActionResult EnrollAgentIdentity(Session session)
+        {
+            ActionResult Fail(string message)
+            {
+                session.Log(message);
+                using Record record = new(0) { FormatString = EscapeFormatted(message) };
+                session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+                return ActionResult.Failure;
+            }
+
+            try
+            {
+                string token = DecodePropertyData(session, AgentProperties.IdentityEnrollmentTokenEncoded).Trim();
+                string Redact(string s) => token.Length == 0 ? s : s.Replace(token, "***");
+
+                (string fileName, string arguments, string input) =
+                    AgentIdentity.EnrollCommand(session.Property(AgentProperties.InstallDir), token);
+                session.Log($"Running Agent Identity enrollment: {fileName} {arguments}");
+                AgentRunResult result = RunAgentCommand(fileName, arguments, input, ProgramDataDirectory, 60_000);
+
+                if (result.TimedOut)
+                {
+                    return Fail("Agent Identity enrollment timed out.");
+                }
+
+                if (!string.IsNullOrEmpty(result.Stdout))
+                {
+                    session.Log($"enrollment stdout: {Redact(result.Stdout)}");
+                }
+                if (!string.IsNullOrEmpty(result.Stderr))
+                {
+                    session.Log($"enrollment stderr: {Redact(result.Stderr)}");
+                }
+
+                if (result.ExitCode != 0)
+                {
+                    string detail = !string.IsNullOrWhiteSpace(result.Stderr) ? Redact(result.Stderr).Trim() : $"exit code {result.ExitCode}";
+                    return Fail($"Agent Identity enrollment failed: {detail}");
+                }
+
+                session.Log("Agent Identity enrollment token handed to the agent");
+                return ActionResult.Success;
+            }
+            catch (Exception e)
+            {
+                return Fail($"Agent Identity enrollment failed: {e.Message}");
+            }
+        }
+
+        [CustomAction]
+        public static ActionResult ReadIdentityEnrollmentTokenFile(Session session)
+        {
+            ActionResult Fail(string id, params object[] args)
+            {
+                string message = string.Format(Program.Localize(session.Property("ProductLanguage"), id), args);
+                session.Log(message);
+                using Record record = new(0) { FormatString = EscapeFormatted(message) };
+                session.Message(InstallMessage.Error | (uint)MessageButtons.OK, record);
+                return ActionResult.Failure;
+            }
+
+            if (!string.IsNullOrEmpty(session.Property(AgentProperties.IdentityEnrollmentToken)))
+            {
+                return Fail(Strings.IdentityEnrollmentTokenBothSet);
+            }
+
+            string path = session.Property(AgentProperties.IdentityEnrollmentTokenFile);
+            string token;
+
+            try
+            {
+                // A relative path resolves against the folder of the .msi, so that a deployment can ship the file
+                // beside it.
+                path = Path.Combine(Path.GetDirectoryName(session.Property("OriginalDatabase")), path);
+
+                using StreamReader reader = new(path);
+                token = reader.ReadLine()?.Trim() ?? string.Empty;
+            }
+            catch (Exception e)
+            {
+                return Fail(Strings.IdentityEnrollmentTokenFileUnreadable, path, e.Message);
+            }
+
+            if (token.Length == 0)
+            {
+                return Fail(Strings.IdentityEnrollmentTokenFileEmpty, path);
+            }
+
+            session[AgentProperties.IdentityEnrollmentToken] = token;
+            session.Log($"Read the Agent Identity enrollment token from {path}");
+
+            return ActionResult.Success;
+        }
+
+        [CustomAction]
+        public static ActionResult RemoveAgentIdentity(Session session)
+        {
+            // UNTESTED: a failure to list or delete a key, or to delete the identity folder, is logged and the cleanup
+            // goes on.
+            // A failed cleanup must not leave a product that can't be uninstalled, and a later install of the agent
+            // deletes leftover keys with its prefix when it starts.
+            // When changing this action, keep each step in its own try and keep returning success.
+
+            // Keys go first, as the agent deletes a key before its record, so that an interrupted cleanup leaves no key
+            // that the identity files don't name.
+            List<string> keyNames = new();
+
+            try
+            {
+                keyNames = MachineKeys.List().Where(AgentIdentity.IsKeyName).ToList();
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to list Agent Identity device keys: {e}");
+            }
+
+            foreach (string keyName in keyNames)
+            {
+                try
+                {
+                    MachineKeys.Delete(keyName);
+                    session.Log($"deleted Agent Identity device key {keyName}");
+                }
+                catch (Exception e)
+                {
+                    session.Log($"failed to delete Agent Identity device key {keyName}: {e}");
+                }
+            }
+
+            // The deletion never follows a link, so that a link in the data directory can't make the uninstall delete
+            // files elsewhere.
+            try
+            {
+                SecureDirectory.DeleteTree(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent", "identity"],
+                    LogDelegate.WithSession(session));
+            }
+            catch (Exception e)
+            {
+                session.Log($"failed to delete the Agent Identity state: {e}");
+            }
+
+            return ActionResult.Success;
+        }
+
         // When TimedOut is true the child was killed, so ExitCode/Stdout/Stderr carry no meaning —
         // callers must check TimedOut first.
         private sealed class AgentRunResult
@@ -882,6 +1073,15 @@ namespace DevolutionsAgent.Actions
                 .Select(s => s.Trim())
                 .Where(s => !string.IsNullOrEmpty(s))
                 .ToArray();
+
+        /// <summary>
+        /// Escapes <paramref name="text"/> so that Windows Installer shows it verbatim as a formatted message.
+        /// </summary>
+        /// <remarks>
+        /// The installer formats a message's text, which would replace bracketed agent output such as
+        /// <c>[CustomActionData]</c> with a property value.
+        /// </remarks>
+        internal static string EscapeFormatted(string text) => Regex.Replace(text, @"[\[\]]", m => $"[\\{m.Value}]");
 
         private static string DecodePropertyData(Session session, string encodedProperty)
         {
@@ -1712,6 +1912,7 @@ namespace DevolutionsAgent.Actions
                 (AgentProperties.AgentTunnelAdvertiseDomains, AgentProperties.AgentTunnelAdvertiseDomainsEncoded),
                 (AgentProperties.AgentTunnelIncludeDetectedDomain, AgentProperties.AgentTunnelIncludeDetectedDomainEncoded),
                 (AgentProperties.AgentTunnelDetectedDomain, AgentProperties.AgentTunnelDetectedDomainEncoded),
+                (AgentProperties.IdentityEnrollmentToken, AgentProperties.IdentityEnrollmentTokenEncoded),
             })
             {
                 string value = session.Property(source) ?? string.Empty;
@@ -1727,7 +1928,10 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SetFileSecurity(session, ProgramDataDirectory, Includes.PROGRAM_DATA_SDDL);
+                SecureDirectory.SetSecurity(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent"],
+                    Includes.PROGRAM_DATA_SDDL);
                 return ActionResult.Success;
             }
             catch (Exception e)
@@ -1742,7 +1946,18 @@ namespace DevolutionsAgent.Actions
         {
             try
             {
-                SetFileSecurity(session, Path.Combine(ProgramDataDirectory, "pedm"), Includes.PROGRAM_DATA_PEDM_SDDL);
+                SecureDirectory.SetSecurity(
+                    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                    ["Devolutions", "Agent", "pedm"],
+                    Includes.PROGRAM_DATA_PEDM_SDDL);
+                return ActionResult.Success;
+            }
+            catch (Win32Exception e) when (e.NativeErrorCode == WinAPI.ERROR_FILE_NOT_FOUND)
+            {
+                // UNTESTED: a missing pedm folder doesn't fail the run, as only the PEDM feature creates it.
+                // No test runs this action, which reads the machine's own ProgramData.
+                // When changing this, keep accepting a missing pedm folder and nothing else that fails to open.
+                session.Log($"no pedm folder to set permissions on: {e.Message}");
                 return ActionResult.Success;
             }
             catch (Exception e)

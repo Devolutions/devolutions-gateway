@@ -1,0 +1,5 @@
+{
+  "private_key_pkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgxX9emz51HKJMFCGrqX5OInby2wJew9nUcM40oGkUOg2hRANCAAQg8CWz0zJ+w0sZTLvRXPj6Cz6GBrwspv4gaIXtZhySJdp0ZdEq7PEipiYV/BRYIgba8+MxjgNR9UvO8OGhF/UL",
+  "public_key_sec1": "BCDwJbPTMn7DSxlMu9Fc+PoLPoYGvCym/iBohe1mHJIl2nRl0Srs8SKmJhX8FFgiBtrz4zGOA1H1S87w4aEX9Qs=",
+  "signature_base": "\"@method\": POST\n\"@signature-params\": (\"@method\");created=1790000000;expires=1790000060;nonce=\"EBESExQVFhcYGRobHB0eHw\";keyid=\"9T7LbsyWVkALFgAtl2E5ESBgMfMDbKbr_RT36B9OM7w\";alg=\"ecdsa-p256-sha256\";tag=\"connect\""
+}

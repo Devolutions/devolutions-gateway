@@ -164,19 +164,34 @@ jobs:
     needs: [preflight]
     runs-on: ${{ matrix.runner }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [windows, linux]
+        os: [windows, linux, macos]
         include:
           - os: windows
             runner: windows-2022
           - os: linux
             runner: ubuntu-latest
+          - os: macos
+            runner: macos-15
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+
+      # The macos-15 image's ~/.cargo/bin shims dispatch to Homebrew's rustup-init and
+      # fail for `cargo`; the official rustup installer replaces them with working ones.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
 
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
@@ -197,27 +212,140 @@ jobs:
         shell: pwsh
         run: sccache --show-stats
 
-  tests:
-    name: tests [${{ matrix.os }} ${{ matrix.arch }}]
+  oracle-markers:
+    name: oracle markers
     needs: [preflight]
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        arch: [x64]
-        os: [windows, linux]
-        include:
-          - os: windows
-            runner: windows-2022
-            target: x86_64-pc-windows-msvc
-          - os: linux
-            runner: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout ${{ github.repository }}
         uses: actions/checkout@v6
         with:
           ref: ${{ needs.preflight.outputs.ref }}
+          # A pull request's merge commit and its first parent, the base the check compares against.
+          fetch-depth: 2
+
+      - name: Check oracle markers
+        env:
+          # Reads the files that markers pin in other repositories; a pin the token cannot read gets only a syntax check.
+          GH_TOKEN: ${{ secrets.DEVOLUTIONSBOT_TOKEN || github.token }}
+        run: |
+          $Base = if ('${{ github.event_name }}' -Eq 'pull_request' -And -Not '${{ inputs.ref }}') { 'HEAD^1' }
+          ./ci/check-oracle-markers.ps1 -Base $Base
+        shell: pwsh
+
+  skill-links:
+    name: skill links
+    needs: [preflight]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Check skill links
+        run: ./ci/check-skill-links.ps1
+        shell: pwsh
+
+  oracle-markers-tests:
+    name: oracle marker check tests
+    needs: [preflight]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+          # Detecting changes compares the commit with its first parent.
+          fetch-depth: 2
+
+      # Installing Pester from PSGallery fails at times, so a commit that leaves the check alone skips its tests.
+      # The steps are skipped rather than the job, because the success job requires every job to succeed.
+      - name: Detect changes to the check
+        id: changes
+        run: |
+          $Changed = 'true'
+          if (('${{ github.event_name }}' -In 'pull_request', 'push') -And -Not '${{ inputs.ref }}') {
+            $Files = git diff --name-only HEAD^1 HEAD -- ci/check-oracle-markers.ps1 ci/check-oracle-markers.Tests.ps1
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+            if (-Not $Files) {
+              $Changed = 'false'
+            }
+          }
+          echo "changed=$Changed" >> $Env:GITHUB_OUTPUT
+        shell: pwsh
+
+      - name: Install Pester
+        if: ${{ steps.changes.outputs.changed == 'true' }}
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+        shell: pwsh
+
+      - name: Pester tests
+        if: ${{ steps.changes.outputs.changed == 'true' }}
+        run: |
+          Import-Module Pester -RequiredVersion 5.6.0
+          $Result = Invoke-Pester ci/check-oracle-markers.Tests.ps1 -PassThru
+          if ($Result.Result -Ne 'Passed') {
+            exit 1
+          }
+        shell: pwsh
+
+  tests:
+    name: tests [${{ matrix.os }} ${{ matrix.arch }}]
+    needs: [preflight]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows
+            arch: x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+          - os: linux
+            arch: x64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos
+            arch: arm64
+            runner: macos-15
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      # The macos-15 image's ~/.cargo/bin shims dispatch to Homebrew's rustup-init and
+      # fail for `cargo`; the official rustup installer replaces them with working ones.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
 
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
@@ -236,10 +364,50 @@ jobs:
         env:
           AWS_LC_SYS_NO_ASM: true
 
+      # A failed Agent Identity conformance run keeps its work directory, whose agent data directories and logs are the
+      # only record of the state that made it fail.
+      # The filter matches that directory under `target`, the temporary directory or `ProgramData`, and a file the runner
+      # cannot read, such as one only SYSTEM can open, is reported and skipped.
+      # UNTESTED: these steps run only after a failure; when changing them, check by hand with a failing conformance test
+      # that the artifact holds the kept agent data directories.
+      - name: Collect kept Agent Identity conformance directories
+        if: ${{ failure() }}
+        shell: pwsh
+        run: |
+          $Destination = Join-Path $Env:RUNNER_TEMP 'agent-identity-conformance'
+          New-Item -ItemType Directory -Force $Destination | Out-Null
+          $Parents = @('target', [IO.Path]::GetTempPath(), $Env:ProgramData) | Where-Object { $_ }
+          $Index = 0
+          Get-ChildItem -Path $Parents -Directory -Filter 'agent-identity-integration*' -ErrorAction SilentlyContinue |
+            ForEach-Object {
+              $Index++
+              $Copy = Join-Path $Destination "$Index-$($_.Name)"
+              Copy-Item -LiteralPath $_.FullName -Destination $Copy -Recurse -ErrorAction Continue
+            }
+
+      - name: Upload kept Agent Identity conformance directories
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: agent-identity-conformance-${{ matrix.os }}-${{ matrix.arch }}-attempt-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-identity-conformance
+          if-no-files-found: ignore
+
       - name: Timing-sensitive tests
         run: |
           cargo test --locked --target ${{ matrix.target }} -p testsuite --test integration_tests timing:: -- --ignored --test-threads=1
         shell: pwsh
+        env:
+          AWS_LC_SYS_NO_ASM: true
+
+      - name: Root-only tests
+        if: ${{ matrix.os == 'linux' }}
+        # Cargo builds as the runner user and runs only the test binary as root, so no build output is owned by root.
+        # UNTESTED: the test binary runs as root.
+        # A root-only test run without root skips and passes, so after changing this step, check that its log has no SKIP line.
+        run: |
+          cargo test --locked --target ${{ matrix.target }} --config "target.${{ matrix.target }}.runner='sudo'" -p device-key --lib root_only_
+          cargo test --locked --target ${{ matrix.target }} --config "target.${{ matrix.target }}.runner='sudo'" -p testsuite --test integration_tests private_fs::unix::root_only_
         env:
           AWS_LC_SYS_NO_ASM: true
 
@@ -314,6 +482,22 @@ jobs:
         with:
           ref: ${{ needs.preflight.outputs.ref }}
 
+      # The macos-15 runner image ships `cargo`, `rustc`, etc. in ~/.cargo/bin as
+      # symlinks to Homebrew's `rustup-init`, which is a shell-script wrapper that
+      # only dispatches on the `rustup`/`rustup-init` names (not on `cargo`/`rustc`/
+      # `clippy`). Invoking `cargo` therefore runs `rustup-init` and fails with
+      # "unexpected argument 'build'". The official rustup installer lays down proper
+      # multi-call hard-link shims, so we run it to repair ~/.cargo/bin.
+      - name: Repair Rust shims (macOS)
+        if: ${{ matrix.os == 'macos' }}
+        run: |
+          set -eux
+          rm -rf "$HOME/.cargo/bin"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        shell: bash
+
       - name: Setup Rust cache
         uses: ./.github/actions/setup-rust-cache
         with:
@@ -343,8 +527,19 @@ jobs:
       - name: Configure Windows runner
         if: ${{ runner.os == 'Windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          choco install nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -361,22 +556,6 @@ jobs:
         run: |
           rustup target add aarch64-pc-windows-msvc
         shell: pwsh
-
-      # The macos-15 runner image ships `cargo`, `rustc`, etc. in ~/.cargo/bin as
-      # symlinks to Homebrew's `rustup-init`, which is a shell-script wrapper that
-      # only dispatches on the `rustup`/`rustup-init` names (not on `cargo`/`rustc`/
-      # `clippy`). Invoking `cargo` therefore runs `rustup-init` and fails with
-      # "unexpected argument 'build'". The official rustup installer lays down proper
-      # multi-call hard-link shims, so we run it to repair ~/.cargo/bin.
-      - name: Repair Rust shims (macOS)
-        if: ${{ matrix.os == 'macos' }}
-        run: |
-          set -eux
-          rm -rf "$HOME/.cargo/bin"
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-            | bash -s -- -y --default-toolchain none --no-modify-path --profile minimal
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-        shell: bash
 
       - name: Configure macOS (intel) runner
         if: ${{ matrix.os == 'macos' && matrix.arch == 'x64' }}
@@ -532,6 +711,10 @@ jobs:
         run: pnpm --filter @devolutions/session-recording-log test
         working-directory: webapp
 
+      - name: Run multi-video-player tests
+        run: pnpm --filter @devolutions/multi-video-player test --runInBand
+        working-directory: webapp
+
       - name: Upload gateway-ui artifact
         uses: actions/upload-artifact@v7
         with:
@@ -557,7 +740,19 @@ jobs:
 
       - name: Install Pester
         id: prepare
-        run: Install-Module Pester -RequiredVersion 5.6.0
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Build module
@@ -604,7 +799,19 @@ jobs:
           ref: ${{ needs.preflight.outputs.ref }}
 
       - name: Install Pester for Windows PowerShell
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: powershell
 
       - name: Run service account tests in Windows PowerShell
@@ -617,7 +824,19 @@ jobs:
         shell: powershell
 
       - name: Install Pester for PowerShell 7
-        run: Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force
+        run: |
+          # Retry because PSGallery intermittently answers that no module named Pester matches.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          for ($Attempt = 1; $true; $Attempt++) {
+            try {
+              Install-Module Pester -RequiredVersion 5.6.0 -Scope CurrentUser -Force -ErrorAction Stop
+              break
+            } catch {
+              if ($Attempt -ge 4) { throw }
+              Write-Warning "Installing Pester failed on attempt ${Attempt}: $_"
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
         shell: pwsh
 
       - name: Run service account tests in PowerShell 7
@@ -723,15 +942,26 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --no-progress --force
+          Install-ChocoPackage wixtoolset --version 3.14.0 --allow-downgrade --force
 
           # WiX is installed on Windows runners but not in the PATH
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          choco install nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1005,9 +1235,20 @@ jobs:
       - name: Configure Windows runner
         if: ${{ matrix.os == 'windows' }}
         run: |
+          # Retry because the Chocolatey community feed intermittently fails with gateway timeouts.
+          # The retry is inline because this job may check out an older commit that lacks any shared helper.
+          function Install-ChocoPackage {
+            for ($Attempt = 1; $true; $Attempt++) {
+              choco install @args --no-progress
+              if ($LASTEXITCODE -eq 0) { return }
+              if ($Attempt -ge 4) { throw "choco install $args failed after $Attempt attempts with exit code $LASTEXITCODE" }
+              Start-Sleep -Seconds (30 * $Attempt)
+            }
+          }
+
           # https://github.com/actions/runner-images/issues/9667
           choco uninstall wixtoolset
-          choco install wixtoolset --version 3.14.0 --allow-downgrade --force
+          Install-ChocoPackage wixtoolset --version 3.14.0 --allow-downgrade --force
 
           # Devolutions PEDM needs MakeAppx.exe
           Write-Output "C:\Program Files (x86)\Windows Kits\10\bin\10.0.17763.0\x64" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1016,7 +1257,7 @@ jobs:
           Write-Output "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
           # NASM is required by aws-lc-rs (used as rustls crypto backend)
-          choco install nasm
+          Install-ChocoPackage nasm
 
           # We need to add the NASM binary folder to the PATH manually.
           Write-Output "$Env:ProgramFiles\NASM" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -1210,6 +1451,36 @@ jobs:
         run: dotnet test utils/dotnet/GatewayUtils.sln
         shell: pwsh
 
+      - name: Build agent channel package
+        run: ./crates/agent-channel-proto/dotnet/build.ps1
+        shell: pwsh
+
+      - name: Agent identity authority tests
+        run: dotnet test dotnet/Devolutions.Agent.Identity.Authority/Devolutions.Agent.Identity.Authority.sln
+        shell: pwsh
+
+      - name: Build agent identity authority package
+        run: ./dotnet/Devolutions.Agent.Identity.Authority/build.ps1
+        shell: pwsh
+
+  agent-identity-vectors:
+    name: Agent Identity test vectors
+    runs-on: ubuntu-latest
+    needs: [preflight]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      # The vectors are recomputed with an independent library, so that an error in them can't pass into every implementation that agrees with them.
+      - name: Verify the vectors
+        run: |
+          python3 -m venv "$RUNNER_TEMP/vectors"
+          "$RUNNER_TEMP/vectors/bin/pip" install --quiet --disable-pip-version-check cryptography==50.0.2
+          "$RUNNER_TEMP/vectors/bin/python" -I docs/agent-identity/verify_vectors.py
+          "$RUNNER_TEMP/vectors/bin/python" -I docs/agent-identity/verify_vectors.py --self-test
   agent-installer-event-log-tests:
     name: Agent installer Event Log lifecycle tests
     runs-on: windows-2022
@@ -1223,6 +1494,21 @@ jobs:
 
       - name: Tests
         run: dotnet test package/AgentWindowsManaged.Tests/DevolutionsAgent.Installer.Tests.csproj
+        shell: pwsh
+
+  gateway-installer-tests:
+    name: Gateway installer tests
+    runs-on: windows-2022
+    needs: [preflight]
+
+    steps:
+      - name: Checkout ${{ github.repository }}
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Tests
+        run: dotnet test package/WindowsManaged.UnitTests/DevolutionsGateway.Installer.Tests.csproj
         shell: pwsh
 
   winapi-sanitizer-tests:
@@ -1347,7 +1633,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
+          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
@@ -1403,7 +1689,7 @@ jobs:
       - name: Install PsExec
         shell: pwsh
         run: |
-          $expectedHash = '2B10B3D9DAE0403B06D90B13BFB53E723A8B14A788F78CDFD43A445D8991415E'
+          $expectedHash = 'C26C6BA44997E650A733DF257C8FEB83898D3FAEF2D2E391869D107E40863553'
           $zipPath = Join-Path $env:RUNNER_TEMP 'PSTools.zip'
           $toolsDir = Join-Path $env:RUNNER_TEMP 'PSTools'
           Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/PSTools.zip' -OutFile $zipPath
@@ -1486,7 +1772,7 @@ jobs:
   success:
     name: Success
     if: ${{ always() }}
-    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-installer-event-log-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
+    needs: [tests, agent-tunnel-e2e, agent-policy-e2e, lints, oracle-markers, oracle-markers-tests, skill-links, check-dependencies, jetsocat-lipo, devolutions-gateway-powershell, gateway-service-account-tests, devolutions-gateway, devolutions-gateway-merge, devolutions-pedm-desktop, devolutions-agent, devolutions-agent-merge, devolutions-pedm-client, dotnet-utils-tests, agent-identity-vectors, agent-installer-event-log-tests, gateway-installer-tests, winapi-sanitizer-tests, winapi-miri, pedm-simulator, secure-memory-verifier]
     runs-on: ubuntu-latest
 
     steps:

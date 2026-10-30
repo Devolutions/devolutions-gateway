@@ -5,9 +5,9 @@ use serde_json::Value;
 use tracing::warn;
 use url::Url;
 
-use super::{Completion, Message, Stop, endpoint, parse_body, usage};
+use super::{Completion, Content, Message, Stop, base64, endpoint, parse_body, usage};
 use crate::Error;
-use crate::client::Prompt;
+use crate::client::{Input, Prompt};
 
 /// Role of the instructions for every server, OpenAI included.
 ///
@@ -48,11 +48,17 @@ pub(crate) fn request(
             messages: [
                 Message {
                     role: INSTRUCTIONS_ROLE,
-                    content: prompt.system,
+                    content: Content::Text(prompt.system),
                 },
                 Message {
                     role: "user",
-                    content: prompt.input,
+                    content: Content::of(prompt.input, |input| match input {
+                        Input::Text(text) => serde_json::json!({ "type": "text", "text": text }),
+                        Input::Png(png) => serde_json::json!({
+                            "type": "image_url",
+                            "image_url": { "url": format!("data:image/png;base64,{}", base64(png)) },
+                        }),
+                    }),
                 },
             ],
             max_completion_tokens,

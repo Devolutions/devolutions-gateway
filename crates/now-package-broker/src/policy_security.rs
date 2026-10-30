@@ -156,6 +156,20 @@ const MAXIMUM_REPARSE_DATA_BUFFER_SIZE: usize = 16 * 1024;
 /// publisher can install a package under this family.
 const WINGET_PACKAGE_FAMILY: &str = "Microsoft.DesktopAppInstaller_8wekyb3d8bbwe";
 
+/// Package family name of the Microsoft Store PowerShell 7 package that delivers `pwsh.exe`.
+const POWERSHELL7_PACKAGE_FAMILY: &str = "Microsoft.PowerShell_8wekyb3d8bbwe";
+
+/// Package family a supported app execution alias must belong to, by alias file name.
+fn trusted_alias_package_family(alias_name: &str) -> Option<&'static str> {
+    if alias_name.eq_ignore_ascii_case("winget.exe") {
+        Some(WINGET_PACKAGE_FAMILY)
+    } else if alias_name.eq_ignore_ascii_case("pwsh.exe") {
+        Some(POWERSHELL7_PACKAGE_FAMILY)
+    } else {
+        None
+    }
+}
+
 /// Security descriptor allocated by `GetSecurityInfo`, freed with `LocalFree` on drop.
 struct OwnedSecurityDescriptor(PSECURITY_DESCRIPTOR);
 
@@ -959,6 +973,33 @@ pub(crate) fn verify_elevated_install_location(
     Ok(VerifiedInstallLocation { _handles: handles })
 }
 
+/// Pin the target of the Microsoft Store app execution alias at `path`, verifying it when it
+/// runs elevated.
+///
+/// Returns `None` when `path` is not an alias. The alias is read once, and only the target
+/// that `validate_app_exec_alias` bound to the identity expected for the alias name is
+/// pinned, so replacing the alias afterwards cannot redirect the launch. The returned guard
+/// must stay alive until the process has been created.
+pub(crate) fn pin_app_exec_alias_target(
+    opener: &dyn PathOpener,
+    path: &Path,
+    requires_elevation: bool,
+) -> anyhow::Result<Option<VerifiedExecutable>> {
+    let Some(alias) = resolve_app_exec_alias(opener, path) else {
+        return Ok(None);
+    };
+    let target = validate_app_exec_alias(path, alias, requires_elevation)?;
+    if let Some(verified) = verify_elevated_executable_security(opener, &target, requires_elevation)? {
+        return Ok(Some(verified));
+    }
+    pin_executable(
+        opener,
+        &target,
+        &format!("package-manager executable '{}'", target.display()),
+    )
+    .map(Some)
+}
+
 /// Kind of Microsoft Store app execution alias found at a path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum AppExecAliasKind {
@@ -1096,9 +1137,10 @@ fn resolve_app_exec_alias(opener: &dyn PathOpener, path: &Path) -> Option<AppExe
 /// TrustedInstaller-owned binary, which would then pass the ACL checks and run elevated.
 ///
 /// Rules (fail-closed):
-/// - Only `winget.exe` aliases are supported (the only Store-app executable the broker
-///   launches).
-/// - The alias package family must be [`WINGET_PACKAGE_FAMILY`], whose publisher-hash
+/// - Only `winget.exe` and `pwsh.exe` aliases are supported (the Store-app executables the
+///   broker launches).
+/// - The alias package family must be the one expected for the alias name
+///   ([`WINGET_PACKAGE_FAMILY`] or [`POWERSHELL7_PACKAGE_FAMILY`]), whose publisher-hash
 ///   suffix is bound to Microsoft's signing certificate.
 /// - The target file name must match the alias file name.
 /// - The target must live inside a package directory of that same family (a
@@ -1109,7 +1151,7 @@ fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias, elevated: boo
         .and_then(|name| name.to_str())
         .with_context(|| format!("app execution alias '{}' has no file name", alias_path.display()))?;
 
-    if !alias_name.eq_ignore_ascii_case("winget.exe") {
+    let Some(expected_family) = trusted_alias_package_family(alias_name) else {
         if elevated {
             bail!(
                 "Microsoft Store app execution alias '{}' is not supported for elevated execution",
@@ -1120,11 +1162,11 @@ fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias, elevated: boo
             "Microsoft Store app execution alias '{}' cannot be launched directly by the broker",
             alias_path.display()
         );
-    }
+    };
 
-    if !alias.package_family.eq_ignore_ascii_case(WINGET_PACKAGE_FAMILY) {
+    if !alias.package_family.eq_ignore_ascii_case(expected_family) {
         bail!(
-            "app execution alias '{}' belongs to package family '{}'; expected '{WINGET_PACKAGE_FAMILY}'",
+            "app execution alias '{}' belongs to package family '{}'; expected '{expected_family}'",
             alias_path.display(),
             alias.package_family,
         );
@@ -1143,9 +1185,9 @@ fn validate_app_exec_alias(alias_path: &Path, alias: AppExecAlias, elevated: boo
         );
     }
 
-    if !path_contains_package_full_name(&alias.target, WINGET_PACKAGE_FAMILY) {
+    if !path_contains_package_full_name(&alias.target, expected_family) {
         bail!(
-            "app execution alias '{}' points to '{}', which is outside the '{WINGET_PACKAGE_FAMILY}' package directory",
+            "app execution alias '{}' points to '{}', which is outside the '{expected_family}' package directory",
             alias_path.display(),
             alias.target.display(),
         );
@@ -2302,6 +2344,92 @@ mod tests {
         };
         let target = validate_app_exec_alias(alias_path, alias, true).expect("valid winget alias must be accepted");
         assert!(target.ends_with("winget.exe"));
+    }
+
+    // oracle: reference the `pwsh.exe` app execution alias of Microsoft Store PowerShell 7.6.9, read with `fsutil reparsepoint query`
+    #[test]
+    fn pwsh_alias_with_expected_identity_is_validated() {
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\pwsh.exe");
+        let alias = AppExecAlias {
+            package_family: POWERSHELL7_PACKAGE_FAMILY.to_owned(),
+            target: PathBuf::from(
+                r"C:\Program Files\WindowsApps\Microsoft.PowerShell_7.6.9.0_x64__8wekyb3d8bbwe\pwsh.exe",
+            ),
+        };
+        let target = validate_app_exec_alias(alias_path, alias, true).expect("valid pwsh alias must be accepted");
+        assert!(target.ends_with("pwsh.exe"));
+    }
+
+    // oracle: mutant accepting a `pwsh.exe` alias bound to the App Installer package or to the PowerShell Preview package
+    #[test]
+    fn pwsh_alias_bound_to_another_package_is_rejected() {
+        let alias_path = Path::new(r"C:\Users\user\AppData\Local\Microsoft\WindowsApps\pwsh.exe");
+        for (family, target) in [
+            // The family of another alias the broker supports.
+            (
+                WINGET_PACKAGE_FAMILY,
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.26.430.0_x64__8wekyb3d8bbwe\pwsh.exe",
+            ),
+            // The right family, but a target inside the PowerShell Preview package.
+            (
+                POWERSHELL7_PACKAGE_FAMILY,
+                r"C:\Program Files\WindowsApps\Microsoft.PowerShellPreview_7.7.0.0_x64__8wekyb3d8bbwe\pwsh.exe",
+            ),
+        ] {
+            let alias = AppExecAlias {
+                package_family: family.to_owned(),
+                target: PathBuf::from(target),
+            };
+            validate_app_exec_alias(alias_path, alias, true).expect_err("mismatched pwsh alias must be rejected");
+        }
+    }
+
+    // oracle: reference the `pwsh.exe` app execution alias Microsoft Store PowerShell 7 installs, compared live
+    #[test]
+    fn pwsh_app_exec_alias_resolves_to_windowsapps_target() {
+        // Opportunistic: only runs where the Microsoft Store PowerShell 7 alias is installed.
+        let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") else {
+            return;
+        };
+        let alias_path = PathBuf::from(local_app_data).join("Microsoft\\WindowsApps\\pwsh.exe");
+        if !alias_path.exists() {
+            return;
+        }
+
+        let guard = pin_app_exec_alias_target(&ServiceOpener, &alias_path, false)
+            .expect("pwsh alias must be launchable")
+            .expect("pwsh alias must be an alias");
+        assert!(guard.path().ends_with("pwsh.exe"));
+        assert_ne!(guard.path(), alias_path);
+    }
+
+    // oracle: mutant pinning a regular file or an alias of another package in place of a validated alias target
+    #[test]
+    fn alias_target_pinning_requires_a_validated_alias() {
+        let root = tempfile::tempdir().expect("create alias directory");
+        let plain = root.path().join("pwsh.exe");
+        std::fs::write(&plain, b"").expect("write plain file");
+        assert!(
+            pin_app_exec_alias_target(&ServiceOpener, &plain, false)
+                .expect("a regular file is not an alias")
+                .is_none()
+        );
+
+        let foreign = root.path().join("foreign").join("pwsh.exe");
+        std::fs::create_dir_all(foreign.parent().expect("alias parent")).expect("create alias parent");
+        create_app_exec_alias_for_tests(
+            &foreign,
+            WINGET_PACKAGE_FAMILY,
+            Path::new(
+                r"C:\Program Files\WindowsApps\Microsoft.DesktopAppInstaller_1.0.0.0_x64__8wekyb3d8bbwe\pwsh.exe",
+            ),
+        );
+        let error =
+            pin_app_exec_alias_target(&ServiceOpener, &foreign, false).expect_err("foreign alias must be rejected");
+        assert!(
+            error.to_string().contains("package family"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]

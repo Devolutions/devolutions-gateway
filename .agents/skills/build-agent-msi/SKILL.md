@@ -3,8 +3,6 @@ name: build-agent-msi
 description: Build the Devolutions Agent Windows MSI installer locally. Use when asked to build, compile, or rebuild the agent MSI.
 ---
 
-# Build Devolutions Agent MSI Locally
-
 ## Required Tools
 
 - **MSBuild** — VS 2022: `C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe`

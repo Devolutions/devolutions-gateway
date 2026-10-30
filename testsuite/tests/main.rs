@@ -2,10 +2,12 @@
 #![allow(clippy::print_stdout, reason = "test code uses print for diagnostics")]
 #![allow(clippy::print_stderr, reason = "test code uses print for diagnostics")]
 
+mod agent_identity;
 mod agent_tunnel;
 mod cli;
 mod mcp_proxy;
 mod network_scanner;
+mod private_fs;
 #[cfg(windows)]
 mod service_accounts;
 mod sysevent;

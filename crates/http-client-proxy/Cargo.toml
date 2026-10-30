@@ -17,5 +17,8 @@ tracing = "0.1"
 ipnet = "2.10"
 parking_lot = "0.12"
 
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
 [dev-dependencies]
 rstest = "0.25"

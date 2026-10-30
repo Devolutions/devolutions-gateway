@@ -1,3 +1,4 @@
+use std::cell::LazyCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::BufReader;
@@ -209,12 +210,13 @@ impl Conf {
             .clone()
             .unwrap_or_else(|| default_hostname().unwrap_or_else(|| "localhost".to_owned()));
 
-        let auto_ipv6 = detect_ipv6_support();
+        // Only a `*` host needs the probe, so a configuration with explicit hosts never runs it.
+        let auto_ipv6: LazyCell<bool> = LazyCell::new(detect_ipv6_support);
 
         let mut listeners = Vec::new();
 
         for (idx, listener) in conf_file.listeners.iter().enumerate() {
-            let mut listener_urls = to_listener_urls(listener, &hostname, auto_ipv6)
+            let mut listener_urls = to_listener_urls(listener, &hostname, &auto_ipv6)
                 .with_context(|| format!("Listener at position {idx}"))?;
             listeners.append(&mut listener_urls);
         }
@@ -562,6 +564,11 @@ impl WebAppConf {
             root_path.push(APPLICATION_DIR);
             root_path.push("webapp");
             Ok(root_path)
+        } else if cfg!(target_os = "macos") {
+            let mut root_path = std::path::PathBuf::from("/Library/Application Support");
+            root_path.push(APPLICATION_DIR);
+            root_path.push("webapp");
+            Ok(root_path)
         } else {
             anyhow::bail!("standalone web application path must be specified manually on this platform");
         }
@@ -569,7 +576,17 @@ impl WebAppConf {
 }
 
 fn detect_ipv6_support() -> bool {
-    std::net::TcpListener::bind(("[::]", 0)).is_ok()
+    use std::net::{Ipv6Addr, SocketAddr};
+
+    use tokio::net::TcpSocket;
+
+    // UNTESTED: the probe binds without listening.
+    // On Windows, a listener on a wildcard address makes the firewall ask for elevation once per executable path,
+    // and every worktree builds new paths.
+    // When changing this probe, keep it bind-only.
+    TcpSocket::new_v6()
+        .and_then(|socket| socket.bind(SocketAddr::from((Ipv6Addr::UNSPECIFIED, 0))))
+        .is_ok()
 }
 
 /// Configuration Handle, source of truth for current configuration state
@@ -1045,7 +1062,11 @@ fn read_priv_key(
     }
 }
 
-fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -> anyhow::Result<Vec<ListenerUrls>> {
+fn to_listener_urls(
+    conf: &dto::ListenerConf,
+    hostname: &str,
+    auto_ipv6: &LazyCell<bool>,
+) -> anyhow::Result<Vec<ListenerUrls>> {
     fn map_scheme(url: &mut Url) {
         match url.scheme() {
             "ws" => url.set_scheme("http").expect("http is a valid scheme"),
@@ -1065,7 +1086,7 @@ fn to_listener_urls(conf: &dto::ListenerConf, hostname: &str, auto_ipv6: bool) -
             .set_host(Some("0.0.0.0"))
             .context("internal URL IPv4 bind address")?;
 
-        if auto_ipv6 {
+        if *LazyCell::force(auto_ipv6) {
             let mut ipv6_version = internal_url.clone();
             ipv6_version
                 .set_host(Some("[::]"))

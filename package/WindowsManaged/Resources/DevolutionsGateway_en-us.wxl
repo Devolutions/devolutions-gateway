@@ -9,6 +9,11 @@
                     <!-- messages -->
                 <String Id="AnUnexpectedErrorOccurredAccessingTheSystemCertificateStoreX">An unexpected error occurred accessing the system certificate store: {0}</String>
                 <String Id="AuthenticationTokenIsRequired">The authentication token is required</String>
+                <String Id="DataFolderIsFile">Can't use {0} because it is a file, not a folder. Delete the file, then try again.</String>
+                <String Id="DataFolderIsLink">Can't use the folder {0} because it is a link. Delete the link, then try again.</String>
+                <String Id="DataFolderOwnedByUntrustedAccount">Can't use the folder {0} because it is owned by {1}. Only SYSTEM or an administrator may own it. Change its owner, then try again.</String>
+                <String Id="DataFolderReplaceableByUntrustedAccount">Can't use the folder {0} because {1} can replace it or what it contains. Remove that permission, then try again.</String>
+                <String Id="DataFolderSecurityUnreadable">Can't read the owner or the permissions of the folder {0}. Check them, then try again.</String>
                 <String Id="DomainIsRequiredAndMustBeValid">The domain is required and must be a valid hostname</String>
                 <String Id="Dotnet471IsRequired">The product requires Microsoft .NET Framework 4.7.1. Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
                 <String Id="DotNet48IsStrongRecommendedDownloadNow">Microsoft .NET Framework 4.8 is strongly recommended. Would you like to download it now?</String>
@@ -16,7 +21,7 @@
                 <String Id="NoMatchingCertificatesFound">No matching certificates found</String>
                 <String Id="OS2Old">This product requires at least Windows 8 / Windows Server 2012 R2</String>
                 <String Id="PasswordsDoNotMatch">Passwords do not match</String>
-                <String Id="RemoteAddressIsRequired">The remote address is required</String>
+                <String Id="RemoteAddressIsRequired">The remote address is required for native client access. Select Later for browser-only access.</String>
                 <String Id="RemoteAddressMustBeInTheFormat">The remote address must be a valid host and port in the format {host}:{port}</String>
                 <String Id="ThereIsAProblemWithTheEnteredData">There is a problem with the entered data. Please correct the issue and try again.</String>
                 <String Id="TheSpecifiedFileWasInvalidOrNotAccessible">The specified file was invalid or not accessible</String>
@@ -37,12 +42,12 @@
                 <String Id="FindYourPublicKeyForXorX">Find your public key for {0} or {1}</String>
                 <String Id="NgrokAuthTokenLink">authentication token</String>
                 <String Id="NgrokDomainLink">domain</String>
+                <String Id="NgrokNativeClientsNeedAReservedX">Native clients such as Remote Desktop Manager need a reserved {0}, which is a paid ngrok feature. Browser-only access doesn't need one.</String>
                 <String Id="NgrokProvideYourX">Provide your {0}</String>
                 <String Id="NgrokReadMoreAtX">Read more at {0}</String>
                 <String Id="NgrokReadMoreLink">ngrok.com</String>
                 <String Id="NgrokTcpAddressLink">TCP address</String>
                 <String Id="NgrokXForWebClientAccess">The {0} for web client access</String>
-                <String Id="NgroXForNativeClientAccess">The {0} for native client access</String>
                     <!-- buttons -->
                 <String Id="SearchButton">Search</String>
                 <String Id="ValidateButton">Validate</String>
@@ -111,6 +116,7 @@
                 <String Id="Property_NewCertificate">A new self-signed certificate will be generated</String>
                 <String Id="Property_NewKeyPair">A new key pair will be generated</String>
                 <String Id="Property_NgrokAuthToken">Authentication Token</String>
+                <String Id="Property_NgrokEnableTcp">Native Client Access</String>
                 <String Id="Property_NgrokHttpDomain">Domain</String>
                 <String Id="Property_NgrokRemoteAddress">TCP Address</String>
                 <String Id="Property_PrivateKeyFile">Private Key File</String>

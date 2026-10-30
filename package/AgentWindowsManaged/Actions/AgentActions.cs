@@ -69,6 +69,24 @@ internal static class AgentActions
     };
 
     /// <summary>
+    /// Set the Agent Identity enrollment token from the file <c>IDENTITY_ENROLLMENT_TOKEN_FILE</c> names, so that
+    /// <see cref="encodePropertyData"/> hands it to <see cref="enrollAgentIdentity"/>
+    /// </summary>
+    /// <remarks>
+    /// Its condition mirrors <see cref="enrollAgentIdentity"/>'s, so that a repair, a maintenance run or an uninstall
+    /// never reads the file.
+    /// </remarks>
+    private static readonly ManagedAction readIdentityEnrollmentTokenFile = new(
+        new Id($"CA.{nameof(readIdentityEnrollmentTokenFile)}"),
+        CustomActions.ReadIdentityEnrollmentTokenFile,
+        Return.check, When.Before, new Step(encodePropertyData.Id),
+        new Condition($"NOT Installed AND {AgentProperties.IdentityEnrollmentTokenFile}"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.immediate,
+    };
+
+    /// <summary>
     /// Set the ARP installation location to the chosen install directory
     /// </summary>
     private static readonly SetPropertyAction setArpInstallLocation = new("ARPINSTALLLOCATION", $"[{AgentProperties.InstallDir}]")
@@ -92,19 +110,46 @@ internal static class AgentActions
     // Deferred sequence
 
     /// <summary>
-    /// Create the path %ProgramData%\Devolutions\Agent if it does not exist
+    /// Fail the run, with an error naming the folder, when %ProgramData%\Devolutions or %ProgramData%\Devolutions\Agent
+    /// is a link or is controlled by an account that is not an administrator, or, naming the entry, when a file or a
+    /// folder below Agent is owned by such an account
+    /// </summary>
+    /// <remarks>
+    /// The major upgrade removes the installed product at RemoveExistingProducts, right after InstallInitialize, so
+    /// running before it fails an install, an upgrade, a repair or a maintenance run before it changes anything.
+    /// A full uninstall is never refused, so that a machine can always be uninstalled.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction checkProgramDataDirectory = new(
+        new Id($"CA.{nameof(checkProgramDataDirectory)}"),
+        CustomActions.CheckProgramDataDirectory,
+        Return.check,
+        When.Before, Step.RemoveExistingProducts,
+        new Condition("NOT (REMOVE=\"ALL\")"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        UsesProperties = "ProductLanguage=[ProductLanguage]",
+    };
+
+    /// <summary>
+    /// Create the path %ProgramData%\Devolutions\Agent if it does not exist, after checking its folders again as
+    /// <see cref="checkProgramDataDirectory"/> does
     /// </summary>
     /// <remarks>
     /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
     /// it's easy to create it with a custom action than workaround Windows Installer.
     /// </remarks>
-    private static readonly ElevatedManagedAction createProgramDataDirectory = new(
+    internal static readonly ElevatedManagedAction createProgramDataDirectory = new(
         new Id($"CA.{nameof(createProgramDataDirectory)}"),
         CustomActions.CreateProgramDataDirectory,
         Return.check,
         When.After, Step.CreateFolders,
-        Condition.Always,
-        Sequence.InstallExecuteSequence);
+        new Condition("NOT (REMOVE=\"ALL\")"),
+        Sequence.InstallExecuteSequence)
+    {
+        UsesProperties = "ProductLanguage=[ProductLanguage]",
+    };
 
     /// <summary>
     /// Create the path %ProgramData%\Devolutions\Agent\Pedm and subfolders if they do not exist
@@ -112,12 +157,14 @@ internal static class AgentActions
     /// <remarks>
     /// It's hard to tell the installer not to remove directories on uninstall. Since we want this folder to persist,
     /// it's easy to create it with a custom action than workaround Windows Installer.
+    /// It runs after <see cref="createProgramDataDirectory"/>, which checks the folders above and creates Agent with its
+    /// own security descriptor, so that it never creates Agent itself with an inherited DACL.
     /// </remarks>
-    private static readonly ElevatedManagedAction createProgramDataPedmDirectories = new(
+    internal static readonly ElevatedManagedAction createProgramDataPedmDirectories = new(
         new Id($"CA.{nameof(createProgramDataPedmDirectories)}"),
         CustomActions.CreateProgramDataPedmDirectories,
         Return.check,
-        When.After, Step.CreateFolders,
+        When.After, new Step(createProgramDataDirectory.Id),
         Features.PEDM_FEATURE.BeingInstall(),
         Sequence.InstallExecuteSequence);
 
@@ -127,9 +174,9 @@ internal static class AgentActions
     private static readonly ElevatedManagedAction setProgramDataDirectoryPermissions = new(
         new Id($"CA.{nameof(setProgramDataDirectoryPermissions)}"),
         CustomActions.SetProgramDataDirectoryPermissions,
-        Return.ignore,
+        Return.check,
         When.After, new Step(createProgramDataDirectory.Id),
-        Condition.Always,
+        new Condition("NOT (REMOVE=\"ALL\")"),
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
@@ -137,21 +184,21 @@ internal static class AgentActions
     };
 
     /// <summary>
-    /// Set or reset the ACL on %ProgramData%\Devolutions\Agent\pedm
+    /// Set or reset the ACL on %ProgramData%\Devolutions\Agent\pedm, when it exists
     /// </summary>
     private static readonly ElevatedManagedAction setProgramDataPedmDirectoryPermissions = new(
         new Id($"CA.{nameof(setProgramDataPedmDirectoryPermissions)}"),
         CustomActions.SetProgramDataPedmDirectoryPermissions,
-        Return.ignore,
+        Return.check,
         When.After, new Step(createProgramDataPedmDirectories.Id),
-        Condition.Always,
+        new Condition("NOT (REMOVE=\"ALL\")"),
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
         Impersonate = false,
     };
 
-    private static readonly ElevatedManagedAction cleanAgentConfigIfNeeded = new(
+    internal static readonly ElevatedManagedAction cleanAgentConfigIfNeeded = new(
         new Id($"CA.{nameof(cleanAgentConfigIfNeeded)}"),
         CustomActions.CleanAgentConfig,
         Return.check,
@@ -183,13 +230,64 @@ internal static class AgentActions
     /// <remarks>
     /// Ensures a default configuration file is created
     /// </remarks>
-    private static readonly WixQuietExecAction initAgentConfigIfNeeded = new(
+    internal static readonly WixQuietExecAction initAgentConfigIfNeeded = new(
         new Id($"CA.{nameof(initAgentConfigIfNeeded)}"),
         $"[{AgentProperties.InstallDir}]{Includes.EXECUTABLE_NAME}",
         "config init",
         Return.check,
         When.After, new Step(cleanAgentConfigIfNeeded.Id),
         AgentProperties.firstInstall.Equal(true) & AgentProperties.configureAgent.Equal(false),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+    };
+
+    /// <summary>
+    /// Hand the Agent Identity enrollment token to <c>identity enroll -</c> running as SYSTEM
+    /// </summary>
+    /// <remarks>
+    /// As SYSTEM, <c>identity enroll</c> neither uses nor waits for the service's drop box.
+    /// <c>pending::write</c> (crates/agent-identity/src/pending.rs) submits through the drop box only for an
+    /// administrator who isn't SYSTEM.
+    /// For SYSTEM, it takes the state lock, which first provisions the identity directories with the service's
+    /// protected ACLs (<c>private_file::prepare_directories</c>), then writes the pending file itself.
+    /// The action therefore needs only the installed executable and agent.json, and the service consumes the pending
+    /// file when StartServices starts it.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction enrollAgentIdentity = new(
+        new Id($"CA.{nameof(enrollAgentIdentity)}"),
+        CustomActions.EnrollAgentIdentity,
+        Return.check,
+        When.After, new Step(initAgentConfigIfNeeded.Id),
+        new Condition($"NOT Installed AND {AgentProperties.IdentityEnrollmentToken}"),
+        Sequence.InstallExecuteSequence)
+    {
+        Execute = Execute.deferred,
+        Impersonate = false,
+        // Keeps the CustomActionData, which holds the encoded token, out of the MSI log.
+        // WiX also lists the property that carries it in MsiHiddenProperties, which hides it from the property log.
+        AttributesDefinition = "HideTarget=yes",
+        UsesProperties = string.Join(";", new[]
+        {
+            AgentProperties.IdentityEnrollmentTokenEncoded,
+            AgentProperties.InstallDir,
+        }.Select(p => $"{p}=[{p}]")),
+    };
+
+    /// <summary>
+    /// Delete the Agent Identity state and device keys on a full uninstall, without contacting any authority
+    /// </summary>
+    /// <remarks>
+    /// A major upgrade, a repair or a maintenance run keeps them.
+    /// RemoveFiles runs after StopServices, so the stopped service holds neither the identity state lock nor a key.
+    /// </remarks>
+    internal static readonly ElevatedManagedAction removeAgentIdentity = new(
+        new Id($"CA.{nameof(removeAgentIdentity)}"),
+        CustomActions.RemoveAgentIdentity,
+        Return.ignore,
+        When.After, Step.RemoveFiles,
+        new Condition("REMOVE=\"ALL\" AND NOT UPGRADINGPRODUCTCODE"),
         Sequence.InstallExecuteSequence)
     {
         Execute = Execute.deferred,
@@ -503,6 +601,7 @@ internal static class AgentActions
         isUninstalling,
         isMaintenance,
         setInstallId,
+        readIdentityEnrollmentTokenFile,
         encodePropertyData,
         getNetFxInstalledVersion,
         checkNetFxInstalledVersion,
@@ -516,11 +615,14 @@ internal static class AgentActions
         configurePsuAgent,
         rollbackConfigurePsuAgent,
         commitConfigurePsuAgent,
+        checkProgramDataDirectory,
         createProgramDataDirectory,
         setProgramDataDirectoryPermissions,
         createProgramDataPedmDirectories,
         setProgramDataPedmDirectoryPermissions,
         initAgentConfigIfNeeded,
+        enrollAgentIdentity,
+        removeAgentIdentity,
         registerExplorerCommand,
         registerExplorerCommandRollback,
         unregisterExplorerCommand,

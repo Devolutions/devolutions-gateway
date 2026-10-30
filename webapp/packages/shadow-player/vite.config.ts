@@ -45,6 +45,10 @@ const staticCopyPlugin = viteStaticCopy({
       dest: './',
       rename: 'package.json',
     },
+    {
+      src: './README.md',
+      dest: './',
+    },
   ],
 });
 

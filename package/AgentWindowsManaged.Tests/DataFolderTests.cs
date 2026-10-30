@@ -1,0 +1,597 @@
+using System.IO;
+using System.Linq;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Text.RegularExpressions;
+
+using DevolutionsAgent.Actions;
+using DevolutionsAgent.Resources;
+
+using WixSharp;
+
+using Xunit;
+using Xunit.Abstractions;
+
+using static DevolutionsAgent.Installer.Tests.InstallerSession;
+
+namespace DevolutionsAgent.Installer.Tests;
+
+[Collection(InstallerSession.Collection)]
+public sealed class DataFolderTests
+{
+    // Values of Evaluate's checkAccess, which only Devolutions gets.
+    private const bool Devolutions = true;
+    private const bool Agent = false;
+
+    // The DACL of a Devolutions folder that SYSTEM created in ProgramData, as read on Windows 11: inherited full control
+    // for SYSTEM and Administrators, an inherit-only CREATOR OWNER entry, read access for Users, and the Users entry that
+    // only adds files and subdirectories.
+    private const string InheritedDacl =
+        "D:AI(A;OICIID;FA;;;SY)(A;OICIID;FA;;;BA)(A;OICIIOID;GA;;;CO)(A;OICIID;0x1200a9;;;BU)(A;CIID;DCLCRPCR;;;BU)";
+
+    private const string Users = "S-1-5-32-545";
+
+    private const string Everyone = "S-1-1-0";
+
+    private static readonly SecurityIdentifier CurrentUser = WindowsIdentity.GetCurrent().User;
+
+    private static readonly string AgentSddl = $"O:{CurrentUser}D:P(A;OICI;FA;;;{CurrentUser})(A;OICI;FA;;;SY)";
+
+    private static readonly string[] DataFolderActions =
+    [
+        nameof(CustomActions.CheckProgramDataDirectory),
+        nameof(CustomActions.CreateProgramDataDirectory),
+        nameof(CustomActions.SetProgramDataDirectoryPermissions),
+        nameof(CustomActions.SetProgramDataPedmDirectoryPermissions),
+    ];
+
+    private readonly ILogger logger;
+
+    public DataFolderTests(ITestOutputHelper output) => this.logger = new OutputLogger(output);
+
+    [Theory]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("SYSTEM owns Devolutions", Devolutions, "O:SY" + InheritedDacl, "none")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("Administrators own Devolutions", Devolutions, "O:BA" + InheritedDacl, "none")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("Users own Devolutions", Devolutions, "O:BU" + InheritedDacl, "Owner " + Users)]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("Everyone owns Devolutions", Devolutions, "O:WD" + InheritedDacl, "Owner " + Everyone)]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("Users own Agent", Agent, "O:BU" + InheritedDacl, "Owner " + Users)]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may delete Devolutions", Devolutions, "O:SYD:(A;;SD;;;BU)", "Access " + Users)]
+    // The built-in Administrator account (LA) is a member of Administrators on every machine.
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("a member of Administrators may delete Devolutions", Devolutions, "O:SYD:(A;OICI;FA;;;LA)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may change the DACL", Devolutions, "O:SYD:(A;;WD;;;BU)", "Access " + Users)]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may take ownership", Devolutions, "O:SYD:(A;;WO;;;BU)", "Access " + Users)]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may delete entries", Devolutions, "O:SYD:(A;;0x40;;;BU)", "Access " + Users)]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users have generic all", Devolutions, "O:SYD:(A;;GA;;;BU)", "Access " + Users)]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may delete through a conditional entry", Devolutions, "O:SYD:(XA;;SD;;;BU;(Member_of {SID(BU)}))", "Access " + Users)]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("null DACL", Devolutions, "O:SYD:NO_ACCESS_CONTROL", "Access " + Everyone)]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users get full control of entries created below", Devolutions, "O:SYD:(A;OICIIO;FA;;;BU)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may only add entries", Devolutions, "O:SYD:(A;CI;DCLCRPCR;;;BU)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users are denied deletion", Devolutions, "O:SYD:(D;;SD;;;BU)", "none")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("TrustedInstaller has full control", Devolutions, "O:SYD:(A;;FA;;;S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464)", "none")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("no owner", Devolutions, "D:(A;;FA;;;SY)", "Unreadable")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("OWNER RIGHTS has full control", Devolutions, "O:SYD:(A;OICI;FA;;;OW)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("an AppContainer package has full control", Devolutions, "O:SYD:(A;OICI;FA;;;S-1-15-2-1)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("an AppContainer capability has full control", Devolutions, "O:SYD:(A;OICI;FA;;;S-1-15-3-1)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users are denied deletion through an object entry", Devolutions, "O:SYD:(OD;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "none")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may delete through an object entry", Devolutions, "O:SYD:(OA;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "Unreadable")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("an inherit-only object entry", Devolutions, "O:SYD:(OA;CIIO;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU)", "Unreadable")]
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [InlineData("Users may delete through a conditional object entry", Devolutions, "O:SYD:(ZA;;SD;bf967aba-0de6-11d0-a285-00aa003049e2;;BU;(Member_of {SID(BU)}))", "Unreadable")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("Users have full control of Agent", Agent, "O:SYD:(A;OICI;FA;;;BU)", "none")]
+    public void RefusalFollowsTheOwnerAndTheDacl(string scenario, bool checkAccess, string sddl, string expected)
+    {
+        DataFolderRefusal refusal = DataFolders.Evaluate(
+            "folder", new RawSecurityDescriptor(sddl), isLink: false, isDirectory: true, checkAccess);
+
+        Assert.True(expected == Describe(refusal), $"{scenario}: {Describe(refusal)}");
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Theory]
+    [InlineData(Devolutions)]
+    [InlineData(Agent)]
+    public void LinkIsRefusedWhateverItsSecurity(bool checkAccess)
+    {
+        DataFolderRefusal refusal = DataFolders.Evaluate(
+            "folder", new RawSecurityDescriptor("O:SY" + InheritedDacl), isLink: true, isDirectory: true, checkAccess);
+
+        Assert.Equal("Link", Describe(refusal));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Theory]
+    [InlineData(Devolutions)]
+    [InlineData(Agent)]
+    public void FileIsRefusedWhateverItsSecurity(bool checkAccess)
+    {
+        DataFolderRefusal refusal = DataFolders.Evaluate(
+            "folder", new RawSecurityDescriptor("O:SY" + InheritedDacl), isLink: false, isDirectory: false, checkAccess);
+
+        Assert.Equal("File", Describe(refusal));
+    }
+
+    // The agent checks Agent as a directory above its data, so the security the installer gives Agent must pass that
+    // check.
+    // oracle: reference Devolutions/devolutions-gateway@9b8b60380f6c:crates/private-fs/src/windows/security.rs Policy::check_ancestor
+    [Fact]
+    public void AgentFolderSecurityPassesTheDaclRule()
+    {
+        DataFolderRefusal refusal = DataFolders.Evaluate(
+            "folder", new RawSecurityDescriptor(Includes.PROGRAM_DATA_SDDL), isLink: false, isDirectory: true, Devolutions);
+
+        Assert.Equal("none", Describe(refusal));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void AgentFolderSecurityLetsOnlySystemAndAdministratorsChangeWhatTheAgentStores()
+    {
+        // FILE_GENERIC_READ | FILE_GENERIC_EXECUTE, which changes nothing.
+        const uint readAndExecute = 0x1200a9;
+
+        string[] writers = new RawSecurityDescriptor(Includes.PROGRAM_DATA_SDDL).DiscretionaryAcl
+            .Cast<CommonAce>()
+            .Where(ace => ace.AceQualifier == AceQualifier.AccessAllowed
+                && (unchecked((uint)ace.AccessMask) & ~readAndExecute) != 0)
+            .Select(ace => ace.SecurityIdentifier.Value)
+            .OrderBy(sid => sid, System.StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(["S-1-5-18", "S-1-5-32-544"], writers);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRefusesAFileAtDevolutions()
+    {
+        using TempFolder folder = new();
+        string devolutions = Path.Combine(folder.Path, "Devolutions");
+        System.IO.File.WriteAllText(devolutions, "");
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger);
+
+        Assert.Equal((devolutions, "File"), (refusal?.Folder, Describe(refusal)));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CreateRefusesAFileAtDevolutionsAndLeavesIt()
+    {
+        using TempFolder folder = new();
+        string devolutions = Path.Combine(folder.Path, "Devolutions");
+        System.IO.File.WriteAllText(devolutions, "kept");
+
+        DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger);
+
+        Assert.Equal((devolutions, "File", "kept"), (refusal?.Folder, Describe(refusal), System.IO.File.ReadAllText(devolutions)));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRefusesAJunctionAtDevolutions()
+    {
+        using TempFolder folder = new();
+        string devolutions = Path.Combine(folder.Path, "Devolutions");
+        TempFolder.CreateJunction(devolutions, folder.CreateDirectory("target"));
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger);
+
+        Assert.Equal((devolutions, "Link"), (refusal?.Folder, Describe(refusal)));
+    }
+
+    [Fact]
+    public void CreateRefusesAJunctionAtDevolutionsAndCreatesNothingInItsTarget()
+    {
+        using TempFolder folder = new();
+        string target = folder.CreateDirectory("target");
+        string devolutions = Path.Combine(folder.Path, "Devolutions");
+        TempFolder.CreateJunction(devolutions, target);
+
+        DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger);
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal((devolutions, "Link"), (refusal?.Folder, Describe(refusal)));
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Empty(Directory.GetFileSystemEntries(target));
+    }
+
+    [Theory]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("Users may delete Devolutions", "SD")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("Users may delete entries of Devolutions", "0x40")]
+    public void CheckRefusesADevolutionsFolderThatUsersMayReplaceOrWhoseEntriesTheyMayReplace(string scenario, string right)
+    {
+        using TempFolder folder = new();
+        string devolutions = Path.Combine(folder.Path, "Devolutions");
+        Assert.True(SecureDirectory.Create(devolutions, ReplaceableByUsers(right)), scenario);
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger);
+
+        Assert.Equal((devolutions, "Access " + Users), (refusal?.Folder, Describe(refusal)));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CreateRefusesADevolutionsFolderThatUsersMayDeleteAndCreatesNothingInIt()
+    {
+        using TempFolder folder = new();
+        string devolutions = Path.Combine(folder.Path, "Devolutions");
+        Assert.True(SecureDirectory.Create(devolutions, ReplaceableByUsers("SD")));
+
+        DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger);
+
+        Assert.Equal((devolutions, "Access " + Users), (refusal?.Folder, Describe(refusal)));
+        Assert.Empty(Directory.GetFileSystemEntries(devolutions));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRefusesADevolutionsFolderItCantOpenAsUnreadable()
+    {
+        using TempFolder folder = new();
+        string devolutions = Path.Combine(folder.Path, "Devolutions");
+        // Opening the folder fails with access denied, not with not-found: the current user, its owner, is granted
+        // neither READ_CONTROL, as the OWNER RIGHTS entry takes away the owner's implicit one, nor FILE_TRAVERSE.
+        // The user keeps the rights to list the folder, read its attributes and synchronize, which deleting it needs.
+        Assert.True(SecureDirectory.Create(devolutions, $"O:{CurrentUser}D:P(A;;0;;;OW)(A;OICI;FA;;;SY)(A;;0x100081;;;{CurrentUser})"));
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger);
+
+        Assert.Equal((devolutions, "Unreadable"), (refusal?.Folder, Describe(refusal)));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckPassesWhenTheFoldersDontExist()
+    {
+        using TempFolder folder = new();
+
+        Assert.Null(DataFolders.Check(folder.Path, this.logger));
+    }
+
+    // An entry another account created below Agent while it could keeps that account as its owner, which may change the
+    // entry's DACL whatever the installer sets.
+    [Fact]
+    public void CheckRefusesAFileWithAnUntrustedOwnerTwoFoldersBelowAgentAndChangesNothing()
+    {
+        using TempFolder folder = new();
+        string deeper = folder.CreateDirectory("Devolutions", "Agent", "sub", "deeper");
+        string file = Path.Combine(deeper, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        string[] entries =
+        [
+            Path.Combine(folder.Path, "Devolutions"),
+            Path.Combine(folder.Path, "Devolutions", "Agent"),
+            Path.Combine(folder.Path, "Devolutions", "Agent", "sub"),
+            deeper,
+            file,
+        ];
+        byte[][] before = entries.Select(SecureDirectoryTests.RawDescriptor).ToArray();
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger, UntrustedAt(file));
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal((file, "EntryOwner " + SecureDirectoryTests.RawSecurity(file).Owner), (refusal?.Folder, Describe(refusal)));
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal(before, entries.Select(SecureDirectoryTests.RawDescriptor).ToArray());
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRefusesAFolderWithAnUntrustedOwnerBelowAgent()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+
+        DataFolderRefusal refusal = DataFolders.Check(folder.Path, this.logger, UntrustedAt(sub));
+
+        Assert.Equal((sub, "EntryOwner " + SecureDirectoryTests.RawSecurity(sub).Owner), (refusal?.Folder, Describe(refusal)));
+    }
+
+    // A link's own owner can retarget it, whatever it points to.
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRefusesAJunctionWithAnUntrustedOwnerInsideAgent()
+    {
+        using TempFolder folder = new();
+        string agent = folder.CreateDirectory("Devolutions", "Agent");
+        string target = folder.CreateDirectory("target");
+        string file = Path.Combine(target, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        string link = Path.Combine(agent, "link");
+        TempFolder.CreateJunction(link, target);
+
+        DataFolderRefusal refusal = DataFolders.Check(
+            folder.Path, this.logger, UntrustedAt(link, file, Path.Combine(link, "file.txt")));
+
+        Assert.Equal((link, "EntryOwner " + SecureDirectoryTests.RawSecurity(link).Owner), (refusal?.Folder, Describe(refusal)));
+    }
+
+    // Until the installer resets Agent, its earlier DACL lets LOCAL SERVICE add entries, so one can appear after the check.
+    [Fact]
+    public void CreateRefusesAFolderWithAnUntrustedOwnerBelowAgentBeforeChangingItOrWhatItHolds()
+    {
+        using TempFolder folder = new();
+        string agent = SecureDirectoryTests.CreateLegacyAgentFolder(folder.Path);
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+        string file = Path.Combine(sub, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        string[] entries = [sub, file];
+        byte[][] before = entries.Select(SecureDirectoryTests.RawDescriptor).ToArray();
+        Assert.Equal(agent, Path.GetDirectoryName(sub));
+
+        DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger, UntrustedAt(sub));
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal((sub, "EntryOwner " + SecureDirectoryTests.RawSecurity(sub).Owner), (refusal?.Folder, Describe(refusal)));
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal(before, entries.Select(SecureDirectoryTests.RawDescriptor).ToArray());
+    }
+
+    // An earlier Agent passed LOCAL SERVICE on to the files below it, and a file another account owns keeps it.
+    [Fact]
+    public void CreateRefusesAFileWithAnUntrustedOwnerBelowAgentBeforeChangingIt()
+    {
+        using TempFolder folder = new();
+        string agent = SecureDirectoryTests.CreateLegacyAgentFolder(folder.Path);
+        string file = Path.Combine(agent, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        byte[] before = SecureDirectoryTests.RawDescriptor(file);
+        Assert.Contains(";;;LS)", SecureDirectoryTests.RawSddl(file));
+
+        DataFolderRefusal refusal = DataFolders.Create(folder.Path, AgentSddl, this.logger, UntrustedAt(file));
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal((file, "EntryOwner " + SecureDirectoryTests.RawSecurity(file).Owner), (refusal?.Folder, Describe(refusal)));
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal(before, SecureDirectoryTests.RawDescriptor(file));
+    }
+
+    // The installer log is all an administrator has to find what failed a run.
+    // oracle: mutant a failure to hold an entry below Agent doesn't name the entry
+    [Fact]
+    public void CheckFailsNamingADirectoryBelowAgentHeldWithoutSharing()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+
+        System.Exception failure;
+
+        using (TempFolder.HoldWithoutSharing(sub))
+        {
+            failure = Record.Exception(() => DataFolders.Check(folder.Path, this.logger, UntrustedAt()));
+        }
+
+        Assert.Contains(sub, failure?.Message ?? "no failure");
+    }
+
+    // Before a major upgrade stops it, the agent holds identity without sharing for a moment around each state write.
+    // oracle: mutant a directory held without sharing fails the walk at once
+    [Fact]
+    public void CheckWaitsForADirectoryBelowAgentHeldWithoutSharingForAMoment()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+        Microsoft.Win32.SafeHandles.SafeFileHandle held = TempFolder.HoldWithoutSharing(sub);
+        System.Threading.Tasks.Task release = System.Threading.Tasks.Task.Delay(200).ContinueWith(_ => held.Dispose());
+
+        try
+        {
+            Assert.Null(DataFolders.Check(folder.Path, this.logger, UntrustedAt()));
+        }
+        finally
+        {
+            release.Wait();
+        }
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckDoesNotFollowAJunctionWithATrustedOwnerInsideAgent()
+    {
+        using TempFolder folder = new();
+        string agent = folder.CreateDirectory("Devolutions", "Agent");
+        string target = folder.CreateDirectory("target");
+        string file = Path.Combine(target, "file.txt");
+        System.IO.File.WriteAllText(file, "");
+        TempFolder.CreateJunction(Path.Combine(agent, "link"), target);
+
+        Assert.Null(DataFolders.Check(folder.Path, this.logger, UntrustedAt(file, Path.Combine(agent, "link", "file.txt"))));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckPassesWhenEveryEntryBelowAgentHasATrustedOwner()
+    {
+        using TempFolder folder = new();
+        string sub = folder.CreateDirectory("Devolutions", "Agent", "sub");
+        System.IO.File.WriteAllText(Path.Combine(sub, "file.txt"), "");
+        TempFolder.CreateJunction(Path.Combine(sub, "link"), folder.CreateDirectory("target"));
+
+        Assert.Null(DataFolders.Check(folder.Path, this.logger, UntrustedAt()));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void ErrorNamesTheFolderAndTheAccountOrItsSidWhenItHasNone()
+    {
+        const string Folder = @"C:\ProgramData\Devolutions";
+        const string Unnamed = "S-1-5-21-1-2-3-1001";
+        SecurityIdentifier users = new(Users);
+
+        string owned = new DataFolderRefusal(Folder, DataFolderProblem.Owner, users).Message("1033");
+        string replaceable = new DataFolderRefusal(Folder, DataFolderProblem.Access, new SecurityIdentifier(Unnamed)).Message("1033");
+
+        Assert.Contains(Folder, owned);
+        Assert.Contains(users.Translate(typeof(NTAccount)).Value, owned);
+        Assert.Contains(Folder, replaceable);
+        Assert.Contains(Unnamed, replaceable);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void ErrorNamesTheEntryBelowAgentAndItsOwner()
+    {
+        const string Entry = @"C:\ProgramData\Devolutions\Agent\identity\identity.json";
+        SecurityIdentifier localService = new(WellKnownSidType.LocalServiceSid, null);
+
+        string message = new DataFolderRefusal(Entry, DataFolderProblem.EntryOwner, localService).Message("1033");
+
+        Assert.Contains(Entry, message);
+        Assert.Contains(localService.Translate(typeof(NTAccount)).Value, message);
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void ErrorIsInTheInstallerLanguage()
+    {
+        DataFolderRefusal refusal = new(@"C:\ProgramData\Devolutions", DataFolderProblem.Link);
+        string english = refusal.Message("1033");
+
+        Assert.NotEqual(english, refusal.Message("1036"));
+        Assert.NotEqual(english, refusal.Message("1053"));
+        // Windows Installer applies no language transform for German, so the rest of the installer is in English too.
+        Assert.Equal(english, refusal.Message("1031"));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Theory]
+    [InlineData(Strings.DataFolderIsLink)]
+    [InlineData(Strings.DataFolderIsFile)]
+    [InlineData(Strings.DataFolderOwnedByUntrustedAccount)]
+    [InlineData(Strings.DataFolderReplaceableByUntrustedAccount)]
+    [InlineData(Strings.DataFolderSecurityUnreadable)]
+    [InlineData(Strings.DataFolderEntryOwnedByUntrustedAccount)]
+    public void ErrorIsTranslatedWithTheEnglishPlaceholders(string id)
+    {
+        string english = Program.Localize("1033", id);
+
+        Assert.NotEqual(id, english);
+        Assert.All(new[] { "1036", "1053" }, language =>
+        {
+            string translated = Program.Localize(language, id);
+            Assert.NotEqual(id, translated);
+            Assert.NotEqual(english, translated);
+            Assert.Equal(Placeholders(english), Placeholders(translated));
+        });
+    }
+
+    [Theory]
+    [InlineData(nameof(CustomActions.CheckProgramDataDirectory))]
+    [InlineData(nameof(CustomActions.CreateProgramDataDirectory))]
+    public void RefusalFailsTheRunInTheInstallerLanguage(string method)
+    {
+        ManagedAction action = ActionOf(method);
+
+        // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+        Assert.Equal(Return.check, action.Return);
+        // A deferred action reads only the properties its action data carries.
+        // oracle: spec Windows Installer §Obtaining Context Information for Deferred Execution Custom Actions
+        Assert.Contains("ProductLanguage=[ProductLanguage]", action.UsesProperties.Split(';'));
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Theory]
+    [InlineData(nameof(CustomActions.SetProgramDataDirectoryPermissions))]
+    [InlineData(nameof(CustomActions.SetProgramDataPedmDirectoryPermissions))]
+    public void FailedSecurityResetFailsTheRun(string method)
+    {
+        Assert.Equal(Return.check, ActionOf(method).Return);
+    }
+
+    [Theory]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("first install", true)]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("major upgrade", true, "WIX_UPGRADE_DETECTED={00000000-0000-0000-0000-000000000001}")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("repair", true, "Installed=00:00:00", "REINSTALL=ALL")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("maintenance adding a feature", true, "Installed=00:00:00", "ADDLOCAL=F.Session")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("maintenance removing a feature", true, "Installed=00:00:00", "REMOVE=F.Session")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("full uninstall", false, "Installed=00:00:00", "REMOVE=ALL")]
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [InlineData("old product removed by a major upgrade", false, "Installed=00:00:00", "REMOVE=ALL", "UPGRADINGPRODUCTCODE={00000000-0000-0000-0000-000000000002}")]
+    public void DataFoldersAreCheckedAndResetOnEveryRunButAFullUninstall(string scenario, bool expected, params string[] properties)
+    {
+        bool[] evaluated = DataFolderActions
+            .Select(method => EvaluateCondition(ActionOf(method).Condition.ToString(), properties))
+            .ToArray();
+
+        Assert.True(evaluated.All(e => e == expected), $"{scenario}: {string.Join(", ", evaluated)}");
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void CheckRunsBeforeTheMajorUpgradeRemovesTheInstalledProduct()
+    {
+        Assert.Equal(When.Before, AgentActions.checkProgramDataDirectory.When);
+        Assert.Equal(Step.RemoveExistingProducts.ToString(), AgentActions.checkProgramDataDirectory.Step.ToString());
+    }
+
+    // oracle: intent package/AgentWindowsManaged/INTENT.md §Data folder
+    [Fact]
+    public void PedmFolderIsCreatedAfterTheAgentFolder()
+    {
+        // Created first, the pedm folder would also create Agent, with the DACL it inherits.
+        Assert.Equal(When.After, AgentActions.createProgramDataPedmDirectories.When);
+        Assert.Equal(AgentActions.createProgramDataDirectory.Id, AgentActions.createProgramDataPedmDirectories.Step.ToString());
+    }
+
+    /// <summary>
+    /// A security descriptor that grants Users <paramref name="right"/> on the folder.
+    /// </summary>
+    /// <remarks>
+    /// Protected, so that the folder inherits nothing from the temporary directory, which grants the current user full
+    /// control, and owned by the current user, who can't make another account the owner without elevation.
+    /// </remarks>
+    private static string ReplaceableByUsers(string right) =>
+        $"O:{CurrentUser}D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)(A;;{right};;;BU)";
+
+    /// <summary>
+    /// A trust decision that trusts every account except for the entries <paramref name="untrusted"/> names.
+    /// </summary>
+    /// <remarks>
+    /// A test without elevation can't make another account the owner of an entry, so every entry it creates has the same
+    /// owner, and the decision tells them apart by path.
+    /// </remarks>
+    private static System.Func<string, SecurityIdentifier, bool> UntrustedAt(params string[] untrusted) =>
+        (path, _) => !untrusted.Contains(path);
+
+    /// <summary>
+    /// The problem and the account <paramref name="refusal"/> names, or <c>none</c>.
+    /// </summary>
+    private static string Describe(DataFolderRefusal refusal) =>
+        refusal is null ? "none" : $"{refusal.Problem} {refusal.Account}".TrimEnd();
+
+    private static string[] Placeholders(string text) =>
+        Regex.Matches(text, @"\{\d+\}").Cast<Match>().Select(m => m.Value).OrderBy(p => p).ToArray();
+}

@@ -26,6 +26,7 @@ use crate::streaming::{RecordingStreamState, StreamLifecycle};
 use crate::token::{JrecTokenClaims, RecordingFileType};
 
 const DISCONNECTED_TTL_EXTRA_LEEWAY: Duration = Duration::from_secs(10);
+
 const BUFFER_WRITER_SIZE: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,19 +75,31 @@ pub enum PushOutcome {
     StorageFull,
 }
 
+/// How a producer ended its push stream.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PushEnd {
+    /// The recording is over: it ends at once, so live viewers see the end right after the last bytes.
+    RecordingEnded,
+    /// The producer may come back, for example with a new clip after a resize: the recording waits for its reconnection window.
+    MayReconnect,
+}
+
 #[derive(TypedBuilder)]
-pub struct ClientPush<S> {
+pub struct ClientPush<S, E> {
     recordings: RecordingMessageSender,
     claims: JrecTokenClaims,
     client_stream: S,
     file_type: RecordingFileType,
     session_id: Uuid,
     shutdown_signal: ShutdownSignal,
+    /// Tells how the producer ended the push, once `client_stream` is over.
+    push_end: E,
 }
 
-impl<S> ClientPush<S>
+impl<S, E> ClientPush<S, E>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    E: FnOnce() -> PushEnd,
 {
     pub async fn run(self) -> anyhow::Result<PushOutcome> {
         let Self {
@@ -96,6 +109,7 @@ where
             file_type,
             session_id,
             mut shutdown_signal,
+            push_end,
         } = self;
 
         if session_id != claims.jet_aid {
@@ -196,9 +210,14 @@ where
             Err(e) => Err(anyhow::Error::new(e).context(format!("failed to open file at {recording_file}"))),
         };
 
-        info!(?res, "Recording finished");
+        // UNTESTED: a recording its producer ended ends at once, even when writing its last bytes failed.
+        // The producer is not coming back, and no test makes writing the recording file fail.
+        // When changing this, keep calling `push_end` whatever `res` holds.
+        let end = push_end();
 
-        recordings.disconnect(session_id).await.context("disconnect")?;
+        info!(?res, ?end, "Recording finished");
+
+        recordings.disconnect(session_id, end).await.context("disconnect")?;
 
         res
     }
@@ -359,6 +378,7 @@ enum RecordingManagerMessage {
     },
     Disconnect {
         id: Uuid,
+        end: PushEnd,
     },
     GetState {
         id: Uuid,
@@ -396,7 +416,9 @@ impl fmt::Debug for RecordingManagerMessage {
                 .field("id", id)
                 .field("kind", kind)
                 .finish_non_exhaustive(),
-            RecordingManagerMessage::Disconnect { id } => f.debug_struct("Disconnect").field("id", id).finish(),
+            RecordingManagerMessage::Disconnect { id, end } => {
+                f.debug_struct("Disconnect").field("id", id).field("end", end).finish()
+            }
             RecordingManagerMessage::GetState { id, channel: _ } => {
                 f.debug_struct("GetState").field("id", id).finish_non_exhaustive()
             }
@@ -459,9 +481,9 @@ impl RecordingMessageSender {
         rx.await.context("couldn't receive AddArtifact result")?
     }
 
-    async fn disconnect(&self, id: Uuid) -> anyhow::Result<()> {
+    async fn disconnect(&self, id: Uuid, end: PushEnd) -> anyhow::Result<()> {
         self.channel
-            .send(RecordingManagerMessage::Disconnect { id })
+            .send(RecordingManagerMessage::Disconnect { id, end })
             .await
             .ok()
             .context("couldn't send Remove message")
@@ -728,7 +750,7 @@ impl RecordingManagerTask {
         Ok((recording_file, ClipProgress(stream_state)))
     }
 
-    async fn handle_disconnect(&mut self, id: Uuid) -> anyhow::Result<()> {
+    async fn handle_disconnect(&mut self, id: Uuid, end: PushEnd) -> anyhow::Result<()> {
         let Some(ongoing) = self.ongoing_recordings.get_mut(&id) else {
             return Err(anyhow::anyhow!("unknown recording for ID {id}"));
         };
@@ -740,7 +762,12 @@ impl RecordingManagerTask {
         let end_time = time::OffsetDateTime::now_utc().unix_timestamp();
 
         // Viewers and the recording share this deadline, so a stream never ends while its recording continues.
-        let reconnect_deadline = tokio::time::Instant::now() + ongoing.disconnected_ttl;
+        // An ended recording waits for no reconnection, as if its token disallowed reuse.
+        let disconnected_ttl = match end {
+            PushEnd::RecordingEnded => Duration::ZERO,
+            PushEnd::MayReconnect => ongoing.disconnected_ttl,
+        };
+        let reconnect_deadline = tokio::time::Instant::now() + disconnected_ttl;
         ongoing.state = OnGoingRecordingState::LastSeen { reconnect_deadline };
 
         // Re-read from disk: an artifact may have been added since this recording connected.
@@ -937,8 +964,8 @@ async fn recording_manager_task(
                     RecordingManagerMessage::AddArtifact { id, kind, channel } => {
                         let _ = channel.send(manager.handle_add_artifact(id, kind).await);
                     },
-                    RecordingManagerMessage::Disconnect { id } => {
-                        if let Err(e) = manager.handle_disconnect(id).await {
+                    RecordingManagerMessage::Disconnect { id, end } => {
+                        if let Err(e) = manager.handle_disconnect(id, end).await {
                             error!(error = format!("{e:#}"), "handle_disconnect");
                         }
 
@@ -1008,8 +1035,8 @@ async fn recording_manager_task(
         };
 
         debug!(?msg, "Received message");
-        if let RecordingManagerMessage::Disconnect { id } = msg {
-            if let Err(e) = manager.handle_disconnect(id).await {
+        if let RecordingManagerMessage::Disconnect { id, end } = msg {
+            if let Err(e) = manager.handle_disconnect(id, end).await {
                 error!(error = format!("{e:#}"), "handle_disconnect");
             }
             manager.ongoing_recordings.remove(&id);
@@ -1159,7 +1186,10 @@ mod tests {
         }
 
         async fn disconnect(&self, id: Uuid) {
-            self.sender.disconnect(id).await.expect("disconnect");
+            self.sender
+                .disconnect(id, PushEnd::MayReconnect)
+                .await
+                .expect("disconnect");
             // Messages are processed in order, so this waits for the disconnect to be handled.
             self.sender.get_count().await.expect("sync with manager");
         }
@@ -1344,6 +1374,42 @@ mod tests {
         sender.send_modify(RecordingStreamState::mark_ended);
         progress.mark_recording();
         assert_eq!(state.borrow().lifecycle, StreamLifecycle::Ended);
+    }
+
+    // oracle: intent devolutions-gateway/src/recording.intent.md §Ending a recording
+    #[tokio::test]
+    async fn a_recording_its_producer_ended_ends_without_waiting_for_a_reconnection() {
+        let harness = Harness::start();
+        let id = Uuid::new_v4();
+        harness
+            .sender
+            .connect(id, WEBM, Duration::from_secs(3600))
+            .await
+            .expect("connect");
+        let mut stream = harness
+            .sender
+            .subscribe_to_stream(id)
+            .await
+            .expect("subscribe")
+            .expect("ongoing recording");
+
+        harness
+            .sender
+            .disconnect(id, PushEnd::RecordingEnded)
+            .await
+            .expect("disconnect");
+
+        // Far less than the one-hour reconnection window the token allows.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            stream.wait_for(|state| state.lifecycle == StreamLifecycle::Ended),
+        )
+        .await
+        .expect("stream ended without waiting for a reconnection")
+        .expect("stream state alive");
+        // oracle: mutant the manager holding an ended recording for the token's reconnection window
+        assert!(harness.sender.get_state(id).await.expect("get state").is_none());
+        assert!(!harness.sender.active_recordings.cloned().contains(&id));
     }
 
     #[tokio::test]

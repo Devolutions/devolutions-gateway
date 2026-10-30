@@ -43,11 +43,13 @@ namespace DevolutionsAgent.Resources
         /// Group  : NT AUTHORITY\SYSTEM
         /// Access :
         ///    NT AUTHORITY\SYSTEM Allow  FullControl
-        ///    NT AUTHORITY\LOCAL SERVICE Allow Write, ReadAndExecute, Synchronize
         ///    BUILTIN\Administrators Allow  FullControl
         ///    BUILTIN\Users Allow ReadAndExecute, Synchronize
+        ///
+        /// The DACL gives no account but SYSTEM and administrators any right to change what the agent stores there.
+        /// Earlier installers gave LOCAL SERVICE write access, which the installer removes from the DACLs below the folder.
         /// </remarks>
-        internal static readonly string PROGRAM_DATA_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;0x1201bf;;;LS)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
+        internal static readonly string PROGRAM_DATA_SDDL = "O:SYG:SYD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)";
 
         /// <summary>
         /// SDDL string representing desired %programdata%\devolutions\agent\pedm ACL
