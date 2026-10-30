@@ -1,13 +1,15 @@
-//! Client-side CredSSP against the Gateway: X.224 negotiation, TLS, then an sspi
-//! `CredSspClient` whose KDC traffic is resolved over TCP or through `/jet/KdcProxy`.
+//! RDP client roles against the Gateway TCP listener: the preconnection blob carrying the
+//! association token, the X.224 Connection Request, then optionally TLS and an sspi
+//! `CredSspClient` whose KDC traffic goes over TCP or through `/jet/KdcProxy`.
 
-use std::sync::Mutex;
 use std::time::Duration;
 
 use anyhow::Context as _;
 use ironrdp_connector::sspi;
 use ironrdp_connector::sspi::generator::GeneratorState;
-use ironrdp_pdu::nego::{ConnectionConfirm, SecurityProtocol};
+use ironrdp_pdu::nego::{
+    ConnectionConfirm, ConnectionRequest as X224ConnectionRequest, NegoRequestData, RequestFlags, SecurityProtocol,
+};
 use ironrdp_pdu::x224::X224;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use picky_krb::messages::KdcProxyMessage;
@@ -15,37 +17,102 @@ use rustls::pki_types::ServerName;
 use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
 use tokio::net::TcpStream;
 
-use super::mock_kdc::{ObservedKdcReply, ObservedKdcReq, observe_kdc_reply, observe_kdc_req, send_kdc_tcp};
-use super::rdp::{encode_hybrid_cr, encode_pcb};
-use super::tls::{dangerous_tls_connector, peer_public_key};
-use super::{PROXY_PASSWORD, PROXY_USER, SERVICE_HOST};
+use crate::event::{Event, emit};
+use crate::fixture::{CLIENT_COOKIE, PROXY_KERBEROS_USER, PROXY_PASSWORD, PROXY_USER, SERVICE_HOST};
+use crate::kdc::{observe_kdc_reply, observe_kdc_req, send_kdc_tcp};
+use crate::tls::{dangerous_tls_connector, peer_public_key};
 
-pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(20);
 
-pub async fn connect_ntlm_client(
-    gateway_tcp: u16,
-    association_token: &str,
-) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
-    tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        connect_ntlm_client_inner(gateway_tcp, association_token),
-    )
-    .await
-    .context("timed out connecting NTLM client to Gateway")?
+pub(crate) enum ConnectionRequest {
+    /// Offers SSL, HYBRID and HYBRID_EX, like a regular client.
+    Full,
+    /// Offers SSL and HYBRID only.
+    Hybrid,
 }
 
-async fn connect_ntlm_client_inner(
-    gateway_tcp: u16,
+pub(crate) enum Auth {
+    /// SPNEGO restricted to NTLM, as the proxy user.
+    Ntlm,
+    /// Bare NTLM: Gateway NTLM injection uses `ServerMode::Ntlm`, which rejects SPNEGO.
+    RawNtlm,
+    /// SPNEGO restricted to Kerberos, as the Kerberos proxy user, with tickets from `kdc_proxy_url`.
+    Kerberos { kdc_proxy_url: String },
+}
+
+/// Sends the opening bytes of an RDP connection, then keeps the socket open until killed.
+pub(crate) async fn send_connection_request(
+    gateway_port: u16,
+    association_token: &str,
+    request: ConnectionRequest,
+) -> anyhow::Result<()> {
+    let request = match request {
+        ConnectionRequest::Full => {
+            encode_connection_request(SecurityProtocol::HYBRID | SecurityProtocol::HYBRID_EX | SecurityProtocol::SSL)?
+        }
+        ConnectionRequest::Hybrid => encode_connection_request(SecurityProtocol::HYBRID | SecurityProtocol::SSL)?,
+    };
+    let mut stream = TcpStream::connect(("127.0.0.1", gateway_port))
+        .await
+        .context("connect to gateway TCP")?;
+    stream
+        .write_all(&encode_pcb(association_token)?)
+        .await
+        .context("write preconnection blob")?;
+    stream.write_all(&request).await.context("write connection request")?;
+    stream.flush().await.context("flush RDP client")?;
+    emit(&Event::ConnectionRequestSent);
+
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
+/// Connects to Gateway and completes CredSSP as the proxy user; exits non-zero when CredSSP fails.
+pub(crate) async fn run_credssp(gateway_port: u16, association_token: &str, auth: Auth) -> anyhow::Result<()> {
+    let tls = tokio::time::timeout(HANDSHAKE_TIMEOUT, connect_tls(gateway_port, association_token))
+        .await
+        .context("timed out connecting to Gateway")??;
+    emit(&Event::TlsConnected);
+    tokio::time::timeout(HANDSHAKE_TIMEOUT, complete_credssp(tls, auth))
+        .await
+        .context("timed out completing client CredSSP")?
+}
+
+fn encode_pcb(association_token: &str) -> anyhow::Result<Vec<u8>> {
+    let pcb = ironrdp_pdu::pcb::PreconnectionBlob {
+        version: ironrdp_pdu::pcb::PcbVersion::V2,
+        id: 0,
+        v2_payload: Some(association_token.to_owned()),
+    };
+    ironrdp_core::encode_vec(&pcb).context("encode preconnection blob")
+}
+
+fn encode_connection_request(protocol: SecurityProtocol) -> anyhow::Result<Vec<u8>> {
+    let pdu = X224(X224ConnectionRequest {
+        nego_data: Some(NegoRequestData::cookie(CLIENT_COOKIE.to_owned())),
+        flags: RequestFlags::empty(),
+        protocol,
+    });
+    ironrdp_core::encode_vec(&pdu).context("encode X.224 connection request")
+}
+
+async fn connect_tls(
+    gateway_port: u16,
     association_token: &str,
 ) -> anyhow::Result<tokio_rustls::client::TlsStream<TcpStream>> {
-    let mut stream = TcpStream::connect(("127.0.0.1", gateway_tcp))
+    let mut stream = TcpStream::connect(("127.0.0.1", gateway_port))
         .await
         .context("connect gateway TCP")?;
     stream
         .write_all(&encode_pcb(association_token)?)
         .await
         .context("write PCB")?;
-    stream.write_all(&encode_hybrid_cr()?).await.context("write X.224 CR")?;
+    stream
+        .write_all(&encode_connection_request(
+            SecurityProtocol::HYBRID | SecurityProtocol::SSL,
+        )?)
+        .await
+        .context("write X.224 CR")?;
     stream.flush().await.context("flush CR")?;
 
     let mut framed = TokioFramed::new(stream);
@@ -62,69 +129,44 @@ async fn connect_ntlm_client_inner(
     connector.connect(server_name, tcp).await.context("TLS to gateway")
 }
 
-pub async fn complete_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
-    complete_client_credssp(tls, PROXY_USER, None, false, None, None).await
-}
-
-pub async fn complete_raw_ntlm_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>) -> anyhow::Result<()> {
-    complete_client_credssp(tls, PROXY_USER, None, true, None, None).await
-}
-
-pub async fn complete_client_credssp(
-    tls: tokio_rustls::client::TlsStream<TcpStream>,
-    username: &str,
-    kdc_proxy_url: Option<&str>,
-    raw_ntlm: bool,
-    proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
-    proxy_requests: Option<&Mutex<Vec<ObservedKdcReq>>>,
-) -> anyhow::Result<()> {
-    tokio::time::timeout(
-        HANDSHAKE_TIMEOUT,
-        complete_client_credssp_inner(tls, username, kdc_proxy_url, raw_ntlm, proxy_replies, proxy_requests),
-    )
-    .await
-    .context("timed out completing client CredSSP")?
-}
-
-async fn complete_client_credssp_inner(
-    tls: tokio_rustls::client::TlsStream<TcpStream>,
-    username: &str,
-    kdc_proxy_url: Option<&str>,
-    raw_ntlm: bool,
-    proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
-    proxy_requests: Option<&Mutex<Vec<ObservedKdcReq>>>,
-) -> anyhow::Result<()> {
+async fn complete_credssp(tls: tokio_rustls::client::TlsStream<TcpStream>, auth: Auth) -> anyhow::Result<()> {
     use sspi::credssp::{ClientMode, ClientState, CredSspClient, CredSspMode, TsRequest};
     use sspi::ntlm::NtlmConfig;
 
     let public_key = peer_public_key(&tls)?;
     let mut framed = TokioFramed::new(tls);
+    let (username, client_mode) = match auth {
+        Auth::Ntlm => (
+            PROXY_USER,
+            ClientMode::Negotiate(sspi::NegotiateConfig::new(
+                Box::new(NtlmConfig {
+                    client_computer_name: Some("cred-injection-e2e".to_owned()),
+                }),
+                Some("ntlm,!kerberos,!pku2u".to_owned()),
+                "cred-injection-e2e".to_owned(),
+            )),
+        ),
+        Auth::RawNtlm => (
+            PROXY_USER,
+            ClientMode::Ntlm(NtlmConfig {
+                client_computer_name: Some("cred-injection-e2e".to_owned()),
+            }),
+        ),
+        Auth::Kerberos { kdc_proxy_url } => (
+            PROXY_KERBEROS_USER,
+            ClientMode::Negotiate(sspi::NegotiateConfig::new(
+                Box::new(sspi::KerberosConfig {
+                    kdc_url: Some(kdc_proxy_url.parse().context("parse KDC proxy URL")?),
+                    client_computer_name: "cred-injection-e2e".to_owned(),
+                }),
+                Some("kerberos,!ntlm".to_owned()),
+                "cred-injection-e2e".to_owned(),
+            )),
+        ),
+    };
     let identity = sspi::AuthIdentity {
         username: sspi::Username::parse(username).context("parse client username")?,
         password: PROXY_PASSWORD.to_owned().into(),
-    };
-    let client_mode = if let Some(kdc_url) = kdc_proxy_url {
-        ClientMode::Negotiate(sspi::NegotiateConfig::new(
-            Box::new(sspi::KerberosConfig {
-                kdc_url: Some(kdc_url.parse().context("parse KDC proxy URL")?),
-                client_computer_name: "cred-injection-e2e".to_owned(),
-            }),
-            Some("kerberos,!ntlm".to_owned()),
-            "cred-injection-e2e".to_owned(),
-        ))
-    } else if raw_ntlm {
-        // Gateway NTLM injection uses ServerMode::Ntlm, which rejects SPNEGO.
-        ClientMode::Ntlm(NtlmConfig {
-            client_computer_name: Some("cred-injection-e2e".to_owned()),
-        })
-    } else {
-        ClientMode::Negotiate(sspi::NegotiateConfig::new(
-            Box::new(NtlmConfig {
-                client_computer_name: Some("cred-injection-e2e".to_owned()),
-            }),
-            Some("ntlm,!kerberos,!pku2u".to_owned()),
-            "cred-injection-e2e".to_owned(),
-        ))
     };
     let mut client = CredSspClient::new(
         public_key,
@@ -142,7 +184,7 @@ async fn complete_client_credssp_inner(
     for _ in 0..8 {
         let client_state = {
             let mut generator = client.process(std::mem::take(&mut ts_request));
-            resolve_sspi_client(&mut generator, proxy_replies, proxy_requests).await?
+            resolve_sspi_client(&mut generator).await?
         };
         let (outbound, finished) = match client_state {
             ClientState::ReplyNeeded(request) => (request, false),
@@ -172,8 +214,6 @@ async fn resolve_sspi_client(
         sspi::Result<Vec<u8>>,
         sspi::Result<sspi::credssp::ClientState>,
     >,
-    proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
-    proxy_requests: Option<&Mutex<Vec<ObservedKdcReq>>>,
 ) -> anyhow::Result<sspi::credssp::ClientState> {
     let mut state = generator.start();
     loop {
@@ -181,7 +221,7 @@ async fn resolve_sspi_client(
             GeneratorState::Suspended(request) => {
                 let reply = match request.url.scheme() {
                     "tcp" | "udp" => send_kdc_tcp(&request).await?,
-                    "http" | "https" => send_kdc_http(&request, proxy_replies, proxy_requests).await?,
+                    "http" | "https" => send_kdc_http(&request).await?,
                     other => anyhow::bail!("unsupported KDC scheme {other}: {}", request.url),
                 };
                 state = generator.resume(Ok(reply));
@@ -193,11 +233,7 @@ async fn resolve_sspi_client(
     }
 }
 
-async fn send_kdc_http(
-    request: &sspi::generator::NetworkRequest,
-    proxy_replies: Option<&Mutex<Vec<ObservedKdcReply>>>,
-    proxy_requests: Option<&Mutex<Vec<ObservedKdcReq>>>,
-) -> anyhow::Result<Vec<u8>> {
+async fn send_kdc_http(request: &sspi::generator::NetworkRequest) -> anyhow::Result<Vec<u8>> {
     let host = request.url.host_str().context("KDC proxy host")?;
     let port = request.url.port_or_known_default().unwrap_or(80);
     let path = if request.url.query().is_some() {
@@ -221,11 +257,11 @@ async fn send_kdc_http(
         .context("write KDC proxy headers")?;
     stream.write_all(&request.data).await.context("write KDC proxy body")?;
     stream.flush().await.context("flush KDC proxy")?;
-    if let Ok(message) = KdcProxyMessage::from_raw(&request.data)
-        && let Some(log) = proxy_requests
-    {
+    if let Ok(message) = KdcProxyMessage::from_raw(&request.data) {
         let kerb = message.kerb_message.0.0.get(4..).unwrap_or(&message.kerb_message.0.0);
-        log.lock().expect("proxy request mutex").push(observe_kdc_req(kerb));
+        emit(&Event::KdcProxyRequest {
+            request: observe_kdc_req(kerb),
+        });
     }
 
     let mut reader = BufReader::new(stream);
@@ -268,12 +304,10 @@ async fn send_kdc_http(
             .context("read KDC proxy eof body")?;
         buf
     };
-    if let Ok(message) = KdcProxyMessage::from_raw(&buf)
-        && let Some(log) = proxy_replies
-    {
-        log.lock()
-            .expect("proxy reply mutex")
-            .push(observe_kdc_reply(&message.kerb_message.0.0));
+    if let Ok(message) = KdcProxyMessage::from_raw(&buf) {
+        emit(&Event::KdcProxyReply {
+            reply: observe_kdc_reply(&message.kerb_message.0.0),
+        });
     }
     Ok(buf)
 }

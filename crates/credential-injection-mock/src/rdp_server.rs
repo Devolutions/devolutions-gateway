@@ -1,9 +1,7 @@
 //! Fake RDP server that completes CredSSP as the target: X.224 accept, TLS, then an
 //! sspi `CredSspServer` in Kerberos or NTLM mode.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Context as _;
 use ironrdp_connector::sspi;
@@ -13,115 +11,39 @@ use ironrdp_pdu::x224::X224;
 use ironrdp_tokio::{FramedWrite as _, TokioFramed};
 use tokio::net::TcpStream;
 
-use super::credssp::TsRequestHint;
-use super::mock_kdc::send_kdc_tcp;
-use super::rdp::{LocalhostListener, record_cookie};
-use super::tls::{install_crypto_provider, server_public_key, tls_acceptor};
-use super::{KERBEROS_TARGET_USER, REALM, SERVICE_HOST, TARGET_PASSWORD, TARGET_USER, TERMSRV_KEY};
+use crate::client::TsRequestHint;
+use crate::event::{Event, emit, report_error};
+use crate::fixture::{KERBEROS_TARGET_USER, REALM, SERVICE_HOST, TARGET_PASSWORD, TARGET_USER, TERMSRV_KEY};
+use crate::kdc::send_kdc_tcp;
+use crate::rdp_target::{LocalhostListener, emit_cookie};
+use crate::tls::{server_public_key, tls_acceptor};
 
 #[derive(Clone)]
-enum MockRdpMode {
-    Kerberos { kdc_url: Option<String> },
+pub(crate) enum Auth {
+    Kerberos { kdc_url: String },
     Ntlm,
 }
 
-pub struct MockRdp {
-    pub port: u16,
-    credssp_ok: Arc<AtomicBool>,
-    finished_account: Arc<Mutex<Option<String>>>,
-    cookies: Arc<Mutex<Vec<String>>>,
-}
+pub(crate) async fn run(auth: Auth) -> anyhow::Result<()> {
+    let listener = LocalhostListener::bind().await.context("bind mock RDP")?;
+    let acceptor = tls_acceptor()?;
+    let public_key = server_public_key()?;
+    emit(&Event::Listening { port: listener.port()? });
 
-impl MockRdp {
-    pub async fn start_kerberos(kdc_url: String) -> anyhow::Result<Self> {
-        Self::start(MockRdpMode::Kerberos { kdc_url: Some(kdc_url) }).await
-    }
-
-    pub async fn start_ntlm() -> anyhow::Result<Self> {
-        Self::start(MockRdpMode::Ntlm).await
-    }
-
-    async fn start(mode: MockRdpMode) -> anyhow::Result<Self> {
-        install_crypto_provider();
-        let listener = LocalhostListener::bind().await.context("bind mock RDP")?;
-        let port = listener.port()?;
-        let credssp_ok = Arc::new(AtomicBool::new(false));
-        let finished_account = Arc::new(Mutex::new(None));
-        let cookies = Arc::new(Mutex::new(Vec::new()));
-        let credssp_ok_task = Arc::clone(&credssp_ok);
-        let finished_account_task = Arc::clone(&finished_account);
-        let cookies_task = Arc::clone(&cookies);
-        let acceptor = tls_acceptor()?;
-        let public_key = server_public_key()?;
-
+    loop {
+        let (stream, peer) = listener.accept().await.context("accept on mock RDP")?;
+        let acceptor = acceptor.clone();
+        let public_key = public_key.clone();
+        let auth = auth.clone();
         tokio::spawn(async move {
-            loop {
-                let Ok((stream, peer)) = listener.accept().await else {
-                    break;
-                };
-                let acceptor = acceptor.clone();
-                let public_key = public_key.clone();
-                let credssp_ok = Arc::clone(&credssp_ok_task);
-                let finished_account = Arc::clone(&finished_account_task);
-                let cookies = Arc::clone(&cookies_task);
-                let mode = mode.clone();
-                tokio::spawn(async move {
-                    let result = match &mode {
-                        MockRdpMode::Kerberos { kdc_url } => {
-                            accept_kerberos_rdp(
-                                stream,
-                                peer,
-                                acceptor,
-                                public_key,
-                                kdc_url.as_deref(),
-                                &cookies,
-                                &finished_account,
-                            )
-                            .await
-                        }
-                        MockRdpMode::Ntlm => {
-                            accept_ntlm_rdp(stream, peer, acceptor, public_key, &cookies, &finished_account).await
-                        }
-                    };
-                    match result {
-                        Ok(()) => credssp_ok.store(true, Ordering::SeqCst),
-                        Err(error) => eprintln!("mock RDP CredSSP failed: {error:#}"),
-                    }
-                });
+            let result = match &auth {
+                Auth::Kerberos { kdc_url } => accept_kerberos_rdp(stream, peer, acceptor, public_key, kdc_url).await,
+                Auth::Ntlm => accept_ntlm_rdp(stream, peer, acceptor, public_key).await,
+            };
+            if let Err(error) = result {
+                report_error("mock RDP CredSSP failed", &error);
             }
         });
-
-        Ok(Self {
-            port,
-            credssp_ok,
-            finished_account,
-            cookies,
-        })
-    }
-
-    pub fn credssp_ok(&self) -> bool {
-        self.credssp_ok.load(Ordering::SeqCst)
-    }
-
-    pub fn finished_account(&self) -> Option<String> {
-        self.finished_account.lock().expect("finished account mutex").clone()
-    }
-
-    pub fn cookies(&self) -> Vec<String> {
-        self.cookies.lock().expect("cookie mutex").clone()
-    }
-
-    pub async fn wait_credssp(&self) -> anyhow::Result<()> {
-        let deadline = Instant::now() + Duration::from_secs(30);
-        loop {
-            if self.credssp_ok() {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!("timed out waiting for Kerberos CredSSP on mock RDP");
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
     }
 }
 
@@ -130,14 +52,12 @@ async fn accept_kerberos_rdp(
     peer: std::net::SocketAddr,
     acceptor: tokio_rustls::TlsAcceptor,
     public_key: Vec<u8>,
-    kdc_url: Option<&str>,
-    cookies: &Mutex<Vec<String>>,
-    finished_account: &Mutex<Option<String>>,
+    kdc_url: &str,
 ) -> anyhow::Result<()> {
     let mut framed = TokioFramed::new(stream);
     let (_, request) = framed.read_pdu().await.context("read X.224 CR")?;
     let cr: X224<ConnectionRequest> = ironrdp_core::decode(&request).context("decode X.224 CR")?;
-    record_cookie(&cr, cookies);
+    emit_cookie(&cr);
 
     let confirm = X224(ConnectionConfirm::Response {
         flags: ResponseFlags::empty(),
@@ -158,10 +78,7 @@ async fn accept_kerberos_rdp(
     };
     let kerberos_config = sspi::KerberosServerConfig {
         kerberos_config: sspi::KerberosConfig {
-            kdc_url: kdc_url
-                .map(|url| url.parse())
-                .transpose()
-                .context("parse mock KDC URL")?,
+            kdc_url: Some(kdc_url.parse().context("parse mock KDC URL")?),
             client_computer_name: peer.to_string(),
         },
         server_properties: sspi::kerberos::ServerProperties::new(
@@ -208,8 +125,9 @@ async fn accept_kerberos_rdp(
                 framed.write_all(&buf[..length]).await.context("write CredSSP")?;
             }
             sspi::credssp::ServerState::Finished(identity) => {
-                *finished_account.lock().expect("finished account mutex") =
-                    Some(identity.username.account_name().to_owned());
+                emit(&Event::CredsspFinished {
+                    account: identity.username.account_name(),
+                });
                 return Ok(());
             }
         }
@@ -222,13 +140,11 @@ async fn accept_ntlm_rdp(
     peer: std::net::SocketAddr,
     acceptor: tokio_rustls::TlsAcceptor,
     public_key: Vec<u8>,
-    cookies: &Mutex<Vec<String>>,
-    finished_account: &Mutex<Option<String>>,
 ) -> anyhow::Result<()> {
     let mut framed = TokioFramed::new(stream);
     let (_, request) = framed.read_pdu().await.context("read X.224 CR")?;
     let cr: X224<ConnectionRequest> = ironrdp_core::decode(&request).context("decode X.224 CR")?;
-    record_cookie(&cr, cookies);
+    emit_cookie(&cr);
 
     let confirm = X224(ConnectionConfirm::Response {
         flags: ResponseFlags::empty(),
@@ -278,8 +194,9 @@ async fn accept_ntlm_rdp(
                 framed.write_all(&buf[..length]).await.context("write CredSSP")?;
             }
             sspi::credssp::ServerState::Finished(identity) => {
-                *finished_account.lock().expect("finished account mutex") =
-                    Some(identity.username.account_name().to_owned());
+                emit(&Event::CredsspFinished {
+                    account: identity.username.account_name(),
+                });
                 return Ok(());
             }
         }
