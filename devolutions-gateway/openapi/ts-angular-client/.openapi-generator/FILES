@@ -13,6 +13,7 @@ api/net.service.ts
 api/networkMonitoring.service.ts
 api/preflight.service.ts
 api/sessions.service.ts
+api/tasks.service.ts
 api/traffic.service.ts
 api/update.service.ts
 api/webApp.service.ts
@@ -26,7 +27,22 @@ model/addressFamily.ts
 model/agentDomainAdvertisement.ts
 model/agentInfo.ts
 model/agentStatus.ts
-model/apiError.ts
+model/aiAnalysisBadAnswer.ts
+model/aiAnalysisConflict.ts
+model/aiAnalysisConflictCode.ts
+model/aiAnalysisError.ts
+model/aiAnalysisErrorKind.ts
+model/aiAnalysisFailedPayload.ts
+model/aiAnalysisParams.ts
+model/aiAnalysisPayload.ts
+model/aiAnalysisRecoverableError.ts
+model/aiAnalysisRecoverableErrorKind.ts
+model/aiAnalysisRequest.ts
+model/aiAnalysisRunningPayload.ts
+model/aiAnalysisSucceededPayload.ts
+model/aiAnalysisTask.ts
+model/aiAnalysisUsage.ts
+model/aiProvider.ts
 model/appCredential.ts
 model/appCredentialKind.ts
 model/appTokenContentType.ts
@@ -40,7 +56,6 @@ model/dataEncoding.ts
 model/deleteManyResult.ts
 model/enrollRequest.ts
 model/enrollResponse.ts
-model/errorCode.ts
 model/eventOutcomeResponse.ts
 model/getUpdateProductsResponse.ts
 model/getUpdateScheduleResponse.ts
@@ -85,6 +100,7 @@ model/startTimeRange.ts
 model/subProvisionerKey.ts
 model/subscriber.ts
 model/targetConnectionOptions.ts
+model/taskState.ts
 model/trafficEventResponse.ts
 model/transportProtocolResponse.ts
 model/updateProductInfo.ts

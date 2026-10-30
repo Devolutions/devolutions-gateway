@@ -41,11 +41,11 @@ namespace Devolutions.Gateway.Client.Model
         /// <summary>
         /// Initializes a new instance of the <see cref="RecordingSearchHit" /> class.
         /// </summary>
-        /// <param name="fileName">Name of the &#x60;.slog&#x60; artifact holding the line, as listed in &#x60;recording.json&#x60;. (required).</param>
+        /// <param name="fileName">Name of the &#x60;.slog&#x60; file holding the line, as listed in &#x60;recording.json&#x60;. (required).</param>
         /// <param name="line">The line&#39;s text without its line break; bytes that are not UTF-8 read as U+FFFD. (required).</param>
         /// <param name="lineNumber">Number of the line in the file, counting from 1. (required).</param>
         /// <param name="offset">Byte offset of the line in the file. (required).</param>
-        /// <param name="recordingId">The recording whose artifact holds the line. (required).</param>
+        /// <param name="recordingId">The recording whose log holds the line. (required).</param>
         /// <param name="truncated">The line is longer than 256 KiB, so &#x60;line&#x60; holds only its start, and the file holds the rest. (required).</param>
         public RecordingSearchHit(string fileName = default(string), string line = default(string), long lineNumber = default(long), long offset = default(long), Guid recordingId = default(Guid), bool truncated = default(bool))
         {
@@ -68,9 +68,9 @@ namespace Devolutions.Gateway.Client.Model
         }
 
         /// <summary>
-        /// Name of the &#x60;.slog&#x60; artifact holding the line, as listed in &#x60;recording.json&#x60;.
+        /// Name of the &#x60;.slog&#x60; file holding the line, as listed in &#x60;recording.json&#x60;.
         /// </summary>
-        /// <value>Name of the &#x60;.slog&#x60; artifact holding the line, as listed in &#x60;recording.json&#x60;.</value>
+        /// <value>Name of the &#x60;.slog&#x60; file holding the line, as listed in &#x60;recording.json&#x60;.</value>
         [DataMember(Name = "fileName", IsRequired = true, EmitDefaultValue = true)]
         public string FileName { get; set; }
 
@@ -96,9 +96,9 @@ namespace Devolutions.Gateway.Client.Model
         public long Offset { get; set; }
 
         /// <summary>
-        /// The recording whose artifact holds the line.
+        /// The recording whose log holds the line.
         /// </summary>
-        /// <value>The recording whose artifact holds the line.</value>
+        /// <value>The recording whose log holds the line.</value>
         [DataMember(Name = "recordingId", IsRequired = true, EmitDefaultValue = true)]
         public Guid RecordingId { get; set; }
 

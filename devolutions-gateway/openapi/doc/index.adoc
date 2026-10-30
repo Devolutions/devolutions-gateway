@@ -1452,11 +1452,11 @@ endif::internal-generation[]
 
 `POST /jet/jrec/search`
 
-Searches the `.slog` artifacts, such as AI analysis logs, of recordings stored on this instance
+Searches the `.slog` files of recordings stored on this instance, such as Active Directory Console logs
 
 ===== Description
 
-The query is a case-insensitive substring, and an empty query matches every line. In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read once unescaped, so field names, numbers, booleans and null never match. Any other line, such as one still being written, is matched as raw text. A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually matched as raw text. Only the files listed under `artifacts` in `recording.json` with the `slog` type are searched. Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same `query`, `recordings` and `startTime` again, with the `nextCursor` of the previous page as `cursor`. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
+The query is a case-insensitive substring, and an empty query matches every line. In a line holding a JSON object, it is matched against the string values of the object at any depth, as they read once unescaped, so field names, numbers, booleans and null never match. Any other line, such as one still being written, is matched as raw text. A line longer than 256 KiB is matched on its first 256 KiB only, by the same rule, so a cut JSON object is usually matched as raw text. Only the files listed in `recording.json` with the `slog` type are searched, under `files` and under `artifacts`. Recordings without a readable `recording.json` and IDs with no recording on this instance give no hits.  Results come in pages. To get the next page, send the same `query`, `recordings` and `startTime` again, with the `nextCursor` of the previous page as `cursor`. Pages never go back, so a recording that starts, or a log that grows, behind the cursor while paging is not searched.
 
 
 // markup not found, no include::{specDir}jet/jrec/search/POST/spec.adoc[opts=optional]
@@ -2651,6 +2651,247 @@ ifdef::internal-generation[]
 endif::internal-generation[]
 
 
+[.Tasks]
+=== Tasks
+
+
+[.getAiAnalysis]
+==== getAiAnalysis
+
+`GET /jet/tasks/recording-ai-analysis/{task_id}`
+
+Gets an AI analysis of a recorded session
+
+===== Description
+
+Returns the Task of the analysis: its state, its progress while it runs, its result once it is over, and the tokens it used in every state but `queued`. Tasks are kept forever, across Gateway restarts; an unfinished Task past its deadline is reported as failed.
+
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/GET/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| task_id
+| Task ID of the AI analysis 
+| X
+| null
+| 
+
+|===
+
+
+
+
+
+
+===== Return Type
+
+<<AiAnalysisTask>>
+
+
+===== Content Type
+
+* application/json
+* application/problem+json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The AI analysis Task
+|  <<AiAnalysisTask>>
+
+
+| 400
+| Bad request
+|  <<ApiError>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<ApiError>>
+
+
+| 403
+| Insufficient permissions
+|  <<ApiError>>
+
+
+| 404
+| No AI analysis has this Task ID
+|  <<ApiError>>
+
+
+| 500
+| Unexpected server error
+|  <<ApiError>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/GET/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
+[.startAiAnalysis]
+==== startAiAnalysis
+
+`PUT /jet/tasks/recording-ai-analysis/{task_id}`
+
+Starts an AI analysis of a recorded session
+
+===== Description
+
+Gateway asks the AI provider what the user did in the session recording, and puts the answer in the session as its log, listed under `artifacts.ai-analysis` in its manifest. The answer is in the `language` of the request, English without one. The work runs in the background as a Task; follow it with `GET /jet/tasks/recording-ai-analysis/{task_id}`.  Sending the same request again returns the same Task and starts nothing new. A new Task for the session starts from scratch, and replaces the earlier AI analysis of the session once its success is recorded, so a session holds at most one; a Task that fails leaves the earlier analysis in place and removes everything it made. A Task fails if it does not start within 2 hours, or, once it runs, after 30 minutes without progress. The API key and the base URL are kept in memory only, until the Task ends; a Gateway restart fails the unfinished Tasks.
+
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/PUT/spec.adoc[opts=optional]
+
+
+
+===== Security
+
+[cols="2,1,1"]
+|===
+| Name | Type | Scheme
+
+| `scope_token`
+| http
+| bearer
+|===
+
+===== Parameters
+
+====== Path Parameters
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| task_id
+| Task ID, chosen by the caller so it can send the same request again safely 
+| X
+| null
+| 
+
+|===
+
+====== Body Parameter
+
+[cols="2,3,1,1,1"]
+|===
+|Name| Description| Required| Default| Pattern
+
+| AiAnalysisRequest
+| AI analysis settings <<AiAnalysisRequest>>
+| X
+| 
+| 
+
+|===
+
+
+
+
+
+===== Return Type
+
+<<AiAnalysisTask>>
+
+
+===== Content Type
+
+* application/json
+* application/problem+json
+
+===== Responses
+
+.HTTP Response Codes
+[cols="2,3,1"]
+|===
+| Code | Message | Datatype
+
+
+| 200
+| The same request came in before; nothing new starts
+|  <<AiAnalysisTask>>
+
+
+| 202
+| The AI analysis Task is created and runs in the background
+|  <<AiAnalysisTask>>
+
+
+| 400
+| Invalid request body, AI settings or language
+|  <<ApiError>>
+
+
+| 401
+| Invalid or missing authorization token
+|  <<ApiError>>
+
+
+| 403
+| Insufficient permissions
+|  <<ApiError>>
+
+
+| 404
+| The session has no recording
+|  <<ApiError>>
+
+
+| 409
+| The AI analysis cannot start now
+|  <<AiAnalysisConflict>>
+
+
+| 500
+| Unexpected server error
+|  <<ApiError>>
+
+|===
+
+
+ifdef::internal-generation[]
+===== Implementation
+
+// markup not found, no include::{specDir}jet/tasks/recording-ai-analysis/\{task_id\}/PUT/implementation.adoc[opts=optional]
+
+
+endif::internal-generation[]
+
+
 [.Traffic]
 === Traffic
 
@@ -3512,6 +3753,8 @@ endif::internal-generation[]
 | gateway.agent.delete
 | gateway.agent.read
 | gateway.recordings.search
+| gateway.tasks.recording-ai-analysis.start
+| gateway.tasks.recording-ai-analysis.read
 
 |===
 
@@ -3681,6 +3924,634 @@ endif::internal-generation[]
 | offline
 | online
 | unresponsive
+
+|===
+
+
+[#AiAnalysisBadAnswer]
+=== _AiAnalysisBadAnswer_ 
+
+What was wrong with an answer of the AI provider
+
+
+
+
+[.fields-AiAnalysisBadAnswer]
+[cols="1"]
+|===
+| Enum Values
+
+| invalid
+| truncated
+| refused
+| notExpectedJson
+
+|===
+
+
+[#AiAnalysisConflict]
+=== _AiAnalysisConflict_ 
+
+Why an AI analysis cannot start now
+
+
+[.fields-AiAnalysisConflict]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| code
+| X
+| 
+|  <<AiAnalysisConflictCode>>  
+| 
+|    task_id_conflict, recording_active, analysis_in_progress,  
+
+| taskId
+| 
+| X
+|   UUID  
+| The AI analysis of this session that is not finished yet; set for `analysis_in_progress`.
+| uuid    
+
+|===
+
+
+
+[#AiAnalysisConflictCode]
+=== _AiAnalysisConflictCode_ 
+
+
+
+
+
+
+[.fields-AiAnalysisConflictCode]
+[cols="1"]
+|===
+| Enum Values
+
+| task_id_conflict
+| recording_active
+| analysis_in_progress
+
+|===
+
+
+[#AiAnalysisError]
+=== _AiAnalysisError_ 
+
+Why an AI analysis Task failed: a kind, with the fields of that kind; there is no text for people, so the caller
+words it
+
+
+[.fields-AiAnalysisError]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| file
+| 
+| X
+|   String  
+| Recording file that cannot be read, for `unreadableRecording`.
+|     
+
+| kind
+| X
+| 
+|  <<AiAnalysisErrorKind>>  
+| 
+|    aiRejected, aiBadAnswer, keyLost, noRecording, mixedRecording, unreadableRecording, invalidTask, panicked, internal, attemptsExhausted, deadlinePassed,  
+
+| last
+| 
+| X
+| <<AiAnalysisRecoverableError>>    
+| 
+|     
+
+| status
+| 
+| X
+|   Integer  
+| HTTP status the AI provider answered, for `aiRejected`.
+| int32    
+
+| why
+| 
+| X
+|  <<AiAnalysisBadAnswer>>  
+| 
+|    invalid, truncated, refused, notExpectedJson,  
+
+|===
+
+
+
+[#AiAnalysisErrorKind]
+=== _AiAnalysisErrorKind_ 
+
+Kind of failure of an AI analysis Task
+
+
+
+
+[.fields-AiAnalysisErrorKind]
+[cols="1"]
+|===
+| Enum Values
+
+| aiRejected
+| aiBadAnswer
+| keyLost
+| noRecording
+| mixedRecording
+| unreadableRecording
+| invalidTask
+| panicked
+| internal
+| attemptsExhausted
+| deadlinePassed
+
+|===
+
+
+[#AiAnalysisFailedPayload]
+=== _AiAnalysisFailedPayload_ 
+
+Payload of a &#x60;failed&#x60; AI analysis Task: why it failed, and the tokens it used
+
+
+[.fields-AiAnalysisFailedPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| error
+| X
+| 
+| <<AiAnalysisError>>    
+| 
+|     
+
+| usage
+| 
+| X
+| <<AiAnalysisUsage>>    
+| 
+|     
+
+|===
+
+
+
+[#AiAnalysisParams]
+=== _AiAnalysisParams_ 
+
+Params of an AI analysis Task: what was asked, without the API key and the base URL
+
+
+[.fields-AiAnalysisParams]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| language
+| 
+| X
+|   String  
+| Language the AI writes in; absent when not asked, so the AI writes in English.
+|     
+
+| maxOutputTokens
+| 
+| X
+|   Long  
+| Upper bound of tokens in each AI answer; null when not asked.
+| int64    
+
+| model
+| X
+| 
+|   String  
+| Model identifier, passed to the provider as is.
+|     
+
+| provider
+| X
+| 
+|  <<AiProvider>>  
+| 
+|    openai, anthropic, mistral, gemini, openai-compatible,  
+
+|===
+
+
+
+[#AiAnalysisPayload]
+=== _AiAnalysisPayload_ 
+
+Details of the state of an AI analysis Task: &#x60;running&#x60;, &#x60;succeeded&#x60; and &#x60;failed&#x60; each have their own
+
+
+[.fields-AiAnalysisPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| done
+| 
+| X
+|   Long  
+| Work done in the step: bytes read while `reading`, parts described while `describing`; absent in the other steps.
+| int64    
+
+| step
+| X
+| 
+|   String  
+| Current step: `preparing` (the attempt starts), `reading` (the recordings are read), `describing` (the AI is asked about the recording, part by part), then `writing` (the log is written).
+|     
+
+| total
+| 
+| X
+|   Long  
+| Work the step has in all, in the same unit as `done`; absent in the other steps.
+| int64    
+
+| usage
+| X
+| X
+| <<AiAnalysisUsage>>    
+| 
+|     
+
+| fileName
+| X
+| 
+|   String  
+| Name of the log in the session manifest, such as `ai-analysis-0.slog`.
+|     
+
+| model
+| X
+| 
+|   String  
+| Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+|     
+
+| promptVersion
+| X
+| 
+|   String  
+| Versions of the prompts that wrote the log, such as `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
+|     
+
+| error
+| X
+| 
+| <<AiAnalysisError>>    
+| 
+|     
+
+|===
+
+
+
+[#AiAnalysisRecoverableError]
+=== _AiAnalysisRecoverableError_ 
+
+A failure of an attempt that was worth another attempt
+
+
+[.fields-AiAnalysisRecoverableError]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| kind
+| X
+| 
+|  <<AiAnalysisRecoverableErrorKind>>  
+| 
+|    aiUnreachable, aiBusy,  
+
+| status
+| 
+| X
+|   Integer  
+| HTTP status the AI provider answered, for `aiBusy`.
+| int32    
+
+|===
+
+
+
+[#AiAnalysisRecoverableErrorKind]
+=== _AiAnalysisRecoverableErrorKind_ 
+
+Kind of a failure worth another attempt
+
+
+
+
+[.fields-AiAnalysisRecoverableErrorKind]
+[cols="1"]
+|===
+| Enum Values
+
+| aiUnreachable
+| aiBusy
+
+|===
+
+
+[#AiAnalysisRequest]
+=== _AiAnalysisRequest_ 
+
+Settings of an AI analysis
+
+
+[.fields-AiAnalysisRequest]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| apiKey
+| X
+| 
+|   String  
+| API key of the provider, kept in memory only until the Task ends.
+| password    
+
+| baseUrl
+| 
+| X
+|   String  
+| Endpoint of the provider API, kept in memory only; required for `openai-compatible`.
+|     
+
+| language
+| 
+| X
+|   String  
+| Language the AI writes in, any text of 1 to 10 characters such as `fr-CA` or `français`; English when absent.
+|     
+
+| maxOutputTokens
+| 
+| X
+|   Long  
+| Upper bound of tokens in each AI answer.
+| int64    
+
+| model
+| X
+| 
+|   String  
+| Model identifier, passed to the provider as is.
+|     
+
+| provider
+| X
+| 
+|  <<AiProvider>>  
+| 
+|    openai, anthropic, mistral, gemini, openai-compatible,  
+
+| sessionId
+| X
+| 
+|   UUID  
+| Recorded session to analyze.
+| uuid    
+
+|===
+
+
+
+[#AiAnalysisRunningPayload]
+=== _AiAnalysisRunningPayload_ 
+
+Payload of a &#x60;running&#x60; AI analysis Task: its progress, and the tokens it used so far
+
+
+[.fields-AiAnalysisRunningPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| done
+| 
+| X
+|   Long  
+| Work done in the step: bytes read while `reading`, parts described while `describing`; absent in the other steps.
+| int64    
+
+| step
+| X
+| 
+|   String  
+| Current step: `preparing` (the attempt starts), `reading` (the recordings are read), `describing` (the AI is asked about the recording, part by part), then `writing` (the log is written).
+|     
+
+| total
+| 
+| X
+|   Long  
+| Work the step has in all, in the same unit as `done`; absent in the other steps.
+| int64    
+
+| usage
+| X
+| 
+| <<AiAnalysisUsage>>    
+| 
+|     
+
+|===
+
+
+
+[#AiAnalysisSucceededPayload]
+=== _AiAnalysisSucceededPayload_ 
+
+Payload of a &#x60;succeeded&#x60; AI analysis Task: the log it put in the session
+
+
+[.fields-AiAnalysisSucceededPayload]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| fileName
+| X
+| 
+|   String  
+| Name of the log in the session manifest, such as `ai-analysis-0.slog`.
+|     
+
+| model
+| X
+| 
+|   String  
+| Model that wrote the log, as reported by the AI provider; the requested model when it reports none.
+|     
+
+| promptVersion
+| X
+| 
+|   String  
+| Versions of the prompts that wrote the log, such as `session-actions-3f9a1c2b7e4d0a51+session-summary-8b20e9a4c1f70d36`.
+|     
+
+| usage
+| X
+| 
+| <<AiAnalysisUsage>>    
+| 
+|     
+
+|===
+
+
+
+[#AiAnalysisTask]
+=== _AiAnalysisTask_ 
+
+An AI analysis Task: the permanent record of one analysis the provisioner asked for
+
+The work runs in the background; &#x60;state&#x60; and &#x60;payload&#x60; tell how it goes.
+
+
+[.fields-AiAnalysisTask]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| createdAt
+| X
+| 
+|   Date  
+| When the Task was created.
+| date-time    
+
+| deadlineAt
+| X
+| 
+|   Date  
+| Time at which a Task still unfinished fails; while the Task runs, it moves ahead each time an attempt starts or the Task makes progress.
+| date-time    
+
+| finishedAt
+| 
+| X
+|   Date  
+| When it succeeded or failed.
+| date-time    
+
+| id
+| X
+| 
+|   UUID  
+| Task ID, chosen by the provisioner.
+| uuid    
+
+| params
+| X
+| 
+| <<AiAnalysisParams>>    
+| 
+|     
+
+| payload
+| 
+| X
+| <<AiAnalysisPayload>>    
+| 
+|     
+
+| sessionId
+| X
+| 
+|   UUID  
+| Recorded session the analysis is about.
+| uuid    
+
+| startedAt
+| 
+| X
+|   Date  
+| When its first attempt started.
+| date-time    
+
+| state
+| X
+| 
+|  <<TaskState>>  
+| 
+|    queued, running, succeeded, failed,  
+
+|===
+
+
+
+[#AiAnalysisUsage]
+=== _AiAnalysisUsage_ 
+
+Tokens the AI provider counted for an AI analysis Task, over all its attempts
+
+
+[.fields-AiAnalysisUsage]
+[cols="2,1,1,2,4,1"]
+|===
+| Field Name| Required| Nullable | Type| Description | Format
+
+| inputTokens
+| X
+| 
+|   Long  
+| 
+| int64    
+
+| outputTokens
+| X
+| 
+|   Long  
+| 
+| int64    
+
+| unreportedRequests
+| X
+| 
+|   Long  
+| Requests that may have cost tokens the provider did not report, such as a request that got no answer, or one still waiting for it; while it is not 0, `inputTokens` and `outputTokens` are short of what the provider billed.
+| int64    
+
+|===
+
+
+
+[#AiProvider]
+=== _AiProvider_ 
+
+AI provider to ask; &#x60;openai-compatible&#x60; needs a base URL
+
+
+
+
+[.fields-AiProvider]
+[cols="1"]
+|===
+| Enum Values
+
+| openai
+| anthropic
+| mistral
+| gemini
+| openai-compatible
 
 |===
 
@@ -5472,7 +6343,7 @@ A line that matches the search text.
 | X
 | 
 |   String  
-| Name of the `.slog` artifact holding the line, as listed in `recording.json`.
+| Name of the `.slog` file holding the line, as listed in `recording.json`.
 |     
 
 | line
@@ -5500,7 +6371,7 @@ A line that matches the search text.
 | X
 | 
 |   UUID  
-| The recording whose artifact holds the line.
+| The recording whose log holds the line.
 | uuid    
 
 | truncated
@@ -6002,6 +6873,27 @@ Subscriber configuration
 
 |===
 
+
+
+[#TaskState]
+=== _TaskState_ 
+
+
+
+
+
+
+[.fields-TaskState]
+[cols="1"]
+|===
+| Enum Values
+
+| queued
+| running
+| succeeded
+| failed
+
+|===
 
 
 [#TrafficEventResponse]
