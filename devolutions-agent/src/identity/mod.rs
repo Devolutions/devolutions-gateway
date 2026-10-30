@@ -13,8 +13,8 @@ use agent_channel_client::{Backoff, ChannelClient, uniform_jitter};
 use agent_identity::client::{Client, ClientError, PermanentCode, TerminalCode};
 use agent_identity::pending::{self, PendingRead};
 use agent_identity::state::{
-    EnrolledIdentity, EnrollmentDiscardReason, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots, PendingDiscard, Store,
-    StoredIdentity, UntrustedStoredIdentity,
+    EnrolledIdentity, EnrollmentDiscardReason, ForeignIdentityDirectory, IDENTITY_KEY_PREFIX, KeyRecord, KeySlots,
+    PendingDiscard, Store, StoredIdentity, UntrustedStoredIdentity,
 };
 use agent_identity::token::Token;
 use agent_identity::{csr, metadata};
@@ -193,8 +193,8 @@ async fn run_identity(
 /// Why pending enrollment stopped.
 enum Stopped {
     Shutdown,
-    /// An authority directory or `identity.json` failed its check, which stops all identity processing until it is
-    /// fixed.
+    /// An identity directory has an owner the agent does not accept, or an authority directory or `identity.json` failed
+    /// its check, which stops all identity processing until it is fixed.
     Untrusted,
 }
 
@@ -316,29 +316,38 @@ async fn run_pending_enrollments(
     let mut last_check_error = None;
     let mut last_list_error = None;
     loop {
-        // `crates/agent-identity/INTENT.md` ("Local state"): an authority directory or `identity.json` that fails its
-        // check stops all identity processing; start-up reports it and waits until it is fixed.
-        // Any other error only kept the check from running, so the poll retries it rather than stop every runner and its
-        // streams.
+        // `crates/agent-identity/INTENT.md` ("Local state"): an identity directory with an owner the agent does not
+        // accept, or an authority directory or `identity.json` that fails its check, stops all identity processing;
+        // start-up reports it and waits until it is fixed.
+        // The poll runs the checks a state change runs before it writes, so that it notices either without one.
+        // Like start-up, this also resets wrong permissions on the identity directories.
+        // Any other error only kept the checks from running, so the poll retries them rather than stop every runner and
+        // its streams.
         // UNTESTED: both outcomes are logged with the error, because stopping every identity is otherwise unexplained
         // and a check that keeps failing otherwise holds pending enrollment silently.
         // No test captures service logs; when changing this, keep the error in both logs.
-        if let Err(error) = store.check_stored_identities() {
-            if let Some(untrusted) = error
-                .chain()
-                .find_map(|cause| cause.downcast_ref::<UntrustedStoredIdentity>())
-            {
+        if let Err(error) = store.check_state() {
+            if let Some(path) = error.chain().find_map(|cause| {
+                cause
+                    .downcast_ref::<UntrustedStoredIdentity>()
+                    .map(|untrusted| &untrusted.path)
+                    .or_else(|| {
+                        cause
+                            .downcast_ref::<ForeignIdentityDirectory>()
+                            .map(|foreign| &foreign.path)
+                    })
+            }) {
                 warn!(
                     error = format!("{error:#}"),
-                    path = %untrusted.path,
-                    "Stopping every Agent Identity because a stored identity failed its check"
+                    %path,
+                    "Stopping every Agent Identity because the identity state failed its check"
                 );
                 return Stopped::Untrusted;
             }
             if log_is_due(&mut last_check_error) {
                 warn!(
                     error = format!("{error:#}"),
-                    "Cannot check the stored Agent Identities; retrying at the next poll"
+                    "Cannot check the Agent Identity state; retrying at the next poll"
                 );
             }
             if wait_or_stop(shutdown, poll_interval).await {
@@ -517,6 +526,8 @@ async fn enroll_pending(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write as _;
+
     use super::*;
 
     #[cfg(not(windows))]
@@ -749,14 +760,132 @@ mod tests {
         Ok(())
     }
 
+    #[rstest::rstest]
+    #[case::identity("identity")]
+    #[case::authorities("identity/authorities")]
+    #[case::keys("identity/keys")]
+    #[case::rejected("identity/rejected")]
+    #[case::pending("identity/pending")]
+    #[tokio::test]
+    async fn an_identity_directory_given_to_another_account_after_start_up_stops_identity_processing(
+        #[case] name: &str,
+    ) -> anyhow::Result<()> {
+        // oracle: intent crates/agent-identity/INTENT.md §Local state
+        // An identity directory owned by another account stops all identity processing until it is fixed, also when it
+        // changes owner after start-up; the caller then stops every runner and its streams, and start-up resumes without
+        // a restart once the owner is fixed.
+        let data_dir = TestDataDir::new()?;
+        let shared = test_shared(&data_dir)?;
+        let (_shutdown_handle, mut shutdown) = devolutions_gateway_task::ShutdownHandle::new();
+        let mut runners = Runners::new(Arc::clone(&shared), shutdown.clone());
+        let path = data_dir.0.join(name);
+        if !give_to_another_account(&path)? {
+            let needs = if cfg!(unix) { "root" } else { "an elevated token" };
+            writeln!(
+                std::io::stderr(),
+                "SKIP: an_identity_directory_given_to_another_account_after_start_up_stops_identity_processing needs \
+                 {needs} to give a directory another owner"
+            )?;
+            return Ok(());
+        }
+
+        let stopped = tokio::time::timeout(
+            Duration::from_secs(10),
+            run_pending_enrollments(
+                &shared,
+                &mut runners,
+                &data_dir.0,
+                Duration::from_millis(10),
+                &mut shutdown,
+            ),
+        )
+        .await;
+        let start_up_while_foreign = data_dir.store().map(drop);
+        give_back_to_the_agent(&path)?;
+        let start_up_once_fixed = data_dir.store().map(drop);
+
+        assert!(
+            matches!(stopped.context("pending poll kept running")?, Stopped::Untrusted),
+            "the pending poll stopped for another reason"
+        );
+        assert!(
+            start_up_while_foreign.is_err(),
+            "start-up accepted an identity directory owned by another account"
+        );
+        start_up_once_fixed.context("start-up did not resume once the identity directory was fixed")?;
+        Ok(())
+    }
+
+    /// Gives `path` to an account other than the agent's, or returns `false` when this process can't.
+    fn give_to_another_account(path: &Utf8Path) -> anyhow::Result<bool> {
+        #[cfg(unix)]
+        {
+            // SAFETY: Reading the process's effective UID has no preconditions.
+            if unsafe { libc::geteuid() } != 0 {
+                return Ok(false);
+            }
+            // The conventional `nobody` account, which is neither root nor the agent's account here.
+            std::os::unix::fs::chown(path, Some(65534), None)?;
+            Ok(true)
+        }
+        #[cfg(windows)]
+        {
+            // BUILTIN\Administrators, which only an elevated token can make the owner.
+            set_owner(path, "*S-1-5-32-544")
+        }
+    }
+
+    /// Gives `path` back to the account the test runs as, which is the agent's.
+    fn give_back_to_the_agent(path: &Utf8Path) -> anyhow::Result<()> {
+        #[cfg(unix)]
+        {
+            // SAFETY: Reading the process's effective UID has no preconditions.
+            std::os::unix::fs::chown(path, Some(unsafe { libc::geteuid() }), None)?;
+        }
+        #[cfg(windows)]
+        {
+            // The SID, because icacls cannot map the name of an Entra ID or Microsoft account.
+            // `whoami /user /fo csv /nh` prints `"<name>","<SID>"`; the name may not be UTF-8 in the console code page.
+            let output = std::process::Command::new("whoami")
+                .args(["/user", "/fo", "csv", "/nh"])
+                .output()?;
+            anyhow::ensure!(output.status.success(), "whoami failed");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let sid = stdout
+                .trim()
+                .rsplit(',')
+                .next()
+                .map(|field| field.trim_matches('"'))
+                .filter(|sid| sid.starts_with("S-1-"))
+                .with_context(|| format!("no SID in whoami output: {stdout}"))?;
+            let owner = format!("*{sid}");
+            anyhow::ensure!(set_owner(path, &owner)?, "cannot give {path} back to {owner}");
+        }
+        Ok(())
+    }
+
+    /// Makes `owner`, an account name or `*` followed by a SID, the owner of `path`, and reports whether `icacls` could.
+    #[cfg(windows)]
+    fn set_owner(path: &Utf8Path, owner: &str) -> anyhow::Result<bool> {
+        let status = std::process::Command::new("icacls")
+            .arg(path)
+            .arg("/setowner")
+            .arg(owner)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()?;
+        Ok(status.success())
+    }
+
     #[tokio::test]
     async fn a_check_that_cannot_run_neither_stops_the_pending_poll_nor_holds_enrollment_once_it_runs_again()
     -> anyhow::Result<()> {
         // oracle: intent crates/agent-identity/INTENT.md §Local state
-        // Only an authority directory or `identity.json` that fails the check stops all identity processing.
-        // An error that keeps the check from running, here listing the authority directories, is not such a failure,
-        // so the poll keeps running, which keeps its caller from stopping every runner and its streams, and processes
-        // pending files again once the check runs.
+        // Only an identity directory with an owner the agent does not accept, or an authority directory or
+        // `identity.json` that fails the check, stops all identity processing.
+        // An error that keeps the checks from running, here a file in place of the authority directories, is not such a
+        // failure, so the poll keeps running, which keeps its caller from stopping every runner and its streams, and
+        // processes pending files again once the checks run.
         let data_dir = TestDataDir::new()?;
         let shared = test_shared(&data_dir)?;
         let (_shutdown_handle, mut shutdown) = devolutions_gateway_task::ShutdownHandle::new();
@@ -767,12 +896,15 @@ mod tests {
         let authorities = data_dir.0.join("identity").join("authorities");
         std::fs::remove_dir(&authorities)?;
         std::fs::write(&authorities, b"")?;
-        let check = shared.store.check_stored_identities();
+        let check = shared.store.check_state();
         assert!(
-            check
-                .as_ref()
-                .is_err_and(|error| !error.chain().any(|cause| cause.is::<UntrustedStoredIdentity>())),
-            "listing a file as the authority directories must fail without an untrusted identity: {check:?}"
+            check.as_ref().is_err_and(|error| {
+                !error
+                    .chain()
+                    .any(|cause| cause.is::<UntrustedStoredIdentity>() || cause.is::<ForeignIdentityDirectory>())
+            }),
+            "a file in place of the authority directories must fail the checks without an untrusted identity or a \
+             foreign identity directory: {check:?}"
         );
 
         let poll = run_pending_enrollments(
