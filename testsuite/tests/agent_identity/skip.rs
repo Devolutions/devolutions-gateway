@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::process::{Command, Output};
 
 use anyhow::{Context as _, ensure};
@@ -7,13 +6,9 @@ use super::agent_identity_conformance_path;
 
 /// Runs one conformance test against an unreachable DVLS target, where no test can reach the network.
 fn run_against_dvls(filter: &str, allow_incomplete: bool) -> anyhow::Result<(Output, String)> {
-    let scratch = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .context("workspace root")?
-        .join("target")
-        .join("agent-identity-skip-tests");
-    std::fs::create_dir_all(&scratch)?;
-    let work_dir = tempfile::Builder::new().prefix("skip-").tempdir_in(scratch)?;
+    // On Windows the runner refuses a `--work-dir` too long for key file paths to fit the Windows path limit, which a
+    // directory under a checkout's `target` exceeds; the temporary directory is short, and no test here starts an agent.
+    let work_dir = tempfile::Builder::new().prefix("skip-").tempdir()?;
     let bin = agent_identity_conformance_path();
     let mut command = Command::new(bin);
     command
