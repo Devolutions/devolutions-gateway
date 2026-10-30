@@ -706,18 +706,17 @@ impl DataDir<'_> {
 
     /// Every existing key with the run's prefix, in each key storage the suite can list.
     fn existing_keys(&self) -> anyhow::Result<HashSet<RecordedKey>> {
-        let mut existing = self
+        let file_keys = self
             .file_keys_with_prefix()?
             .into_iter()
-            .map(|name| RecordedKey::new(&name, key_storage::FILE))
-            .collect::<HashSet<_>>();
+            .map(|name| RecordedKey::new(&name, key_storage::FILE));
         #[cfg(windows)]
-        existing.extend(
-            crate::windows::machine_keys_with_prefix(self.key_name_prefix)?
-                .into_iter()
-                .map(|name| RecordedKey::new(&name, key_storage::WINDOWS_SOFTWARE_PROVIDER)),
-        );
-        Ok(existing)
+        let machine_keys = crate::windows::machine_keys_with_prefix(self.key_name_prefix)?
+            .into_iter()
+            .map(|name| RecordedKey::new(&name, key_storage::WINDOWS_SOFTWARE_PROVIDER));
+        #[cfg(not(windows))]
+        let machine_keys = std::iter::empty();
+        Ok(file_keys.chain(machine_keys).collect())
     }
 
     /// Fails for each key with the run's prefix that no record names with its key storage, since the agent records each key with its storage before creating it ([agent intent], "Stored identities").
