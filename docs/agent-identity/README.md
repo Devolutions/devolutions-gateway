@@ -80,7 +80,8 @@ A policy that is required and excludes the current key's storage makes the agent
 
 When a policy is required and the machine offers none of its storages, the agent keeps its current key and sends no renewal, and raises system event 1100.
 Renewal resumes once the policy changes or the machine offers a listed storage.
-If neither happens before the certificate expires, the identity ends.
+If neither happens before the certificate expires, the identity stops working.
+A listed storage that becomes available within the renewal grace period still renews it; after that, the identity ends.
 See [Key storage unavailable](#key-storage-unavailable).
 
 Settings under `__debug__.identity` exist only for tests: they are unsupported, the agent logs a warning at start-up when any is set, and none belongs in production.
@@ -176,6 +177,7 @@ The service logs Agent Identity events in the agent's log files, in its data dir
 | `Agent Identity is stopped until this authority directory or identity.json is a plain directory or file owned by the service account with no access for other users; the agent never repairs it` | The agent can't trust the authority directory or `identity.json` in `path`; it never repairs it, and processes no identity or pending enrollment until an administrator fixes its owner and access. Make it a plain directory or file again, owned by the service account, with access for that account only and, on Windows, no inherited permissions; the agent resumes on its own. |
 | `An Agent Identity key storage is unavailable; what needs it waits until it is available` | See [Key storage unavailable](#key-storage-unavailable). |
 | `Agent Identity state is unavailable; fix the cause the error names, such as the ownership and ACL of the identity directory or a stored file the agent can't use`, with an `error` such as ``invalid stored identity <path>: missing field `key_storage` `` or ``invalid pending enrollment record <path>: missing field `key_storage` `` | After an upgrade from a build that recorded no `key_storage` for its keys, the agent can't use that build's state in the file at `<path>` and stops all identity processing. Ownership is fine, so don't change it. On a test machine, stop the service, remove the `identity` folder and enroll again with a new token. |
+| `The old Agent Identity key is in an unavailable key storage; its record is removed, and the agent deletes the key when it starts with that key storage available` | After a renewal, the identity's previous key named in `key_name` stays in `key_storage`, which the machine doesn't offer now. The identity continues with its new key. The agent deletes the old key at a start when that storage is available again; nothing else is needed. |
 | `Agent Identity debug settings are enabled; remove __debug__.identity for production` | Remove the `__debug__.identity` section from `agent.json`. |
 
 ### Key storage unavailable
@@ -192,7 +194,8 @@ Two cases raise the event:
   Make the storage available again; the agent checks again on its own.
 - An identity's required policy lists no storage the machine offers when a renewal is due.
   The event names the identity and the listed storages.
-  The identity keeps its current key until its certificate expires, and then ends.
+  The identity keeps its current key until its certificate expires, and stops working then.
+  A listed storage that becomes available within the renewal grace period still renews it; after that, the identity ends.
   Change the policy on the authority, or make a listed storage available on the machine.
   The agent renews once either happens, without a restart.
 
