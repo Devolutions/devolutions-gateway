@@ -244,14 +244,17 @@ mod tests {
     }
 
     #[test]
-    fn elevated_cargo_operations_are_rejected() {
+    fn implicit_user_scope_lowers_requested_elevation() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4379344015.
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
         request.options.scope = None;
 
-        let error = build_cargo_command(&request).expect_err("elevated cargo should fail");
-
-        assert!(error.to_string().contains("elevated"));
+        assert_eq!(
+            crate::evaluator::effective_execution_elevation(&request),
+            Elevation::Standard
+        );
+        build_cargo_command(&request).expect("implicit user scope runs with the standard token");
     }
 
     #[test]

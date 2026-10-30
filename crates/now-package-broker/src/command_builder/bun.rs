@@ -262,14 +262,17 @@ mod tests {
     }
 
     #[test]
-    fn bun_rejects_elevated_execution() {
+    fn implicit_user_scope_lowers_requested_elevation() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4379344015.
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
         request.options.scope = None;
 
-        let error = build_bun_command(&request).expect_err("elevation should fail");
-
-        assert!(error.to_string().contains("elevated Bun"));
+        assert_eq!(
+            crate::evaluator::effective_execution_elevation(&request),
+            Elevation::Standard
+        );
+        build_bun_command(&request).expect("implicit user scope runs with the standard token");
     }
 
     #[test]

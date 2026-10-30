@@ -43,7 +43,7 @@
 //! Each Elevated Allow rule removes the UAC prompt for the operations it matches, for any code
 //! running in that administrator's session, so the broker restricts what an elevated operation
 //! can select regardless of the policy:
-//! - An explicit user scope, typed or passed through custom parameters, always runs with the standard
+//! - A user scope, explicit or defaulted by the manager, runs with the standard
 //!   token (see `effective_execution_elevation`); policy matching and execution use the same elevation.
 //!   The executor refuses to run a standard plan with an elevated token: a full administrator token
 //!   without UAC (UAC disabled, or the built-in Administrator account) cannot use the broker.
@@ -329,16 +329,11 @@ pub(crate) fn is_powershell_manager(manager: now_policy_api::ManagerName) -> boo
 /// Policy matching, request validation, command building and the executor all use this value,
 /// so a request is always evaluated with the elevation it runs with.
 pub(crate) fn effective_execution_elevation(request: &PackageRequest) -> Elevation {
-    let custom_scope = || {
-        let custom = custom_options::custom_options(request.manager, &request.options.custom_parameters);
-        custom_options::resolve(None, &custom.scopes).flatten()
-    };
-    // A user scope passed only through custom parameters lowers the elevation like a typed one;
-    // a machine scope there does not raise it.
+    // An implicit user scope lowers elevation like a typed one; an implicit machine scope never raises it.
     let scope = request
         .options
         .scope
-        .or_else(|| custom_scope().filter(|scope| *scope == Scope::User));
+        .or_else(|| matching::effective_scope(request).filter(|scope| *scope == Scope::User));
     effective_elevation(request.client.requested_elevation, scope)
 }
 
