@@ -9,6 +9,7 @@ When a session whose token requires recording starts and no recording starts for
 # Artifacts
 Artifacts are files that are not recordings; the only kind today is `ai-analysis`, stored with the `slog` file type.
 An endpoint to push artifacts is wanted later.
+Gateway replaces the manifest in one step and never rewrites it in place, so neither a reader nor a crash ever leaves half of it.
 
 
 # Ending a recording

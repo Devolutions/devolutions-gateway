@@ -15,7 +15,8 @@ const REPORTED_MODEL: &str = "gpt-test-2026-09-30";
 const SUMMARY_PROMPT_START: &str = "You summarize";
 
 /// A mock OpenAI-compatible provider: `status` picks the answer of the n-th request, 0 being a valid answer, which is
-/// the action `Step n`, or `Summary n` for a summary request.
+/// the action `Step n`, or `Summary n` for a summary request, counted as 10 input and 20 output tokens; 1 is the same
+/// answer without a token count.
 ///
 /// Returns a client for it and the bodies of the requests it got.
 async fn spawn_provider(status: fn(usize) -> u16) -> (AiClient, Arc<Mutex<Vec<String>>>) {
@@ -73,9 +74,8 @@ async fn spawn_provider_answering(
                     };
 
                     let (status, answer) = match status(index) {
-                        0 => (
-                            200,
-                            serde_json::json!({
+                        scripted @ (0 | 1) => {
+                            let mut answer = serde_json::json!({
                                 "model": REPORTED_MODEL,
                                 "choices": [{
                                     "index": 0,
@@ -85,9 +85,12 @@ async fn spawn_provider_answering(
                                     },
                                     "finish_reason": "stop",
                                 }],
-                                "usage": { "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 },
-                            }),
-                        ),
+                            });
+                            if scripted == 0 {
+                                answer["usage"] = serde_json::json!({ "prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30 });
+                            }
+                            (200, answer)
+                        }
                         status => (
                             status,
                             serde_json::json!({ "error": { "message": "scripted failure" } }),
@@ -182,6 +185,14 @@ async fn finish(
     panic!("the events ended without a last event");
 }
 
+fn tokens(input_tokens: u64, output_tokens: u64) -> UsageSoFar {
+    UsageSoFar {
+        input_tokens,
+        output_tokens,
+        unreported_requests: 0,
+    }
+}
+
 fn entries(log: &Utf8Path) -> Vec<serde_json::Value> {
     std::fs::read_to_string(log)
         .unwrap()
@@ -222,10 +233,11 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     );
     assert_eq!(
         analysis.usage,
-        Some(Usage {
+        UsageSoFar {
             input_tokens: 20,
-            output_tokens: 40
-        }),
+            output_tokens: 40,
+            unreported_requests: 0,
+        },
         "the summary request counts too"
     );
     assert_eq!(
@@ -254,6 +266,7 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
     };
     assert_eq!(total_bytes, recording_size);
     assert!(read_bytes <= total_bytes);
+    // oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
     assert_eq!(
         progress
             .iter()
@@ -263,13 +276,37 @@ async fn the_log_is_left_next_to_the_manifest_and_the_working_files_removed() {
         [
             Progress::Describing {
                 described_chunks: 0,
-                total_chunks: 1
+                total_chunks: 1,
+                usage: UsageSoFar {
+                    unreported_requests: 1,
+                    ..tokens(0, 0)
+                },
+            },
+            Progress::Describing {
+                described_chunks: 0,
+                total_chunks: 1,
+                usage: tokens(10, 20),
             },
             Progress::Describing {
                 described_chunks: 1,
-                total_chunks: 1
+                total_chunks: 1,
+                usage: tokens(10, 20),
             },
-        ]
+            Progress::Describing {
+                described_chunks: 1,
+                total_chunks: 1,
+                usage: UsageSoFar {
+                    unreported_requests: 1,
+                    ..tokens(10, 20)
+                },
+            },
+            Progress::Describing {
+                described_chunks: 1,
+                total_chunks: 1,
+                usage: tokens(20, 40),
+            },
+        ],
+        "a request counts as unreported until its answer comes"
     );
     assert_eq!(progress.last(), Some(&Progress::Writing));
 }
@@ -298,12 +335,50 @@ async fn analysing_again_only_asks_about_the_chunks_left() {
     );
     assert_eq!(
         analysis.usage,
-        Some(Usage {
-            input_tokens: 40,
-            output_tokens: 80
-        }),
-        "chunk 0 counts from its checkpoint, the failed request not at all"
+        tokens(30, 60),
+        "only the requests of this analysis count, so chunk 0 belongs to the first one"
     );
+}
+
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
+#[tokio::test]
+async fn requests_without_a_token_count_are_counted_apart() {
+    let session = Session::new(10);
+    // The chunk is request 0, answered without a token count, and the summary request 1.
+    let (client, _requests) = spawn_provider(|index| if index == 0 { 1 } else { 0 }).await;
+
+    let analysis = session.analyze(&client).await.unwrap();
+
+    assert_eq!(
+        analysis.usage,
+        UsageSoFar {
+            input_tokens: 10,
+            output_tokens: 20,
+            unreported_requests: 1,
+        }
+    );
+}
+
+// oracle: intent devolutions-gateway/src/api/tasks/recording_ai_analysis.intent.md §AI analysis
+#[tokio::test]
+async fn a_failed_analysis_reports_the_tokens_it_spent() {
+    // About 1 MB of transcript: three chunks.
+    let session = Session::new(10_000);
+    // Chunk 0 is answered, then the provider fails chunk 1 with a server error, which costs no token.
+    let (client, _requests) = spawn_provider(|index| if index == 1 { 503 } else { 0 }).await;
+
+    let (progress, result) = finish(
+        client
+            .analyze_recording(&session.manifest, &session.manifest_path)
+            .start(),
+    )
+    .await;
+
+    result.unwrap_err();
+    let Some(Progress::Describing { usage, .. }) = progress.last() else {
+        panic!("the tokens are reported before the failure: {progress:?}");
+    };
+    assert_eq!(*usage, tokens(10, 20));
 }
 
 #[tokio::test]
@@ -320,7 +395,6 @@ async fn working_files_of_another_analysis_are_not_reused() {
         &DescribedChunk {
             actions: Vec::new(),
             model: None,
-            usage: None,
         },
     )
     .unwrap();
@@ -541,6 +615,7 @@ fn progress_tells_its_stage_and_how_far_it_is() {
     let describing = Progress::Describing {
         described_chunks: 2,
         total_chunks: 5,
+        usage: UsageSoFar::default(),
     };
     assert_eq!(describing.stage(), "describing");
     assert_eq!(describing.percent(), 40);
@@ -650,16 +725,4 @@ fn halves_are_cut_on_the_line_boundary_closest_to_the_middle() {
 
     assert!(split_in_half(&line.repeat(3)).is_none(), "too short");
     assert!(split_in_half(&"c".repeat(MIN_SPLIT_LEN * 2)).is_none(), "one line");
-}
-
-#[test]
-fn usage_total_is_unknown_once_a_count_is() {
-    let usage = |input_tokens, output_tokens| Usage {
-        input_tokens,
-        output_tokens,
-    };
-
-    assert_eq!(add_usage(Some(usage(1, 2)), Some(usage(10, 20))), Some(usage(11, 22)));
-    assert_eq!(add_usage(Some(usage(1, 2)), None), None);
-    assert_eq!(add_usage(None, Some(usage(10, 20))), None);
 }
