@@ -198,6 +198,8 @@ where
         SessionConfig {
             encoder_threads: 1,
             adaptive_frame_skip: false,
+            fill_interval: None,
+            fill_delay: Duration::ZERO,
         },
         0,
     )
@@ -495,7 +497,9 @@ fn truncated_clip_tail_does_not_abort_the_following_clip() {
     ];
     let (input_sender, input_receiver) = mpsc::channel(events.len());
     for event in events {
-        input_sender.blocking_send(Ok(event)).expect("queue recording event");
+        input_sender
+            .blocking_send(Ok(InputEvent::Recording(event)))
+            .expect("queue recording event");
     }
     drop(input_sender);
     let (output_sender, mut output_receiver) = mpsc::channel(1);
@@ -506,6 +510,8 @@ fn truncated_clip_tail_does_not_abort_the_following_clip() {
         SessionConfig {
             encoder_threads: 1,
             adaptive_frame_skip: false,
+            fill_interval: None,
+            fill_delay: Duration::ZERO,
         },
     )
     .expect("normalize reconnecting clips");
@@ -529,7 +535,9 @@ fn corruption_before_an_incomplete_tail_still_fails() {
     ];
     let (input_sender, input_receiver) = mpsc::channel(events.len());
     for event in events {
-        input_sender.blocking_send(Ok(event)).expect("queue recording event");
+        input_sender
+            .blocking_send(Ok(InputEvent::Recording(event)))
+            .expect("queue recording event");
     }
     drop(input_sender);
     let (output_sender, _output_receiver) = mpsc::channel(1);
@@ -540,6 +548,8 @@ fn corruption_before_an_incomplete_tail_still_fails() {
         SessionConfig {
             encoder_threads: 1,
             adaptive_frame_skip: false,
+            fill_interval: None,
+            fill_delay: Duration::ZERO,
         },
     )
     .expect_err("corruption before the incomplete tail must fail");
