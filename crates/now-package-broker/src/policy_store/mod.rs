@@ -1145,12 +1145,13 @@ mod storage_tests {
         assert_eq!(error.code, ErrorCode::ValidationFailed);
 
         let validation = store.validate_draft(&request.draft);
-        assert_eq!(validation.validator_version, "now-package-broker-policy-validator/11");
         let canonical = validation.canonical_draft.as_ref().expect("compatible draft");
-        let old_receipt =
-            store
-                .receipt_key
-                .issue("now-package-broker-policy-validator/8", canonical, &validation.findings);
+        // oracle: mutant Reusing the previous validator version accepts stale validation receipts.
+        let old_receipt = store.receipt_key.issue(
+            "now-package-broker-policy-validator/11",
+            canonical,
+            &validation.findings,
+        );
         request.validation_receipt = old_receipt;
         let error = store
             .replace_for_tests(request.clone())

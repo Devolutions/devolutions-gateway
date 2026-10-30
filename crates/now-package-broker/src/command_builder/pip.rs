@@ -52,11 +52,11 @@ pub fn build_pip_command(request: &PackageRequest) -> anyhow::Result<Vec<String>
 }
 
 fn validate_pip_request(request: &PackageRequest) -> anyhow::Result<()> {
-    if request.client.requested_elevation == Elevation::Elevated {
-        bail!("pip elevated operations are not supported by the broker");
-    }
     if request.options.scope == Some(Scope::Machine) {
         bail!("pip machine-scope operations are not supported by the broker");
+    }
+    if crate::evaluator::effective_execution_elevation(request) == Elevation::Elevated {
+        bail!("pip elevated operations are not supported by the broker");
     }
     if request.source.url.is_some() {
         bail!("pip package sources with urls are not supported by the broker");
@@ -271,13 +271,17 @@ mod tests {
     }
 
     #[test]
-    fn pip_rejects_elevated_operations() {
+    fn implicit_user_scope_lowers_requested_elevation() {
+        // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4379344015.
         let mut request = make_request();
         request.client.requested_elevation = Elevation::Elevated;
+        request.options.scope = None;
 
-        let error = build_pip_command(&request).expect_err("elevated pip should fail");
-
-        assert!(error.to_string().contains("elevated"));
+        assert_eq!(
+            crate::evaluator::effective_execution_elevation(&request),
+            Elevation::Standard
+        );
+        build_pip_command(&request).expect("implicit user scope runs with the standard token");
     }
 
     #[test]
