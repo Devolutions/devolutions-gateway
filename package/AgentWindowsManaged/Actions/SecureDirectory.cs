@@ -165,7 +165,7 @@ internal static class SecureDirectory
         ILogger logger)
     {
         SetSecurity(directory, path, sddl);
-        return WalkBelow(path, removeLocalService: true, isTrusted, logger);
+        return WalkBelow(path, isTrusted, logger);
     }
 
     /// <summary>
@@ -407,29 +407,14 @@ internal static class SecureDirectory
 
     /// <summary>
     /// Checks the owner of every file and directory below the directory <paramref name="path"/>, which the caller holds,
-    /// without changing anything and without following any link.
-    /// </summary>
-    /// <remarks>
-    /// The entries are opened and held as <see cref="SetSecurityAndRemoveLocalServiceBelow"/> opens and holds them.
-    /// </remarks>
-    /// <param name="isTrusted">Whether an account may own the entry at a path.</param>
-    /// <returns>
-    /// The refusal for the first entry whose owner <paramref name="isTrusted"/> rejects, or <c>null</c>.
-    /// </returns>
-    internal static DataFolderRefusal CheckOwnersBelow(
-        string path, Func<string, SecurityIdentifier, bool> isTrusted, ILogger logger) =>
-        WalkBelow(path, removeLocalService: false, isTrusted, logger);
-
-    /// <summary>
-    /// Checks the owner of every file and directory below the directory <paramref name="path"/>, which the caller holds,
-    /// and, when <paramref name="removeLocalService"/> is set, removes each allow entry for LOCAL SERVICE from its DACL,
-    /// as <see cref="SetSecurityAndRemoveLocalServiceBelow"/> describes.
+    /// and removes each allow entry for LOCAL SERVICE from its DACL, as
+    /// <see cref="SetSecurityAndRemoveLocalServiceBelow"/> describes.
     /// </summary>
     /// <returns>
     /// The refusal for the first entry whose owner <paramref name="isTrusted"/> rejects, or <c>null</c>.
     /// </returns>
     private static DataFolderRefusal WalkBelow(
-        string path, bool removeLocalService, Func<string, SecurityIdentifier, bool> isTrusted, ILogger logger)
+        string path, Func<string, SecurityIdentifier, bool> isTrusted, ILogger logger)
     {
         // UNTESTED: each directory handle stays open until the entries below the directory are done, and a directory is
         // walked only when the handle held is the entry first opened, so that no path below it can be redirected while
@@ -459,30 +444,26 @@ internal static class SecureDirectory
             WinAPI.BY_HANDLE_FILE_INFORMATION information = GetInformation(handle);
             bool isReparsePoint = (information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_REPARSE_POINT) != 0;
             bool isDirectory = (information.dwFileAttributes & WinAPI.FILE_ATTRIBUTE_DIRECTORY) != 0;
-            uint access = removeLocalService ? WinAPI.READ_CONTROL | WinAPI.WRITE_DAC : 0;
+            const uint access = WinAPI.READ_CONTROL | WinAPI.WRITE_DAC;
 
             if (isReparsePoint && isDirectory)
             {
-                if (removeLocalService)
+                // ReOpenFile refuses a directory, so the link is opened again through its path, itself rather than
+                // its target, and compared with the entry first opened; nothing below it is reached.
+                using SafeFileHandle link = OpenUnlessNotFound(
+                    () => Open(entry, access | WinAPI.FILE_READ_ATTRIBUTES, AnyShare), entry, logger);
+
+                if (link is null)
                 {
-                    // ReOpenFile refuses a directory, so the link is opened again through its path, itself rather than
-                    // its target, and compared with the entry first opened; nothing below it is reached.
-                    using SafeFileHandle link = OpenUnlessNotFound(
-                        () => Open(entry, access | WinAPI.FILE_READ_ATTRIBUTES, AnyShare), entry, logger);
-
-                    if (link is null)
-                    {
-                        continue;
-                    }
-
-                    if (!IsSameEntry(information, GetInformation(link)))
-                    {
-                        throw new IOException($"{entry} changed while LOCAL SERVICE was being removed from it");
-                    }
-
-                    RemoveLocalService(link, entry, logger);
+                    continue;
                 }
 
+                if (!IsSameEntry(information, GetInformation(link)))
+                {
+                    throw new IOException($"{entry} changed while LOCAL SERVICE was being removed from it");
+                }
+
+                RemoveLocalService(link, entry, logger);
                 logger.Log($"did not follow {entry}: it is a reparse point");
             }
             else if (isDirectory)
@@ -506,12 +487,8 @@ internal static class SecureDirectory
                     throw new IOException($"{entry} changed while the entries below the data folder were being walked");
                 }
 
-                if (removeLocalService)
-                {
-                    RemoveLocalService(child, entry, logger);
-                }
-
-                refusal = WalkBelow(entry, removeLocalService, isTrusted, logger);
+                RemoveLocalService(child, entry, logger);
+                refusal = WalkBelow(entry, isTrusted, logger);
 
                 if (refusal is not null)
                 {
@@ -520,21 +497,18 @@ internal static class SecureDirectory
             }
             else
             {
-                if (removeLocalService)
+                // UNTESTED: a file symbolic link loses LOCAL SERVICE from its own DACL, not from its target's,
+                // because the first handle opened the link itself and the reopened handle addresses the same object.
+                // Creating a file symbolic link needs elevation or developer mode, which tests don't have.
+                // When changing this, keep opening the entry with FILE_FLAG_OPEN_REPARSE_POINT before reopening it.
+                using SafeFileHandle file = OpenUnlessNotFound(() => Reopen(handle, access, AnyShare), entry, logger);
+
+                if (file is null)
                 {
-                    // UNTESTED: a file symbolic link loses LOCAL SERVICE from its own DACL, not from its target's,
-                    // because the first handle opened the link itself and the reopened handle addresses the same object.
-                    // Creating a file symbolic link needs elevation or developer mode, which tests don't have.
-                    // When changing this, keep opening the entry with FILE_FLAG_OPEN_REPARSE_POINT before reopening it.
-                    using SafeFileHandle file = OpenUnlessNotFound(() => Reopen(handle, access, AnyShare), entry, logger);
-
-                    if (file is null)
-                    {
-                        continue;
-                    }
-
-                    RemoveLocalService(file, entry, logger);
+                    continue;
                 }
+
+                RemoveLocalService(file, entry, logger);
 
                 if (isReparsePoint)
                 {

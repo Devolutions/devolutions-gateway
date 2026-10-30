@@ -134,14 +134,19 @@ internal static class DataFolders
     private static readonly SecurityIdentifier OwnerRights = new("S-1-3-4");
 
     /// <summary>
-    /// Checks <c>Devolutions</c> and <c>Devolutions\Agent</c> under <paramref name="root"/>, and the owner of every
-    /// file and folder below <c>Agent</c>, without changing anything and without following any link.
+    /// Checks <c>Devolutions</c> and <c>Devolutions\Agent</c> under <paramref name="root"/>, without changing anything
+    /// and without following any link.
     /// </summary>
+    /// <remarks>
+    /// The entries below <c>Agent</c> are left to <see cref="Create"/>, because this runs as the installing
+    /// administrator, before RemoveExistingProducts, where Windows Installer allows no action that runs as SYSTEM, and
+    /// the agent keeps entries that only SYSTEM can open.
+    /// </remarks>
     /// <param name="isTrusted">
     /// Whether an account may own or replace the entry at a path; <see cref="IsTrusted(string, SecurityIdentifier)"/>
     /// when <c>null</c>.
     /// </param>
-    /// <returns>The first refusal, or <c>null</c> when everything passes.</returns>
+    /// <returns>The first refusal, or <c>null</c> when both folders pass.</returns>
     internal static DataFolderRefusal Check(
         string root, ILogger logger, Func<string, SecurityIdentifier, bool> isTrusted = null)
     {
@@ -163,26 +168,15 @@ internal static class DataFolders
             }
 
             // UNTESTED: an existing Agent is refused when it is a link or has an untrusted owner, here and in Create.
-            // Tests check the entries below Agent, not Agent itself.
+            // Tests reach Agent here only to pass it, and check the entries below it through Create.
             // When changing this, keep Agent checked in both, without the DACL rule, as the installer resets its DACL.
-            // UNTESTED: the handle on Agent holds it until the entries below are checked, so that they are the entries
-            // of the folder just checked, not of one put at that path afterwards.
-            // Tests check that a held folder can't be renamed, not how long this handle stays open.
-            // When changing this, keep opening Agent with hold set and keep the handle open until the walk returns.
             string agentPath = Path.Combine(devolutions, Agent);
             refusal = Inspect(
-                agentPath, path => SecureDirectory.OpenToRead(path, hold: true), checkAccess: false, isTrusted, logger,
+                agentPath, path => SecureDirectory.OpenToRead(path, hold: false), checkAccess: false, isTrusted, logger,
                 out SafeFileHandle agent);
+            agent?.Dispose();
 
-            using (agent)
-            {
-                if (refusal is not null || agent is null)
-                {
-                    return refusal;
-                }
-
-                return SecureDirectory.CheckOwnersBelow(agentPath, isTrusted, logger);
-            }
+            return refusal;
         }
     }
 
@@ -197,7 +191,7 @@ internal static class DataFolders
     /// <c>Agent</c> gets its security descriptor when it is created, so that it never exists with the DACL it would
     /// inherit from ProgramData, which lets users add entries.
     /// Until <c>Agent</c> is reset, an earlier DACL may let LOCAL SERVICE add entries below it, so the entries are checked
-    /// again here, after <see cref="Check"/>.
+    /// here, as SYSTEM, after <see cref="Check"/> passed the folders.
     /// </remarks>
     /// <param name="isTrusted">
     /// Whether an account may own or replace the entry at a path; <see cref="IsTrusted(string, SecurityIdentifier)"/>
