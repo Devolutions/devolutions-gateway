@@ -12,7 +12,7 @@ workspace = true
 [dependencies]
 device-key = { path = "../device-key" }
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 http = "1"
 httpsig = { version = "=0.0.24", default-features = false }
 rand = "0.10"
