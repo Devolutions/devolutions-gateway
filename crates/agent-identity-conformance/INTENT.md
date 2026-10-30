@@ -95,7 +95,7 @@ The mock implements the contract's agent-facing operations and channel independe
   - a required policy that excludes the current key's backend makes the agent renew without a request;
   - a malformed policy is ignored without blocking enrollment or renewal;
   - metadata reports each key's backend and the available backends;
-  - a key recorded in an unavailable or unknown backend pauses only its identity, without `key_lost`, and restoring it resumes the identity;
+  - a key recorded in an unavailable or unknown backend pauses only its identity, without `key_lost`; a paused pending key or in-progress record resumes once its record is restored;
   - an identity file or in-progress record without `key_storage` stops identity processing and is left unchanged;
   - start-up removes unrecorded keys in every available backend.
 - **Multiple authorities:** identities for two authorities coexist, including across agent restarts.
