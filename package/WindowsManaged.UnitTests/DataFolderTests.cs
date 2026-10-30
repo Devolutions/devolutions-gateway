@@ -333,14 +333,20 @@ public sealed class DataFolderTests
     [Theory]
     [InlineData(nameof(CustomActions.CheckProgramDataDirectory))]
     [InlineData(nameof(CustomActions.CreateProgramDataDirectory))]
-    public void RefusalFailsTheRunInTheInstallerLanguage(string method)
+    public void RefusalFailsTheRun(string method)
     {
-        ManagedAction action = ActionOf(method);
-
         // oracle: intent package/WindowsManaged/INTENT.md §Data folder
-        Assert.Equal(Return.check, action.Return);
+        Assert.Equal(Return.check, ActionOf(method).Return);
+    }
+
+    [Fact]
+    public void DeferredRefusalReadsTheInstallerLanguageFromItsActionData()
+    {
+        ManagedAction action = GatewayActions.createProgramDataDirectory;
+
         // A deferred action reads only the properties its action data carries.
         // oracle: spec Windows Installer §Obtaining Context Information for Deferred Execution Custom Actions
+        Assert.Equal(Execute.deferred, action.Execute);
         Assert.Contains("ProductLanguage=[ProductLanguage]", action.UsesProperties.Split(';'));
     }
 
@@ -398,6 +404,15 @@ public sealed class DataFolderTests
             (GatewayActions.checkProgramDataDirectory.When,
                 GatewayActions.checkProgramDataDirectory.Step.ToString(),
                 Program.MajorUpgrade.Schedule));
+    }
+
+    // oracle: spec Windows Installer §RemoveExistingProducts Action
+    [Fact]
+    public void CheckBeforeTheMajorUpgradeRunsImmediately()
+    {
+        // RemoveExistingProducts scheduled after InstallInitialize fails the install with error 2613 when a deferred
+        // action precedes it, because the script must be empty when it runs.
+        Assert.Equal(Execute.immediate, GatewayActions.checkProgramDataDirectory.Execute);
     }
 
     [Theory]
