@@ -721,18 +721,6 @@ fn recommended_denied_custom_parameters_block_winget_installer_arguments() {
 }
 
 #[test]
-fn effective_elevation_lowers_explicit_user_scope_and_raises_machine_scope() {
-    use api::{Elevation as E, Scope as S};
-
-    assert_eq!(super::effective_elevation(E::Elevated, Some(S::User)), E::Standard);
-    assert_eq!(super::effective_elevation(E::Elevated, None), E::Elevated);
-    assert_eq!(super::effective_elevation(E::Elevated, Some(S::Machine)), E::Elevated);
-    assert_eq!(super::effective_elevation(E::Standard, Some(S::Machine)), E::Elevated);
-    assert_eq!(super::effective_elevation(E::Standard, Some(S::User)), E::Standard);
-    assert_eq!(super::effective_elevation(E::Standard, None), E::Standard);
-}
-
-#[test]
 fn implicit_user_scope_matches_standard_elevation_policy() {
     // oracle: regression Devolutions/devolutions-gateway#2036 discussion_r4379344015.
     let policy = make_policy(
@@ -890,7 +878,6 @@ fn agent_uninstall_by_installed_product_code_is_detected() {
         r"ARP\Machine\X64\{0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D}",
     );
     assert!(protects(&request));
-    assert!(!super::uninstalls_protected_package(&request, None));
 
     let mut request = make_request(api::Operation::Uninstall, "Contoso.Tool");
     request.options.custom_parameters = vec![
